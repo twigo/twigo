@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use super::error::{self, Error};
+
 #[allow(dead_code)]
 #[derive(Debug, Default, Clone, Deserialize)]
 pub(crate) struct ContextFile {
@@ -97,7 +99,7 @@ fn selected_context_name(config_dir: &std::path::Path) -> Option<String> {
     }
 }
 
-pub fn load_contexts(custom_dir: Option<PathBuf>) -> Result<Vec<NatsContext>, String> {
+pub fn load_contexts(custom_dir: Option<PathBuf>) -> error::Result<Vec<NatsContext>> {
     let base = match custom_dir {
         Some(d) => d,
         None => match nats_config_dir() {
@@ -118,8 +120,10 @@ pub fn load_contexts(custom_dir: Option<PathBuf>) -> Result<Vec<NatsContext>, St
     let selected = selected_context_name(&base);
 
     let mut contexts = Vec::new();
-    let entries = std::fs::read_dir(&context_dir)
-        .map_err(|e| format!("failed to read {}: {e}", context_dir.display()))?;
+    let entries = std::fs::read_dir(&context_dir).map_err(|source| Error::Io {
+        path: context_dir.display().to_string(),
+        source,
+    })?;
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -148,7 +152,7 @@ pub fn load_contexts(custom_dir: Option<PathBuf>) -> Result<Vec<NatsContext>, St
 }
 
 #[tauri::command]
-pub fn list_contexts(dir: Option<String>) -> Result<Vec<ContextSummary>, String> {
+pub fn list_contexts(dir: Option<String>) -> error::Result<Vec<ContextSummary>> {
     let custom = dir.filter(|d| !d.trim().is_empty()).map(PathBuf::from);
     Ok(load_contexts(custom)?.iter().map(|c| c.summary()).collect())
 }
