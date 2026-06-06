@@ -8,6 +8,7 @@ import {
 import { decodePreview, type StreamMessage } from "@/lib/message";
 
 const CAP = 2000;
+const HARD_CAP = 50000;
 const FLUSH_MS = 100;
 
 let channel: Channel<IncomingMessage> | null = null;
@@ -21,17 +22,22 @@ interface StreamState {
   subId: string | null;
   items: StreamMessage[];
   paused: boolean;
+  following: boolean;
   open: (connId: string, subject: string) => Promise<void>;
   close: () => Promise<void>;
   clear: () => void;
   togglePause: () => void;
+  setFollowing: (following: boolean) => void;
 }
 
 function flush() {
   if (buffer.length === 0 || useStream.getState().paused) return;
   const batch = buffer;
   buffer = [];
-  useStream.setState((s) => ({ items: [...s.items, ...batch].slice(-CAP) }));
+  // Only trim from the top while following the tail; otherwise dropping old
+  // rows would shift the scrolled-up view. Hard cap guards memory.
+  const cap = useStream.getState().following ? CAP : HARD_CAP;
+  useStream.setState((s) => ({ items: [...s.items, ...batch].slice(-cap) }));
 }
 
 export const useStream = create<StreamState>((set, get) => ({
@@ -40,6 +46,7 @@ export const useStream = create<StreamState>((set, get) => ({
   subId: null,
   items: [],
   paused: false,
+  following: true,
 
   open: async (connId, subject) => {
     await get().close();
@@ -61,7 +68,7 @@ export const useStream = create<StreamState>((set, get) => ({
     channel = ch;
     await apiSubscribe(connId, subId, subject, ch);
     flushTimer = setInterval(flush, FLUSH_MS);
-    set({ connId, subject, subId, items: [], paused: false });
+    set({ connId, subject, subId, items: [], paused: false, following: true });
   },
 
   close: async () => {
@@ -73,9 +80,21 @@ export const useStream = create<StreamState>((set, get) => ({
     if (channel) channel = null;
     const { subId } = get();
     if (subId) await apiUnsubscribe(subId);
-    set({ connId: null, subject: null, subId: null, items: [], paused: false });
+    set({
+      connId: null,
+      subject: null,
+      subId: null,
+      items: [],
+      paused: false,
+      following: true,
+    });
   },
 
   clear: () => set({ items: [] }),
   togglePause: () => set((s) => ({ paused: !s.paused })),
+  setFollowing: (following) =>
+    set((s) => ({
+      following,
+      items: following ? s.items.slice(-CAP) : s.items,
+    })),
 }));

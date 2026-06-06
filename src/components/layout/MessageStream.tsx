@@ -14,7 +14,8 @@ function fmtSize(n: number): string {
 }
 
 export function MessageStream() {
-  const { subject, items, paused, togglePause, clear } = useStream();
+  const { subject, items, paused, togglePause, clear, setFollowing } =
+    useStream();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [lastSeenId, setLastSeenId] = useState(0);
@@ -33,6 +34,7 @@ export function MessageStream() {
     if (!el) return;
     const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
     setAtBottom(bottom);
+    setFollowing(bottom);
     if (bottom) setLastSeenId(lastId);
   }
 
@@ -42,6 +44,7 @@ export function MessageStream() {
       behavior: "smooth",
     });
     setAtBottom(true);
+    setFollowing(true);
     setLastSeenId(lastId);
   }
 
