@@ -9,10 +9,36 @@ export interface ContextSummary {
   selected: boolean;
 }
 
+export interface ConnInfo {
+  name: string;
+  serverName: string;
+  serverVersion: string;
+  rttMs: number;
+  jetstream: boolean;
+  maxPayload: number;
+}
+
+export interface NatsEvent {
+  conn: string;
+  kind: string;
+}
+
 export function listContexts(dir?: string | null): Promise<ContextSummary[]> {
   return invoke<ContextSummary[]>("list_contexts", { dir: dir ?? null });
 }
 
 export function defaultContextDir(): Promise<string | null> {
   return invoke<string | null>("default_context_dir");
+}
+
+export function connect(name: string, dir?: string | null): Promise<ConnInfo> {
+  return invoke<ConnInfo>("connect", { name, dir: dir ?? null });
+}
+
+export function disconnect(name: string): Promise<void> {
+  return invoke<void>("disconnect", { name });
+}
+
+export function listConnections(): Promise<string[]> {
+  return invoke<string[]>("list_connections");
 }

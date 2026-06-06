@@ -1,33 +1,33 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[allow(dead_code)] // most fields are consumed by the connection manager (#4)
+#[allow(dead_code)]
 #[derive(Debug, Default, Clone, Deserialize)]
 pub(crate) struct ContextFile {
     #[serde(default)]
-    description: String,
+    pub(crate) description: String,
     #[serde(default)]
-    url: String,
+    pub(crate) url: String,
     #[serde(default)]
-    token: Option<String>,
+    pub(crate) token: Option<String>,
     #[serde(default)]
-    user: Option<String>,
+    pub(crate) user: Option<String>,
     #[serde(default)]
-    password: Option<String>,
+    pub(crate) password: Option<String>,
     #[serde(default)]
-    creds: Option<String>,
+    pub(crate) creds: Option<String>,
     #[serde(default)]
-    nkey: Option<String>,
+    pub(crate) nkey: Option<String>,
     #[serde(default)]
-    cert: Option<String>,
+    pub(crate) cert: Option<String>,
     #[serde(default)]
-    key: Option<String>,
+    pub(crate) key: Option<String>,
     #[serde(default)]
-    ca: Option<String>,
+    pub(crate) ca: Option<String>,
     #[serde(default)]
-    jetstream_domain: Option<String>,
+    pub(crate) jetstream_domain: Option<String>,
     #[serde(default)]
-    jetstream_api_prefix: Option<String>,
+    pub(crate) jetstream_api_prefix: Option<String>,
 }
 
 #[derive(Debug, Clone)]

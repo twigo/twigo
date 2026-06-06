@@ -7,6 +7,7 @@ import {
   Radio,
   RefreshCw,
   Loader2,
+  Unplug,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUi } from "@/store/ui";
@@ -22,13 +23,24 @@ const viewTitles: Record<string, string> = {
 };
 
 function ConnectionsSection() {
-  const { contexts, status, error, activeContext, load, setActive } =
-    useConnections();
+  const {
+    contexts,
+    status,
+    error,
+    activeContext,
+    connected,
+    connecting,
+    connError,
+    load,
+    setActive,
+    connect,
+    disconnect,
+  } = useConnections();
 
   return (
     <>
       <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           Connections
         </span>
         <div className="flex items-center gap-0.5">
@@ -48,7 +60,7 @@ function ConnectionsSection() {
         </div>
       </div>
 
-      <div className="px-1.5">
+      <div className="space-y-0.5 px-1.5">
         {status === "loading" && (
           <div className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
             <Loader2 className="size-3.5 animate-spin" />
@@ -69,29 +81,63 @@ function ConnectionsSection() {
 
         {contexts.map((c) => {
           const active = activeContext === c.name;
+          const isConnected = !!connected[c.name];
+          const isConnecting = !!connecting[c.name];
+          const err = connError[c.name];
           return (
-            <button
+            <div
               key={c.name}
-              onClick={() => setActive(c.name)}
-              title={`${c.url}${c.description ? ` — ${c.description}` : ""}`}
+              onClick={() =>
+                isConnected ? setActive(c.name) : connect(c.name)
+              }
+              title={err || `${c.url}${c.description ? ` — ${c.description}` : ""}`}
               className={cn(
-                "flex w-full items-center gap-2 rounded-sm px-1.5 py-1 text-left hover:bg-accent",
+                "group relative flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-1.5 text-left transition-colors hover:bg-accent",
                 active && "bg-accent",
               )}
             >
-              <Circle className="size-2 shrink-0 fill-muted-foreground/40 text-muted-foreground/40" />
+              {active && (
+                <span className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-brand" />
+              )}
+              {isConnecting ? (
+                <Loader2 className="size-2.5 shrink-0 animate-spin text-muted-foreground" />
+              ) : (
+                <Circle
+                  className={cn(
+                    "size-2 shrink-0",
+                    isConnected
+                      ? "fill-ok text-ok"
+                      : err
+                        ? "fill-error text-error"
+                        : "fill-muted-foreground/40 text-muted-foreground/40",
+                  )}
+                />
+              )}
               <span className="flex-1 truncate text-xs font-medium">
                 {c.name}
                 {c.selected && (
-                  <span className="ml-1 text-[10px] font-normal text-brand">
+                  <span className="ml-1 text-[11px] font-normal text-brand">
                     ★
                   </span>
                 )}
               </span>
-              <span className="truncate font-mono text-[10px] text-muted-foreground">
-                {c.url.replace(/^\w+:\/\//, "")}
-              </span>
-            </button>
+              {isConnected ? (
+                <button
+                  title="Disconnect"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    disconnect(c.name);
+                  }}
+                  className="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-error pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100"
+                >
+                  <Unplug className="size-3" />
+                </button>
+              ) : (
+                <span className="truncate font-mono text-[11px] text-muted-foreground">
+                  {c.url.replace(/^\w+:\/\//, "")}
+                </span>
+              )}
+            </div>
           );
         })}
       </div>
@@ -136,7 +182,7 @@ function SubjectRow({ node, depth }: { node: SubjectNode; depth: number }) {
           <Radio className="size-3.5 shrink-0 text-muted-foreground/60" />
         )}
         <span className="flex-1 truncate font-mono text-xs">{node.token}</span>
-        <span className="rounded bg-muted px-1 font-mono text-[10px] tabular-nums text-muted-foreground">
+        <span className="rounded bg-muted px-1 font-mono text-[11px] tabular-nums text-muted-foreground">
           {node.rate}/s
         </span>
       </button>
@@ -156,7 +202,7 @@ export function Sidebar() {
       <div className="my-1.5 border-t border-sidebar-border" />
 
       <div className="px-3 pb-1">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           {viewTitles[activeView]}
         </span>
       </div>
