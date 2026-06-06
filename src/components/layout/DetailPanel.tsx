@@ -44,7 +44,7 @@ export function DetailPanel() {
     : "";
 
   return (
-    <aside className="flex h-full w-80 shrink-0 flex-col border-l border-border bg-panel">
+    <aside className="flex h-full w-full flex-col border-l border-border bg-panel">
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-border px-2">
         <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           Message

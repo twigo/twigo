@@ -370,7 +370,7 @@ export function Sidebar() {
   const activeView = useUi((s) => s.activeView);
   const [filter, setFilter] = useState("");
   return (
-    <aside className="flex h-full w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
+    <aside className="flex h-full w-full flex-col border-r border-sidebar-border bg-sidebar">
       <ConnectionsSection />
 
       <div className="my-1.5 border-t border-sidebar-border" />
