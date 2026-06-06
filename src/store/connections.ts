@@ -54,11 +54,14 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
 
   connect: async (name) => {
     if (get().connecting[name]) return;
-    set((s) => ({
-      connecting: { ...s.connecting, [name]: true },
-      connError: { ...s.connError, [name]: "" },
-      activeContext: name,
-    }));
+    set((s) => {
+      const { [name]: _cleared, ...connError } = s.connError;
+      return {
+        connecting: { ...s.connecting, [name]: true },
+        connError,
+        activeContext: name,
+      };
+    });
     try {
       const dir = useSettings.getState().contextDir;
       const info = await apiConnect(name, dir);
@@ -77,8 +80,7 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
   disconnect: async (name) => {
     await apiDisconnect(name);
     set((s) => {
-      const connected = { ...s.connected };
-      delete connected[name];
+      const { [name]: _removed, ...connected } = s.connected;
       return { connected };
     });
   },
@@ -86,8 +88,7 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
   onEvent: (conn, kind) => {
     if (kind === "closed") {
       set((s) => {
-        const connected = { ...s.connected };
-        delete connected[conn];
+        const { [conn]: _removed, ...connected } = s.connected;
         return { connected };
       });
     }

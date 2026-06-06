@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use super::error::{self, Error};
+
 #[allow(dead_code)]
 #[derive(Debug, Default, Clone, Deserialize)]
 pub(crate) struct ContextFile {
@@ -97,7 +99,7 @@ fn selected_context_name(config_dir: &std::path::Path) -> Option<String> {
     }
 }
 
-pub fn load_contexts(custom_dir: Option<PathBuf>) -> Result<Vec<NatsContext>, String> {
+pub fn load_contexts(custom_dir: Option<PathBuf>) -> error::Result<Vec<NatsContext>> {
     let base = match custom_dir {
         Some(d) => d,
         None => match nats_config_dir() {
@@ -118,8 +120,10 @@ pub fn load_contexts(custom_dir: Option<PathBuf>) -> Result<Vec<NatsContext>, St
     let selected = selected_context_name(&base);
 
     let mut contexts = Vec::new();
-    let entries = std::fs::read_dir(&context_dir)
-        .map_err(|e| format!("failed to read {}: {e}", context_dir.display()))?;
+    let entries = std::fs::read_dir(&context_dir).map_err(|source| Error::Io {
+        path: context_dir.display().to_string(),
+        source,
+    })?;
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -143,12 +147,12 @@ pub fn load_contexts(custom_dir: Option<PathBuf>) -> Result<Vec<NatsContext>, St
         });
     }
 
-    contexts.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    contexts.sort_by_key(|c| c.name.to_lowercase());
     Ok(contexts)
 }
 
 #[tauri::command]
-pub fn list_contexts(dir: Option<String>) -> Result<Vec<ContextSummary>, String> {
+pub fn list_contexts(dir: Option<String>) -> error::Result<Vec<ContextSummary>> {
     let custom = dir.filter(|d| !d.trim().is_empty()).map(PathBuf::from);
     Ok(load_contexts(custom)?.iter().map(|c| c.summary()).collect())
 }
@@ -156,4 +160,64 @@ pub fn list_contexts(dir: Option<String>) -> Result<Vec<ContextSummary>, String>
 #[tauri::command]
 pub fn default_context_dir() -> Option<String> {
     nats_config_dir().map(|p| p.to_string_lossy().into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn ctx(file: ContextFile) -> NatsContext {
+        NatsContext {
+            name: "x".into(),
+            file,
+            selected: false,
+        }
+    }
+
+    #[test]
+    fn auth_method_precedence() {
+        let mut f = ContextFile::default();
+        assert_eq!(ctx(f.clone()).auth_method(), "none");
+        f.user = Some("u".into());
+        assert_eq!(ctx(f.clone()).auth_method(), "user/password");
+        f.token = Some("t".into());
+        assert_eq!(ctx(f.clone()).auth_method(), "token");
+        f.nkey = Some("n".into());
+        assert_eq!(ctx(f.clone()).auth_method(), "nkey");
+        f.creds = Some("/c".into());
+        assert_eq!(ctx(f).auth_method(), "creds");
+    }
+
+    #[test]
+    fn loads_sorts_and_marks_selected() {
+        let dir = tempfile::tempdir().unwrap();
+        let cdir = dir.path().join("context");
+        fs::create_dir_all(&cdir).unwrap();
+        fs::write(
+            cdir.join("beta.json"),
+            r#"{"url":"nats://b:4222","token":"x"}"#,
+        )
+        .unwrap();
+        fs::write(cdir.join("alpha.json"), r#"{"url":"nats://a:4222"}"#).unwrap();
+        fs::write(cdir.join("broken.json"), "{ not json").unwrap();
+        fs::write(dir.path().join("context.txt"), "beta\n").unwrap();
+
+        let ctxs = load_contexts(Some(dir.path().to_path_buf())).unwrap();
+
+        assert_eq!(ctxs.len(), 2, "malformed file is skipped");
+        assert_eq!(ctxs[0].name, "alpha");
+        assert_eq!(ctxs[1].name, "beta");
+        assert!(ctxs[1].selected);
+        assert!(!ctxs[0].selected);
+        assert_eq!(ctxs[1].summary().auth_method, "token");
+        assert_eq!(ctxs[0].summary().auth_method, "none");
+    }
+
+    #[test]
+    fn missing_dir_returns_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctxs = load_contexts(Some(dir.path().join("does-not-exist"))).unwrap();
+        assert!(ctxs.is_empty());
+    }
 }

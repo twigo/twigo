@@ -1,11 +1,4 @@
-import {
-  Radio,
-  Layers,
-  Database,
-  Box,
-  Activity,
-  Settings,
-} from "lucide-react";
+import { Radio, Layers, Database, Box, Activity, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUi, type View } from "@/store/ui";
 
@@ -20,17 +13,23 @@ const items: { view: View; label: string; icon: typeof Radio }[] = [
 export function ActivityBar() {
   const { activeView, setView, setSettingsOpen } = useUi();
   return (
-    <nav className="flex h-full w-12 shrink-0 flex-col items-center justify-between border-r border-sidebar-border bg-sidebar py-2">
+    <nav
+      aria-label="Primary"
+      className="flex h-full w-12 shrink-0 flex-col items-center justify-between border-r border-sidebar-border bg-sidebar py-2"
+    >
       <div className="flex flex-col items-center gap-1">
         {items.map(({ view, label, icon: Icon }) => {
           const active = activeView === view;
           return (
             <button
               key={view}
+              type="button"
+              aria-label={label}
+              aria-current={active ? "page" : undefined}
               title={label}
               onClick={() => setView(view)}
               className={cn(
-                "relative flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                "relative flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 active && "text-foreground",
               )}
             >
@@ -43,9 +42,11 @@ export function ActivityBar() {
         })}
       </div>
       <button
+        type="button"
+        aria-label="Settings"
         title="Settings"
         onClick={() => setSettingsOpen(true)}
-        className="flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        className="flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <Settings className="size-5" />
       </button>

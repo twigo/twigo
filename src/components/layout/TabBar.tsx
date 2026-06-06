@@ -24,7 +24,11 @@ export function TabBar() {
           )}
           <Radio className="size-3.5 text-brand" />
           <span className="font-mono">{t.label}</span>
-          <button className="ml-1 rounded p-0.5 opacity-0 hover:bg-accent group-hover:opacity-100">
+          <button
+            type="button"
+            aria-label={`Close ${t.label}`}
+            className="ml-1 rounded p-0.5 opacity-0 hover:bg-accent focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+          >
             <X className="size-3" />
           </button>
         </div>

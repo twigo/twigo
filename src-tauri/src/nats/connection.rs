@@ -6,6 +6,7 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 
 use super::context::{load_contexts, NatsContext};
+use super::error::{self, Error};
 
 #[derive(Default)]
 pub struct ConnState {
@@ -48,15 +49,17 @@ fn build_options(
     ctx: &NatsContext,
     app: &AppHandle,
     name: &str,
-) -> Result<async_nats::ConnectOptions, String> {
+) -> error::Result<async_nats::ConnectOptions> {
     let f = &ctx.file;
 
     let base = if let Some(creds) = non_empty(&f.creds) {
-        let content =
-            std::fs::read_to_string(creds).map_err(|e| format!("read creds file: {e}"))?;
+        let content = std::fs::read_to_string(creds).map_err(|source| Error::Io {
+            path: creds.to_string(),
+            source,
+        })?;
         async_nats::ConnectOptions::new()
             .credentials(&content)
-            .map_err(|e| e.to_string())?
+            .map_err(|e| Error::Credentials(e.to_string()))?
     } else if let Some(token) = non_empty(&f.token) {
         async_nats::ConnectOptions::with_token(token.to_string())
     } else if let (Some(user), Some(pass)) = (non_empty(&f.user), non_empty(&f.password)) {
@@ -83,7 +86,16 @@ fn build_options(
                 async_nats::Event::ServerError(_) => "serverError",
                 async_nats::Event::ClientError(_) => "clientError",
             };
-            let _ = app.emit("nats:event", NatsEvent { conn: name, kind: kind.into() });
+            tracing::debug!(conn = %name, event = kind, "nats event");
+            if let Err(e) = app.emit(
+                "nats:event",
+                NatsEvent {
+                    conn: name,
+                    kind: kind.into(),
+                },
+            ) {
+                tracing::warn!("failed to emit nats:event: {e}");
+            }
         }
     }))
 }
@@ -94,14 +106,14 @@ pub async fn connect(
     state: State<'_, ConnState>,
     name: String,
     dir: Option<String>,
-) -> Result<ConnInfo, String> {
+) -> error::Result<ConnInfo> {
     let custom = dir
         .filter(|d| !d.trim().is_empty())
         .map(std::path::PathBuf::from);
     let ctx = load_contexts(custom)?
         .into_iter()
         .find(|c| c.name == name)
-        .ok_or_else(|| format!("context '{name}' not found"))?;
+        .ok_or_else(|| Error::ContextNotFound(name.clone()))?;
 
     let url = if ctx.file.url.trim().is_empty() {
         "127.0.0.1:4222".to_string()
@@ -110,7 +122,7 @@ pub async fn connect(
     };
 
     let opts = build_options(&ctx, &app, &name)?;
-    let client = opts.connect(url).await.map_err(|e| e.to_string())?;
+    let client = opts.connect(url).await?;
 
     let server = client.server_info();
     let started = std::time::Instant::now();
@@ -127,17 +139,32 @@ pub async fn connect(
         max_payload: server.max_payload,
     };
 
+    tracing::info!(conn = %name, server = %server.server_name, rtt_ms, "connected");
     state.clients.lock().await.insert(name, client);
     Ok(info)
 }
 
 #[tauri::command]
-pub async fn disconnect(state: State<'_, ConnState>, name: String) -> Result<(), String> {
+pub async fn disconnect(state: State<'_, ConnState>, name: String) -> error::Result<()> {
     state.clients.lock().await.remove(&name);
+    tracing::info!(conn = %name, "disconnected");
     Ok(())
 }
 
 #[tauri::command]
-pub async fn list_connections(state: State<'_, ConnState>) -> Result<Vec<String>, String> {
+pub async fn list_connections(state: State<'_, ConnState>) -> error::Result<Vec<String>> {
     Ok(state.clients.lock().await.keys().cloned().collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn non_empty_filters_blank_and_trims() {
+        assert_eq!(non_empty(&None), None);
+        assert_eq!(non_empty(&Some(String::new())), None);
+        assert_eq!(non_empty(&Some("   ".into())), None);
+        assert_eq!(non_empty(&Some(" token ".into())), Some("token"));
+    }
 }
