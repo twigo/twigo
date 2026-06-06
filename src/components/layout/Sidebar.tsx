@@ -7,6 +7,7 @@ import {
   Radio,
   RefreshCw,
   Loader2,
+  Unplug,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUi } from "@/store/ui";
@@ -22,8 +23,19 @@ const viewTitles: Record<string, string> = {
 };
 
 function ConnectionsSection() {
-  const { contexts, status, error, activeContext, load, setActive } =
-    useConnections();
+  const {
+    contexts,
+    status,
+    error,
+    activeContext,
+    connected,
+    connecting,
+    connError,
+    load,
+    setActive,
+    connect,
+    disconnect,
+  } = useConnections();
 
   return (
     <>
@@ -69,17 +81,35 @@ function ConnectionsSection() {
 
         {contexts.map((c) => {
           const active = activeContext === c.name;
+          const isConnected = !!connected[c.name];
+          const isConnecting = !!connecting[c.name];
+          const err = connError[c.name];
           return (
-            <button
+            <div
               key={c.name}
-              onClick={() => setActive(c.name)}
-              title={`${c.url}${c.description ? ` — ${c.description}` : ""}`}
+              onClick={() =>
+                isConnected ? setActive(c.name) : connect(c.name)
+              }
+              title={err || `${c.url}${c.description ? ` — ${c.description}` : ""}`}
               className={cn(
-                "flex w-full items-center gap-2 rounded-sm px-1.5 py-1 text-left hover:bg-accent",
+                "group flex w-full cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 text-left hover:bg-accent",
                 active && "bg-accent",
               )}
             >
-              <Circle className="size-2 shrink-0 fill-muted-foreground/40 text-muted-foreground/40" />
+              {isConnecting ? (
+                <Loader2 className="size-2.5 shrink-0 animate-spin text-muted-foreground" />
+              ) : (
+                <Circle
+                  className={cn(
+                    "size-2 shrink-0",
+                    isConnected
+                      ? "fill-ok text-ok"
+                      : err
+                        ? "fill-error text-error"
+                        : "fill-muted-foreground/40 text-muted-foreground/40",
+                  )}
+                />
+              )}
               <span className="flex-1 truncate text-xs font-medium">
                 {c.name}
                 {c.selected && (
@@ -88,10 +118,23 @@ function ConnectionsSection() {
                   </span>
                 )}
               </span>
-              <span className="truncate font-mono text-[10px] text-muted-foreground">
-                {c.url.replace(/^\w+:\/\//, "")}
-              </span>
-            </button>
+              {isConnected ? (
+                <button
+                  title="Disconnect"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    disconnect(c.name);
+                  }}
+                  className="hidden size-4 items-center justify-center rounded text-muted-foreground hover:text-error group-hover:flex"
+                >
+                  <Unplug className="size-3" />
+                </button>
+              ) : (
+                <span className="truncate font-mono text-[10px] text-muted-foreground">
+                  {c.url.replace(/^\w+:\/\//, "")}
+                </span>
+              )}
+            </div>
           );
         })}
       </div>
