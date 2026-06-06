@@ -46,7 +46,7 @@ function ConnectionsSection() {
         <div className="flex items-center gap-0.5">
           <button
             title="Reload nats contexts"
-            onClick={() => load()}
+            onClick={() => void load()}
             className="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
           >
             <RefreshCw className="size-3.5" />
@@ -87,10 +87,16 @@ function ConnectionsSection() {
           return (
             <div
               key={c.name}
-              onClick={() =>
-                isConnected ? setActive(c.name) : connect(c.name)
+              onClick={() => {
+                if (isConnected) {
+                  setActive(c.name);
+                } else {
+                  void connect(c.name);
+                }
+              }}
+              title={
+                err ?? `${c.url}${c.description ? ` — ${c.description}` : ""}`
               }
-              title={err || `${c.url}${c.description ? ` — ${c.description}` : ""}`}
               className={cn(
                 "group relative flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-1.5 text-left transition-colors hover:bg-accent",
                 active && "bg-accent",
@@ -126,7 +132,7 @@ function ConnectionsSection() {
                   title="Disconnect"
                   onClick={(e) => {
                     e.stopPropagation();
-                    disconnect(c.name);
+                    void disconnect(c.name);
                   }}
                   className="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-error pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100"
                 >
@@ -186,8 +192,8 @@ function SubjectRow({ node, depth }: { node: SubjectNode; depth: number }) {
           {node.rate}/s
         </span>
       </button>
-      {hasChildren && open && (
-        <SubjectTree nodes={node.children!} depth={depth + 1} />
+      {open && node.children && (
+        <SubjectTree nodes={node.children} depth={depth + 1} />
       )}
     </li>
   );

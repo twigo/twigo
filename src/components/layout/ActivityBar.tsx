@@ -1,11 +1,4 @@
-import {
-  Radio,
-  Layers,
-  Database,
-  Box,
-  Activity,
-  Settings,
-} from "lucide-react";
+import { Radio, Layers, Database, Box, Activity, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUi, type View } from "@/store/ui";
 

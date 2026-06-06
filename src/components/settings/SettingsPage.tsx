@@ -98,7 +98,7 @@ function ConnectionsSection() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    defaultContextDir().then(setDefaultDir);
+    void defaultContextDir().then(setDefaultDir);
   }, []);
 
   const dirty = (draft.trim() || null) !== (contextDir ?? null);
@@ -130,7 +130,12 @@ function ConnectionsSection() {
             className="font-mono text-xs"
             spellCheck={false}
           />
-          <Button variant="outline" size="icon" onClick={browse} title="Browse…">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => void browse()}
+            title="Browse…"
+          >
             <FolderOpen />
           </Button>
         </div>
@@ -146,7 +151,12 @@ function ConnectionsSection() {
         </p>
 
         <div className="flex items-center gap-2 pt-2">
-          <Button variant="brand" size="sm" onClick={save} disabled={!dirty}>
+          <Button
+            variant="brand"
+            size="sm"
+            onClick={() => void save()}
+            disabled={!dirty}
+          >
             Save & reload
           </Button>
           {saved && (

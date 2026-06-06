@@ -35,7 +35,15 @@ export const useUi = create<UiState>()(
       toggleDetail: () => set((s) => ({ detailOpen: !s.detailOpen })),
       setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
     }),
-    { name: "twigo-ui", partialize: (s) => ({ theme: s.theme, activeView: s.activeView, sidebarOpen: s.sidebarOpen, detailOpen: s.detailOpen }) },
+    {
+      name: "twigo-ui",
+      partialize: (s) => ({
+        theme: s.theme,
+        activeView: s.activeView,
+        sidebarOpen: s.sidebarOpen,
+        detailOpen: s.detailOpen,
+      }),
+    },
   ),
 );
 

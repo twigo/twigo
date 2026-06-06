@@ -22,7 +22,11 @@ export function AppShell() {
             <>
               <TabBar />
               <div className="flex min-h-0 flex-1">
-                {activeView === "subjects" ? <MessageStream /> : <Placeholder />}
+                {activeView === "subjects" ? (
+                  <MessageStream />
+                ) : (
+                  <Placeholder />
+                )}
                 {detailOpen && activeView === "subjects" && <DetailPanel />}
               </div>
             </>

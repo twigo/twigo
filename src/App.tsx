@@ -15,15 +15,17 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
-    loadContexts();
+    void loadContexts();
   }, [loadContexts]);
 
   useEffect(() => {
-    const unlisten = listen<NatsEvent>("nats:event", (e) =>
-      onEvent(e.payload.conn, e.payload.kind),
-    );
+    const unlisten = listen<NatsEvent>("nats:event", (e) => {
+      onEvent(e.payload.conn, e.payload.kind);
+    });
     return () => {
-      unlisten.then((fn) => fn());
+      void unlisten.then((fn) => {
+        fn();
+      });
     };
   }, [onEvent]);
 

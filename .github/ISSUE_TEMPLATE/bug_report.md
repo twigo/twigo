@@ -14,6 +14,7 @@ Steps to reproduce the behavior.
 What you expected to happen.
 
 **Environment**
+
 - OS:
 - Twigo version:
 - NATS server version:

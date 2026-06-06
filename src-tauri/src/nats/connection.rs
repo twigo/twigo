@@ -83,7 +83,13 @@ fn build_options(
                 async_nats::Event::ServerError(_) => "serverError",
                 async_nats::Event::ClientError(_) => "clientError",
             };
-            let _ = app.emit("nats:event", NatsEvent { conn: name, kind: kind.into() });
+            let _ = app.emit(
+                "nats:event",
+                NatsEvent {
+                    conn: name,
+                    kind: kind.into(),
+                },
+            );
         }
     }))
 }

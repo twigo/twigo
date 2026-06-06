@@ -35,8 +35,8 @@ export function connect(name: string, dir?: string | null): Promise<ConnInfo> {
   return invoke<ConnInfo>("connect", { name, dir: dir ?? null });
 }
 
-export function disconnect(name: string): Promise<void> {
-  return invoke<void>("disconnect", { name });
+export async function disconnect(name: string): Promise<void> {
+  await invoke("disconnect", { name });
 }
 
 export function listConnections(): Promise<string[]> {

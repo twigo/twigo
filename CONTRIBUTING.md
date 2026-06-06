@@ -30,7 +30,7 @@ CI runs the same checks on every pull request.
 ## Conventions
 
 - **UI text is English only.**
-- **Comments are minimal** — explain non-obvious *why*, not *what*.
+- **Comments are minimal** — explain non-obvious _why_, not _what_.
 - **Commits** follow [Conventional Commits](https://www.conventionalcommits.org)
   (`feat:`, `fix:`, `chore:`, `docs:`, `style:`, `refactor:`, `test:`).
 - **Accessibility**: interactive elements must be keyboard-reachable and

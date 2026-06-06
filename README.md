@@ -15,12 +15,14 @@ that imports your existing `nats` CLI contexts and gets out of your way.
 ## Features
 
 **Working today**
+
 - Imports your existing `nats` CLI contexts (`~/.config/nats/context/`), with a
   configurable contexts directory
 - Connect / disconnect with live status (creds, token, user/password, or nkey)
 - Light & dark themes
 
 **Roadmap**
+
 - Subject explorer with live message rates
 - Live subscriptions, publish & request/reply
 - Message viewer (JSON / hex / …)

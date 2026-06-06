@@ -28,7 +28,9 @@ export function StatusBar() {
         ) : (
           <span className="flex items-center gap-1 opacity-90">
             <Plug className="size-3.5" />
-            {activeContext ? `${activeContext} · not connected` : "no connection"}
+            {activeContext
+              ? `${activeContext} · not connected`
+              : "no connection"}
           </span>
         )}
       </div>
