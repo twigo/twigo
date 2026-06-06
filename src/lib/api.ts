@@ -1,7 +1,16 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, Channel } from "@tauri-apps/api/core";
 import type { SubjectStat } from "@/lib/subject-tree";
 
+export { Channel };
 export type { SubjectStat };
+
+export interface IncomingMessage {
+  subject: string;
+  reply: string | null;
+  payloadB64: string;
+  headers: [string, string][];
+  size: number;
+}
 
 export interface ContextSummary {
   name: string;
@@ -61,4 +70,17 @@ export async function startSubjectWatch(
 
 export async function stopSubjectWatch(connId: string): Promise<void> {
   await invoke("stop_subject_watch", { connId });
+}
+
+export async function subscribe(
+  connId: string,
+  subId: string,
+  subject: string,
+  onMessage: Channel<IncomingMessage>,
+): Promise<void> {
+  await invoke("subscribe", { connId, subId, subject, onMessage });
+}
+
+export async function unsubscribe(subId: string): Promise<void> {
+  await invoke("unsubscribe", { subId });
 }

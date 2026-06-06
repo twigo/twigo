@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { useUi } from "@/store/ui";
 import { useConnections } from "@/store/connections";
 import { useSubjects } from "@/store/subjects";
+import { useStream } from "@/store/stream";
 import { buildSubjectTree, type SubjectNode } from "@/lib/subject-tree";
 
 const viewTitles: Record<string, string> = {
@@ -174,54 +175,89 @@ function formatRate(rate: number): string {
 function SubjectTree({
   nodes,
   depth = 0,
+  onSelect,
 }: {
   nodes: SubjectNode[];
   depth?: number;
+  onSelect: (subject: string) => void;
 }) {
   return (
     <ul>
       {nodes.map((n) => (
-        <SubjectRow key={n.path} node={n} depth={depth} />
+        <SubjectRow key={n.path} node={n} depth={depth} onSelect={onSelect} />
       ))}
     </ul>
   );
 }
 
-function SubjectRow({ node, depth }: { node: SubjectNode; depth: number }) {
+function SubjectRow({
+  node,
+  depth,
+  onSelect,
+}: {
+  node: SubjectNode;
+  depth: number;
+  onSelect: (subject: string) => void;
+}) {
   const [open, setOpen] = useState(true);
   const hasChildren = node.children.length > 0;
+  const subject = hasChildren ? `${node.path}.>` : node.path;
+  const isActive = useStream((s) => s.subject === subject);
+
   return (
     <li>
-      <button
-        type="button"
-        onClick={() => hasChildren && setOpen((o) => !o)}
-        aria-expanded={hasChildren ? open : undefined}
-        title={`${node.path} · ${node.count} msgs`}
-        className="group flex w-full items-center gap-1 rounded-sm py-1 pr-2 text-left hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        style={{ paddingLeft: depth * 12 + 6 }}
+      <div
+        className={cn(
+          "group flex items-center rounded-sm hover:bg-accent",
+          isActive && "bg-accent",
+        )}
+        style={{ paddingLeft: depth * 12 }}
       >
         {hasChildren ? (
-          <ChevronRight
-            className={cn(
-              "size-3.5 shrink-0 text-muted-foreground transition-transform",
-              open && "rotate-90",
-            )}
-          />
+          <button
+            type="button"
+            aria-label={open ? "Collapse" : "Expand"}
+            aria-expanded={open}
+            onClick={() => setOpen((o) => !o)}
+            className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <ChevronRight
+              className={cn(
+                "size-3.5 transition-transform",
+                open && "rotate-90",
+              )}
+            />
+          </button>
         ) : (
-          <Radio className="size-3.5 shrink-0 text-muted-foreground/60" />
+          <span className="flex size-5 shrink-0 items-center justify-center">
+            <Radio className="size-3.5 text-muted-foreground/60" />
+          </span>
         )}
-        <span className="flex-1 truncate font-mono text-xs">{node.token}</span>
-        <span
-          className={cn(
-            "rounded bg-muted px-1 font-mono text-[11px] tabular-nums",
-            node.rate > 0 ? "text-foreground" : "text-muted-foreground",
-          )}
+        <button
+          type="button"
+          onClick={() => onSelect(subject)}
+          title={`Stream ${subject} · ${node.count} msgs`}
+          className="flex min-w-0 flex-1 items-center gap-1 py-1 pr-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          {formatRate(node.rate)}/s
-        </span>
-      </button>
+          <span className="flex-1 truncate font-mono text-xs">
+            {node.token}
+          </span>
+          <span
+            className={cn(
+              "rounded bg-muted px-1 font-mono text-[11px] tabular-nums",
+              node.rate > 0 ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {formatRate(node.rate)}/s
+          </span>
+        </button>
+      </div>
       {open && hasChildren && (
-        <SubjectTree nodes={node.children} depth={depth + 1} />
+        <SubjectTree
+          nodes={node.children}
+          depth={depth + 1}
+          onSelect={onSelect}
+        />
       )}
     </li>
   );
@@ -246,6 +282,7 @@ function SubjectExplorer({ filter }: { filter: string }) {
   );
   const startWatch = useSubjects((s) => s.startWatch);
   const stopWatch = useSubjects((s) => s.stopWatch);
+  const openStream = useStream((s) => s.open);
   const [pattern, setPattern] = useState(">");
 
   const tree = useMemo(() => {
@@ -315,7 +352,10 @@ function SubjectExplorer({ filter }: { filter: string }) {
           {filter ? "No matching subjects." : "No messages observed yet."}
         </Hint>
       ) : (
-        <SubjectTree nodes={tree} />
+        <SubjectTree
+          nodes={tree}
+          onSelect={(subject) => void openStream(activeContext, subject)}
+        />
       )}
       {data?.truncated && (
         <p className="px-2 py-2 text-[11px] text-warn">

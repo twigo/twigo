@@ -1,38 +1,26 @@
 import { X, Radio } from "lucide-react";
-import { cn } from "@/lib/utils";
-
-const tabs = [
-  { id: "t1", label: "orders.>", active: true },
-  { id: "t2", label: "payments.captured", active: false },
-];
+import { useStream } from "@/store/stream";
 
 export function TabBar() {
+  const { subject, close } = useStream();
+  if (!subject)
+    return <div className="h-9 shrink-0 border-b border-border bg-panel" />;
+
   return (
     <div className="flex h-9 shrink-0 items-stretch border-b border-border bg-panel">
-      {tabs.map((t) => (
-        <div
-          key={t.id}
-          className={cn(
-            "group flex items-center gap-1.5 border-r border-border px-3 text-xs",
-            t.active
-              ? "bg-background text-foreground"
-              : "text-muted-foreground hover:bg-accent/50",
-          )}
+      <div className="group relative flex items-center gap-1.5 border-r border-border bg-background px-3 text-xs">
+        <span className="absolute inset-x-0 top-0 h-0.5 bg-brand" />
+        <Radio className="size-3.5 text-brand" />
+        <span className="font-mono">{subject}</span>
+        <button
+          type="button"
+          aria-label={`Close ${subject}`}
+          onClick={() => void close()}
+          className="ml-1 rounded p-0.5 hover:bg-accent focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          {t.active && (
-            <span className="absolute -mt-[34px] h-0.5 w-[inherit] bg-brand" />
-          )}
-          <Radio className="size-3.5 text-brand" />
-          <span className="font-mono">{t.label}</span>
-          <button
-            type="button"
-            aria-label={`Close ${t.label}`}
-            className="ml-1 rounded p-0.5 opacity-0 hover:bg-accent focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
-          >
-            <X className="size-3" />
-          </button>
-        </div>
-      ))}
+          <X className="size-3" />
+        </button>
+      </div>
     </div>
   );
 }
