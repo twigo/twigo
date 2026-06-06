@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { toast } from "sonner";
 import {
   listContexts,
   connect as apiConnect,
@@ -71,12 +70,10 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
         connecting: { ...s.connecting, [name]: false },
       }));
     } catch (e) {
-      const message = String(e);
       set((s) => ({
         connecting: { ...s.connecting, [name]: false },
-        connError: { ...s.connError, [name]: message },
+        connError: { ...s.connError, [name]: String(e) },
       }));
-      toast.error(`Failed to connect to ${name}`, { description: message });
     }
   },
 

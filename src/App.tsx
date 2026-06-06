@@ -1,6 +1,5 @@
 import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Toaster } from "sonner";
 import { AppShell } from "@/components/layout/AppShell";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { applyTheme, useUi } from "@/store/ui";
@@ -34,7 +33,6 @@ function App() {
   return (
     <ErrorBoundary>
       <AppShell />
-      <Toaster theme={theme} position="bottom-right" richColors />
     </ErrorBoundary>
   );
 }
