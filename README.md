@@ -46,6 +46,12 @@ docker compose up -d   # local NATS with JetStream (:4222) + monitoring (:8222)
 pnpm tauri dev         # run the app
 ```
 
+To generate continuous fake traffic for testing the subject explorer:
+
+```bash
+docker compose --profile traffic up -d   # publishes to telemetry.*, orders.*, …
+```
+
 To package a release build:
 
 ```bash
