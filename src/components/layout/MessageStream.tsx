@@ -38,13 +38,18 @@ export function MessageStream() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
-        <Button variant="ghost" size="icon-sm" title="Pause">
+        <Button variant="ghost" size="icon-sm" aria-label="Pause" title="Pause">
           <Pause />
         </Button>
-        <Button variant="ghost" size="icon-sm" title="Clear">
+        <Button variant="ghost" size="icon-sm" aria-label="Clear" title="Clear">
           <Trash2 />
         </Button>
-        <Button variant="ghost" size="icon-sm" title="Scroll to latest">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Scroll to latest"
+          title="Scroll to latest"
+        >
           <ArrowDownToLine />
         </Button>
         <div className="ml-auto" />

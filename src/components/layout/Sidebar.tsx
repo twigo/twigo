@@ -45,15 +45,19 @@ function ConnectionsSection() {
         </span>
         <div className="flex items-center gap-0.5">
           <button
+            type="button"
+            aria-label="Reload nats contexts"
             title="Reload nats contexts"
             onClick={() => void load()}
-            className="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <RefreshCw className="size-3.5" />
           </button>
           <button
+            type="button"
+            aria-label="Add connection"
             title="Add connection"
-            className="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <Plus className="size-3.5" />
           </button>
@@ -87,61 +91,67 @@ function ConnectionsSection() {
           return (
             <div
               key={c.name}
-              onClick={() => {
-                if (isConnected) {
-                  setActive(c.name);
-                } else {
-                  void connect(c.name);
-                }
-              }}
-              title={
-                err ?? `${c.url}${c.description ? ` — ${c.description}` : ""}`
-              }
               className={cn(
-                "group relative flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-1.5 text-left transition-colors hover:bg-accent",
+                "group relative flex h-7 w-full items-center rounded-md transition-colors hover:bg-accent",
                 active && "bg-accent",
               )}
             >
               {active && (
                 <span className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-brand" />
               )}
-              {isConnecting ? (
-                <Loader2 className="size-2.5 shrink-0 animate-spin text-muted-foreground" />
-              ) : (
-                <Circle
-                  className={cn(
-                    "size-2 shrink-0",
-                    isConnected
-                      ? "fill-ok text-ok"
-                      : err
-                        ? "fill-error text-error"
-                        : "fill-muted-foreground/40 text-muted-foreground/40",
+              <button
+                type="button"
+                onClick={() => {
+                  if (isConnected) {
+                    setActive(c.name);
+                  } else {
+                    void connect(c.name);
+                  }
+                }}
+                aria-current={active ? "true" : undefined}
+                title={
+                  err ?? `${c.url}${c.description ? ` — ${c.description}` : ""}`
+                }
+                className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {isConnecting ? (
+                  <Loader2 className="size-2.5 shrink-0 animate-spin text-muted-foreground" />
+                ) : (
+                  <Circle
+                    className={cn(
+                      "size-2 shrink-0",
+                      isConnected
+                        ? "fill-ok text-ok"
+                        : err
+                          ? "fill-error text-error"
+                          : "fill-muted-foreground/40 text-muted-foreground/40",
+                    )}
+                  />
+                )}
+                <span className="flex-1 truncate text-xs font-medium">
+                  {c.name}
+                  {c.selected && (
+                    <span className="ml-1 text-[11px] font-normal text-brand">
+                      ★
+                    </span>
                   )}
-                />
-              )}
-              <span className="flex-1 truncate text-xs font-medium">
-                {c.name}
-                {c.selected && (
-                  <span className="ml-1 text-[11px] font-normal text-brand">
-                    ★
+                </span>
+                {!isConnected && (
+                  <span className="truncate font-mono text-[11px] text-muted-foreground">
+                    {c.url.replace(/^\w+:\/\//, "")}
                   </span>
                 )}
-              </span>
-              {isConnected ? (
+              </button>
+              {isConnected && (
                 <button
+                  type="button"
+                  aria-label={`Disconnect ${c.name}`}
                   title="Disconnect"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void disconnect(c.name);
-                  }}
-                  className="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-error pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100"
+                  onClick={() => void disconnect(c.name)}
+                  className="mr-1 flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-error focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
                 >
                   <Unplug className="size-3" />
                 </button>
-              ) : (
-                <span className="truncate font-mono text-[11px] text-muted-foreground">
-                  {c.url.replace(/^\w+:\/\//, "")}
-                </span>
               )}
             </div>
           );
@@ -173,8 +183,10 @@ function SubjectRow({ node, depth }: { node: SubjectNode; depth: number }) {
   return (
     <li>
       <button
+        type="button"
         onClick={() => hasChildren && setOpen((o) => !o)}
-        className="group flex w-full items-center gap-1 rounded-sm py-1 pr-2 text-left hover:bg-accent"
+        aria-expanded={hasChildren ? open : undefined}
+        className="group flex w-full items-center gap-1 rounded-sm py-1 pr-2 text-left hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         style={{ paddingLeft: depth * 12 + 6 }}
       >
         {hasChildren ? (
@@ -216,6 +228,7 @@ export function Sidebar() {
         <div className="flex items-center gap-1.5 rounded-md border border-input bg-background px-2 py-1">
           <Search className="size-3.5 text-muted-foreground" />
           <input
+            aria-label={`Filter ${viewTitles[activeView] ?? ""}`}
             placeholder="Filter…"
             className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground"
           />

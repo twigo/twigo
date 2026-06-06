@@ -37,9 +37,11 @@ export function StatusBar() {
       <div className="flex items-center gap-2">
         <span className="opacity-80">Twigo v0.1.0</span>
         <button
+          type="button"
           onClick={toggleTheme}
+          aria-label="Toggle theme"
           title="Toggle theme"
-          className="flex size-5 items-center justify-center rounded hover:bg-white/15"
+          className="flex size-5 items-center justify-center rounded hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
         >
           {theme === "dark" ? (
             <Sun className="size-3.5" />

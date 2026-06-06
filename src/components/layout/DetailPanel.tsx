@@ -21,12 +21,18 @@ export function DetailPanel() {
           Message
         </span>
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon-sm" title="Copy payload">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Copy payload"
+            title="Copy payload"
+          >
             <Copy />
           </Button>
           <Button
             variant="ghost"
             size="icon-sm"
+            aria-label="Hide panel"
             title="Hide panel"
             onClick={toggleDetail}
           >
