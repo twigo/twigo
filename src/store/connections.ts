@@ -7,6 +7,7 @@ import {
   type ConnInfo,
 } from "@/lib/api";
 import { useSettings } from "@/store/settings";
+import { useSubjects } from "@/store/subjects";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -79,6 +80,7 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
 
   disconnect: async (name) => {
     await apiDisconnect(name);
+    useSubjects.getState().reset(name);
     set((s) => {
       const { [name]: _removed, ...connected } = s.connected;
       return { connected };
@@ -87,6 +89,7 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
 
   onEvent: (conn, kind) => {
     if (kind === "closed") {
+      useSubjects.getState().reset(conn);
       set((s) => {
         const { [conn]: _removed, ...connected } = s.connected;
         return { connected };

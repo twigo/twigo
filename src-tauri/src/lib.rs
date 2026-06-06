@@ -15,12 +15,15 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(nats::connection::ConnState::default())
+        .manage(nats::subjects::SubjectWatch::default())
         .invoke_handler(tauri::generate_handler![
             nats::context::list_contexts,
             nats::context::default_context_dir,
             nats::connection::connect,
             nats::connection::disconnect,
-            nats::connection::list_connections
+            nats::connection::list_connections,
+            nats::subjects::start_subject_watch,
+            nats::subjects::stop_subject_watch
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

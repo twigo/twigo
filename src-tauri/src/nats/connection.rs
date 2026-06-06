@@ -13,6 +13,12 @@ pub struct ConnState {
     clients: Mutex<HashMap<String, async_nats::Client>>,
 }
 
+impl ConnState {
+    pub(crate) async fn client(&self, name: &str) -> Option<async_nats::Client> {
+        self.clients.lock().await.get(name).cloned()
+    }
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnInfo {

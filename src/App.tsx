@@ -4,12 +4,14 @@ import { AppShell } from "@/components/layout/AppShell";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { applyTheme, useUi } from "@/store/ui";
 import { useConnections } from "@/store/connections";
-import type { NatsEvent } from "@/lib/api";
+import { useSubjects } from "@/store/subjects";
+import type { NatsEvent, SubjectsUpdate } from "@/lib/api";
 
 function App() {
   const theme = useUi((s) => s.theme);
   const loadContexts = useConnections((s) => s.load);
   const onEvent = useConnections((s) => s.onEvent);
+  const updateSubjects = useSubjects((s) => s.update);
 
   useEffect(() => {
     applyTheme(theme);
@@ -29,6 +31,17 @@ function App() {
       });
     };
   }, [onEvent]);
+
+  useEffect(() => {
+    const unlisten = listen<SubjectsUpdate>("subjects:update", (e) => {
+      updateSubjects(e.payload.conn, e.payload.subjects, e.payload.truncated);
+    });
+    return () => {
+      void unlisten.then((fn) => {
+        fn();
+      });
+    };
+  }, [updateSubjects]);
 
   return (
     <ErrorBoundary>

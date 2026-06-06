@@ -14,5 +14,30 @@ services:
     volumes:
       - nats-data:/data
 
+  # Optional fake-traffic generator for development.
+  # Enable with: docker compose --profile traffic up -d
+  traffic:
+    image: natsio/nats-box:latest
+    container_name: twigo-traffic
+    depends_on:
+      - nats
+    restart: unless-stopped
+    profiles: ["traffic"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 3
+        S=nats://nats:4222
+        N=1000000000
+        nats pub --server "$$S" --count=$$N --sleep=90ms   telemetry.cpu       '{"v":0.71}' &
+        nats pub --server "$$S" --count=$$N --sleep=110ms  telemetry.mem       '{"v":0.52}' &
+        nats pub --server "$$S" --count=$$N --sleep=130ms  orders.created      '{"id":"o_1","total":42.0}' &
+        nats pub --server "$$S" --count=$$N --sleep=700ms  orders.failed       '{"id":"o_9","err":"card"}' &
+        nats pub --server "$$S" --count=$$N --sleep=250ms  payments.authorized '{"amt":10.0}' &
+        nats pub --server "$$S" --count=$$N --sleep=600ms  payments.captured   '{"amt":10.0}' &
+        nats pub --server "$$S" --count=$$N --sleep=1500ms audit.login         '{"user":"alice"}' &
+        nats pub --server "$$S" --count=$$N --sleep=2000ms audit.logout        '{"user":"alice"}' &
+        wait
+
 volumes:
   nats-data:

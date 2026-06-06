@@ -17,6 +17,9 @@ pub enum Error {
 
     #[error(transparent)]
     Connect(#[from] async_nats::ConnectError),
+
+    #[error(transparent)]
+    Subscribe(#[from] async_nats::SubscribeError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

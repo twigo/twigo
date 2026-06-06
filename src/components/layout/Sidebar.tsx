@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ChevronRight,
   Circle,
@@ -8,11 +8,15 @@ import {
   RefreshCw,
   Loader2,
   Unplug,
+  Play,
+  Square,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { useUi } from "@/store/ui";
 import { useConnections } from "@/store/connections";
-import { mockSubjects, type SubjectNode } from "@/lib/mock";
+import { useSubjects } from "@/store/subjects";
+import { buildSubjectTree, type SubjectNode } from "@/lib/subject-tree";
 
 const viewTitles: Record<string, string> = {
   subjects: "Subjects",
@@ -161,6 +165,12 @@ function ConnectionsSection() {
   );
 }
 
+function formatRate(rate: number): string {
+  if (rate >= 10) return Math.round(rate).toString();
+  if (rate > 0) return rate.toFixed(1);
+  return "0";
+}
+
 function SubjectTree({
   nodes,
   depth = 0,
@@ -171,7 +181,7 @@ function SubjectTree({
   return (
     <ul>
       {nodes.map((n) => (
-        <SubjectRow key={n.token} node={n} depth={depth} />
+        <SubjectRow key={n.path} node={n} depth={depth} />
       ))}
     </ul>
   );
@@ -179,13 +189,14 @@ function SubjectTree({
 
 function SubjectRow({ node, depth }: { node: SubjectNode; depth: number }) {
   const [open, setOpen] = useState(true);
-  const hasChildren = !!node.children?.length;
+  const hasChildren = node.children.length > 0;
   return (
     <li>
       <button
         type="button"
         onClick={() => hasChildren && setOpen((o) => !o)}
         aria-expanded={hasChildren ? open : undefined}
+        title={`${node.path} · ${node.count} msgs`}
         className="group flex w-full items-center gap-1 rounded-sm py-1 pr-2 text-left hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         style={{ paddingLeft: depth * 12 + 6 }}
       >
@@ -200,19 +211,124 @@ function SubjectRow({ node, depth }: { node: SubjectNode; depth: number }) {
           <Radio className="size-3.5 shrink-0 text-muted-foreground/60" />
         )}
         <span className="flex-1 truncate font-mono text-xs">{node.token}</span>
-        <span className="rounded bg-muted px-1 font-mono text-[11px] tabular-nums text-muted-foreground">
-          {node.rate}/s
+        <span
+          className={cn(
+            "rounded bg-muted px-1 font-mono text-[11px] tabular-nums",
+            node.rate > 0 ? "text-foreground" : "text-muted-foreground",
+          )}
+        >
+          {formatRate(node.rate)}/s
         </span>
       </button>
-      {open && node.children && (
+      {open && hasChildren && (
         <SubjectTree nodes={node.children} depth={depth + 1} />
       )}
     </li>
   );
 }
 
+function Hint({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="px-2 py-3 text-xs leading-relaxed text-muted-foreground">
+      {children}
+    </p>
+  );
+}
+
+function SubjectExplorer({ filter }: { filter: string }) {
+  const { activeContext, connected } = useConnections();
+  const isConnected = !!(activeContext && connected[activeContext]);
+  const data = useSubjects((s) =>
+    activeContext ? s.byConn[activeContext] : undefined,
+  );
+  const watchingPattern = useSubjects((s) =>
+    activeContext ? s.watching[activeContext] : undefined,
+  );
+  const startWatch = useSubjects((s) => s.startWatch);
+  const stopWatch = useSubjects((s) => s.stopWatch);
+  const [pattern, setPattern] = useState(">");
+
+  const tree = useMemo(() => {
+    const stats = data?.stats ?? [];
+    const f = filter.trim().toLowerCase();
+    const filtered = f
+      ? stats.filter((s) => s.subject.toLowerCase().includes(f))
+      : stats;
+    return buildSubjectTree(filtered);
+  }, [data?.stats, filter]);
+
+  if (!isConnected || !activeContext) {
+    return <Hint>Connect to a server to explore subjects.</Hint>;
+  }
+
+  if (!watchingPattern) {
+    return (
+      <div className="space-y-2 px-2 py-2">
+        <Hint>
+          Core NATS has no subject registry. Subscribe to a pattern to discover
+          subjects from live traffic — this receives matching messages while
+          running.
+        </Hint>
+        <div className="flex items-center gap-1.5 rounded-md border border-input bg-background px-2 py-1">
+          <span className="font-mono text-[11px] text-muted-foreground">
+            pattern
+          </span>
+          <input
+            value={pattern}
+            onChange={(e) => setPattern(e.target.value)}
+            aria-label="Subject pattern to watch"
+            spellCheck={false}
+            className="w-full bg-transparent font-mono text-xs outline-none"
+          />
+        </div>
+        <Button
+          variant="brand"
+          size="sm"
+          className="w-full"
+          onClick={() => void startWatch(activeContext, pattern)}
+        >
+          <Play />
+          Start listening
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center justify-between gap-2 px-2 pb-1.5">
+        <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-ok" />
+          <span className="truncate font-mono">{watchingPattern}</span>
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => void stopWatch(activeContext)}
+        >
+          <Square />
+          Stop
+        </Button>
+      </div>
+      {tree.length === 0 ? (
+        <Hint>
+          {filter ? "No matching subjects." : "No messages observed yet."}
+        </Hint>
+      ) : (
+        <SubjectTree nodes={tree} />
+      )}
+      {data?.truncated && (
+        <p className="px-2 py-2 text-[11px] text-warn">
+          Showing the first 5000 subjects.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function Sidebar() {
   const activeView = useUi((s) => s.activeView);
+  const [filter, setFilter] = useState("");
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
       <ConnectionsSection />
@@ -228,6 +344,8 @@ export function Sidebar() {
         <div className="flex items-center gap-1.5 rounded-md border border-input bg-background px-2 py-1">
           <Search className="size-3.5 text-muted-foreground" />
           <input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
             aria-label={`Filter ${viewTitles[activeView] ?? ""}`}
             placeholder="Filter…"
             className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground"
@@ -237,7 +355,7 @@ export function Sidebar() {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
         {activeView === "subjects" ? (
-          <SubjectTree nodes={mockSubjects} />
+          <SubjectExplorer filter={filter} />
         ) : (
           <p className="px-2 py-3 text-xs text-muted-foreground">
             {viewTitles[activeView]} — coming soon.
