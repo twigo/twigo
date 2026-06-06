@@ -40,7 +40,7 @@ function ConnectionsSection() {
   return (
     <>
       <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           Connections
         </span>
         <div className="flex items-center gap-0.5">
@@ -116,7 +116,7 @@ function ConnectionsSection() {
               <span className="flex-1 truncate text-xs font-medium">
                 {c.name}
                 {c.selected && (
-                  <span className="ml-1 text-[10px] font-normal text-brand">
+                  <span className="ml-1 text-[11px] font-normal text-brand">
                     ★
                   </span>
                 )}
@@ -133,7 +133,7 @@ function ConnectionsSection() {
                   <Unplug className="size-3" />
                 </button>
               ) : (
-                <span className="truncate font-mono text-[10px] text-muted-foreground">
+                <span className="truncate font-mono text-[11px] text-muted-foreground">
                   {c.url.replace(/^\w+:\/\//, "")}
                 </span>
               )}
@@ -182,7 +182,7 @@ function SubjectRow({ node, depth }: { node: SubjectNode; depth: number }) {
           <Radio className="size-3.5 shrink-0 text-muted-foreground/60" />
         )}
         <span className="flex-1 truncate font-mono text-xs">{node.token}</span>
-        <span className="rounded bg-muted px-1 font-mono text-[10px] tabular-nums text-muted-foreground">
+        <span className="rounded bg-muted px-1 font-mono text-[11px] tabular-nums text-muted-foreground">
           {node.rate}/s
         </span>
       </button>
@@ -202,7 +202,7 @@ export function Sidebar() {
       <div className="my-1.5 border-t border-sidebar-border" />
 
       <div className="px-3 pb-1">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           {viewTitles[activeView]}
         </span>
       </div>

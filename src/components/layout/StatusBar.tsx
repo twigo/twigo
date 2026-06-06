@@ -8,7 +8,7 @@ export function StatusBar() {
   const info = activeContext ? connected[activeContext] : undefined;
 
   return (
-    <footer className="flex h-6 shrink-0 items-center justify-between bg-statusbar px-2 text-[11px] text-statusbar-foreground">
+    <footer className="flex h-6 shrink-0 items-center justify-between bg-statusbar px-2 text-xs text-statusbar-foreground">
       <div className="flex items-center gap-3">
         {info ? (
           <>
