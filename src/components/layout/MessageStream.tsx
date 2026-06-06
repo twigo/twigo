@@ -1,4 +1,5 @@
-import { Pause, Play, Trash2 } from "lucide-react";
+import { useLayoutEffect, useRef, useState } from "react";
+import { Pause, Play, Trash2, ArrowDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useStream } from "@/store/stream";
 
@@ -14,6 +15,31 @@ function fmtSize(n: number): string {
 
 export function MessageStream() {
   const { subject, items, paused, togglePause, clear } = useStream();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const stickRef = useRef(true);
+  const [showJump, setShowJump] = useState(false);
+
+  // Follow the tail while pinned to the bottom; stay put once scrolled up.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el && stickRef.current) el.scrollTop = el.scrollHeight;
+  }, [items]);
+
+  function onScroll() {
+    const el = scrollRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+    stickRef.current = atBottom;
+    setShowJump(!atBottom);
+  }
+
+  function jumpToLatest() {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    stickRef.current = true;
+    setShowJump(false);
+  }
 
   if (!subject) {
     return (
@@ -24,7 +50,7 @@ export function MessageStream() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 flex-1 flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
         <Button
           variant="ghost"
@@ -55,7 +81,11 @@ export function MessageStream() {
           <span className="ml-1 font-mono">{subject}</span>…
         </div>
       ) : (
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div
+          ref={scrollRef}
+          onScroll={onScroll}
+          className="min-h-0 flex-1 overflow-auto"
+        >
           <table className="w-full border-collapse text-xs">
             <thead className="sticky top-0 bg-panel text-left text-muted-foreground">
               <tr className="[&>th]:px-2 [&>th]:py-1 [&>th]:font-medium">
@@ -66,27 +96,36 @@ export function MessageStream() {
               </tr>
             </thead>
             <tbody className="font-mono">
-              {items
-                .slice()
-                .reverse()
-                .map((m) => (
-                  <tr
-                    key={m.id}
-                    className="cursor-default border-b border-border/50 hover:bg-accent/50"
-                  >
-                    <td className="px-2 py-1 tabular-nums text-muted-foreground">
-                      {fmtTime(m.receivedAt)}
-                    </td>
-                    <td className="px-2 py-1 text-brand">{m.subject}</td>
-                    <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
-                      {fmtSize(m.size)}
-                    </td>
-                    <td className="max-w-0 truncate px-2 py-1">{m.preview}</td>
-                  </tr>
-                ))}
+              {items.map((m) => (
+                <tr
+                  key={m.id}
+                  className="cursor-default border-b border-border/50 hover:bg-accent/50"
+                >
+                  <td className="px-2 py-1 tabular-nums text-muted-foreground">
+                    {fmtTime(m.receivedAt)}
+                  </td>
+                  <td className="px-2 py-1 text-brand">{m.subject}</td>
+                  <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
+                    {fmtSize(m.size)}
+                  </td>
+                  <td className="max-w-0 truncate px-2 py-1">{m.preview}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
+      )}
+
+      {showJump && (
+        <Button
+          variant="brand"
+          size="sm"
+          onClick={jumpToLatest}
+          className="absolute bottom-3 right-3 shadow-lg"
+        >
+          <ArrowDown />
+          Latest
+        </Button>
       )}
     </div>
   );
