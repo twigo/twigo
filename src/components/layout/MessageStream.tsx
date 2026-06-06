@@ -12,7 +12,6 @@ const mockMessages = [
 export function MessageStream() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* toolbar */}
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
         <Button variant="ghost" size="icon-sm" title="Pause">
           <Pause />
@@ -30,7 +29,6 @@ export function MessageStream() {
         </Button>
       </div>
 
-      {/* table */}
       <div className="min-h-0 flex-1 overflow-auto">
         <table className="w-full border-collapse text-xs">
           <thead className="sticky top-0 bg-panel text-left text-muted-foreground">

@@ -18,7 +18,7 @@ const items: { view: View; label: string; icon: typeof Radio }[] = [
 ];
 
 export function ActivityBar() {
-  const { activeView, setView } = useUi();
+  const { activeView, setView, setSettingsOpen } = useUi();
   return (
     <nav className="flex h-full w-12 shrink-0 flex-col items-center justify-between border-r border-sidebar-border bg-sidebar py-2">
       <div className="flex flex-col items-center gap-1">
@@ -44,6 +44,7 @@ export function ActivityBar() {
       </div>
       <button
         title="Settings"
+        onClick={() => setSettingsOpen(true)}
         className="flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       >
         <Settings className="size-5" />

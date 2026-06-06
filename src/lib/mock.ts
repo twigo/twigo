@@ -1,23 +1,7 @@
-/**
- * Temporary mock data so the layout has something to render.
- * Replaced by real nats context import (#3) + connection manager (#4).
- */
-export interface MockConnection {
-  id: string;
-  name: string;
-  url: string;
-  status: "connected" | "disconnected";
-}
-
-export const mockConnections: MockConnection[] = [
-  { id: "local", name: "local", url: "nats://127.0.0.1:4222", status: "connected" },
-  { id: "staging", name: "staging", url: "nats://staging:4222", status: "disconnected" },
-  { id: "prod", name: "prod", url: "tls://prod:4222", status: "disconnected" },
-];
-
+// TODO(#5): replace with the real Subject Explorer data.
 export interface SubjectNode {
   token: string;
-  rate: number; // msg/s
+  rate: number;
   children?: SubjectNode[];
 }
 

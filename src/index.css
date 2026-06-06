@@ -3,16 +3,10 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/*
-  Twigo design tokens.
-  - Neutral base (JetBrains/Lens feel), hybrid density.
-  - Accent is a single source of truth: --brand / --brand-foreground.
-    Swap these two values to re-skin the whole app (e.g. teal, violet, amber).
-*/
 :root {
   --radius: 0.5rem;
 
-  /* one place to change the brand accent (default: restrained teal-cyan, NATS-ish) */
+  /* change these two to re-skin the whole app */
   --brand: oklch(0.62 0.11 195);
   --brand-foreground: oklch(0.98 0 0);
 
@@ -36,7 +30,6 @@
   --input: oklch(0.922 0 0);
   --ring: var(--brand);
 
-  /* app chrome surfaces (sidebar, panels, status bar) */
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-border: oklch(0.922 0 0);
@@ -44,7 +37,6 @@
   --statusbar: var(--brand);
   --statusbar-foreground: var(--brand-foreground);
 
-  /* semantic status colors for message/connection states */
   --ok: oklch(0.62 0.14 150);
   --warn: oklch(0.72 0.15 75);
   --error: oklch(0.577 0.245 27.325);
@@ -124,7 +116,6 @@
   --color-warn: var(--warn);
   --color-error: var(--error);
 
-  /* JetBrains-ish mono for payloads/subjects */
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono",
     Menlo, Consolas, monospace;
 }
@@ -140,7 +131,6 @@
   }
   body {
     @apply bg-background text-foreground;
-    /* hybrid density: slightly compact base */
     font-size: 13px;
     -webkit-font-smoothing: antialiased;
     overflow: hidden;
