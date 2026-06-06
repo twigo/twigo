@@ -31,19 +31,14 @@ export function AppShell() {
           >
             {showSidebar && (
               <>
-                <ResizablePanel
-                  id="sidebar"
-                  defaultSize={20}
-                  minSize={12}
-                  maxSize={32}
-                >
+                <ResizablePanel id="sidebar" defaultSize={22} minSize={12}>
                   <Sidebar />
                 </ResizablePanel>
                 <ResizableHandle withHandle />
               </>
             )}
 
-            <ResizablePanel id="main" minSize={30}>
+            <ResizablePanel id="main" minSize={25}>
               <main className="flex h-full min-w-0 flex-col bg-background">
                 <TabBar />
                 <div className="flex min-h-0 flex-1">
@@ -59,12 +54,7 @@ export function AppShell() {
             {showDetail && (
               <>
                 <ResizableHandle withHandle />
-                <ResizablePanel
-                  id="detail"
-                  defaultSize={24}
-                  minSize={15}
-                  maxSize={45}
-                >
+                <ResizablePanel id="detail" defaultSize={30} minSize={16}>
                   <DetailPanel />
                 </ResizablePanel>
               </>
