@@ -194,7 +194,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cdir = dir.path().join("context");
         fs::create_dir_all(&cdir).unwrap();
-        fs::write(cdir.join("beta.json"), r#"{"url":"nats://b:4222","token":"x"}"#).unwrap();
+        fs::write(
+            cdir.join("beta.json"),
+            r#"{"url":"nats://b:4222","token":"x"}"#,
+        )
+        .unwrap();
         fs::write(cdir.join("alpha.json"), r#"{"url":"nats://a:4222"}"#).unwrap();
         fs::write(cdir.join("broken.json"), "{ not json").unwrap();
         fs::write(dir.path().join("context.txt"), "beta\n").unwrap();
