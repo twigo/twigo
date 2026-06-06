@@ -1,4 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { SubjectStat } from "@/lib/subject-tree";
+
+export type { SubjectStat };
 
 export interface ContextSummary {
   name: string;
@@ -41,4 +44,21 @@ export async function disconnect(name: string): Promise<void> {
 
 export function listConnections(): Promise<string[]> {
   return invoke<string[]>("list_connections");
+}
+
+export interface SubjectsUpdate {
+  conn: string;
+  subjects: SubjectStat[];
+  truncated: boolean;
+}
+
+export async function startSubjectWatch(
+  connId: string,
+  pattern?: string | null,
+): Promise<void> {
+  await invoke("start_subject_watch", { connId, pattern: pattern ?? null });
+}
+
+export async function stopSubjectWatch(connId: string): Promise<void> {
+  await invoke("stop_subject_watch", { connId });
 }
