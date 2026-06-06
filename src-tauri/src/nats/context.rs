@@ -147,7 +147,7 @@ pub fn load_contexts(custom_dir: Option<PathBuf>) -> error::Result<Vec<NatsConte
         });
     }
 
-    contexts.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    contexts.sort_by_key(|c| c.name.to_lowercase());
     Ok(contexts)
 }
 
