@@ -34,7 +34,7 @@ export function AppShell() {
                 <ResizablePanel id="sidebar" defaultSize={22} minSize={12}>
                   <Sidebar />
                 </ResizablePanel>
-                <ResizableHandle withHandle />
+                <ResizableHandle />
               </>
             )}
 
@@ -53,7 +53,7 @@ export function AppShell() {
 
             {showDetail && (
               <>
-                <ResizableHandle withHandle />
+                <ResizableHandle />
                 <ResizablePanel id="detail" defaultSize={30} minSize={16}>
                   <DetailPanel />
                 </ResizablePanel>
