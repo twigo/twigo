@@ -23,11 +23,13 @@ interface StreamState {
   items: StreamMessage[];
   paused: boolean;
   following: boolean;
+  selectedId: number | null;
   open: (connId: string, subject: string) => Promise<void>;
   close: () => Promise<void>;
   clear: () => void;
   togglePause: () => void;
   setFollowing: (following: boolean) => void;
+  select: (id: number | null) => void;
 }
 
 function flush() {
@@ -47,6 +49,7 @@ export const useStream = create<StreamState>((set, get) => ({
   items: [],
   paused: false,
   following: true,
+  selectedId: null,
 
   open: async (connId, subject) => {
     await get().close();
@@ -68,7 +71,15 @@ export const useStream = create<StreamState>((set, get) => ({
     channel = ch;
     await apiSubscribe(connId, subId, subject, ch);
     flushTimer = setInterval(flush, FLUSH_MS);
-    set({ connId, subject, subId, items: [], paused: false, following: true });
+    set({
+      connId,
+      subject,
+      subId,
+      items: [],
+      paused: false,
+      following: true,
+      selectedId: null,
+    });
   },
 
   close: async () => {
@@ -87,14 +98,16 @@ export const useStream = create<StreamState>((set, get) => ({
       items: [],
       paused: false,
       following: true,
+      selectedId: null,
     });
   },
 
-  clear: () => set({ items: [] }),
+  clear: () => set({ items: [], selectedId: null }),
   togglePause: () => set((s) => ({ paused: !s.paused })),
   setFollowing: (following) =>
     set((s) => ({
       following,
       items: following ? s.items.slice(-CAP) : s.items,
     })),
+  select: (selectedId) => set({ selectedId }),
 }));

@@ -26,3 +26,19 @@ export function decodePreview(payloadB64: string, max = 200): string {
   const text = decodeText(payloadB64).replace(/\s+/g, " ").trim();
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
+
+/** Pretty-print the payload as JSON, or null if it isn't valid JSON. */
+export function tryPrettyJson(payloadB64: string): string | null {
+  try {
+    return JSON.stringify(JSON.parse(decodeText(payloadB64)), null, 2);
+  } catch {
+    return null;
+  }
+}
+
+/** Space-separated hex dump of the payload bytes. */
+export function toHex(payloadB64: string): string {
+  return Array.from(decodeBytes(payloadB64))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join(" ");
+}

@@ -1,34 +1,66 @@
+import { useState } from "react";
 import { Copy, PanelRightClose } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useUi } from "@/store/ui";
+import { useStream } from "@/store/stream";
+import { decodeText, tryPrettyJson, toHex } from "@/lib/message";
 
-const payload = `{
-  "id": "o_8421",
-  "customer": "cus_1029",
-  "total": 59.9,
-  "currency": "USD",
-  "items": [
-    { "sku": "TWG-01", "qty": 1 }
-  ]
-}`;
+type Format = "json" | "text" | "hex";
+const FORMATS: Format[] = ["json", "text", "hex"];
+
+function fmtTime(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number, len = 2) => n.toString().padStart(len, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
+}
+
+function Field({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+      <span className="truncate font-mono text-xs">{value}</span>
+    </div>
+  );
+}
 
 export function DetailPanel() {
   const toggleDetail = useUi((s) => s.toggleDetail);
+  const items = useStream((s) => s.items);
+  const selectedId = useStream((s) => s.selectedId);
+  const [format, setFormat] = useState<Format>("json");
+
+  const msg =
+    selectedId !== null ? items.find((m) => m.id === selectedId) : undefined;
+
+  const body = msg
+    ? format === "hex"
+      ? toHex(msg.payloadB64)
+      : format === "text"
+        ? decodeText(msg.payloadB64)
+        : (tryPrettyJson(msg.payloadB64) ?? decodeText(msg.payloadB64))
+    : "";
+
   return (
     <aside className="flex h-full w-80 shrink-0 flex-col border-l border-border bg-panel">
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-border px-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           Message
         </span>
         <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Copy payload"
-            title="Copy payload"
-          >
-            <Copy />
-          </Button>
+          {msg && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Copy payload"
+              title="Copy payload"
+              onClick={() => void navigator.clipboard.writeText(body)}
+            >
+              <Copy />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon-sm"
@@ -41,38 +73,69 @@ export function DetailPanel() {
         </div>
       </div>
 
-      <div className="space-y-3 overflow-y-auto p-3">
-        <Field label="Subject" value="orders.created" mono />
-        <Field label="Received" value="12:04:31.221" mono />
-        <Field label="Size" value="312 B" mono />
-        <div>
-          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Payload · JSON
-          </p>
-          <pre className="overflow-x-auto rounded-md border border-border bg-background p-2 font-mono text-xs leading-relaxed">
-            {payload}
-          </pre>
+      {!msg ? (
+        <div className="flex flex-1 items-center justify-center px-4 text-center text-xs text-muted-foreground">
+          Select a message to inspect it.
         </div>
-      </div>
-    </aside>
-  );
-}
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
+          <div className="space-y-1.5">
+            <Field label="Subject" value={msg.subject} />
+            <Field label="Received" value={fmtTime(msg.receivedAt)} />
+            <Field
+              label="Size"
+              value={
+                msg.size < 1024
+                  ? `${msg.size} B`
+                  : `${(msg.size / 1024).toFixed(1)} KB`
+              }
+            />
+            {msg.reply && <Field label="Reply" value={msg.reply} />}
+          </div>
 
-function Field({
-  label,
-  value,
-  mono,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <div className="flex items-baseline justify-between gap-2">
-      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-        {label}
-      </span>
-      <span className={mono ? "font-mono text-xs" : "text-xs"}>{value}</span>
-    </div>
+          {msg.headers.length > 0 && (
+            <div>
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Headers
+              </p>
+              <div className="rounded-md border border-border">
+                {msg.headers.map(([k, v], i) => (
+                  <div
+                    key={i}
+                    className="flex justify-between gap-2 border-b border-border/50 px-2 py-1 font-mono text-[11px] last:border-0"
+                  >
+                    <span className="text-muted-foreground">{k}</span>
+                    <span className="truncate">{v}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="mb-1 flex items-center gap-0.5">
+              {FORMATS.map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => setFormat(f)}
+                  className={cn(
+                    "rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    format === f
+                      ? "bg-accent text-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
+            <pre className="min-h-0 flex-1 overflow-auto rounded-md border border-border bg-background p-2 font-mono text-xs leading-relaxed">
+              {body}
+            </pre>
+          </div>
+        </div>
+      )}
+    </aside>
   );
 }

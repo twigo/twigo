@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { Pause, Play, Trash2, ArrowDown } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useStream } from "@/store/stream";
 
@@ -14,8 +15,9 @@ function fmtSize(n: number): string {
 }
 
 export function MessageStream() {
-  const { subject, items, paused, togglePause, clear, setFollowing } =
+  const { subject, items, paused, togglePause, clear, setFollowing, select } =
     useStream();
+  const selectedId = useStream((s) => s.selectedId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [lastSeenId, setLastSeenId] = useState(0);
@@ -106,7 +108,11 @@ export function MessageStream() {
               {items.map((m) => (
                 <tr
                   key={m.id}
-                  className="cursor-default border-b border-border/50 hover:bg-accent/50"
+                  onClick={() => select(m.id)}
+                  className={cn(
+                    "cursor-pointer border-b border-border/50 hover:bg-accent/50",
+                    m.id === selectedId && "bg-accent",
+                  )}
                 >
                   <td className="px-2 py-1 tabular-nums text-muted-foreground">
                     {fmtTime(m.receivedAt)}
