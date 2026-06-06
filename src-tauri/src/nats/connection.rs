@@ -40,6 +40,10 @@ fn read_maybe_file(value: &str) -> String {
     }
 }
 
+fn non_empty(value: &Option<String>) -> Option<&str> {
+    value.as_deref().map(str::trim).filter(|s| !s.is_empty())
+}
+
 fn build_options(
     ctx: &NatsContext,
     app: &AppHandle,
@@ -47,17 +51,17 @@ fn build_options(
 ) -> Result<async_nats::ConnectOptions, String> {
     let f = &ctx.file;
 
-    let base = if let Some(creds) = &f.creds {
+    let base = if let Some(creds) = non_empty(&f.creds) {
         let content =
             std::fs::read_to_string(creds).map_err(|e| format!("read creds file: {e}"))?;
         async_nats::ConnectOptions::new()
             .credentials(&content)
             .map_err(|e| e.to_string())?
-    } else if let Some(token) = &f.token {
-        async_nats::ConnectOptions::with_token(token.clone())
-    } else if let (Some(user), Some(pass)) = (&f.user, &f.password) {
-        async_nats::ConnectOptions::with_user_and_password(user.clone(), pass.clone())
-    } else if let Some(nkey) = &f.nkey {
+    } else if let Some(token) = non_empty(&f.token) {
+        async_nats::ConnectOptions::with_token(token.to_string())
+    } else if let (Some(user), Some(pass)) = (non_empty(&f.user), non_empty(&f.password)) {
+        async_nats::ConnectOptions::with_user_and_password(user.to_string(), pass.to_string())
+    } else if let Some(nkey) = non_empty(&f.nkey) {
         async_nats::ConnectOptions::with_nkey(read_maybe_file(nkey))
     } else {
         async_nats::ConnectOptions::new()

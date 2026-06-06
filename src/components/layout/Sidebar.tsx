@@ -60,7 +60,7 @@ function ConnectionsSection() {
         </div>
       </div>
 
-      <div className="px-1.5">
+      <div className="space-y-0.5 px-1.5">
         {status === "loading" && (
           <div className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
             <Loader2 className="size-3.5 animate-spin" />
@@ -92,10 +92,13 @@ function ConnectionsSection() {
               }
               title={err || `${c.url}${c.description ? ` — ${c.description}` : ""}`}
               className={cn(
-                "group flex w-full cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 text-left hover:bg-accent",
+                "group relative flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-1.5 text-left transition-colors hover:bg-accent",
                 active && "bg-accent",
               )}
             >
+              {active && (
+                <span className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-brand" />
+              )}
               {isConnecting ? (
                 <Loader2 className="size-2.5 shrink-0 animate-spin text-muted-foreground" />
               ) : (
@@ -125,7 +128,7 @@ function ConnectionsSection() {
                     e.stopPropagation();
                     disconnect(c.name);
                   }}
-                  className="hidden size-4 items-center justify-center rounded text-muted-foreground hover:text-error group-hover:flex"
+                  className="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-error pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100"
                 >
                   <Unplug className="size-3" />
                 </button>
