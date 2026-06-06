@@ -16,29 +16,33 @@ function fmtSize(n: number): string {
 export function MessageStream() {
   const { subject, items, paused, togglePause, clear } = useStream();
   const scrollRef = useRef<HTMLDivElement>(null);
-  const stickRef = useRef(true);
-  const [showJump, setShowJump] = useState(false);
+  const [atBottom, setAtBottom] = useState(true);
+  const [lastSeenId, setLastSeenId] = useState(0);
 
-  // Follow the tail while pinned to the bottom; stay put once scrolled up.
+  const lastId = (items.length ? items[items.length - 1] : undefined)?.id ?? 0;
+  const unread = atBottom ? 0 : Math.max(0, lastId - lastSeenId);
+
+  // Follow the tail while pinned to the bottom.
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (el && stickRef.current) el.scrollTop = el.scrollHeight;
-  }, [items]);
+    if (el && atBottom) el.scrollTop = el.scrollHeight;
+  }, [lastId, atBottom]);
 
   function onScroll() {
     const el = scrollRef.current;
     if (!el) return;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
-    stickRef.current = atBottom;
-    setShowJump(!atBottom);
+    const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+    setAtBottom(bottom);
+    if (bottom) setLastSeenId(lastId);
   }
 
   function jumpToLatest() {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-    stickRef.current = true;
-    setShowJump(false);
+    scrollRef.current?.scrollTo({
+      top: scrollRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+    setAtBottom(true);
+    setLastSeenId(lastId);
   }
 
   if (!subject) {
@@ -116,16 +120,22 @@ export function MessageStream() {
         </div>
       )}
 
-      {showJump && (
-        <Button
-          variant="brand"
-          size="sm"
+      {!atBottom && items.length > 0 && (
+        <button
+          type="button"
           onClick={jumpToLatest}
-          className="absolute bottom-3 right-3 shadow-lg"
+          aria-label={
+            unread > 0 ? `Jump to ${unread} new messages` : "Jump to latest"
+          }
+          className="absolute bottom-4 right-4 flex size-9 items-center justify-center rounded-full border border-border bg-popover text-foreground shadow-lg transition-colors duration-150 animate-in fade-in zoom-in-90 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <ArrowDown />
-          Latest
-        </Button>
+          <ArrowDown className="size-4" />
+          {unread > 0 && (
+            <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold tabular-nums text-brand-foreground">
+              {unread > 99 ? "99+" : unread}
+            </span>
+          )}
+        </button>
       )}
     </div>
   );
