@@ -13,11 +13,6 @@ services:
       - "8222:8222" # monitoring (varz/connz/jsz)
     volumes:
       - nats-data:/data
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
 
 volumes:
   nats-data:
