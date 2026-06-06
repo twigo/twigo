@@ -16,6 +16,7 @@ interface UiState {
   setView: (v: View) => void;
   toggleSidebar: () => void;
   toggleDetail: () => void;
+  setDetailOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
 }
 
@@ -33,6 +34,7 @@ export const useUi = create<UiState>()(
       setView: (activeView) => set({ activeView }),
       toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
       toggleDetail: () => set((s) => ({ detailOpen: !s.detailOpen })),
+      setDetailOpen: (detailOpen) => set({ detailOpen }),
       setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
     }),
     {

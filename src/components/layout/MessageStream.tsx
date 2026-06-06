@@ -3,6 +3,7 @@ import { Pause, Play, Trash2, ArrowDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useStream } from "@/store/stream";
+import { useUi } from "@/store/ui";
 
 function fmtTime(ms: number): string {
   const d = new Date(ms);
@@ -18,6 +19,7 @@ export function MessageStream() {
   const { subject, items, paused, togglePause, clear, setFollowing, select } =
     useStream();
   const selectedId = useStream((s) => s.selectedId);
+  const setDetailOpen = useUi((s) => s.setDetailOpen);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [lastSeenId, setLastSeenId] = useState(0);
@@ -108,7 +110,10 @@ export function MessageStream() {
               {items.map((m) => (
                 <tr
                   key={m.id}
-                  onClick={() => select(m.id)}
+                  onClick={() => {
+                    select(m.id);
+                    setDetailOpen(true);
+                  }}
                   className={cn(
                     "cursor-pointer border-b border-border/50 hover:bg-accent/50",
                     m.id === selectedId && "bg-accent",
