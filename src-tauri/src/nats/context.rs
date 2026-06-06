@@ -157,3 +157,59 @@ pub fn list_contexts(dir: Option<String>) -> Result<Vec<ContextSummary>, String>
 pub fn default_context_dir() -> Option<String> {
     nats_config_dir().map(|p| p.to_string_lossy().into_owned())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn ctx(file: ContextFile) -> NatsContext {
+        NatsContext {
+            name: "x".into(),
+            file,
+            selected: false,
+        }
+    }
+
+    #[test]
+    fn auth_method_precedence() {
+        let mut f = ContextFile::default();
+        assert_eq!(ctx(f.clone()).auth_method(), "none");
+        f.user = Some("u".into());
+        assert_eq!(ctx(f.clone()).auth_method(), "user/password");
+        f.token = Some("t".into());
+        assert_eq!(ctx(f.clone()).auth_method(), "token");
+        f.nkey = Some("n".into());
+        assert_eq!(ctx(f.clone()).auth_method(), "nkey");
+        f.creds = Some("/c".into());
+        assert_eq!(ctx(f).auth_method(), "creds");
+    }
+
+    #[test]
+    fn loads_sorts_and_marks_selected() {
+        let dir = tempfile::tempdir().unwrap();
+        let cdir = dir.path().join("context");
+        fs::create_dir_all(&cdir).unwrap();
+        fs::write(cdir.join("beta.json"), r#"{"url":"nats://b:4222","token":"x"}"#).unwrap();
+        fs::write(cdir.join("alpha.json"), r#"{"url":"nats://a:4222"}"#).unwrap();
+        fs::write(cdir.join("broken.json"), "{ not json").unwrap();
+        fs::write(dir.path().join("context.txt"), "beta\n").unwrap();
+
+        let ctxs = load_contexts(Some(dir.path().to_path_buf())).unwrap();
+
+        assert_eq!(ctxs.len(), 2, "malformed file is skipped");
+        assert_eq!(ctxs[0].name, "alpha");
+        assert_eq!(ctxs[1].name, "beta");
+        assert!(ctxs[1].selected);
+        assert!(!ctxs[0].selected);
+        assert_eq!(ctxs[1].summary().auth_method, "token");
+        assert_eq!(ctxs[0].summary().auth_method, "none");
+    }
+
+    #[test]
+    fn missing_dir_returns_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctxs = load_contexts(Some(dir.path().join("does-not-exist"))).unwrap();
+        assert!(ctxs.is_empty());
+    }
+}

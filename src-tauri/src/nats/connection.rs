@@ -147,3 +147,16 @@ pub async fn disconnect(state: State<'_, ConnState>, name: String) -> Result<(),
 pub async fn list_connections(state: State<'_, ConnState>) -> Result<Vec<String>, String> {
     Ok(state.clients.lock().await.keys().cloned().collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn non_empty_filters_blank_and_trims() {
+        assert_eq!(non_empty(&None), None);
+        assert_eq!(non_empty(&Some(String::new())), None);
+        assert_eq!(non_empty(&Some("   ".into())), None);
+        assert_eq!(non_empty(&Some(" token ".into())), Some("token"));
+    }
+}
