@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
-  X,
-  Settings as SettingsIcon,
   FolderOpen,
   PlugZap,
   Palette,
@@ -27,25 +25,10 @@ const categories: { id: Category; label: string; icon: typeof PlugZap }[] = [
 ];
 
 export function SettingsPage() {
-  const setSettingsOpen = useUi((s) => s.setSettingsOpen);
   const [category, setCategory] = useState<Category>("connections");
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-background">
-      <div className="flex h-9 shrink-0 items-stretch border-b border-border bg-panel">
-        <div className="flex items-center gap-1.5 border-r border-border bg-background px-3 text-xs">
-          <SettingsIcon className="size-3.5 text-brand" />
-          <span>Settings</span>
-          <button
-            onClick={() => setSettingsOpen(false)}
-            title="Close"
-            className="ml-1 rounded p-0.5 hover:bg-accent"
-          >
-            <X className="size-3" />
-          </button>
-        </div>
-      </div>
-
+    <div className="flex h-full min-h-0 flex-col bg-background">
       <div className="flex min-h-0 flex-1">
         <nav className="w-44 shrink-0 border-r border-border bg-sidebar p-2">
           {categories.map(({ id, label, icon: Icon }) => (

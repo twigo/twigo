@@ -10,13 +10,13 @@ interface UiState {
   activeView: View;
   sidebarOpen: boolean;
   detailOpen: boolean;
-  settingsOpen: boolean;
+  shellSizes: number[];
   toggleTheme: () => void;
   setTheme: (t: Theme) => void;
   setView: (v: View) => void;
   toggleSidebar: () => void;
   toggleDetail: () => void;
-  setSettingsOpen: (open: boolean) => void;
+  setShellSizes: (sizes: number[]) => void;
 }
 
 export const useUi = create<UiState>()(
@@ -26,14 +26,14 @@ export const useUi = create<UiState>()(
       activeView: "subjects",
       sidebarOpen: true,
       detailOpen: true,
-      settingsOpen: false,
+      shellSizes: [],
       toggleTheme: () =>
         set((s) => ({ theme: s.theme === "dark" ? "light" : "dark" })),
       setTheme: (theme) => set({ theme }),
       setView: (activeView) => set({ activeView }),
       toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
       toggleDetail: () => set((s) => ({ detailOpen: !s.detailOpen })),
-      setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+      setShellSizes: (shellSizes) => set({ shellSizes }),
     }),
     {
       name: "twigo-ui",
@@ -42,6 +42,7 @@ export const useUi = create<UiState>()(
         activeView: s.activeView,
         sidebarOpen: s.sidebarOpen,
         detailOpen: s.detailOpen,
+        shellSizes: s.shellSizes,
       }),
     },
   ),

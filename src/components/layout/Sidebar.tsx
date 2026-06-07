@@ -8,15 +8,27 @@ import {
   RefreshCw,
   Loader2,
   Unplug,
+  PlugZap,
+  Server,
   Play,
   Square,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+} from "@/components/ui/context-menu";
 import { useUi } from "@/store/ui";
 import { useConnections } from "@/store/connections";
 import { useSubjects } from "@/store/subjects";
+import { useStream } from "@/store/stream";
 import { buildSubjectTree, type SubjectNode } from "@/lib/subject-tree";
+import { openStream, openServerInfo } from "@/lib/editor";
 
 const viewTitles: Record<string, string> = {
   subjects: "Subjects",
@@ -93,71 +105,102 @@ function ConnectionsSection() {
           const isConnecting = !!connecting[c.name];
           const err = connError[c.name];
           return (
-            <div
-              key={c.name}
-              className={cn(
-                "group relative flex h-7 w-full items-center rounded-md transition-colors hover:bg-accent",
-                active && "bg-accent",
-              )}
-            >
-              {active && (
-                <span className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-brand" />
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  if (isConnected) {
-                    setActive(c.name);
-                  } else {
-                    void connect(c.name);
-                  }
-                }}
-                aria-current={active ? "true" : undefined}
-                title={
-                  err ?? `${c.url}${c.description ? ` — ${c.description}` : ""}`
-                }
-                className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {isConnecting ? (
-                  <Loader2 className="size-2.5 shrink-0 animate-spin text-muted-foreground" />
-                ) : (
-                  <Circle
-                    className={cn(
-                      "size-2 shrink-0",
-                      isConnected
-                        ? "fill-ok text-ok"
-                        : err
-                          ? "fill-error text-error"
-                          : "fill-muted-foreground/40 text-muted-foreground/40",
-                    )}
-                  />
-                )}
-                <span className="flex-1 truncate text-xs font-medium">
-                  {c.name}
-                  {c.selected && (
-                    <span className="ml-1 text-[11px] font-normal text-brand">
-                      ★
-                    </span>
+            <ContextMenu key={c.name}>
+              <ContextMenuTrigger asChild>
+                <div
+                  className={cn(
+                    "group relative flex h-7 w-full items-center rounded-md transition-colors hover:bg-accent",
+                    active && "bg-accent",
                   )}
-                </span>
-                {!isConnected && (
-                  <span className="truncate font-mono text-[11px] text-muted-foreground">
-                    {c.url.replace(/^\w+:\/\//, "")}
-                  </span>
-                )}
-              </button>
-              {isConnected && (
-                <button
-                  type="button"
-                  aria-label={`Disconnect ${c.name}`}
-                  title="Disconnect"
-                  onClick={() => void disconnect(c.name)}
-                  className="mr-1 flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-error focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
                 >
-                  <Unplug className="size-3" />
-                </button>
-              )}
-            </div>
+                  {active && (
+                    <span className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-brand" />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isConnected) {
+                        setActive(c.name);
+                      } else {
+                        void connect(c.name);
+                      }
+                    }}
+                    aria-current={active ? "true" : undefined}
+                    title={
+                      err ??
+                      `${c.url}${c.description ? ` — ${c.description}` : ""}`
+                    }
+                    className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {isConnecting ? (
+                      <Loader2 className="size-2.5 shrink-0 animate-spin text-muted-foreground" />
+                    ) : (
+                      <Circle
+                        className={cn(
+                          "size-2 shrink-0",
+                          isConnected
+                            ? "fill-ok text-ok"
+                            : err
+                              ? "fill-error text-error"
+                              : "fill-muted-foreground/40 text-muted-foreground/40",
+                        )}
+                      />
+                    )}
+                    <span className="flex-1 truncate text-xs font-medium">
+                      {c.name}
+                      {c.selected && (
+                        <span className="ml-1 text-[11px] font-normal text-brand">
+                          ★
+                        </span>
+                      )}
+                    </span>
+                    {!isConnected && (
+                      <span className="truncate font-mono text-[11px] text-muted-foreground">
+                        {c.url.replace(/^\w+:\/\//, "")}
+                      </span>
+                    )}
+                  </button>
+                  {isConnected && (
+                    <button
+                      type="button"
+                      aria-label={`Disconnect ${c.name}`}
+                      title="Disconnect"
+                      onClick={() => void disconnect(c.name)}
+                      className="mr-1 flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-error focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+                    >
+                      <Unplug className="size-3" />
+                    </button>
+                  )}
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuLabel>{c.name}</ContextMenuLabel>
+                <ContextMenuItem
+                  disabled={!isConnected}
+                  onSelect={() => {
+                    openServerInfo(c.name);
+                  }}
+                >
+                  <Server />
+                  Server info
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                {isConnected ? (
+                  <ContextMenuItem
+                    variant="destructive"
+                    onSelect={() => void disconnect(c.name)}
+                  >
+                    <Unplug />
+                    Disconnect
+                  </ContextMenuItem>
+                ) : (
+                  <ContextMenuItem onSelect={() => void connect(c.name)}>
+                    <PlugZap />
+                    Connect
+                  </ContextMenuItem>
+                )}
+              </ContextMenuContent>
+            </ContextMenu>
           );
         })}
       </div>
@@ -173,55 +216,105 @@ function formatRate(rate: number): string {
 
 function SubjectTree({
   nodes,
+  connId,
   depth = 0,
+  onSelect,
 }: {
   nodes: SubjectNode[];
+  connId: string;
   depth?: number;
+  onSelect: (subject: string) => void;
 }) {
   return (
     <ul>
       {nodes.map((n) => (
-        <SubjectRow key={n.path} node={n} depth={depth} />
+        <SubjectRow
+          key={n.path}
+          node={n}
+          connId={connId}
+          depth={depth}
+          onSelect={onSelect}
+        />
       ))}
     </ul>
   );
 }
 
-function SubjectRow({ node, depth }: { node: SubjectNode; depth: number }) {
+function SubjectRow({
+  node,
+  connId,
+  depth,
+  onSelect,
+}: {
+  node: SubjectNode;
+  connId: string;
+  depth: number;
+  onSelect: (subject: string) => void;
+}) {
   const [open, setOpen] = useState(true);
   const hasChildren = node.children.length > 0;
+  const subject = hasChildren ? `${node.path}.>` : node.path;
+  const isActive = useStream((s) =>
+    Object.values(s.sessions).some(
+      (x) => x.connId === connId && x.subject === subject,
+    ),
+  );
+
   return (
     <li>
-      <button
-        type="button"
-        onClick={() => hasChildren && setOpen((o) => !o)}
-        aria-expanded={hasChildren ? open : undefined}
-        title={`${node.path} · ${node.count} msgs`}
-        className="group flex w-full items-center gap-1 rounded-sm py-1 pr-2 text-left hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        style={{ paddingLeft: depth * 12 + 6 }}
+      <div
+        className={cn(
+          "group flex items-center rounded-sm hover:bg-accent",
+          isActive && "bg-accent",
+        )}
+        style={{ paddingLeft: depth * 12 }}
       >
         {hasChildren ? (
-          <ChevronRight
-            className={cn(
-              "size-3.5 shrink-0 text-muted-foreground transition-transform",
-              open && "rotate-90",
-            )}
-          />
+          <button
+            type="button"
+            aria-label={open ? "Collapse" : "Expand"}
+            aria-expanded={open}
+            onClick={() => setOpen((o) => !o)}
+            className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <ChevronRight
+              className={cn(
+                "size-3.5 transition-transform",
+                open && "rotate-90",
+              )}
+            />
+          </button>
         ) : (
-          <Radio className="size-3.5 shrink-0 text-muted-foreground/60" />
+          <span className="flex size-5 shrink-0 items-center justify-center">
+            <Radio className="size-3.5 text-muted-foreground/60" />
+          </span>
         )}
-        <span className="flex-1 truncate font-mono text-xs">{node.token}</span>
-        <span
-          className={cn(
-            "rounded bg-muted px-1 font-mono text-[11px] tabular-nums",
-            node.rate > 0 ? "text-foreground" : "text-muted-foreground",
-          )}
+        <button
+          type="button"
+          onClick={() => onSelect(subject)}
+          title={`Stream ${subject} · ${node.count} msgs`}
+          className="flex min-w-0 flex-1 items-center gap-1 py-1 pr-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          {formatRate(node.rate)}/s
-        </span>
-      </button>
+          <span className="flex-1 truncate font-mono text-xs">
+            {node.token}
+          </span>
+          <span
+            className={cn(
+              "rounded bg-muted px-1 font-mono text-[11px] tabular-nums",
+              node.rate > 0 ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {formatRate(node.rate)}/s
+          </span>
+        </button>
+      </div>
       {open && hasChildren && (
-        <SubjectTree nodes={node.children} depth={depth + 1} />
+        <SubjectTree
+          nodes={node.children}
+          connId={connId}
+          depth={depth + 1}
+          onSelect={onSelect}
+        />
       )}
     </li>
   );
@@ -315,7 +408,13 @@ function SubjectExplorer({ filter }: { filter: string }) {
           {filter ? "No matching subjects." : "No messages observed yet."}
         </Hint>
       ) : (
-        <SubjectTree nodes={tree} />
+        <SubjectTree
+          nodes={tree}
+          connId={activeContext}
+          onSelect={(subject) => {
+            void openStream(activeContext, subject);
+          }}
+        />
       )}
       {data?.truncated && (
         <p className="px-2 py-2 text-[11px] text-warn">
@@ -330,7 +429,7 @@ export function Sidebar() {
   const activeView = useUi((s) => s.activeView);
   const [filter, setFilter] = useState("");
   return (
-    <aside className="flex h-full w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
+    <aside className="flex h-full w-full flex-col border-r border-sidebar-border bg-sidebar">
       <ConnectionsSection />
 
       <div className="my-1.5 border-t border-sidebar-border" />

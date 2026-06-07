@@ -1,6 +1,7 @@
 import { Radio, Layers, Database, Box, Activity, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUi, type View } from "@/store/ui";
+import { openSettings } from "@/lib/editor";
 
 const items: { view: View; label: string; icon: typeof Radio }[] = [
   { view: "subjects", label: "Subjects", icon: Radio },
@@ -11,7 +12,7 @@ const items: { view: View; label: string; icon: typeof Radio }[] = [
 ];
 
 export function ActivityBar() {
-  const { activeView, setView, setSettingsOpen } = useUi();
+  const { activeView, setView } = useUi();
   return (
     <nav
       aria-label="Primary"
@@ -45,7 +46,7 @@ export function ActivityBar() {
         type="button"
         aria-label="Settings"
         title="Settings"
-        onClick={() => setSettingsOpen(true)}
+        onClick={() => openSettings()}
         className="flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <Settings className="size-5" />

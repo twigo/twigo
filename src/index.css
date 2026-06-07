@@ -135,6 +135,103 @@
     font-size: 13px;
     -webkit-font-smoothing: antialiased;
     overflow: hidden;
+    /* WKWebView (Tauri) needs the prefix; without it a tab drag selects text. */
+    -webkit-user-select: none;
     user-select: none;
   }
+
+  /* IDE-style scrollbars: thin, overlay, brighten on hover. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--foreground) 22%, transparent)
+      transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background-color: color-mix(in oklab, var(--foreground) 22%, transparent);
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, var(--foreground) 42%, transparent);
+    background-clip: padding-box;
+  }
+}
+
+/* Dockview themed with our design tokens (adapts to light/dark).
+   Flush panels separated by a thin border (no gaps, no rounding). */
+.twigo-dockview {
+  --dv-background-color: var(--background);
+  --dv-group-view-background-color: var(--background);
+  --dv-tabs-and-actions-container-background-color: var(--panel);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--background);
+  --dv-activegroup-visiblepanel-tab-color: var(--foreground);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--panel);
+  --dv-activegroup-hiddenpanel-tab-color: var(--muted-foreground);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--background);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--muted-foreground);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--panel);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--muted-foreground);
+  --dv-tabs-container-scrollbar-color: var(--muted-foreground);
+  --dv-tab-divider-color: var(--border);
+  --dv-separator-border: var(--border);
+  --dv-paneview-active-outline-color: transparent;
+  --dv-active-sash-color: transparent;
+  --dv-icon-hover-background-color: var(--accent);
+}
+
+/* Central editor tabs (VS Code-like): inactive tabs recede into the strip,
+   the active tab takes the content colour with a brand accent on top. */
+.twigo-dockview .dv-tabs-container > .dv-tab {
+  border-right: 1px solid var(--border);
+  transition: background-color 0.1s ease-in-out;
+}
+.twigo-dockview .dv-tabs-container > .dv-tab.dv-inactive-tab:hover {
+  background-color: var(--accent);
+}
+
+/* Close button shows only on the active tab or on hover (less clutter). */
+.twigo-dockview .dv-tab .twigo-tab-close {
+  opacity: 0;
+  transition:
+    opacity 0.1s ease-in-out,
+    background-color 0.1s ease-in-out;
+}
+.twigo-dockview .dv-tab.dv-active-tab .twigo-tab-close,
+.twigo-dockview .dv-tab:hover .twigo-tab-close {
+  opacity: 0.6;
+}
+.twigo-dockview .dv-tab .twigo-tab-close:hover {
+  opacity: 1;
+}
+
+/* Thin centered highlight on the resize sash (keeps the wide grab zone). */
+.twigo-dockview .dv-sash-container > .dv-sash::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-50%);
+  background: transparent;
+  transition: background-color 0.1s ease-in-out;
+}
+.twigo-dockview .dv-sash-container > .dv-sash:hover::before,
+.twigo-dockview .dv-sash-container > .dv-sash:active::before {
+  background: var(--brand);
+}
+
+/* Allotment shell (sidebar · editor · inspector) themed to our tokens. */
+:root {
+  --separator-border: var(--border);
+  --focus-border: var(--brand);
 }

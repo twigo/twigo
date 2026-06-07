@@ -5,6 +5,9 @@ pub enum Error {
     #[error("context '{0}' not found")]
     ContextNotFound(String),
 
+    #[error("not connected to '{0}'")]
+    NotConnected(String),
+
     #[error("failed to read {path}: {source}")]
     Io {
         path: String,
