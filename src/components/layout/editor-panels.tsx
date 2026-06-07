@@ -1,0 +1,100 @@
+import { Radio, X, Settings, Server, type LucideIcon } from "lucide-react";
+import type {
+  IDockviewPanelProps,
+  IDockviewPanelHeaderProps,
+} from "dockview-react";
+import { cn } from "@/lib/utils";
+import { MessageStream } from "./MessageStream";
+import { ServerInfoPanel } from "./ServerInfoPanel";
+import { SettingsPage } from "@/components/settings/SettingsPage";
+
+export function StreamPanel(props: IDockviewPanelProps) {
+  const { streamId } = props.params as { streamId: string };
+  return <MessageStream streamId={streamId} />;
+}
+
+export function ServerPanel(props: IDockviewPanelProps) {
+  const { connId } = props.params as { connId: string };
+  return <ServerInfoPanel connId={connId} />;
+}
+
+export function SettingsPanel() {
+  return <SettingsPage />;
+}
+
+// Close button shows only on the active/hovered tab (styled in index.css).
+function ClosableTab({
+  icon: Icon,
+  title,
+  mono,
+  iconClass,
+  onClose,
+}: {
+  icon: LucideIcon;
+  title: string | undefined;
+  mono?: boolean;
+  iconClass?: string;
+  onClose: () => void;
+}) {
+  return (
+    <div className="flex h-full items-center gap-2 pl-3 pr-2 text-xs">
+      <Icon className={cn("size-3 shrink-0", iconClass)} />
+      <span className={cn("max-w-44 truncate", mono && "font-mono")}>
+        {title}
+      </span>
+      <button
+        type="button"
+        aria-label="Close tab"
+        title="Close tab"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
+        className="twigo-tab-close flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+      >
+        <X className="size-3" />
+      </button>
+    </div>
+  );
+}
+
+export function StreamTab(props: IDockviewPanelHeaderProps) {
+  return (
+    <ClosableTab
+      icon={Radio}
+      iconClass="text-brand"
+      mono
+      title={props.api.title}
+      onClose={() => {
+        props.api.close();
+      }}
+    />
+  );
+}
+
+export function ServerTab(props: IDockviewPanelHeaderProps) {
+  return (
+    <ClosableTab
+      icon={Server}
+      iconClass="text-brand"
+      mono
+      title={props.api.title}
+      onClose={() => {
+        props.api.close();
+      }}
+    />
+  );
+}
+
+export function SettingsTab(props: IDockviewPanelHeaderProps) {
+  return (
+    <ClosableTab
+      icon={Settings}
+      iconClass="text-muted-foreground"
+      title={props.api.title}
+      onClose={() => {
+        props.api.close();
+      }}
+    />
+  );
+}

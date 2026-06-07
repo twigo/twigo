@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { createPersistStorage } from "@/lib/persist-storage";
 
 interface SettingsState {
   contextDir: string | null;
@@ -13,6 +14,11 @@ export const useSettings = create<SettingsState>()(
       setContextDir: (contextDir) =>
         set({ contextDir: contextDir?.trim() ? contextDir.trim() : null }),
     }),
-    { name: "twigo-settings" },
+    {
+      name: "twigo-settings",
+      version: 1,
+      storage: createPersistStorage(),
+      partialize: (s) => ({ contextDir: s.contextDir }),
+    },
   ),
 );

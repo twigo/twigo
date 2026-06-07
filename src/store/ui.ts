@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { createPersistStorage } from "@/lib/persist-storage";
 
 export type Theme = "light" | "dark";
 
@@ -37,6 +38,8 @@ export const useUi = create<UiState>()(
     }),
     {
       name: "twigo-ui",
+      version: 1,
+      storage: createPersistStorage(),
       partialize: (s) => ({
         theme: s.theme,
         activeView: s.activeView,

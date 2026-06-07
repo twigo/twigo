@@ -1,22 +1,20 @@
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   DockviewReact,
   themeDark,
   themeLight,
+  type DockviewApi,
   type DockviewReadyEvent,
   type DockviewTheme,
-  type IDockviewPanelProps,
-  type IDockviewPanelHeaderProps,
 } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
-import { Radio, X, Settings, Server } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Radio } from "lucide-react";
 import { useUi } from "@/store/ui";
 import { useStream } from "@/store/stream";
-import { setEditorApi } from "@/lib/editor";
-import { MessageStream } from "./MessageStream";
-import { ServerInfoPanel } from "./ServerInfoPanel";
-import { SettingsPage } from "@/components/settings/SettingsPage";
+import { useConnections } from "@/store/connections";
+import { useWorkspace } from "@/store/workspace";
+import { setEditorApi, openStream } from "@/lib/editor";
+import { editorComponents, editorTabComponents } from "./editors";
 
 // Shown by Dockview when the editor area has no open tabs.
 function Watermark() {
@@ -29,77 +27,28 @@ function Watermark() {
   );
 }
 
-const components: Record<string, React.FC<IDockviewPanelProps>> = {
-  stream: (props) => {
-    const { streamId } = props.params as { streamId: string };
-    return <MessageStream streamId={streamId} />;
-  },
-  settings: () => <SettingsPage />,
-  server: (props) => {
-    const { connId } = props.params as { connId: string };
-    return <ServerInfoPanel connId={connId} />;
-  },
-};
-
-// Closable editor tab: leading icon, title, and a close button that only
-// appears on the active/hovered tab (styled in index.css via .twigo-tab-close).
-function closableTab(
-  Icon: typeof Radio,
-  opts?: { iconClass?: string; mono?: boolean },
-) {
-  return function Tab(props: IDockviewPanelHeaderProps) {
-    return (
-      <div className="flex h-full items-center gap-2 pl-3 pr-2 text-xs">
-        <Icon className={cn("size-3 shrink-0", opts?.iconClass)} />
-        <span className={cn("max-w-44 truncate", opts?.mono && "font-mono")}>
-          {props.api.title}
-        </span>
-        <button
-          type="button"
-          aria-label="Close tab"
-          title="Close tab"
-          onClick={(e) => {
-            e.stopPropagation();
-            props.api.close();
-          }}
-          className="twigo-tab-close flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <X className="size-3" />
-        </button>
-      </div>
-    );
+// A restored stream tab comes back as a placeholder (no live session). Subscribe
+// it lazily once it's the focused tab and its connection is truly live.
+function subscribeActiveStream(api: DockviewApi) {
+  const panel = api.activePanel;
+  if (!panel) return;
+  const p = panel.params as {
+    type?: string;
+    connId?: string;
+    subject?: string;
   };
-}
-
-const tabComponents: Record<string, React.FC<IDockviewPanelHeaderProps>> = {
-  stream: closableTab(Radio, { iconClass: "text-brand", mono: true }),
-  settings: closableTab(Settings, { iconClass: "text-muted-foreground" }),
-  server: closableTab(Server, { iconClass: "text-brand", mono: true }),
-};
-
-function onReady(event: DockviewReadyEvent) {
-  const api = event.api;
-  setEditorApi(api);
-
-  // The detail panel tracks the visible editor: the active stream tab, or
-  // nothing when a non-stream tab (settings/server) or no tab is focused.
-  api.onDidActivePanelChange((panel) => {
-    const id = panel?.id;
-    useStream
-      .getState()
-      .setActive(id && useStream.getState().sessions[id] ? id : null);
-  });
-
-  // Closing a stream tab stops its subscription.
-  api.onDidRemovePanel((panel) => {
-    if (useStream.getState().sessions[panel.id]) {
-      void useStream.getState().close(panel.id);
-    }
-  });
+  if (p.type !== "stream" || !p.connId || !p.subject) return;
+  if (useStream.getState().sessions[panel.id]) return; // already live
+  if (!useConnections.getState().connected[p.connId]?.connected) return; // not up
+  void openStream(p.connId, p.subject);
 }
 
 export function EditorArea() {
   const uiTheme = useUi((s) => s.theme);
+  const apiRef = useRef<DockviewApi | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
 
   const theme = useMemo<DockviewTheme>(() => {
     const base = uiTheme === "dark" ? themeDark : themeLight;
@@ -111,6 +60,59 @@ export function EditorArea() {
     };
   }, [uiTheme]);
 
+  const onReady = useCallback((event: DockviewReadyEvent) => {
+    const api = event.api;
+    apiRef.current = api;
+    setEditorApi(api);
+
+    // Restore the previous session's tabs/layout. On a bad/old blob fall back
+    // to an empty area rather than letting fromJSON throw and brick startup.
+    const saved = useWorkspace.getState().layout;
+    if (saved) {
+      try {
+        api.fromJSON(saved);
+      } catch {
+        api.clear();
+      }
+    }
+
+    // These dockview listeners are disposed with the api on unmount.
+    api.onDidActivePanelChange((panel) => {
+      subscribeActiveStream(api);
+      const id = panel?.id;
+      useStream
+        .getState()
+        .setActive(id && useStream.getState().sessions[id] ? id : null);
+    });
+
+    api.onDidRemovePanel((panel) => {
+      if (useStream.getState().sessions[panel.id]) {
+        void useStream.getState().close(panel.id);
+      }
+    });
+
+    api.onDidLayoutChange(() => {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        useWorkspace.getState().setLayout(api.toJSON());
+      }, 300);
+    });
+
+    subscribeActiveStream(api);
+  }, []);
+
+  // Wake the focused restored stream tab when a connection comes online.
+  // Tied to the component lifecycle so it doesn't leak across remounts.
+  useEffect(() => {
+    const unsub = useConnections.subscribe(() => {
+      if (apiRef.current) subscribeActiveStream(apiRef.current);
+    });
+    return () => {
+      unsub();
+      clearTimeout(saveTimerRef.current);
+    };
+  }, []);
+
   return (
     <DockviewReact
       className="h-full"
@@ -119,8 +121,8 @@ export function EditorArea() {
       disableFloatingGroups
       watermarkComponent={Watermark}
       onReady={onReady}
-      components={components}
-      tabComponents={tabComponents}
+      components={editorComponents}
+      tabComponents={editorTabComponents}
     />
   );
 }

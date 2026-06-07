@@ -28,6 +28,7 @@ export interface ConnInfo {
   rttMs: number;
   jetstream: boolean;
   maxPayload: number;
+  connected: boolean;
 }
 
 export interface NatsEvent {
@@ -53,6 +54,10 @@ export async function disconnect(name: string): Promise<void> {
 
 export function listConnections(): Promise<string[]> {
   return invoke<string[]>("list_connections");
+}
+
+export function connInfo(name: string): Promise<ConnInfo> {
+  return invoke<ConnInfo>("conn_info", { name });
 }
 
 export interface ServerDetails {

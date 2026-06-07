@@ -29,12 +29,14 @@ interface PanelApi {
 }
 interface FakePanel {
   id: string;
+  params: Record<string, unknown>;
   api: PanelApi;
   group: { id: string };
 }
 interface AddOpts {
   id: string;
   component: string;
+  params?: Record<string, unknown>;
   position?: { referenceGroup: string; index: number };
 }
 
@@ -43,6 +45,7 @@ function makeApi(activeGroup: { id: string } | undefined) {
   const addPanel = vi.fn((opts: AddOpts): FakePanel => {
     const panel: FakePanel = {
       id: opts.id,
+      params: opts.params ?? {},
       group: { id: "g1" },
       api: {
         setActive: vi.fn(),
@@ -151,7 +154,8 @@ describe("editor service", () => {
     expect(mocks.unsubscribe).toHaveBeenCalled();
   });
 
-  it("tears down a session even when it has no editor panel (no-UI fallback)", async () => {
+  it("tears down sessions via the no-UI fallback when no editor api is set", async () => {
+    setEditorApi(undefined as unknown as DockviewApi);
     await useStream.getState().open("stream:local:orphan", "local", "orphan");
     expect(useStream.getState().sessions["stream:local:orphan"]).toBeDefined();
 

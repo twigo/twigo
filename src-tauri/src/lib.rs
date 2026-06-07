@@ -14,6 +14,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_store::Builder::new().build())
         .manage(nats::connection::ConnState::default())
         .manage(nats::subjects::SubjectWatch::default())
         .manage(nats::subscription::SubState::default())
@@ -24,6 +25,7 @@ pub fn run() {
             nats::connection::disconnect,
             nats::connection::list_connections,
             nats::connection::server_info,
+            nats::connection::conn_info,
             nats::subjects::start_subject_watch,
             nats::subjects::stop_subject_watch,
             nats::subscription::subscribe,
