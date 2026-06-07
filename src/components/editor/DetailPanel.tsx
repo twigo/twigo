@@ -3,6 +3,7 @@ import { Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fmtTime, fmtBytes } from "@/lib/format";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useStream } from "@/store/stream";
 import { decodeText, tryPrettyJson, toHex } from "@/lib/message";
 
@@ -60,9 +61,9 @@ export function DetailPanel() {
       </div>
 
       {!msg ? (
-        <div className="flex flex-1 items-center justify-center px-4 text-center text-xs text-muted-foreground">
+        <EmptyState className="min-h-0 flex-1">
           Select a message to inspect it.
-        </div>
+        </EmptyState>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
           <div className="space-y-1.5">

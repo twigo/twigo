@@ -9,6 +9,7 @@ import {
 } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
 import { Radio } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useUi } from "@/store/ui";
 import { useStream } from "@/store/stream";
 import { useConnections } from "@/store/connections";
@@ -19,11 +20,10 @@ import { editorComponents, editorTabComponents } from "./registry";
 // Shown by Dockview when the editor area has no open tabs.
 function Watermark() {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 bg-background px-6 text-center text-sm text-muted-foreground">
-      <Radio className="size-8 opacity-30" />
+    <EmptyState icon={Radio} className="h-full bg-background">
       <p>Select a subject in the Explorer to start a live stream.</p>
       <p className="text-xs opacity-80">Each subject opens in its own tab.</p>
-    </div>
+    </EmptyState>
   );
 }
 
