@@ -1,9 +1,10 @@
 import type { DockviewApi } from "dockview-react";
 import { useStream } from "@/store/stream";
+import { EDITORS, type EditorType } from "@/components/layout/editors";
 
 // Editor "inputs" (VS Code model): a type + a stable id. Opening the same id
 // focuses the existing tab instead of duplicating it.
-export type EditorType = "stream" | "settings" | "server";
+export type { EditorType };
 
 interface EditorDescriptor {
   type: EditorType;
@@ -44,7 +45,8 @@ function openEditor(desc: EditorDescriptor): void {
     component: desc.type,
     tabComponent: desc.type,
     title: desc.title,
-    params: desc.params ?? {},
+    // `type` is embedded so panels self-describe (used by teardown / restore).
+    params: { ...desc.params, type: desc.type },
     ...(active && desc.index !== undefined
       ? { position: { referenceGroup: active.id, index: desc.index } }
       : {}),
@@ -59,7 +61,12 @@ export async function openStream(connId: string, subject: string) {
   if (!useStream.getState().sessions[id]) {
     await useStream.getState().open(id, connId, subject);
   }
-  openEditor({ type: "stream", id, title: subject, params: { streamId: id } });
+  openEditor({
+    type: "stream",
+    id,
+    title: subject,
+    params: { streamId: id, connId, subject },
+  });
 }
 
 /** Open a server-info tab for a connection. */
@@ -77,17 +84,28 @@ export function openSettings() {
   openEditor({ type: "settings", id: "settings", title: "Settings", index: 0 });
 }
 
-/** Close every editor tab bound to a connection (e.g. on disconnect). */
+/** Close every conn-scoped editor tab when a connection drops. */
 export function closeEditorsForConn(connId: string) {
-  const { sessions, close } = useStream.getState();
-
-  for (const session of Object.values(sessions)) {
-    if (session.connId !== connId) continue;
-    // Close the tab and tear down the subscription explicitly. close() is
-    // idempotent, so the onDidRemovePanel handler firing afterwards is a no-op.
-    api?.getPanel(session.id)?.api.close();
-    void close(session.id);
+  if (!api) {
+    // No UI surface: tear down the only store-backed editors (streams).
+    const { sessions, close } = useStream.getState();
+    for (const s of Object.values(sessions)) {
+      if (s.connId === connId) void close(s.id);
+    }
+    return;
   }
 
-  api?.getPanel(serverEditorId(connId))?.api.close();
+  for (const panel of api.panels) {
+    const p = panel.params as
+      | { type?: EditorType; connId?: string }
+      | undefined;
+    if (!p?.type) continue;
+    const def = EDITORS[p.type];
+    if (def.connScoped && p.connId === connId) {
+      // dispose() releases the subscription; it is idempotent, so the
+      // onDidRemovePanel handler firing on close() is a harmless no-op.
+      def.dispose?.(panel.id);
+      panel.api.close();
+    }
+  }
 }

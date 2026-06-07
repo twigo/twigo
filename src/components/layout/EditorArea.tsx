@@ -5,18 +5,13 @@ import {
   themeLight,
   type DockviewReadyEvent,
   type DockviewTheme,
-  type IDockviewPanelProps,
-  type IDockviewPanelHeaderProps,
 } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
-import { Radio, X, Settings, Server } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Radio } from "lucide-react";
 import { useUi } from "@/store/ui";
 import { useStream } from "@/store/stream";
 import { setEditorApi } from "@/lib/editor";
-import { MessageStream } from "./MessageStream";
-import { ServerInfoPanel } from "./ServerInfoPanel";
-import { SettingsPage } from "@/components/settings/SettingsPage";
+import { editorComponents, editorTabComponents } from "./editors";
 
 // Shown by Dockview when the editor area has no open tabs.
 function Watermark() {
@@ -28,54 +23,6 @@ function Watermark() {
     </div>
   );
 }
-
-const components: Record<string, React.FC<IDockviewPanelProps>> = {
-  stream: (props) => {
-    const { streamId } = props.params as { streamId: string };
-    return <MessageStream streamId={streamId} />;
-  },
-  settings: () => <SettingsPage />,
-  server: (props) => {
-    const { connId } = props.params as { connId: string };
-    return <ServerInfoPanel connId={connId} />;
-  },
-};
-
-// Closable editor tab: leading icon, title, and a close button that only
-// appears on the active/hovered tab (styled in index.css via .twigo-tab-close).
-function closableTab(
-  Icon: typeof Radio,
-  opts?: { iconClass?: string; mono?: boolean },
-) {
-  return function Tab(props: IDockviewPanelHeaderProps) {
-    return (
-      <div className="flex h-full items-center gap-2 pl-3 pr-2 text-xs">
-        <Icon className={cn("size-3 shrink-0", opts?.iconClass)} />
-        <span className={cn("max-w-44 truncate", opts?.mono && "font-mono")}>
-          {props.api.title}
-        </span>
-        <button
-          type="button"
-          aria-label="Close tab"
-          title="Close tab"
-          onClick={(e) => {
-            e.stopPropagation();
-            props.api.close();
-          }}
-          className="twigo-tab-close flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <X className="size-3" />
-        </button>
-      </div>
-    );
-  };
-}
-
-const tabComponents: Record<string, React.FC<IDockviewPanelHeaderProps>> = {
-  stream: closableTab(Radio, { iconClass: "text-brand", mono: true }),
-  settings: closableTab(Settings, { iconClass: "text-muted-foreground" }),
-  server: closableTab(Server, { iconClass: "text-brand", mono: true }),
-};
 
 function onReady(event: DockviewReadyEvent) {
   const api = event.api;
@@ -119,8 +66,8 @@ export function EditorArea() {
       disableFloatingGroups
       watermarkComponent={Watermark}
       onReady={onReady}
-      components={components}
-      tabComponents={tabComponents}
+      components={editorComponents}
+      tabComponents={editorTabComponents}
     />
   );
 }

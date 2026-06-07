@@ -37,6 +37,8 @@ export const useUi = create<UiState>()(
     }),
     {
       name: "twigo-ui",
+      version: 1,
+      migrate: (persisted) => persisted as UiState,
       partialize: (s) => ({
         theme: s.theme,
         activeView: s.activeView,

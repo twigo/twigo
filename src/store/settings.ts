@@ -13,6 +13,11 @@ export const useSettings = create<SettingsState>()(
       setContextDir: (contextDir) =>
         set({ contextDir: contextDir?.trim() ? contextDir.trim() : null }),
     }),
-    { name: "twigo-settings" },
+    {
+      name: "twigo-settings",
+      version: 1,
+      migrate: (persisted) => persisted as SettingsState,
+      partialize: (s) => ({ contextDir: s.contextDir }),
+    },
   ),
 );
