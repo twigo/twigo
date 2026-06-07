@@ -64,11 +64,14 @@ function SubjectRow({
     <li>
       <div
         className={cn(
-          "group flex items-center rounded-sm hover:bg-accent",
-          isActive && "bg-accent",
+          "group relative flex items-center rounded-sm",
+          isActive ? "bg-accent" : "hover:bg-accent/50",
         )}
         style={{ paddingLeft: depth * 12 }}
       >
+        {isActive && (
+          <span className="absolute inset-y-0.5 left-0 w-0.5 rounded-full bg-brand" />
+        )}
         {hasChildren ? (
           <button
             type="button"

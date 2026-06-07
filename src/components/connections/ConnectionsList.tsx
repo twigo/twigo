@@ -94,8 +94,8 @@ export function ConnectionsList() {
               <ContextMenuTrigger asChild>
                 <div
                   className={cn(
-                    "group relative flex h-7 w-full items-center rounded-md transition-colors hover:bg-accent",
-                    active && "bg-accent",
+                    "group relative flex h-7 w-full items-center rounded-md transition-colors",
+                    active ? "bg-accent" : "hover:bg-accent/50",
                   )}
                 >
                   {active && (
