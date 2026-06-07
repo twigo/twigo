@@ -1,18 +1,13 @@
 import { useState } from "react";
 import { Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { fmtTime, fmtBytes } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { useStream } from "@/store/stream";
 import { decodeText, tryPrettyJson, toHex } from "@/lib/message";
 
 type Format = "json" | "text" | "hex";
 const FORMATS: Format[] = ["json", "text", "hex"];
-
-function fmtTime(ms: number): string {
-  const d = new Date(ms);
-  const p = (n: number, len = 2) => n.toString().padStart(len, "0");
-  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
-}
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
@@ -73,14 +68,7 @@ export function DetailPanel() {
           <div className="space-y-1.5">
             <Field label="Subject" value={msg.subject} />
             <Field label="Received" value={fmtTime(msg.receivedAt)} />
-            <Field
-              label="Size"
-              value={
-                msg.size < 1024
-                  ? `${msg.size} B`
-                  : `${(msg.size / 1024).toFixed(1)} KB`
-              }
-            />
+            <Field label="Size" value={fmtBytes(msg.size)} />
             {msg.reply && <Field label="Reply" value={msg.reply} />}
           </div>
 

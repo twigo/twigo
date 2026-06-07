@@ -1,4 +1,5 @@
 import { Sun, Moon, PlugZap, Plug, Gauge, Database } from "lucide-react";
+import { fmtRtt } from "@/lib/format";
 import { useUi } from "@/store/ui";
 import { useConnections } from "@/store/connections";
 
@@ -23,7 +24,7 @@ export function StatusBar() {
             </span>
             <span className="flex items-center gap-1 opacity-90">
               <Gauge className="size-3.5" />
-              RTT {info.rttMs.toFixed(1)}ms
+              RTT {fmtRtt(info.rttMs)}
             </span>
             <span className="flex items-center gap-1 opacity-90">
               <Database className="size-3.5" />

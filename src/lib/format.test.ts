@@ -1,0 +1,24 @@
+import { describe, it, expect } from "vitest";
+import { fmtBytes, fmtRtt, fmtTime } from "./format";
+
+describe("fmtBytes", () => {
+  it("formats B / KB / MB consistently", () => {
+    expect(fmtBytes(0)).toBe("0 B");
+    expect(fmtBytes(512)).toBe("512 B");
+    expect(fmtBytes(2048)).toBe("2.0 KB");
+    expect(fmtBytes(4 * 1024 * 1024)).toBe("4.0 MB");
+  });
+});
+
+describe("fmtRtt", () => {
+  it("formats milliseconds to one decimal", () => {
+    expect(fmtRtt(0.42)).toBe("0.4ms");
+    expect(fmtRtt(12)).toBe("12.0ms");
+  });
+});
+
+describe("fmtTime", () => {
+  it("renders HH:MM:SS.mmm", () => {
+    expect(fmtTime(Date.UTC(2026, 0, 1))).toMatch(/^\d{2}:\d{2}:\d{2}\.\d{3}$/);
+  });
+});

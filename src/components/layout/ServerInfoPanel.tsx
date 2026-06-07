@@ -1,13 +1,8 @@
 import { useEffect, useState } from "react";
 import { RefreshCw, Loader2, Server, Check, Minus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { fmtBytes, fmtRtt } from "@/lib/format";
 import { serverInfo, type ServerDetails } from "@/lib/api";
-
-function fmtBytes(n: number): string {
-  if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-  if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${n.toString()} B`;
-}
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -91,7 +86,7 @@ export function ServerInfoPanel({ connId }: { connId: string }) {
         <span className="ml-1 truncate text-[11px] font-medium">{connId}</span>
         {data && (
           <span className="ml-1 text-[11px] tabular-nums text-muted-foreground">
-            RTT {data.rttMs.toFixed(1)}ms
+            RTT {fmtRtt(data.rttMs)}
           </span>
         )}
         <Button
