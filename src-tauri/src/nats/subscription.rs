@@ -73,7 +73,7 @@ pub async fn subscribe(
     let client = conns
         .client(&conn_id)
         .await
-        .ok_or_else(|| Error::ContextNotFound(conn_id.clone()))?;
+        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
 
     stop(&subs, &sub_id);
     let mut sub = client.subscribe(subject.clone()).await?;

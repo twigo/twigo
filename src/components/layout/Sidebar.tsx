@@ -216,17 +216,25 @@ function formatRate(rate: number): string {
 
 function SubjectTree({
   nodes,
+  connId,
   depth = 0,
   onSelect,
 }: {
   nodes: SubjectNode[];
+  connId: string;
   depth?: number;
   onSelect: (subject: string) => void;
 }) {
   return (
     <ul>
       {nodes.map((n) => (
-        <SubjectRow key={n.path} node={n} depth={depth} onSelect={onSelect} />
+        <SubjectRow
+          key={n.path}
+          node={n}
+          connId={connId}
+          depth={depth}
+          onSelect={onSelect}
+        />
       ))}
     </ul>
   );
@@ -234,10 +242,12 @@ function SubjectTree({
 
 function SubjectRow({
   node,
+  connId,
   depth,
   onSelect,
 }: {
   node: SubjectNode;
+  connId: string;
   depth: number;
   onSelect: (subject: string) => void;
 }) {
@@ -245,7 +255,9 @@ function SubjectRow({
   const hasChildren = node.children.length > 0;
   const subject = hasChildren ? `${node.path}.>` : node.path;
   const isActive = useStream((s) =>
-    Object.values(s.sessions).some((x) => x.subject === subject),
+    Object.values(s.sessions).some(
+      (x) => x.connId === connId && x.subject === subject,
+    ),
   );
 
   return (
@@ -299,6 +311,7 @@ function SubjectRow({
       {open && hasChildren && (
         <SubjectTree
           nodes={node.children}
+          connId={connId}
           depth={depth + 1}
           onSelect={onSelect}
         />
@@ -397,6 +410,7 @@ function SubjectExplorer({ filter }: { filter: string }) {
       ) : (
         <SubjectTree
           nodes={tree}
+          connId={activeContext}
           onSelect={(subject) => {
             void openStream(activeContext, subject);
           }}

@@ -26,12 +26,12 @@ interface Runtime {
   channel: Channel<IncomingMessage>;
   buffer: StreamMessage[];
   timer: ReturnType<typeof setInterval>;
+  seq: number;
 }
 
 // Per-session runtime kept outside the store: channels, batching buffers and
 // flush timers are imperative and must not trigger React renders.
 const runtimes = new Map<string, Runtime>();
-let seq = 0;
 
 interface StreamState {
   sessions: Record<string, StreamSession>;
@@ -61,7 +61,13 @@ function flush(id: string) {
   const rt = runtimes.get(id);
   if (!rt || rt.buffer.length === 0) return;
   const session = useStream.getState().sessions[id];
-  if (!session || session.paused) return;
+  if (!session) return;
+  if (session.paused) {
+    // Paused streams keep receiving from the backend; bound the staging buffer
+    // so a long pause on a busy subject can't grow memory without limit.
+    if (rt.buffer.length > HARD_CAP) rt.buffer = rt.buffer.slice(-HARD_CAP);
+    return;
+  }
   const batch = rt.buffer;
   rt.buffer = [];
   // Only trim from the top while following the tail; otherwise dropping old
@@ -80,9 +86,9 @@ export const useStream = create<StreamState>((set, get) => ({
     channel.onmessage = (m) => {
       const rt = runtimes.get(id);
       if (!rt) return;
-      seq += 1;
+      rt.seq += 1;
       rt.buffer.push({
-        id: seq,
+        id: rt.seq,
         receivedAt: Date.now(),
         subject: m.subject,
         reply: m.reply,
@@ -95,7 +101,7 @@ export const useStream = create<StreamState>((set, get) => ({
     const timer = setInterval(() => {
       flush(id);
     }, FLUSH_MS);
-    runtimes.set(id, { channel, buffer: [], timer });
+    runtimes.set(id, { channel, buffer: [], timer, seq: 0 });
     set((state) => ({
       sessions: {
         ...state.sessions,
@@ -147,7 +153,13 @@ export const useStream = create<StreamState>((set, get) => ({
     }
   },
 
-  clear: (id) => patch(id, (s) => ({ ...s, items: [], selectedId: null })),
+  clear: (id) =>
+    patch(id, (s) => ({
+      ...s,
+      items: [],
+      selectedId: null,
+      following: true,
+    })),
   togglePause: (id) => patch(id, (s) => ({ ...s, paused: !s.paused })),
   setFollowing: (id, following) =>
     patch(id, (s) => ({

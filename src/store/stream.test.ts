@@ -97,6 +97,35 @@ describe("stream store (multi-session)", () => {
     expect(useStream.getState().sessions.b?.items).toHaveLength(1);
   });
 
+  it("numbers message ids per session, not globally", async () => {
+    await useStream.getState().open("a", "local", "orders.>");
+    await useStream.getState().open("b", "local", "audit.>");
+    const [chA, chB] = mocks.channels;
+
+    chA?.onmessage(msg("orders.new", "x"));
+    chB?.onmessage(msg("audit.login", "y"));
+    chB?.onmessage(msg("audit.login", "z"));
+    vi.advanceTimersByTime(150);
+
+    expect(useStream.getState().sessions.a?.items[0]?.id).toBe(1);
+    expect(useStream.getState().sessions.b?.items[0]?.id).toBe(1);
+    expect(useStream.getState().sessions.b?.items[1]?.id).toBe(2);
+  });
+
+  it("clear empties items and resets follow", async () => {
+    await useStream.getState().open("a", "local", "orders.>");
+    const ch = mocks.channels[0];
+
+    useStream.getState().setFollowing("a", false);
+    ch?.onmessage(msg("orders.new", "x"));
+    vi.advanceTimersByTime(150);
+    expect(useStream.getState().sessions.a?.items).toHaveLength(1);
+
+    useStream.getState().clear("a");
+    expect(useStream.getState().sessions.a?.items).toHaveLength(0);
+    expect(useStream.getState().sessions.a?.following).toBe(true);
+  });
+
   it("closes a session, unsubscribes and clears active when it was active", async () => {
     await useStream.getState().open("a", "local", "orders.>");
     await useStream.getState().open("b", "local", "audit.>");

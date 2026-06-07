@@ -53,6 +53,12 @@ export function MessageStream({ streamId }: { streamId: string }) {
     setLastSeenId(lastId);
   }
 
+  function handleClear() {
+    clear(streamId);
+    setAtBottom(true);
+    setLastSeenId(0);
+  }
+
   if (!session) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -80,7 +86,7 @@ export function MessageStream({ streamId }: { streamId: string }) {
           size="icon-sm"
           aria-label="Clear"
           title="Clear"
-          onClick={() => clear(streamId)}
+          onClick={handleClear}
         >
           <Trash2 />
         </Button>
