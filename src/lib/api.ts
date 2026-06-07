@@ -55,6 +55,33 @@ export function listConnections(): Promise<string[]> {
   return invoke<string[]>("list_connections");
 }
 
+export interface ServerDetails {
+  name: string;
+  serverId: string;
+  serverName: string;
+  version: string;
+  go: string;
+  host: string;
+  port: number;
+  clientId: number;
+  clientIp: string;
+  proto: number;
+  maxPayload: number;
+  headers: boolean;
+  authRequired: boolean;
+  tlsRequired: boolean;
+  jetstream: boolean;
+  lameDuckMode: boolean;
+  cluster: string | null;
+  domain: string | null;
+  connectUrls: string[];
+  rttMs: number;
+}
+
+export function serverInfo(name: string): Promise<ServerDetails> {
+  return invoke<ServerDetails>("server_info", { name });
+}
+
 export interface SubjectsUpdate {
   conn: string;
   subjects: SubjectStat[];

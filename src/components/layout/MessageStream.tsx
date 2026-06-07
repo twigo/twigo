@@ -1,9 +1,8 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { Pause, Play, Trash2, ArrowDown } from "lucide-react";
+import { Pause, Play, Trash2, ArrowDown, Radio } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useStream } from "@/store/stream";
-import { useUi } from "@/store/ui";
 
 function fmtTime(ms: number): string {
   const d = new Date(ms);
@@ -15,15 +14,17 @@ function fmtSize(n: number): string {
   return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`;
 }
 
-export function MessageStream() {
-  const { subject, items, paused, togglePause, clear, setFollowing, select } =
-    useStream();
-  const selectedId = useStream((s) => s.selectedId);
-  const setDetailOpen = useUi((s) => s.setDetailOpen);
+export function MessageStream({ streamId }: { streamId: string }) {
+  const session = useStream((s) => s.sessions[streamId]);
+  const togglePause = useStream((s) => s.togglePause);
+  const clear = useStream((s) => s.clear);
+  const setFollowing = useStream((s) => s.setFollowing);
+  const select = useStream((s) => s.select);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [lastSeenId, setLastSeenId] = useState(0);
 
+  const items = session?.items ?? [];
   const lastId = (items.length ? items[items.length - 1] : undefined)?.id ?? 0;
   const unread = atBottom ? 0 : Math.max(0, lastId - lastSeenId);
 
@@ -38,7 +39,7 @@ export function MessageStream() {
     if (!el) return;
     const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
     setAtBottom(bottom);
-    setFollowing(bottom);
+    setFollowing(streamId, bottom);
     if (bottom) setLastSeenId(lastId);
   }
 
@@ -48,27 +49,29 @@ export function MessageStream() {
       behavior: "smooth",
     });
     setAtBottom(true);
-    setFollowing(true);
+    setFollowing(streamId, true);
     setLastSeenId(lastId);
   }
 
-  if (!subject) {
+  if (!session) {
     return (
-      <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         Select a subject to stream messages.
       </div>
     );
   }
 
+  const { subject, paused, selectedId } = session;
+
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
         <Button
           variant="ghost"
           size="icon-sm"
           aria-label={paused ? "Resume" : "Pause"}
           title={paused ? "Resume" : "Pause"}
-          onClick={togglePause}
+          onClick={() => togglePause(streamId)}
         >
           {paused ? <Play /> : <Pause />}
         </Button>
@@ -77,11 +80,15 @@ export function MessageStream() {
           size="icon-sm"
           aria-label="Clear"
           title="Clear"
-          onClick={clear}
+          onClick={() => clear(streamId)}
         >
           <Trash2 />
         </Button>
-        <span className="ml-1 text-[11px] tabular-nums text-muted-foreground">
+        <span className="ml-1 flex min-w-0 items-center gap-1 text-[11px] text-brand">
+          <Radio className="size-3 shrink-0" />
+          <span className="truncate font-mono">{subject}</span>
+        </span>
+        <span className="ml-auto text-[11px] tabular-nums text-muted-foreground">
           {items.length} msgs{paused && " · paused"}
         </span>
       </div>
@@ -111,8 +118,7 @@ export function MessageStream() {
                 <tr
                   key={m.id}
                   onClick={() => {
-                    select(m.id);
-                    setDetailOpen(true);
+                    select(streamId, m.id);
                   }}
                   className={cn(
                     "cursor-pointer border-b border-border/50 hover:bg-accent/50",
@@ -139,7 +145,9 @@ export function MessageStream() {
           type="button"
           onClick={jumpToLatest}
           aria-label={
-            unread > 0 ? `Jump to ${unread} new messages` : "Jump to latest"
+            unread > 0
+              ? `Jump to ${unread.toString()} new messages`
+              : "Jump to latest"
           }
           className="absolute bottom-4 right-4 flex size-9 items-center justify-center rounded-full border border-border bg-popover text-foreground shadow-lg transition-colors duration-150 animate-in fade-in zoom-in-90 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >

@@ -32,6 +32,56 @@ pub struct ConnInfo {
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct ServerDetails {
+    name: String,
+    server_id: String,
+    server_name: String,
+    version: String,
+    go: String,
+    host: String,
+    port: u16,
+    client_id: u64,
+    client_ip: String,
+    proto: i8,
+    max_payload: usize,
+    headers: bool,
+    auth_required: bool,
+    tls_required: bool,
+    jetstream: bool,
+    lame_duck_mode: bool,
+    cluster: Option<String>,
+    domain: Option<String>,
+    connect_urls: Vec<String>,
+    rtt_ms: f64,
+}
+
+fn server_details(name: String, info: &async_nats::ServerInfo, rtt_ms: f64) -> ServerDetails {
+    ServerDetails {
+        name,
+        server_id: info.server_id.clone(),
+        server_name: info.server_name.clone(),
+        version: info.version.clone(),
+        go: info.go.clone(),
+        host: info.host.clone(),
+        port: info.port,
+        client_id: info.client_id,
+        client_ip: info.client_ip.clone(),
+        proto: info.proto,
+        max_payload: info.max_payload,
+        headers: info.headers,
+        auth_required: info.auth_required,
+        tls_required: info.tls_required,
+        jetstream: info.jetstream,
+        lame_duck_mode: info.lame_duck_mode,
+        cluster: info.cluster.clone(),
+        domain: info.domain.clone(),
+        connect_urls: info.connect_urls.clone(),
+        rtt_ms,
+    }
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct NatsEvent {
     conn: String,
     kind: String,
@@ -162,6 +212,25 @@ pub async fn list_connections(state: State<'_, ConnState>) -> error::Result<Vec<
     Ok(state.clients.lock().await.keys().cloned().collect())
 }
 
+#[tauri::command]
+pub async fn server_info(
+    state: State<'_, ConnState>,
+    name: String,
+) -> error::Result<ServerDetails> {
+    let client = state
+        .client(&name)
+        .await
+        .ok_or_else(|| Error::NotConnected(name.clone()))?;
+
+    let info = client.server_info();
+    let started = std::time::Instant::now();
+    let rtt_ms = match client.flush().await {
+        Ok(()) => started.elapsed().as_secs_f64() * 1000.0,
+        Err(_) => 0.0,
+    };
+    Ok(server_details(name, &info, rtt_ms))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,5 +241,27 @@ mod tests {
         assert_eq!(non_empty(&Some(String::new())), None);
         assert_eq!(non_empty(&Some("   ".into())), None);
         assert_eq!(non_empty(&Some(" token ".into())), Some("token"));
+    }
+
+    #[test]
+    fn server_details_maps_fields() {
+        let info = async_nats::ServerInfo {
+            server_name: "twigo-dev".into(),
+            version: "2.10.0".into(),
+            host: "127.0.0.1".into(),
+            port: 4222,
+            jetstream: true,
+            max_payload: 1_048_576,
+            ..Default::default()
+        };
+        let d = server_details("prod-eu".into(), &info, 1.5);
+        assert_eq!(d.name, "prod-eu");
+        assert_eq!(d.server_name, "twigo-dev");
+        assert_eq!(d.version, "2.10.0");
+        assert_eq!(d.host, "127.0.0.1");
+        assert_eq!(d.port, 4222);
+        assert!(d.jetstream);
+        assert_eq!(d.max_payload, 1_048_576);
+        assert_eq!(d.rtt_ms, 1.5);
     }
 }

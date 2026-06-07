@@ -23,6 +23,7 @@ pub fn run() {
             nats::connection::connect,
             nats::connection::disconnect,
             nats::connection::list_connections,
+            nats::connection::server_info,
             nats::subjects::start_subject_watch,
             nats::subjects::stop_subject_watch,
             nats::subscription::subscribe,

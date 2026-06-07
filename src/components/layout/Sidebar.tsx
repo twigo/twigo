@@ -8,16 +8,27 @@ import {
   RefreshCw,
   Loader2,
   Unplug,
+  PlugZap,
+  Server,
   Play,
   Square,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+} from "@/components/ui/context-menu";
 import { useUi } from "@/store/ui";
 import { useConnections } from "@/store/connections";
 import { useSubjects } from "@/store/subjects";
 import { useStream } from "@/store/stream";
 import { buildSubjectTree, type SubjectNode } from "@/lib/subject-tree";
+import { openStream, openServerInfo } from "@/lib/editor";
 
 const viewTitles: Record<string, string> = {
   subjects: "Subjects",
@@ -94,71 +105,102 @@ function ConnectionsSection() {
           const isConnecting = !!connecting[c.name];
           const err = connError[c.name];
           return (
-            <div
-              key={c.name}
-              className={cn(
-                "group relative flex h-7 w-full items-center rounded-md transition-colors hover:bg-accent",
-                active && "bg-accent",
-              )}
-            >
-              {active && (
-                <span className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-brand" />
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  if (isConnected) {
-                    setActive(c.name);
-                  } else {
-                    void connect(c.name);
-                  }
-                }}
-                aria-current={active ? "true" : undefined}
-                title={
-                  err ?? `${c.url}${c.description ? ` — ${c.description}` : ""}`
-                }
-                className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {isConnecting ? (
-                  <Loader2 className="size-2.5 shrink-0 animate-spin text-muted-foreground" />
-                ) : (
-                  <Circle
-                    className={cn(
-                      "size-2 shrink-0",
-                      isConnected
-                        ? "fill-ok text-ok"
-                        : err
-                          ? "fill-error text-error"
-                          : "fill-muted-foreground/40 text-muted-foreground/40",
-                    )}
-                  />
-                )}
-                <span className="flex-1 truncate text-xs font-medium">
-                  {c.name}
-                  {c.selected && (
-                    <span className="ml-1 text-[11px] font-normal text-brand">
-                      ★
-                    </span>
+            <ContextMenu key={c.name}>
+              <ContextMenuTrigger asChild>
+                <div
+                  className={cn(
+                    "group relative flex h-7 w-full items-center rounded-md transition-colors hover:bg-accent",
+                    active && "bg-accent",
                   )}
-                </span>
-                {!isConnected && (
-                  <span className="truncate font-mono text-[11px] text-muted-foreground">
-                    {c.url.replace(/^\w+:\/\//, "")}
-                  </span>
-                )}
-              </button>
-              {isConnected && (
-                <button
-                  type="button"
-                  aria-label={`Disconnect ${c.name}`}
-                  title="Disconnect"
-                  onClick={() => void disconnect(c.name)}
-                  className="mr-1 flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-error focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
                 >
-                  <Unplug className="size-3" />
-                </button>
-              )}
-            </div>
+                  {active && (
+                    <span className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-brand" />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isConnected) {
+                        setActive(c.name);
+                      } else {
+                        void connect(c.name);
+                      }
+                    }}
+                    aria-current={active ? "true" : undefined}
+                    title={
+                      err ??
+                      `${c.url}${c.description ? ` — ${c.description}` : ""}`
+                    }
+                    className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {isConnecting ? (
+                      <Loader2 className="size-2.5 shrink-0 animate-spin text-muted-foreground" />
+                    ) : (
+                      <Circle
+                        className={cn(
+                          "size-2 shrink-0",
+                          isConnected
+                            ? "fill-ok text-ok"
+                            : err
+                              ? "fill-error text-error"
+                              : "fill-muted-foreground/40 text-muted-foreground/40",
+                        )}
+                      />
+                    )}
+                    <span className="flex-1 truncate text-xs font-medium">
+                      {c.name}
+                      {c.selected && (
+                        <span className="ml-1 text-[11px] font-normal text-brand">
+                          ★
+                        </span>
+                      )}
+                    </span>
+                    {!isConnected && (
+                      <span className="truncate font-mono text-[11px] text-muted-foreground">
+                        {c.url.replace(/^\w+:\/\//, "")}
+                      </span>
+                    )}
+                  </button>
+                  {isConnected && (
+                    <button
+                      type="button"
+                      aria-label={`Disconnect ${c.name}`}
+                      title="Disconnect"
+                      onClick={() => void disconnect(c.name)}
+                      className="mr-1 flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-error focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+                    >
+                      <Unplug className="size-3" />
+                    </button>
+                  )}
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuLabel>{c.name}</ContextMenuLabel>
+                <ContextMenuItem
+                  disabled={!isConnected}
+                  onSelect={() => {
+                    openServerInfo(c.name);
+                  }}
+                >
+                  <Server />
+                  Server info
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                {isConnected ? (
+                  <ContextMenuItem
+                    variant="destructive"
+                    onSelect={() => void disconnect(c.name)}
+                  >
+                    <Unplug />
+                    Disconnect
+                  </ContextMenuItem>
+                ) : (
+                  <ContextMenuItem onSelect={() => void connect(c.name)}>
+                    <PlugZap />
+                    Connect
+                  </ContextMenuItem>
+                )}
+              </ContextMenuContent>
+            </ContextMenu>
           );
         })}
       </div>
@@ -202,7 +244,9 @@ function SubjectRow({
   const [open, setOpen] = useState(true);
   const hasChildren = node.children.length > 0;
   const subject = hasChildren ? `${node.path}.>` : node.path;
-  const isActive = useStream((s) => s.subject === subject);
+  const isActive = useStream((s) =>
+    Object.values(s.sessions).some((x) => x.subject === subject),
+  );
 
   return (
     <li>
@@ -282,7 +326,6 @@ function SubjectExplorer({ filter }: { filter: string }) {
   );
   const startWatch = useSubjects((s) => s.startWatch);
   const stopWatch = useSubjects((s) => s.stopWatch);
-  const openStream = useStream((s) => s.open);
   const [pattern, setPattern] = useState(">");
 
   const tree = useMemo(() => {
@@ -354,7 +397,9 @@ function SubjectExplorer({ filter }: { filter: string }) {
       ) : (
         <SubjectTree
           nodes={tree}
-          onSelect={(subject) => void openStream(activeContext, subject)}
+          onSelect={(subject) => {
+            void openStream(activeContext, subject);
+          }}
         />
       )}
       {data?.truncated && (

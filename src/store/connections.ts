@@ -8,13 +8,13 @@ import {
 } from "@/lib/api";
 import { useSettings } from "@/store/settings";
 import { useSubjects } from "@/store/subjects";
-import { useStream } from "@/store/stream";
+import { closeEditorsForConn } from "@/lib/editor";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
 function teardown(conn: string) {
   useSubjects.getState().reset(conn);
-  if (useStream.getState().connId === conn) void useStream.getState().close();
+  closeEditorsForConn(conn);
 }
 
 interface ConnectionsState {

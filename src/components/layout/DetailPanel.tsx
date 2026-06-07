@@ -1,8 +1,7 @@
 import { useState } from "react";
-import { Copy, PanelRightClose } from "lucide-react";
+import { Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { useUi } from "@/store/ui";
 import { useStream } from "@/store/stream";
 import { decodeText, tryPrettyJson, toHex } from "@/lib/message";
 
@@ -27,13 +26,16 @@ function Field({ label, value }: { label: string; value: string }) {
 }
 
 export function DetailPanel() {
-  const toggleDetail = useUi((s) => s.toggleDetail);
-  const items = useStream((s) => s.items);
-  const selectedId = useStream((s) => s.selectedId);
+  const session = useStream((s) =>
+    s.activeId ? s.sessions[s.activeId] : undefined,
+  );
   const [format, setFormat] = useState<Format>("json");
 
+  const selectedId = session?.selectedId ?? null;
   const msg =
-    selectedId !== null ? items.find((m) => m.id === selectedId) : undefined;
+    selectedId !== null
+      ? session?.items.find((m) => m.id === selectedId)
+      : undefined;
 
   const body = msg
     ? format === "hex"
@@ -49,28 +51,17 @@ export function DetailPanel() {
         <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           Message
         </span>
-        <div className="flex items-center gap-1">
-          {msg && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Copy payload"
-              title="Copy payload"
-              onClick={() => void navigator.clipboard.writeText(body)}
-            >
-              <Copy />
-            </Button>
-          )}
+        {msg && (
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="Hide panel"
-            title="Hide panel"
-            onClick={toggleDetail}
+            aria-label="Copy payload"
+            title="Copy payload"
+            onClick={() => void navigator.clipboard.writeText(body)}
           >
-            <PanelRightClose />
+            <Copy />
           </Button>
-        </div>
+        )}
       </div>
 
       {!msg ? (
