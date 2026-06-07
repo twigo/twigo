@@ -26,7 +26,7 @@ function SubjectTree({
   onSelect: (subject: string) => void;
 }) {
   return (
-    <ul>
+    <ul className="space-y-0.5">
       {nodes.map((n) => (
         <SubjectRow
           key={n.path}
