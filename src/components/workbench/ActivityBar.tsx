@@ -2,7 +2,7 @@ import { Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUi } from "@/store/ui";
 import { openSettings } from "@/lib/editor";
-import { VIEWS, VIEW_ORDER } from "./views";
+import { VIEWS, VIEW_ORDER } from "@/components/views/registry";
 
 export function ActivityBar() {
   const { activeView, setView } = useUi();

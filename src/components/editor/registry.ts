@@ -11,7 +11,7 @@ import {
   StreamTab,
   ServerTab,
   SettingsTab,
-} from "./editor-panels";
+} from "./panels";
 
 // Editor inputs (VS Code model). One registry drives the Dockview component &
 // tab maps and connection-scoped teardown, so a new tab type is a single entry

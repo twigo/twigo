@@ -14,7 +14,7 @@ import { useStream } from "@/store/stream";
 import { useConnections } from "@/store/connections";
 import { useWorkspace } from "@/store/workspace";
 import { setEditorApi, openStream } from "@/lib/editor";
-import { editorComponents, editorTabComponents } from "./editors";
+import { editorComponents, editorTabComponents } from "./registry";
 
 // Shown by Dockview when the editor area has no open tabs.
 function Watermark() {

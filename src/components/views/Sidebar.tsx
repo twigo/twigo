@@ -21,7 +21,7 @@ import {
 import { useUi } from "@/store/ui";
 import { useConnections } from "@/store/connections";
 import { openServerInfo } from "@/lib/editor";
-import { VIEWS } from "./views";
+import { VIEWS } from "./registry";
 
 function ConnectionsSection() {
   const {

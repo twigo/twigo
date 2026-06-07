@@ -3,9 +3,9 @@ import { Allotment } from "allotment";
 import "allotment/dist/style.css";
 import { ActivityBar } from "./ActivityBar";
 import { StatusBar } from "./StatusBar";
-import { EditorArea } from "./EditorArea";
-import { Sidebar } from "./Sidebar";
-import { DetailPanel } from "./DetailPanel";
+import { EditorArea } from "@/components/editor/EditorArea";
+import { Sidebar } from "@/components/views/Sidebar";
+import { DetailPanel } from "@/components/editor/DetailPanel";
 import { useUi } from "@/store/ui";
 
 export function AppShell() {
