@@ -28,6 +28,9 @@ pub struct ConnInfo {
     rtt_ms: f64,
     jetstream: bool,
     max_payload: usize,
+    // False while the client is still (re)connecting in the background — the
+    // server info/rtt above are placeholders until a real link is up.
+    connected: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -101,6 +104,32 @@ fn non_empty(value: &Option<String>) -> Option<&str> {
     value.as_deref().map(str::trim).filter(|s| !s.is_empty())
 }
 
+// RTT via flush timing, bounded so a still-reconnecting client (server down at
+// launch under retry_on_initial_connect) can't hang the command. A successful
+// flush also doubles as the "is the link actually up" signal: Some(rtt) means
+// connected, None means still (re)connecting.
+async fn measure_rtt(client: &async_nats::Client) -> Option<f64> {
+    let started = std::time::Instant::now();
+    match tokio::time::timeout(std::time::Duration::from_secs(2), client.flush()).await {
+        Ok(Ok(())) => Some(started.elapsed().as_secs_f64() * 1000.0),
+        _ => None,
+    }
+}
+
+async fn build_conn_info(name: String, client: &async_nats::Client) -> ConnInfo {
+    let rtt = measure_rtt(client).await;
+    let server = client.server_info();
+    ConnInfo {
+        name,
+        server_name: server.server_name.clone(),
+        server_version: server.version.clone(),
+        rtt_ms: rtt.unwrap_or(0.0),
+        jetstream: server.jetstream,
+        max_payload: server.max_payload,
+        connected: rtt.is_some(),
+    }
+}
+
 fn build_options(
     ctx: &NatsContext,
     app: &AppHandle,
@@ -128,32 +157,39 @@ fn build_options(
 
     let app = app.clone();
     let name = name.to_string();
-    Ok(base.name("twigo").event_callback(move |event| {
-        let app = app.clone();
-        let name = name.clone();
-        async move {
-            let kind = match event {
-                async_nats::Event::Connected => "connected",
-                async_nats::Event::Disconnected => "disconnected",
-                async_nats::Event::Closed => "closed",
-                async_nats::Event::LameDuckMode => "lameDuck",
-                async_nats::Event::Draining => "draining",
-                async_nats::Event::SlowConsumer(_) => "slowConsumer",
-                async_nats::Event::ServerError(_) => "serverError",
-                async_nats::Event::ClientError(_) => "clientError",
-            };
-            tracing::debug!(conn = %name, event = kind, "nats event");
-            if let Err(e) = app.emit(
-                "nats:event",
-                NatsEvent {
-                    conn: name,
-                    kind: kind.into(),
-                },
-            ) {
-                tracing::warn!("failed to emit nats:event: {e}");
+    // Keep the client alive across a server that is briefly unavailable — this
+    // lets a saved connection restore on launch even if its server is down,
+    // and survives transient drops mid-session.
+    Ok(base
+        .name("twigo")
+        .retry_on_initial_connect()
+        .max_reconnects(None)
+        .event_callback(move |event| {
+            let app = app.clone();
+            let name = name.clone();
+            async move {
+                let kind = match event {
+                    async_nats::Event::Connected => "connected",
+                    async_nats::Event::Disconnected => "disconnected",
+                    async_nats::Event::Closed => "closed",
+                    async_nats::Event::LameDuckMode => "lameDuck",
+                    async_nats::Event::Draining => "draining",
+                    async_nats::Event::SlowConsumer(_) => "slowConsumer",
+                    async_nats::Event::ServerError(_) => "serverError",
+                    async_nats::Event::ClientError(_) => "clientError",
+                };
+                tracing::debug!(conn = %name, event = kind, "nats event");
+                if let Err(e) = app.emit(
+                    "nats:event",
+                    NatsEvent {
+                        conn: name,
+                        kind: kind.into(),
+                    },
+                ) {
+                    tracing::warn!("failed to emit nats:event: {e}");
+                }
             }
-        }
-    }))
+        }))
 }
 
 #[tauri::command]
@@ -180,24 +216,19 @@ pub async fn connect(
     let opts = build_options(&ctx, &app, &name)?;
     let client = opts.connect(url).await?;
 
-    let server = client.server_info();
-    let started = std::time::Instant::now();
-    let rtt_ms = match client.flush().await {
-        Ok(()) => started.elapsed().as_secs_f64() * 1000.0,
-        Err(_) => 0.0,
-    };
-    let info = ConnInfo {
-        name: name.clone(),
-        server_name: server.server_name.clone(),
-        server_version: server.version.clone(),
-        rtt_ms,
-        jetstream: server.jetstream,
-        max_payload: server.max_payload,
-    };
-
-    tracing::info!(conn = %name, server = %server.server_name, rtt_ms, "connected");
+    let info = build_conn_info(name.clone(), &client).await;
+    tracing::info!(conn = %name, connected = info.connected, "connect");
     state.clients.lock().await.insert(name, client);
     Ok(info)
+}
+
+#[tauri::command]
+pub async fn conn_info(state: State<'_, ConnState>, name: String) -> error::Result<ConnInfo> {
+    let client = state
+        .client(&name)
+        .await
+        .ok_or_else(|| Error::NotConnected(name.clone()))?;
+    Ok(build_conn_info(name, &client).await)
 }
 
 #[tauri::command]
@@ -223,11 +254,7 @@ pub async fn server_info(
         .ok_or_else(|| Error::NotConnected(name.clone()))?;
 
     let info = client.server_info();
-    let started = std::time::Instant::now();
-    let rtt_ms = match client.flush().await {
-        Ok(()) => started.elapsed().as_secs_f64() * 1000.0,
-        Err(_) => 0.0,
-    };
+    let rtt_ms = measure_rtt(&client).await.unwrap_or(0.0);
     Ok(server_details(name, &info, rtt_ms))
 }
 

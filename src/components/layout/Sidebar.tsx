@@ -101,7 +101,9 @@ function ConnectionsSection() {
 
         {contexts.map((c) => {
           const active = activeContext === c.name;
-          const isConnected = !!connected[c.name];
+          const info = connected[c.name];
+          const isConnected = !!info;
+          const isLive = info?.connected === true;
           const isConnecting = !!connecting[c.name];
           const err = connError[c.name];
           return (
@@ -138,11 +140,13 @@ function ConnectionsSection() {
                       <Circle
                         className={cn(
                           "size-2 shrink-0",
-                          isConnected
+                          isLive
                             ? "fill-ok text-ok"
-                            : err
-                              ? "fill-error text-error"
-                              : "fill-muted-foreground/40 text-muted-foreground/40",
+                            : isConnected
+                              ? "animate-pulse fill-warn text-warn"
+                              : err
+                                ? "fill-error text-error"
+                                : "fill-muted-foreground/40 text-muted-foreground/40",
                         )}
                       />
                     )}
@@ -176,7 +180,7 @@ function ConnectionsSection() {
               <ContextMenuContent>
                 <ContextMenuLabel>{c.name}</ContextMenuLabel>
                 <ContextMenuItem
-                  disabled={!isConnected}
+                  disabled={!isLive}
                   onSelect={() => {
                     openServerInfo(c.name);
                   }}

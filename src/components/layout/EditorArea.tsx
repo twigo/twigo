@@ -1,8 +1,9 @@
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   DockviewReact,
   themeDark,
   themeLight,
+  type DockviewApi,
   type DockviewReadyEvent,
   type DockviewTheme,
 } from "dockview-react";
@@ -10,7 +11,9 @@ import "dockview-react/dist/styles/dockview.css";
 import { Radio } from "lucide-react";
 import { useUi } from "@/store/ui";
 import { useStream } from "@/store/stream";
-import { setEditorApi } from "@/lib/editor";
+import { useConnections } from "@/store/connections";
+import { useWorkspace } from "@/store/workspace";
+import { setEditorApi, openStream } from "@/lib/editor";
 import { editorComponents, editorTabComponents } from "./editors";
 
 // Shown by Dockview when the editor area has no open tabs.
@@ -24,29 +27,28 @@ function Watermark() {
   );
 }
 
-function onReady(event: DockviewReadyEvent) {
-  const api = event.api;
-  setEditorApi(api);
-
-  // The detail panel tracks the visible editor: the active stream tab, or
-  // nothing when a non-stream tab (settings/server) or no tab is focused.
-  api.onDidActivePanelChange((panel) => {
-    const id = panel?.id;
-    useStream
-      .getState()
-      .setActive(id && useStream.getState().sessions[id] ? id : null);
-  });
-
-  // Closing a stream tab stops its subscription.
-  api.onDidRemovePanel((panel) => {
-    if (useStream.getState().sessions[panel.id]) {
-      void useStream.getState().close(panel.id);
-    }
-  });
+// A restored stream tab comes back as a placeholder (no live session). Subscribe
+// it lazily once it's the focused tab and its connection is truly live.
+function subscribeActiveStream(api: DockviewApi) {
+  const panel = api.activePanel;
+  if (!panel) return;
+  const p = panel.params as {
+    type?: string;
+    connId?: string;
+    subject?: string;
+  };
+  if (p.type !== "stream" || !p.connId || !p.subject) return;
+  if (useStream.getState().sessions[panel.id]) return; // already live
+  if (!useConnections.getState().connected[p.connId]?.connected) return; // not up
+  void openStream(p.connId, p.subject);
 }
 
 export function EditorArea() {
   const uiTheme = useUi((s) => s.theme);
+  const apiRef = useRef<DockviewApi | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
 
   const theme = useMemo<DockviewTheme>(() => {
     const base = uiTheme === "dark" ? themeDark : themeLight;
@@ -57,6 +59,59 @@ export function EditorArea() {
       tabAnimation: "smooth",
     };
   }, [uiTheme]);
+
+  const onReady = useCallback((event: DockviewReadyEvent) => {
+    const api = event.api;
+    apiRef.current = api;
+    setEditorApi(api);
+
+    // Restore the previous session's tabs/layout. On a bad/old blob fall back
+    // to an empty area rather than letting fromJSON throw and brick startup.
+    const saved = useWorkspace.getState().layout;
+    if (saved) {
+      try {
+        api.fromJSON(saved);
+      } catch {
+        api.clear();
+      }
+    }
+
+    // These dockview listeners are disposed with the api on unmount.
+    api.onDidActivePanelChange((panel) => {
+      subscribeActiveStream(api);
+      const id = panel?.id;
+      useStream
+        .getState()
+        .setActive(id && useStream.getState().sessions[id] ? id : null);
+    });
+
+    api.onDidRemovePanel((panel) => {
+      if (useStream.getState().sessions[panel.id]) {
+        void useStream.getState().close(panel.id);
+      }
+    });
+
+    api.onDidLayoutChange(() => {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        useWorkspace.getState().setLayout(api.toJSON());
+      }, 300);
+    });
+
+    subscribeActiveStream(api);
+  }, []);
+
+  // Wake the focused restored stream tab when a connection comes online.
+  // Tied to the component lifecycle so it doesn't leak across remounts.
+  useEffect(() => {
+    const unsub = useConnections.subscribe(() => {
+      if (apiRef.current) subscribeActiveStream(apiRef.current);
+    });
+    return () => {
+      unsub();
+      clearTimeout(saveTimerRef.current);
+    };
+  }, []);
 
   return (
     <DockviewReact

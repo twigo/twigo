@@ -5,20 +5,36 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { applyTheme, useUi } from "@/store/ui";
 import { useConnections } from "@/store/connections";
 import { useSubjects } from "@/store/subjects";
+import { useWorkspace } from "@/store/workspace";
+import { useAppHydrated } from "@/lib/hydration";
 import type { NatsEvent, SubjectsUpdate } from "@/lib/api";
 
-function App() {
-  const theme = useUi((s) => s.theme);
+function Workbench() {
   const loadContexts = useConnections((s) => s.load);
   const onEvent = useConnections((s) => s.onEvent);
   const updateSubjects = useSubjects((s) => s.update);
 
+  // Load contexts, then restore the previous session: reconnect the saved
+  // connections and resume their subject watches. The editor area (Dockview)
+  // restores its own tabs/layout and re-subscribes streams lazily on focus.
   useEffect(() => {
-    applyTheme(theme);
-  }, [theme]);
-
-  useEffect(() => {
-    void loadContexts();
+    let cancelled = false;
+    void loadContexts().then(() => {
+      if (cancelled) return;
+      const { connect } = useConnections.getState();
+      const { startWatch } = useSubjects.getState();
+      for (const name of useWorkspace.getState().lastConnected) {
+        void connect(name).then(() => {
+          const pattern = useWorkspace.getState().watching[name];
+          if (pattern && !useSubjects.getState().watching[name]) {
+            void startWatch(name, pattern);
+          }
+        });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [loadContexts]);
 
   useEffect(() => {
@@ -43,9 +59,20 @@ function App() {
     };
   }, [updateSubjects]);
 
+  return <AppShell />;
+}
+
+function App() {
+  const theme = useUi((s) => s.theme);
+  const hydrated = useAppHydrated();
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
+
   return (
     <ErrorBoundary>
-      <AppShell />
+      {hydrated ? <Workbench /> : <div className="h-full bg-background" />}
     </ErrorBoundary>
   );
 }

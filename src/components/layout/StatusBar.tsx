@@ -10,7 +10,12 @@ export function StatusBar() {
   return (
     <footer className="flex h-6 shrink-0 items-center justify-between bg-statusbar px-2 text-xs text-statusbar-foreground">
       <div className="flex items-center gap-3">
-        {info ? (
+        {info && !info.connected ? (
+          <span className="flex items-center gap-1">
+            <Plug className="size-3.5 animate-pulse" />
+            {info.name} · reconnecting…
+          </span>
+        ) : info ? (
           <>
             <span className="flex items-center gap-1">
               <PlugZap className="size-3.5" />

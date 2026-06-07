@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { startSubjectWatch, stopSubjectWatch } from "@/lib/api";
+import { useWorkspace } from "@/store/workspace";
 import type { SubjectStat } from "@/lib/subject-tree";
 
 interface ConnSubjects {
@@ -27,6 +28,7 @@ export const useSubjects = create<SubjectsState>((set) => ({
     const effective = pattern.trim() || ">";
     await startSubjectWatch(conn, effective);
     set((s) => ({ watching: { ...s.watching, [conn]: effective } }));
+    useWorkspace.getState().setWatching(conn, effective);
   },
 
   stopWatch: async (conn) => {
@@ -36,12 +38,16 @@ export const useSubjects = create<SubjectsState>((set) => ({
       const { [conn]: _b, ...byConn } = s.byConn;
       return { watching, byConn };
     });
+    useWorkspace.getState().setWatching(conn, null);
   },
 
-  reset: (conn) =>
+  // Live teardown only (on disconnect/drop). The persisted watch intent is
+  // kept so a reconnect/restore can resume it; an explicit disconnect clears it.
+  reset: (conn) => {
     set((s) => {
       const { [conn]: _w, ...watching } = s.watching;
       const { [conn]: _b, ...byConn } = s.byConn;
       return { watching, byConn };
-    }),
+    });
+  },
 }));
