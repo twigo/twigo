@@ -116,3 +116,26 @@ export async function subscribe(
 export async function unsubscribe(subId: string): Promise<void> {
   await invoke("unsubscribe", { subId });
 }
+
+export async function publish(
+  connId: string,
+  subject: string,
+  payload: string,
+  reply?: string | null,
+): Promise<void> {
+  await invoke("publish", { connId, subject, payload, reply: reply ?? null });
+}
+
+export function request(
+  connId: string,
+  subject: string,
+  payload: string,
+  timeoutMs?: number | null,
+): Promise<IncomingMessage> {
+  return invoke<IncomingMessage>("request", {
+    connId,
+    subject,
+    payload,
+    timeoutMs: timeoutMs ?? null,
+  });
+}

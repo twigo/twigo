@@ -1,4 +1,11 @@
-import { Radio, X, Settings, Server, type LucideIcon } from "lucide-react";
+import {
+  Radio,
+  X,
+  Settings,
+  Server,
+  Send,
+  type LucideIcon,
+} from "lucide-react";
 import type {
   IDockviewPanelProps,
   IDockviewPanelHeaderProps,
@@ -6,6 +13,7 @@ import type {
 import { cn } from "@twigo/ui";
 import { MessageStream } from "./MessageStream";
 import { ServerInfoPanel } from "./ServerInfoPanel";
+import { PublishEditor } from "./PublishEditor";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 
 export function StreamPanel(props: IDockviewPanelProps) {
@@ -16,6 +24,14 @@ export function StreamPanel(props: IDockviewPanelProps) {
 export function ServerPanel(props: IDockviewPanelProps) {
   const { connId } = props.params as { connId: string };
   return <ServerInfoPanel connId={connId} />;
+}
+
+export function PublishPanel(props: IDockviewPanelProps) {
+  const { connId, subject } = props.params as {
+    connId: string;
+    subject?: string;
+  };
+  return <PublishEditor connId={connId} initialSubject={subject ?? ""} />;
 }
 
 export function SettingsPanel() {
@@ -78,6 +94,19 @@ export function ServerTab(props: IDockviewPanelHeaderProps) {
       icon={Server}
       iconClass="text-brand"
       mono
+      title={props.api.title}
+      onClose={() => {
+        props.api.close();
+      }}
+    />
+  );
+}
+
+export function PublishTab(props: IDockviewPanelHeaderProps) {
+  return (
+    <ClosableTab
+      icon={Send}
+      iconClass="text-brand"
       title={props.api.title}
       onClose={() => {
         props.api.close();

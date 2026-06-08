@@ -30,6 +30,10 @@ function serverEditorId(connId: string): string {
   return `server:${encodeURIComponent(connId)}`;
 }
 
+function publishEditorId(connId: string): string {
+  return `publish:${encodeURIComponent(connId)}`;
+}
+
 function openEditor(desc: EditorDescriptor): void {
   if (!api) return;
 
@@ -66,6 +70,16 @@ export async function openStream(connId: string, subject: string) {
     id,
     title: subject,
     params: { streamId: id, connId, subject },
+  });
+}
+
+/** Open a publish/request tab for a connection, optionally prefilling a subject. */
+export function openPublish(connId: string, subject?: string) {
+  openEditor({
+    type: "publish",
+    id: publishEditorId(connId),
+    title: `Publish · ${connId}`,
+    params: { connId, subject: subject ?? "" },
   });
 }
 

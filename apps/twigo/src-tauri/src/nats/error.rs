@@ -23,6 +23,15 @@ pub enum Error {
 
     #[error(transparent)]
     Subscribe(#[from] async_nats::SubscribeError),
+
+    #[error(transparent)]
+    Publish(#[from] async_nats::PublishError),
+
+    #[error(transparent)]
+    Request(#[from] async_nats::RequestError),
+
+    #[error(transparent)]
+    Flush(#[from] async_nats::client::FlushError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

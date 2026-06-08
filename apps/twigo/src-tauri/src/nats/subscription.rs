@@ -26,7 +26,7 @@ pub struct IncomingMessage {
     size: usize,
 }
 
-fn encode_message(
+pub(super) fn encode_message(
     subject: String,
     reply: Option<String>,
     payload: &[u8],
@@ -41,7 +41,7 @@ fn encode_message(
     }
 }
 
-fn flatten_headers(headers: Option<&async_nats::HeaderMap>) -> Vec<(String, String)> {
+pub(super) fn flatten_headers(headers: Option<&async_nats::HeaderMap>) -> Vec<(String, String)> {
     let Some(headers) = headers else {
         return Vec::new();
     };

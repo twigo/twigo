@@ -29,7 +29,9 @@ pub fn run() {
             nats::subjects::start_subject_watch,
             nats::subjects::stop_subject_watch,
             nats::subscription::subscribe,
-            nats::subscription::unsubscribe
+            nats::subscription::unsubscribe,
+            nats::publish::publish,
+            nats::publish::request
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
