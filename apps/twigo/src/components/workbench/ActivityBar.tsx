@@ -1,5 +1,5 @@
 import { Settings } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@twigo/ui";
 import { useUi } from "@/store/ui";
 import { openSettings } from "@/lib/editor";
 import { VIEWS, VIEW_ORDER } from "@/components/views/registry";

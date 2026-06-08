@@ -3,7 +3,7 @@ import type {
   IDockviewPanelProps,
   IDockviewPanelHeaderProps,
 } from "dockview-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@twigo/ui";
 import { MessageStream } from "./MessageStream";
 import { ServerInfoPanel } from "./ServerInfoPanel";
 import { SettingsPage } from "@/components/settings/SettingsPage";

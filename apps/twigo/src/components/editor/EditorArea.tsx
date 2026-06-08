@@ -9,7 +9,7 @@ import {
 } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
 import { Radio } from "lucide-react";
-import { EmptyState } from "@/components/ui/empty-state";
+import { EmptyState } from "@twigo/ui";
 import { useUi } from "@/store/ui";
 import { useStream } from "@/store/stream";
 import { useConnections } from "@/store/connections";

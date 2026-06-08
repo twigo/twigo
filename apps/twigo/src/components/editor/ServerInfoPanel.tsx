@@ -1,9 +1,7 @@
-import { useEffect, useState } from "react";
 import { RefreshCw, Loader2, Server, Check, Minus } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/empty-state";
-import { fmtBytes, fmtRtt } from "@/lib/format";
-import { serverInfo, type ServerDetails } from "@/lib/api";
+import { Button, EmptyState } from "@twigo/ui";
+import { fmtBytes, fmtRtt } from "@twigo/utils";
+import { useServerInfo } from "@/hooks/useServerInfo";
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -50,35 +48,7 @@ function Section({
 }
 
 export function ServerInfoPanel({ connId }: { connId: string }) {
-  const [data, setData] = useState<ServerDetails | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [reloadKey, setReloadKey] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    serverInfo(connId)
-      .then((d) => {
-        if (!cancelled) {
-          setData(d);
-          setError(null);
-        }
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setError(String(e));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [connId, reloadKey]);
-
-  function refresh() {
-    setLoading(true);
-    setReloadKey((k) => k + 1);
-  }
+  const { data, error, loading, refresh } = useServerInfo(connId);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">

@@ -1,10 +1,8 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { Pause, Play, Trash2, ArrowDown, Radio } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { fmtTime, fmtBytes } from "@/lib/format";
-import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/empty-state";
+import { Button, EmptyState } from "@twigo/ui";
 import { useStream } from "@/store/stream";
+import { MessageTable } from "./MessageTable";
 
 export function MessageStream({ streamId }: { streamId: string }) {
   const session = useStream((s) => s.sessions[streamId]);
@@ -104,39 +102,13 @@ export function MessageStream({ streamId }: { streamId: string }) {
           onScroll={onScroll}
           className="min-h-0 flex-1 overflow-auto"
         >
-          <table className="w-full border-collapse text-xs">
-            <thead className="sticky top-0 bg-panel text-left text-muted-foreground">
-              <tr className="[&>th]:px-2 [&>th]:py-1 [&>th]:font-medium">
-                <th className="w-28">Time</th>
-                <th className="w-44">Subject</th>
-                <th className="w-16 text-right">Size</th>
-                <th>Payload</th>
-              </tr>
-            </thead>
-            <tbody className="font-mono">
-              {items.map((m) => (
-                <tr
-                  key={m.id}
-                  onClick={() => {
-                    select(streamId, m.id);
-                  }}
-                  className={cn(
-                    "cursor-pointer border-b border-border/50 hover:bg-accent/50",
-                    m.id === selectedId && "bg-accent",
-                  )}
-                >
-                  <td className="px-2 py-1 tabular-nums text-muted-foreground">
-                    {fmtTime(m.receivedAt)}
-                  </td>
-                  <td className="px-2 py-1 text-brand">{m.subject}</td>
-                  <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
-                    {fmtBytes(m.size)}
-                  </td>
-                  <td className="max-w-0 truncate px-2 py-1">{m.preview}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <MessageTable
+            items={items}
+            selectedId={selectedId}
+            onSelect={(id) => {
+              select(streamId, id);
+            }}
+          />
         </div>
       )}
 

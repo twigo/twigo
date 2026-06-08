@@ -1,5 +1,5 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
-import type { SubjectStat } from "@/lib/subject-tree";
+import type { SubjectStat } from "@twigo/utils";
 
 export { Channel };
 export type { SubjectStat };
