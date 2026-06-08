@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { RefreshCw, Loader2, Server, Check, Minus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { fmtBytes, fmtRtt } from "@/lib/format";
+import { fmtBytes, fmtRtt } from "@twigo/utils";
 import { serverInfo, type ServerDetails } from "@/lib/api";
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {

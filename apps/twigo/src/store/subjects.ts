@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { startSubjectWatch, stopSubjectWatch } from "@/lib/api";
 import { useWorkspace } from "@/store/workspace";
-import type { SubjectStat } from "@/lib/subject-tree";
+import type { SubjectStat } from "@twigo/utils";
 
 interface ConnSubjects {
   stats: SubjectStat[];

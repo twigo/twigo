@@ -5,7 +5,7 @@ import {
   unsubscribe as apiUnsubscribe,
   type IncomingMessage,
 } from "@/lib/api";
-import { decodePreview, type StreamMessage } from "@/lib/message";
+import { decodePreview, type StreamMessage } from "@twigo/utils";
 
 const CAP = 2000;
 const HARD_CAP = 50000;

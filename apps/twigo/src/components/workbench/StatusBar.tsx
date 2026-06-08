@@ -1,5 +1,5 @@
 import { Sun, Moon, PlugZap, Plug, Gauge, Database } from "lucide-react";
-import { fmtRtt } from "@/lib/format";
+import { fmtRtt } from "@twigo/utils";
 import { useUi } from "@/store/ui";
 import { useConnections } from "@/store/connections";
 

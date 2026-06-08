@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useConnections } from "@/store/connections";
 import { useSubjects } from "@/store/subjects";
 import { useStream } from "@/store/stream";
-import { buildSubjectTree, type SubjectNode } from "@/lib/subject-tree";
+import { buildSubjectTree, type SubjectNode } from "@twigo/utils";
 import { openStream } from "@/lib/editor";
 
 function formatRate(rate: number): string {

@@ -1,11 +1,16 @@
 import { useState } from "react";
 import { Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { fmtTime, fmtBytes } from "@/lib/format";
+import {
+  fmtTime,
+  fmtBytes,
+  decodeText,
+  tryPrettyJson,
+  toHex,
+} from "@twigo/utils";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useStream } from "@/store/stream";
-import { decodeText, tryPrettyJson, toHex } from "@/lib/message";
 
 type Format = "json" | "text" | "hex";
 const FORMATS: Format[] = ["json", "text", "hex"];

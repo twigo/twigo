@@ -59,6 +59,9 @@ importers:
       '@tauri-apps/plugin-store':
         specifier: ^2.4.3
         version: 2.4.3
+      '@twigo/utils':
+        specifier: workspace:*
+        version: link:../../libs/utils
       allotment:
         specifier: ^1.20.5
         version: 1.20.5(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -129,6 +132,15 @@ importers:
       vite:
         specifier: ^7.0.4
         version: 7.3.5(@types/node@25.9.2)(jiti@2.7.0)(lightningcss@1.32.0)
+      vitest:
+        specifier: ^4.1.8
+        version: 4.1.8(@types/node@25.9.2)(jsdom@29.1.1)(vite@7.3.5(@types/node@25.9.2)(jiti@2.7.0)(lightningcss@1.32.0))
+
+  libs/utils:
+    devDependencies:
+      typescript:
+        specifier: ~5.8.3
+        version: 5.8.3
       vitest:
         specifier: ^4.1.8
         version: 4.1.8(@types/node@25.9.2)(jsdom@29.1.1)(vite@7.3.5(@types/node@25.9.2)(jiti@2.7.0)(lightningcss@1.32.0))
