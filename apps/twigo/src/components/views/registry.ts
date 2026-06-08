@@ -8,7 +8,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { View } from "@/store/ui";
-import { SubjectsView } from "./SubjectsView";
+import { SubjectsView } from "./subjects/SubjectsView";
 
 // Sidebar views (VS Code "viewlets"). One registry drives the activity bar and
 // the sidebar body. Record<View, …> makes a missing entry a compile error

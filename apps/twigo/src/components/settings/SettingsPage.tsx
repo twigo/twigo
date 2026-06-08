@@ -1,17 +1,9 @@
-import { useEffect, useState } from "react";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import {
-  FolderOpen,
-  PlugZap,
-  Palette,
-  SlidersHorizontal,
-  Check,
-} from "lucide-react";
-import { Button, Input, Label, cn } from "@twigo/ui";
+import { useState } from "react";
+import { PlugZap, Palette, SlidersHorizontal, Check } from "lucide-react";
+import { Label, cn } from "@twigo/ui";
 import { useUi, type Theme } from "@/store/ui";
-import { useSettings } from "@/store/settings";
-import { useConnections } from "@/store/connections";
-import { defaultContextDir } from "@/lib/api";
+import { SectionTitle } from "./SectionTitle";
+import { ConnectionSettings } from "./ConnectionSettings";
 
 type Category = "general" | "connections" | "appearance";
 
@@ -46,17 +38,13 @@ export function SettingsPage() {
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto max-w-2xl p-6">
             {category === "general" && <GeneralSection />}
-            {category === "connections" && <ConnectionsSection />}
+            {category === "connections" && <ConnectionSettings />}
             {category === "appearance" && <AppearanceSection />}
           </div>
         </div>
       </div>
     </div>
   );
-}
-
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <h2 className="mb-4 text-base font-semibold">{children}</h2>;
 }
 
 function GeneralSection() {
@@ -66,86 +54,6 @@ function GeneralSection() {
       <p className="text-xs text-muted-foreground">
         More general settings will appear here.
       </p>
-    </>
-  );
-}
-
-function ConnectionsSection() {
-  const { contextDir, setContextDir } = useSettings();
-  const reloadContexts = useConnections((s) => s.load);
-  const [draft, setDraft] = useState(contextDir ?? "");
-  const [defaultDir, setDefaultDir] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-
-  useEffect(() => {
-    void defaultContextDir().then(setDefaultDir);
-  }, []);
-
-  const dirty = (draft.trim() || null) !== (contextDir ?? null);
-
-  async function browse() {
-    const picked = await openDialog({ directory: true, multiple: false });
-    if (typeof picked === "string") setDraft(picked);
-  }
-
-  async function save() {
-    setContextDir(draft.trim() ? draft.trim() : null);
-    await reloadContexts();
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
-  }
-
-  return (
-    <>
-      <SectionTitle>Connections</SectionTitle>
-
-      <div className="space-y-2">
-        <Label htmlFor="context-dir">NATS contexts directory</Label>
-        <div className="flex gap-2">
-          <Input
-            id="context-dir"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder={defaultDir ?? "~/.config/nats"}
-            className="font-mono text-xs"
-            spellCheck={false}
-          />
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => void browse()}
-            title="Browse…"
-          >
-            <FolderOpen />
-          </Button>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Leave empty to use the default
-          {defaultDir && (
-            <>
-              {" "}
-              (<span className="font-mono">{defaultDir}</span>)
-            </>
-          )}
-          . Point at a nats config dir or a folder of context JSON files.
-        </p>
-
-        <div className="flex items-center gap-2 pt-2">
-          <Button
-            variant="brand"
-            size="sm"
-            onClick={() => void save()}
-            disabled={!dirty}
-          >
-            Save & reload
-          </Button>
-          {saved && (
-            <span className="flex items-center gap-1 text-xs text-ok">
-              <Check className="size-3.5" /> Saved
-            </span>
-          )}
-        </div>
-      </div>
     </>
   );
 }
