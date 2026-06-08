@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "../lib/cn";
 
 // Centered placeholder for empty / loading / error regions. The caller controls
 // outer sizing via className (h-full, flex-1, …); this only standardizes the

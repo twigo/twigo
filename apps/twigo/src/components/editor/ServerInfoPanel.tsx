@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { RefreshCw, Loader2, Server, Check, Minus } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/empty-state";
+import { Button, EmptyState } from "@twigo/ui";
 import { fmtBytes, fmtRtt } from "@twigo/utils";
 import { serverInfo, type ServerDetails } from "@/lib/api";
 

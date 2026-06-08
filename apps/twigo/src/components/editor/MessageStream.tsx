@@ -1,9 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { Pause, Play, Trash2, ArrowDown, Radio } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Button, EmptyState, cn } from "@twigo/ui";
 import { fmtTime, fmtBytes } from "@twigo/utils";
-import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/empty-state";
 import { useStream } from "@/store/stream";
 
 export function MessageStream({ streamId }: { streamId: string }) {

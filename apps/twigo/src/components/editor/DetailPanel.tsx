@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Copy } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Button, EmptyState, cn } from "@twigo/ui";
 import {
   fmtTime,
   fmtBytes,
@@ -8,8 +8,6 @@ import {
   tryPrettyJson,
   toHex,
 } from "@twigo/utils";
-import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/empty-state";
 import { useStream } from "@/store/stream";
 
 type Format = "json" | "text" | "hex";

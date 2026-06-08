@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { ChevronRight, Radio, Play, Square } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { Button, cn } from "@twigo/ui";
 import { useConnections } from "@/store/connections";
 import { useSubjects } from "@/store/subjects";
 import { useStream } from "@/store/stream";

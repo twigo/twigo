@@ -7,7 +7,6 @@ import {
   PlugZap,
   Server,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -15,7 +14,8 @@ import {
   ContextMenuItem,
   ContextMenuLabel,
   ContextMenuSeparator,
-} from "@/components/ui/context-menu";
+  cn,
+} from "@twigo/ui";
 import { useConnections } from "@/store/connections";
 import { openServerInfo } from "@/lib/editor";
 

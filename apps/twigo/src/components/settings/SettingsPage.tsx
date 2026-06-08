@@ -7,10 +7,7 @@ import {
   SlidersHorizontal,
   Check,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Button, Input, Label, cn } from "@twigo/ui";
 import { useUi, type Theme } from "@/store/ui";
 import { useSettings } from "@/store/settings";
 import { useConnections } from "@/store/connections";
