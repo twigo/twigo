@@ -1,13 +1,9 @@
 import { useEffect, useState } from "react";
 import { RefreshCw, Loader2, Server, Check, Minus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { fmtBytes, fmtRtt } from "@/lib/format";
 import { serverInfo, type ServerDetails } from "@/lib/api";
-
-function fmtBytes(n: number): string {
-  if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-  if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${n.toString()} B`;
-}
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -91,7 +87,7 @@ export function ServerInfoPanel({ connId }: { connId: string }) {
         <span className="ml-1 truncate text-[11px] font-medium">{connId}</span>
         {data && (
           <span className="ml-1 text-[11px] tabular-nums text-muted-foreground">
-            RTT {data.rttMs.toFixed(1)}ms
+            RTT {fmtRtt(data.rttMs)}
           </span>
         )}
         <Button
@@ -107,13 +103,11 @@ export function ServerInfoPanel({ connId }: { connId: string }) {
       </div>
 
       {error ? (
-        <div className="flex flex-1 items-center justify-center px-4 text-center text-xs text-error">
+        <EmptyState variant="error" className="min-h-0 flex-1">
           {error}
-        </div>
+        </EmptyState>
       ) : !data ? (
-        <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
-          Loading server info…
-        </div>
+        <EmptyState className="min-h-0 flex-1">Loading server info…</EmptyState>
       ) : (
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
           <Section title="Identity">

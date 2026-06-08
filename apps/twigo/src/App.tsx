@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { AppShell } from "@/components/layout/AppShell";
+import { AppShell } from "@/components/workbench/AppShell";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { applyTheme, useUi } from "@/store/ui";
 import { useConnections } from "@/store/connections";

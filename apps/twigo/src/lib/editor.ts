@@ -1,6 +1,6 @@
 import type { DockviewApi } from "dockview-react";
 import { useStream } from "@/store/stream";
-import { EDITORS, type EditorType } from "@/components/layout/editors";
+import { EDITORS, type EditorType } from "@/components/editor/registry";
 
 // Editor "inputs" (VS Code model): a type + a stable id. Opening the same id
 // focuses the existing tab instead of duplicating it.

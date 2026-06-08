@@ -1,18 +1,14 @@
 import { useState } from "react";
 import { Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { fmtTime, fmtBytes } from "@/lib/format";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useStream } from "@/store/stream";
 import { decodeText, tryPrettyJson, toHex } from "@/lib/message";
 
 type Format = "json" | "text" | "hex";
 const FORMATS: Format[] = ["json", "text", "hex"];
-
-function fmtTime(ms: number): string {
-  const d = new Date(ms);
-  const p = (n: number, len = 2) => n.toString().padStart(len, "0");
-  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
-}
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
@@ -65,22 +61,15 @@ export function DetailPanel() {
       </div>
 
       {!msg ? (
-        <div className="flex flex-1 items-center justify-center px-4 text-center text-xs text-muted-foreground">
+        <EmptyState className="min-h-0 flex-1">
           Select a message to inspect it.
-        </div>
+        </EmptyState>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
           <div className="space-y-1.5">
             <Field label="Subject" value={msg.subject} />
             <Field label="Received" value={fmtTime(msg.receivedAt)} />
-            <Field
-              label="Size"
-              value={
-                msg.size < 1024
-                  ? `${msg.size} B`
-                  : `${(msg.size / 1024).toFixed(1)} KB`
-              }
-            />
+            <Field label="Size" value={fmtBytes(msg.size)} />
             {msg.reply && <Field label="Reply" value={msg.reply} />}
           </div>
 

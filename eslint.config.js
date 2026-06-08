@@ -6,7 +6,7 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import prettier from "eslint-config-prettier";
 
 export default tseslint.config(
-  { ignores: ["dist", "src-tauri", "node_modules"] },
+  { ignores: ["**/dist", "**/src-tauri", "**/node_modules"] },
   {
     files: ["**/*.{ts,tsx}"],
     extends: [
@@ -50,7 +50,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["src/components/ui/**/*.tsx"],
+    files: ["**/components/ui/**/*.tsx", "libs/ui/**/*.tsx"],
     rules: {
       "react-refresh/only-export-components": "off",
     },
