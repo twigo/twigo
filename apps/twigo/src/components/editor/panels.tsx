@@ -27,11 +27,18 @@ export function ServerPanel(props: IDockviewPanelProps) {
 }
 
 export function PublishPanel(props: IDockviewPanelProps) {
-  const { connId, subject } = props.params as {
+  const { connId, subject, payload } = props.params as {
     connId: string;
     subject?: string;
+    payload?: string;
   };
-  return <PublishEditor connId={connId} initialSubject={subject ?? ""} />;
+  return (
+    <PublishEditor
+      connId={connId}
+      initialSubject={subject ?? ""}
+      initialPayload={payload ?? ""}
+    />
+  );
 }
 
 export function SettingsPanel() {

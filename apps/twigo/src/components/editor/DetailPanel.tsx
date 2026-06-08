@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Copy } from "lucide-react";
+import { Copy, Send, Reply } from "lucide-react";
 import { Button, EmptyState, CodeViewer, cn } from "@twigo/ui";
 import {
   fmtTime,
@@ -9,6 +9,7 @@ import {
   toHex,
 } from "@twigo/utils";
 import { useStream } from "@/store/stream";
+import { openPublish } from "@/lib/editor";
 
 type Format = "json" | "text" | "hex";
 const FORMATS: Format[] = ["json", "text", "hex"];
@@ -44,22 +45,49 @@ export function DetailPanel() {
         : (tryPrettyJson(msg.payloadB64) ?? decodeText(msg.payloadB64))
     : "";
 
+  const payloadText = msg ? decodeText(msg.payloadB64) : "";
+  const replyTo = msg?.reply ?? null;
+
   return (
     <aside className="flex h-full w-full flex-col border-l border-border bg-panel">
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-border px-2">
         <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           Message
         </span>
-        {msg && (
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Copy payload"
-            title="Copy payload"
-            onClick={() => void navigator.clipboard.writeText(body)}
-          >
-            <Copy />
-          </Button>
+        {msg && session && (
+          <div className="flex items-center gap-0.5">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Republish"
+              title="Republish"
+              onClick={() =>
+                openPublish(session.connId, msg.subject, payloadText)
+              }
+            >
+              <Send />
+            </Button>
+            {replyTo && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Reply"
+                title={`Reply to ${replyTo}`}
+                onClick={() => openPublish(session.connId, replyTo, "")}
+              >
+                <Reply />
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Copy payload"
+              title="Copy payload"
+              onClick={() => void navigator.clipboard.writeText(body)}
+            >
+              <Copy />
+            </Button>
+          </div>
         )}
       </div>
 

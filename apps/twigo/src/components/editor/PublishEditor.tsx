@@ -12,13 +12,15 @@ type Reply =
 export function PublishEditor({
   connId,
   initialSubject,
+  initialPayload = "",
 }: {
   connId: string;
   initialSubject: string;
+  initialPayload?: string;
 }) {
   const live = useConnections((s) => s.connected[connId]?.connected === true);
   const [subject, setSubject] = useState(initialSubject);
-  const [payload, setPayload] = useState("");
+  const [payload, setPayload] = useState(initialPayload);
   const [busy, setBusy] = useState<"publish" | "request" | null>(null);
   const [reply, setReply] = useState<Reply | null>(null);
   const [sent, setSent] = useState(false);

@@ -73,13 +73,17 @@ export async function openStream(connId: string, subject: string) {
   });
 }
 
-/** Open a publish/request tab for a connection, optionally prefilling a subject. */
-export function openPublish(connId: string, subject?: string) {
+/** Open a publish/request tab for a connection, optionally prefilling subject & payload. */
+export function openPublish(
+  connId: string,
+  subject?: string,
+  payload?: string,
+) {
   openEditor({
     type: "publish",
     id: publishEditorId(connId),
     title: `Publish · ${connId}`,
-    params: { connId, subject: subject ?? "" },
+    params: { connId, subject: subject ?? "", payload: payload ?? "" },
   });
 }
 

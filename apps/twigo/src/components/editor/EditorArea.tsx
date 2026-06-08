@@ -8,21 +8,36 @@ import {
   type DockviewTheme,
 } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
-import { Radio } from "lucide-react";
-import { EmptyState } from "@twigo/ui";
+import { Radio, Send } from "lucide-react";
+import { Button, EmptyState } from "@twigo/ui";
 import { useUi } from "@/store/ui";
 import { useStream } from "@/store/stream";
 import { useConnections } from "@/store/connections";
 import { useWorkspace } from "@/store/workspace";
 import { setEditorApi, openStream } from "@/lib/editor";
+import { newPublish } from "@/lib/actions";
 import { editorComponents, editorTabComponents } from "./registry";
+import { NewTabButton } from "./NewTabButton";
 
 // Shown by Dockview when the editor area has no open tabs.
 function Watermark() {
+  const hasLive = useConnections((s) =>
+    Object.values(s.connected).some((i) => i.connected),
+  );
   return (
     <EmptyState icon={Radio} className="h-full bg-background">
       <p>Select a subject in the Explorer to start a live stream.</p>
       <p className="text-xs opacity-80">Each subject opens in its own tab.</p>
+      <Button
+        variant="outline"
+        size="sm"
+        className="mt-2"
+        disabled={!hasLive}
+        onClick={() => newPublish()}
+      >
+        <Send />
+        New publish
+      </Button>
     </EmptyState>
   );
 }
@@ -120,6 +135,7 @@ export function EditorArea() {
       dndStrategy="pointer"
       disableFloatingGroups
       watermarkComponent={Watermark}
+      rightHeaderActionsComponent={NewTabButton}
       onReady={onReady}
       components={editorComponents}
       tabComponents={editorTabComponents}
