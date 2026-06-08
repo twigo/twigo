@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Copy } from "lucide-react";
-import { Button, EmptyState, cn } from "@twigo/ui";
+import { Button, EmptyState, CodeViewer, cn } from "@twigo/ui";
 import {
   fmtTime,
   fmtBytes,
@@ -113,9 +113,11 @@ export function DetailPanel() {
                 </button>
               ))}
             </div>
-            <pre className="min-h-0 flex-1 overflow-auto rounded-md border border-border bg-background p-2 font-mono text-xs leading-relaxed">
-              {body}
-            </pre>
+            <CodeViewer
+              value={body}
+              language={format === "json" ? "json" : "text"}
+              className="min-h-0 flex-1"
+            />
           </div>
         </div>
       )}
