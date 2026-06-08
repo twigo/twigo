@@ -6,8 +6,6 @@ import { tags as t } from "@lezer/highlight";
 import type { Extension } from "@codemirror/state";
 import { cn } from "../lib/cn";
 
-// Themed off our design tokens (var(--…)), so it adapts to light/dark with the
-// rest of the app — no separate CodeMirror light/dark themes to maintain.
 const editorTheme = EditorView.theme({
   "&": {
     backgroundColor: "var(--background)",
@@ -27,9 +25,11 @@ const editorTheme = EditorView.theme({
     border: "none",
   },
   ".cm-activeLine, .cm-activeLineGutter": { backgroundColor: "transparent" },
-  ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
-    backgroundColor: "var(--accent)",
-  },
+  "&.cm-focused .cm-selectionBackground, & .cm-selectionBackground, &.cm-focused .cm-content ::selection, & .cm-content ::selection":
+    {
+      backgroundColor:
+        "color-mix(in oklab, var(--brand) 40%, transparent) !important",
+    },
   ".cm-cursor": { borderLeftColor: "var(--foreground)" },
   ".cm-searchMatch": {
     backgroundColor: "color-mix(in oklab, var(--brand) 30%, transparent)",
@@ -77,11 +77,9 @@ const basicSetup = {
   highlightActiveLineGutter: false,
   autocompletion: false,
   closeBrackets: false,
-  // We provide our own highlight style above.
   syntaxHighlighting: false,
 };
 
-// Read-only code view with syntax highlighting, folding and search (Cmd/Ctrl+F).
 export function CodeViewer({
   value,
   language = "text",
