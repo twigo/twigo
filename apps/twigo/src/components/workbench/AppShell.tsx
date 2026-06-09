@@ -7,6 +7,7 @@ import { EditorArea } from "@/components/editor/EditorArea";
 import { Sidebar } from "@/components/views/Sidebar";
 import { DetailPanel } from "@/components/editor/DetailPanel";
 import { useUi } from "@/store/ui";
+import { newPublish } from "@/lib/actions";
 
 export function AppShell() {
   const sidebarOpen = useUi((s) => s.sidebarOpen);
@@ -38,13 +39,19 @@ export function AppShell() {
     [],
   );
 
-  // VS Code-style layout toggles: Cmd/Ctrl+B (sidebar), Cmd/Ctrl+Alt+B (inspector).
+  // VS Code-style layout toggles: Cmd/Ctrl+B (sidebar), Cmd/Ctrl+Alt+B (inspector);
+  // Cmd/Ctrl+N opens a new publish tab on the active connection.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === "b") {
         e.preventDefault();
         if (e.altKey) toggleDetail();
         else toggleSidebar();
+      } else if (key === "n") {
+        e.preventDefault();
+        newPublish();
       }
     }
     window.addEventListener("keydown", onKey);

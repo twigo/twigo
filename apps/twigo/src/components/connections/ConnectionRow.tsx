@@ -1,4 +1,4 @@
-import { Circle, Loader2, Unplug, PlugZap, Server } from "lucide-react";
+import { Circle, Loader2, Unplug, PlugZap, Server, Send } from "lucide-react";
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -9,7 +9,7 @@ import {
   cn,
 } from "@twigo/ui";
 import { useConnections } from "@/store/connections";
-import { openServerInfo } from "@/lib/editor";
+import { openServerInfo, openPublish } from "@/lib/editor";
 import type { ContextSummary } from "@/lib/api";
 
 // One connection in the sidebar list: pick/connect/disconnect, a five-state
@@ -105,6 +105,15 @@ export function ConnectionRow({ context: c }: { context: ContextSummary }) {
         >
           <Server />
           Server info
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!isLive}
+          onSelect={() => {
+            openPublish(c.name);
+          }}
+        >
+          <Send />
+          Publish message
         </ContextMenuItem>
         <ContextMenuSeparator />
         {isConnected ? (

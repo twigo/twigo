@@ -12,6 +12,7 @@ interface EditorDescriptor {
   title: string;
   params?: Record<string, unknown>;
   index?: number;
+  replaceParams?: boolean;
 }
 
 let api: DockviewApi | null = null;
@@ -30,11 +31,18 @@ function serverEditorId(connId: string): string {
   return `server:${encodeURIComponent(connId)}`;
 }
 
+function publishEditorId(connId: string): string {
+  return `publish:${encodeURIComponent(connId)}`;
+}
+
 function openEditor(desc: EditorDescriptor): void {
   if (!api) return;
 
   const existing = api.getPanel(desc.id);
   if (existing) {
+    if (desc.replaceParams) {
+      existing.api.updateParameters({ ...desc.params, type: desc.type });
+    }
     existing.api.setActive();
     return;
   }
@@ -66,6 +74,32 @@ export async function openStream(connId: string, subject: string) {
     id,
     title: subject,
     params: { streamId: id, connId, subject },
+  });
+}
+
+// Bumped on every prefilled open so the form remounts with the new values
+// (e.g. republishing a different message into an already-open Publish tab).
+let publishSeed = 0;
+
+/** Open a publish/request tab for a connection, optionally prefilling subject & payload. */
+export function openPublish(
+  connId: string,
+  subject?: string,
+  payload?: string,
+) {
+  const hasPrefill = Boolean((subject ?? "") || (payload ?? ""));
+  if (hasPrefill) publishSeed += 1;
+  openEditor({
+    type: "publish",
+    id: publishEditorId(connId),
+    title: `Publish · ${connId}`,
+    params: {
+      connId,
+      subject: subject ?? "",
+      payload: payload ?? "",
+      seed: publishSeed,
+    },
+    replaceParams: hasPrefill,
   });
 }
 

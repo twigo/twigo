@@ -19,6 +19,7 @@ import {
   openStream,
   openServerInfo,
   openSettings,
+  openPublish,
   closeEditorsForConn,
 } from "./editor";
 import { useStream } from "@/store/stream";
@@ -26,6 +27,7 @@ import { useStream } from "@/store/stream";
 interface PanelApi {
   setActive: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
+  updateParameters: ReturnType<typeof vi.fn>;
 }
 interface FakePanel {
   id: string;
@@ -50,6 +52,10 @@ function makeApi(activeGroup: { id: string } | undefined) {
       api: {
         setActive: vi.fn(),
         close: vi.fn(() => map.delete(opts.id)),
+        updateParameters: vi.fn((p: Record<string, unknown>) => {
+          const pn = map.get(opts.id);
+          if (pn) pn.params = p;
+        }),
       },
     };
     map.set(opts.id, panel);
@@ -152,6 +158,30 @@ describe("editor service", () => {
       useStream.getState().sessions["stream:local:orders.new"],
     ).toBeUndefined();
     expect(mocks.unsubscribe).toHaveBeenCalled();
+  });
+
+  it("republishing into an open tab updates its params, not a new tab", () => {
+    openPublish("local");
+    expect(api.addPanel).toHaveBeenCalledTimes(1);
+
+    openPublish("local", "orders.created", '{"a":1}');
+    const panel = api.getPanel("publish:local");
+    expect(api.addPanel).toHaveBeenCalledTimes(1);
+    expect(panel?.api.updateParameters).toHaveBeenCalled();
+    expect(panel?.params).toMatchObject({
+      connId: "local",
+      subject: "orders.created",
+      payload: '{"a":1}',
+      type: "publish",
+    });
+  });
+
+  it("opening publish without a prefill does not clobber the open tab", () => {
+    openPublish("local", "orders.created", "draft");
+    const panel = api.getPanel("publish:local");
+    openPublish("local");
+    expect(panel?.api.updateParameters).not.toHaveBeenCalled();
+    expect(panel?.params).toMatchObject({ subject: "orders.created" });
   });
 
   it("tears down sessions via the no-UI fallback when no editor api is set", async () => {
