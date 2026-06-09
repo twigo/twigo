@@ -27,13 +27,15 @@ export function ServerPanel(props: IDockviewPanelProps) {
 }
 
 export function PublishPanel(props: IDockviewPanelProps) {
-  const { connId, subject, payload } = props.params as {
+  const { connId, subject, payload, seed } = props.params as {
     connId: string;
     subject?: string;
     payload?: string;
+    seed?: number;
   };
   return (
     <PublishEditor
+      key={seed}
       connId={connId}
       initialSubject={subject ?? ""}
       initialPayload={payload ?? ""}
