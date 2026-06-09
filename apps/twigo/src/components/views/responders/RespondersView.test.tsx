@@ -11,11 +11,12 @@ vi.mock("@/lib/template", () => ({
 }));
 vi.mock("@/lib/editor", () => ({ openResponderTab: vi.fn() }));
 
-function setLive() {
-  useConnections.setState({
+function setLive(name: string) {
+  useConnections.setState((s) => ({
     connected: {
-      conn: {
-        name: "conn",
+      ...s.connected,
+      [name]: {
+        name,
         serverName: "s",
         serverVersion: "2",
         rttMs: 0,
@@ -24,7 +25,7 @@ function setLive() {
         connected: true,
       },
     },
-  });
+  }));
 }
 
 describe("RespondersView", () => {
@@ -34,25 +35,42 @@ describe("RespondersView", () => {
   });
   afterEach(cleanup);
 
-  it("shows an empty state when there are no responders", () => {
-    render(<RespondersView filter="" />);
-    expect(screen.getByText(/No responders yet/i)).toBeInTheDocument();
+  it("prompts to connect when there is no active connection", () => {
+    render(<RespondersView filter="" connId={null} />);
+    expect(screen.getByText(/Connect to a server/i)).toBeInTheDocument();
+  });
+
+  it("shows a connection-specific empty state", () => {
+    setLive("conn");
+    render(<RespondersView filter="" connId="conn" />);
+    expect(screen.getByText(/No responders for/i)).toBeInTheDocument();
   });
 
   it("lists a responder with its subject and a Start action", () => {
-    setLive();
+    setLive("conn");
     useResponder.getState().ensure("r1", "conn", "orders.get");
-    render(<RespondersView filter="" />);
+    render(<RespondersView filter="" connId="conn" />);
     expect(screen.getByText("orders.get")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Start responder" }),
     ).toBeEnabled();
   });
 
-  it("filters by subject", () => {
+  it("only shows responders for the active connection", () => {
+    setLive("a");
+    setLive("b");
+    useResponder.getState().ensure("ra", "a", "orders.get");
+    useResponder.getState().ensure("rb", "b", "users.create");
+    render(<RespondersView filter="" connId="a" />);
+    expect(screen.getByText("orders.get")).toBeInTheDocument();
+    expect(screen.queryByText("users.create")).not.toBeInTheDocument();
+  });
+
+  it("filters by subject within the connection", () => {
+    setLive("conn");
     useResponder.getState().ensure("r1", "conn", "orders.get");
     useResponder.getState().ensure("r2", "conn", "users.create");
-    render(<RespondersView filter="users" />);
+    render(<RespondersView filter="users" connId="conn" />);
     expect(screen.queryByText("orders.get")).not.toBeInTheDocument();
     expect(screen.getByText("users.create")).toBeInTheDocument();
   });

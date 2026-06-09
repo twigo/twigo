@@ -15,10 +15,15 @@ import { RespondersView } from "./responders/RespondersView";
 // Sidebar views (VS Code "viewlets"). One registry drives the activity bar and
 // the sidebar body. Record<View, …> makes a missing entry a compile error
 // (no more silent blank headers). A view without a Panel shows "coming soon".
+export interface ViewProps {
+  filter: string;
+  connId: string | null;
+}
+
 interface ViewDef {
   title: string;
   icon: LucideIcon;
-  Panel?: FC<{ filter: string }>;
+  Panel?: FC<ViewProps>;
 }
 
 export const VIEWS: Record<View, ViewDef> = {

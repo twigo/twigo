@@ -4,6 +4,7 @@ import { cn } from "@twigo/ui";
 import { useConnections } from "@/store/connections";
 import { useResponder } from "@/store/responder";
 import { openResponderTab } from "@/lib/editor";
+import type { ViewProps } from "@/components/views/registry";
 
 function IconButton({
   label,
@@ -30,20 +31,31 @@ function IconButton({
   );
 }
 
-export function RespondersView({ filter }: { filter: string }) {
+export function RespondersView({ filter, connId }: ViewProps) {
   const sessions = useResponder((s) => s.sessions);
-  const connected = useConnections((s) => s.connected);
+  const live = useConnections(
+    (s) => !!(connId && s.connected[connId]?.connected),
+  );
   const list = Object.values(sessions)
+    .filter((s) => s.connId === connId)
     .filter((s) =>
       s.config.subject.toLowerCase().includes(filter.toLowerCase()),
     )
     .sort((a, b) => a.config.subject.localeCompare(b.config.subject));
 
-  if (list.length === 0) {
+  if (!connId) {
     return (
       <p className="px-2 py-3 text-xs text-muted-foreground">
-        No responders yet. Right-click a subject → “Mock this subject…”, or use
-        the responder button in the editor toolbar.
+        Connect to a server to manage responders.
+      </p>
+    );
+  }
+
+  if (list.length === 0) {
+    return (
+      <p className="px-2 py-3 text-xs leading-relaxed text-muted-foreground">
+        No responders for <span className="font-mono">{connId}</span> yet.
+        Right-click a subject → “Mock this subject…”.
       </p>
     );
   }
@@ -51,7 +63,6 @@ export function RespondersView({ filter }: { filter: string }) {
   return (
     <ul className="space-y-0.5">
       {list.map((s) => {
-        const live = connected[s.connId]?.connected === true;
         return (
           <li
             key={s.id}
@@ -75,7 +86,7 @@ export function RespondersView({ filter }: { filter: string }) {
                   {s.config.subject || "(no subject)"}
                 </span>
                 <span className="block truncate text-[10px] text-muted-foreground">
-                  {s.connId} · {s.config.mode} · {s.handled} handled
+                  {s.config.mode} · {s.handled} handled
                 </span>
               </span>
             </button>
