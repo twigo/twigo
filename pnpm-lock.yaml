@@ -38,6 +38,9 @@ importers:
 
   apps/twigo:
     dependencies:
+      '@codemirror/autocomplete':
+        specifier: ^6.20.3
+        version: 6.20.3
       '@jitl/quickjs-singlefile-browser-release-sync':
         specifier: ^0.32.0
         version: 0.32.0
@@ -132,6 +135,9 @@ importers:
 
   libs/ui:
     dependencies:
+      '@codemirror/autocomplete':
+        specifier: ^6.20.3
+        version: 6.20.3
       '@codemirror/lang-json':
         specifier: ^6.0.2
         version: 6.0.2

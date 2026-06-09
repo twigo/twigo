@@ -9,6 +9,7 @@ import {
   type ReplyOutcome,
 } from "@/store/responder";
 import { render, buildMsgContext, type RenderResult } from "@/lib/template";
+import { makeTemplateCompletion } from "@/lib/template-completion";
 import type { IncomingMessage } from "@/lib/api";
 
 const MODES: { key: ResponderMode; label: string; hint: string }[] = [
@@ -135,6 +136,16 @@ export function ResponderEditor({
     [lastRequest],
   );
 
+  const completion = useMemo(
+    () =>
+      makeTemplateCompletion(() => {
+        const last = useResponder.getState().sessions[id]?.lastRequest ?? null;
+        const c = buildMsgContext(last ?? SAMPLE);
+        return { $msg: c, $json: c.body };
+      }),
+    [id],
+  );
+
   useEffect(() => {
     let alive = true;
     void render(template, previewCtx).then((r) => {
@@ -257,6 +268,7 @@ export function ResponderEditor({
           value={template}
           language="json"
           onChange={(v) => set(id, { template: v })}
+          completion={completion}
           className="min-h-0 flex-1"
         />
       </div>
