@@ -4,21 +4,29 @@ import type {
   IDockviewPanelHeaderProps,
 } from "dockview-react";
 import { useStream } from "@/store/stream";
+import { useResponder } from "@/store/responder";
 import {
   StreamPanel,
   ServerPanel,
   PublishPanel,
+  ResponderPanel,
   SettingsPanel,
   StreamTab,
   ServerTab,
   PublishTab,
+  ResponderTab,
   SettingsTab,
 } from "./panels";
 
 // Editor inputs (VS Code model). One registry drives the Dockview component &
 // tab maps and connection-scoped teardown, so a new tab type is a single entry
 // and an omission is a compile error (Record<EditorType, …>).
-export type EditorType = "stream" | "settings" | "server" | "publish";
+export type EditorType =
+  | "stream"
+  | "settings"
+  | "server"
+  | "publish"
+  | "responder";
 
 interface EditorDef {
   component: FC<IDockviewPanelProps>;
@@ -40,6 +48,14 @@ export const EDITORS: Record<EditorType, EditorDef> = {
   },
   server: { component: ServerPanel, tab: ServerTab, connScoped: true },
   publish: { component: PublishPanel, tab: PublishTab, connScoped: true },
+  responder: {
+    component: ResponderPanel,
+    tab: ResponderTab,
+    connScoped: true,
+    dispose: (id) => {
+      useResponder.getState().remove(id);
+    },
+  },
   settings: { component: SettingsPanel, tab: SettingsTab },
 };
 

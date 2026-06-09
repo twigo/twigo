@@ -1,5 +1,6 @@
 import type { DockviewApi } from "dockview-react";
 import { useStream } from "@/store/stream";
+import { useResponder } from "@/store/responder";
 import { EDITORS, type EditorType } from "@/components/editor/registry";
 
 // Editor "inputs" (VS Code model): a type + a stable id. Opening the same id
@@ -33,6 +34,10 @@ function serverEditorId(connId: string): string {
 
 function publishEditorId(connId: string): string {
   return `publish:${encodeURIComponent(connId)}`;
+}
+
+function responderEditorId(connId: string, key: string): string {
+  return `responder:${encodeURIComponent(connId)}:${encodeURIComponent(key)}`;
 }
 
 function openEditor(desc: EditorDescriptor): void {
@@ -100,6 +105,21 @@ export function openPublish(
       seed: publishSeed,
     },
     replaceParams: hasPrefill,
+  });
+}
+
+let responderSeed = 0;
+
+/** Open an auto-responder/mock tab, optionally pre-targeting a subject. */
+export function openResponder(connId: string, subject?: string) {
+  const seeded = subject?.trim() ? subject : `new-${(responderSeed += 1)}`;
+  const id = responderEditorId(connId, seeded);
+  useResponder.getState().ensure(id, connId, subject ?? "");
+  openEditor({
+    type: "responder",
+    id,
+    title: subject?.trim() ? `Mock ${subject}` : "Responder",
+    params: { id, connId, subject: subject ?? "" },
   });
 }
 
