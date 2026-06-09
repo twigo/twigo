@@ -121,9 +121,9 @@ export async function publish(
   connId: string,
   subject: string,
   payload: string,
-  reply?: string | null,
+  headers: [string, string][] = [],
 ): Promise<void> {
-  await invoke("publish", { connId, subject, payload, reply: reply ?? null });
+  await invoke("publish", { connId, subject, payload, headers });
 }
 
 export function request(
@@ -131,11 +131,13 @@ export function request(
   subject: string,
   payload: string,
   timeoutMs?: number | null,
+  headers: [string, string][] = [],
 ): Promise<IncomingMessage> {
   return invoke<IncomingMessage>("request", {
     connId,
     subject,
     payload,
     timeoutMs: timeoutMs ?? null,
+    headers,
   });
 }

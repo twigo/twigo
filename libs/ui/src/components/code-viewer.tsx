@@ -84,11 +84,14 @@ export function CodeViewer({
   value,
   language = "text",
   className,
+  onChange,
 }: {
   value: string;
   language?: "json" | "text";
   className?: string;
+  onChange?: (value: string) => void;
 }) {
+  const editable = onChange !== undefined;
   return (
     <div
       className={cn(
@@ -98,12 +101,14 @@ export function CodeViewer({
     >
       <CodeMirror
         value={value}
-        readOnly
+        editable={editable}
+        readOnly={!editable}
         height="100%"
         style={{ height: "100%" }}
         theme={editorTheme}
         extensions={[...LANGUAGE[language], ...commonExtensions]}
         basicSetup={basicSetup}
+        onChange={onChange}
       />
     </div>
   );

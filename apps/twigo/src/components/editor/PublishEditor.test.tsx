@@ -37,16 +37,21 @@ describe("PublishEditor", () => {
 
   it("publishes the subject and payload", async () => {
     setLive(true);
-    render(<PublishEditor connId="c" initialSubject="orders.created" />);
-    await userEvent.type(screen.getByLabelText("Payload"), "hello");
-    await userEvent.click(screen.getByRole("button", { name: /publish/i }));
-    expect(publish).toHaveBeenCalledWith("c", "orders.created", "hello");
+    render(
+      <PublishEditor
+        connId="c"
+        initialSubject="orders.created"
+        initialPayload="hello"
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Publish" }));
+    expect(publish).toHaveBeenCalledWith("c", "orders.created", "hello", []);
   });
 
   it("disables sending when the connection is not live", () => {
     setLive(false);
     render(<PublishEditor connId="c" initialSubject="orders.created" />);
-    expect(screen.getByRole("button", { name: /publish/i })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /request/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Request" })).toBeDisabled();
   });
 });
