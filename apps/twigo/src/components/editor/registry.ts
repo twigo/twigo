@@ -4,7 +4,6 @@ import type {
   IDockviewPanelHeaderProps,
 } from "dockview-react";
 import { useStream } from "@/store/stream";
-import { useResponder } from "@/store/responder";
 import {
   StreamPanel,
   ServerPanel,
@@ -48,14 +47,10 @@ export const EDITORS: Record<EditorType, EditorDef> = {
   },
   server: { component: ServerPanel, tab: ServerTab, connScoped: true },
   publish: { component: PublishPanel, tab: PublishTab, connScoped: true },
-  responder: {
-    component: ResponderPanel,
-    tab: ResponderTab,
-    connScoped: true,
-    dispose: (id) => {
-      useResponder.getState().remove(id);
-    },
-  },
+  // Responders are managed from the Responders view, not the tab: closing the
+  // tab leaves the mock running. The session is torn down on conn loss
+  // (closeEditorsForConn) or explicit delete, so there's no per-tab dispose.
+  responder: { component: ResponderPanel, tab: ResponderTab, connScoped: true },
   settings: { component: SettingsPanel, tab: SettingsTab },
 };
 

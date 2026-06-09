@@ -123,6 +123,16 @@ export function openResponder(connId: string, subject?: string) {
   });
 }
 
+/** Focus or reopen the editor tab for an existing responder session. */
+export function openResponderTab(id: string, connId: string, subject: string) {
+  openEditor({
+    type: "responder",
+    id,
+    title: subject.trim() ? `Mock ${subject}` : "Responder",
+    params: { id, connId, subject },
+  });
+}
+
 /** Open a server-info tab for a connection. */
 export function openServerInfo(connId: string) {
   openEditor({
@@ -140,6 +150,13 @@ export function openSettings() {
 
 /** Close every conn-scoped editor tab when a connection drops. */
 export function closeEditorsForConn(connId: string) {
+  // Responders are tab-independent, so close their sessions explicitly (a
+  // closed tab leaves the mock running; only conn loss or delete stops it).
+  const responder = useResponder.getState();
+  for (const s of Object.values(responder.sessions)) {
+    if (s.connId === connId) responder.remove(s.id);
+  }
+
   if (!api) {
     // No UI surface: tear down the only store-backed editors (streams).
     const { sessions, close } = useStream.getState();

@@ -1,6 +1,7 @@
 import type { FC } from "react";
 import {
   Radio,
+  Webhook,
   Layers,
   Database,
   Box,
@@ -9,6 +10,7 @@ import {
 } from "lucide-react";
 import type { View } from "@/store/ui";
 import { SubjectsView } from "./subjects/SubjectsView";
+import { RespondersView } from "./responders/RespondersView";
 
 // Sidebar views (VS Code "viewlets"). One registry drives the activity bar and
 // the sidebar body. Record<View, …> makes a missing entry a compile error
@@ -21,6 +23,7 @@ interface ViewDef {
 
 export const VIEWS: Record<View, ViewDef> = {
   subjects: { title: "Subjects", icon: Radio, Panel: SubjectsView },
+  responders: { title: "Responders", icon: Webhook, Panel: RespondersView },
   jetstream: { title: "Streams & Consumers", icon: Layers },
   kv: { title: "KV Buckets", icon: Database },
   objectstore: { title: "Object Stores", icon: Box },
