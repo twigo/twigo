@@ -1,5 +1,5 @@
 import { useConnections } from "@/store/connections";
-import { openPublish } from "@/lib/editor";
+import { openPublish, openResponder } from "@/lib/editor";
 
 function liveTarget(): string | undefined {
   const { activeContext, connected } = useConnections.getState();
@@ -11,4 +11,9 @@ function liveTarget(): string | undefined {
 export function newPublish() {
   const target = liveTarget();
   if (target) openPublish(target);
+}
+
+export function newResponder() {
+  const target = liveTarget();
+  if (target) openResponder(target);
 }

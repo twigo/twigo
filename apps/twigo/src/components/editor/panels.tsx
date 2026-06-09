@@ -4,6 +4,7 @@ import {
   Settings,
   Server,
   Send,
+  Webhook,
   type LucideIcon,
 } from "lucide-react";
 import type {
@@ -14,6 +15,7 @@ import { cn } from "@twigo/ui";
 import { MessageStream } from "./MessageStream";
 import { ServerInfoPanel } from "./ServerInfoPanel";
 import { PublishEditor } from "./PublishEditor";
+import { ResponderEditor } from "./ResponderEditor";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 
 export function StreamPanel(props: IDockviewPanelProps) {
@@ -40,6 +42,17 @@ export function PublishPanel(props: IDockviewPanelProps) {
       initialSubject={subject ?? ""}
       initialPayload={payload ?? ""}
     />
+  );
+}
+
+export function ResponderPanel(props: IDockviewPanelProps) {
+  const { id, connId, subject } = props.params as {
+    id: string;
+    connId: string;
+    subject?: string;
+  };
+  return (
+    <ResponderEditor id={id} connId={connId} initialSubject={subject ?? ""} />
   );
 }
 
@@ -115,6 +128,19 @@ export function PublishTab(props: IDockviewPanelHeaderProps) {
   return (
     <ClosableTab
       icon={Send}
+      iconClass="text-brand"
+      title={props.api.title}
+      onClose={() => {
+        props.api.close();
+      }}
+    />
+  );
+}
+
+export function ResponderTab(props: IDockviewPanelHeaderProps) {
+  return (
+    <ClosableTab
+      icon={Webhook}
       iconClass="text-brand"
       title={props.api.title}
       onClose={() => {

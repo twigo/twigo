@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronRight, Radio, Send } from "lucide-react";
+import { ChevronRight, Radio, Send, Webhook } from "lucide-react";
 import {
   cn,
   ContextMenu,
@@ -9,7 +9,7 @@ import {
 } from "@twigo/ui";
 import { type SubjectNode } from "@twigo/utils";
 import { useStream } from "@/store/stream";
-import { openPublish } from "@/lib/editor";
+import { openPublish, openResponder } from "@/lib/editor";
 
 function formatRate(rate: number): string {
   if (rate >= 10) return Math.round(rate).toString();
@@ -129,6 +129,14 @@ function SubjectRow({
           >
             <Send />
             Publish to subject
+          </ContextMenuItem>
+          <ContextMenuItem
+            onSelect={() => {
+              openResponder(connId, subject);
+            }}
+          >
+            <Webhook />
+            Mock this subject…
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>

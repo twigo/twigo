@@ -4,7 +4,13 @@ import { createPersistStorage } from "@/lib/persist-storage";
 
 export type Theme = "light" | "dark";
 
-export type View = "subjects" | "jetstream" | "kv" | "objectstore" | "monitor";
+export type View =
+  | "subjects"
+  | "responders"
+  | "jetstream"
+  | "kv"
+  | "objectstore"
+  | "monitor";
 
 interface UiState {
   theme: Theme;

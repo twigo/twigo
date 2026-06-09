@@ -1,5 +1,6 @@
 import type { DockviewApi } from "dockview-react";
 import { useStream } from "@/store/stream";
+import { useResponder } from "@/store/responder";
 import { EDITORS, type EditorType } from "@/components/editor/registry";
 
 // Editor "inputs" (VS Code model): a type + a stable id. Opening the same id
@@ -33,6 +34,10 @@ function serverEditorId(connId: string): string {
 
 function publishEditorId(connId: string): string {
   return `publish:${encodeURIComponent(connId)}`;
+}
+
+function responderEditorId(connId: string, key: string): string {
+  return `responder:${encodeURIComponent(connId)}:${encodeURIComponent(key)}`;
 }
 
 function openEditor(desc: EditorDescriptor): void {
@@ -103,6 +108,31 @@ export function openPublish(
   });
 }
 
+let responderSeed = 0;
+
+/** Open an auto-responder/mock tab, optionally pre-targeting a subject. */
+export function openResponder(connId: string, subject?: string) {
+  const seeded = subject?.trim() ? subject : `new-${(responderSeed += 1)}`;
+  const id = responderEditorId(connId, seeded);
+  useResponder.getState().ensure(id, connId, subject ?? "");
+  openEditor({
+    type: "responder",
+    id,
+    title: subject?.trim() ? `Mock ${subject}` : "Responder",
+    params: { id, connId, subject: subject ?? "" },
+  });
+}
+
+/** Focus or reopen the editor tab for an existing responder session. */
+export function openResponderTab(id: string, connId: string, subject: string) {
+  openEditor({
+    type: "responder",
+    id,
+    title: subject.trim() ? `Mock ${subject}` : "Responder",
+    params: { id, connId, subject },
+  });
+}
+
 /** Open a server-info tab for a connection. */
 export function openServerInfo(connId: string) {
   openEditor({
@@ -120,6 +150,13 @@ export function openSettings() {
 
 /** Close every conn-scoped editor tab when a connection drops. */
 export function closeEditorsForConn(connId: string) {
+  // Responders are tab-independent, so close their sessions explicitly (a
+  // closed tab leaves the mock running; only conn loss or delete stops it).
+  const responder = useResponder.getState();
+  for (const s of Object.values(responder.sessions)) {
+    if (s.connId === connId) responder.remove(s.id);
+  }
+
   if (!api) {
     // No UI surface: tear down the only store-backed editors (streams).
     const { sessions, close } = useStream.getState();
