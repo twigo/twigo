@@ -7,7 +7,8 @@ import { VIEWS } from "./registry";
 export function Sidebar() {
   const activeView = useUi((s) => s.activeView);
   const [filter, setFilter] = useState("");
-  const { title, Panel } = VIEWS[activeView];
+  const { title, Panel } =
+    (VIEWS as Partial<typeof VIEWS>)[activeView] ?? VIEWS.subjects;
 
   return (
     <aside className="flex h-full w-full flex-col border-r border-sidebar-border bg-sidebar">
