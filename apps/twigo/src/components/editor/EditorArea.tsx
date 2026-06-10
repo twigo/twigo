@@ -14,7 +14,12 @@ import { useUi } from "@/store/ui";
 import { useStream } from "@/store/stream";
 import { useConnections } from "@/store/connections";
 import { useWorkspace } from "@/store/workspace";
-import { setEditorApi, openStream } from "@/lib/editor";
+import {
+  setEditorApi,
+  openStream,
+  isReplacingLayout,
+  setReplacingLayout,
+} from "@/lib/editor";
 import { newPublish } from "@/lib/actions";
 import { editorComponents, editorTabComponents } from "./registry";
 import { NewTabButton } from "./NewTabButton";
@@ -67,7 +72,6 @@ export function EditorArea() {
   // The connection whose tab layout is currently shown; layouts are per-context
   // and swapped when the active connection changes.
   const shownRef = useRef<string>("");
-  const swappingRef = useRef(false);
 
   const theme = useMemo<DockviewTheme>(() => {
     const base = uiTheme === "dark" ? themeDark : themeLight;
@@ -96,8 +100,11 @@ export function EditorArea() {
       }
     }
 
-    // These dockview listeners are disposed with the api on unmount.
+    // These dockview listeners are disposed with the api on unmount. They all
+    // bail while a layout swap/teardown is in flight, so bulk panel removals
+    // don't tear down live streams or persist an empty layout.
     api.onDidActivePanelChange((panel) => {
+      if (isReplacingLayout()) return;
       subscribeActiveStream(api);
       const id = panel?.id;
       useStream
@@ -106,13 +113,14 @@ export function EditorArea() {
     });
 
     api.onDidRemovePanel((panel) => {
+      if (isReplacingLayout()) return;
       if (useStream.getState().sessions[panel.id]) {
         void useStream.getState().close(panel.id);
       }
     });
 
     api.onDidLayoutChange(() => {
-      if (swappingRef.current) return;
+      if (isReplacingLayout()) return;
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         useWorkspace.getState().setLayout(shownRef.current, api.toJSON());
@@ -130,19 +138,22 @@ export function EditorArea() {
       if (!api) return;
       const conn = s.activeContext ?? "";
       if (conn !== shownRef.current) {
-        swappingRef.current = true;
-        useWorkspace.getState().setLayout(shownRef.current, api.toJSON());
-        shownRef.current = conn;
-        api.clear();
-        const next = useWorkspace.getState().layouts[conn];
-        if (next) {
-          try {
-            api.fromJSON(next);
-          } catch {
-            api.clear();
+        setReplacingLayout(true);
+        try {
+          useWorkspace.getState().setLayout(shownRef.current, api.toJSON());
+          shownRef.current = conn;
+          api.clear();
+          const next = useWorkspace.getState().layouts[conn];
+          if (next) {
+            try {
+              api.fromJSON(next);
+            } catch {
+              api.clear();
+            }
           }
+        } finally {
+          setReplacingLayout(false);
         }
-        swappingRef.current = false;
       }
       subscribeActiveStream(api);
     });
