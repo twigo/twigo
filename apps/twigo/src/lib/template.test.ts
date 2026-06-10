@@ -117,6 +117,12 @@ describe("render", () => {
     if (!r.ok) expect(r.error).toMatch(/deep|undefined|cannot/i);
   });
 
+  it("caps oversized rendered output", async () => {
+    const r = await render('{{ "x".repeat(2000000) }}', ctx({}));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/exceeds/i);
+  });
+
   it("interrupts a runaway expression via the deadline", async () => {
     const r = await render("{{ (() => { while (true) {} })() }}", ctx({}));
     expect(r.ok).toBe(false);

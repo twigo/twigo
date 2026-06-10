@@ -157,7 +157,9 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
         </button>
         <button
           type="button"
-          className="flex items-center gap-1.5 rounded px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground [&_svg]:size-3.5"
+          disabled
+          title="Import nats contexts into ~/.config/nats/context (in-app editing coming soon)"
+          className="flex items-center gap-1.5 rounded px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent [&_svg]:size-3.5"
         >
           <Plus />
           Add connection…

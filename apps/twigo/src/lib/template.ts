@@ -11,6 +11,7 @@ import type { IncomingMessage } from "@/lib/api";
 const EVAL_TIMEOUT_MS = 1000;
 const MEMORY_LIMIT = 16 * 1024 * 1024;
 const STACK_LIMIT = 512 * 1024;
+const MAX_OUTPUT = 1024 * 1024;
 
 let modulePromise: Promise<QuickJSWASMModule> | null = null;
 function loadModule(): Promise<QuickJSWASMModule> {
@@ -103,7 +104,15 @@ function prepare(ctx: QuickJSContext, msg: MsgContext): void {
     },
     $json: msg.body,
   });
-  const setup = `const __d=${data};
+  // Hand the bus data to the VM as a string value and JSON.parse it *inside*,
+  // never concatenated into source — so payload bytes can't influence the code
+  // (e.g. U+2028/U+2029, which JSON.stringify doesn't escape).
+  const dataHandle = ctx.newString(data);
+  ctx.setProp(ctx.global, "__twigo_data", dataHandle);
+  dataHandle.dispose();
+
+  const setup = `const __d=JSON.parse(globalThis.__twigo_data);
+delete globalThis.__twigo_data;
 globalThis.$msg=__d.$msg;
 globalThis.$json=__d.$json;
 globalThis.$now=new Date().toISOString();
@@ -157,6 +166,12 @@ export async function render(
     for (const seg of segments) {
       out +=
         "literal" in seg ? seg.literal : stringify(evalExpr(ctx, seg.expr));
+      if (out.length > MAX_OUTPUT) {
+        return {
+          ok: false,
+          error: `rendered output exceeds ${MAX_OUTPUT} bytes`,
+        };
+      }
     }
     return { ok: true, output: out };
   } catch (e) {
