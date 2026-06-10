@@ -32,12 +32,11 @@ function IconButton({
 }
 
 export function RespondersView({ filter, connId }: ViewProps) {
-  const sessions = useResponder((s) => s.sessions);
+  const conns = useResponder((s) => (connId ? s.byConn[connId] : undefined));
   const live = useConnections(
     (s) => !!(connId && s.connected[connId]?.connected),
   );
-  const list = Object.values(sessions)
-    .filter((s) => s.connId === connId)
+  const list = Object.values(conns ?? {})
     .filter((s) =>
       s.config.subject.toLowerCase().includes(filter.toLowerCase()),
     )
@@ -94,7 +93,9 @@ export function RespondersView({ filter, connId }: ViewProps) {
               {s.listening ? (
                 <IconButton
                   label="Stop responder"
-                  onClick={() => void useResponder.getState().stop(s.id)}
+                  onClick={() =>
+                    void useResponder.getState().stop(s.connId, s.id)
+                  }
                 >
                   <Square />
                 </IconButton>
@@ -102,14 +103,16 @@ export function RespondersView({ filter, connId }: ViewProps) {
                 <IconButton
                   label="Start responder"
                   disabled={!live || s.config.subject.trim() === ""}
-                  onClick={() => void useResponder.getState().start(s.id)}
+                  onClick={() =>
+                    void useResponder.getState().start(s.connId, s.id)
+                  }
                 >
                   <Play />
                 </IconButton>
               )}
               <IconButton
                 label="Delete responder"
-                onClick={() => useResponder.getState().remove(s.id)}
+                onClick={() => useResponder.getState().remove(s.connId, s.id)}
               >
                 <Trash2 />
               </IconButton>

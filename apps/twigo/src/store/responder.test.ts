@@ -51,15 +51,15 @@ function deliver(msg: IncomingMessage) {
   channel.onmessage?.(msg);
 }
 
-function sess(id = "r1") {
-  const s = useResponder.getState().sessions[id];
-  if (!s) throw new Error(`no session ${id}`);
+function sess(id = "r1", connId = "conn") {
+  const s = useResponder.getState().byConn[connId]?.[id];
+  if (!s) throw new Error(`no session ${connId}/${id}`);
   return s;
 }
 
 describe("responder store", () => {
   beforeEach(() => {
-    useResponder.setState({ sessions: {} });
+    useResponder.setState({ byConn: {} });
     subscribe.mockReset().mockResolvedValue(undefined);
     unsubscribe.mockReset().mockResolvedValue(undefined);
     publish.mockReset().mockResolvedValue(undefined);
@@ -77,7 +77,7 @@ describe("responder store", () => {
   it("auto-replies to a request with the rendered template", async () => {
     render.mockResolvedValue({ ok: true, output: "PONG" });
     useResponder.getState().ensure("r1", "conn", "svc.get");
-    await useResponder.getState().start("r1");
+    await useResponder.getState().start("conn", "r1");
     expect(subscribe).toHaveBeenCalledWith(
       "conn",
       "responder::r1",
@@ -94,7 +94,7 @@ describe("responder store", () => {
   it("ignores messages without a reply subject", async () => {
     render.mockResolvedValue({ ok: true, output: "PONG" });
     useResponder.getState().ensure("r1", "conn", "svc.get");
-    await useResponder.getState().start("r1");
+    await useResponder.getState().start("conn", "r1");
 
     deliver(req({ reply: null }));
     await waitFor(() => sess().log.length > 0);
@@ -105,8 +105,8 @@ describe("responder store", () => {
   it("does not answer in down mode", async () => {
     render.mockResolvedValue({ ok: true, output: "PONG" });
     useResponder.getState().ensure("r1", "conn", "svc.get");
-    useResponder.getState().setConfig("r1", { mode: "down" });
-    await useResponder.getState().start("r1");
+    useResponder.getState().setConfig("conn", "r1", { mode: "down" });
+    await useResponder.getState().start("conn", "r1");
 
     deliver(req());
     await waitFor(() => sess().log.length > 0);
@@ -116,7 +116,7 @@ describe("responder store", () => {
   it("replies with service-error headers when the template fails", async () => {
     render.mockResolvedValue({ ok: false, error: "boom" });
     useResponder.getState().ensure("r1", "conn", "svc.get");
-    await useResponder.getState().start("r1");
+    await useResponder.getState().start("conn", "r1");
 
     deliver(req());
     await waitFor(() => publish.mock.calls.length > 0);
@@ -129,8 +129,8 @@ describe("responder store", () => {
   it("stops listening and unsubscribes", async () => {
     render.mockResolvedValue({ ok: true, output: "PONG" });
     useResponder.getState().ensure("r1", "conn", "svc.get");
-    await useResponder.getState().start("r1");
-    await useResponder.getState().stop("r1");
+    await useResponder.getState().start("conn", "r1");
+    await useResponder.getState().stop("conn", "r1");
     expect(unsubscribe).toHaveBeenCalledWith("responder::r1");
     expect(sess().listening).toBe(false);
   });

@@ -79,45 +79,58 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-interface ResponderState {
-  sessions: Record<string, ResponderSession>;
-  ensure: (id: string, connId: string, subject: string) => void;
-  setConfig: (id: string, patch: Partial<ResponderConfig>) => void;
-  start: (id: string) => Promise<void>;
-  stop: (id: string) => Promise<void>;
-  remove: (id: string) => void;
-  clearLog: (id: string) => void;
+function omitKey<T>(obj: Record<string, T>, key: string): Record<string, T> {
+  const { [key]: _removed, ...rest } = obj;
+  return rest;
 }
 
-function patch(id: string, fn: (s: ResponderSession) => ResponderSession) {
+interface ResponderState {
+  byConn: Record<string, Record<string, ResponderSession>>;
+  ensure: (id: string, connId: string, subject: string) => void;
+  setConfig: (
+    connId: string,
+    id: string,
+    patch: Partial<ResponderConfig>,
+  ) => void;
+  start: (connId: string, id: string) => Promise<void>;
+  stop: (connId: string, id: string) => Promise<void>;
+  remove: (connId: string, id: string) => void;
+  removeConn: (connId: string) => void;
+  clearLog: (connId: string, id: string) => void;
+}
+
+function patch(
+  connId: string,
+  id: string,
+  fn: (s: ResponderSession) => ResponderSession,
+) {
   useResponder.setState((state) => {
-    const cur = state.sessions[id];
-    if (!cur) return state;
-    return { sessions: { ...state.sessions, [id]: fn(cur) } };
+    const conn = state.byConn[connId];
+    const cur = conn?.[id];
+    if (!conn || !cur) return state;
+    return {
+      byConn: { ...state.byConn, [connId]: { ...conn, [id]: fn(cur) } },
+    };
   });
 }
 
-function omit<T>(obj: Record<string, T>, key: string): Record<string, T> {
-  return Object.fromEntries(Object.entries(obj).filter(([k]) => k !== key));
-}
-
-function appendLog(id: string, entry: ResponderLog) {
-  patch(id, (s) => ({
+function appendLog(connId: string, id: string, entry: ResponderLog) {
+  patch(connId, id, (s) => ({
     ...s,
     handled: s.handled + 1,
     log: [entry, ...s.log].slice(0, LOG_CAP),
   }));
 }
 
-async function handleMessage(id: string, m: IncomingMessage) {
-  const session = useResponder.getState().sessions[id];
+async function handleMessage(connId: string, id: string, m: IncomingMessage) {
+  const session = useResponder.getState().byConn[connId]?.[id];
   const rt = runtimes.get(id);
   if (!session || !session.listening || !rt) return;
 
   rt.seq += 1;
   const entryId = rt.seq;
   const cfg = session.config;
-  patch(id, (s) => ({ ...s, lastRequest: m }));
+  patch(connId, id, (s) => ({ ...s, lastRequest: m }));
   const base: Omit<ResponderLog, "outcome" | "ms"> = {
     id: entryId,
     receivedAt: Date.now(),
@@ -126,7 +139,7 @@ async function handleMessage(id: string, m: IncomingMessage) {
   };
 
   if (!m.reply) {
-    appendLog(id, {
+    appendLog(connId, id, {
       ...base,
       outcome: { kind: "skipped", reason: "no reply subject" },
       ms: 0,
@@ -134,7 +147,7 @@ async function handleMessage(id: string, m: IncomingMessage) {
     return;
   }
   if (cfg.mode === "down") {
-    appendLog(id, {
+    appendLog(connId, id, {
       ...base,
       outcome: { kind: "skipped", reason: "simulated no-responder" },
       ms: 0,
@@ -149,14 +162,14 @@ async function handleMessage(id: string, m: IncomingMessage) {
 
   if (!rendered.ok) {
     try {
-      await apiPublish(session.connId, m.reply, "", [
+      await apiPublish(connId, m.reply, "", [
         [ERROR_HEADER, rendered.error.slice(0, 200)],
         [ERROR_CODE_HEADER, "500"],
       ]);
     } catch {
       /* connection gone; the local log still records the failure */
     }
-    appendLog(id, {
+    appendLog(connId, id, {
       ...base,
       outcome: { kind: "error", error: rendered.error },
       ms,
@@ -174,18 +187,18 @@ async function handleMessage(id: string, m: IncomingMessage) {
       : cfg.headers;
   try {
     await apiPublish(
-      session.connId,
+      connId,
       m.reply,
       rendered.output,
       headers as [string, string][],
     );
-    appendLog(id, {
+    appendLog(connId, id, {
       ...base,
       outcome: { kind: "sent", output: rendered.output },
       ms,
     });
   } catch (e) {
-    appendLog(id, {
+    appendLog(connId, id, {
       ...base,
       outcome: { kind: "error", error: String(e) },
       ms,
@@ -196,32 +209,35 @@ async function handleMessage(id: string, m: IncomingMessage) {
 export const useResponder = create<ResponderState>()(
   persist(
     (set, get) => ({
-      sessions: {},
+      byConn: {},
 
       ensure: (id, connId, subject) => {
-        if (get().sessions[id]) return;
+        if (get().byConn[connId]?.[id]) return;
         set((state) => ({
-          sessions: {
-            ...state.sessions,
-            [id]: {
-              id,
-              connId,
-              subId: null,
-              config: defaultConfig(subject),
-              listening: false,
-              handled: 0,
-              log: [],
-              lastRequest: null,
+          byConn: {
+            ...state.byConn,
+            [connId]: {
+              ...(state.byConn[connId] ?? {}),
+              [id]: {
+                id,
+                connId,
+                subId: null,
+                config: defaultConfig(subject),
+                listening: false,
+                handled: 0,
+                log: [],
+                lastRequest: null,
+              },
             },
           },
         }));
       },
 
-      setConfig: (id, p) =>
-        patch(id, (s) => ({ ...s, config: { ...s.config, ...p } })),
+      setConfig: (connId, id, p) =>
+        patch(connId, id, (s) => ({ ...s, config: { ...s.config, ...p } })),
 
-      start: async (id) => {
-        const session = get().sessions[id];
+      start: async (connId, id) => {
+        const session = get().byConn[connId]?.[id];
         if (!session || session.listening) return;
         const subject = session.config.subject.trim();
         if (!subject) return;
@@ -230,24 +246,24 @@ export const useResponder = create<ResponderState>()(
         const subId = `responder::${id}`;
         const channel = new Channel<IncomingMessage>();
         channel.onmessage = (m) => {
-          void handleMessage(id, m);
+          void handleMessage(connId, id, m);
         };
         runtimes.set(id, { channel, seq: 0 });
-        patch(id, (s) => ({ ...s, subId, listening: true }));
+        patch(connId, id, (s) => ({ ...s, subId, listening: true }));
 
         try {
-          await apiSubscribe(session.connId, subId, subject, channel);
+          await apiSubscribe(connId, subId, subject, channel);
         } catch (e) {
           runtimes.delete(id);
-          patch(id, (s) => ({ ...s, subId: null, listening: false }));
+          patch(connId, id, (s) => ({ ...s, subId: null, listening: false }));
           throw e;
         }
       },
 
-      stop: async (id) => {
-        const session = get().sessions[id];
+      stop: async (connId, id) => {
+        const session = get().byConn[connId]?.[id];
         runtimes.delete(id);
-        patch(id, (s) => ({ ...s, listening: false, subId: null }));
+        patch(connId, id, (s) => ({ ...s, listening: false, subId: null }));
         if (session?.subId) {
           try {
             await apiUnsubscribe(session.subId);
@@ -257,15 +273,36 @@ export const useResponder = create<ResponderState>()(
         }
       },
 
-      remove: (id) => {
-        const session = get().sessions[id];
+      remove: (connId, id) => {
+        const session = get().byConn[connId]?.[id];
         runtimes.delete(id);
         if (session?.subId)
           void apiUnsubscribe(session.subId).catch(() => undefined);
-        set((state) => ({ sessions: omit(state.sessions, id) }));
+        set((state) => {
+          const conn = state.byConn[connId];
+          if (!conn) return state;
+          const next = omitKey(conn, id);
+          return {
+            byConn:
+              Object.keys(next).length > 0
+                ? { ...state.byConn, [connId]: next }
+                : omitKey(state.byConn, connId),
+          };
+        });
       },
 
-      clearLog: (id) => patch(id, (s) => ({ ...s, log: [], handled: 0 })),
+      removeConn: (connId) => {
+        const conn = get().byConn[connId];
+        if (!conn) return;
+        for (const s of Object.values(conn)) {
+          runtimes.delete(s.id);
+          if (s.subId) void apiUnsubscribe(s.subId).catch(() => undefined);
+        }
+        set((state) => ({ byConn: omitKey(state.byConn, connId) }));
+      },
+
+      clearLog: (connId, id) =>
+        patch(connId, id, (s) => ({ ...s, log: [], handled: 0 })),
     }),
     {
       name: "twigo-responders",
@@ -273,19 +310,24 @@ export const useResponder = create<ResponderState>()(
       storage: createPersistStorage(),
       // Persist config only; live runtime is rebuilt at launch (stopped).
       partialize: (state) => ({
-        sessions: Object.fromEntries(
-          Object.entries(state.sessions).map(([id, s]) => [
-            id,
-            {
-              id: s.id,
-              connId: s.connId,
-              subId: null,
-              config: s.config,
-              listening: false,
-              handled: 0,
-              log: [],
-              lastRequest: null,
-            },
+        byConn: Object.fromEntries(
+          Object.entries(state.byConn).map(([connId, sessions]) => [
+            connId,
+            Object.fromEntries(
+              Object.entries(sessions).map(([id, s]) => [
+                id,
+                {
+                  id: s.id,
+                  connId: s.connId,
+                  subId: null,
+                  config: s.config,
+                  listening: false,
+                  handled: 0,
+                  log: [],
+                  lastRequest: null,
+                },
+              ]),
+            ),
           ]),
         ),
       }),

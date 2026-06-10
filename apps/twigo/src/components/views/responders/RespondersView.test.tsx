@@ -30,7 +30,7 @@ function setLive(name: string) {
 
 describe("RespondersView", () => {
   beforeEach(() => {
-    useResponder.setState({ sessions: {} });
+    useResponder.setState({ byConn: {} });
     useConnections.setState({ connected: {} });
   });
   afterEach(cleanup);

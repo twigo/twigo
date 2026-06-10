@@ -150,12 +150,9 @@ export function openSettings() {
 
 /** Close every conn-scoped editor tab when a connection drops. */
 export function closeEditorsForConn(connId: string) {
-  // Responders are tab-independent, so close their sessions explicitly (a
-  // closed tab leaves the mock running; only conn loss or delete stops it).
-  const responder = useResponder.getState();
-  for (const s of Object.values(responder.sessions)) {
-    if (s.connId === connId) responder.remove(s.id);
-  }
+  // Responders are tab-independent (a closed tab leaves the mock running); a
+  // connection loss tears down its whole set.
+  useResponder.getState().removeConn(connId);
 
   if (!api) {
     // No UI surface: tear down the only store-backed editors (streams).
