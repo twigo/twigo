@@ -90,7 +90,11 @@ function connectionCommands(): Command[] {
       keywords: c.name,
       run: isConnected
         ? () => useConnections.getState().setActive(c.name)
-        : () => void useConnections.getState().connect(c.name),
+        : () => {
+            // Connect to and switch to it, matching the connection switcher.
+            useConnections.getState().setActive(c.name);
+            void useConnections.getState().connect(c.name);
+          },
     };
   });
 }

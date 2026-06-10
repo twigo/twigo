@@ -62,6 +62,18 @@ describe("command registry", () => {
     );
   });
 
+  it("connecting to a context also makes it active", () => {
+    useConnections.setState({
+      contexts: [ctx("prod-eu")],
+      connected: {},
+      activeContext: null,
+    });
+    getCommands()
+      .find((c) => c.id === "conn.prod-eu")
+      ?.run();
+    expect(useConnections.getState().activeContext).toBe("prod-eu");
+  });
+
   it("always offers the view-navigation commands", () => {
     const ids = getCommands().map((c) => c.id);
     expect(ids).toContain("view.subjects");
