@@ -160,6 +160,18 @@ describe("editor service", () => {
     expect(mocks.unsubscribe).toHaveBeenCalled();
   });
 
+  it("tears down a connection's background stream sessions (no open panel)", async () => {
+    // Streams persist across context switches, so a connection can have a live
+    // session with no panel in the shown layout; conn loss must still close it
+    // from the store, not only via open tabs.
+    await useStream.getState().open("stream:remote:bg", "remote", "bg");
+    expect(useStream.getState().sessions["stream:remote:bg"]).toBeDefined();
+    expect(api.getPanel("stream:remote:bg")).toBeUndefined();
+
+    closeEditorsForConn("remote");
+    expect(useStream.getState().sessions["stream:remote:bg"]).toBeUndefined();
+  });
+
   it("republishing into an open tab updates its params, not a new tab", () => {
     openPublish("local");
     expect(api.addPanel).toHaveBeenCalledTimes(1);
