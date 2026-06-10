@@ -1,7 +1,17 @@
-import { Sun, Moon, PlugZap, Plug, Gauge, Database } from "lucide-react";
+import {
+  Sun,
+  Moon,
+  PlugZap,
+  Plug,
+  Gauge,
+  Database,
+  Search,
+} from "lucide-react";
 import { fmtRtt } from "@twigo/utils";
 import { useUi } from "@/store/ui";
 import { useConnections } from "@/store/connections";
+import { usePalette } from "@/store/palette";
+import { fmtBinding } from "@/lib/commands";
 
 export function StatusBar() {
   const { theme, toggleTheme } = useUi();
@@ -41,6 +51,15 @@ export function StatusBar() {
         )}
       </div>
       <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => usePalette.getState().setOpen(true)}
+          title="Command palette"
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+        >
+          <Search className="size-3" />
+          <span className="opacity-90">{fmtBinding("mod+shift+p")}</span>
+        </button>
         <span className="opacity-80">Twigo v0.1.0</span>
         <button
           type="button"

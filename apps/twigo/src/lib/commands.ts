@@ -122,11 +122,21 @@ export function matchKeybinding(e: KeyboardEvent, binding: string): boolean {
 }
 
 export function fmtBinding(binding: string): string {
-  const parts = binding.split("+").map((p) => {
-    if (p === "mod") return IS_MAC ? "⌘" : "Ctrl";
-    if (p === "alt") return IS_MAC ? "⌥" : "Alt";
-    if (p === "shift") return IS_MAC ? "⇧" : "Shift";
-    return p.toUpperCase();
-  });
-  return parts.join(IS_MAC ? "" : "+");
+  const parts = binding.toLowerCase().split("+");
+  const has = (m: string) => parts.includes(m);
+  const key = (parts[parts.length - 1] ?? "").toUpperCase();
+  // macOS convention orders modifiers ⌃⌥⇧⌘ (Command last); elsewhere Ctrl first.
+  if (IS_MAC) {
+    return (
+      (has("alt") ? "⌥" : "") +
+      (has("shift") ? "⇧" : "") +
+      (has("mod") ? "⌘" : "") +
+      key
+    );
+  }
+  const mods: string[] = [];
+  if (has("mod")) mods.push("Ctrl");
+  if (has("alt")) mods.push("Alt");
+  if (has("shift")) mods.push("Shift");
+  return [...mods, key].join("+");
 }

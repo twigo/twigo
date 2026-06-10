@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import {
   Dialog,
   DialogContent,
@@ -17,6 +17,7 @@ import {
   PALETTE_BINDINGS,
   type Command as Cmd,
 } from "@/lib/commands";
+import { usePalette } from "@/store/palette";
 
 const CATEGORY_ORDER = ["Create", "Connections", "Go", "View"];
 
@@ -33,16 +34,17 @@ function group(cmds: Cmd[]): [string, Cmd[]][] {
 }
 
 export function CommandPalette() {
-  const [open, setOpen] = useState(false);
+  const open = usePalette((s) => s.open);
+  const setOpen = usePalette((s) => s.setOpen);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (PALETTE_BINDINGS.some((b) => matchKeybinding(e, b))) {
         e.preventDefault();
-        setOpen((o) => !o);
+        usePalette.getState().toggle();
         return;
       }
-      if (open) return;
+      if (usePalette.getState().open) return;
       for (const c of getCommands()) {
         if (c.keybinding && matchKeybinding(e, c.keybinding)) {
           e.preventDefault();
@@ -55,7 +57,7 @@ export function CommandPalette() {
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, []);
 
   const groups = useMemo(() => (open ? group(getCommands()) : []), [open]);
 

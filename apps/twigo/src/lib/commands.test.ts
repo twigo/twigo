@@ -106,4 +106,9 @@ describe("fmtBinding", () => {
   it("renders a readable shortcut", () => {
     expect(fmtBinding("mod+n")).toMatch(/(⌘|Ctrl\+)N/);
   });
+
+  it("orders modifiers by platform convention (Command last on mac)", () => {
+    expect(fmtBinding("mod+shift+p")).toMatch(/^(⇧⌘P|Ctrl\+Shift\+P)$/);
+    expect(fmtBinding("mod+alt+b")).toMatch(/^(⌥⌘B|Ctrl\+Alt\+B)$/);
+  });
 });
