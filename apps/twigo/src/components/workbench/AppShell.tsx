@@ -4,17 +4,15 @@ import "allotment/dist/style.css";
 import { ActivityBar } from "./ActivityBar";
 import { StatusBar } from "./StatusBar";
 import { Toaster } from "./Toaster";
+import { CommandPalette } from "./CommandPalette";
 import { EditorArea } from "@/components/editor/EditorArea";
 import { Sidebar } from "@/components/views/Sidebar";
 import { DetailPanel } from "@/components/editor/DetailPanel";
 import { useUi } from "@/store/ui";
-import { newPublish } from "@/lib/actions";
 
 export function AppShell() {
   const sidebarOpen = useUi((s) => s.sidebarOpen);
   const detailOpen = useUi((s) => s.detailOpen);
-  const toggleSidebar = useUi((s) => s.toggleSidebar);
-  const toggleDetail = useUi((s) => s.toggleDetail);
   const shellSizes = useUi((s) => s.shellSizes);
   const setShellSizes = useUi((s) => s.setShellSizes);
 
@@ -39,27 +37,6 @@ export function AppShell() {
     },
     [],
   );
-
-  // VS Code-style layout toggles: Cmd/Ctrl+B (sidebar), Cmd/Ctrl+Alt+B (inspector);
-  // Cmd/Ctrl+N opens a new publish tab on the active connection.
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (!(e.metaKey || e.ctrlKey)) return;
-      const key = e.key.toLowerCase();
-      if (key === "b") {
-        e.preventDefault();
-        if (e.altKey) toggleDetail();
-        else toggleSidebar();
-      } else if (key === "n") {
-        e.preventDefault();
-        newPublish();
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [toggleSidebar, toggleDetail]);
 
   const restored =
     shellSizes.length === 3 && shellSizes.every((n) => n > 0)
@@ -96,6 +73,7 @@ export function AppShell() {
       </div>
       <StatusBar />
       <Toaster />
+      <CommandPalette />
     </div>
   );
 }
