@@ -53,7 +53,7 @@ fn build_snapshot(
         .collect()
 }
 
-fn stop(watch: &SubjectWatch, conn_id: &str) {
+pub(crate) fn stop(watch: &SubjectWatch, conn_id: &str) {
     if let Some(handle) = watch.tasks.lock().unwrap().remove(conn_id) {
         handle.abort();
     }

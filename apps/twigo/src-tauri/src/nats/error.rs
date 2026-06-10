@@ -18,6 +18,9 @@ pub enum Error {
     #[error("invalid credentials: {0}")]
     Credentials(String),
 
+    #[error("background task failed: {0}")]
+    Task(String),
+
     #[error(transparent)]
     Connect(#[from] async_nats::ConnectError),
 

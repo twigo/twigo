@@ -13,7 +13,10 @@ use super::error::{self, Error};
 
 #[derive(Default)]
 pub struct SubState {
-    handles: Mutex<HashMap<String, AbortHandle>>,
+    // sub_id -> (conn_id, task) so a connection's subscriptions can all be
+    // aborted on disconnect (otherwise the task holds the Subscriber alive and
+    // the async-nats event loop never closes the socket).
+    handles: Mutex<HashMap<String, (String, AbortHandle)>>,
 }
 
 #[derive(Serialize, Clone)]
@@ -56,9 +59,21 @@ pub(super) fn flatten_headers(headers: Option<&async_nats::HeaderMap>) -> Vec<(S
 }
 
 fn stop(subs: &SubState, sub_id: &str) {
-    if let Some(handle) = subs.handles.lock().unwrap().remove(sub_id) {
+    if let Some((_conn, handle)) = subs.handles.lock().unwrap().remove(sub_id) {
         handle.abort();
     }
+}
+
+/// Abort every subscription belonging to a connection (used on disconnect).
+pub(crate) fn abort_conn(subs: &SubState, conn_id: &str) {
+    subs.handles.lock().unwrap().retain(|_, (conn, handle)| {
+        if conn == conn_id {
+            handle.abort();
+            false
+        } else {
+            true
+        }
+    });
 }
 
 #[tauri::command]
@@ -95,7 +110,7 @@ pub async fn subscribe(
     subs.handles
         .lock()
         .unwrap()
-        .insert(sub_id, handle.abort_handle());
+        .insert(sub_id, (conn_id.clone(), handle.abort_handle()));
     tracing::info!(conn = %conn_id, %subject, "subscribed");
     Ok(())
 }
@@ -116,5 +131,26 @@ mod tests {
         assert_eq!(msg.size, 5);
         assert_eq!(msg.payload_b64, "aGVsbG8=");
         assert!(msg.reply.is_none());
+    }
+
+    #[tokio::test]
+    async fn abort_conn_drops_only_that_connections_subs() {
+        let subs = SubState::default();
+        let spawn = || {
+            tokio::spawn(async {
+                std::future::pending::<()>().await;
+            })
+            .abort_handle()
+        };
+        {
+            let mut h = subs.handles.lock().unwrap();
+            h.insert("s1".into(), ("a".into(), spawn()));
+            h.insert("s2".into(), ("a".into(), spawn()));
+            h.insert("s3".into(), ("b".into(), spawn()));
+        }
+        abort_conn(&subs, "a");
+        let h = subs.handles.lock().unwrap();
+        assert_eq!(h.len(), 1);
+        assert!(h.contains_key("s3"));
     }
 }
