@@ -96,6 +96,7 @@ interface ResponderState {
   stop: (connId: string, id: string) => Promise<void>;
   remove: (connId: string, id: string) => void;
   removeConn: (connId: string) => void;
+  pruneConns: (names: string[]) => void;
   clearLog: (connId: string, id: string) => void;
 }
 
@@ -299,6 +300,19 @@ export const useResponder = create<ResponderState>()(
           if (s.subId) void apiUnsubscribe(s.subId).catch(() => undefined);
         }
         set((state) => ({ byConn: omitKey(state.byConn, connId) }));
+      },
+
+      pruneConns: (names) => {
+        const keep = new Set(names);
+        for (const [connId, sessions] of Object.entries(get().byConn)) {
+          if (!keep.has(connId))
+            for (const id of Object.keys(sessions)) runtimes.delete(id);
+        }
+        set((state) => ({
+          byConn: Object.fromEntries(
+            Object.entries(state.byConn).filter(([k]) => keep.has(k)),
+          ),
+        }));
       },
 
       clearLog: (connId, id) =>

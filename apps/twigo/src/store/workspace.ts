@@ -19,6 +19,9 @@ interface WorkspaceState {
   setConnected: (name: string, connected: boolean) => void;
   setWatching: (conn: string, pattern: string | null) => void;
   setActiveContext: (name: string | null) => void;
+  // Drop persisted state for connections that no longer exist (renamed/deleted
+  // in the nats CLI) so it can't orphan or trigger ghost reconnects.
+  prune: (names: string[]) => void;
 }
 
 export const useWorkspace = create<WorkspaceState>()(
@@ -33,6 +36,27 @@ export const useWorkspace = create<WorkspaceState>()(
         set((s) => ({ layouts: { ...s.layouts, [connId]: layout } })),
 
       setActiveContext: (activeContext) => set({ activeContext }),
+
+      prune: (names) =>
+        set((s) => {
+          const keep = new Set(names);
+          const pick = <T>(obj: Record<string, T>) =>
+            Object.fromEntries(
+              // "" is the no-connection layout bucket; always keep it.
+              Object.entries(obj).filter(([k]) => k === "" || keep.has(k)),
+            );
+          return {
+            layouts: pick(s.layouts),
+            watching: Object.fromEntries(
+              Object.entries(s.watching).filter(([k]) => keep.has(k)),
+            ),
+            lastConnected: s.lastConnected.filter((n) => keep.has(n)),
+            activeContext:
+              s.activeContext && keep.has(s.activeContext)
+                ? s.activeContext
+                : null,
+          };
+        }),
 
       setConnected: (name, connected) =>
         set((s) => ({

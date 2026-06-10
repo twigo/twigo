@@ -27,4 +27,19 @@ describe("workspace per-context layouts", () => {
     useWorkspace.getState().setActiveContext("prod-eu");
     expect(useWorkspace.getState().activeContext).toBe("prod-eu");
   });
+
+  it("prunes state for connections that no longer exist", () => {
+    useWorkspace.setState({
+      layouts: { "": {} as never, a: {} as never, gone: {} as never },
+      watching: { a: ">", gone: "x.>" },
+      lastConnected: ["a", "gone"],
+      activeContext: "gone",
+    });
+    useWorkspace.getState().prune(["a"]);
+    const s = useWorkspace.getState();
+    expect(Object.keys(s.layouts).sort()).toEqual(["", "a"]);
+    expect(s.watching).toEqual({ a: ">" });
+    expect(s.lastConnected).toEqual(["a"]);
+    expect(s.activeContext).toBeNull();
+  });
 });

@@ -10,6 +10,7 @@ import {
 import { useSettings } from "@/store/settings";
 import { useSubjects } from "@/store/subjects";
 import { useWorkspace } from "@/store/workspace";
+import { useResponder } from "@/store/responder";
 import { closeEditorsForConn } from "@/lib/editor";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -48,12 +49,16 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
     try {
       const dir = useSettings.getState().contextDir;
       const contexts = await listContexts(dir);
+      // Drop persisted state for contexts that no longer exist (renamed/deleted
+      // in the nats CLI) before restoring, so it can't orphan or ghost-reconnect.
+      const names = contexts.map((c) => c.name);
+      useWorkspace.getState().prune(names);
+      useResponder.getState().pruneConns(names);
+
       const selected = contexts.find((c) => c.selected)?.name ?? null;
       const remembered = useWorkspace.getState().activeContext;
       const restored =
-        remembered && contexts.some((c) => c.name === remembered)
-          ? remembered
-          : null;
+        remembered && names.includes(remembered) ? remembered : null;
       set({
         contexts,
         status: "ready",

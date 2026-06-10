@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { ContextSummary } from "@/lib/api";
+import type { ContextSummary, ConnInfo } from "@/lib/api";
 
 const { listContexts, connect, disconnect, connInfo } = vi.hoisted(() => ({
   listContexts: vi.fn(),
@@ -21,6 +21,18 @@ function ctx(name: string, selected = false): ContextSummary {
     authMethod: "none",
     hasTls: false,
     selected,
+  };
+}
+
+function info(name = "a"): ConnInfo {
+  return {
+    name,
+    serverName: "s",
+    serverVersion: "2",
+    rttMs: 0,
+    jetstream: false,
+    maxPayload: 0,
+    connected: true,
   };
 }
 
@@ -57,5 +69,34 @@ describe("connections active-context persistence", () => {
     listContexts.mockResolvedValue([ctx("prod-eu", true)]);
     await useConnections.getState().load();
     expect(useConnections.getState().activeContext).toBe("prod-eu");
+  });
+
+  it("prunes persisted state for contexts that disappeared, on load", async () => {
+    useWorkspace.setState({
+      layouts: { gone: {} as never },
+      lastConnected: ["gone"],
+      watching: { gone: ">" },
+      activeContext: "gone",
+    });
+    listContexts.mockResolvedValue([ctx("prod-eu", true)]);
+    await useConnections.getState().load();
+    const w = useWorkspace.getState();
+    expect(w.layouts.gone).toBeUndefined();
+    expect(w.lastConnected).toEqual([]);
+    expect(w.activeContext).not.toBe("gone");
+  });
+
+  it("marks a connection reconnecting on a disconnected event", () => {
+    useConnections.setState({
+      connected: { a: { ...info(), connected: true } },
+    });
+    useConnections.getState().onEvent("a", "disconnected");
+    expect(useConnections.getState().connected.a?.connected).toBe(false);
+  });
+
+  it("drops a connection on a closed event", () => {
+    useConnections.setState({ connected: { a: info() } });
+    useConnections.getState().onEvent("a", "closed");
+    expect(useConnections.getState().connected.a).toBeUndefined();
   });
 });

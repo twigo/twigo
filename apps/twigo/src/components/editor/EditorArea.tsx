@@ -123,6 +123,7 @@ export function EditorArea() {
       if (isReplacingLayout()) return;
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
+        saveTimerRef.current = undefined;
         useWorkspace.getState().setLayout(shownRef.current, api.toJSON());
       }, 300);
     });
@@ -157,8 +158,23 @@ export function EditorArea() {
       }
       subscribeActiveStream(api);
     });
+
+    // Flush a pending (debounced) layout save before the window closes, so
+    // quitting right after a layout change doesn't lose it.
+    const flushOnExit = () => {
+      const api = apiRef.current;
+      if (!api || isReplacingLayout() || saveTimerRef.current === undefined) {
+        return;
+      }
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = undefined;
+      useWorkspace.getState().setLayout(shownRef.current, api.toJSON());
+    };
+    window.addEventListener("beforeunload", flushOnExit);
+
     return () => {
       unsub();
+      window.removeEventListener("beforeunload", flushOnExit);
       clearTimeout(saveTimerRef.current);
     };
   }, []);
