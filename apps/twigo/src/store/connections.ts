@@ -11,6 +11,7 @@ import { useSettings } from "@/store/settings";
 import { useSubjects } from "@/store/subjects";
 import { useWorkspace } from "@/store/workspace";
 import { useResponder } from "@/store/responder";
+import { useToasts } from "@/store/toasts";
 import { closeEditorsForConn } from "@/lib/editor";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -96,6 +97,9 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
         connecting: { ...s.connecting, [name]: false },
         connError: { ...s.connError, [name]: String(e) },
       }));
+      useToasts
+        .getState()
+        .push("error", `Couldn't connect to ${name}: ${String(e)}`);
     }
   },
 
@@ -143,6 +147,10 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
         const { [conn]: _removed, ...connected } = s.connected;
         return { connected };
       });
+    } else if (kind === "slowConsumer") {
+      useToasts
+        .getState()
+        .push("warning", `${conn}: slow consumer — messages may be dropped`);
     }
   },
 }));

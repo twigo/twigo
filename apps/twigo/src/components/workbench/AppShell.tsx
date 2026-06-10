@@ -3,6 +3,7 @@ import { Allotment } from "allotment";
 import "allotment/dist/style.css";
 import { ActivityBar } from "./ActivityBar";
 import { StatusBar } from "./StatusBar";
+import { Toaster } from "./Toaster";
 import { EditorArea } from "@/components/editor/EditorArea";
 import { Sidebar } from "@/components/views/Sidebar";
 import { DetailPanel } from "@/components/editor/DetailPanel";
@@ -94,6 +95,7 @@ export function AppShell() {
         </Allotment>
       </div>
       <StatusBar />
+      <Toaster />
     </div>
   );
 }
