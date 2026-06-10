@@ -13,9 +13,11 @@ interface WorkspaceState {
   layout: SerializedLayout | null;
   lastConnected: string[];
   watching: Record<string, string>;
+  activeContext: string | null;
   setLayout: (layout: SerializedLayout) => void;
   setConnected: (name: string, connected: boolean) => void;
   setWatching: (conn: string, pattern: string | null) => void;
+  setActiveContext: (name: string | null) => void;
 }
 
 export const useWorkspace = create<WorkspaceState>()(
@@ -24,8 +26,11 @@ export const useWorkspace = create<WorkspaceState>()(
       layout: null,
       lastConnected: [],
       watching: {},
+      activeContext: null,
 
       setLayout: (layout) => set({ layout }),
+
+      setActiveContext: (activeContext) => set({ activeContext }),
 
       setConnected: (name, connected) =>
         set((s) => ({
@@ -54,6 +59,7 @@ export const useWorkspace = create<WorkspaceState>()(
         layout: s.layout,
         lastConnected: s.lastConnected,
         watching: s.watching,
+        activeContext: s.activeContext,
       }),
     },
   ),

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import {
   Channel,
   subscribe as apiSubscribe,
@@ -8,6 +9,7 @@ import {
 } from "@/lib/api";
 import { decodePreview } from "@twigo/utils";
 import { render, buildMsgContext, warmUp } from "@/lib/template";
+import { createPersistStorage } from "@/lib/persist-storage";
 
 const LOG_CAP = 200;
 
@@ -191,75 +193,102 @@ async function handleMessage(id: string, m: IncomingMessage) {
   }
 }
 
-export const useResponder = create<ResponderState>((set, get) => ({
-  sessions: {},
+export const useResponder = create<ResponderState>()(
+  persist(
+    (set, get) => ({
+      sessions: {},
 
-  ensure: (id, connId, subject) => {
-    if (get().sessions[id]) return;
-    set((state) => ({
-      sessions: {
-        ...state.sessions,
-        [id]: {
-          id,
-          connId,
-          subId: null,
-          config: defaultConfig(subject),
-          listening: false,
-          handled: 0,
-          log: [],
-          lastRequest: null,
-        },
+      ensure: (id, connId, subject) => {
+        if (get().sessions[id]) return;
+        set((state) => ({
+          sessions: {
+            ...state.sessions,
+            [id]: {
+              id,
+              connId,
+              subId: null,
+              config: defaultConfig(subject),
+              listening: false,
+              handled: 0,
+              log: [],
+              lastRequest: null,
+            },
+          },
+        }));
       },
-    }));
-  },
 
-  setConfig: (id, p) =>
-    patch(id, (s) => ({ ...s, config: { ...s.config, ...p } })),
+      setConfig: (id, p) =>
+        patch(id, (s) => ({ ...s, config: { ...s.config, ...p } })),
 
-  start: async (id) => {
-    const session = get().sessions[id];
-    if (!session || session.listening) return;
-    const subject = session.config.subject.trim();
-    if (!subject) return;
+      start: async (id) => {
+        const session = get().sessions[id];
+        if (!session || session.listening) return;
+        const subject = session.config.subject.trim();
+        if (!subject) return;
 
-    warmUp();
-    const subId = `responder::${id}`;
-    const channel = new Channel<IncomingMessage>();
-    channel.onmessage = (m) => {
-      void handleMessage(id, m);
-    };
-    runtimes.set(id, { channel, seq: 0 });
-    patch(id, (s) => ({ ...s, subId, listening: true }));
+        warmUp();
+        const subId = `responder::${id}`;
+        const channel = new Channel<IncomingMessage>();
+        channel.onmessage = (m) => {
+          void handleMessage(id, m);
+        };
+        runtimes.set(id, { channel, seq: 0 });
+        patch(id, (s) => ({ ...s, subId, listening: true }));
 
-    try {
-      await apiSubscribe(session.connId, subId, subject, channel);
-    } catch (e) {
-      runtimes.delete(id);
-      patch(id, (s) => ({ ...s, subId: null, listening: false }));
-      throw e;
-    }
-  },
+        try {
+          await apiSubscribe(session.connId, subId, subject, channel);
+        } catch (e) {
+          runtimes.delete(id);
+          patch(id, (s) => ({ ...s, subId: null, listening: false }));
+          throw e;
+        }
+      },
 
-  stop: async (id) => {
-    const session = get().sessions[id];
-    runtimes.delete(id);
-    patch(id, (s) => ({ ...s, listening: false, subId: null }));
-    if (session?.subId) {
-      try {
-        await apiUnsubscribe(session.subId);
-      } catch {
-        /* already gone if the connection dropped */
-      }
-    }
-  },
+      stop: async (id) => {
+        const session = get().sessions[id];
+        runtimes.delete(id);
+        patch(id, (s) => ({ ...s, listening: false, subId: null }));
+        if (session?.subId) {
+          try {
+            await apiUnsubscribe(session.subId);
+          } catch {
+            /* already gone if the connection dropped */
+          }
+        }
+      },
 
-  remove: (id) => {
-    const session = get().sessions[id];
-    runtimes.delete(id);
-    if (session?.subId)
-      void apiUnsubscribe(session.subId).catch(() => undefined);
-    set((state) => ({ sessions: omit(state.sessions, id) }));
-  },
+      remove: (id) => {
+        const session = get().sessions[id];
+        runtimes.delete(id);
+        if (session?.subId)
+          void apiUnsubscribe(session.subId).catch(() => undefined);
+        set((state) => ({ sessions: omit(state.sessions, id) }));
+      },
 
-  clearLog: (id) => patch(id, (s) => ({ ...s, log: [], handled: 0 })),
-}));
+      clearLog: (id) => patch(id, (s) => ({ ...s, log: [], handled: 0 })),
+    }),
+    {
+      name: "twigo-responders",
+      version: 1,
+      storage: createPersistStorage(),
+      // Persist config only; live runtime is rebuilt at launch (stopped).
+      partialize: (state) => ({
+        sessions: Object.fromEntries(
+          Object.entries(state.sessions).map(([id, s]) => [
+            id,
+            {
+              id: s.id,
+              connId: s.connId,
+              subId: null,
+              config: s.config,
+              listening: false,
+              handled: 0,
+              log: [],
+              lastRequest: null,
+            },
+          ]),
+        ),
+      }),
+    },
+  ),
+);

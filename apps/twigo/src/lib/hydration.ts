@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useUi } from "@/store/ui";
 import { useSettings } from "@/store/settings";
 import { useWorkspace } from "@/store/workspace";
+import { useResponder } from "@/store/responder";
 
 interface Hydratable {
   persist: {
@@ -10,7 +11,7 @@ interface Hydratable {
   };
 }
 
-const STORES: Hydratable[] = [useUi, useSettings, useWorkspace];
+const STORES: Hydratable[] = [useUi, useSettings, useWorkspace, useResponder];
 
 /**
  * True once every persisted store has loaded from disk. With the async Tauri

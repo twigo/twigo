@@ -65,6 +65,7 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
       setActive(c.name);
       onClose();
     } else {
+      setActive(c.name);
       void connect(c.name);
     }
   }

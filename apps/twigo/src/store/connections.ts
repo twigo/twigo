@@ -49,17 +49,25 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       const dir = useSettings.getState().contextDir;
       const contexts = await listContexts(dir);
       const selected = contexts.find((c) => c.selected)?.name ?? null;
+      const remembered = useWorkspace.getState().activeContext;
+      const restored =
+        remembered && contexts.some((c) => c.name === remembered)
+          ? remembered
+          : null;
       set({
         contexts,
         status: "ready",
-        activeContext: get().activeContext ?? selected,
+        activeContext: get().activeContext ?? restored ?? selected,
       });
     } catch (e) {
       set({ status: "error", error: String(e) });
     }
   },
 
-  setActive: (name) => set({ activeContext: name }),
+  setActive: (name) => {
+    set({ activeContext: name });
+    useWorkspace.getState().setActiveContext(name);
+  },
 
   connect: async (name) => {
     if (get().connecting[name]) return;
@@ -68,7 +76,6 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       return {
         connecting: { ...s.connecting, [name]: true },
         connError,
-        activeContext: name,
       };
     });
     try {

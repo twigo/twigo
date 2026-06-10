@@ -75,7 +75,7 @@ describe("ConnectionPicker", () => {
     render(<ConnectionPicker onClose={() => undefined} />);
     await userEvent.click(screen.getByText("dev-local"));
     expect(connect).toHaveBeenCalledWith("dev-local");
-    expect(setActive).not.toHaveBeenCalled();
+    expect(setActive).toHaveBeenCalledWith("dev-local");
   });
 
   it("disconnects from the inline action", async () => {
