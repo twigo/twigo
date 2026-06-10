@@ -64,6 +64,10 @@ export function EditorArea() {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
+  // The connection whose tab layout is currently shown; layouts are per-context
+  // and swapped when the active connection changes.
+  const shownRef = useRef<string>("");
+  const swappingRef = useRef(false);
 
   const theme = useMemo<DockviewTheme>(() => {
     const base = uiTheme === "dark" ? themeDark : themeLight;
@@ -80,9 +84,10 @@ export function EditorArea() {
     apiRef.current = api;
     setEditorApi(api);
 
-    // Restore the previous session's tabs/layout. On a bad/old blob fall back
+    // Restore the active connection's tabs/layout. On a bad/old blob fall back
     // to an empty area rather than letting fromJSON throw and brick startup.
-    const saved = useWorkspace.getState().layout;
+    shownRef.current = useConnections.getState().activeContext ?? "";
+    const saved = useWorkspace.getState().layouts[shownRef.current];
     if (saved) {
       try {
         api.fromJSON(saved);
@@ -107,20 +112,39 @@ export function EditorArea() {
     });
 
     api.onDidLayoutChange(() => {
+      if (swappingRef.current) return;
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
-        useWorkspace.getState().setLayout(api.toJSON());
+        useWorkspace.getState().setLayout(shownRef.current, api.toJSON());
       }, 300);
     });
 
     subscribeActiveStream(api);
   }, []);
 
-  // Wake the focused restored stream tab when a connection comes online.
-  // Tied to the component lifecycle so it doesn't leak across remounts.
+  // Swap the editor layout when the active connection changes (tabs are
+  // per-context), and wake the focused restored stream as connections come up.
   useEffect(() => {
-    const unsub = useConnections.subscribe(() => {
-      if (apiRef.current) subscribeActiveStream(apiRef.current);
+    const unsub = useConnections.subscribe((s) => {
+      const api = apiRef.current;
+      if (!api) return;
+      const conn = s.activeContext ?? "";
+      if (conn !== shownRef.current) {
+        swappingRef.current = true;
+        useWorkspace.getState().setLayout(shownRef.current, api.toJSON());
+        shownRef.current = conn;
+        api.clear();
+        const next = useWorkspace.getState().layouts[conn];
+        if (next) {
+          try {
+            api.fromJSON(next);
+          } catch {
+            api.clear();
+          }
+        }
+        swappingRef.current = false;
+      }
+      subscribeActiveStream(api);
     });
     return () => {
       unsub();

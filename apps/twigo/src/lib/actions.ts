@@ -10,10 +10,14 @@ function liveTarget(): string | undefined {
 
 export function newPublish() {
   const target = liveTarget();
-  if (target) openPublish(target);
+  if (!target) return;
+  useConnections.getState().setActive(target);
+  openPublish(target);
 }
 
 export function newResponder() {
   const target = liveTarget();
-  if (target) openResponder(target);
+  if (!target) return;
+  useConnections.getState().setActive(target);
+  openResponder(target);
 }

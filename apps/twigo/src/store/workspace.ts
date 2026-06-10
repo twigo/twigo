@@ -7,14 +7,15 @@ type SerializedLayout = ReturnType<DockviewApi["toJSON"]>;
 
 // The persisted workspace manifest: enough to rebuild the previous session
 // (editor geometry + which connections/watches were open) but no live state.
-// The Dockview layout already serializes each panel's params (type/connId/
+// Editor layout is kept per connection so each context has its own tab set;
+// the Dockview blob already serializes each panel's params (type/connId/
 // subject), so no separate tab list is needed.
 interface WorkspaceState {
-  layout: SerializedLayout | null;
+  layouts: Record<string, SerializedLayout>;
   lastConnected: string[];
   watching: Record<string, string>;
   activeContext: string | null;
-  setLayout: (layout: SerializedLayout) => void;
+  setLayout: (connId: string, layout: SerializedLayout) => void;
   setConnected: (name: string, connected: boolean) => void;
   setWatching: (conn: string, pattern: string | null) => void;
   setActiveContext: (name: string | null) => void;
@@ -23,12 +24,13 @@ interface WorkspaceState {
 export const useWorkspace = create<WorkspaceState>()(
   persist(
     (set) => ({
-      layout: null,
+      layouts: {},
       lastConnected: [],
       watching: {},
       activeContext: null,
 
-      setLayout: (layout) => set({ layout }),
+      setLayout: (connId, layout) =>
+        set((s) => ({ layouts: { ...s.layouts, [connId]: layout } })),
 
       setActiveContext: (activeContext) => set({ activeContext }),
 
@@ -53,10 +55,10 @@ export const useWorkspace = create<WorkspaceState>()(
     }),
     {
       name: "twigo-workspace",
-      version: 1,
+      version: 2,
       storage: createPersistStorage(),
       partialize: (s) => ({
-        layout: s.layout,
+        layouts: s.layouts,
         lastConnected: s.lastConnected,
         watching: s.watching,
         activeContext: s.activeContext,

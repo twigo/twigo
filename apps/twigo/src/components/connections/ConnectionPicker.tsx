@@ -112,6 +112,7 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
               label="Server info"
               disabled={!info.connected}
               onClick={() => {
+                setActive(c.name);
                 openServerInfo(c.name);
                 onClose();
               }}
