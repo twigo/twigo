@@ -19,6 +19,7 @@ import {
   openStream,
   isReplacingLayout,
   setReplacingLayout,
+  closeEditorsForConn,
 } from "@/lib/editor";
 import { newPublish } from "@/lib/actions";
 import { editorComponents, editorTabComponents } from "./registry";
@@ -87,6 +88,9 @@ export function EditorArea() {
     const api = event.api;
     apiRef.current = api;
     setEditorApi(api);
+    // Inject editor teardown into the connections store (keeps store→UI
+    // dependency one-way; the store calls this when a connection drops).
+    useConnections.getState().setEditorTeardown(closeEditorsForConn);
 
     // Restore the active connection's tabs/layout. On a bad/old blob fall back
     // to an empty area rather than letting fromJSON throw and brick startup.

@@ -3,6 +3,7 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
+import importPlugin from "eslint-plugin-import";
 import prettier from "eslint-config-prettier";
 
 export default tseslint.config(
@@ -25,8 +26,15 @@ export default tseslint.config(
     },
     plugins: {
       "react-refresh": reactRefresh,
+      import: importPlugin,
+    },
+    settings: {
+      "import/resolver": {
+        typescript: { alwaysTryTypes: true, project: ["apps/*/tsconfig.json", "libs/*/tsconfig.json"] },
+      },
     },
     rules: {
+      "import/no-cycle": ["error", { ignoreExternal: true }],
       "react-refresh/only-export-components": [
         "warn",
         { allowConstantExport: true },

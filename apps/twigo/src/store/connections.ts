@@ -12,13 +12,14 @@ import { useSubjects } from "@/store/subjects";
 import { useWorkspace } from "@/store/workspace";
 import { useResponder } from "@/store/responder";
 import { useToasts } from "@/store/toasts";
-import { closeEditorsForConn } from "@/lib/editor";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
 function teardown(conn: string) {
   useSubjects.getState().reset(conn);
-  closeEditorsForConn(conn);
+  // The editor layer injects this (setEditorTeardown) so the store doesn't
+  // depend on the UI — keeps the dependency one-way (editor → store).
+  useConnections.getState().editorTeardown(conn);
 }
 
 interface ConnectionsState {
@@ -34,6 +35,8 @@ interface ConnectionsState {
   connect: (name: string) => Promise<void>;
   disconnect: (name: string) => Promise<void>;
   onEvent: (conn: string, kind: string) => void;
+  editorTeardown: (conn: string) => void;
+  setEditorTeardown: (fn: (conn: string) => void) => void;
 }
 
 export const useConnections = create<ConnectionsState>((set, get) => ({
@@ -44,6 +47,8 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
   connected: {},
   connecting: {},
   connError: {},
+  editorTeardown: () => undefined,
+  setEditorTeardown: (fn) => set({ editorTeardown: fn }),
 
   load: async () => {
     set({ status: "loading", error: null });
