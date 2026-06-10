@@ -1,5 +1,19 @@
 import "@testing-library/jest-dom/vitest";
 
+// jsdom has no layout; cmdk calls scrollIntoView on its items + ResizeObserver.
+Element.prototype.scrollIntoView = () => undefined;
+globalThis.ResizeObserver = class {
+  observe() {
+    return undefined;
+  }
+  unobserve() {
+    return undefined;
+  }
+  disconnect() {
+    return undefined;
+  }
+};
+
 class MemoryStorage implements Storage {
   private store = new Map<string, string>();
   get length() {

@@ -30,7 +30,7 @@ function setLive(connected: boolean) {
 
 describe("ResponderEditor", () => {
   beforeEach(() => {
-    useResponder.setState({ sessions: {} });
+    useResponder.setState({ byConn: {} });
   });
   afterEach(cleanup);
 

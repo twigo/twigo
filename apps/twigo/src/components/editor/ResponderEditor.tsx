@@ -7,6 +7,7 @@ import {
   useResponder,
   type ResponderMode,
   type ReplyOutcome,
+  type ResponderConfig,
 } from "@/store/responder";
 import { render, buildMsgContext, type RenderResult } from "@/lib/template";
 import { makeTemplateCompletion } from "@/lib/template-completion";
@@ -122,7 +123,7 @@ export function ResponderEditor({
     useResponder.getState().ensure(id, connId, initialSubject);
   }, [id, connId, initialSubject]);
 
-  const session = useResponder((s) => s.sessions[id]);
+  const session = useResponder((s) => s.byConn[connId]?.[id]);
   const live = useConnections(
     (s) =>
       session !== undefined && s.connected[session.connId]?.connected === true,
@@ -139,11 +140,12 @@ export function ResponderEditor({
   const completion = useMemo(
     () =>
       makeTemplateCompletion(() => {
-        const last = useResponder.getState().sessions[id]?.lastRequest ?? null;
+        const last =
+          useResponder.getState().byConn[connId]?.[id]?.lastRequest ?? null;
         const c = buildMsgContext(last ?? SAMPLE);
         return { $msg: c, $json: c.body };
       }),
-    [id],
+    [id, connId],
   );
 
   useEffect(() => {
@@ -159,7 +161,8 @@ export function ResponderEditor({
   if (!session) return null;
   const { config, listening, handled, log } = session;
   const subject = config.subject;
-  const set = useResponder.getState().setConfig;
+  const set = (p: Partial<ResponderConfig>) =>
+    useResponder.getState().setConfig(connId, id, p);
   const canStart = live && subject.trim().length > 0;
 
   return (
@@ -177,7 +180,7 @@ export function ResponderEditor({
           <Input
             id="resp-subject"
             value={subject}
-            onChange={(e) => set(id, { subject: e.target.value })}
+            onChange={(e) => set({ subject: e.target.value })}
             placeholder="orders.*.get"
             spellCheck={false}
             disabled={listening}
@@ -188,7 +191,7 @@ export function ResponderEditor({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => void useResponder.getState().stop(id)}
+            onClick={() => void useResponder.getState().stop(connId, id)}
           >
             <Square />
             Stop
@@ -198,7 +201,7 @@ export function ResponderEditor({
             variant="brand"
             size="sm"
             disabled={!canStart}
-            onClick={() => void useResponder.getState().start(id)}
+            onClick={() => void useResponder.getState().start(connId, id)}
           >
             <Play />
             Start
@@ -213,7 +216,7 @@ export function ResponderEditor({
               key={m.key}
               type="button"
               title={m.hint}
-              onClick={() => set(id, { mode: m.key })}
+              onClick={() => set({ mode: m.key })}
               className={cn(
                 "rounded px-2 py-1 text-xs transition-colors",
                 config.mode === m.key
@@ -235,7 +238,7 @@ export function ResponderEditor({
             min={0}
             value={config.delayMs}
             onChange={(e) =>
-              set(id, { delayMs: Math.max(0, Number(e.target.value) || 0) })
+              set({ delayMs: Math.max(0, Number(e.target.value) || 0) })
             }
             className="h-7 w-20 text-xs"
           />
@@ -254,7 +257,7 @@ export function ResponderEditor({
 
       <HeaderRows
         headers={config.headers}
-        onChange={(headers) => set(id, { headers })}
+        onChange={(headers) => set({ headers })}
       />
 
       <div className="flex min-h-32 flex-1 flex-col gap-1.5">
@@ -267,7 +270,7 @@ export function ResponderEditor({
         <CodeViewer
           value={template}
           language="json"
-          onChange={(v) => set(id, { template: v })}
+          onChange={(v) => set({ template: v })}
           completion={completion}
           className="min-h-0 flex-1"
         />
@@ -299,7 +302,7 @@ export function ResponderEditor({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => useResponder.getState().clearLog(id)}
+              onClick={() => useResponder.getState().clearLog(connId, id)}
             >
               <Trash2 />
               Clear

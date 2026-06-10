@@ -24,9 +24,16 @@ export function MessageTable({
         {items.map((m) => (
           <tr
             key={m.id}
+            tabIndex={0}
             onClick={() => onSelect(m.id)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onSelect(m.id);
+              }
+            }}
             className={cn(
-              "cursor-pointer border-b border-border/50 hover:bg-accent/50",
+              "cursor-pointer border-b border-border/50 hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
               m.id === selectedId && "bg-accent",
             )}
           >

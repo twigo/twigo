@@ -14,7 +14,13 @@ import { useUi } from "@/store/ui";
 import { useStream } from "@/store/stream";
 import { useConnections } from "@/store/connections";
 import { useWorkspace } from "@/store/workspace";
-import { setEditorApi, openStream } from "@/lib/editor";
+import {
+  setEditorApi,
+  openStream,
+  isReplacingLayout,
+  setReplacingLayout,
+  closeEditorsForConn,
+} from "@/lib/editor";
 import { newPublish } from "@/lib/actions";
 import { editorComponents, editorTabComponents } from "./registry";
 import { NewTabButton } from "./NewTabButton";
@@ -64,6 +70,9 @@ export function EditorArea() {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
+  // The connection whose tab layout is currently shown; layouts are per-context
+  // and swapped when the active connection changes.
+  const shownRef = useRef<string>("");
 
   const theme = useMemo<DockviewTheme>(() => {
     const base = uiTheme === "dark" ? themeDark : themeLight;
@@ -79,10 +88,14 @@ export function EditorArea() {
     const api = event.api;
     apiRef.current = api;
     setEditorApi(api);
+    // Inject editor teardown into the connections store (keeps store→UI
+    // dependency one-way; the store calls this when a connection drops).
+    useConnections.getState().setEditorTeardown(closeEditorsForConn);
 
-    // Restore the previous session's tabs/layout. On a bad/old blob fall back
+    // Restore the active connection's tabs/layout. On a bad/old blob fall back
     // to an empty area rather than letting fromJSON throw and brick startup.
-    const saved = useWorkspace.getState().layout;
+    shownRef.current = useConnections.getState().activeContext ?? "";
+    const saved = useWorkspace.getState().layouts[shownRef.current];
     if (saved) {
       try {
         api.fromJSON(saved);
@@ -91,8 +104,11 @@ export function EditorArea() {
       }
     }
 
-    // These dockview listeners are disposed with the api on unmount.
+    // These dockview listeners are disposed with the api on unmount. They all
+    // bail while a layout swap/teardown is in flight, so bulk panel removals
+    // don't tear down live streams or persist an empty layout.
     api.onDidActivePanelChange((panel) => {
+      if (isReplacingLayout()) return;
       subscribeActiveStream(api);
       const id = panel?.id;
       useStream
@@ -101,29 +117,68 @@ export function EditorArea() {
     });
 
     api.onDidRemovePanel((panel) => {
+      if (isReplacingLayout()) return;
       if (useStream.getState().sessions[panel.id]) {
         void useStream.getState().close(panel.id);
       }
     });
 
     api.onDidLayoutChange(() => {
+      if (isReplacingLayout()) return;
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
-        useWorkspace.getState().setLayout(api.toJSON());
+        saveTimerRef.current = undefined;
+        useWorkspace.getState().setLayout(shownRef.current, api.toJSON());
       }, 300);
     });
 
     subscribeActiveStream(api);
   }, []);
 
-  // Wake the focused restored stream tab when a connection comes online.
-  // Tied to the component lifecycle so it doesn't leak across remounts.
+  // Swap the editor layout when the active connection changes (tabs are
+  // per-context), and wake the focused restored stream as connections come up.
   useEffect(() => {
-    const unsub = useConnections.subscribe(() => {
-      if (apiRef.current) subscribeActiveStream(apiRef.current);
+    const unsub = useConnections.subscribe((s) => {
+      const api = apiRef.current;
+      if (!api) return;
+      const conn = s.activeContext ?? "";
+      if (conn !== shownRef.current) {
+        setReplacingLayout(true);
+        try {
+          useWorkspace.getState().setLayout(shownRef.current, api.toJSON());
+          shownRef.current = conn;
+          api.clear();
+          const next = useWorkspace.getState().layouts[conn];
+          if (next) {
+            try {
+              api.fromJSON(next);
+            } catch {
+              api.clear();
+            }
+          }
+        } finally {
+          setReplacingLayout(false);
+        }
+      }
+      subscribeActiveStream(api);
     });
+
+    // Flush a pending (debounced) layout save before the window closes, so
+    // quitting right after a layout change doesn't lose it.
+    const flushOnExit = () => {
+      const api = apiRef.current;
+      if (!api || isReplacingLayout() || saveTimerRef.current === undefined) {
+        return;
+      }
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = undefined;
+      useWorkspace.getState().setLayout(shownRef.current, api.toJSON());
+    };
+    window.addEventListener("beforeunload", flushOnExit);
+
     return () => {
       unsub();
+      window.removeEventListener("beforeunload", flushOnExit);
       clearTimeout(saveTimerRef.current);
     };
   }, []);

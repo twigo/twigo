@@ -10,10 +10,17 @@ fn build_headers(pairs: Vec<(String, String)>) -> Option<async_nats::HeaderMap> 
     let mut headers = async_nats::HeaderMap::new();
     let mut any = false;
     for (key, value) in pairs {
-        if !key.trim().is_empty() {
-            headers.insert(key.as_str(), value.as_str());
-            any = true;
+        let key = key.trim();
+        if key.is_empty() {
+            continue;
         }
+        // CR/LF are illegal in NATS headers (async-nats asserts on them), and a
+        // rendered responder value can be multi-line — collapse so a stray
+        // newline can't panic the publish command.
+        let key = key.replace(['\r', '\n'], " ");
+        let value = value.replace(['\r', '\n'], " ");
+        headers.insert(key.as_str(), value.as_str());
+        any = true;
     }
     any.then_some(headers)
 }
@@ -73,4 +80,22 @@ pub async fn request(
         &resp.payload,
         flatten_headers(resp.headers.as_ref()),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_headers;
+
+    #[test]
+    fn multiline_value_does_not_panic() {
+        // A multi-line rendered responder value used to assert in async-nats.
+        let h = build_headers(vec![("Nats-Service-Error".into(), "a\r\nb".into())]);
+        assert!(h.is_some());
+    }
+
+    #[test]
+    fn blank_keys_are_skipped() {
+        assert!(build_headers(vec![("  ".into(), "v".into())]).is_none());
+        assert!(build_headers(vec![]).is_none());
+    }
 }

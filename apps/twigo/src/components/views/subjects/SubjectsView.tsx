@@ -5,6 +5,7 @@ import { useConnections } from "@/store/connections";
 import { useSubjects } from "@/store/subjects";
 import { buildSubjectTree } from "@twigo/utils";
 import { openStream } from "@/lib/editor";
+import type { ViewProps } from "@/components/views/registry";
 import { SubjectTree } from "./SubjectTree";
 import { WatchForm } from "./WatchForm";
 
@@ -16,14 +17,11 @@ function Hint({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function SubjectsView({ filter }: { filter: string }) {
-  const { activeContext, connected } = useConnections();
-  const isConnected = !!(activeContext && connected[activeContext]);
-  const data = useSubjects((s) =>
-    activeContext ? s.byConn[activeContext] : undefined,
-  );
+export function SubjectsView({ filter, connId }: ViewProps) {
+  const isConnected = useConnections((s) => !!(connId && s.connected[connId]));
+  const data = useSubjects((s) => (connId ? s.byConn[connId] : undefined));
   const watchingPattern = useSubjects((s) =>
-    activeContext ? s.watching[activeContext] : undefined,
+    connId ? s.watching[connId] : undefined,
   );
   const startWatch = useSubjects((s) => s.startWatch);
   const stopWatch = useSubjects((s) => s.stopWatch);
@@ -37,15 +35,13 @@ export function SubjectsView({ filter }: { filter: string }) {
     return buildSubjectTree(filtered);
   }, [data?.stats, filter]);
 
-  if (!isConnected || !activeContext) {
+  if (!isConnected || !connId) {
     return <Hint>Connect to a server to explore subjects.</Hint>;
   }
 
   if (!watchingPattern) {
     return (
-      <WatchForm
-        onStart={(pattern) => void startWatch(activeContext, pattern)}
-      />
+      <WatchForm onStart={(pattern) => void startWatch(connId, pattern)} />
     );
   }
 
@@ -59,7 +55,7 @@ export function SubjectsView({ filter }: { filter: string }) {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => void stopWatch(activeContext)}
+          onClick={() => void stopWatch(connId)}
         >
           <Square />
           Stop
@@ -72,9 +68,9 @@ export function SubjectsView({ filter }: { filter: string }) {
       ) : (
         <SubjectTree
           nodes={tree}
-          connId={activeContext}
+          connId={connId}
           onSelect={(subject) => {
-            void openStream(activeContext, subject);
+            void openStream(connId, subject);
           }}
         />
       )}

@@ -22,6 +22,17 @@ export function setEditorApi(value: DockviewApi) {
   api = value;
 }
 
+// Set while the Dockview layout is being swapped (context switch) or torn down
+// (connection loss), so EditorArea's listeners don't treat bulk panel removals
+// as user closes (tearing down live streams) or persist an empty layout.
+let replacingLayout = false;
+export function isReplacingLayout(): boolean {
+  return replacingLayout;
+}
+export function setReplacingLayout(value: boolean): void {
+  replacingLayout = value;
+}
+
 // Encode the components: ':' is the delimiter but is legal in both NATS
 // subjects and context names, so raw interpolation could collide.
 function streamEditorId(connId: string, subject: string): string {
@@ -148,35 +159,31 @@ export function openSettings() {
   openEditor({ type: "settings", id: "settings", title: "Settings", index: 0 });
 }
 
-/** Close every conn-scoped editor tab when a connection drops. */
+/** Tear down a connection's editors + live sessions when it drops. */
 export function closeEditorsForConn(connId: string) {
-  // Responders are tab-independent, so close their sessions explicitly (a
-  // closed tab leaves the mock running; only conn loss or delete stops it).
-  const responder = useResponder.getState();
-  for (const s of Object.values(responder.sessions)) {
-    if (s.connId === connId) responder.remove(s.id);
-  }
-
-  if (!api) {
-    // No UI surface: tear down the only store-backed editors (streams).
+  setReplacingLayout(true);
+  try {
+    // Responders and streams are tab-independent (they persist across context
+    // switches), so tear down this connection's sessions from the stores —
+    // including ones whose tabs aren't in the currently shown layout.
+    useResponder.getState().removeConn(connId);
     const { sessions, close } = useStream.getState();
     for (const s of Object.values(sessions)) {
       if (s.connId === connId) void close(s.id);
     }
-    return;
-  }
-
-  for (const panel of api.panels) {
-    const p = panel.params as
-      | { type?: EditorType; connId?: string }
-      | undefined;
-    if (!p?.type) continue;
-    const def = EDITORS[p.type];
-    if (def.connScoped && p.connId === connId) {
-      // dispose() releases the subscription; it is idempotent, so the
-      // onDidRemovePanel handler firing on close() is a harmless no-op.
-      def.dispose?.(panel.id);
-      panel.api.close();
+    // Close this connection's panels in the shown layout (its persisted layout
+    // is preserved — the save is suppressed while replacingLayout is set).
+    if (api) {
+      for (const panel of api.panels) {
+        const p = panel.params as
+          | { type?: EditorType; connId?: string }
+          | undefined;
+        if (p?.type && EDITORS[p.type].connScoped && p.connId === connId) {
+          panel.api.close();
+        }
+      }
     }
+  } finally {
+    setReplacingLayout(false);
   }
 }

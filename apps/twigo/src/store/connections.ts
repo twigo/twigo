@@ -10,13 +10,16 @@ import {
 import { useSettings } from "@/store/settings";
 import { useSubjects } from "@/store/subjects";
 import { useWorkspace } from "@/store/workspace";
-import { closeEditorsForConn } from "@/lib/editor";
+import { useResponder } from "@/store/responder";
+import { useToasts } from "@/store/toasts";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
 function teardown(conn: string) {
   useSubjects.getState().reset(conn);
-  closeEditorsForConn(conn);
+  // The editor layer injects this (setEditorTeardown) so the store doesn't
+  // depend on the UI — keeps the dependency one-way (editor → store).
+  useConnections.getState().editorTeardown(conn);
 }
 
 interface ConnectionsState {
@@ -32,6 +35,8 @@ interface ConnectionsState {
   connect: (name: string) => Promise<void>;
   disconnect: (name: string) => Promise<void>;
   onEvent: (conn: string, kind: string) => void;
+  editorTeardown: (conn: string) => void;
+  setEditorTeardown: (fn: (conn: string) => void) => void;
 }
 
 export const useConnections = create<ConnectionsState>((set, get) => ({
@@ -42,24 +47,38 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
   connected: {},
   connecting: {},
   connError: {},
+  editorTeardown: () => undefined,
+  setEditorTeardown: (fn) => set({ editorTeardown: fn }),
 
   load: async () => {
     set({ status: "loading", error: null });
     try {
       const dir = useSettings.getState().contextDir;
       const contexts = await listContexts(dir);
+      // Drop persisted state for contexts that no longer exist (renamed/deleted
+      // in the nats CLI) before restoring, so it can't orphan or ghost-reconnect.
+      const names = contexts.map((c) => c.name);
+      useWorkspace.getState().prune(names);
+      useResponder.getState().pruneConns(names);
+
       const selected = contexts.find((c) => c.selected)?.name ?? null;
+      const remembered = useWorkspace.getState().activeContext;
+      const restored =
+        remembered && names.includes(remembered) ? remembered : null;
       set({
         contexts,
         status: "ready",
-        activeContext: get().activeContext ?? selected,
+        activeContext: get().activeContext ?? restored ?? selected,
       });
     } catch (e) {
       set({ status: "error", error: String(e) });
     }
   },
 
-  setActive: (name) => set({ activeContext: name }),
+  setActive: (name) => {
+    set({ activeContext: name });
+    useWorkspace.getState().setActiveContext(name);
+  },
 
   connect: async (name) => {
     if (get().connecting[name]) return;
@@ -68,7 +87,6 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       return {
         connecting: { ...s.connecting, [name]: true },
         connError,
-        activeContext: name,
       };
     });
     try {
@@ -84,6 +102,9 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
         connecting: { ...s.connecting, [name]: false },
         connError: { ...s.connError, [name]: String(e) },
       }));
+      useToasts
+        .getState()
+        .push("error", `Couldn't connect to ${name}: ${String(e)}`);
     }
   },
 
@@ -131,6 +152,10 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
         const { [conn]: _removed, ...connected } = s.connected;
         return { connected };
       });
+    } else if (kind === "slowConsumer") {
+      useToasts
+        .getState()
+        .push("warning", `${conn}: slow consumer — messages may be dropped`);
     }
   },
 }));

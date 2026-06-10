@@ -7,6 +7,8 @@ use tokio::sync::Mutex;
 
 use super::context::{load_contexts, NatsContext};
 use super::error::{self, Error};
+use super::subjects::{self, SubjectWatch};
+use super::subscription::{abort_conn, SubState};
 
 #[derive(Default)]
 pub struct ConnState {
@@ -196,16 +198,25 @@ fn build_options(
 pub async fn connect(
     app: AppHandle,
     state: State<'_, ConnState>,
+    subs: State<'_, SubState>,
+    watch: State<'_, SubjectWatch>,
     name: String,
     dir: Option<String>,
 ) -> error::Result<ConnInfo> {
     let custom = dir
         .filter(|d| !d.trim().is_empty())
         .map(std::path::PathBuf::from);
-    let ctx = load_contexts(custom)?
-        .into_iter()
-        .find(|c| c.name == name)
-        .ok_or_else(|| Error::ContextNotFound(name.clone()))?;
+
+    // Config + creds reads are blocking std::fs; keep them off the async runtime.
+    let lookup = name.clone();
+    let ctx = tokio::task::spawn_blocking(move || {
+        load_contexts(custom)?
+            .into_iter()
+            .find(|c| c.name == lookup)
+            .ok_or_else(|| Error::ContextNotFound(lookup.clone()))
+    })
+    .await
+    .map_err(|e| Error::Task(e.to_string()))??;
 
     let url = if ctx.file.url.trim().is_empty() {
         "127.0.0.1:4222".to_string()
@@ -213,10 +224,20 @@ pub async fn connect(
         ctx.file.url.clone()
     };
 
-    let opts = build_options(&ctx, &app, &name)?;
+    let opts = {
+        let app = app.clone();
+        let name = name.clone();
+        tokio::task::spawn_blocking(move || build_options(&ctx, &app, &name))
+            .await
+            .map_err(|e| Error::Task(e.to_string()))??
+    };
     let client = opts.connect(url).await?;
-
     let info = build_conn_info(name.clone(), &client).await;
+
+    // Reconnecting the same name: tear down the previous connection's tasks so
+    // the old client/socket closes instead of leaking behind the new one.
+    abort_conn(&subs, &name);
+    subjects::stop(&watch, &name);
     tracing::info!(conn = %name, connected = info.connected, "connect");
     state.clients.lock().await.insert(name, client);
     Ok(info)
@@ -232,7 +253,17 @@ pub async fn conn_info(state: State<'_, ConnState>, name: String) -> error::Resu
 }
 
 #[tauri::command]
-pub async fn disconnect(state: State<'_, ConnState>, name: String) -> error::Result<()> {
+pub async fn disconnect(
+    state: State<'_, ConnState>,
+    subs: State<'_, SubState>,
+    watch: State<'_, SubjectWatch>,
+    name: String,
+) -> error::Result<()> {
+    // Abort the connection's subscription + watch tasks first so their
+    // Subscribers drop and the async-nats event loop can close the socket;
+    // only then drop the client.
+    abort_conn(&subs, &name);
+    subjects::stop(&watch, &name);
     state.clients.lock().await.remove(&name);
     tracing::info!(conn = %name, "disconnected");
     Ok(())
