@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Search } from "lucide-react";
 import { useUi } from "@/store/ui";
 import { useConnections } from "@/store/connections";
-import { ConnectionsList } from "@/components/connections/ConnectionsList";
+import { ConnectionSwitcher } from "@/components/connections/ConnectionSwitcher";
 import { VIEWS } from "./registry";
 
 export function Sidebar() {
@@ -14,7 +14,7 @@ export function Sidebar() {
 
   return (
     <aside className="flex h-full w-full flex-col border-r border-sidebar-border bg-sidebar">
-      <ConnectionsList />
+      <ConnectionSwitcher />
 
       <div className="my-1.5 border-t border-sidebar-border" />
 
