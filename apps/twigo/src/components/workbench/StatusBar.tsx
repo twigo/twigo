@@ -12,6 +12,7 @@ import { useUi } from "@/store/ui";
 import { useConnections } from "@/store/connections";
 import { usePalette } from "@/store/palette";
 import { fmtBinding } from "@/lib/commands";
+import { ReconnectStatus } from "./ReconnectStatus";
 
 export function StatusBar() {
   const { theme, toggleTheme } = useUi();
@@ -22,10 +23,7 @@ export function StatusBar() {
     <footer className="flex h-6 shrink-0 items-center justify-between bg-statusbar px-2 text-xs text-statusbar-foreground">
       <div className="flex items-center gap-3">
         {info && !info.connected ? (
-          <span className="flex items-center gap-1">
-            <Plug className="size-3.5 animate-pulse" />
-            {info.name} · reconnecting…
-          </span>
+          <ReconnectStatus name={info.name} />
         ) : info ? (
           <>
             <span className="flex items-center gap-1">

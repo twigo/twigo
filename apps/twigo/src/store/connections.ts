@@ -11,12 +11,14 @@ import { useSettings } from "@/store/settings";
 import { useSubjects } from "@/store/subjects";
 import { useWorkspace } from "@/store/workspace";
 import { useResponder } from "@/store/responder";
+import { useJetStream } from "@/store/jetstream";
 import { useToasts } from "@/store/toasts";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
 function teardown(conn: string) {
   useSubjects.getState().reset(conn);
+  useJetStream.getState().reset(conn);
   // The editor layer injects this (setEditorTeardown) so the store doesn't
   // depend on the UI — keeps the dependency one-way (editor → store).
   useConnections.getState().editorTeardown(conn);
@@ -30,11 +32,17 @@ interface ConnectionsState {
   connected: Record<string, ConnInfo>;
   connecting: Record<string, boolean>;
   connError: Record<string, string>;
+  // While a connection is dropped, the live backoff state for its next retry.
+  reconnecting: Record<
+    string,
+    { attempt: number; delayMs: number; at: number }
+  >;
   load: () => Promise<void>;
   setActive: (name: string) => void;
   connect: (name: string) => Promise<void>;
   disconnect: (name: string) => Promise<void>;
   onEvent: (conn: string, kind: string) => void;
+  onReconnect: (conn: string, attempt: number, delayMs: number) => void;
   editorTeardown: (conn: string) => void;
   setEditorTeardown: (fn: (conn: string) => void) => void;
 }
@@ -47,6 +55,7 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
   connected: {},
   connecting: {},
   connError: {},
+  reconnecting: {},
   editorTeardown: () => undefined,
   setEditorTeardown: (fn) => set({ editorTeardown: fn }),
 
@@ -117,7 +126,8 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
     useWorkspace.getState().setWatching(name, null);
     set((s) => {
       const { [name]: _removed, ...connected } = s.connected;
-      return { connected };
+      const { [name]: _r, ...reconnecting } = s.reconnecting;
+      return { connected, reconnecting };
     });
   },
 
@@ -125,8 +135,12 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
   // result (which can resolve while still background-reconnecting).
   onEvent: (conn, kind) => {
     if (kind === "connected") {
-      // Link is up: refresh real server info / rtt (covers a connect that
-      // resolved as pending, and transparent mid-session reconnects).
+      // Link is up: clear any backoff state and refresh real server info / rtt
+      // (covers a pending connect and transparent mid-session reconnects).
+      set((s) => {
+        const { [conn]: _r, ...reconnecting } = s.reconnecting;
+        return { reconnecting };
+      });
       void apiConnInfo(conn).then((info) => {
         set((s) =>
           s.connected[conn]
@@ -150,7 +164,8 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       teardown(conn);
       set((s) => {
         const { [conn]: _removed, ...connected } = s.connected;
-        return { connected };
+        const { [conn]: _r, ...reconnecting } = s.reconnecting;
+        return { connected, reconnecting };
       });
     } else if (kind === "slowConsumer") {
       useToasts
@@ -158,4 +173,12 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
         .push("warning", `${conn}: slow consumer — messages may be dropped`);
     }
   },
+
+  onReconnect: (conn, attempt, delayMs) =>
+    set((s) => ({
+      reconnecting: {
+        ...s.reconnecting,
+        [conn]: { attempt, delayMs, at: Date.now() },
+      },
+    })),
 }));

@@ -97,13 +97,16 @@ export async function openStream(connId: string, subject: string) {
 // (e.g. republishing a different message into an already-open Publish tab).
 let publishSeed = 0;
 
-/** Open a publish/request tab for a connection, optionally prefilling subject & payload. */
+/** Open a publish/request tab for a connection, optionally prefilling subject, payload & headers. */
 export function openPublish(
   connId: string,
   subject?: string,
   payload?: string,
+  headers?: [string, string][],
 ) {
-  const hasPrefill = Boolean((subject ?? "") || (payload ?? ""));
+  const hasPrefill = Boolean(
+    (subject ?? "") || (payload ?? "") || headers?.length,
+  );
   if (hasPrefill) publishSeed += 1;
   openEditor({
     type: "publish",
@@ -113,6 +116,7 @@ export function openPublish(
       connId,
       subject: subject ?? "",
       payload: payload ?? "",
+      headers: headers ?? [],
       seed: publishSeed,
     },
     replaceParams: hasPrefill,
@@ -152,6 +156,55 @@ export function openServerInfo(connId: string) {
     title: connId,
     params: { connId },
   });
+}
+
+function jsStreamEditorId(connId: string, stream: string): string {
+  return `jsstream:${encodeURIComponent(connId)}:${encodeURIComponent(stream)}`;
+}
+
+function jsConsumerEditorId(
+  connId: string,
+  stream: string,
+  consumer: string,
+): string {
+  return `jsconsumer:${encodeURIComponent(connId)}:${encodeURIComponent(stream)}:${encodeURIComponent(consumer)}`;
+}
+
+/** Open a JetStream stream detail tab, reusing an existing tab. */
+export function openStreamDetail(connId: string, stream: string) {
+  openEditor({
+    type: "jsstream",
+    id: jsStreamEditorId(connId, stream),
+    title: stream,
+    params: { connId, stream },
+  });
+}
+
+/** Open a JetStream consumer detail tab, reusing an existing tab. */
+export function openConsumerDetail(
+  connId: string,
+  stream: string,
+  consumer: string,
+) {
+  openEditor({
+    type: "jsconsumer",
+    id: jsConsumerEditorId(connId, stream, consumer),
+    title: consumer,
+    params: { connId, stream, consumer },
+  });
+}
+
+/** Close a stream/consumer detail tab (e.g. after the entity is deleted). */
+export function closeStreamDetail(connId: string, stream: string) {
+  api?.getPanel(jsStreamEditorId(connId, stream))?.api.close();
+}
+
+export function closeConsumerDetail(
+  connId: string,
+  stream: string,
+  consumer: string,
+) {
+  api?.getPanel(jsConsumerEditorId(connId, stream, consumer))?.api.close();
 }
 
 /** Open settings as the first editor tab. */

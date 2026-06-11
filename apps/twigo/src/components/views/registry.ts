@@ -11,6 +11,7 @@ import {
 import type { View } from "@/store/ui";
 import { SubjectsView } from "./subjects/SubjectsView";
 import { RespondersView } from "./responders/RespondersView";
+import { JetStreamView } from "./jetstream/JetStreamView";
 
 // Sidebar views (VS Code "viewlets"). One registry drives the activity bar and
 // the sidebar body. Record<View, …> makes a missing entry a compile error
@@ -29,7 +30,11 @@ interface ViewDef {
 export const VIEWS: Record<View, ViewDef> = {
   subjects: { title: "Subjects", icon: Radio, Panel: SubjectsView },
   responders: { title: "Responders", icon: Webhook, Panel: RespondersView },
-  jetstream: { title: "Streams & Consumers", icon: Layers },
+  jetstream: {
+    title: "Streams & Consumers",
+    icon: Layers,
+    Panel: JetStreamView,
+  },
   kv: { title: "KV Buckets", icon: Database },
   objectstore: { title: "Object Stores", icon: Box },
   monitor: { title: "Monitoring", icon: Activity },

@@ -21,6 +21,9 @@ pub enum Error {
     #[error("background task failed: {0}")]
     Task(String),
 
+    #[error("jetstream error: {0}")]
+    JetStream(String),
+
     #[error(transparent)]
     Connect(#[from] async_nats::ConnectError),
 

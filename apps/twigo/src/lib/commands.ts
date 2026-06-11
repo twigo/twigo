@@ -1,5 +1,6 @@
 import { useConnections } from "@/store/connections";
 import { useUi } from "@/store/ui";
+import { useJetStream } from "@/store/jetstream";
 import { newPublish, newResponder } from "@/lib/actions";
 import { openSettings } from "@/lib/editor";
 import { VIEWS, VIEW_ORDER } from "@/components/views/registry";
@@ -40,6 +41,20 @@ const STATIC: Command[] = [
     title: "Reload nats contexts",
     category: "Connections",
     run: () => void useConnections.getState().load(),
+  },
+  {
+    id: "jetstream.refresh",
+    title: "JetStream: Refresh streams",
+    category: "Connections",
+    keywords: "jetstream stream consumer",
+    when: () => {
+      const { activeContext, connected } = useConnections.getState();
+      return !!(activeContext && connected[activeContext]?.jetstream);
+    },
+    run: () => {
+      const active = useConnections.getState().activeContext;
+      if (active) void useJetStream.getState().load(active);
+    },
   },
   ...VIEW_ORDER.map(
     (v): Command => ({
