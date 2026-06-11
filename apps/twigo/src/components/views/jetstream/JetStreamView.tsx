@@ -7,7 +7,7 @@ import { useJetStream } from "@/store/jetstream";
 import { useToasts } from "@/store/toasts";
 import type { ViewProps } from "@/components/views/registry";
 import { StreamTree } from "./StreamTree";
-import { CreateStreamDialog } from "@/components/editor/jetstream/CreateStreamDialog";
+import { StreamFormDialog } from "@/components/editor/jetstream/StreamFormDialog";
 
 function Hint({ children }: { children: React.ReactNode }) {
   return (
@@ -126,9 +126,11 @@ export function JetStreamView({ filter, connId }: ViewProps) {
       )}
 
       {createOpen && (
-        <CreateStreamDialog
+        <StreamFormDialog
+          title="New stream"
+          submitLabel="Create stream"
           onClose={() => setCreateOpen(false)}
-          onCreate={(config) => void doCreate(config)}
+          onSubmit={(config) => void doCreate(config)}
         />
       )}
     </div>

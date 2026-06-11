@@ -393,6 +393,23 @@ pub async fn js_create_stream(
 }
 
 #[tauri::command]
+pub async fn js_update_stream(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    config: serde_json::Value,
+) -> error::Result<()> {
+    let client = conns
+        .client(&conn_id)
+        .await
+        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
+    let js = async_nats::jetstream::new(client);
+    let cfg: async_nats::jetstream::stream::Config =
+        serde_json::from_value(config).map_err(js_err)?;
+    js.update_stream(&cfg).await.map_err(js_err)?;
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn js_create_consumer(
     conns: State<'_, ConnState>,
     conn_id: String,

@@ -261,6 +261,13 @@ export async function jsCreateStream(
   await invoke("js_create_stream", { connId, config });
 }
 
+export async function jsUpdateStream(
+  connId: string,
+  config: Record<string, unknown>,
+): Promise<void> {
+  await invoke("js_update_stream", { connId, config });
+}
+
 export async function jsCreateConsumer(
   connId: string,
   stream: string,

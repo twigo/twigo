@@ -38,6 +38,7 @@ pub fn run() {
             nats::jetstream::js_consumer_detail,
             nats::jetstream::js_get_messages,
             nats::jetstream::js_create_stream,
+            nats::jetstream::js_update_stream,
             nats::jetstream::js_create_consumer,
             nats::jetstream::js_purge_stream,
             nats::jetstream::js_delete_stream,

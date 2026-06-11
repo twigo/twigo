@@ -1,8 +1,21 @@
 import { useState } from "react";
-import { RefreshCw, Loader2, Layers, Eraser, Trash2, Plus } from "lucide-react";
+import {
+  RefreshCw,
+  Loader2,
+  Layers,
+  Eraser,
+  Trash2,
+  Plus,
+  Pencil,
+} from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
-import { jsPurgeStream, jsDeleteStream, jsCreateConsumer } from "@/lib/api";
+import {
+  jsPurgeStream,
+  jsDeleteStream,
+  jsCreateConsumer,
+  jsUpdateStream,
+} from "@/lib/api";
 import { useStreamDetail } from "@/hooks/useJetStreamDetail";
 import { useJetStream } from "@/store/jetstream";
 import { useToasts } from "@/store/toasts";
@@ -13,6 +26,11 @@ import { MessageBrowser } from "./MessageBrowser";
 import { PurgeDialog } from "./PurgeDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { CreateConsumerDialog } from "./CreateConsumerDialog";
+import { StreamFormDialog, type StreamFormInitial } from "./StreamFormDialog";
+
+function pick(v: unknown, fallback: string): string {
+  return typeof v === "string" ? v : fallback;
+}
 
 function nanos(v: unknown): string {
   const n = num(v);
@@ -32,6 +50,7 @@ export function StreamDetailPanel({
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [consumerOpen, setConsumerOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
 
   const cfg = data?.config ?? {};
   const subjects = Array.isArray(cfg.subjects)
@@ -39,6 +58,19 @@ export function StreamDetailPanel({
     : [];
   const denyPurge = !!cfg.deny_purge || !!cfg.sealed;
   const denyDelete = !!cfg.deny_delete || !!cfg.sealed;
+  const sealed = !!cfg.sealed;
+
+  const editInitial: StreamFormInitial = {
+    name: stream,
+    subjects: subjects.join(", "),
+    storage: pick(cfg.storage, "file"),
+    retention: pick(cfg.retention, "limits"),
+    discard: pick(cfg.discard, "old"),
+    maxMsgs: String(num(cfg.max_msgs) ?? -1),
+    maxBytes: String(num(cfg.max_bytes) ?? -1),
+    maxAgeSec: String(Math.round((num(cfg.max_age) ?? 0) / 1e9)),
+    replicas: String(num(cfg.num_replicas) ?? 1),
+  };
 
   const doPurge = async (keep: number | null) => {
     try {
@@ -77,6 +109,17 @@ export function StreamDetailPanel({
     }
   };
 
+  const doEdit = async (config: Record<string, unknown>) => {
+    try {
+      await jsUpdateStream(connId, config);
+      useToasts.getState().push("info", `Updated stream ${stream}`);
+      refresh();
+      void useJetStream.getState().load(connId);
+    } catch (e) {
+      useToasts.getState().push("error", `Update failed: ${String(e)}`);
+    }
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
@@ -95,6 +138,18 @@ export function StreamDetailPanel({
                 onClick={() => setConsumerOpen(true)}
               >
                 <Plus />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Edit stream"
+                title={
+                  sealed ? "Sealed streams can't be edited" : "Edit stream"
+                }
+                disabled={sealed}
+                onClick={() => setEditOpen(true)}
+              >
+                <Pencil />
               </Button>
               <Button
                 variant="ghost"
@@ -164,6 +219,17 @@ export function StreamDetailPanel({
           stream={stream}
           onClose={() => setConsumerOpen(false)}
           onCreate={(config) => void doCreateConsumer(config)}
+        />
+      )}
+
+      {editOpen && (
+        <StreamFormDialog
+          title={`Edit ${stream}`}
+          submitLabel="Save"
+          lockIdentity
+          initial={editInitial}
+          onClose={() => setEditOpen(false)}
+          onSubmit={(config) => void doEdit(config)}
         />
       )}
 

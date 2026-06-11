@@ -6,22 +6,43 @@ const STORAGE = ["file", "memory"];
 const RETENTION = ["limits", "interest", "workqueue"];
 const DISCARD = ["old", "new"];
 
-export function CreateStreamDialog({
+export interface StreamFormInitial {
+  name: string;
+  subjects: string;
+  storage: string;
+  retention: string;
+  discard: string;
+  maxMsgs: string;
+  maxBytes: string;
+  maxAgeSec: string;
+  replicas: string;
+}
+
+export function StreamFormDialog({
+  title,
+  submitLabel,
+  initial,
+  // On edit, name/storage/retention can't change — gray them.
+  lockIdentity = false,
   onClose,
-  onCreate,
+  onSubmit,
 }: {
+  title: string;
+  submitLabel: string;
+  initial?: StreamFormInitial;
+  lockIdentity?: boolean;
   onClose: () => void;
-  onCreate: (config: Record<string, unknown>) => void;
+  onSubmit: (config: Record<string, unknown>) => void;
 }) {
-  const [name, setName] = useState("");
-  const [subjects, setSubjects] = useState("");
-  const [storage, setStorage] = useState("file");
-  const [retention, setRetention] = useState("limits");
-  const [discard, setDiscard] = useState("old");
-  const [maxMsgs, setMaxMsgs] = useState("-1");
-  const [maxBytes, setMaxBytes] = useState("-1");
-  const [maxAgeSec, setMaxAgeSec] = useState("0");
-  const [replicas, setReplicas] = useState("1");
+  const [name, setName] = useState(initial?.name ?? "");
+  const [subjects, setSubjects] = useState(initial?.subjects ?? "");
+  const [storage, setStorage] = useState(initial?.storage ?? "file");
+  const [retention, setRetention] = useState(initial?.retention ?? "limits");
+  const [discard, setDiscard] = useState(initial?.discard ?? "old");
+  const [maxMsgs, setMaxMsgs] = useState(initial?.maxMsgs ?? "-1");
+  const [maxBytes, setMaxBytes] = useState(initial?.maxBytes ?? "-1");
+  const [maxAgeSec, setMaxAgeSec] = useState(initial?.maxAgeSec ?? "0");
+  const [replicas, setReplicas] = useState(initial?.replicas ?? "1");
 
   const subjectList = subjects
     .split(",")
@@ -31,7 +52,7 @@ export function CreateStreamDialog({
 
   const submit = () => {
     if (!valid) return;
-    onCreate({
+    onSubmit({
       name: name.trim(),
       subjects: subjectList,
       storage,
@@ -45,6 +66,9 @@ export function CreateStreamDialog({
     onClose();
   };
 
+  const lock = (label: string) =>
+    lockIdentity ? `${label} (immutable)` : label;
+
   return (
     <Dialog
       open
@@ -53,14 +77,15 @@ export function CreateStreamDialog({
       }}
     >
       <DialogContent className="p-4">
-        <DialogTitle className="text-sm font-semibold">New stream</DialogTitle>
+        <DialogTitle className="text-sm font-semibold">{title}</DialogTitle>
 
         <div className="mt-3 space-y-2">
-          <Field label="Name">
+          <Field label={lock("Name")}>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              autoFocus
+              autoFocus={!lockIdentity}
+              disabled={lockIdentity}
               spellCheck={false}
               placeholder="ORDERS"
               className="h-7 w-40 font-mono text-xs"
@@ -75,14 +100,20 @@ export function CreateStreamDialog({
               className="h-7 w-40 font-mono text-xs"
             />
           </Field>
-          <Field label="Storage">
-            <Select value={storage} onChange={setStorage} options={STORAGE} />
+          <Field label={lock("Storage")}>
+            <Select
+              value={storage}
+              onChange={setStorage}
+              options={STORAGE}
+              disabled={lockIdentity}
+            />
           </Field>
-          <Field label="Retention">
+          <Field label={lock("Retention")}>
             <Select
               value={retention}
               onChange={setRetention}
               options={RETENTION}
+              disabled={lockIdentity}
             />
           </Field>
           <Field label="Discard">
@@ -127,7 +158,7 @@ export function CreateStreamDialog({
             Cancel
           </Button>
           <Button size="sm" disabled={!valid} onClick={submit}>
-            Create stream
+            {submitLabel}
           </Button>
         </div>
       </DialogContent>
