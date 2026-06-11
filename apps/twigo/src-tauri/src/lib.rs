@@ -50,7 +50,13 @@ pub fn run() {
             nats::kv::kv_bucket_info,
             nats::kv::kv_list_keys,
             nats::kv::kv_get_entry,
-            nats::kv::kv_history
+            nats::kv::kv_history,
+            nats::kv::kv_put,
+            nats::kv::kv_create,
+            nats::kv::kv_delete,
+            nats::kv::kv_purge,
+            nats::kv::kv_create_bucket,
+            nats::kv::kv_delete_bucket
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

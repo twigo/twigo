@@ -221,6 +221,10 @@ export function openKvEntry(connId: string, bucket: string, key: string) {
   });
 }
 
+export function closeKvEntry(connId: string, bucket: string, key: string) {
+  api?.getPanel(kvEntryEditorId(connId, bucket, key))?.api.close();
+}
+
 /** Open settings as the first editor tab. */
 export function openSettings() {
   openEditor({ type: "settings", id: "settings", title: "Settings", index: 0 });

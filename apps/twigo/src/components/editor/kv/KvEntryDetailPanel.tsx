@@ -1,15 +1,40 @@
 import { useState } from "react";
-import { RefreshCw, Loader2, Database, History } from "lucide-react";
-import { Button, EmptyState, CodeViewer, cn } from "@twigo/ui";
+import {
+  RefreshCw,
+  Loader2,
+  Database,
+  History,
+  Pencil,
+  Trash2,
+  Eraser,
+  Save,
+  X,
+} from "lucide-react";
+import {
+  Button,
+  EmptyState,
+  CodeViewer,
+  cn,
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+} from "@twigo/ui";
 import {
   fmtBytes,
   fmtDuration,
   decodeText,
+  encodeText,
   tryPrettyJson,
   toHex,
 } from "@twigo/utils";
+import { kvPut, kvDelete, kvPurge } from "@/lib/api";
 import { useKvEntry, useKvBucketInfo, useKvHistory } from "@/hooks/useKvDetail";
+import { useKv } from "@/store/kv";
+import { useToasts } from "@/store/toasts";
+import { closeKvEntry } from "@/lib/editor";
 import { Row, Section } from "@/components/editor/jetstream/parts";
+import { ConfirmDialog } from "@/components/editor/jetstream/ConfirmDialog";
 
 type Format = "json" | "text" | "hex";
 const FORMATS: Format[] = ["json", "text", "hex"];
@@ -26,6 +51,11 @@ export function KvEntryDetailPanel({
   const [revision, setRevision] = useState<number | null>(null);
   const [format, setFormat] = useState<Format>("json");
   const [histKey, setHistKey] = useState(0);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [purgeOpen, setPurgeOpen] = useState(false);
+  const [conflict, setConflict] = useState(false);
 
   const { data, error, loading, refresh } = useKvEntry(
     connId,
@@ -39,7 +69,63 @@ export function KvEntryDetailPanel({
   const doRefresh = () => {
     setRevision(null);
     setHistKey((k) => k + 1);
+    setEditing(false);
+    setConflict(false);
     refresh();
+  };
+
+  const startEdit = () => {
+    if (!data) return;
+    setDraft(decodeText(data.payloadB64));
+    setFormat("text");
+    setEditing(true);
+  };
+
+  // useRevision=true → optimistic CAS; false → force overwrite (blind put).
+  const save = async (useRevision: boolean) => {
+    if (!data) return;
+    try {
+      await kvPut(
+        connId,
+        bucket,
+        kvkey,
+        encodeText(draft),
+        useRevision ? data.revision : null,
+      );
+      useToasts.getState().push("info", `Saved ${kvkey}`);
+      doRefresh();
+    } catch (e) {
+      const msg = String(e);
+      if (/wrong last sequence|revision|expected/i.test(msg)) {
+        setConflict(true);
+      } else {
+        useToasts.getState().push("error", `Save failed: ${msg}`);
+      }
+    }
+  };
+
+  const doDelete = async () => {
+    try {
+      await kvDelete(connId, bucket, kvkey);
+      useToasts.getState().push("info", `Deleted ${kvkey}`);
+      closeKvEntry(connId, bucket, kvkey);
+      void useKv.getState().refreshKeys(connId, bucket);
+      void useKv.getState().load(connId);
+    } catch (e) {
+      useToasts.getState().push("error", `Delete failed: ${String(e)}`);
+    }
+  };
+
+  const doPurge = async () => {
+    try {
+      await kvPurge(connId, bucket, kvkey);
+      useToasts.getState().push("info", `Purged ${kvkey}`);
+      closeKvEntry(connId, bucket, kvkey);
+      void useKv.getState().refreshKeys(connId, bucket);
+      void useKv.getState().load(connId);
+    } catch (e) {
+      useToasts.getState().push("error", `Purge failed: ${String(e)}`);
+    }
   };
 
   const body = data
@@ -62,17 +148,117 @@ export function KvEntryDetailPanel({
             · r{revision} (read-only)
           </span>
         )}
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Refresh"
-          title="Refresh"
-          className="ml-auto"
-          onClick={doRefresh}
-        >
-          <RefreshCw className={loading ? "animate-spin" : ""} />
-        </Button>
+        <div className="ml-auto flex items-center gap-0.5">
+          {editing ? (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Save"
+                title="Save (optimistic)"
+                onClick={() => void save(true)}
+              >
+                <Save />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Cancel edit"
+                title="Cancel"
+                onClick={() => setEditing(false)}
+              >
+                <X />
+              </Button>
+            </>
+          ) : (
+            data &&
+            revision === null && (
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Edit value"
+                  title="Edit value"
+                  onClick={startEdit}
+                >
+                  <Pencil />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Delete key"
+                  title="Delete key (tombstone)"
+                  className="text-error"
+                  onClick={() => setDeleteOpen(true)}
+                >
+                  <Trash2 />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Purge key"
+                  title="Purge key (wipe history)"
+                  className="text-error"
+                  onClick={() => setPurgeOpen(true)}
+                >
+                  <Eraser />
+                </Button>
+              </>
+            )
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Refresh"
+            title="Refresh"
+            onClick={doRefresh}
+          >
+            <RefreshCw className={loading ? "animate-spin" : ""} />
+          </Button>
+        </div>
       </div>
+
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title={`Delete key ${kvkey}?`}
+        description="This writes a delete marker (tombstone); history is retained until purged."
+        confirmLabel="Delete key"
+        onConfirm={() => void doDelete()}
+      />
+      <ConfirmDialog
+        open={purgeOpen}
+        onOpenChange={setPurgeOpen}
+        title={`Purge key ${kvkey}?`}
+        description="This permanently wipes the key and all its history. This can't be undone."
+        confirmLabel="Purge key"
+        confirmWord={kvkey}
+        onConfirm={() => void doPurge()}
+      />
+
+      <Dialog open={conflict} onOpenChange={setConflict}>
+        <DialogContent className="p-4">
+          <DialogTitle className="text-sm font-semibold">
+            {kvkey} changed
+          </DialogTitle>
+          <DialogDescription className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+            The key was updated by someone else since you opened it. Reload to
+            see their value (discards your edit), or overwrite it with yours.
+          </DialogDescription>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => doRefresh()}>
+              Reload
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => void save(false)}
+            >
+              Overwrite
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {error ? (
         <EmptyState icon={Database} variant="error" className="flex-1 gap-3">
@@ -95,34 +281,49 @@ export function KvEntryDetailPanel({
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3">
           <div className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-0.5">
-              {FORMATS.map((fmt) => (
-                <button
-                  key={fmt}
-                  type="button"
-                  onClick={() => setFormat(fmt)}
-                  className={cn(
-                    "rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider",
-                    format === fmt
-                      ? "bg-accent text-foreground"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {fmt}
-                </button>
-              ))}
-            </div>
-            {data.truncated && (
+            {editing ? (
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-brand">
+                Editing value
+              </span>
+            ) : (
+              <div className="flex items-center gap-0.5">
+                {FORMATS.map((fmt) => (
+                  <button
+                    key={fmt}
+                    type="button"
+                    onClick={() => setFormat(fmt)}
+                    className={cn(
+                      "rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider",
+                      format === fmt
+                        ? "bg-accent text-foreground"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {fmt}
+                  </button>
+                ))}
+              </div>
+            )}
+            {data.truncated && !editing && (
               <p className="text-[10px] text-warn">
                 Value truncated to 1 MB for display · {fmtBytes(data.size)}{" "}
                 total.
               </p>
             )}
-            <CodeViewer
-              value={body}
-              language={format === "json" ? "json" : "text"}
-              className="max-h-72"
-            />
+            {editing ? (
+              <CodeViewer
+                value={draft}
+                onChange={setDraft}
+                language="text"
+                className="max-h-72"
+              />
+            ) : (
+              <CodeViewer
+                value={body}
+                language={format === "json" ? "json" : "text"}
+                className="max-h-72"
+              />
+            )}
           </div>
 
           <Section title="Entry">

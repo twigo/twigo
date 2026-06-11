@@ -1,7 +1,8 @@
 use async_nats::jetstream::kv::Operation;
+use async_nats::jetstream::stream::StorageType;
 use base64::Engine;
 use futures_util::{StreamExt, TryStreamExt};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use super::connection::ConnState;
@@ -230,6 +231,145 @@ pub async fn kv_history(
     }
     out.reverse(); // newest-first
     Ok(out)
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PutResult {
+    revision: u64,
+}
+
+#[tauri::command]
+pub async fn kv_put(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    bucket: String,
+    key: String,
+    payload_b64: String,
+    // Some(rev) → optimistic CAS update; None → unconditional put.
+    revision: Option<u64>,
+) -> error::Result<PutResult> {
+    let kv = store(&conns, &conn_id, &bucket).await?;
+    let val = base64::engine::general_purpose::STANDARD
+        .decode(payload_b64.as_bytes())
+        .map_err(js_err)?;
+    let rev = match revision {
+        Some(r) => kv.update(&key, val.into(), r).await.map_err(js_err)?,
+        None => kv.put(&key, val.into()).await.map_err(js_err)?,
+    };
+    Ok(PutResult { revision: rev })
+}
+
+#[tauri::command]
+pub async fn kv_create(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    bucket: String,
+    key: String,
+    payload_b64: String,
+) -> error::Result<PutResult> {
+    let kv = store(&conns, &conn_id, &bucket).await?;
+    let val = base64::engine::general_purpose::STANDARD
+        .decode(payload_b64.as_bytes())
+        .map_err(js_err)?;
+    let rev = kv.create(&key, val.into()).await.map_err(js_err)?;
+    Ok(PutResult { revision: rev })
+}
+
+#[tauri::command]
+pub async fn kv_delete(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    bucket: String,
+    key: String,
+) -> error::Result<()> {
+    let kv = store(&conns, &conn_id, &bucket).await?;
+    kv.delete(&key).await.map_err(js_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn kv_purge(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    bucket: String,
+    key: String,
+) -> error::Result<()> {
+    let kv = store(&conns, &conn_id, &bucket).await?;
+    kv.purge(&key).await.map_err(js_err)?;
+    Ok(())
+}
+
+// kv::Config is Serialize-only (it's a create payload), so build it from a
+// deserializable form rather than round-tripping the typed config.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NewBucket {
+    bucket: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    history: i64,
+    #[serde(default)]
+    max_value_size: i32,
+    #[serde(default)]
+    max_bytes: i64,
+    #[serde(default)]
+    max_age: u64,
+    #[serde(default)]
+    storage: String,
+    #[serde(default)]
+    num_replicas: usize,
+}
+
+#[tauri::command]
+pub async fn kv_create_bucket(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    config: serde_json::Value,
+) -> error::Result<()> {
+    let client = conns
+        .client(&conn_id)
+        .await
+        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
+    let js = async_nats::jetstream::new(client);
+    let nb: NewBucket = serde_json::from_value(config).map_err(js_err)?;
+    let cfg = async_nats::jetstream::kv::Config {
+        bucket: nb.bucket,
+        description: nb.description,
+        history: if nb.history > 0 { nb.history } else { 1 },
+        max_value_size: nb.max_value_size,
+        max_bytes: nb.max_bytes,
+        max_age: std::time::Duration::from_nanos(nb.max_age),
+        storage: if nb.storage == "memory" {
+            StorageType::Memory
+        } else {
+            StorageType::File
+        },
+        num_replicas: if nb.num_replicas > 0 {
+            nb.num_replicas
+        } else {
+            1
+        },
+        ..Default::default()
+    };
+    js.create_key_value(cfg).await.map_err(js_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn kv_delete_bucket(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    bucket: String,
+) -> error::Result<()> {
+    let client = conns
+        .client(&conn_id)
+        .await
+        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
+    let js = async_nats::jetstream::new(client);
+    js.delete_key_value(&bucket).await.map_err(js_err)?;
+    Ok(())
 }
 
 #[cfg(test)]

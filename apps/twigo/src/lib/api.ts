@@ -414,3 +414,63 @@ export function kvHistory(
 ): Promise<KvEntrySummary[]> {
   return invoke<KvEntrySummary[]>("kv_history", { connId, bucket, key });
 }
+
+export function kvPut(
+  connId: string,
+  bucket: string,
+  key: string,
+  payloadB64: string,
+  revision: number | null,
+): Promise<{ revision: number }> {
+  return invoke<{ revision: number }>("kv_put", {
+    connId,
+    bucket,
+    key,
+    payloadB64,
+    revision,
+  });
+}
+
+export function kvCreate(
+  connId: string,
+  bucket: string,
+  key: string,
+  payloadB64: string,
+): Promise<{ revision: number }> {
+  return invoke<{ revision: number }>("kv_create", {
+    connId,
+    bucket,
+    key,
+    payloadB64,
+  });
+}
+
+export async function kvDelete(
+  connId: string,
+  bucket: string,
+  key: string,
+): Promise<void> {
+  await invoke("kv_delete", { connId, bucket, key });
+}
+
+export async function kvPurge(
+  connId: string,
+  bucket: string,
+  key: string,
+): Promise<void> {
+  await invoke("kv_purge", { connId, bucket, key });
+}
+
+export async function kvCreateBucket(
+  connId: string,
+  config: Record<string, unknown>,
+): Promise<void> {
+  await invoke("kv_create_bucket", { connId, config });
+}
+
+export async function kvDeleteBucket(
+  connId: string,
+  bucket: string,
+): Promise<void> {
+  await invoke("kv_delete_bucket", { connId, bucket });
+}

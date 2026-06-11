@@ -21,6 +21,14 @@ export function decodeText(payloadB64: string): string {
   return new TextDecoder().decode(decodeBytes(payloadB64));
 }
 
+/** Encode UTF-8 text to a base64 payload (inverse of decodeText). */
+export function encodeText(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
+}
+
 /** Single-line, truncated preview of a payload for the message table. */
 export function decodePreview(payloadB64: string, max = 200): string {
   const text = decodeText(payloadB64).replace(/\s+/g, " ").trim();

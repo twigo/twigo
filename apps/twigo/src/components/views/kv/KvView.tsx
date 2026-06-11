@@ -1,10 +1,19 @@
-import { useEffect } from "react";
-import { RefreshCw, ChevronsDownUp, Loader2, Database } from "lucide-react";
+import { useEffect, useState } from "react";
+import {
+  RefreshCw,
+  ChevronsDownUp,
+  Loader2,
+  Database,
+  Plus,
+} from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
+import { kvCreateBucket } from "@/lib/api";
 import { useConnections } from "@/store/connections";
 import { useKv } from "@/store/kv";
+import { useToasts } from "@/store/toasts";
 import type { ViewProps } from "@/components/views/registry";
 import { KvTree } from "./KvTree";
+import { CreateBucketDialog } from "@/components/editor/kv/CreateBucketDialog";
 
 function Hint({ children }: { children: React.ReactNode }) {
   return (
@@ -22,6 +31,20 @@ export function KvView({ filter, connId }: ViewProps) {
   const data = useKv((s) => (connId ? s.byConn[connId] : undefined));
   const load = useKv((s) => s.load);
   const collapseAll = useKv((s) => s.collapseAll);
+  const [createOpen, setCreateOpen] = useState(false);
+
+  const doCreate = async (config: Record<string, unknown>) => {
+    if (!connId) return;
+    try {
+      await kvCreateBucket(connId, config);
+      useToasts
+        .getState()
+        .push("info", `Created bucket ${String(config.bucket)}`);
+      void load(connId);
+    } catch (e) {
+      useToasts.getState().push("error", `Create failed: ${String(e)}`);
+    }
+  };
 
   useEffect(() => {
     if (
@@ -63,6 +86,15 @@ export function KvView({ filter, connId }: ViewProps) {
           <Button
             variant="ghost"
             size="icon"
+            aria-label="New bucket"
+            title="New bucket"
+            onClick={() => setCreateOpen(true)}
+          >
+            <Plus />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             aria-label="Collapse all"
             title="Collapse all"
             onClick={() => collapseAll(connId)}
@@ -97,6 +129,13 @@ export function KvView({ filter, connId }: ViewProps) {
         <Hint>{f ? "No matching buckets." : "No KV buckets yet."}</Hint>
       ) : (
         <KvTree connId={connId} buckets={filtered} />
+      )}
+
+      {createOpen && (
+        <CreateBucketDialog
+          onClose={() => setCreateOpen(false)}
+          onCreate={(config) => void doCreate(config)}
+        />
       )}
     </div>
   );
