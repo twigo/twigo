@@ -474,3 +474,48 @@ export async function kvDeleteBucket(
 ): Promise<void> {
   await invoke("kv_delete_bucket", { connId, bucket });
 }
+
+export interface ObjBucketSummary {
+  bucket: string;
+  bytes: number;
+  storage: string;
+}
+
+export interface ObjSummary {
+  name: string;
+  size: number;
+  chunks: number;
+  modified: string | null;
+  deleted: boolean;
+}
+
+export interface ObjDetail {
+  name: string;
+  description: string | null;
+  size: number;
+  chunks: number;
+  modified: string | null;
+  digest: string | null;
+  deleted: boolean;
+  metadata: Record<string, string>;
+  headers: [string, string][];
+}
+
+export function objListBuckets(connId: string): Promise<ObjBucketSummary[]> {
+  return invoke<ObjBucketSummary[]>("obj_list_buckets", { connId });
+}
+
+export function objListObjects(
+  connId: string,
+  bucket: string,
+): Promise<ObjSummary[]> {
+  return invoke<ObjSummary[]>("obj_list_objects", { connId, bucket });
+}
+
+export function objObjectInfo(
+  connId: string,
+  bucket: string,
+  name: string,
+): Promise<ObjDetail> {
+  return invoke<ObjDetail>("obj_object_info", { connId, bucket, name });
+}
