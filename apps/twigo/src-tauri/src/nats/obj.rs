@@ -1,8 +1,11 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
+use async_nats::jetstream::stream::StorageType;
 use futures_util::TryStreamExt;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
+use tokio::io::AsyncWriteExt;
 
 use super::connection::ConnState;
 use super::error::{self, Error};
@@ -135,4 +138,135 @@ pub async fn obj_object_info(
         metadata: info.metadata.clone(),
         headers: super::subscription::flatten_headers(info.headers.as_ref()),
     })
+}
+
+/// Download an object to a local path. Streams chunk-by-chunk so a multi-GB
+/// object never lands wholly in memory.
+#[tauri::command]
+pub async fn obj_get_object(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    bucket: String,
+    name: String,
+    dest: String,
+) -> error::Result<()> {
+    let os = store(&conns, &conn_id, &bucket).await?;
+    let mut object = os.get(&name).await.map_err(js_err)?;
+    let mut file = tokio::fs::File::create(&dest)
+        .await
+        .map_err(|source| Error::Io {
+            path: dest.clone(),
+            source,
+        })?;
+    tokio::io::copy(&mut object, &mut file)
+        .await
+        .map_err(|source| Error::Io {
+            path: dest.clone(),
+            source,
+        })?;
+    file.flush().await.map_err(|source| Error::Io {
+        path: dest.clone(),
+        source,
+    })?;
+    Ok(())
+}
+
+/// Upload a local file as an object (name = the caller-chosen object name).
+#[tauri::command]
+pub async fn obj_put_object(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    bucket: String,
+    name: String,
+    src: String,
+) -> error::Result<()> {
+    let os = store(&conns, &conn_id, &bucket).await?;
+    let mut file = tokio::fs::File::open(&src)
+        .await
+        .map_err(|source| Error::Io {
+            path: src.clone(),
+            source,
+        })?;
+    os.put(name.as_str(), &mut file).await.map_err(js_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn obj_delete(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    bucket: String,
+    name: String,
+) -> error::Result<()> {
+    let os = store(&conns, &conn_id, &bucket).await?;
+    os.delete(&name).await.map_err(js_err)?;
+    Ok(())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NewObjBucket {
+    bucket: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    max_age: u64,
+    #[serde(default)]
+    max_bytes: i64,
+    #[serde(default)]
+    storage: String,
+    #[serde(default)]
+    num_replicas: usize,
+}
+
+#[tauri::command]
+pub async fn obj_create_bucket(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    config: serde_json::Value,
+) -> error::Result<()> {
+    let client = conns
+        .client(&conn_id)
+        .await
+        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
+    let js = async_nats::jetstream::new(client);
+    let nb: NewObjBucket = serde_json::from_value(config).map_err(js_err)?;
+    let cfg = async_nats::jetstream::object_store::Config {
+        bucket: nb.bucket,
+        description: if nb.description.is_empty() {
+            None
+        } else {
+            Some(nb.description)
+        },
+        max_age: Duration::from_nanos(nb.max_age),
+        max_bytes: nb.max_bytes,
+        storage: if nb.storage == "memory" {
+            StorageType::Memory
+        } else {
+            StorageType::File
+        },
+        num_replicas: if nb.num_replicas > 0 {
+            nb.num_replicas
+        } else {
+            1
+        },
+        ..Default::default()
+    };
+    js.create_object_store(cfg).await.map_err(js_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn obj_delete_bucket(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    bucket: String,
+) -> error::Result<()> {
+    let client = conns
+        .client(&conn_id)
+        .await
+        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
+    let js = async_nats::jetstream::new(client);
+    js.delete_object_store(&bucket).await.map_err(js_err)?;
+    Ok(())
 }

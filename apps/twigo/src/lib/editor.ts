@@ -243,6 +243,10 @@ export function openObjectEntry(connId: string, bucket: string, name: string) {
   });
 }
 
+export function closeObjectEntry(connId: string, bucket: string, name: string) {
+  api?.getPanel(objEntryEditorId(connId, bucket, name))?.api.close();
+}
+
 /** Open settings as the first editor tab. */
 export function openSettings() {
   openEditor({ type: "settings", id: "settings", title: "Settings", index: 0 });

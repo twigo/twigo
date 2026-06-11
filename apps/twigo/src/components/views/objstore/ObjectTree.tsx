@@ -1,9 +1,13 @@
 import { useMemo, useState } from "react";
-import { ChevronRight, Box, File, Loader2, Trash2 } from "lucide-react";
+import { ChevronRight, Box, File, Loader2, Trash2, Upload } from "lucide-react";
+import { open as openFile } from "@tauri-apps/plugin-dialog";
 import { cn } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
+import { objPutObject, objDeleteBucket } from "@/lib/api";
 import { useObjStore } from "@/store/objstore";
+import { useToasts } from "@/store/toasts";
 import { openObjectEntry } from "@/lib/editor";
+import { ConfirmDialog } from "@/components/editor/jetstream/ConfirmDialog";
 import type { ObjBucketSummary, ObjSummary } from "@/lib/api";
 
 type Row =
@@ -23,6 +27,31 @@ export function ObjectTree({
   const toggleBucket = useObjStore((s) => s.toggleBucket);
 
   const [selected, setSelected] = useState(0);
+  const [delBucket, setDelBucket] = useState<string | null>(null);
+
+  const doUpload = async (bkt: string) => {
+    const src = await openFile({ multiple: false, directory: false });
+    if (typeof src !== "string") return;
+    const objName = src.split(/[/\\]/).pop() ?? src;
+    try {
+      await objPutObject(connId, bkt, objName, src);
+      useToasts.getState().push("info", `Uploaded ${objName}`);
+      void useObjStore.getState().refreshObjects(connId, bkt);
+      void useObjStore.getState().load(connId);
+    } catch (e) {
+      useToasts.getState().push("error", `Upload failed: ${String(e)}`);
+    }
+  };
+
+  const doDeleteBucket = async (bkt: string) => {
+    try {
+      await objDeleteBucket(connId, bkt);
+      useToasts.getState().push("info", `Deleted object store ${bkt}`);
+      void useObjStore.getState().load(connId);
+    } catch (e) {
+      useToasts.getState().push("error", `Delete failed: ${String(e)}`);
+    }
+  };
 
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = [];
@@ -69,34 +98,54 @@ export function ObjectTree({
   };
 
   return (
-    <ul
-      role="tree"
-      tabIndex={0}
-      onKeyDown={onKeyDown}
-      className="min-h-0 flex-1 overflow-auto py-0.5 outline-none"
-    >
-      {rows.map((row, i) =>
-        row.kind === "bucket" ? (
-          <BucketRow
-            key={`b:${row.bucket.bucket}`}
-            bucket={row.bucket}
-            selected={i === sel}
-            expanded={!!expanded[row.bucket.bucket]}
-            loading={!!loading[row.bucket.bucket]}
-            onSelect={() => setSelected(i)}
-            onToggle={() => void toggleBucket(connId, row.bucket.bucket)}
-          />
-        ) : (
-          <ObjectRow
-            key={`o:${row.bucket}:${row.object.name}`}
-            object={row.object}
-            selected={i === sel}
-            onSelect={() => setSelected(i)}
-            onOpen={() => openObjectEntry(connId, row.bucket, row.object.name)}
-          />
-        ),
+    <>
+      <ul
+        role="tree"
+        tabIndex={0}
+        onKeyDown={onKeyDown}
+        className="min-h-0 flex-1 overflow-auto py-0.5 outline-none"
+      >
+        {rows.map((row, i) =>
+          row.kind === "bucket" ? (
+            <BucketRow
+              key={`b:${row.bucket.bucket}`}
+              bucket={row.bucket}
+              selected={i === sel}
+              expanded={!!expanded[row.bucket.bucket]}
+              loading={!!loading[row.bucket.bucket]}
+              onSelect={() => setSelected(i)}
+              onToggle={() => void toggleBucket(connId, row.bucket.bucket)}
+              onUpload={() => void doUpload(row.bucket.bucket)}
+              onDelete={() => setDelBucket(row.bucket.bucket)}
+            />
+          ) : (
+            <ObjectRow
+              key={`o:${row.bucket}:${row.object.name}`}
+              object={row.object}
+              selected={i === sel}
+              onSelect={() => setSelected(i)}
+              onOpen={() =>
+                openObjectEntry(connId, row.bucket, row.object.name)
+              }
+            />
+          ),
+        )}
+      </ul>
+
+      {delBucket && (
+        <ConfirmDialog
+          open
+          onOpenChange={(o) => {
+            if (!o) setDelBucket(null);
+          }}
+          title={`Delete object store ${delBucket}?`}
+          description="This permanently deletes the store and all its objects. This can't be undone."
+          confirmLabel="Delete store"
+          confirmWord={delBucket}
+          onConfirm={() => void doDeleteBucket(delBucket)}
+        />
       )}
-    </ul>
+    </>
   );
 }
 
@@ -107,6 +156,8 @@ function BucketRow({
   loading,
   onSelect,
   onToggle,
+  onUpload,
+  onDelete,
 }: {
   bucket: ObjBucketSummary;
   selected: boolean;
@@ -114,6 +165,8 @@ function BucketRow({
   loading: boolean;
   onSelect: () => void;
   onToggle: () => void;
+  onUpload: () => void;
+  onDelete: () => void;
 }) {
   return (
     <li
@@ -152,6 +205,32 @@ function BucketRow({
       </button>
       <Box className="size-3 shrink-0 text-brand" />
       <span className="min-w-0 flex-1 truncate font-mono">{bucket.bucket}</span>
+      <span className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100">
+        <button
+          type="button"
+          aria-label="Upload object"
+          title="Upload object"
+          onClick={(e) => {
+            e.stopPropagation();
+            onUpload();
+          }}
+          className="text-muted-foreground hover:text-foreground"
+        >
+          <Upload className="size-3" />
+        </button>
+        <button
+          type="button"
+          aria-label="Delete object store"
+          title="Delete object store"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          className="text-muted-foreground hover:text-error"
+        >
+          <Trash2 className="size-3" />
+        </button>
+      </span>
       <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
         {fmtBytes(bucket.bytes)} · {bucket.storage}
       </span>

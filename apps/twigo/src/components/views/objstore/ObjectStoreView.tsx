@@ -1,10 +1,13 @@
-import { useEffect } from "react";
-import { RefreshCw, ChevronsDownUp, Loader2, Box } from "lucide-react";
+import { useEffect, useState } from "react";
+import { RefreshCw, ChevronsDownUp, Loader2, Box, Plus } from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
+import { objCreateBucket } from "@/lib/api";
 import { useConnections } from "@/store/connections";
 import { useObjStore } from "@/store/objstore";
+import { useToasts } from "@/store/toasts";
 import type { ViewProps } from "@/components/views/registry";
 import { ObjectTree } from "./ObjectTree";
+import { CreateObjBucketDialog } from "@/components/editor/objstore/CreateObjBucketDialog";
 
 function Hint({ children }: { children: React.ReactNode }) {
   return (
@@ -22,6 +25,20 @@ export function ObjectStoreView({ filter, connId }: ViewProps) {
   const data = useObjStore((s) => (connId ? s.byConn[connId] : undefined));
   const load = useObjStore((s) => s.load);
   const collapseAll = useObjStore((s) => s.collapseAll);
+  const [createOpen, setCreateOpen] = useState(false);
+
+  const doCreate = async (config: Record<string, unknown>) => {
+    if (!connId) return;
+    try {
+      await objCreateBucket(connId, config);
+      useToasts
+        .getState()
+        .push("info", `Created object store ${String(config.bucket)}`);
+      void load(connId);
+    } catch (e) {
+      useToasts.getState().push("error", `Create failed: ${String(e)}`);
+    }
+  };
 
   useEffect(() => {
     if (
@@ -63,6 +80,15 @@ export function ObjectStoreView({ filter, connId }: ViewProps) {
           <Button
             variant="ghost"
             size="icon"
+            aria-label="New object store"
+            title="New object store"
+            onClick={() => setCreateOpen(true)}
+          >
+            <Plus />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             aria-label="Collapse all"
             title="Collapse all"
             onClick={() => collapseAll(connId)}
@@ -97,6 +123,13 @@ export function ObjectStoreView({ filter, connId }: ViewProps) {
         <Hint>{f ? "No matching stores." : "No object stores yet."}</Hint>
       ) : (
         <ObjectTree connId={connId} buckets={filtered} />
+      )}
+
+      {createOpen && (
+        <CreateObjBucketDialog
+          onClose={() => setCreateOpen(false)}
+          onCreate={(config) => void doCreate(config)}
+        />
       )}
     </div>
   );

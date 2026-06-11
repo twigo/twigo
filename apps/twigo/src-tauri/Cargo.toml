@@ -28,6 +28,8 @@ tokio = { version = "1.52.3", features = [
     "macros",
     "sync",
     "time",
+    "fs",
+    "io-util",
 ] }
 tauri-plugin-dialog = "2.7.1"
 thiserror = "2.0.18"

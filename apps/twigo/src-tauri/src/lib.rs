@@ -59,7 +59,12 @@ pub fn run() {
             nats::kv::kv_delete_bucket,
             nats::obj::obj_list_buckets,
             nats::obj::obj_list_objects,
-            nats::obj::obj_object_info
+            nats::obj::obj_object_info,
+            nats::obj::obj_get_object,
+            nats::obj::obj_put_object,
+            nats::obj::obj_delete,
+            nats::obj::obj_create_bucket,
+            nats::obj::obj_delete_bucket
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

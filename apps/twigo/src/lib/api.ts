@@ -519,3 +519,43 @@ export function objObjectInfo(
 ): Promise<ObjDetail> {
   return invoke<ObjDetail>("obj_object_info", { connId, bucket, name });
 }
+
+export async function objGetObject(
+  connId: string,
+  bucket: string,
+  name: string,
+  dest: string,
+): Promise<void> {
+  await invoke("obj_get_object", { connId, bucket, name, dest });
+}
+
+export async function objPutObject(
+  connId: string,
+  bucket: string,
+  name: string,
+  src: string,
+): Promise<void> {
+  await invoke("obj_put_object", { connId, bucket, name, src });
+}
+
+export async function objDelete(
+  connId: string,
+  bucket: string,
+  name: string,
+): Promise<void> {
+  await invoke("obj_delete", { connId, bucket, name });
+}
+
+export async function objCreateBucket(
+  connId: string,
+  config: Record<string, unknown>,
+): Promise<void> {
+  await invoke("obj_create_bucket", { connId, config });
+}
+
+export async function objDeleteBucket(
+  connId: string,
+  bucket: string,
+): Promise<void> {
+  await invoke("obj_delete_bucket", { connId, bucket });
+}
