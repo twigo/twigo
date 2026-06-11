@@ -52,9 +52,10 @@
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --panel: oklch(0.985 0 0);
-  /* Calmer than full --brand so the bottom band reads as a refined identity
-     strip, not a flashlight. */
-  --statusbar: oklch(0.54 0.085 195);
+  /* Same hue as --brand, just deeper — a large filled band reads calmer than a
+     vivid accent, but it's provably the brand color so re-skin still follows.
+     Small accents (icons, primary buttons, selection bar) keep full --brand. */
+  --statusbar: color-mix(in oklab, var(--brand) 70%, oklch(0.2 0 0));
   --statusbar-foreground: oklch(0.99 0 0);
 
   --ok: oklch(0.62 0.14 150);
@@ -97,8 +98,8 @@
   --sidebar-foreground: oklch(0.95 0 0);
   --sidebar-border: oklch(1 0 0 / 8%);
   --panel: oklch(0.185 0 0);
-  --statusbar: oklch(0.5 0.075 195);
-  --statusbar-foreground: oklch(0.99 0 0);
+  /* --statusbar / --statusbar-foreground inherit from :root and recompute from
+     the dark --brand above (same hue, just deeper for the large band). */
 
   --ok: oklch(0.72 0.15 150);
   --warn: oklch(0.78 0.15 75);
