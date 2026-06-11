@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronRight, RefreshCw, Send, Loader2 } from "lucide-react";
+import { ChevronRight, RefreshCw, Send, Loader2, Trash2 } from "lucide-react";
 import { Button, CodeViewer, cn } from "@twigo/ui";
 import {
   fmtBytes,
@@ -8,8 +8,11 @@ import {
   tryPrettyJson,
   toHex,
 } from "@twigo/utils";
-import { jsGetMessages, type StoredMessage } from "@/lib/api";
+import { jsGetMessages, jsDeleteMessage, type StoredMessage } from "@/lib/api";
 import { openPublish } from "@/lib/editor";
+import { useJetStream } from "@/store/jetstream";
+import { useToasts } from "@/store/toasts";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 type Format = "json" | "text" | "hex";
 const FORMATS: Format[] = ["json", "text", "hex"];
@@ -32,6 +35,7 @@ export function MessageBrowser({
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
   const [format, setFormat] = useState<Format>("json");
   const [seqInput, setSeqInput] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const load = async (start: number | null, append: boolean) => {
     setLoading(true);
@@ -59,6 +63,18 @@ export function MessageBrowser({
   const loadFromSeq = () => {
     const n = Number(seqInput);
     if (Number.isFinite(n) && n > 0) void load(Math.floor(n), false);
+  };
+
+  const doDelete = async (seq: number) => {
+    try {
+      await jsDeleteMessage(connId, stream, seq);
+      setMessages((prev) => prev.filter((m) => m.seq !== seq));
+      setSelectedSeq(null);
+      useToasts.getState().push("info", `Deleted message #${String(seq)}`);
+      void useJetStream.getState().load(connId);
+    } catch (e) {
+      useToasts.getState().push("error", `Delete failed: ${String(e)}`);
+    }
   };
 
   const selected = messages.find((m) => m.seq === selectedSeq);
@@ -181,6 +197,16 @@ export function MessageBrowser({
                     >
                       <Send />
                     </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Delete message"
+                      title="Delete message"
+                      className="text-error"
+                      onClick={() => setDeleteOpen(true)}
+                    >
+                      <Trash2 />
+                    </Button>
                   </div>
 
                   {selected.headers.length > 0 && (
@@ -218,6 +244,15 @@ export function MessageBrowser({
                     value={body}
                     language={format === "json" ? "json" : "text"}
                     className="max-h-64"
+                  />
+
+                  <ConfirmDialog
+                    open={deleteOpen}
+                    onOpenChange={setDeleteOpen}
+                    title={`Delete message #${String(selected.seq)}?`}
+                    description="This permanently removes the message from the stream. This can't be undone."
+                    confirmLabel="Delete message"
+                    onConfirm={() => void doDelete(selected.seq)}
                   />
                 </div>
               )}

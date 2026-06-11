@@ -36,7 +36,13 @@ pub fn run() {
             nats::jetstream::js_stream_detail,
             nats::jetstream::js_list_consumers,
             nats::jetstream::js_consumer_detail,
-            nats::jetstream::js_get_messages
+            nats::jetstream::js_get_messages,
+            nats::jetstream::js_purge_stream,
+            nats::jetstream::js_delete_stream,
+            nats::jetstream::js_delete_consumer,
+            nats::jetstream::js_pause_consumer,
+            nats::jetstream::js_resume_consumer,
+            nats::jetstream::js_delete_message
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

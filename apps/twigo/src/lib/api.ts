@@ -252,3 +252,56 @@ export function jsGetMessages(
     backward,
   });
 }
+
+export function jsPurgeStream(
+  connId: string,
+  stream: string,
+  keep: number | null,
+  upToSeq: number | null,
+): Promise<{ purged: number }> {
+  return invoke<{ purged: number }>("js_purge_stream", {
+    connId,
+    stream,
+    keep,
+    upToSeq,
+  });
+}
+
+export async function jsDeleteStream(
+  connId: string,
+  stream: string,
+): Promise<void> {
+  await invoke("js_delete_stream", { connId, stream });
+}
+
+export async function jsDeleteConsumer(
+  connId: string,
+  stream: string,
+  consumer: string,
+): Promise<void> {
+  await invoke("js_delete_consumer", { connId, stream, consumer });
+}
+
+export async function jsPauseConsumer(
+  connId: string,
+  stream: string,
+  consumer: string,
+): Promise<void> {
+  await invoke("js_pause_consumer", { connId, stream, consumer });
+}
+
+export async function jsResumeConsumer(
+  connId: string,
+  stream: string,
+  consumer: string,
+): Promise<void> {
+  await invoke("js_resume_consumer", { connId, stream, consumer });
+}
+
+export async function jsDeleteMessage(
+  connId: string,
+  stream: string,
+  seq: number,
+): Promise<void> {
+  await invoke("js_delete_message", { connId, stream, seq });
+}

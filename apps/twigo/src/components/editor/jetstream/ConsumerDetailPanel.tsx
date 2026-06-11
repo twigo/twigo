@@ -1,9 +1,23 @@
-import { RefreshCw, Loader2, ArrowDownToLine, Pause } from "lucide-react";
+import { useState } from "react";
+import {
+  RefreshCw,
+  Loader2,
+  ArrowDownToLine,
+  Pause,
+  Play,
+  Trash2,
+} from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
 import { fmtCount } from "@twigo/utils";
+import { jsPauseConsumer, jsResumeConsumer, jsDeleteConsumer } from "@/lib/api";
 import { useConsumerDetail } from "@/hooks/useJetStreamDetail";
+import { useConnections } from "@/store/connections";
+import { useJetStream } from "@/store/jetstream";
+import { useToasts } from "@/store/toasts";
+import { closeConsumerDetail } from "@/lib/editor";
 import { Row, Section, RawJson } from "./parts";
-import { disp, num } from "./format";
+import { disp, num, supportsPause } from "./format";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 function nanos(v: unknown): string {
   const n = num(v);
@@ -36,7 +50,39 @@ export function ConsumerDetailPanel({
     stream,
     consumer,
   );
+  const serverVersion = useConnections(
+    (s) => s.connected[connId]?.serverVersion ?? "",
+  );
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const cfg = data?.config ?? {};
+  const canPause = supportsPause(serverVersion);
+
+  const doPauseResume = async () => {
+    try {
+      if (data?.paused) {
+        await jsResumeConsumer(connId, stream, consumer);
+        useToasts.getState().push("info", `Resumed ${consumer}`);
+      } else {
+        await jsPauseConsumer(connId, stream, consumer);
+        useToasts.getState().push("info", `Paused ${consumer}`);
+      }
+      refresh();
+      void useJetStream.getState().refreshConsumers(connId, stream);
+    } catch (e) {
+      useToasts.getState().push("error", `Failed: ${String(e)}`);
+    }
+  };
+
+  const doDelete = async () => {
+    try {
+      await jsDeleteConsumer(connId, stream, consumer);
+      useToasts.getState().push("info", `Deleted consumer ${consumer}`);
+      closeConsumerDetail(connId, stream, consumer);
+      void useJetStream.getState().refreshConsumers(connId, stream);
+    } catch (e) {
+      useToasts.getState().push("error", `Delete failed: ${String(e)}`);
+    }
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
@@ -53,17 +99,50 @@ export function ConsumerDetailPanel({
             <Pause className="size-3" /> paused
           </span>
         )}
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Refresh"
-          title="Refresh"
-          className="ml-auto"
-          onClick={refresh}
-        >
-          <RefreshCw className={loading ? "animate-spin" : ""} />
-        </Button>
+        <div className="ml-auto flex items-center gap-0.5">
+          {data && canPause && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={data.paused ? "Resume consumer" : "Pause consumer"}
+              title={data.paused ? "Resume consumer" : "Pause consumer"}
+              onClick={() => void doPauseResume()}
+            >
+              {data.paused ? <Play /> : <Pause />}
+            </Button>
+          )}
+          {data && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Delete consumer"
+              title="Delete consumer"
+              className="text-error"
+              onClick={() => setDeleteOpen(true)}
+            >
+              <Trash2 />
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Refresh"
+            title="Refresh"
+            onClick={refresh}
+          >
+            <RefreshCw className={loading ? "animate-spin" : ""} />
+          </Button>
+        </div>
       </div>
+
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title={`Delete consumer ${consumer}?`}
+        description="This permanently removes the consumer and its position. Messages stay in the stream."
+        confirmLabel="Delete consumer"
+        onConfirm={() => void doDelete()}
+      />
 
       {error ? (
         <EmptyState

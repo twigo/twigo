@@ -329,6 +329,126 @@ pub async fn js_get_messages(
     Ok(MessagePage { messages, next_seq })
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PurgeResult {
+    purged: u64,
+}
+
+#[tauri::command]
+pub async fn js_purge_stream(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    stream: String,
+    keep: Option<u64>,
+    up_to_seq: Option<u64>,
+) -> error::Result<PurgeResult> {
+    let client = conns
+        .client(&conn_id)
+        .await
+        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
+    let js = async_nats::jetstream::new(client);
+    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    // keep/sequence are mutually exclusive (enforced by the builder's generics).
+    let resp = match (keep, up_to_seq) {
+        (Some(k), _) => handle.purge().keep(k).await,
+        (_, Some(s)) => handle.purge().sequence(s).await,
+        _ => handle.purge().await,
+    }
+    .map_err(js_err)?;
+    Ok(PurgeResult {
+        purged: resp.purged,
+    })
+}
+
+#[tauri::command]
+pub async fn js_delete_stream(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    stream: String,
+) -> error::Result<()> {
+    let client = conns
+        .client(&conn_id)
+        .await
+        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
+    let js = async_nats::jetstream::new(client);
+    js.delete_stream(&stream).await.map_err(js_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn js_delete_consumer(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    stream: String,
+    consumer: String,
+) -> error::Result<()> {
+    let client = conns
+        .client(&conn_id)
+        .await
+        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
+    let js = async_nats::jetstream::new(client);
+    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    handle.delete_consumer(&consumer).await.map_err(js_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn js_pause_consumer(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    stream: String,
+    consumer: String,
+) -> error::Result<()> {
+    let client = conns
+        .client(&conn_id)
+        .await
+        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
+    let js = async_nats::jetstream::new(client);
+    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    // Pause far into the future = effectively indefinite (resume re-enables it).
+    let until = OffsetDateTime::now_utc() + time::Duration::days(36500);
+    handle
+        .pause_consumer(&consumer, until)
+        .await
+        .map_err(js_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn js_resume_consumer(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    stream: String,
+    consumer: String,
+) -> error::Result<()> {
+    let client = conns
+        .client(&conn_id)
+        .await
+        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
+    let js = async_nats::jetstream::new(client);
+    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    handle.resume_consumer(&consumer).await.map_err(js_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn js_delete_message(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    stream: String,
+    seq: u64,
+) -> error::Result<()> {
+    let client = conns
+        .client(&conn_id)
+        .await
+        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
+    let js = async_nats::jetstream::new(client);
+    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    handle.delete_message(seq).await.map_err(js_err)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

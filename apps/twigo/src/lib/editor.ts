@@ -190,6 +190,19 @@ export function openConsumerDetail(
   });
 }
 
+/** Close a stream/consumer detail tab (e.g. after the entity is deleted). */
+export function closeStreamDetail(connId: string, stream: string) {
+  api?.getPanel(jsStreamEditorId(connId, stream))?.api.close();
+}
+
+export function closeConsumerDetail(
+  connId: string,
+  stream: string,
+  consumer: string,
+) {
+  api?.getPanel(jsConsumerEditorId(connId, stream, consumer))?.api.close();
+}
+
 /** Open settings as the first editor tab. */
 export function openSettings() {
   openEditor({ type: "settings", id: "settings", title: "Settings", index: 0 });

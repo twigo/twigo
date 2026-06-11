@@ -31,3 +31,12 @@ export function limitBytes(v: unknown): string {
   if (n === null) return "—";
   return n < 0 ? "∞" : fmtBytes(n);
 }
+
+// Consumer pause/resume landed in NATS 2.11.
+export function supportsPause(version: string): boolean {
+  const m = /^(\d+)\.(\d+)/.exec(version);
+  if (!m) return false;
+  const major = Number(m[1]);
+  const minor = Number(m[2]);
+  return major > 2 || (major === 2 && minor >= 11);
+}
