@@ -7,11 +7,12 @@ import { useConnections } from "@/store/connections";
 import { useSubjects } from "@/store/subjects";
 import { useWorkspace } from "@/store/workspace";
 import { useAppHydrated } from "@/lib/hydration";
-import type { NatsEvent, SubjectsUpdate } from "@/lib/api";
+import type { NatsEvent, ReconnectEvent, SubjectsUpdate } from "@/lib/api";
 
 function Workbench() {
   const loadContexts = useConnections((s) => s.load);
   const onEvent = useConnections((s) => s.onEvent);
+  const onReconnect = useConnections((s) => s.onReconnect);
   const updateSubjects = useSubjects((s) => s.update);
 
   // Load contexts, then restore the previous session: reconnect the saved
@@ -47,6 +48,17 @@ function Workbench() {
       });
     };
   }, [onEvent]);
+
+  useEffect(() => {
+    const unlisten = listen<ReconnectEvent>("nats:reconnect", (e) => {
+      onReconnect(e.payload.conn, e.payload.attempt, e.payload.delayMs);
+    });
+    return () => {
+      void unlisten.then((fn) => {
+        fn();
+      });
+    };
+  }, [onReconnect]);
 
   useEffect(() => {
     const unlisten = listen<SubjectsUpdate>("subjects:update", (e) => {

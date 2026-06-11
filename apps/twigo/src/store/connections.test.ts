@@ -99,4 +99,16 @@ describe("connections active-context persistence", () => {
     useConnections.getState().onEvent("a", "closed");
     expect(useConnections.getState().connected.a).toBeUndefined();
   });
+
+  it("tracks reconnect backoff and clears it once connected", () => {
+    useConnections.setState({ reconnecting: {} });
+    useConnections.getState().onReconnect("a", 3, 2000);
+    const rc = useConnections.getState().reconnecting.a;
+    expect(rc?.attempt).toBe(3);
+    expect(rc?.delayMs).toBe(2000);
+
+    connInfo.mockResolvedValue(info("a"));
+    useConnections.getState().onEvent("a", "connected");
+    expect(useConnections.getState().reconnecting.a).toBeUndefined();
+  });
 });

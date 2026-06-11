@@ -92,6 +92,25 @@ struct NatsEvent {
     kind: String,
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ReconnectEvent {
+    conn: String,
+    attempt: usize,
+    delay_ms: u64,
+}
+
+// Visible exponential backoff (the async-nats default is sub-second and flashes
+// past): 0 → 250ms → 0.5s → 1s → 2s → 4s → 8s, capped at 15s.
+fn reconnect_backoff(attempts: usize) -> std::time::Duration {
+    if attempts <= 1 {
+        return std::time::Duration::from_millis(0);
+    }
+    let exp = u32::try_from(attempts - 2).unwrap_or(u32::MAX).min(20);
+    let ms = 250u64.saturating_mul(2u64.saturating_pow(exp)).min(15_000);
+    std::time::Duration::from_millis(ms)
+}
+
 fn read_maybe_file(value: &str) -> String {
     if Path::new(value).is_file() {
         std::fs::read_to_string(value)
@@ -159,6 +178,8 @@ fn build_options(
 
     let app = app.clone();
     let name = name.to_string();
+    let rc_app = app.clone();
+    let rc_name = name.clone();
     // Keep the client alive across a server that is briefly unavailable — this
     // lets a saved connection restore on launch even if its server is down,
     // and survives transient drops mid-session.
@@ -166,6 +187,22 @@ fn build_options(
         .name("twigo")
         .retry_on_initial_connect()
         .max_reconnects(None)
+        // Called before each (re)connect attempt with the attempt count; report
+        // it + the chosen delay so the UI can show "attempt N · next try in Xs".
+        .reconnect_delay_callback(move |attempts| {
+            let delay = reconnect_backoff(attempts);
+            if let Err(e) = rc_app.emit(
+                "nats:reconnect",
+                ReconnectEvent {
+                    conn: rc_name.clone(),
+                    attempt: attempts,
+                    delay_ms: delay.as_millis() as u64,
+                },
+            ) {
+                tracing::warn!("failed to emit nats:reconnect: {e}");
+            }
+            delay
+        })
         .event_callback(move |event| {
             let app = app.clone();
             let name = name.clone();
@@ -299,6 +336,17 @@ mod tests {
         assert_eq!(non_empty(&Some(String::new())), None);
         assert_eq!(non_empty(&Some("   ".into())), None);
         assert_eq!(non_empty(&Some(" token ".into())), Some("token"));
+    }
+
+    #[test]
+    fn reconnect_backoff_ramps_and_caps() {
+        use std::time::Duration;
+        assert_eq!(reconnect_backoff(1), Duration::from_millis(0));
+        assert_eq!(reconnect_backoff(2), Duration::from_millis(250));
+        assert_eq!(reconnect_backoff(4), Duration::from_millis(1000));
+        assert_eq!(reconnect_backoff(7), Duration::from_millis(8000));
+        assert_eq!(reconnect_backoff(8), Duration::from_millis(15_000));
+        assert_eq!(reconnect_backoff(100), Duration::from_millis(15_000));
     }
 
     #[test]

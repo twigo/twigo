@@ -36,6 +36,12 @@ export interface NatsEvent {
   kind: string;
 }
 
+export interface ReconnectEvent {
+  conn: string;
+  attempt: number;
+  delayMs: number;
+}
+
 export function listContexts(dir?: string | null): Promise<ContextSummary[]> {
   return invoke<ContextSummary[]>("list_contexts", { dir: dir ?? null });
 }
