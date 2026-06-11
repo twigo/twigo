@@ -394,7 +394,7 @@ export function KvEntryDetailPanel({
                       type="button"
                       onClick={() => setRevision(h.revision)}
                       className={cn(
-                        "flex w-full items-center gap-2 border-b border-border/50 px-2 py-1 text-left font-mono text-[11px] last:border-0 hover:bg-accent/50",
+                        "flex w-full items-center gap-2 border-b border-border/50 px-2 py-1 text-left font-mono text-[11px] last:border-0 hover:bg-row-hover",
                         (revision ?? data.revision) === h.revision &&
                           "bg-accent",
                       )}

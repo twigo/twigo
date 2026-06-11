@@ -70,7 +70,7 @@ function SubjectRow({
           <div
             className={cn(
               "group relative flex items-center rounded-sm",
-              isActive ? "bg-accent" : "hover:bg-accent/50",
+              isActive ? "bg-selected" : "hover:bg-row-hover",
             )}
             style={{ paddingLeft: depth * 12 }}
           >

@@ -33,8 +33,8 @@ export function MessageTable({
               }
             }}
             className={cn(
-              "cursor-pointer border-b border-border/50 hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-              m.id === selectedId && "bg-accent",
+              "cursor-pointer border-b border-border/50 hover:bg-row-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+              m.id === selectedId && "bg-selected",
             )}
           >
             <td className="px-2 py-1 tabular-nums text-muted-foreground">

@@ -222,7 +222,7 @@ function BucketRow({
       onDoubleClick={onToggle}
       className={cn(
         "group relative flex cursor-pointer items-center gap-1 py-1 pl-2 pr-2 text-xs",
-        selected ? "bg-accent" : "hover:bg-accent/50",
+        selected ? "bg-selected" : "hover:bg-row-hover",
       )}
     >
       {selected && (
@@ -312,7 +312,7 @@ function ObjectRow({
       onDoubleClick={onOpen}
       className={cn(
         "group relative flex cursor-pointer items-center gap-1.5 py-1 pl-8 pr-2 text-xs",
-        selected ? "bg-accent" : "hover:bg-accent/50",
+        selected ? "bg-selected" : "hover:bg-row-hover",
       )}
     >
       {selected && (
