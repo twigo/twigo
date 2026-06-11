@@ -3,7 +3,7 @@ import { ChevronRight, Box, File, Loader2, Trash2, Upload } from "lucide-react";
 import { open as openFile } from "@tauri-apps/plugin-dialog";
 import { cn } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
-import { objPutObject, objDeleteBucket } from "@/lib/api";
+import { objPutObject, objDeleteBucket, objObjectInfo } from "@/lib/api";
 import { useObjStore } from "@/store/objstore";
 import { useToasts } from "@/store/toasts";
 import { openObjectEntry } from "@/lib/editor";
@@ -28,11 +28,15 @@ export function ObjectTree({
 
   const [selected, setSelected] = useState(0);
   const [delBucket, setDelBucket] = useState<string | null>(null);
+  const [uploadingBucket, setUploadingBucket] = useState<string | null>(null);
+  const [pendingUpload, setPendingUpload] = useState<{
+    bucket: string;
+    src: string;
+    name: string;
+  } | null>(null);
 
-  const doUpload = async (bkt: string) => {
-    const src = await openFile({ multiple: false, directory: false });
-    if (typeof src !== "string") return;
-    const objName = src.split(/[/\\]/).pop() ?? src;
+  const runUpload = async (bkt: string, src: string, objName: string) => {
+    setUploadingBucket(bkt);
     try {
       await objPutObject(connId, bkt, objName, src);
       useToasts.getState().push("info", `Uploaded ${objName}`);
@@ -40,7 +44,26 @@ export function ObjectTree({
       void useObjStore.getState().load(connId);
     } catch (e) {
       useToasts.getState().push("error", `Upload failed: ${String(e)}`);
+    } finally {
+      setUploadingBucket(null);
     }
+  };
+
+  const startUpload = async (bkt: string) => {
+    const src = await openFile({ multiple: false, directory: false });
+    if (typeof src !== "string") return;
+    const objName = src.split(/[\\/]/).filter(Boolean).pop() ?? src;
+    // Object store put() replaces; warn before clobbering an existing object.
+    try {
+      const existing = await objObjectInfo(connId, bkt, objName);
+      if (!existing.deleted) {
+        setPendingUpload({ bucket: bkt, src, name: objName });
+        return;
+      }
+    } catch {
+      // info() errors when the object doesn't exist yet — safe to upload.
+    }
+    await runUpload(bkt, src, objName);
   };
 
   const doDeleteBucket = async (bkt: string) => {
@@ -115,7 +138,8 @@ export function ObjectTree({
               loading={!!loading[row.bucket.bucket]}
               onSelect={() => setSelected(i)}
               onToggle={() => void toggleBucket(connId, row.bucket.bucket)}
-              onUpload={() => void doUpload(row.bucket.bucket)}
+              uploading={uploadingBucket === row.bucket.bucket}
+              onUpload={() => void startUpload(row.bucket.bucket)}
               onDelete={() => setDelBucket(row.bucket.bucket)}
             />
           ) : (
@@ -145,6 +169,25 @@ export function ObjectTree({
           onConfirm={() => void doDeleteBucket(delBucket)}
         />
       )}
+
+      {pendingUpload && (
+        <ConfirmDialog
+          open
+          onOpenChange={(o) => {
+            if (!o) setPendingUpload(null);
+          }}
+          title={`Replace ${pendingUpload.name}?`}
+          description="An object with this name already exists in the store. Uploading replaces it — the current contents are lost."
+          confirmLabel="Replace object"
+          onConfirm={() =>
+            void runUpload(
+              pendingUpload.bucket,
+              pendingUpload.src,
+              pendingUpload.name,
+            )
+          }
+        />
+      )}
     </>
   );
 }
@@ -154,6 +197,7 @@ function BucketRow({
   selected,
   expanded,
   loading,
+  uploading,
   onSelect,
   onToggle,
   onUpload,
@@ -163,6 +207,7 @@ function BucketRow({
   selected: boolean;
   expanded: boolean;
   loading: boolean;
+  uploading: boolean;
   onSelect: () => void;
   onToggle: () => void;
   onUpload: () => void;
@@ -205,18 +250,28 @@ function BucketRow({
       </button>
       <Box className="size-3 shrink-0 text-brand" />
       <span className="min-w-0 flex-1 truncate font-mono">{bucket.bucket}</span>
-      <span className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100">
+      <span
+        className={cn(
+          "flex shrink-0 items-center gap-0.5",
+          uploading ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+        )}
+      >
         <button
           type="button"
           aria-label="Upload object"
           title="Upload object"
+          disabled={uploading}
           onClick={(e) => {
             e.stopPropagation();
             onUpload();
           }}
           className="text-muted-foreground hover:text-foreground"
         >
-          <Upload className="size-3" />
+          {uploading ? (
+            <Loader2 className="size-3 animate-spin" />
+          ) : (
+            <Upload className="size-3" />
+          )}
         </button>
         <button
           type="button"

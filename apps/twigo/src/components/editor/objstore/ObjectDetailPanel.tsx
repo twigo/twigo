@@ -26,7 +26,8 @@ export function ObjectDetailPanel({
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const doDownload = async () => {
-    const dest = await save({ defaultPath: name.split("/").pop() });
+    const suggested = name.split("/").filter(Boolean).pop() ?? "object";
+    const dest = await save({ defaultPath: suggested });
     if (!dest) return;
     setDownloading(true);
     try {

@@ -141,7 +141,9 @@ pub async fn obj_object_info(
 }
 
 /// Download an object to a local path. Streams chunk-by-chunk so a multi-GB
-/// object never lands wholly in memory.
+/// object never lands wholly in memory, and writes to a sidecar temp file that
+/// is atomically renamed on success — a failed download never leaves a
+/// truncated file at `dest`.
 #[tauri::command]
 pub async fn obj_get_object(
     conns: State<'_, ConnState>,
@@ -152,22 +154,38 @@ pub async fn obj_get_object(
 ) -> error::Result<()> {
     let os = store(&conns, &conn_id, &bucket).await?;
     let mut object = os.get(&name).await.map_err(js_err)?;
-    let mut file = tokio::fs::File::create(&dest)
-        .await
-        .map_err(|source| Error::Io {
-            path: dest.clone(),
+    let tmp = format!("{dest}.twigo-part");
+
+    let download = async {
+        let mut file = tokio::fs::File::create(&tmp)
+            .await
+            .map_err(|source| Error::Io {
+                path: tmp.clone(),
+                source,
+            })?;
+        tokio::io::copy(&mut object, &mut file)
+            .await
+            .map_err(|source| Error::Io {
+                path: tmp.clone(),
+                source,
+            })?;
+        file.flush().await.map_err(|source| Error::Io {
+            path: tmp.clone(),
             source,
         })?;
-    tokio::io::copy(&mut object, &mut file)
-        .await
-        .map_err(|source| Error::Io {
-            path: dest.clone(),
-            source,
-        })?;
-    file.flush().await.map_err(|source| Error::Io {
-        path: dest.clone(),
-        source,
-    })?;
+        tokio::fs::rename(&tmp, &dest)
+            .await
+            .map_err(|source| Error::Io {
+                path: dest.clone(),
+                source,
+            })?;
+        Ok::<(), Error>(())
+    };
+
+    if let Err(e) = download.await {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(e);
+    }
     Ok(())
 }
 
@@ -187,7 +205,12 @@ pub async fn obj_put_object(
             path: src.clone(),
             source,
         })?;
-    os.put(name.as_str(), &mut file).await.map_err(js_err)?;
+    if let Err(e) = os.put(name.as_str(), &mut file).await {
+        // Best-effort cleanup so a mid-stream failure doesn't leave a partial
+        // object occupying the store.
+        let _ = os.delete(&name).await;
+        return Err(js_err(e));
+    }
     Ok(())
 }
 
