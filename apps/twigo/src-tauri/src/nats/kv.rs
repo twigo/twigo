@@ -187,9 +187,16 @@ pub async fn kv_get_entry(
         Some(rev) => {
             let mut hist = kv.history(&key).await.map_err(js_err)?;
             let mut found = None;
+            // Bound the scan so a request for a very old revision on a
+            // high-churn key can't walk an unbounded history.
+            let mut scanned = 0u32;
             while let Some(e) = hist.try_next().await.map_err(js_err)? {
                 if e.revision == rev {
                     found = Some(e);
+                    break;
+                }
+                scanned += 1;
+                if scanned >= 100_000 {
                     break;
                 }
             }

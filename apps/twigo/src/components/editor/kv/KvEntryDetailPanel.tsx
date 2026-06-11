@@ -74,8 +74,16 @@ export function KvEntryDetailPanel({
     refresh();
   };
 
+  // A value is only safe to edit as text if it isn't truncated and survives a
+  // UTF-8 round-trip (otherwise saving would silently lose data or corrupt
+  // non-UTF-8 bytes).
+  const editable =
+    !!data &&
+    !data.truncated &&
+    encodeText(decodeText(data.payloadB64)) === data.payloadB64;
+
   const startEdit = () => {
-    if (!data) return;
+    if (!data || !editable) return;
     setDraft(decodeText(data.payloadB64));
     setFormat("text");
     setEditing(true);
@@ -178,7 +186,12 @@ export function KvEntryDetailPanel({
                   variant="ghost"
                   size="icon"
                   aria-label="Edit value"
-                  title="Edit value"
+                  title={
+                    editable
+                      ? "Edit value"
+                      : "Can't edit a truncated or non-UTF-8 value"
+                  }
+                  disabled={!editable}
                   onClick={startEdit}
                 >
                   <Pencil />
