@@ -222,3 +222,33 @@ export function jsConsumerDetail(
     consumer,
   });
 }
+
+export interface StoredMessage {
+  seq: number;
+  subject: string;
+  time: string | null;
+  size: number;
+  payloadB64: string;
+  headers: [string, string][];
+}
+
+export interface MessagePage {
+  messages: StoredMessage[];
+  nextSeq: number | null;
+}
+
+export function jsGetMessages(
+  connId: string,
+  stream: string,
+  start: number | null,
+  limit: number,
+  backward: boolean,
+): Promise<MessagePage> {
+  return invoke<MessagePage>("js_get_messages", {
+    connId,
+    stream,
+    start,
+    limit,
+    backward,
+  });
+}

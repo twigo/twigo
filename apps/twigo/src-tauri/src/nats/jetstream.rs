@@ -1,5 +1,6 @@
 use async_nats::jetstream::consumer::AckPolicy;
 use async_nats::jetstream::stream::{RetentionPolicy, StorageType};
+use base64::Engine;
 use futures_util::TryStreamExt;
 use serde::Serialize;
 use tauri::State;
@@ -240,6 +241,92 @@ pub async fn js_consumer_detail(
         ack_floor_stream_seq: info.ack_floor.stream_sequence,
         paused: info.paused,
     })
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredMessage {
+    seq: u64,
+    subject: String,
+    time: Option<String>,
+    size: usize,
+    payload_b64: String,
+    headers: Vec<(String, String)>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MessagePage {
+    messages: Vec<StoredMessage>,
+    // Cursor to continue browsing (next sequence to fetch), or null at the edge.
+    next_seq: Option<u64>,
+}
+
+/// Non-destructive message browse: walks sequences via get_raw_message (never
+/// creates a consumer, never advances any ack floor), skipping deleted gaps.
+#[tauri::command]
+pub async fn js_get_messages(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    stream: String,
+    start: Option<u64>,
+    limit: u32,
+    backward: bool,
+) -> error::Result<MessagePage> {
+    let client = conns
+        .client(&conn_id)
+        .await
+        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
+    let js = async_nats::jetstream::new(client);
+    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let state = &handle.cached_info().state;
+    let (first, last) = (state.first_sequence, state.last_sequence);
+
+    if state.messages == 0 || last == 0 {
+        return Ok(MessagePage {
+            messages: Vec::new(),
+            next_seq: None,
+        });
+    }
+
+    let limit = limit.clamp(1, 500) as usize;
+    let max_scan = (limit as u32).saturating_mul(4).saturating_add(50);
+    let mut seq = start
+        .unwrap_or(if backward { last } else { first })
+        .clamp(first, last);
+
+    let mut messages = Vec::new();
+    let mut scanned = 0u32;
+    let next_seq = loop {
+        if messages.len() >= limit || scanned >= max_scan {
+            break Some(seq);
+        }
+        if (backward && seq < first) || (!backward && seq > last) {
+            break None;
+        }
+        scanned += 1;
+        // StreamMessage is an unnameable type, so build the DTO inline.
+        if let Ok(raw) = handle.get_raw_message(seq).await {
+            messages.push(StoredMessage {
+                seq: raw.sequence,
+                subject: raw.subject.to_string(),
+                time: fmt_time(raw.time),
+                size: raw.payload.len(),
+                payload_b64: base64::engine::general_purpose::STANDARD.encode(&raw.payload),
+                headers: super::subscription::flatten_headers(Some(&raw.headers)),
+            });
+        }
+        if backward {
+            if seq == 0 {
+                break None;
+            }
+            seq -= 1;
+        } else {
+            seq += 1;
+        }
+    };
+
+    Ok(MessagePage { messages, next_seq })
 }
 
 #[cfg(test)]

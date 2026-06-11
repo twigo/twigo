@@ -4,6 +4,7 @@ import { fmtBytes, fmtCount } from "@twigo/utils";
 import { useStreamDetail } from "@/hooks/useJetStreamDetail";
 import { Row, Section, RawJson } from "./parts";
 import { disp, num, limitCount, limitBytes } from "./format";
+import { MessageBrowser } from "./MessageBrowser";
 
 function nanos(v: unknown): string {
   const n = num(v);
@@ -91,6 +92,8 @@ export function StreamDetailPanel({
             <Row label="Allow direct" value={cfg.allow_direct ? "yes" : "no"} />
             <Row label="Sealed" value={cfg.sealed ? "yes" : "no"} />
           </Section>
+
+          <MessageBrowser connId={connId} stream={stream} />
 
           <RawJson value={data.config} />
         </div>
