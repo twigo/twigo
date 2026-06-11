@@ -5,6 +5,8 @@ import {
   Server,
   Send,
   Webhook,
+  Layers,
+  ArrowDownToLine,
   type LucideIcon,
 } from "lucide-react";
 import type {
@@ -16,6 +18,8 @@ import { MessageStream } from "./MessageStream";
 import { ServerInfoPanel } from "./ServerInfoPanel";
 import { PublishEditor } from "./PublishEditor";
 import { ResponderEditor } from "./ResponderEditor";
+import { StreamDetailPanel } from "./jetstream/StreamDetailPanel";
+import { ConsumerDetailPanel } from "./jetstream/ConsumerDetailPanel";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 
 export function StreamPanel(props: IDockviewPanelProps) {
@@ -58,6 +62,25 @@ export function ResponderPanel(props: IDockviewPanelProps) {
 
 export function SettingsPanel() {
   return <SettingsPage />;
+}
+
+export function JsStreamPanel(props: IDockviewPanelProps) {
+  const { connId, stream } = props.params as {
+    connId: string;
+    stream: string;
+  };
+  return <StreamDetailPanel connId={connId} stream={stream} />;
+}
+
+export function JsConsumerPanel(props: IDockviewPanelProps) {
+  const { connId, stream, consumer } = props.params as {
+    connId: string;
+    stream: string;
+    consumer: string;
+  };
+  return (
+    <ConsumerDetailPanel connId={connId} stream={stream} consumer={consumer} />
+  );
 }
 
 // Close button shows only on the active/hovered tab (styled in index.css).
@@ -155,6 +178,34 @@ export function SettingsTab(props: IDockviewPanelHeaderProps) {
     <ClosableTab
       icon={Settings}
       iconClass="text-muted-foreground"
+      title={props.api.title}
+      onClose={() => {
+        props.api.close();
+      }}
+    />
+  );
+}
+
+export function JsStreamTab(props: IDockviewPanelHeaderProps) {
+  return (
+    <ClosableTab
+      icon={Layers}
+      iconClass="text-brand"
+      mono
+      title={props.api.title}
+      onClose={() => {
+        props.api.close();
+      }}
+    />
+  );
+}
+
+export function JsConsumerTab(props: IDockviewPanelHeaderProps) {
+  return (
+    <ClosableTab
+      icon={ArrowDownToLine}
+      iconClass="text-brand"
+      mono
       title={props.api.title}
       onClose={() => {
         props.api.close();

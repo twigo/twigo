@@ -141,3 +141,84 @@ export function request(
     headers,
   });
 }
+
+export interface StreamSummary {
+  name: string;
+  subjects: string[];
+  messages: number;
+  bytes: number;
+  firstSeq: number;
+  lastSeq: number;
+  consumerCount: number;
+  storage: string;
+  retention: string;
+}
+
+export interface ConsumerSummary {
+  name: string;
+  durable: boolean;
+  kind: string;
+  ackPolicy: string;
+  numPending: number;
+  numAckPending: number;
+  numRedelivered: number;
+  paused: boolean;
+}
+
+export interface StreamDetail {
+  config: Record<string, unknown>;
+  created: string | null;
+  messages: number;
+  bytes: number;
+  firstSeq: number;
+  firstTs: string | null;
+  lastSeq: number;
+  lastTs: string | null;
+  consumerCount: number;
+  numSubjects: number;
+  numDeleted: number;
+}
+
+export interface ConsumerDetail {
+  config: Record<string, unknown>;
+  created: string | null;
+  numPending: number;
+  numAckPending: number;
+  numRedelivered: number;
+  numWaiting: number;
+  deliveredConsumerSeq: number;
+  deliveredStreamSeq: number;
+  ackFloorConsumerSeq: number;
+  ackFloorStreamSeq: number;
+  paused: boolean;
+}
+
+export function jsListStreams(connId: string): Promise<StreamSummary[]> {
+  return invoke<StreamSummary[]>("js_list_streams", { connId });
+}
+
+export function jsStreamDetail(
+  connId: string,
+  stream: string,
+): Promise<StreamDetail> {
+  return invoke<StreamDetail>("js_stream_detail", { connId, stream });
+}
+
+export function jsListConsumers(
+  connId: string,
+  stream: string,
+): Promise<ConsumerSummary[]> {
+  return invoke<ConsumerSummary[]>("js_list_consumers", { connId, stream });
+}
+
+export function jsConsumerDetail(
+  connId: string,
+  stream: string,
+  consumer: string,
+): Promise<ConsumerDetail> {
+  return invoke<ConsumerDetail>("js_consumer_detail", {
+    connId,
+    stream,
+    consumer,
+  });
+}

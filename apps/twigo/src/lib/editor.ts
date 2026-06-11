@@ -154,6 +154,42 @@ export function openServerInfo(connId: string) {
   });
 }
 
+function jsStreamEditorId(connId: string, stream: string): string {
+  return `jsstream:${encodeURIComponent(connId)}:${encodeURIComponent(stream)}`;
+}
+
+function jsConsumerEditorId(
+  connId: string,
+  stream: string,
+  consumer: string,
+): string {
+  return `jsconsumer:${encodeURIComponent(connId)}:${encodeURIComponent(stream)}:${encodeURIComponent(consumer)}`;
+}
+
+/** Open a JetStream stream detail tab, reusing an existing tab. */
+export function openStreamDetail(connId: string, stream: string) {
+  openEditor({
+    type: "jsstream",
+    id: jsStreamEditorId(connId, stream),
+    title: stream,
+    params: { connId, stream },
+  });
+}
+
+/** Open a JetStream consumer detail tab, reusing an existing tab. */
+export function openConsumerDetail(
+  connId: string,
+  stream: string,
+  consumer: string,
+) {
+  openEditor({
+    type: "jsconsumer",
+    id: jsConsumerEditorId(connId, stream, consumer),
+    title: consumer,
+    params: { connId, stream, consumer },
+  });
+}
+
 /** Open settings as the first editor tab. */
 export function openSettings() {
   openEditor({ type: "settings", id: "settings", title: "Settings", index: 0 });

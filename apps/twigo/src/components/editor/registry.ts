@@ -10,11 +10,15 @@ import {
   PublishPanel,
   ResponderPanel,
   SettingsPanel,
+  JsStreamPanel,
+  JsConsumerPanel,
   StreamTab,
   ServerTab,
   PublishTab,
   ResponderTab,
   SettingsTab,
+  JsStreamTab,
+  JsConsumerTab,
 } from "./panels";
 
 // Editor inputs (VS Code model). One registry drives the Dockview component &
@@ -25,7 +29,9 @@ export type EditorType =
   | "settings"
   | "server"
   | "publish"
-  | "responder";
+  | "responder"
+  | "jsstream"
+  | "jsconsumer";
 
 interface EditorDef {
   component: FC<IDockviewPanelProps>;
@@ -52,6 +58,12 @@ export const EDITORS: Record<EditorType, EditorDef> = {
   // (closeEditorsForConn) or explicit delete, so there's no per-tab dispose.
   responder: { component: ResponderPanel, tab: ResponderTab, connScoped: true },
   settings: { component: SettingsPanel, tab: SettingsTab },
+  jsstream: { component: JsStreamPanel, tab: JsStreamTab, connScoped: true },
+  jsconsumer: {
+    component: JsConsumerPanel,
+    tab: JsConsumerTab,
+    connScoped: true,
+  },
 };
 
 export const editorComponents: Record<

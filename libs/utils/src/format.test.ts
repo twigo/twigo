@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fmtBytes, fmtRtt, fmtTime } from "./format";
+import { fmtBytes, fmtRtt, fmtTime, fmtCount } from "./format";
 
 describe("fmtBytes", () => {
   it("formats B / KB / MB consistently", () => {
@@ -20,5 +20,13 @@ describe("fmtRtt", () => {
 describe("fmtTime", () => {
   it("renders HH:MM:SS.mmm", () => {
     expect(fmtTime(Date.UTC(2026, 0, 1))).toMatch(/^\d{2}:\d{2}:\d{2}\.\d{3}$/);
+  });
+});
+
+describe("fmtCount", () => {
+  it("formats compact integer counts", () => {
+    expect(fmtCount(999)).toBe("999");
+    expect(fmtCount(12_400)).toBe("12.4k");
+    expect(fmtCount(3_200_000)).toBe("3.2M");
   });
 });

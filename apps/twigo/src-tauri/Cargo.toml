@@ -36,6 +36,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 futures-util = "0.3.32"
 base64 = "0.22.1"
 tauri-plugin-store = "2.4.3"
+time = { version = "0.3", features = ["formatting"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

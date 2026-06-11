@@ -16,3 +16,10 @@ export function fmtBytes(n: number): string {
 export function fmtRtt(ms: number): string {
   return `${ms.toFixed(1)}ms`;
 }
+
+// Compact integer count: 999 → "999", 12_400 → "12.4k", 3_200_000 → "3.2M".
+export function fmtCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return n.toString();
+}
