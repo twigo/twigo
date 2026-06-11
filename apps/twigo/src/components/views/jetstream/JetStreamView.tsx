@@ -1,10 +1,13 @@
-import { useEffect } from "react";
-import { RefreshCw, ChevronsDownUp, Loader2, Layers } from "lucide-react";
+import { useEffect, useState } from "react";
+import { RefreshCw, ChevronsDownUp, Loader2, Layers, Plus } from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
+import { jsCreateStream } from "@/lib/api";
 import { useConnections } from "@/store/connections";
 import { useJetStream } from "@/store/jetstream";
+import { useToasts } from "@/store/toasts";
 import type { ViewProps } from "@/components/views/registry";
 import { StreamTree } from "./StreamTree";
+import { CreateStreamDialog } from "@/components/editor/jetstream/CreateStreamDialog";
 
 function Hint({ children }: { children: React.ReactNode }) {
   return (
@@ -22,6 +25,20 @@ export function JetStreamView({ filter, connId }: ViewProps) {
   const data = useJetStream((s) => (connId ? s.byConn[connId] : undefined));
   const load = useJetStream((s) => s.load);
   const collapseAll = useJetStream((s) => s.collapseAll);
+  const [createOpen, setCreateOpen] = useState(false);
+
+  const doCreate = async (config: Record<string, unknown>) => {
+    if (!connId) return;
+    try {
+      await jsCreateStream(connId, config);
+      useToasts
+        .getState()
+        .push("info", `Created stream ${String(config.name)}`);
+      void load(connId);
+    } catch (e) {
+      useToasts.getState().push("error", `Create failed: ${String(e)}`);
+    }
+  };
 
   useEffect(() => {
     if (
@@ -63,6 +80,15 @@ export function JetStreamView({ filter, connId }: ViewProps) {
           <Button
             variant="ghost"
             size="icon"
+            aria-label="New stream"
+            title="New stream"
+            onClick={() => setCreateOpen(true)}
+          >
+            <Plus />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             aria-label="Collapse all"
             title="Collapse all"
             onClick={() => collapseAll(connId)}
@@ -97,6 +123,13 @@ export function JetStreamView({ filter, connId }: ViewProps) {
         <Hint>{f ? "No matching streams." : "No streams yet."}</Hint>
       ) : (
         <StreamTree connId={connId} streams={filtered} />
+      )}
+
+      {createOpen && (
+        <CreateStreamDialog
+          onClose={() => setCreateOpen(false)}
+          onCreate={(config) => void doCreate(config)}
+        />
       )}
     </div>
   );

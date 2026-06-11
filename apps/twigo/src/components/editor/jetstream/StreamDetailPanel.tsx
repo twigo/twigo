@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { RefreshCw, Loader2, Layers, Eraser, Trash2 } from "lucide-react";
+import { RefreshCw, Loader2, Layers, Eraser, Trash2, Plus } from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
-import { jsPurgeStream, jsDeleteStream } from "@/lib/api";
+import { jsPurgeStream, jsDeleteStream, jsCreateConsumer } from "@/lib/api";
 import { useStreamDetail } from "@/hooks/useJetStreamDetail";
 import { useJetStream } from "@/store/jetstream";
 import { useToasts } from "@/store/toasts";
@@ -12,6 +12,7 @@ import { disp, num, limitCount, limitBytes } from "./format";
 import { MessageBrowser } from "./MessageBrowser";
 import { PurgeDialog } from "./PurgeDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { CreateConsumerDialog } from "./CreateConsumerDialog";
 
 function nanos(v: unknown): string {
   const n = num(v);
@@ -30,6 +31,7 @@ export function StreamDetailPanel({
   const { data, error, loading, refresh } = useStreamDetail(connId, stream);
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [consumerOpen, setConsumerOpen] = useState(false);
 
   const cfg = data?.config ?? {};
   const subjects = Array.isArray(cfg.subjects)
@@ -62,6 +64,19 @@ export function StreamDetailPanel({
     }
   };
 
+  const doCreateConsumer = async (config: Record<string, unknown>) => {
+    try {
+      await jsCreateConsumer(connId, stream, config);
+      useToasts
+        .getState()
+        .push("info", `Created consumer ${String(config.name)}`);
+      void useJetStream.getState().refreshConsumers(connId, stream);
+      void useJetStream.getState().load(connId);
+    } catch (e) {
+      useToasts.getState().push("error", `Create failed: ${String(e)}`);
+    }
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
@@ -72,6 +87,15 @@ export function StreamDetailPanel({
         <div className="ml-auto flex items-center gap-0.5">
           {data && (
             <>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="New consumer"
+                title="New consumer"
+                onClick={() => setConsumerOpen(true)}
+              >
+                <Plus />
+              </Button>
               <Button
                 variant="ghost"
                 size="icon"
@@ -133,6 +157,14 @@ export function StreamDetailPanel({
             onConfirm={() => void doDelete()}
           />
         </>
+      )}
+
+      {consumerOpen && (
+        <CreateConsumerDialog
+          stream={stream}
+          onClose={() => setConsumerOpen(false)}
+          onCreate={(config) => void doCreateConsumer(config)}
+        />
       )}
 
       {error ? (

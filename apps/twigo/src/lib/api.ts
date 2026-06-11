@@ -254,6 +254,21 @@ export function jsGetMessages(
   });
 }
 
+export async function jsCreateStream(
+  connId: string,
+  config: Record<string, unknown>,
+): Promise<void> {
+  await invoke("js_create_stream", { connId, config });
+}
+
+export async function jsCreateConsumer(
+  connId: string,
+  stream: string,
+  config: Record<string, unknown>,
+): Promise<void> {
+  await invoke("js_create_consumer", { connId, stream, config });
+}
+
 export function jsPurgeStream(
   connId: string,
   stream: string,

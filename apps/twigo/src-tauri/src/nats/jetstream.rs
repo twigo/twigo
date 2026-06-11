@@ -374,6 +374,44 @@ pub async fn js_purge_stream(
 }
 
 #[tauri::command]
+pub async fn js_create_stream(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    config: serde_json::Value,
+) -> error::Result<()> {
+    let client = conns
+        .client(&conn_id)
+        .await
+        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
+    let js = async_nats::jetstream::new(client);
+    // Deserialize into the typed config so defaults/feature-gated fields are
+    // handled by async-nats rather than forwarding raw JSON.
+    let cfg: async_nats::jetstream::stream::Config =
+        serde_json::from_value(config).map_err(js_err)?;
+    js.create_stream(cfg).await.map_err(js_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn js_create_consumer(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    stream: String,
+    config: serde_json::Value,
+) -> error::Result<()> {
+    let client = conns
+        .client(&conn_id)
+        .await
+        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
+    let js = async_nats::jetstream::new(client);
+    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let cfg: async_nats::jetstream::consumer::Config =
+        serde_json::from_value(config).map_err(js_err)?;
+    let _consumer = handle.create_consumer(cfg).await.map_err(js_err)?;
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn js_delete_stream(
     conns: State<'_, ConnState>,
     conn_id: String,
