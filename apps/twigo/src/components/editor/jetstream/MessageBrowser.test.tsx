@@ -28,6 +28,7 @@ function msg(seq: number, body: string) {
     size: body.length,
     payloadB64: btoa(body),
     headers: [] as [string, string][],
+    truncated: false,
   };
 }
 
@@ -75,6 +76,7 @@ describe("MessageBrowser", () => {
       "dev",
       "orders.created",
       '{"id":2}',
+      [],
     );
   });
 });

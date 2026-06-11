@@ -68,6 +68,7 @@ export function ConsumerDetailPanel({
       }
       refresh();
       void useJetStream.getState().refreshConsumers(connId, stream);
+      void useJetStream.getState().load(connId);
     } catch (e) {
       useToasts.getState().push("error", `Failed: ${String(e)}`);
     }
@@ -79,6 +80,7 @@ export function ConsumerDetailPanel({
       useToasts.getState().push("info", `Deleted consumer ${consumer}`);
       closeConsumerDetail(connId, stream, consumer);
       void useJetStream.getState().refreshConsumers(connId, stream);
+      void useJetStream.getState().load(connId);
     } catch (e) {
       useToasts.getState().push("error", `Delete failed: ${String(e)}`);
     }
@@ -100,12 +102,19 @@ export function ConsumerDetailPanel({
           </span>
         )}
         <div className="ml-auto flex items-center gap-0.5">
-          {data && canPause && (
+          {data && (
             <Button
               variant="ghost"
               size="icon"
               aria-label={data.paused ? "Resume consumer" : "Pause consumer"}
-              title={data.paused ? "Resume consumer" : "Pause consumer"}
+              title={
+                canPause
+                  ? data.paused
+                    ? "Resume consumer"
+                    : "Pause consumer"
+                  : "Pause/resume requires NATS Server 2.11+"
+              }
+              disabled={!canPause}
               onClick={() => void doPauseResume()}
             >
               {data.paused ? <Play /> : <Pause />}
@@ -141,6 +150,7 @@ export function ConsumerDetailPanel({
         title={`Delete consumer ${consumer}?`}
         description="This permanently removes the consumer and its position. Messages stay in the stream."
         confirmLabel="Delete consumer"
+        confirmWord={consumer}
         onConfirm={() => void doDelete()}
       />
 

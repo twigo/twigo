@@ -97,13 +97,16 @@ export async function openStream(connId: string, subject: string) {
 // (e.g. republishing a different message into an already-open Publish tab).
 let publishSeed = 0;
 
-/** Open a publish/request tab for a connection, optionally prefilling subject & payload. */
+/** Open a publish/request tab for a connection, optionally prefilling subject, payload & headers. */
 export function openPublish(
   connId: string,
   subject?: string,
   payload?: string,
+  headers?: [string, string][],
 ) {
-  const hasPrefill = Boolean((subject ?? "") || (payload ?? ""));
+  const hasPrefill = Boolean(
+    (subject ?? "") || (payload ?? "") || headers?.length,
+  );
   if (hasPrefill) publishSeed += 1;
   openEditor({
     type: "publish",
@@ -113,6 +116,7 @@ export function openPublish(
       connId,
       subject: subject ?? "",
       payload: payload ?? "",
+      headers: headers ?? [],
       seed: publishSeed,
     },
     replaceParams: hasPrefill,

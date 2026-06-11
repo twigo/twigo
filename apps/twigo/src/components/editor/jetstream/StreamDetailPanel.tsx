@@ -183,7 +183,11 @@ export function StreamDetailPanel({
             <Row label="Sealed" value={cfg.sealed ? "yes" : "no"} />
           </Section>
 
-          <MessageBrowser connId={connId} stream={stream} />
+          <MessageBrowser
+            key={`${data.firstSeq}:${data.lastSeq}:${data.messages}`}
+            connId={connId}
+            stream={stream}
+          />
 
           <RawJson value={data.config} />
         </div>

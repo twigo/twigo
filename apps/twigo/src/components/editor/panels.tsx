@@ -33,10 +33,11 @@ export function ServerPanel(props: IDockviewPanelProps) {
 }
 
 export function PublishPanel(props: IDockviewPanelProps) {
-  const { connId, subject, payload, seed } = props.params as {
+  const { connId, subject, payload, headers, seed } = props.params as {
     connId: string;
     subject?: string;
     payload?: string;
+    headers?: [string, string][];
     seed?: number;
   };
   return (
@@ -45,6 +46,7 @@ export function PublishPanel(props: IDockviewPanelProps) {
       connId={connId}
       initialSubject={subject ?? ""}
       initialPayload={payload ?? ""}
+      initialHeaders={headers}
     />
   );
 }

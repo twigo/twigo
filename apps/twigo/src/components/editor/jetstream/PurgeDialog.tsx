@@ -79,6 +79,9 @@ export function PurgeDialog({
             />
             <span>messages</span>
           </label>
+          <p className="text-[10px] text-muted-foreground">
+            Counts are from the last refresh.
+          </p>
         </div>
 
         <div className="mt-4 flex justify-end gap-2">

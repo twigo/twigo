@@ -68,8 +68,11 @@ export function MessageBrowser({
   const doDelete = async (seq: number) => {
     try {
       await jsDeleteMessage(connId, stream, seq);
-      setMessages((prev) => prev.filter((m) => m.seq !== seq));
-      setSelectedSeq(null);
+      const idx = messages.findIndex((m) => m.seq === seq);
+      const next = messages.filter((m) => m.seq !== seq);
+      setMessages(next);
+      // Keep a selection: the row that took the deleted slot, else the previous.
+      setSelectedSeq(next[idx]?.seq ?? next[idx - 1]?.seq ?? null);
       useToasts.getState().push("info", `Deleted message #${String(seq)}`);
       void useJetStream.getState().load(connId);
     } catch (e) {
@@ -132,7 +135,7 @@ export function MessageBrowser({
             <p className="px-1 text-xs text-error">{error}</p>
           ) : messages.length === 0 && !loading ? (
             <p className="px-1 py-2 text-xs text-muted-foreground">
-              No messages.
+              No messages — use the seq field to jump to a sequence.
             </p>
           ) : (
             <>
@@ -162,7 +165,7 @@ export function MessageBrowser({
                 ))}
               </ul>
 
-              {nextSeq !== null && (
+              {nextSeq !== null ? (
                 <Button
                   variant="outline"
                   size="sm"
@@ -172,6 +175,10 @@ export function MessageBrowser({
                   {loading && <Loader2 className="animate-spin" />}
                   Load older
                 </Button>
+              ) : (
+                <p className="py-1 text-center text-[10px] uppercase tracking-wider text-muted-foreground">
+                  — start of stream —
+                </p>
               )}
 
               {selected && (
@@ -192,6 +199,7 @@ export function MessageBrowser({
                           connId,
                           selected.subject,
                           decodeText(selected.payloadB64),
+                          selected.headers,
                         )
                       }
                     >
@@ -240,6 +248,12 @@ export function MessageBrowser({
                       </button>
                     ))}
                   </div>
+                  {selected.truncated && (
+                    <p className="text-[10px] text-warn">
+                      Payload truncated to 1 MB for display ·{" "}
+                      {fmtBytes(selected.size)} total.
+                    </p>
+                  )}
                   <CodeViewer
                     value={body}
                     language={format === "json" ? "json" : "text"}

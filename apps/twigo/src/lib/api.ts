@@ -230,6 +230,7 @@ export interface StoredMessage {
   size: number;
   payloadB64: string;
   headers: [string, string][];
+  truncated: boolean;
 }
 
 export interface MessagePage {

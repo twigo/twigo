@@ -62,7 +62,12 @@ export function DetailPanel() {
               aria-label="Republish"
               title="Republish"
               onClick={() =>
-                openPublish(session.connId, msg.subject, payloadText)
+                openPublish(
+                  session.connId,
+                  msg.subject,
+                  payloadText,
+                  msg.headers,
+                )
               }
             >
               <Send />

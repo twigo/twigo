@@ -243,6 +243,10 @@ pub async fn js_consumer_detail(
     })
 }
 
+// Cap the payload sent over IPC; a multi-MB stored message would otherwise be
+// base64-encoded and rendered whole. `size` stays the true byte length.
+const MAX_BROWSE_PAYLOAD: usize = 1024 * 1024;
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredMessage {
@@ -252,6 +256,7 @@ pub struct StoredMessage {
     size: usize,
     payload_b64: String,
     headers: Vec<(String, String)>,
+    truncated: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -307,13 +312,20 @@ pub async fn js_get_messages(
         scanned += 1;
         // StreamMessage is an unnameable type, so build the DTO inline.
         if let Ok(raw) = handle.get_raw_message(seq).await {
+            let truncated = raw.payload.len() > MAX_BROWSE_PAYLOAD;
+            let bytes = if truncated {
+                &raw.payload[..MAX_BROWSE_PAYLOAD]
+            } else {
+                &raw.payload[..]
+            };
             messages.push(StoredMessage {
                 seq: raw.sequence,
                 subject: raw.subject.to_string(),
                 time: fmt_time(raw.time),
                 size: raw.payload.len(),
-                payload_b64: base64::engine::general_purpose::STANDARD.encode(&raw.payload),
+                payload_b64: base64::engine::general_purpose::STANDARD.encode(bytes),
                 headers: super::subscription::flatten_headers(Some(&raw.headers)),
+                truncated,
             });
         }
         if backward {

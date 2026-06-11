@@ -22,15 +22,19 @@ export function PublishEditor({
   connId,
   initialSubject,
   initialPayload = "",
+  initialHeaders,
 }: {
   connId: string;
   initialSubject: string;
   initialPayload?: string;
+  initialHeaders?: [string, string][];
 }) {
   const live = useConnections((s) => s.connected[connId]?.connected === true);
   const [subject, setSubject] = useState(initialSubject);
   const [payload, setPayload] = useState(initialPayload);
-  const [headers, setHeaders] = useState<[string, string][]>([]);
+  const [headers, setHeaders] = useState<[string, string][]>(
+    initialHeaders ?? [],
+  );
   const [busy, setBusy] = useState<"publish" | "request" | null>(null);
   const [reply, setReply] = useState<Reply | null>(null);
   const [sent, setSent] = useState(false);
