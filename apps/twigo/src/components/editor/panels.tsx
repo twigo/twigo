@@ -7,6 +7,7 @@ import {
   Webhook,
   Layers,
   ArrowDownToLine,
+  Database,
   type LucideIcon,
 } from "lucide-react";
 import type {
@@ -20,6 +21,7 @@ import { PublishEditor } from "./PublishEditor";
 import { ResponderEditor } from "./ResponderEditor";
 import { StreamDetailPanel } from "./jetstream/StreamDetailPanel";
 import { ConsumerDetailPanel } from "./jetstream/ConsumerDetailPanel";
+import { KvEntryDetailPanel } from "./kv/KvEntryDetailPanel";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 
 export function StreamPanel(props: IDockviewPanelProps) {
@@ -72,6 +74,15 @@ export function JsStreamPanel(props: IDockviewPanelProps) {
     stream: string;
   };
   return <StreamDetailPanel connId={connId} stream={stream} />;
+}
+
+export function KvEntryPanel(props: IDockviewPanelProps) {
+  const { connId, bucket, key } = props.params as {
+    connId: string;
+    bucket: string;
+    key: string;
+  };
+  return <KvEntryDetailPanel connId={connId} bucket={bucket} kvkey={key} />;
 }
 
 export function JsConsumerPanel(props: IDockviewPanelProps) {
@@ -192,6 +203,20 @@ export function JsStreamTab(props: IDockviewPanelHeaderProps) {
   return (
     <ClosableTab
       icon={Layers}
+      iconClass="text-brand"
+      mono
+      title={props.api.title}
+      onClose={() => {
+        props.api.close();
+      }}
+    />
+  );
+}
+
+export function KvEntryTab(props: IDockviewPanelHeaderProps) {
+  return (
+    <ClosableTab
+      icon={Database}
       iconClass="text-brand"
       mono
       title={props.api.title}

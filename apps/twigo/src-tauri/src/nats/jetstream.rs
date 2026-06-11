@@ -10,15 +10,15 @@ use time::OffsetDateTime;
 use super::connection::ConnState;
 use super::error::{self, Error};
 
-fn js_err<E: std::fmt::Display>(e: E) -> Error {
+pub(crate) fn js_err<E: std::fmt::Display>(e: E) -> Error {
     Error::JetStream(e.to_string())
 }
 
-fn fmt_time(t: OffsetDateTime) -> Option<String> {
+pub(crate) fn fmt_time(t: OffsetDateTime) -> Option<String> {
     t.format(&Rfc3339).ok()
 }
 
-fn storage_str(s: &StorageType) -> String {
+pub(crate) fn storage_str(s: &StorageType) -> String {
     match s {
         StorageType::File => "file",
         StorageType::Memory => "memory",

@@ -207,6 +207,20 @@ export function closeConsumerDetail(
   api?.getPanel(jsConsumerEditorId(connId, stream, consumer))?.api.close();
 }
 
+function kvEntryEditorId(connId: string, bucket: string, key: string): string {
+  return `kventry:${encodeURIComponent(connId)}:${encodeURIComponent(bucket)}:${encodeURIComponent(key)}`;
+}
+
+/** Open a KV entry detail tab, reusing an existing tab. */
+export function openKvEntry(connId: string, bucket: string, key: string) {
+  openEditor({
+    type: "kventry",
+    id: kvEntryEditorId(connId, bucket, key),
+    title: key,
+    params: { connId, bucket, key },
+  });
+}
+
 /** Open settings as the first editor tab. */
 export function openSettings() {
   openEditor({ type: "settings", id: "settings", title: "Settings", index: 0 });

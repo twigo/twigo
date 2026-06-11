@@ -334,3 +334,83 @@ export async function jsDeleteMessage(
 ): Promise<void> {
   await invoke("js_delete_message", { connId, stream, seq });
 }
+
+export interface KvBucketSummary {
+  bucket: string;
+  values: number;
+  bytes: number;
+  history: number;
+  maxAge: number;
+  storage: string;
+}
+
+export interface KvBucketDetail {
+  bucket: string;
+  values: number;
+  bytes: number;
+  history: number;
+  maxAge: number;
+  storage: string;
+  maxValueSize: number;
+  replicas: number;
+}
+
+export interface KvEntrySummary {
+  key: string;
+  revision: number;
+  created: string | null;
+  operation: string;
+  delta: number;
+  size: number;
+}
+
+export interface KvEntryDetail {
+  key: string;
+  revision: number;
+  created: string | null;
+  operation: string;
+  delta: number;
+  size: number;
+  payloadB64: string;
+  truncated: boolean;
+}
+
+export function kvListBuckets(connId: string): Promise<KvBucketSummary[]> {
+  return invoke<KvBucketSummary[]>("kv_list_buckets", { connId });
+}
+
+export function kvBucketInfo(
+  connId: string,
+  bucket: string,
+): Promise<KvBucketDetail> {
+  return invoke<KvBucketDetail>("kv_bucket_info", { connId, bucket });
+}
+
+export function kvListKeys(
+  connId: string,
+  bucket: string,
+): Promise<KvEntrySummary[]> {
+  return invoke<KvEntrySummary[]>("kv_list_keys", { connId, bucket });
+}
+
+export function kvGetEntry(
+  connId: string,
+  bucket: string,
+  key: string,
+  revision: number | null,
+): Promise<KvEntryDetail | null> {
+  return invoke<KvEntryDetail | null>("kv_get_entry", {
+    connId,
+    bucket,
+    key,
+    revision,
+  });
+}
+
+export function kvHistory(
+  connId: string,
+  bucket: string,
+  key: string,
+): Promise<KvEntrySummary[]> {
+  return invoke<KvEntrySummary[]>("kv_history", { connId, bucket, key });
+}

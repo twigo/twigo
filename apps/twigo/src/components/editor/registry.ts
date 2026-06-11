@@ -12,6 +12,7 @@ import {
   SettingsPanel,
   JsStreamPanel,
   JsConsumerPanel,
+  KvEntryPanel,
   StreamTab,
   ServerTab,
   PublishTab,
@@ -19,6 +20,7 @@ import {
   SettingsTab,
   JsStreamTab,
   JsConsumerTab,
+  KvEntryTab,
 } from "./panels";
 
 // Editor inputs (VS Code model). One registry drives the Dockview component &
@@ -31,7 +33,8 @@ export type EditorType =
   | "publish"
   | "responder"
   | "jsstream"
-  | "jsconsumer";
+  | "jsconsumer"
+  | "kventry";
 
 interface EditorDef {
   component: FC<IDockviewPanelProps>;
@@ -64,6 +67,7 @@ export const EDITORS: Record<EditorType, EditorDef> = {
     tab: JsConsumerTab,
     connScoped: true,
   },
+  kventry: { component: KvEntryPanel, tab: KvEntryTab, connScoped: true },
 };
 
 export const editorComponents: Record<

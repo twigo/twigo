@@ -23,3 +23,15 @@ export function fmtCount(n: number): string {
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return n.toString();
 }
+
+// Human-readable duration from nanoseconds (0 = unlimited): 0 → "∞",
+// 90_000_000_000 → "2m", 604_800_000_000_000 → "7d".
+export function fmtDuration(ns: number): string {
+  if (ns <= 0) return "∞";
+  const s = ns / 1e9;
+  if (s < 1) return `${Math.round(ns / 1e6)}ms`;
+  if (s < 60) return `${Math.round(s)}s`;
+  if (s < 3600) return `${Math.round(s / 60)}m`;
+  if (s < 86_400) return `${Math.round(s / 3600)}h`;
+  return `${Math.round(s / 86_400)}d`;
+}
