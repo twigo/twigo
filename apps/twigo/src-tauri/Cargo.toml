@@ -22,12 +22,14 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-async-nats = "0.49.1"
+async-nats = { version = "0.49.1", features = ["object-store"] }
 tokio = { version = "1.52.3", features = [
     "rt-multi-thread",
     "macros",
     "sync",
     "time",
+    "fs",
+    "io-util",
 ] }
 tauri-plugin-dialog = "2.7.1"
 thiserror = "2.0.18"

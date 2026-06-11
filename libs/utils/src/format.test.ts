@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fmtBytes, fmtRtt, fmtTime, fmtCount } from "./format";
+import { fmtBytes, fmtRtt, fmtTime, fmtCount, fmtDuration } from "./format";
 
 describe("fmtBytes", () => {
   it("formats B / KB / MB consistently", () => {
@@ -28,5 +28,15 @@ describe("fmtCount", () => {
     expect(fmtCount(999)).toBe("999");
     expect(fmtCount(12_400)).toBe("12.4k");
     expect(fmtCount(3_200_000)).toBe("3.2M");
+  });
+});
+
+describe("fmtDuration", () => {
+  it("humanizes nanosecond durations, 0 = unlimited", () => {
+    expect(fmtDuration(0)).toBe("∞");
+    expect(fmtDuration(30 * 1e9)).toBe("30s");
+    expect(fmtDuration(5 * 60 * 1e9)).toBe("5m");
+    expect(fmtDuration(2 * 3600 * 1e9)).toBe("2h");
+    expect(fmtDuration(7 * 86_400 * 1e9)).toBe("7d");
   });
 });

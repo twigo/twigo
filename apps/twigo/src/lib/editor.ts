@@ -207,6 +207,46 @@ export function closeConsumerDetail(
   api?.getPanel(jsConsumerEditorId(connId, stream, consumer))?.api.close();
 }
 
+function kvEntryEditorId(connId: string, bucket: string, key: string): string {
+  return `kventry:${encodeURIComponent(connId)}:${encodeURIComponent(bucket)}:${encodeURIComponent(key)}`;
+}
+
+/** Open a KV entry detail tab, reusing an existing tab. */
+export function openKvEntry(connId: string, bucket: string, key: string) {
+  openEditor({
+    type: "kventry",
+    id: kvEntryEditorId(connId, bucket, key),
+    title: key,
+    params: { connId, bucket, key },
+  });
+}
+
+export function closeKvEntry(connId: string, bucket: string, key: string) {
+  api?.getPanel(kvEntryEditorId(connId, bucket, key))?.api.close();
+}
+
+function objEntryEditorId(
+  connId: string,
+  bucket: string,
+  name: string,
+): string {
+  return `objentry:${encodeURIComponent(connId)}:${encodeURIComponent(bucket)}:${encodeURIComponent(name)}`;
+}
+
+/** Open an Object Store object detail tab, reusing an existing tab. */
+export function openObjectEntry(connId: string, bucket: string, name: string) {
+  openEditor({
+    type: "objentry",
+    id: objEntryEditorId(connId, bucket, name),
+    title: name,
+    params: { connId, bucket, name },
+  });
+}
+
+export function closeObjectEntry(connId: string, bucket: string, name: string) {
+  api?.getPanel(objEntryEditorId(connId, bucket, name))?.api.close();
+}
+
 /** Open settings as the first editor tab. */
 export function openSettings() {
   openEditor({ type: "settings", id: "settings", title: "Settings", index: 0 });

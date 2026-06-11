@@ -334,3 +334,228 @@ export async function jsDeleteMessage(
 ): Promise<void> {
   await invoke("js_delete_message", { connId, stream, seq });
 }
+
+export interface KvBucketSummary {
+  bucket: string;
+  values: number;
+  bytes: number;
+  history: number;
+  maxAge: number;
+  storage: string;
+}
+
+export interface KvBucketDetail {
+  bucket: string;
+  values: number;
+  bytes: number;
+  history: number;
+  maxAge: number;
+  storage: string;
+  maxValueSize: number;
+  replicas: number;
+}
+
+export interface KvEntrySummary {
+  key: string;
+  revision: number;
+  created: string | null;
+  operation: string;
+  delta: number;
+  size: number;
+}
+
+export interface KvEntryDetail {
+  key: string;
+  revision: number;
+  created: string | null;
+  operation: string;
+  delta: number;
+  size: number;
+  payloadB64: string;
+  truncated: boolean;
+}
+
+export function kvListBuckets(connId: string): Promise<KvBucketSummary[]> {
+  return invoke<KvBucketSummary[]>("kv_list_buckets", { connId });
+}
+
+export function kvBucketInfo(
+  connId: string,
+  bucket: string,
+): Promise<KvBucketDetail> {
+  return invoke<KvBucketDetail>("kv_bucket_info", { connId, bucket });
+}
+
+export function kvListKeys(
+  connId: string,
+  bucket: string,
+): Promise<KvEntrySummary[]> {
+  return invoke<KvEntrySummary[]>("kv_list_keys", { connId, bucket });
+}
+
+export function kvGetEntry(
+  connId: string,
+  bucket: string,
+  key: string,
+  revision: number | null,
+): Promise<KvEntryDetail | null> {
+  return invoke<KvEntryDetail | null>("kv_get_entry", {
+    connId,
+    bucket,
+    key,
+    revision,
+  });
+}
+
+export function kvHistory(
+  connId: string,
+  bucket: string,
+  key: string,
+): Promise<KvEntrySummary[]> {
+  return invoke<KvEntrySummary[]>("kv_history", { connId, bucket, key });
+}
+
+export function kvPut(
+  connId: string,
+  bucket: string,
+  key: string,
+  payloadB64: string,
+  revision: number | null,
+): Promise<{ revision: number }> {
+  return invoke<{ revision: number }>("kv_put", {
+    connId,
+    bucket,
+    key,
+    payloadB64,
+    revision,
+  });
+}
+
+export function kvCreate(
+  connId: string,
+  bucket: string,
+  key: string,
+  payloadB64: string,
+): Promise<{ revision: number }> {
+  return invoke<{ revision: number }>("kv_create", {
+    connId,
+    bucket,
+    key,
+    payloadB64,
+  });
+}
+
+export async function kvDelete(
+  connId: string,
+  bucket: string,
+  key: string,
+): Promise<void> {
+  await invoke("kv_delete", { connId, bucket, key });
+}
+
+export async function kvPurge(
+  connId: string,
+  bucket: string,
+  key: string,
+): Promise<void> {
+  await invoke("kv_purge", { connId, bucket, key });
+}
+
+export async function kvCreateBucket(
+  connId: string,
+  config: Record<string, unknown>,
+): Promise<void> {
+  await invoke("kv_create_bucket", { connId, config });
+}
+
+export async function kvDeleteBucket(
+  connId: string,
+  bucket: string,
+): Promise<void> {
+  await invoke("kv_delete_bucket", { connId, bucket });
+}
+
+export interface ObjBucketSummary {
+  bucket: string;
+  bytes: number;
+  storage: string;
+}
+
+export interface ObjSummary {
+  name: string;
+  size: number;
+  chunks: number;
+  modified: string | null;
+  deleted: boolean;
+}
+
+export interface ObjDetail {
+  name: string;
+  description: string | null;
+  size: number;
+  chunks: number;
+  modified: string | null;
+  digest: string | null;
+  deleted: boolean;
+  metadata: Record<string, string>;
+  headers: [string, string][];
+}
+
+export function objListBuckets(connId: string): Promise<ObjBucketSummary[]> {
+  return invoke<ObjBucketSummary[]>("obj_list_buckets", { connId });
+}
+
+export function objListObjects(
+  connId: string,
+  bucket: string,
+): Promise<ObjSummary[]> {
+  return invoke<ObjSummary[]>("obj_list_objects", { connId, bucket });
+}
+
+export function objObjectInfo(
+  connId: string,
+  bucket: string,
+  name: string,
+): Promise<ObjDetail> {
+  return invoke<ObjDetail>("obj_object_info", { connId, bucket, name });
+}
+
+export async function objGetObject(
+  connId: string,
+  bucket: string,
+  name: string,
+  dest: string,
+): Promise<void> {
+  await invoke("obj_get_object", { connId, bucket, name, dest });
+}
+
+export async function objPutObject(
+  connId: string,
+  bucket: string,
+  name: string,
+  src: string,
+): Promise<void> {
+  await invoke("obj_put_object", { connId, bucket, name, src });
+}
+
+export async function objDelete(
+  connId: string,
+  bucket: string,
+  name: string,
+): Promise<void> {
+  await invoke("obj_delete", { connId, bucket, name });
+}
+
+export async function objCreateBucket(
+  connId: string,
+  config: Record<string, unknown>,
+): Promise<void> {
+  await invoke("obj_create_bucket", { connId, config });
+}
+
+export async function objDeleteBucket(
+  connId: string,
+  bucket: string,
+): Promise<void> {
+  await invoke("obj_delete_bucket", { connId, bucket });
+}

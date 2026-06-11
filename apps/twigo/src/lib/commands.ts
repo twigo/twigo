@@ -1,6 +1,8 @@
 import { useConnections } from "@/store/connections";
 import { useUi } from "@/store/ui";
 import { useJetStream } from "@/store/jetstream";
+import { useKv } from "@/store/kv";
+import { useObjStore } from "@/store/objstore";
 import { newPublish, newResponder } from "@/lib/actions";
 import { openSettings } from "@/lib/editor";
 import { VIEWS, VIEW_ORDER } from "@/components/views/registry";
@@ -54,6 +56,34 @@ const STATIC: Command[] = [
     run: () => {
       const active = useConnections.getState().activeContext;
       if (active) void useJetStream.getState().load(active);
+    },
+  },
+  {
+    id: "kv.refresh",
+    title: "KV: Refresh buckets",
+    category: "Connections",
+    keywords: "kv key value bucket",
+    when: () => {
+      const { activeContext, connected } = useConnections.getState();
+      return !!(activeContext && connected[activeContext]?.jetstream);
+    },
+    run: () => {
+      const active = useConnections.getState().activeContext;
+      if (active) void useKv.getState().load(active);
+    },
+  },
+  {
+    id: "objstore.refresh",
+    title: "Object Store: Refresh",
+    category: "Connections",
+    keywords: "object store bucket file",
+    when: () => {
+      const { activeContext, connected } = useConnections.getState();
+      return !!(activeContext && connected[activeContext]?.jetstream);
+    },
+    run: () => {
+      const active = useConnections.getState().activeContext;
+      if (active) void useObjStore.getState().load(active);
     },
   },
   ...VIEW_ORDER.map(

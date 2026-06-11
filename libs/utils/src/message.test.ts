@@ -1,10 +1,22 @@
 import { describe, it, expect } from "vitest";
-import { decodeText, decodePreview, tryPrettyJson, toHex } from "./message";
+import {
+  decodeText,
+  encodeText,
+  decodePreview,
+  tryPrettyJson,
+  toHex,
+} from "./message";
 
 describe("message decoding", () => {
   it("decodes base64 to text", () => {
     // "hello" -> aGVsbG8=
     expect(decodeText("aGVsbG8=")).toBe("hello");
+  });
+
+  it("encodeText round-trips through decodeText (incl. non-ASCII)", () => {
+    for (const s of ["hello", '{"a":1}', "héllo · 世界", ""]) {
+      expect(decodeText(encodeText(s))).toBe(s);
+    }
   });
 
   it("collapses whitespace in previews", () => {
