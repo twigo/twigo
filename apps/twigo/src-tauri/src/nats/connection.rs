@@ -185,6 +185,13 @@ fn build_options(
     // and survives transient drops mid-session.
     Ok(base
         .name("twigo")
+        // Twigo is an inspection tool: a connection must stay on the exact
+        // server the user picked. Without this, async-nats adds the cluster
+        // peers a server advertises (INFO.connect_urls) to its pool and can
+        // (re)connect to any of them — so a dev/staging context clustered with
+        // prod would silently show prod's data. Pin to the configured URL.
+        .ignore_discovered_servers()
+        .retain_servers_order()
         .retry_on_initial_connect()
         .max_reconnects(None)
         // Called before each (re)connect attempt with the attempt count; report
