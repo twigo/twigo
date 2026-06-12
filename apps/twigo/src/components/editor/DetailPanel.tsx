@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Copy, Send, Reply } from "lucide-react";
+import { Copy, Send, Reply, Pin, PinOff, X } from "lucide-react";
 import { Button, EmptyState, CodeViewer, cn } from "@twigo/ui";
 import {
   fmtDateTime,
@@ -8,12 +8,21 @@ import {
   decodeText,
   tryPrettyJson,
   toHex,
+  type StreamMessage,
 } from "@twigo/utils";
 import { useStream } from "@/store/stream";
+import { useCompare } from "@/store/compare";
 import { openPublish } from "@/lib/editor";
+import { PayloadDiff } from "./PayloadDiff";
 
 type Format = "json" | "text" | "hex";
 const FORMATS: Format[] = ["json", "text", "hex"];
+
+function bodyFor(m: StreamMessage, format: Format): string {
+  if (format === "hex") return toHex(m.payloadB64);
+  if (format === "text") return decodeText(m.payloadB64);
+  return tryPrettyJson(m.payloadB64) ?? decodeText(m.payloadB64);
+}
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
@@ -31,6 +40,9 @@ export function DetailPanel() {
     s.activeId ? s.sessions[s.activeId] : undefined,
   );
   const [format, setFormat] = useState<Format>("json");
+  const pinned = useCompare((s) => s.pinned);
+  const pin = useCompare((s) => s.pin);
+  const clearPin = useCompare((s) => s.clear);
 
   const selectedId = session?.selectedId ?? null;
   const msg =
@@ -38,16 +50,14 @@ export function DetailPanel() {
       ? session?.items.find((m) => m.id === selectedId)
       : undefined;
 
-  const body = msg
-    ? format === "hex"
-      ? toHex(msg.payloadB64)
-      : format === "text"
-        ? decodeText(msg.payloadB64)
-        : (tryPrettyJson(msg.payloadB64) ?? decodeText(msg.payloadB64))
-    : "";
-
+  const body = msg ? bodyFor(msg, format) : "";
   const payloadText = msg ? decodeText(msg.payloadB64) : "";
   const replyTo = msg?.reply ?? null;
+  // Reference identity: the same StreamMessage object stays in `items` until
+  // evicted, so this is unambiguous across sessions (unlike per-session ids).
+  const isPinned = !!(msg && msg === pinned);
+  // The pinned message to diff against, when viewing a different one.
+  const comparePinned = msg && pinned && pinned !== msg ? pinned : null;
 
   return (
     <aside className="flex h-full w-full flex-col border-l border-border bg-panel">
@@ -84,6 +94,19 @@ export function DetailPanel() {
                 <Reply />
               </Button>
             )}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={isPinned ? "Unpin compare base" : "Pin to compare"}
+              title={isPinned ? "Unpin compare base" : "Pin to compare"}
+              className={cn(isPinned && "text-brand")}
+              onClick={() => {
+                if (isPinned) clearPin();
+                else pin(msg);
+              }}
+            >
+              {isPinned ? <PinOff /> : <Pin />}
+            </Button>
             <Button
               variant="ghost"
               size="icon-sm"
@@ -149,12 +172,30 @@ export function DetailPanel() {
                   {f}
                 </button>
               ))}
+              {comparePinned && (
+                <span className="ml-auto flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+                  diff vs pinned
+                  <button
+                    type="button"
+                    onClick={() => clearPin()}
+                    aria-label="Clear comparison"
+                    title="Clear comparison"
+                    className="rounded text-muted-foreground hover:text-foreground [&_svg]:size-3"
+                  >
+                    <X />
+                  </button>
+                </span>
+              )}
             </div>
-            <CodeViewer
-              value={body}
-              language={format === "json" ? "json" : "text"}
-              className="min-h-0 flex-1"
-            />
+            {comparePinned ? (
+              <PayloadDiff a={bodyFor(comparePinned, format)} b={body} />
+            ) : (
+              <CodeViewer
+                value={body}
+                language={format === "json" ? "json" : "text"}
+                className="min-h-0 flex-1"
+              />
+            )}
           </div>
         </div>
       )}
