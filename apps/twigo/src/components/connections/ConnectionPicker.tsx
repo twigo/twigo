@@ -99,14 +99,6 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
         >
           {c.name}
         </span>
-        {readOnly && (
-          <span title="Read-only — writes are blocked">
-            <Lock
-              className="size-3 shrink-0 text-warn"
-              aria-label="Read-only"
-            />
-          </span>
-        )}
         {connecting[c.name] ? (
           <span className="shrink-0 text-[11px] text-muted-foreground">
             connecting…
@@ -124,19 +116,35 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
             {c.url.replace(/^\w+:\/\//, "")}
           </span>
         )}
-        <span className="flex shrink-0 items-center gap-0.5 opacity-0 group-data-[selected=true]:opacity-100">
-          <ActionButton
-            label={
+        <span className="flex shrink-0 items-center gap-0.5">
+          {/* The lock is its own indicator: lit and always shown when read-only,
+              revealed on hover (to lock) otherwise. */}
+          <button
+            type="button"
+            aria-label={
               readOnly
                 ? `Allow writes on ${c.name}`
                 : `Make ${c.name} read-only`
             }
-            onClick={() => toggleReadOnly(c.name)}
+            title={
+              readOnly ? "Read-only — click to allow writes" : "Make read-only"
+            }
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleReadOnly(c.name);
+            }}
+            className={cn(
+              "flex size-5 items-center justify-center rounded hover:bg-background [&_svg]:size-3.5",
+              readOnly
+                ? "text-warn"
+                : "text-muted-foreground opacity-0 hover:text-foreground group-data-[selected=true]:opacity-100",
+            )}
           >
             {readOnly ? <Lock /> : <LockOpen />}
-          </ActionButton>
+          </button>
           {info && (
-            <>
+            <span className="flex items-center gap-0.5 opacity-0 group-data-[selected=true]:opacity-100">
               <ActionButton
                 label="Server info"
                 disabled={!info.connected}
@@ -154,7 +162,7 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
               >
                 <Unplug />
               </ActionButton>
-            </>
+            </span>
           )}
         </span>
       </CommandItem>
