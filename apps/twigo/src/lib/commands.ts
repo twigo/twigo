@@ -1,5 +1,6 @@
 import { useConnections } from "@/store/connections";
 import { useUi } from "@/store/ui";
+import { useHelp } from "@/store/help";
 import { useJetStream } from "@/store/jetstream";
 import { useKv } from "@/store/kv";
 import { useObjStore } from "@/store/objstore";
@@ -130,6 +131,16 @@ const STATIC: Command[] = [
     run: () => useUi.getState().toggleTheme(),
   },
   {
+    id: "help.shortcuts",
+    title: "Keyboard shortcuts",
+    category: "Help",
+    keywords: "help keys cheatsheet bindings reference",
+    // Displayed only; '?' is handled directly (a binding can't carry the
+    // implicit shift the character needs). See CommandPalette's key handler.
+    keybinding: "?",
+    run: () => useHelp.getState().toggle(),
+  },
+  {
     id: "editor.splitRight",
     title: "Split editor right",
     category: "Editor",
@@ -196,8 +207,45 @@ export function getCommands(): Command[] {
   );
 }
 
+export interface ShortcutHelp {
+  category: string;
+  title: string;
+  binding: string;
+}
+
+/** Every keyboard shortcut for the help overlay — the static, always-true set
+ *  (not filtered by `when`, so a user learns them even when inapplicable). */
+export function keybindingHelp(): ShortcutHelp[] {
+  const palette: ShortcutHelp = {
+    category: "General",
+    title: "Command palette",
+    binding: PALETTE_BINDINGS[0] ?? "mod+shift+p",
+  };
+  const fromCommands = STATIC.flatMap((c) =>
+    c.keybinding
+      ? [{ category: c.category, title: c.title, binding: c.keybinding }]
+      : [],
+  );
+  return [palette, ...fromCommands];
+}
+
 const IS_MAC =
   typeof navigator !== "undefined" && /mac/i.test(navigator.userAgent);
+
+// True when a keyboard event targets an editable surface — native fields,
+// CodeMirror, or a role-based widget (cmdk/Radix combobox etc.). Used to avoid
+// hijacking bare keys (like "?") while the user is typing.
+export function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA" ||
+    target.isContentEditable ||
+    target.closest(
+      '.cm-editor, [role="textbox"], [role="searchbox"], [role="combobox"]',
+    ) !== null
+  );
+}
 
 export function matchKeybinding(e: KeyboardEvent, binding: string): boolean {
   const parts = binding.toLowerCase().split("+");
