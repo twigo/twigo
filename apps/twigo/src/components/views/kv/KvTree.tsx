@@ -298,7 +298,7 @@ function BucketRow({
           <Trash2 className="size-3" />
         </button>
       </span>
-      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+      <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
         {fmtCount(bucket.values)} · {fmtBytes(bucket.bytes)} · {bucket.storage}
       </span>
     </li>
@@ -365,11 +365,11 @@ function NodeRow({
       </span>
       {deleted && <Trash2 className="size-3 shrink-0 text-warn" />}
       {isKey && row.entry ? (
-        <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
           r{row.entry.revision} · {fmtBytes(row.entry.size)}
         </span>
       ) : (
-        <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
           {fmtCount(row.node.count)}
         </span>
       )}

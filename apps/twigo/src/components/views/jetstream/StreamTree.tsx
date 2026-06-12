@@ -164,7 +164,7 @@ function StreamRow({
       </button>
       <Layers className="size-3 shrink-0 text-brand" />
       <span className="min-w-0 flex-1 truncate font-mono">{stream.name}</span>
-      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+      <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
         {fmtCount(stream.messages)} · {fmtBytes(stream.bytes)} ·{" "}
         {stream.storage} · {stream.consumerCount}
       </span>
@@ -203,7 +203,7 @@ function ConsumerRow({
       {consumer.paused && <Pause className="size-3 shrink-0 text-warn" />}
       <span
         className={cn(
-          "shrink-0 font-mono text-[10px]",
+          "shrink-0 font-mono text-[10px] tabular-nums",
           consumer.numPending > 0 ? "text-warn" : "text-muted-foreground",
         )}
       >

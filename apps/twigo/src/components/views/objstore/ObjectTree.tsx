@@ -286,7 +286,7 @@ function BucketRow({
           <Trash2 className="size-3" />
         </button>
       </span>
-      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+      <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
         {fmtBytes(bucket.bytes)} · {bucket.storage}
       </span>
     </li>
@@ -321,7 +321,7 @@ function ObjectRow({
       <File className="size-3 shrink-0 text-muted-foreground" />
       <span className="min-w-0 flex-1 truncate font-mono">{object.name}</span>
       {object.deleted && <Trash2 className="size-3 shrink-0 text-warn" />}
-      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+      <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
         {fmtBytes(object.size)} · {fmtCount(object.chunks)} chunks
       </span>
     </li>
