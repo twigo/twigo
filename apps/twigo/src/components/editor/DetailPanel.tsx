@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Copy, Send, Reply, Pin, PinOff, X } from "lucide-react";
+import { Copy, Braces, Send, Reply, Pin, PinOff, X } from "lucide-react";
 import { Button, EmptyState, CodeViewer, cn } from "@twigo/ui";
 import {
   fmtDateTime,
@@ -115,6 +115,29 @@ export function DetailPanel() {
               onClick={() => void navigator.clipboard.writeText(body)}
             >
               <Copy />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Copy as JSON"
+              title="Copy message as JSON"
+              onClick={() =>
+                void navigator.clipboard.writeText(
+                  JSON.stringify(
+                    {
+                      subject: msg.subject,
+                      receivedAt: new Date(msg.receivedAt).toISOString(),
+                      reply: msg.reply,
+                      headers: msg.headers,
+                      payload: payloadText,
+                    },
+                    null,
+                    2,
+                  ),
+                )
+              }
+            >
+              <Braces />
             </Button>
           </div>
         )}
