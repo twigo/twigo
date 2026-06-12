@@ -26,7 +26,7 @@ export function KvView({ filter, connId }: ViewProps) {
       await kvCreateBucket(connId, config);
       useToasts
         .getState()
-        .push("info", `Created bucket ${String(config.bucket)}`);
+        .push("success", `Created bucket ${String(config.bucket)}`);
       void load(connId);
     } catch (e) {
       useToasts.getState().push("error", `Create failed: ${String(e)}`);

@@ -32,7 +32,7 @@ export function ObjectDetailPanel({
     setDownloading(true);
     try {
       await objGetObject(connId, bucket, name, dest);
-      useToasts.getState().push("info", `Saved ${name}`);
+      useToasts.getState().push("success", `Saved ${name}`);
     } catch (e) {
       useToasts.getState().push("error", `Download failed: ${String(e)}`);
     } finally {
@@ -43,7 +43,7 @@ export function ObjectDetailPanel({
   const doDelete = async () => {
     try {
       await objDelete(connId, bucket, name);
-      useToasts.getState().push("info", `Deleted ${name}`);
+      useToasts.getState().push("success", `Deleted ${name}`);
       closeObjectEntry(connId, bucket, name);
       void useObjStore.getState().refreshObjects(connId, bucket);
       void useObjStore.getState().load(connId);

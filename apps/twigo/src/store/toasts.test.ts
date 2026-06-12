@@ -27,4 +27,20 @@ describe("toasts", () => {
     vi.advanceTimersByTime(6000);
     expect(useToasts.getState().toasts).toHaveLength(0);
   });
+
+  it("keeps an actionable success toast longer and runs its action", () => {
+    vi.useFakeTimers();
+    const run = vi.fn();
+    useToasts.getState().push("success", "Saved x", { label: "Undo", run });
+    const t = useToasts.getState().toasts[0];
+    expect(t?.kind).toBe("success");
+    expect(t?.action?.label).toBe("Undo");
+    t?.action?.run();
+    expect(run).toHaveBeenCalledOnce();
+    // Still alive at the normal TTL; gone only by the longer actionable TTL.
+    vi.advanceTimersByTime(6000);
+    expect(useToasts.getState().toasts).toHaveLength(1);
+    vi.advanceTimersByTime(4000);
+    expect(useToasts.getState().toasts).toHaveLength(0);
+  });
 });

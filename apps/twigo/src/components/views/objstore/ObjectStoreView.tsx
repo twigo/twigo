@@ -26,7 +26,7 @@ export function ObjectStoreView({ filter, connId }: ViewProps) {
       await objCreateBucket(connId, config);
       useToasts
         .getState()
-        .push("info", `Created object store ${String(config.bucket)}`);
+        .push("success", `Created object store ${String(config.bucket)}`);
       void load(connId);
     } catch (e) {
       useToasts.getState().push("error", `Create failed: ${String(e)}`);

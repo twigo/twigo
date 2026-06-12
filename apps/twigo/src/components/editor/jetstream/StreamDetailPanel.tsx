@@ -77,7 +77,7 @@ export function StreamDetailPanel({
       const { purged } = await jsPurgeStream(connId, stream, keep, null);
       useToasts
         .getState()
-        .push("info", `Purged ${String(purged)} messages from ${stream}`);
+        .push("success", `Purged ${String(purged)} messages from ${stream}`);
       refresh();
       void useJetStream.getState().load(connId);
     } catch (e) {
@@ -88,7 +88,7 @@ export function StreamDetailPanel({
   const doDelete = async () => {
     try {
       await jsDeleteStream(connId, stream);
-      useToasts.getState().push("info", `Deleted stream ${stream}`);
+      useToasts.getState().push("success", `Deleted stream ${stream}`);
       closeStreamDetail(connId, stream);
       void useJetStream.getState().load(connId);
     } catch (e) {
@@ -101,7 +101,7 @@ export function StreamDetailPanel({
       await jsCreateConsumer(connId, stream, config);
       useToasts
         .getState()
-        .push("info", `Created consumer ${String(config.name)}`);
+        .push("success", `Created consumer ${String(config.name)}`);
       void useJetStream.getState().refreshConsumers(connId, stream);
       void useJetStream.getState().load(connId);
     } catch (e) {
@@ -112,7 +112,7 @@ export function StreamDetailPanel({
   const doEdit = async (config: Record<string, unknown>) => {
     try {
       await jsUpdateStream(connId, config);
-      useToasts.getState().push("info", `Updated stream ${stream}`);
+      useToasts.getState().push("success", `Updated stream ${stream}`);
       refresh();
       void useJetStream.getState().load(connId);
     } catch (e) {

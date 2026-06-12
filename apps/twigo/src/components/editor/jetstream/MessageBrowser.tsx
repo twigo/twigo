@@ -73,7 +73,7 @@ export function MessageBrowser({
       setMessages(next);
       // Keep a selection: the row that took the deleted slot, else the previous.
       setSelectedSeq(next[idx]?.seq ?? next[idx - 1]?.seq ?? null);
-      useToasts.getState().push("info", `Deleted message #${String(seq)}`);
+      useToasts.getState().push("success", `Deleted message #${String(seq)}`);
       void useJetStream.getState().load(connId);
     } catch (e) {
       useToasts.getState().push("error", `Delete failed: ${String(e)}`);
