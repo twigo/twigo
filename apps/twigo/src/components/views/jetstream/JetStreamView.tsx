@@ -9,14 +9,6 @@ import type { ViewProps } from "@/components/views/registry";
 import { StreamTree } from "./StreamTree";
 import { StreamFormDialog } from "@/components/editor/jetstream/StreamFormDialog";
 
-function Hint({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="px-2 py-3 text-xs leading-relaxed text-muted-foreground">
-      {children}
-    </p>
-  );
-}
-
 export function JetStreamView({ filter, connId }: ViewProps) {
   const isConnected = useConnections((s) => !!(connId && s.connected[connId]));
   const jsEnabled = useConnections((s) =>
@@ -52,14 +44,18 @@ export function JetStreamView({ filter, connId }: ViewProps) {
   }, [connId, isConnected, jsEnabled, data?.status, load]);
 
   if (!isConnected || !connId) {
-    return <Hint>Connect to a server to browse JetStream.</Hint>;
+    return (
+      <EmptyState density="inline">
+        Connect to a server to browse JetStream.
+      </EmptyState>
+    );
   }
   if (!jsEnabled) {
     return (
-      <Hint>
+      <EmptyState density="inline">
         JetStream isn&apos;t enabled on this server. Start nats-server with{" "}
         <code className="rounded bg-accent px-1 py-0.5 font-mono">-js</code>.
-      </Hint>
+      </EmptyState>
     );
   }
 
@@ -112,15 +108,37 @@ export function JetStreamView({ filter, connId }: ViewProps) {
           Loading streams…
         </EmptyState>
       ) : status === "error" ? (
-        <EmptyState icon={Layers} variant="error" className="flex-1 gap-3">
+        <EmptyState
+          icon={Layers}
+          variant="error"
+          className="flex-1"
+          action={{
+            label: "Retry",
+            onClick: () => void load(connId),
+            icon: RefreshCw,
+          }}
+        >
           <span className="max-w-64 break-words">{data?.error}</span>
-          <Button variant="outline" size="sm" onClick={() => void load(connId)}>
-            <RefreshCw />
-            Retry
-          </Button>
         </EmptyState>
       ) : filtered.length === 0 ? (
-        <Hint>{f ? "No matching streams." : "No streams yet."}</Hint>
+        f ? (
+          <EmptyState density="inline">
+            No streams match “{filter.trim()}”.
+          </EmptyState>
+        ) : (
+          <EmptyState
+            icon={Layers}
+            className="flex-1"
+            title="No streams"
+            action={{
+              label: "New stream",
+              onClick: () => setCreateOpen(true),
+              icon: Plus,
+            }}
+          >
+            This context has no JetStream streams yet.
+          </EmptyState>
+        )
       ) : (
         <StreamTree connId={connId} streams={filtered} />
       )}

@@ -8,11 +8,13 @@ import {
   type DockviewTheme,
 } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
-import { Radio, Send } from "lucide-react";
-import { Button, EmptyState } from "@twigo/ui";
+import { Radio, Send, Search } from "lucide-react";
+import { EmptyState } from "@twigo/ui";
 import { useUi } from "@/store/ui";
 import { useStream } from "@/store/stream";
 import { useConnections } from "@/store/connections";
+import { usePalette } from "@/store/palette";
+import { fmtBinding } from "@/lib/commands";
 import { useWorkspace } from "@/store/workspace";
 import {
   setEditorApi,
@@ -25,25 +27,43 @@ import { newPublish } from "@/lib/actions";
 import { editorComponents, editorTabComponents } from "./registry";
 import { NewTabButton } from "./NewTabButton";
 
-// Shown by Dockview when the editor area has no open tabs.
+// Shown by Dockview when the editor area has no open tabs. Branches on whether
+// anything is live so the first thing a new user sees is a way forward, not a
+// dead end.
 function Watermark() {
   const hasLive = useConnections((s) =>
     Object.values(s.connected).some((i) => i.connected),
   );
-  return (
-    <EmptyState icon={Radio} className="h-full bg-background">
-      <p>Select a subject in the Explorer to start a live stream.</p>
-      <p className="text-xs opacity-80">Each subject opens in its own tab.</p>
-      <Button
-        variant="outline"
-        size="sm"
-        className="mt-2"
-        disabled={!hasLive}
-        onClick={() => newPublish()}
+  if (!hasLive) {
+    return (
+      <EmptyState
+        icon={Radio}
+        className="h-full bg-background"
+        title="No live connection"
+        action={{
+          label: "Open command palette",
+          onClick: () => usePalette.getState().setOpen(true),
+          icon: Search,
+        }}
+        kbd={fmtBinding("mod+shift+p")}
       >
-        <Send />
-        New publish
-      </Button>
+        <p className="max-w-xs">
+          Connect to a server from the switcher in the top-left, then pick a
+          subject to watch it live.
+        </p>
+      </EmptyState>
+    );
+  }
+  return (
+    <EmptyState
+      icon={Radio}
+      className="h-full bg-background"
+      title="Pick a subject to stream"
+      action={{ label: "New publish", onClick: () => newPublish(), icon: Send }}
+    >
+      <p className="max-w-xs">
+        Choose a subject in the Explorer — each opens in its own live tab.
+      </p>
     </EmptyState>
   );
 }

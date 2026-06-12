@@ -15,14 +15,6 @@ import type { ViewProps } from "@/components/views/registry";
 import { KvTree } from "./KvTree";
 import { CreateBucketDialog } from "@/components/editor/kv/CreateBucketDialog";
 
-function Hint({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="px-2 py-3 text-xs leading-relaxed text-muted-foreground">
-      {children}
-    </p>
-  );
-}
-
 export function KvView({ filter, connId }: ViewProps) {
   const isConnected = useConnections((s) => !!(connId && s.connected[connId]));
   const jsEnabled = useConnections((s) =>
@@ -58,14 +50,18 @@ export function KvView({ filter, connId }: ViewProps) {
   }, [connId, isConnected, jsEnabled, data?.status, load]);
 
   if (!isConnected || !connId) {
-    return <Hint>Connect to a server to browse KV.</Hint>;
+    return (
+      <EmptyState density="inline">
+        Connect to a server to browse KV.
+      </EmptyState>
+    );
   }
   if (!jsEnabled) {
     return (
-      <Hint>
+      <EmptyState density="inline">
         JetStream isn&apos;t enabled on this server. Start nats-server with{" "}
         <code className="rounded bg-accent px-1 py-0.5 font-mono">-js</code>.
-      </Hint>
+      </EmptyState>
     );
   }
 
@@ -118,15 +114,37 @@ export function KvView({ filter, connId }: ViewProps) {
           Loading buckets…
         </EmptyState>
       ) : status === "error" ? (
-        <EmptyState icon={Database} variant="error" className="flex-1 gap-3">
+        <EmptyState
+          icon={Database}
+          variant="error"
+          className="flex-1"
+          action={{
+            label: "Retry",
+            onClick: () => void load(connId),
+            icon: RefreshCw,
+          }}
+        >
           <span className="max-w-64 break-words">{data?.error}</span>
-          <Button variant="outline" size="sm" onClick={() => void load(connId)}>
-            <RefreshCw />
-            Retry
-          </Button>
         </EmptyState>
       ) : filtered.length === 0 ? (
-        <Hint>{f ? "No matching buckets." : "No KV buckets yet."}</Hint>
+        f ? (
+          <EmptyState density="inline">
+            No buckets match “{filter.trim()}”.
+          </EmptyState>
+        ) : (
+          <EmptyState
+            icon={Database}
+            className="flex-1"
+            title="No KV buckets"
+            action={{
+              label: "New bucket",
+              onClick: () => setCreateOpen(true),
+              icon: Plus,
+            }}
+          >
+            This context has no KV buckets yet.
+          </EmptyState>
+        )
       ) : (
         <KvTree connId={connId} buckets={filtered} />
       )}

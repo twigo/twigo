@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Search } from "lucide-react";
+import { EmptyState } from "@twigo/ui";
 import { useUi } from "@/store/ui";
 import { useConnections } from "@/store/connections";
 import { ConnectionSwitcher } from "@/components/connections/ConnectionSwitcher";
@@ -9,7 +10,7 @@ export function Sidebar() {
   const activeView = useUi((s) => s.activeView);
   const activeContext = useConnections((s) => s.activeContext);
   const [filter, setFilter] = useState("");
-  const { title, Panel } =
+  const { title, icon, Panel } =
     (VIEWS as Partial<typeof VIEWS>)[activeView] ?? VIEWS.subjects;
 
   return (
@@ -45,9 +46,9 @@ export function Sidebar() {
         {Panel ? (
           <Panel filter={filter} connId={activeContext ?? null} />
         ) : (
-          <p className="px-2 py-3 text-xs text-muted-foreground">
-            {title} — coming soon.
-          </p>
+          <EmptyState density="inline" icon={icon}>
+            {title} is on the roadmap — not available yet.
+          </EmptyState>
         )}
       </div>
     </aside>

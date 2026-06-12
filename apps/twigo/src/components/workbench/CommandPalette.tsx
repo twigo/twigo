@@ -9,6 +9,7 @@ import {
   CommandEmpty,
   CommandGroup,
   CommandItem,
+  Kbd,
 } from "@twigo/ui";
 import {
   getCommands,
@@ -82,9 +83,7 @@ export function CommandPalette() {
                   >
                     <span className="min-w-0 flex-1 truncate">{c.title}</span>
                     {c.keybinding && (
-                      <span className="ml-auto shrink-0 text-[10px] tracking-wide text-muted-foreground">
-                        {fmtBinding(c.keybinding)}
-                      </span>
+                      <Kbd className="ml-auto">{fmtBinding(c.keybinding)}</Kbd>
                     )}
                   </CommandItem>
                 ))}
