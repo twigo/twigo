@@ -1,4 +1,5 @@
 import { invoke as rawInvoke, Channel } from "@tauri-apps/api/core";
+import { useReadOnly } from "@/store/readonly";
 import type { SubjectStat } from "@twigo/utils";
 
 export { Channel };
@@ -35,6 +36,18 @@ function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   return rawInvoke<T>(cmd, args).catch((e: unknown) => {
     throw ipcError(e);
   });
+}
+
+// Per-connection read-only guardrail. Every write command calls this first so an
+// accidental mutation on a locked connection is blocked before it reaches the
+// server. Throws an IpcError the caller's existing catch surfaces as a toast.
+function assertWritable(connId: string): void {
+  if (useReadOnly.getState().isReadOnly(connId)) {
+    throw new IpcError(
+      "readOnly",
+      `${connId} is read-only — writes are blocked`,
+    );
+  }
 }
 
 export interface IncomingMessage {
@@ -163,16 +176,18 @@ export async function publish(
   payload: string,
   headers: [string, string][] = [],
 ): Promise<void> {
+  assertWritable(connId);
   await call("publish", { connId, subject, payload, headers });
 }
 
-export function request(
+export async function request(
   connId: string,
   subject: string,
   payload: string,
   timeoutMs?: number | null,
   headers: [string, string][] = [],
 ): Promise<IncomingMessage> {
+  assertWritable(connId);
   return call<IncomingMessage>("request", {
     connId,
     subject,
@@ -298,6 +313,7 @@ export async function jsCreateStream(
   connId: string,
   config: Record<string, unknown>,
 ): Promise<void> {
+  assertWritable(connId);
   await call("js_create_stream", { connId, config });
 }
 
@@ -305,6 +321,7 @@ export async function jsUpdateStream(
   connId: string,
   config: Record<string, unknown>,
 ): Promise<void> {
+  assertWritable(connId);
   await call("js_update_stream", { connId, config });
 }
 
@@ -313,15 +330,17 @@ export async function jsCreateConsumer(
   stream: string,
   config: Record<string, unknown>,
 ): Promise<void> {
+  assertWritable(connId);
   await call("js_create_consumer", { connId, stream, config });
 }
 
-export function jsPurgeStream(
+export async function jsPurgeStream(
   connId: string,
   stream: string,
   keep: number | null,
   upToSeq: number | null,
 ): Promise<{ purged: number }> {
+  assertWritable(connId);
   return call<{ purged: number }>("js_purge_stream", {
     connId,
     stream,
@@ -334,6 +353,7 @@ export async function jsDeleteStream(
   connId: string,
   stream: string,
 ): Promise<void> {
+  assertWritable(connId);
   await call("js_delete_stream", { connId, stream });
 }
 
@@ -342,6 +362,7 @@ export async function jsDeleteConsumer(
   stream: string,
   consumer: string,
 ): Promise<void> {
+  assertWritable(connId);
   await call("js_delete_consumer", { connId, stream, consumer });
 }
 
@@ -350,6 +371,7 @@ export async function jsPauseConsumer(
   stream: string,
   consumer: string,
 ): Promise<void> {
+  assertWritable(connId);
   await call("js_pause_consumer", { connId, stream, consumer });
 }
 
@@ -358,6 +380,7 @@ export async function jsResumeConsumer(
   stream: string,
   consumer: string,
 ): Promise<void> {
+  assertWritable(connId);
   await call("js_resume_consumer", { connId, stream, consumer });
 }
 
@@ -366,6 +389,7 @@ export async function jsDeleteMessage(
   stream: string,
   seq: number,
 ): Promise<void> {
+  assertWritable(connId);
   await call("js_delete_message", { connId, stream, seq });
 }
 
@@ -449,13 +473,14 @@ export function kvHistory(
   return call<KvEntrySummary[]>("kv_history", { connId, bucket, key });
 }
 
-export function kvPut(
+export async function kvPut(
   connId: string,
   bucket: string,
   key: string,
   payloadB64: string,
   revision: number | null,
 ): Promise<{ revision: number }> {
+  assertWritable(connId);
   return call<{ revision: number }>("kv_put", {
     connId,
     bucket,
@@ -465,12 +490,13 @@ export function kvPut(
   });
 }
 
-export function kvCreate(
+export async function kvCreate(
   connId: string,
   bucket: string,
   key: string,
   payloadB64: string,
 ): Promise<{ revision: number }> {
+  assertWritable(connId);
   return call<{ revision: number }>("kv_create", {
     connId,
     bucket,
@@ -484,6 +510,7 @@ export async function kvDelete(
   bucket: string,
   key: string,
 ): Promise<void> {
+  assertWritable(connId);
   await call("kv_delete", { connId, bucket, key });
 }
 
@@ -492,6 +519,7 @@ export async function kvPurge(
   bucket: string,
   key: string,
 ): Promise<void> {
+  assertWritable(connId);
   await call("kv_purge", { connId, bucket, key });
 }
 
@@ -499,6 +527,7 @@ export async function kvCreateBucket(
   connId: string,
   config: Record<string, unknown>,
 ): Promise<void> {
+  assertWritable(connId);
   await call("kv_create_bucket", { connId, config });
 }
 
@@ -506,6 +535,7 @@ export async function kvDeleteBucket(
   connId: string,
   bucket: string,
 ): Promise<void> {
+  assertWritable(connId);
   await call("kv_delete_bucket", { connId, bucket });
 }
 
@@ -569,6 +599,7 @@ export async function objPutObject(
   name: string,
   src: string,
 ): Promise<void> {
+  assertWritable(connId);
   await call("obj_put_object", { connId, bucket, name, src });
 }
 
@@ -577,6 +608,7 @@ export async function objDelete(
   bucket: string,
   name: string,
 ): Promise<void> {
+  assertWritable(connId);
   await call("obj_delete", { connId, bucket, name });
 }
 
@@ -584,6 +616,7 @@ export async function objCreateBucket(
   connId: string,
   config: Record<string, unknown>,
 ): Promise<void> {
+  assertWritable(connId);
   await call("obj_create_bucket", { connId, config });
 }
 
@@ -591,6 +624,7 @@ export async function objDeleteBucket(
   connId: string,
   bucket: string,
 ): Promise<void> {
+  assertWritable(connId);
   await call("obj_delete_bucket", { connId, bucket });
 }
 

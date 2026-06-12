@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Unplug, Server, RotateCw, Plus } from "lucide-react";
+import { Unplug, Server, RotateCw, Plus, Lock, LockOpen } from "lucide-react";
 import {
   cn,
   Command,
@@ -11,6 +11,7 @@ import {
   CommandSeparator,
 } from "@twigo/ui";
 import { useConnections } from "@/store/connections";
+import { useReadOnly } from "@/store/readonly";
 import { openServerInfo } from "@/lib/editor";
 import type { ContextSummary } from "@/lib/api";
 import { StatusGlyph } from "./StatusGlyph";
@@ -56,6 +57,8 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
   const connect = useConnections((s) => s.connect);
   const disconnect = useConnections((s) => s.disconnect);
   const load = useConnections((s) => s.load);
+  const readOnlyMap = useReadOnly((s) => s.byConn);
+  const toggleReadOnly = useReadOnly((s) => s.toggle);
 
   const live = contexts.filter((c) => connected[c.name]);
   const available = contexts.filter((c) => !connected[c.name]);
@@ -74,6 +77,7 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
     const info = connected[c.name];
     const err = connError[c.name];
     const isActive = activeContext === c.name;
+    const readOnly = !!readOnlyMap[c.name];
     return (
       <CommandItem
         key={c.name}
@@ -95,6 +99,14 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
         >
           {c.name}
         </span>
+        {readOnly && (
+          <span title="Read-only — writes are blocked">
+            <Lock
+              className="size-3 shrink-0 text-warn"
+              aria-label="Read-only"
+            />
+          </span>
+        )}
         {connecting[c.name] ? (
           <span className="shrink-0 text-[11px] text-muted-foreground">
             connecting…
@@ -111,27 +123,39 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
             {c.url.replace(/^\w+:\/\//, "")}
           </span>
         )}
-        {info && (
-          <span className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 group-data-[selected=true]:opacity-100">
-            <ActionButton
-              label="Server info"
-              disabled={!info.connected}
-              onClick={() => {
-                setActive(c.name);
-                openServerInfo(c.name);
-                onClose();
-              }}
-            >
-              <Server />
-            </ActionButton>
-            <ActionButton
-              label={`Disconnect ${c.name}`}
-              onClick={() => void disconnect(c.name)}
-            >
-              <Unplug />
-            </ActionButton>
-          </span>
-        )}
+        <span className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 group-data-[selected=true]:opacity-100">
+          <ActionButton
+            label={
+              readOnly
+                ? `Allow writes on ${c.name}`
+                : `Make ${c.name} read-only`
+            }
+            onClick={() => toggleReadOnly(c.name)}
+          >
+            {readOnly ? <Lock /> : <LockOpen />}
+          </ActionButton>
+          {info && (
+            <>
+              <ActionButton
+                label="Server info"
+                disabled={!info.connected}
+                onClick={() => {
+                  setActive(c.name);
+                  openServerInfo(c.name);
+                  onClose();
+                }}
+              >
+                <Server />
+              </ActionButton>
+              <ActionButton
+                label={`Disconnect ${c.name}`}
+                onClick={() => void disconnect(c.name)}
+              >
+                <Unplug />
+              </ActionButton>
+            </>
+          )}
+        </span>
       </CommandItem>
     );
   }

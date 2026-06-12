@@ -1,13 +1,17 @@
 import { useState } from "react";
-import { ChevronsUpDown } from "lucide-react";
+import { ChevronsUpDown, Lock } from "lucide-react";
 import { Popover, PopoverTrigger, PopoverContent } from "@twigo/ui";
 import { useConnections } from "@/store/connections";
+import { useReadOnly } from "@/store/readonly";
 import { StatusGlyph } from "./StatusGlyph";
 import { ConnectionPicker } from "./ConnectionPicker";
 
 export function ConnectionSwitcher() {
   const [open, setOpen] = useState(false);
   const activeContext = useConnections((s) => s.activeContext);
+  const readOnly = useReadOnly((s) =>
+    activeContext ? (s.byConn[activeContext] ?? false) : false,
+  );
   const info = useConnections((s) =>
     activeContext ? s.connected[activeContext] : undefined,
   );
@@ -40,6 +44,12 @@ export function ConnectionSwitcher() {
                 <span className="min-w-0 flex-1 truncate text-left font-medium">
                   {activeContext}
                 </span>
+                {readOnly && (
+                  <Lock
+                    className="size-3 shrink-0 text-warn"
+                    aria-label="Read-only"
+                  />
+                )}
               </>
             ) : (
               <span className="min-w-0 flex-1 truncate text-left text-muted-foreground">
