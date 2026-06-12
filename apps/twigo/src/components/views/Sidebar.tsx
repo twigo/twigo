@@ -4,14 +4,17 @@ import { EmptyState } from "@twigo/ui";
 import { useUi } from "@/store/ui";
 import { useConnections } from "@/store/connections";
 import { ConnectionSwitcher } from "@/components/connections/ConnectionSwitcher";
-import { VIEWS } from "./registry";
+import { getView, getViews } from "@/shell/views";
 
 export function Sidebar() {
   const activeView = useUi((s) => s.activeView);
   const activeContext = useConnections((s) => s.activeContext);
   const [filter, setFilter] = useState("");
-  const { title, icon, Panel } =
-    (VIEWS as Partial<typeof VIEWS>)[activeView] ?? VIEWS.subjects;
+  // Fall back to the first registered view if the persisted one is gone.
+  const view = getView(activeView) ?? getViews()[0];
+  const title = view?.title ?? "";
+  const icon = view?.icon ?? Search;
+  const Panel = view?.Panel;
 
   return (
     <aside className="flex h-full w-full flex-col border-r border-sidebar-border bg-sidebar">

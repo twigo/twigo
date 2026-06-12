@@ -5,7 +5,7 @@ import { jsCreateStream } from "@/lib/api";
 import { useConnections } from "@/store/connections";
 import { useJetStream } from "@/store/jetstream";
 import { useToasts } from "@/store/toasts";
-import type { ViewProps } from "@/components/views/registry";
+import type { ViewProps } from "@/shell/views";
 import { TreeSkeleton } from "@/components/views/TreeSkeleton";
 import { StreamTree } from "./StreamTree";
 import { StreamFormDialog } from "@/components/editor/jetstream/StreamFormDialog";

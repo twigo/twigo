@@ -2,7 +2,7 @@ import { Settings } from "lucide-react";
 import { cn } from "@twigo/ui";
 import { useUi } from "@/store/ui";
 import { openSettings } from "@/lib/editor";
-import { VIEWS, VIEW_ORDER } from "@/components/views/registry";
+import { getViews } from "@/shell/views";
 
 export function ActivityBar() {
   const { activeView, setView } = useUi();
@@ -12,17 +12,16 @@ export function ActivityBar() {
       className="flex h-full w-12 shrink-0 flex-col items-center justify-between border-r border-sidebar-border bg-sidebar py-2"
     >
       <div className="flex flex-col items-center gap-1">
-        {VIEW_ORDER.map((view) => {
-          const { title, icon: Icon } = VIEWS[view];
-          const active = activeView === view;
+        {getViews().map(({ id, title, icon: Icon }) => {
+          const active = activeView === id;
           return (
             <button
-              key={view}
+              key={id}
               type="button"
               aria-label={title}
               aria-current={active ? "page" : undefined}
               title={title}
-              onClick={() => setView(view)}
+              onClick={() => setView(id)}
               className={cn(
                 "relative flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 active && "text-foreground",

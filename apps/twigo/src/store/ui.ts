@@ -17,13 +17,9 @@ export function resolveTheme(theme: Theme): ResolvedTheme {
   return theme;
 }
 
-export type View =
-  | "subjects"
-  | "responders"
-  | "jetstream"
-  | "kv"
-  | "objectstore"
-  | "monitor";
+// A registered view's id (e.g. "subjects"). The shell treats it as an opaque
+// string — view ids are owned by domain modules, not the UI store.
+export type View = string;
 
 interface UiState {
   theme: Theme;

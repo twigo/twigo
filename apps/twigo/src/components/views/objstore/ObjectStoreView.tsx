@@ -5,7 +5,7 @@ import { objCreateBucket } from "@/lib/api";
 import { useConnections } from "@/store/connections";
 import { useObjStore } from "@/store/objstore";
 import { useToasts } from "@/store/toasts";
-import type { ViewProps } from "@/components/views/registry";
+import type { ViewProps } from "@/shell/views";
 import { TreeSkeleton } from "@/components/views/TreeSkeleton";
 import { ObjectTree } from "./ObjectTree";
 import { CreateObjBucketDialog } from "@/components/editor/objstore/CreateObjBucketDialog";

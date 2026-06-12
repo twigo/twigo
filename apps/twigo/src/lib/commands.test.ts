@@ -10,6 +10,8 @@ import {
 } from "./commands";
 import { canSplitActiveEditor, editorGroupCount } from "@/lib/editor";
 import { useHelp } from "@/store/help";
+import { registerView, clearViews } from "@/shell/views";
+import { Radio } from "lucide-react";
 
 vi.mock("@/lib/editor", () => ({
   openSettings: vi.fn(),
@@ -107,10 +109,14 @@ describe("command registry", () => {
     expect(useConnections.getState().activeContext).toBe("prod-eu");
   });
 
-  it("always offers the view-navigation commands", () => {
+  it("offers a go-to command for each registered view", () => {
+    clearViews();
+    registerView({ id: "subjects", title: "Subjects", icon: Radio });
+    registerView({ id: "responders", title: "Responders", icon: Radio });
     const ids = getCommands().map((c) => c.id);
     expect(ids).toContain("view.subjects");
     expect(ids).toContain("view.responders");
+    clearViews();
   });
 
   it("binds settings to the conventional mod+,", () => {

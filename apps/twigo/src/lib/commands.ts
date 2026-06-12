@@ -13,7 +13,7 @@ import {
   canSplitActiveEditor,
   editorGroupCount,
 } from "@/lib/editor";
-import { VIEWS, VIEW_ORDER } from "@/components/views/registry";
+import { getViews } from "@/shell/views";
 
 export interface Command {
   id: string;
@@ -94,14 +94,6 @@ const STATIC: Command[] = [
       if (active) void useObjStore.getState().load(active);
     },
   },
-  ...VIEW_ORDER.map(
-    (v): Command => ({
-      id: `view.${v}`,
-      title: `Go to ${VIEWS[v].title}`,
-      category: "Go",
-      run: () => useUi.getState().setView(v),
-    }),
-  ),
   {
     id: "settings.open",
     title: "Open settings",
@@ -200,9 +192,20 @@ function connectionCommands(): Command[] {
 // and the modern ⌘K alias.
 export const PALETTE_BINDINGS = ["mod+shift+p", "mod+shift+a", "mod+k"];
 
+// "Go to X" for each registered view. Built at call time because views are
+// registered by domain modules after this module is imported.
+function viewCommands(): Command[] {
+  return getViews().map((v) => ({
+    id: `view.${v.id}`,
+    title: `Go to ${v.title}`,
+    category: "Go",
+    run: () => useUi.getState().setView(v.id),
+  }));
+}
+
 /** The currently-available commands (static + dynamic, filtered by `when`). */
 export function getCommands(): Command[] {
-  return [...STATIC, ...connectionCommands()].filter(
+  return [...STATIC, ...viewCommands(), ...connectionCommands()].filter(
     (c) => !c.when || c.when(),
   );
 }
