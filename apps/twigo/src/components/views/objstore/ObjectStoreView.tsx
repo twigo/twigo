@@ -1,21 +1,14 @@
 import { useEffect, useState } from "react";
-import { RefreshCw, ChevronsDownUp, Loader2, Box, Plus } from "lucide-react";
+import { RefreshCw, ChevronsDownUp, Box, Plus } from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
 import { objCreateBucket } from "@/lib/api";
 import { useConnections } from "@/store/connections";
 import { useObjStore } from "@/store/objstore";
 import { useToasts } from "@/store/toasts";
 import type { ViewProps } from "@/components/views/registry";
+import { TreeSkeleton } from "@/components/views/TreeSkeleton";
 import { ObjectTree } from "./ObjectTree";
 import { CreateObjBucketDialog } from "@/components/editor/objstore/CreateObjBucketDialog";
-
-function Hint({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="px-2 py-3 text-xs leading-relaxed text-muted-foreground">
-      {children}
-    </p>
-  );
-}
 
 export function ObjectStoreView({ filter, connId }: ViewProps) {
   const isConnected = useConnections((s) => !!(connId && s.connected[connId]));
@@ -52,14 +45,18 @@ export function ObjectStoreView({ filter, connId }: ViewProps) {
   }, [connId, isConnected, jsEnabled, data?.status, load]);
 
   if (!isConnected || !connId) {
-    return <Hint>Connect to a server to browse object stores.</Hint>;
+    return (
+      <EmptyState density="inline">
+        Connect to a server to browse object stores.
+      </EmptyState>
+    );
   }
   if (!jsEnabled) {
     return (
-      <Hint>
+      <EmptyState density="inline">
         JetStream isn&apos;t enabled on this server. Start nats-server with{" "}
         <code className="rounded bg-accent px-1 py-0.5 font-mono">-js</code>.
-      </Hint>
+      </EmptyState>
     );
   }
 
@@ -108,19 +105,39 @@ export function ObjectStoreView({ filter, connId }: ViewProps) {
       </div>
 
       {status === "loading" && buckets.length === 0 ? (
-        <EmptyState icon={Loader2} className="flex-1 [&>svg]:animate-spin">
-          Loading object stores…
-        </EmptyState>
+        <TreeSkeleton />
       ) : status === "error" ? (
-        <EmptyState icon={Box} variant="error" className="flex-1 gap-3">
+        <EmptyState
+          icon={Box}
+          variant="error"
+          className="flex-1"
+          action={{
+            label: "Retry",
+            onClick: () => void load(connId),
+            icon: RefreshCw,
+          }}
+        >
           <span className="max-w-64 break-words">{data?.error}</span>
-          <Button variant="outline" size="sm" onClick={() => void load(connId)}>
-            <RefreshCw />
-            Retry
-          </Button>
         </EmptyState>
       ) : filtered.length === 0 ? (
-        <Hint>{f ? "No matching stores." : "No object stores yet."}</Hint>
+        f ? (
+          <EmptyState density="inline">
+            No stores match “{filter.trim()}”.
+          </EmptyState>
+        ) : (
+          <EmptyState
+            icon={Box}
+            className="flex-1"
+            title="No object stores"
+            action={{
+              label: "New object store",
+              onClick: () => setCreateOpen(true),
+              icon: Plus,
+            }}
+          >
+            This context has no object stores yet.
+          </EmptyState>
+        )
       ) : (
         <ObjectTree connId={connId} buckets={filtered} />
       )}

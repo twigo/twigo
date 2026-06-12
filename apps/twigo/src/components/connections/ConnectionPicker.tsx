@@ -101,11 +101,16 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
           </span>
         ) : err && !info ? (
           <span className="min-w-0 truncate text-[11px] text-error">{err}</span>
-        ) : !info ? (
-          <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
+        ) : (
+          // Always show the target host so two contexts pointing at the same
+          // server are obvious; the title reveals the actually-reached server.
+          <span
+            className="min-w-0 truncate font-mono text-[11px] text-muted-foreground"
+            title={info ? `${c.url} · server: ${info.serverName}` : c.url}
+          >
             {c.url.replace(/^\w+:\/\//, "")}
           </span>
-        ) : null}
+        )}
         {info && (
           <span className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 group-data-[selected=true]:opacity-100">
             <ActionButton

@@ -222,7 +222,7 @@ function BucketRow({
       onDoubleClick={onToggle}
       className={cn(
         "group relative flex cursor-pointer items-center gap-1 py-1 pl-2 pr-2 text-xs",
-        selected ? "bg-accent" : "hover:bg-accent/50",
+        selected ? "bg-selected" : "hover:bg-row-hover",
       )}
     >
       {selected && (
@@ -286,7 +286,7 @@ function BucketRow({
           <Trash2 className="size-3" />
         </button>
       </span>
-      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+      <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
         {fmtBytes(bucket.bytes)} · {bucket.storage}
       </span>
     </li>
@@ -312,7 +312,7 @@ function ObjectRow({
       onDoubleClick={onOpen}
       className={cn(
         "group relative flex cursor-pointer items-center gap-1.5 py-1 pl-8 pr-2 text-xs",
-        selected ? "bg-accent" : "hover:bg-accent/50",
+        selected ? "bg-selected" : "hover:bg-row-hover",
       )}
     >
       {selected && (
@@ -321,7 +321,7 @@ function ObjectRow({
       <File className="size-3 shrink-0 text-muted-foreground" />
       <span className="min-w-0 flex-1 truncate font-mono">{object.name}</span>
       {object.deleted && <Trash2 className="size-3 shrink-0 text-warn" />}
-      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+      <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
         {fmtBytes(object.size)} · {fmtCount(object.chunks)} chunks
       </span>
     </li>

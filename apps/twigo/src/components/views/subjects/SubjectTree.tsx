@@ -9,6 +9,7 @@ import {
 } from "@twigo/ui";
 import { type SubjectNode } from "@twigo/utils";
 import { useStream } from "@/store/stream";
+import { useFlash } from "@/hooks/useFlash";
 import { openPublish, openResponder } from "@/lib/editor";
 
 function formatRate(rate: number): string {
@@ -62,6 +63,7 @@ function SubjectRow({
       (x) => x.connId === connId && x.subject === subject,
     ),
   );
+  const flash = useFlash(node.rate);
 
   return (
     <li>
@@ -70,7 +72,7 @@ function SubjectRow({
           <div
             className={cn(
               "group relative flex items-center rounded-sm",
-              isActive ? "bg-accent" : "hover:bg-accent/50",
+              isActive ? "bg-selected" : "hover:bg-row-hover",
             )}
             style={{ paddingLeft: depth * 12 }}
           >
@@ -108,8 +110,9 @@ function SubjectRow({
               </span>
               <span
                 className={cn(
-                  "rounded bg-muted px-1 font-mono text-[11px] tabular-nums",
+                  "rounded px-1 font-mono text-[11px] tabular-nums transition-colors duration-500",
                   node.rate > 0 ? "text-foreground" : "text-muted-foreground",
+                  flash ? "bg-brand/15" : "bg-muted",
                 )}
               >
                 {formatRate(node.rate)}/s

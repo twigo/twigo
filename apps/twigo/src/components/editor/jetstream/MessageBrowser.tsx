@@ -146,8 +146,8 @@ export function MessageBrowser({
                       type="button"
                       onClick={() => setSelectedSeq(m.seq)}
                       className={cn(
-                        "flex w-full items-center gap-2 border-b border-border/50 px-2 py-1 text-left font-mono text-[11px] last:border-0 hover:bg-accent/50",
-                        m.seq === selectedSeq && "bg-accent",
+                        "flex w-full items-center gap-2 border-b border-border/50 px-2 py-1 text-left font-mono text-[11px] last:border-0 hover:bg-row-hover",
+                        m.seq === selectedSeq && "bg-selected",
                       )}
                     >
                       <span className="shrink-0 tabular-nums text-muted-foreground">
