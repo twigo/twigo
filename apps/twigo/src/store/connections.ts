@@ -19,6 +19,39 @@ import { useToasts } from "@/store/toasts";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
+// Connections the user is intentionally closing — suppresses the "lost
+// connection" toast for drop/lame-duck events that a deliberate disconnect
+// emits on its way down. Transient, never persisted.
+const closing = new Set<string>();
+
+// A dropped link usually self-heals in well under a second; only a sustained
+// outage deserves a toast. Wait this long before announcing a drop, and stay
+// silent entirely if it recovers within the window (transparent reconnect).
+const DROP_GRACE_MS = 3000;
+// A repeating condition (slow consumer) re-fires for as long as it lasts; toast
+// it at most once per this window.
+const SLOW_COOLDOWN_MS = 30_000;
+
+const dropTimers = new Map<string, ReturnType<typeof setTimeout>>();
+// Conns whose outage we actually announced — gates the matching "reconnected"
+// toast so a self-healed blip stays silent both ways.
+const announced = new Set<string>();
+// Last error message toasted per conn: a fault that repeats on every reconnect
+// attempt (e.g. an auth failure) then toasts once, not once per attempt.
+const lastError = new Map<string, string>();
+const slowConsumerAt = new Map<string, number>();
+
+// Drop all transient per-conn toast bookkeeping (on recovery, close, or a
+// deliberate disconnect) so the next outage starts from a clean slate.
+function clearLinkWatch(conn: string) {
+  const t = dropTimers.get(conn);
+  if (t !== undefined) clearTimeout(t);
+  dropTimers.delete(conn);
+  announced.delete(conn);
+  lastError.delete(conn);
+  slowConsumerAt.delete(conn);
+}
+
 function teardown(conn: string) {
   useSubjects.getState().reset(conn);
   useJetStream.getState().reset(conn);
@@ -47,7 +80,7 @@ interface ConnectionsState {
   setActive: (name: string) => void;
   connect: (name: string) => Promise<void>;
   disconnect: (name: string) => Promise<void>;
-  onEvent: (conn: string, kind: string) => void;
+  onEvent: (conn: string, kind: string, detail?: string | null) => void;
   onReconnect: (conn: string, attempt: number, delayMs: number) => void;
   editorTeardown: (conn: string) => void;
   setEditorTeardown: (fn: (conn: string) => void) => void;
@@ -124,29 +157,41 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
   },
 
   disconnect: async (name) => {
-    await apiDisconnect(name);
-    teardown(name);
-    // Explicit disconnect clears the restore intent (connection + its watch);
-    // a dropped connection keeps them so the next launch/reconnect resumes.
-    useWorkspace.getState().setConnected(name, false);
-    useWorkspace.getState().setWatching(name, null);
-    set((s) => {
-      const { [name]: _removed, ...connected } = s.connected;
-      const { [name]: _r, ...reconnecting } = s.reconnecting;
-      return { connected, reconnecting };
-    });
+    closing.add(name);
+    clearLinkWatch(name);
+    try {
+      await apiDisconnect(name);
+      teardown(name);
+      // Explicit disconnect clears the restore intent (connection + its watch);
+      // a dropped connection keeps them so the next launch/reconnect resumes.
+      useWorkspace.getState().setConnected(name, false);
+      useWorkspace.getState().setWatching(name, null);
+      set((s) => {
+        const { [name]: _removed, ...connected } = s.connected;
+        const { [name]: _r, ...reconnecting } = s.reconnecting;
+        return { connected, reconnecting };
+      });
+    } finally {
+      closing.delete(name);
+    }
   },
 
   // The link state is driven by backend events, not the optimistic connect()
   // result (which can resolve while still background-reconnecting).
-  onEvent: (conn, kind) => {
+  onEvent: (conn, kind, detail) => {
+    const toasts = useToasts.getState();
     if (kind === "connected") {
+      // Cancel a pending drop announcement and, if we already told the user the
+      // link was down, tell them it's back. A self-healed blip stays silent.
+      const wasAnnounced = announced.has(conn);
+      clearLinkWatch(conn);
       // Link is up: clear any backoff state and refresh real server info / rtt
       // (covers a pending connect and transparent mid-session reconnects).
       set((s) => {
         const { [conn]: _r, ...reconnecting } = s.reconnecting;
         return { reconnecting };
       });
+      if (wasAnnounced) toasts.push("success", `Reconnected to ${conn}`);
       void apiConnInfo(conn).then((info) => {
         set((s) =>
           s.connected[conn]
@@ -155,28 +200,67 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
         );
       });
     } else if (kind === "disconnected") {
-      set((s) => {
-        const cur = s.connected[conn];
-        return cur
-          ? {
-              connected: {
-                ...s.connected,
-                [conn]: { ...cur, connected: false },
-              },
-            }
-          : s;
-      });
+      const cur = get().connected[conn];
+      if (cur) {
+        set((s) => ({
+          connected: { ...s.connected, [conn]: { ...cur, connected: false } },
+        }));
+      }
+      // Defer the toast past the grace window: a quick auto-reconnect should be
+      // invisible. Arm once per outage, skip repeats and user-led disconnects.
+      const watch =
+        cur?.connected === true &&
+        !closing.has(conn) &&
+        !dropTimers.has(conn) &&
+        !announced.has(conn);
+      if (watch) {
+        const timer = setTimeout(() => {
+          dropTimers.delete(conn);
+          const down = get().connected[conn];
+          if (down && !down.connected && !closing.has(conn)) {
+            announced.add(conn);
+            useToasts
+              .getState()
+              .push("warning", `Lost connection to ${conn} — reconnecting…`);
+          }
+        }, DROP_GRACE_MS);
+        dropTimers.set(conn, timer);
+      }
     } else if (kind === "closed") {
+      clearLinkWatch(conn);
       teardown(conn);
       set((s) => {
         const { [conn]: _removed, ...connected } = s.connected;
         const { [conn]: _r, ...reconnecting } = s.reconnecting;
         return { connected, reconnecting };
       });
+    } else if (kind === "lameDuck") {
+      if (!closing.has(conn)) {
+        toasts.push(
+          "warning",
+          `${conn} is entering lame-duck mode — server shutting down`,
+        );
+      }
     } else if (kind === "slowConsumer") {
-      useToasts
-        .getState()
-        .push("warning", `${conn}: slow consumer — messages may be dropped`);
+      const last = slowConsumerAt.get(conn);
+      if (
+        !closing.has(conn) &&
+        (last === undefined || Date.now() - last > SLOW_COOLDOWN_MS)
+      ) {
+        slowConsumerAt.set(conn, Date.now());
+        toasts.push(
+          "warning",
+          `${conn}: slow consumer — messages may be dropped`,
+        );
+      }
+    } else if (kind === "serverError" || kind === "clientError") {
+      const fallback = kind === "serverError" ? "server error" : "client error";
+      const msg = `${conn}: ${detail ?? fallback}`;
+      // Dedupe: the same fault repeats on every reconnect attempt.
+      if (lastError.get(conn) !== msg) {
+        lastError.set(conn, msg);
+        toasts.push("error", msg);
+      }
     }
   },
 

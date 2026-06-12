@@ -90,6 +90,9 @@ fn server_details(name: String, info: &async_nats::ServerInfo, rtt_ms: f64) -> S
 struct NatsEvent {
     conn: String,
     kind: String,
+    // Human-readable cause for error-bearing events (server/client error), so
+    // the UI can surface "authorization violation" instead of a bare kind.
+    detail: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -214,22 +217,23 @@ fn build_options(
             let app = app.clone();
             let name = name.clone();
             async move {
-                let kind = match event {
-                    async_nats::Event::Connected => "connected",
-                    async_nats::Event::Disconnected => "disconnected",
-                    async_nats::Event::Closed => "closed",
-                    async_nats::Event::LameDuckMode => "lameDuck",
-                    async_nats::Event::Draining => "draining",
-                    async_nats::Event::SlowConsumer(_) => "slowConsumer",
-                    async_nats::Event::ServerError(_) => "serverError",
-                    async_nats::Event::ClientError(_) => "clientError",
+                let (kind, detail) = match &event {
+                    async_nats::Event::Connected => ("connected", None),
+                    async_nats::Event::Disconnected => ("disconnected", None),
+                    async_nats::Event::Closed => ("closed", None),
+                    async_nats::Event::LameDuckMode => ("lameDuck", None),
+                    async_nats::Event::Draining => ("draining", None),
+                    async_nats::Event::SlowConsumer(_) => ("slowConsumer", None),
+                    async_nats::Event::ServerError(e) => ("serverError", Some(e.to_string())),
+                    async_nats::Event::ClientError(e) => ("clientError", Some(e.to_string())),
                 };
-                tracing::debug!(conn = %name, event = kind, "nats event");
+                tracing::debug!(conn = %name, event = kind, detail = ?detail, "nats event");
                 if let Err(e) = app.emit(
                     "nats:event",
                     NatsEvent {
                         conn: name,
                         kind: kind.into(),
+                        detail,
                     },
                 ) {
                     tracing::warn!("failed to emit nats:event: {e}");

@@ -63,6 +63,7 @@ function AppearanceSection() {
   const options: { id: Theme; label: string }[] = [
     { id: "light", label: "Light" },
     { id: "dark", label: "Dark" },
+    { id: "system", label: "System" },
   ];
   return (
     <>

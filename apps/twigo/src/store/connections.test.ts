@@ -1,14 +1,20 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { ContextSummary, ConnInfo } from "@/lib/api";
 
-const { listContexts, connect, disconnect, connInfo } = vi.hoisted(() => ({
-  listContexts: vi.fn(),
-  connect: vi.fn(),
-  disconnect: vi.fn(),
-  connInfo: vi.fn(),
-}));
+const { listContexts, connect, disconnect, connInfo, pushMock } = vi.hoisted(
+  () => ({
+    listContexts: vi.fn(),
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+    connInfo: vi.fn(),
+    pushMock: vi.fn(),
+  }),
+);
 vi.mock("@/lib/api", () => ({ listContexts, connect, disconnect, connInfo }));
 vi.mock("@/lib/editor", () => ({ closeEditorsForConn: vi.fn() }));
+vi.mock("@/store/toasts", () => ({
+  useToasts: { getState: () => ({ push: pushMock }) },
+}));
 
 import { useConnections } from "./connections";
 import { useWorkspace } from "./workspace";
@@ -110,5 +116,85 @@ describe("connections active-context persistence", () => {
     connInfo.mockResolvedValue(info("a"));
     useConnections.getState().onEvent("a", "connected");
     expect(useConnections.getState().reconnecting.a).toBeUndefined();
+  });
+});
+
+describe("connections link toasts", () => {
+  const GRACE = 3500;
+
+  beforeEach(() => {
+    useConnections.setState({ connected: {}, reconnecting: {} });
+    // Drop any drop-watch leaked from an earlier test before faking timers.
+    useConnections.getState().onEvent("a", "closed");
+    pushMock.mockClear();
+    connInfo.mockResolvedValue(info("a"));
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it("warns only once a drop outlasts the grace window", () => {
+    useConnections.setState({
+      connected: { a: { ...info(), connected: true } },
+    });
+    useConnections.getState().onEvent("a", "disconnected");
+    expect(pushMock).not.toHaveBeenCalled(); // deferred, not immediate
+    vi.advanceTimersByTime(GRACE);
+    expect(pushMock).toHaveBeenCalledWith(
+      "warning",
+      expect.stringContaining("Lost connection to a"),
+    );
+  });
+
+  it("stays silent for a transient blip that self-heals", () => {
+    useConnections.setState({
+      connected: { a: { ...info(), connected: true } },
+    });
+    useConnections.getState().onEvent("a", "disconnected");
+    useConnections.getState().onEvent("a", "connected"); // back within grace
+    vi.advanceTimersByTime(GRACE);
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("announces recovery only after an outage was shown", () => {
+    useConnections.setState({
+      connected: { a: { ...info(), connected: true } },
+    });
+    useConnections.getState().onEvent("a", "disconnected");
+    vi.advanceTimersByTime(GRACE); // outage announced
+    pushMock.mockClear();
+    useConnections.getState().onEvent("a", "connected");
+    expect(pushMock).toHaveBeenCalledWith(
+      "success",
+      expect.stringContaining("Reconnected to a"),
+    );
+  });
+
+  it("stays silent when the user is the one disconnecting", async () => {
+    useConnections.setState({
+      connected: { a: { ...info(), connected: true } },
+    });
+    disconnect.mockResolvedValue(undefined);
+    const pending = useConnections.getState().disconnect("a");
+    useConnections.getState().onEvent("a", "disconnected");
+    vi.advanceTimersByTime(GRACE);
+    await pending;
+    expect(pushMock).not.toHaveBeenCalledWith(
+      "warning",
+      expect.stringContaining("Lost connection"),
+    );
+  });
+
+  it("dedupes a fault that repeats on every reconnect attempt", () => {
+    useConnections
+      .getState()
+      .onEvent("a", "serverError", "authorization violation");
+    useConnections
+      .getState()
+      .onEvent("a", "serverError", "authorization violation");
+    const errors = pushMock.mock.calls.filter((c) => c[0] === "error");
+    expect(errors).toEqual([["error", "a: authorization violation"]]);
   });
 });

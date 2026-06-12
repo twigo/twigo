@@ -85,7 +85,7 @@ function subscribeActiveStream(api: DockviewApi) {
 }
 
 export function EditorArea() {
-  const uiTheme = useUi((s) => s.theme);
+  const uiTheme = useUi((s) => s.resolvedTheme);
   const apiRef = useRef<DockviewApi | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,

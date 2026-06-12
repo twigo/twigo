@@ -262,6 +262,47 @@ export function openSettings() {
   openEditor({ type: "settings", id: "settings", title: "Settings", index: 0 });
 }
 
+// --- Editor pane management (split / focus / reset) --------------------------
+// Dockview suppresses its add/remove-panel events during a programmatic move
+// (the `_moving` lock), so moving a panel between groups never trips
+// EditorArea's onDidRemovePanel teardown — live stream subscriptions survive.
+// onDidLayoutChange still fires afterwards, so the new layout is persisted.
+
+/** True when the active tab shares its group with others, so a split is visible. */
+export function canSplitActiveEditor(): boolean {
+  const active = api?.activePanel;
+  return !!active && active.group.panels.length > 1;
+}
+
+/** Number of editor groups (panes) currently in the layout. */
+export function editorGroupCount(): number {
+  return api?.groups.length ?? 0;
+}
+
+/** Move the active tab into a new pane beside its group. */
+export function splitActiveEditor(direction: "right" | "below"): void {
+  const active = api?.activePanel;
+  if (!api || !active) return;
+  const group = api.addGroup({ referenceGroup: active.group, direction });
+  active.api.moveTo({ group });
+}
+
+/** Cycle keyboard focus to the next editor group. */
+export function focusNextEditorGroup(): void {
+  api?.moveToNext({ includePanel: false });
+}
+
+/** Collapse every split back into a single pane (tabs and streams preserved). */
+export function resetEditorLayout(): void {
+  if (!api) return;
+  const target = api.groups[0];
+  if (!target || api.groups.length <= 1) return;
+  for (const panel of [...api.panels]) {
+    if (panel.group !== target) panel.api.moveTo({ group: target });
+  }
+  target.panels[0]?.api.setActive();
+}
+
 /** Tear down a connection's editors + live sessions when it drops. */
 export function closeEditorsForConn(connId: string) {
   setReplacingLayout(true);
