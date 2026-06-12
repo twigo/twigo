@@ -24,6 +24,9 @@ pub enum Error {
     #[error("jetstream error: {0}")]
     JetStream(String),
 
+    #[error("monitoring unavailable: {0}")]
+    Monitoring(String),
+
     #[error(transparent)]
     Connect(#[from] async_nats::ConnectError),
 
