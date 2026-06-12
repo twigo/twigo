@@ -1,5 +1,7 @@
 import { registerWatermark } from "@/shell/watermark";
+import { registerStatusSegment } from "@/shell/statusBar";
 import { NatsWatermark } from "./Watermark";
+import { NatsConnectionStatus } from "./StatusSegments";
 
 // The NATS domain module: the single place that contributes NATS views,
 // commands, status segments and the editor watermark to the shell registries.
@@ -12,4 +14,9 @@ export function registerNatsModule(): void {
   registered = true;
 
   registerWatermark(NatsWatermark);
+  registerStatusSegment({
+    id: "nats.connection",
+    side: "left",
+    render: NatsConnectionStatus,
+  });
 }
