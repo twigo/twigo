@@ -37,18 +37,22 @@ export function ShortcutsHelp() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="max-w-lg">
-        <DialogTitle>Keyboard shortcuts</DialogTitle>
+      <DialogContent className="max-w-xl p-5">
+        <DialogTitle className="mb-3 border-b border-border pb-2.5 text-sm font-semibold text-foreground">
+          Keyboard shortcuts
+        </DialogTitle>
         <DialogDescription className="sr-only">
           Every keyboard shortcut available in Twigo.
         </DialogDescription>
-        <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+        {/* Multi-column so categories of different lengths balance instead of
+            forcing ragged grid rows. */}
+        <div className="max-h-[70vh] columns-2 gap-8 overflow-y-auto">
           {groups.map(([category, items]) => (
-            <section key={category}>
+            <section key={category} className="mb-4 break-inside-avoid">
               <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 {category}
               </h3>
-              <ul className="space-y-1">
+              <ul className="space-y-1.5">
                 {items.map((s) => (
                   <li
                     key={s.title}
@@ -57,7 +61,7 @@ export function ShortcutsHelp() {
                     <span className="min-w-0 truncate text-foreground">
                       {s.title}
                     </span>
-                    <Kbd>{fmtBinding(s.binding)}</Kbd>
+                    <Kbd className="shrink-0">{fmtBinding(s.binding)}</Kbd>
                   </li>
                 ))}
               </ul>
