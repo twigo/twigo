@@ -1,10 +1,14 @@
+use std::collections::HashSet;
 use std::time::Duration;
 
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use super::connection::ConnState;
 use super::error::{self, Error};
+
+const NO_SYS: &str = "no response on $SYS — this connection isn't a system-account login, so server monitoring isn't available";
 
 fn mon_err<E: std::fmt::Display>(e: E) -> Error {
     Error::Monitoring(e.to_string())
@@ -167,9 +171,7 @@ async fn sys_request<T: serde::de::DeserializeOwned>(
         // same actionable "needs a system-account login" state.
         use async_nats::client::RequestErrorKind::{NoResponders, TimedOut};
         if matches!(e.kind(), NoResponders | TimedOut) {
-            Error::Monitoring(
-                "no response on $SYS — this connection isn't a system-account login, so server monitoring isn't available".to_string(),
-            )
+            Error::Monitoring(NO_SYS.to_string())
         } else {
             mon_err(e)
         }
@@ -274,6 +276,45 @@ pub async fn monitor_connz(
     })
     .map_err(mon_err)?;
     sys_request(&conns, &conn_id, "CONNZ", body).await
+}
+
+// Cluster-wide health: fan out a PING to every server and collect each node's
+// varz. Reply count is unknown up front, so gather until a short idle gap.
+#[tauri::command]
+pub async fn monitor_cluster(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+) -> error::Result<Vec<Varz>> {
+    let client = conns
+        .client(&conn_id)
+        .await
+        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
+
+    let inbox = client.new_inbox();
+    let mut sub = client.subscribe(inbox.clone()).await.map_err(mon_err)?;
+    client
+        .publish_with_reply("$SYS.REQ.SERVER.PING.VARZ", inbox, Vec::new().into())
+        .await
+        .map_err(mon_err)?;
+    let _ = client.flush().await;
+
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    while let Ok(Some(msg)) = tokio::time::timeout(Duration::from_millis(700), sub.next()).await {
+        if let Ok(resp) = serde_json::from_slice::<ServerApiResponse<Varz>>(&msg.payload) {
+            if let Some(v) = resp.data {
+                if seen.insert(v.server_id.clone()) {
+                    out.push(v);
+                }
+            }
+        }
+    }
+
+    if out.is_empty() {
+        return Err(Error::Monitoring(NO_SYS.to_string()));
+    }
+    out.sort_by(|a, b| a.server_name.cmp(&b.server_name));
+    Ok(out)
 }
 
 #[cfg(test)]

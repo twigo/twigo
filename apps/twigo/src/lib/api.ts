@@ -656,3 +656,8 @@ export function monitorConnz(
 ): Promise<Connz> {
   return invoke<Connz>("monitor_connz", { connId, sort, limit, offset });
 }
+
+// One varz per cluster node (PING fan-in); a single-server reply has length 1.
+export function monitorCluster(connId: string): Promise<Varz[]> {
+  return invoke<Varz[]>("monitor_cluster", { connId });
+}

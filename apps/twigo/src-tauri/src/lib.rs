@@ -68,7 +68,8 @@ pub fn run() {
             nats::monitoring::monitor_varz,
             nats::monitoring::monitor_jsz,
             nats::monitoring::monitor_healthz,
-            nats::monitoring::monitor_connz
+            nats::monitoring::monitor_connz,
+            nats::monitoring::monitor_cluster
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

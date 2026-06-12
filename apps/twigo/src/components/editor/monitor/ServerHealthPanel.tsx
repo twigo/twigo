@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { Button, EmptyState, cn } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
-import { monitorConnz, type Connz } from "@/lib/api";
+import { monitorConnz, monitorCluster, type Connz, type Varz } from "@/lib/api";
 
 const LIMIT = 100;
 
@@ -35,6 +35,7 @@ export function ServerHealthPanel({ connId }: { connId: string }) {
   const [offset, setOffset] = useState(0);
   const [tick, setTick] = useState(0);
   const [connz, setConnz] = useState<Connz | null>(null);
+  const [cluster, setCluster] = useState<Varz[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -57,6 +58,20 @@ export function ServerHealthPanel({ connId }: { connId: string }) {
       cancelled = true;
     };
   }, [connId, sort, offset, tick]);
+
+  useEffect(() => {
+    let cancelled = false;
+    monitorCluster(connId)
+      .then((c) => {
+        if (!cancelled) setCluster(c);
+      })
+      .catch(() => {
+        if (!cancelled) setCluster([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connId, tick]);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -89,6 +104,37 @@ export function ServerHealthPanel({ connId }: { connId: string }) {
           <RefreshCw className={loading ? "animate-spin" : ""} />
         </Button>
       </div>
+
+      {cluster.length > 1 && (
+        <div className="flex flex-wrap gap-1.5 border-b border-border px-3 py-2">
+          {cluster.map((n) => {
+            const warn = n.slowConsumers > 0 || n.lameDuckMode;
+            return (
+              <div
+                key={n.serverId}
+                className="flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11px]"
+                title={`${n.serverName} · ${n.version} · up ${n.uptime}`}
+              >
+                <span
+                  className={cn(
+                    "size-1.5 rounded-full",
+                    warn ? "bg-warn" : "bg-ok",
+                  )}
+                />
+                <span className="font-mono">{n.serverName}</span>
+                <span className="tabular-nums text-muted-foreground">
+                  {fmtCount(n.connections)} conns
+                </span>
+                {n.slowConsumers > 0 && (
+                  <span className="tabular-nums text-warn">
+                    {n.slowConsumers} slow
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {error ? (
         <EmptyState
