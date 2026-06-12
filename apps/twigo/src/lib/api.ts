@@ -618,3 +618,41 @@ export function monitorJsz(connId: string): Promise<Jsz> {
 export function monitorHealthz(connId: string): Promise<Healthz> {
   return invoke<Healthz>("monitor_healthz", { connId });
 }
+
+export interface ConnzConn {
+  cid: number;
+  name: string;
+  lang: string;
+  version: string;
+  ip: string;
+  port: number;
+  account: string | null;
+  subscriptions: number;
+  pendingBytes: number;
+  inMsgs: number;
+  outMsgs: number;
+  inBytes: number;
+  outBytes: number;
+  rtt: string;
+  idle: string;
+  uptime: string;
+  lastActivity: string;
+}
+
+export interface Connz {
+  now: string;
+  numConnections: number;
+  total: number;
+  offset: number;
+  limit: number;
+  connections: ConnzConn[];
+}
+
+export function monitorConnz(
+  connId: string,
+  sort: string,
+  limit: number,
+  offset: number,
+): Promise<Connz> {
+  return invoke<Connz>("monitor_connz", { connId, sort, limit, offset });
+}

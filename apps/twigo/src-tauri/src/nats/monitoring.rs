@@ -149,6 +149,7 @@ async fn sys_request<T: serde::de::DeserializeOwned>(
     conns: &State<'_, ConnState>,
     conn_id: &str,
     endpoint: &str,
+    body: Vec<u8>,
 ) -> error::Result<T> {
     let client = conns
         .client(conn_id)
@@ -157,7 +158,9 @@ async fn sys_request<T: serde::de::DeserializeOwned>(
     let id = client.server_info().server_id;
     let subject = format!("$SYS.REQ.SERVER.{id}.{endpoint}");
 
-    let req = async_nats::Request::new().timeout(Some(Duration::from_secs(4)));
+    let req = async_nats::Request::new()
+        .payload(body.into())
+        .timeout(Some(Duration::from_secs(4)));
     let msg = client.send_request(subject, req).await.map_err(|e| {
         // A non-system-account connection can't reach $SYS: the request goes
         // nowhere and times out (no explicit no-responders). Treat both as the
@@ -182,12 +185,12 @@ async fn sys_request<T: serde::de::DeserializeOwned>(
 
 #[tauri::command]
 pub async fn monitor_varz(conns: State<'_, ConnState>, conn_id: String) -> error::Result<Varz> {
-    sys_request(&conns, &conn_id, "VARZ").await
+    sys_request(&conns, &conn_id, "VARZ", Vec::new()).await
 }
 
 #[tauri::command]
 pub async fn monitor_jsz(conns: State<'_, ConnState>, conn_id: String) -> error::Result<Jsz> {
-    sys_request(&conns, &conn_id, "JSZ").await
+    sys_request(&conns, &conn_id, "JSZ", Vec::new()).await
 }
 
 #[tauri::command]
@@ -195,7 +198,82 @@ pub async fn monitor_healthz(
     conns: State<'_, ConnState>,
     conn_id: String,
 ) -> error::Result<Healthz> {
-    sys_request(&conns, &conn_id, "HEALTHZ").await
+    sys_request(&conns, &conn_id, "HEALTHZ", Vec::new()).await
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase"))]
+pub struct Connz {
+    now: String,
+    num_connections: u64,
+    total: u64,
+    offset: u64,
+    limit: u64,
+    #[serde(default)]
+    connections: Vec<ConnzConn>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase"))]
+pub struct ConnzConn {
+    cid: u64,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    lang: String,
+    #[serde(default)]
+    version: String,
+    #[serde(default)]
+    ip: String,
+    #[serde(default)]
+    port: u32,
+    #[serde(default)]
+    account: Option<String>,
+    #[serde(default)]
+    subscriptions: u64,
+    #[serde(default)]
+    pending_bytes: i64,
+    #[serde(default)]
+    in_msgs: i64,
+    #[serde(default)]
+    out_msgs: i64,
+    #[serde(default)]
+    in_bytes: i64,
+    #[serde(default)]
+    out_bytes: i64,
+    #[serde(default)]
+    rtt: String,
+    #[serde(default)]
+    idle: String,
+    #[serde(default)]
+    uptime: String,
+    #[serde(default)]
+    last_activity: String,
+}
+
+// Connz request options become the request body; the server sorts & paginates.
+#[derive(Serialize)]
+struct ConnzReq<'a> {
+    sort: &'a str,
+    limit: u32,
+    offset: u32,
+}
+
+#[tauri::command]
+pub async fn monitor_connz(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    sort: String,
+    limit: u32,
+    offset: u32,
+) -> error::Result<Connz> {
+    let body = serde_json::to_vec(&ConnzReq {
+        sort: &sort,
+        limit,
+        offset,
+    })
+    .map_err(mon_err)?;
+    sys_request(&conns, &conn_id, "CONNZ", body).await
 }
 
 #[cfg(test)]
@@ -218,6 +296,16 @@ mod tests {
         let resp: ServerApiResponse<Jsz> = serde_json::from_str(raw).unwrap();
         let j = resp.data.expect("data present");
         assert!(j.config.max_storage > 0);
+    }
+
+    #[test]
+    fn parses_connz_envelope() {
+        let raw = include_str!("../../tests/fixtures/connz.json");
+        let resp: ServerApiResponse<Connz> = serde_json::from_str(raw).unwrap();
+        let c = resp.data.expect("data present");
+        assert!(c.total >= c.num_connections);
+        assert!(!c.connections.is_empty());
+        assert!(c.connections[0].cid > 0);
     }
 
     #[test]

@@ -3,6 +3,7 @@ import { RefreshCw, Activity, ShieldCheck } from "lucide-react";
 import { EmptyState, cn } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
 import { useConnections } from "@/store/connections";
+import { openServerHealth } from "@/lib/editor";
 import { useMonitor, rates, type Sample } from "@/store/monitor";
 import type { ViewProps } from "@/components/views/registry";
 import type { Varz, Jsz, Healthz } from "@/lib/api";
@@ -105,11 +106,13 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 }
 
 function Dashboard({
+  connId,
   varz,
   jsz,
   healthz,
   samples,
 }: {
+  connId: string;
   varz: Varz;
   jsz: Jsz | null;
   healthz: Healthz | null;
@@ -154,6 +157,13 @@ function Dashboard({
         value={fmtCount(varz.slowConsumers)}
         tone={varz.slowConsumers > 0 ? "text-warn" : undefined}
       />
+      <button
+        type="button"
+        onClick={() => openServerHealth(connId)}
+        className="mx-2 mt-1 flex w-[calc(100%-1rem)] items-center justify-center gap-1 rounded border border-border py-1 text-[11px] text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground"
+      >
+        View all connections →
+      </button>
 
       <SectionLabel>Resources</SectionLabel>
       <Row label="Memory" value={fmtBytes(varz.mem)} />
@@ -245,6 +255,7 @@ export function MonitorView({ connId }: ViewProps) {
 
   return (
     <Dashboard
+      connId={connId}
       varz={data.varz}
       jsz={data.jsz}
       healthz={data.healthz}

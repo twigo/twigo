@@ -1,0 +1,228 @@
+import { useEffect, useState } from "react";
+import {
+  RefreshCw,
+  Loader2,
+  Activity,
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+} from "lucide-react";
+import { Button, EmptyState, cn } from "@twigo/ui";
+import { fmtBytes, fmtCount } from "@twigo/utils";
+import { monitorConnz, type Connz } from "@/lib/api";
+
+const LIMIT = 100;
+
+interface Col {
+  label: string;
+  sort?: string;
+  align?: "right";
+}
+const COLS: Col[] = [
+  { label: "CID", sort: "cid", align: "right" },
+  { label: "Client" },
+  { label: "IP" },
+  { label: "Subs", sort: "subs", align: "right" },
+  { label: "Pending", sort: "pending", align: "right" },
+  { label: "In", sort: "msgs_from", align: "right" },
+  { label: "Out", sort: "msgs_to", align: "right" },
+  { label: "RTT", sort: "rtt", align: "right" },
+  { label: "Idle", sort: "idle", align: "right" },
+];
+
+export function ServerHealthPanel({ connId }: { connId: string }) {
+  const [sort, setSort] = useState("pending");
+  const [offset, setOffset] = useState(0);
+  const [tick, setTick] = useState(0);
+  const [connz, setConnz] = useState<Connz | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    monitorConnz(connId, sort, LIMIT, offset)
+      .then((c) => {
+        if (!cancelled) {
+          setConnz(c);
+          setError(null);
+        }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setError(String(e));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connId, sort, offset, tick]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") setTick((t) => t + 1);
+    }, 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  const rows = connz?.connections ?? [];
+  const total = connz?.total ?? 0;
+  const from = total === 0 ? 0 : offset + 1;
+  const to = offset + rows.length;
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-background">
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
+        <Activity className="size-3.5 text-brand" />
+        <span className="text-[11px] font-medium">Connections</span>
+        <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+          {fmtCount(total)}
+        </span>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Refresh"
+          title="Refresh"
+          className="ml-auto"
+          onClick={() => setTick((t) => t + 1)}
+        >
+          <RefreshCw className={loading ? "animate-spin" : ""} />
+        </Button>
+      </div>
+
+      {error ? (
+        <EmptyState
+          icon={Activity}
+          variant="error"
+          className="flex-1"
+          action={{
+            label: "Retry",
+            onClick: () => setTick((t) => t + 1),
+            icon: RefreshCw,
+          }}
+        >
+          <span className="max-w-md break-words">{error}</span>
+        </EmptyState>
+      ) : !connz ? (
+        <EmptyState icon={Loader2} className="flex-1 [&>svg]:animate-spin">
+          Reading connections…
+        </EmptyState>
+      ) : rows.length === 0 ? (
+        <EmptyState icon={Activity} className="flex-1">
+          No connections.
+        </EmptyState>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-auto">
+          <table className="w-full border-collapse text-xs">
+            <thead className="sticky top-0 z-10 bg-panel text-left text-muted-foreground">
+              <tr>
+                {COLS.map((c) => {
+                  const active = c.sort === sort;
+                  return (
+                    <th
+                      key={c.label}
+                      className={cn(
+                        "whitespace-nowrap px-2 py-1.5 font-medium",
+                        c.align === "right" && "text-right",
+                        c.sort &&
+                          "cursor-pointer select-none hover:text-foreground",
+                        active && "text-foreground",
+                      )}
+                      onClick={() => {
+                        if (!c.sort) return;
+                        setOffset(0);
+                        setSort(c.sort);
+                      }}
+                    >
+                      <span className="inline-flex items-center gap-0.5">
+                        {c.label}
+                        {active && <ChevronDown className="size-3" />}
+                      </span>
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody className="font-mono">
+              {rows.map((r) => (
+                <tr
+                  key={r.cid}
+                  className="border-b border-border/50 hover:bg-row-hover"
+                >
+                  <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
+                    {r.cid}
+                  </td>
+                  <td className="max-w-48 truncate px-2 py-1">
+                    {r.name || "—"}
+                    {r.lang && (
+                      <span className="ml-1 text-muted-foreground">
+                        {r.lang}
+                        {r.version ? ` ${r.version}` : ""}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-2 py-1 text-muted-foreground">
+                    {r.ip}:{r.port}
+                  </td>
+                  <td className="px-2 py-1 text-right tabular-nums">
+                    {fmtCount(r.subscriptions)}
+                  </td>
+                  <td
+                    className={cn(
+                      "px-2 py-1 text-right tabular-nums",
+                      r.pendingBytes > 0
+                        ? "text-warn"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    {fmtBytes(r.pendingBytes)}
+                  </td>
+                  <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
+                    {fmtCount(r.inMsgs)} · {fmtBytes(r.inBytes)}
+                  </td>
+                  <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
+                    {fmtCount(r.outMsgs)} · {fmtBytes(r.outBytes)}
+                  </td>
+                  <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
+                    {r.rtt || "—"}
+                  </td>
+                  <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
+                    {r.idle}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {connz && total > 0 && (
+        <div className="flex h-7 shrink-0 items-center gap-2 border-t border-border px-3 text-[11px] text-muted-foreground">
+          <span className="tabular-nums">
+            {from}–{to} of {fmtCount(total)}
+          </span>
+          <div className="ml-auto flex items-center gap-0.5">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Previous"
+              disabled={offset === 0}
+              onClick={() => setOffset(Math.max(0, offset - LIMIT))}
+            >
+              <ChevronLeft />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Next"
+              disabled={to >= total}
+              onClick={() => setOffset(offset + LIMIT)}
+            >
+              <ChevronRight />
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
