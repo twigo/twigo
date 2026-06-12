@@ -33,7 +33,7 @@ export function MessageTable({
               }
             }}
             className={cn(
-              "cursor-pointer border-b border-border/50 hover:bg-row-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+              "cursor-pointer border-b border-border/50 duration-150 animate-in fade-in hover:bg-row-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
               m.id === selectedId && "bg-selected",
             )}
           >
