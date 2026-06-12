@@ -24,7 +24,6 @@ import {
   closeEditorsForConn,
 } from "@/lib/editor";
 import { newPublish } from "@/lib/actions";
-import { TwigMascot } from "@/components/TwigMascot";
 import { editorComponents, editorTabComponents } from "./registry";
 import { NewTabButton } from "./NewTabButton";
 
@@ -38,7 +37,7 @@ function Watermark() {
   if (!hasLive) {
     return (
       <EmptyState
-        visual={<TwigMascot className="mb-1 size-20" />}
+        icon={Radio}
         className="h-full bg-background"
         title="No live connection"
         action={{

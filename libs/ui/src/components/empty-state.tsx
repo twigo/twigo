@@ -9,7 +9,6 @@ import { Kbd } from "./kbd";
 // muted line for nested panels. Outer sizing stays with the caller (className).
 export function EmptyState({
   icon: Icon,
-  visual,
   variant = "muted",
   density = "hero",
   title,
@@ -19,8 +18,6 @@ export function EmptyState({
   children,
 }: {
   icon?: LucideIcon;
-  // A custom hero visual (e.g. the mascot) shown instead of the icon.
-  visual?: React.ReactNode;
   variant?: "muted" | "error";
   density?: "hero" | "inline";
   title?: string;
@@ -53,15 +50,14 @@ export function EmptyState({
         className,
       )}
     >
-      {visual ??
-        (Icon && (
-          <Icon
-            className={cn(
-              "size-8",
-              variant === "error" ? "opacity-70" : "opacity-30",
-            )}
-          />
-        ))}
+      {Icon && (
+        <Icon
+          className={cn(
+            "size-8",
+            variant === "error" ? "opacity-70" : "opacity-30",
+          )}
+        />
+      )}
       {title && <p className="font-medium text-foreground">{title}</p>}
       {children}
       {action && (
