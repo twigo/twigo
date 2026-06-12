@@ -8,13 +8,9 @@ import {
   type ConnInfo,
 } from "@/lib/api";
 import { useSettings } from "@/store/settings";
-import { useSubjects } from "@/store/subjects";
 import { useWorkspace } from "@/store/workspace";
 import { useResponder } from "@/store/responder";
-import { useJetStream } from "@/store/jetstream";
-import { useKv } from "@/store/kv";
-import { useObjStore } from "@/store/objstore";
-import { useMonitor } from "@/store/monitor";
+import { resetConnScopedStores } from "@/store/connScoped";
 import { useToasts } from "@/store/toasts";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -53,11 +49,10 @@ function clearLinkWatch(conn: string) {
 }
 
 function teardown(conn: string) {
-  useSubjects.getState().reset(conn);
-  useJetStream.getState().reset(conn);
-  useKv.getState().reset(conn);
-  useObjStore.getState().reset(conn);
-  useMonitor.getState().reset(conn);
+  // Every per-connection domain store (subjects, JetStream, KV, Object Store,
+  // monitor) self-registers in connScoped, so a new domain joins teardown
+  // without editing this file.
+  resetConnScopedStores(conn);
   // The editor layer injects this (setEditorTeardown) so the store doesn't
   // depend on the UI — keeps the dependency one-way (editor → store).
   useConnections.getState().editorTeardown(conn);

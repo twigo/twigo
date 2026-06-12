@@ -61,7 +61,7 @@ export function JetStreamView({ filter, connId }: ViewProps) {
   }
 
   const status = data?.status ?? "idle";
-  const streams = data?.streams ?? [];
+  const streams = data?.parents ?? [];
   const f = filter.trim().toLowerCase();
   const filtered = f
     ? streams.filter((s) => s.name.toLowerCase().includes(f))

@@ -67,7 +67,7 @@ export function ConsumerDetailPanel({
         useToasts.getState().push("success", `Paused ${consumer}`);
       }
       refresh();
-      void useJetStream.getState().refreshConsumers(connId, stream);
+      void useJetStream.getState().refreshChildren(connId, stream);
       void useJetStream.getState().load(connId);
     } catch (e) {
       useToasts.getState().push("error", `Failed: ${String(e)}`);
@@ -79,7 +79,7 @@ export function ConsumerDetailPanel({
       await jsDeleteConsumer(connId, stream, consumer);
       useToasts.getState().push("success", `Deleted consumer ${consumer}`);
       closeConsumerDetail(connId, stream, consumer);
-      void useJetStream.getState().refreshConsumers(connId, stream);
+      void useJetStream.getState().refreshChildren(connId, stream);
       void useJetStream.getState().load(connId);
     } catch (e) {
       useToasts.getState().push("error", `Delete failed: ${String(e)}`);

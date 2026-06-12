@@ -131,7 +131,7 @@ export function KvEntryDetailPanel({
       await kvDelete(connId, bucket, kvkey);
       useToasts.getState().push("success", `Deleted ${kvkey}`);
       closeKvEntry(connId, bucket, kvkey);
-      void useKv.getState().refreshKeys(connId, bucket);
+      void useKv.getState().refreshChildren(connId, bucket);
       void useKv.getState().load(connId);
     } catch (e) {
       useToasts.getState().push("error", `Delete failed: ${String(e)}`);
@@ -143,7 +143,7 @@ export function KvEntryDetailPanel({
       await kvPurge(connId, bucket, kvkey);
       useToasts.getState().push("success", `Purged ${kvkey}`);
       closeKvEntry(connId, bucket, kvkey);
-      void useKv.getState().refreshKeys(connId, bucket);
+      void useKv.getState().refreshChildren(connId, bucket);
       void useKv.getState().load(connId);
     } catch (e) {
       useToasts.getState().push("error", `Purge failed: ${String(e)}`);
