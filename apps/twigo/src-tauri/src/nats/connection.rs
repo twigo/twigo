@@ -268,14 +268,20 @@ pub async fn connect(
             .await
             .map_err(|e| Error::Task(e.to_string()))??
     };
-    let client = opts.connect(url).await?;
+    let client = opts.connect(url.clone()).await?;
     let info = build_conn_info(name.clone(), &client).await;
 
     // Reconnecting the same name: tear down the previous connection's tasks so
     // the old client/socket closes instead of leaking behind the new one.
     abort_conn(&subs, &name);
     subjects::stop(&watch, &name);
-    tracing::info!(conn = %name, connected = info.connected, "connect");
+    tracing::info!(
+        conn = %name,
+        url = %url,
+        server = %info.server_name,
+        connected = info.connected,
+        "connect"
+    );
     state.clients.lock().await.insert(name, client);
     Ok(info)
 }
