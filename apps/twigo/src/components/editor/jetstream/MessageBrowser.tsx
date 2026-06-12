@@ -11,6 +11,7 @@ import {
 } from "@twigo/utils";
 import { jsGetMessages, jsDeleteMessage, type StoredMessage } from "@/lib/api";
 import { openPublish } from "@/lib/editor";
+import { messageMatches } from "@/lib/messageFilter";
 import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import { useJetStream } from "@/store/jetstream";
 import { useToasts } from "@/store/toasts";
@@ -38,6 +39,7 @@ export function MessageBrowser({
   const [format, setFormat] = useState<Format>("json");
   const [seqInput, setSeqInput] = useState("");
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [filter, setFilter] = useState("");
   const readOnly = useIsReadOnly(connId);
 
   const load = async (start: number | null, append: boolean) => {
@@ -84,6 +86,13 @@ export function MessageBrowser({
   };
 
   const selected = messages.find((m) => m.seq === selectedSeq);
+  const ff = filter.trim().toLowerCase();
+  // Client-side filter over the loaded page(s), by subject or payload preview.
+  const shown = ff
+    ? messages.filter((m) =>
+        messageMatches(m.subject, decodePreview(m.payloadB64), filter),
+      )
+    : messages;
   const body = selected
     ? format === "hex"
       ? toHex(selected.payloadB64)
@@ -108,6 +117,13 @@ export function MessageBrowser({
         </button>
         {open && (
           <div className="ml-auto flex items-center gap-1">
+            <input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="filter…"
+              aria-label="Filter messages"
+              className="h-6 w-24 rounded border border-border bg-background px-1.5 text-xs"
+            />
             <input
               value={seqInput}
               onChange={(e) => setSeqInput(e.target.value)}
@@ -143,29 +159,35 @@ export function MessageBrowser({
           ) : (
             <>
               <ul className="max-h-56 overflow-auto rounded-md border border-border">
-                {messages.map((m) => (
-                  <li key={m.seq}>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedSeq(m.seq)}
-                      className={cn(
-                        "flex w-full items-center gap-2 border-b border-border/50 px-2 py-1 text-left font-mono text-[11px] last:border-0 hover:bg-row-hover",
-                        m.seq === selectedSeq && "bg-selected",
-                      )}
-                    >
-                      <span className="shrink-0 tabular-nums text-muted-foreground">
-                        #{m.seq}
-                      </span>
-                      <span className="shrink-0 text-brand">{m.subject}</span>
-                      <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                        {decodePreview(m.payloadB64)}
-                      </span>
-                      <span className="shrink-0 tabular-nums text-muted-foreground">
-                        {fmtBytes(m.size)}
-                      </span>
-                    </button>
+                {shown.length === 0 ? (
+                  <li className="px-2 py-2 text-center text-[11px] text-muted-foreground">
+                    No messages match the filter.
                   </li>
-                ))}
+                ) : (
+                  shown.map((m) => (
+                    <li key={m.seq}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedSeq(m.seq)}
+                        className={cn(
+                          "flex w-full items-center gap-2 border-b border-border/50 px-2 py-1 text-left font-mono text-[11px] last:border-0 hover:bg-row-hover",
+                          m.seq === selectedSeq && "bg-selected",
+                        )}
+                      >
+                        <span className="shrink-0 tabular-nums text-muted-foreground">
+                          #{m.seq}
+                        </span>
+                        <span className="shrink-0 text-brand">{m.subject}</span>
+                        <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                          {decodePreview(m.payloadB64)}
+                        </span>
+                        <span className="shrink-0 tabular-nums text-muted-foreground">
+                          {fmtBytes(m.size)}
+                        </span>
+                      </button>
+                    </li>
+                  ))
+                )}
               </ul>
 
               {nextSeq !== null ? (

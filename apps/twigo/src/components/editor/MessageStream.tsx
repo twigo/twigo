@@ -1,8 +1,9 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { Pause, Play, Trash2, ArrowDown, Radio } from "lucide-react";
+import { Pause, Play, Trash2, ArrowDown, Radio, Search } from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
 import { fmtCount } from "@twigo/utils";
 import { useStream } from "@/store/stream";
+import { messageMatches } from "@/lib/messageFilter";
 import { MessageTable } from "./MessageTable";
 
 export function MessageStream({ streamId }: { streamId: string }) {
@@ -14,8 +15,15 @@ export function MessageStream({ streamId }: { streamId: string }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [lastSeenId, setLastSeenId] = useState(0);
+  const [filter, setFilter] = useState("");
 
-  const items = session?.items ?? [];
+  const allItems = session?.items ?? [];
+  const f = filter.trim().toLowerCase();
+  // Filter the displayed rows by subject or payload preview (display-only; the
+  // ring buffer and follow logic still run on the full stream).
+  const items = f
+    ? allItems.filter((m) => messageMatches(m.subject, m.preview, filter))
+    : allItems;
   const lastId = (items.length ? items[items.length - 1] : undefined)?.id ?? 0;
   const unread = atBottom ? 0 : Math.max(0, lastId - lastSeenId);
 
@@ -61,7 +69,7 @@ export function MessageStream({ streamId }: { streamId: string }) {
   const { subject, paused, selectedId, received } = session;
   // The view keeps a capped window; show the true received total (and the
   // retained slice when it's smaller) so the user knows they're tailing.
-  const windowed = items.length > 0 && items.length < received;
+  const windowed = allItems.length > 0 && allItems.length < received;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
@@ -84,23 +92,40 @@ export function MessageStream({ streamId }: { streamId: string }) {
         >
           <Trash2 />
         </Button>
-        <span className="ml-1 flex min-w-0 items-center gap-1 text-[11px] text-brand">
+        <span className="ml-1 flex min-w-0 flex-1 items-center gap-1 text-[11px] text-brand">
           <Radio className="size-3 shrink-0" />
           <span className="truncate font-mono">{subject}</span>
         </span>
-        <span className="ml-auto text-[11px] tabular-nums text-muted-foreground">
-          {fmtCount(received)} msgs
-          {windowed && ` · last ${fmtCount(items.length)}`}
+        <div className="flex items-center gap-1 rounded border border-input bg-background px-1.5 py-0.5">
+          <Search className="size-3 shrink-0 text-muted-foreground" />
+          <input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            aria-label="Filter messages"
+            placeholder="Filter…"
+            className="w-24 bg-transparent text-[11px] outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+        <span className="text-[11px] tabular-nums text-muted-foreground">
+          {f
+            ? `${items.length} of ${fmtCount(allItems.length)}`
+            : `${fmtCount(received)} msgs${
+                windowed ? ` · last ${fmtCount(allItems.length)}` : ""
+              }`}
           {paused && " · paused"}
         </span>
       </div>
 
-      {items.length === 0 ? (
+      {allItems.length === 0 ? (
         <EmptyState className="min-h-0 flex-1">
           <span>
             Waiting for messages on <span className="font-mono">{subject}</span>
             …
           </span>
+        </EmptyState>
+      ) : items.length === 0 ? (
+        <EmptyState className="min-h-0 flex-1">
+          No messages match “{filter.trim()}”.
         </EmptyState>
       ) : (
         <div
