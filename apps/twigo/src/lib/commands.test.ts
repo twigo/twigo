@@ -1,8 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useConnections } from "@/store/connections";
 import type { ContextSummary, ConnInfo } from "@/lib/api";
-import { getCommands, matchKeybinding, fmtBinding } from "./commands";
+import {
+  getCommands,
+  keybindingHelp,
+  matchKeybinding,
+  fmtBinding,
+  isTypingTarget,
+} from "./commands";
 import { canSplitActiveEditor, editorGroupCount } from "@/lib/editor";
+import { useHelp } from "@/store/help";
 
 vi.mock("@/lib/editor", () => ({
   openSettings: vi.fn(),
@@ -113,6 +120,30 @@ describe("command registry", () => {
   });
 });
 
+describe("keyboard help", () => {
+  it("lists the palette and static keybindings, regardless of when()", () => {
+    const help = keybindingHelp();
+    expect(help.some((s) => s.title === "Command palette")).toBe(true);
+    expect(help.find((s) => s.title === "Keyboard shortcuts")?.binding).toBe(
+      "?",
+    );
+    expect(help.find((s) => s.title === "Open settings")?.binding).toBe(
+      "mod+,",
+    );
+    // Split shortcuts show in help even when no layout is splittable right now.
+    expect(help.some((s) => s.binding === "mod+\\")).toBe(true);
+  });
+
+  it("offers a command that opens the shortcuts overlay", () => {
+    const cmd = getCommands().find((c) => c.id === "help.shortcuts");
+    expect(cmd).toBeDefined();
+    useHelp.setState({ open: false });
+    cmd?.run();
+    expect(useHelp.getState().open).toBe(true);
+    useHelp.setState({ open: false });
+  });
+});
+
 describe("matchKeybinding", () => {
   it("treats meta and ctrl as the same mod", () => {
     expect(matchKeybinding(ev({ key: "n", metaKey: true }), "mod+n")).toBe(
@@ -137,6 +168,40 @@ describe("matchKeybinding", () => {
     expect(matchKeybinding(ev({ key: "b", metaKey: true }), "mod+alt+b")).toBe(
       false,
     );
+  });
+
+  it("never matches the display-only '?' binding (shift is implicit)", () => {
+    // "?" is typed with Shift, but the binding can't express that, so the
+    // command loop never fires it — the overlay opens via a dedicated handler.
+    expect(matchKeybinding(ev({ key: "?", shiftKey: true }), "?")).toBe(false);
+  });
+});
+
+describe("isTypingTarget", () => {
+  const el = (tag: string, init?: (e: HTMLElement) => void) => {
+    const node = document.createElement(tag);
+    init?.(node);
+    return node;
+  };
+
+  it("flags native fields, CodeMirror and role-based widgets", () => {
+    expect(isTypingTarget(el("input"))).toBe(true);
+    expect(isTypingTarget(el("textarea"))).toBe(true);
+    const cm = el("div", (e) => (e.className = "cm-editor"));
+    const inner = el("span");
+    cm.appendChild(inner);
+    expect(isTypingTarget(inner)).toBe(true);
+    for (const role of ["textbox", "searchbox", "combobox"]) {
+      expect(
+        isTypingTarget(el("div", (e) => e.setAttribute("role", role))),
+      ).toBe(true);
+    }
+  });
+
+  it("ignores plain elements and non-elements", () => {
+    expect(isTypingTarget(el("div"))).toBe(false);
+    expect(isTypingTarget(el("button"))).toBe(false);
+    expect(isTypingTarget(null)).toBe(false);
   });
 });
 

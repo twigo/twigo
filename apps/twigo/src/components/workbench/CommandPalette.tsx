@@ -15,12 +15,22 @@ import {
   getCommands,
   matchKeybinding,
   fmtBinding,
+  isTypingTarget,
   PALETTE_BINDINGS,
   type Command as Cmd,
 } from "@/lib/commands";
 import { usePalette } from "@/store/palette";
+import { useHelp } from "@/store/help";
 
-const CATEGORY_ORDER = ["Create", "Connections", "Go", "View"];
+const CATEGORY_ORDER = [
+  "General",
+  "Create",
+  "Editor",
+  "Connections",
+  "Go",
+  "View",
+  "Help",
+];
 
 function group(cmds: Cmd[]): [string, Cmd[]][] {
   const by = new Map<string, Cmd[]>();
@@ -43,6 +53,21 @@ export function CommandPalette() {
       if (PALETTE_BINDINGS.some((b) => matchKeybinding(e, b))) {
         e.preventDefault();
         usePalette.getState().toggle();
+        return;
+      }
+      // "?" opens the shortcuts overlay (handled here, not as a keybinding,
+      // since "?" carries an implicit shift a binding can't express).
+      if (
+        e.key === "?" &&
+        !e.isComposing &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !usePalette.getState().open &&
+        !isTypingTarget(e.target)
+      ) {
+        e.preventDefault();
+        useHelp.getState().toggle();
         return;
       }
       if (usePalette.getState().open) return;

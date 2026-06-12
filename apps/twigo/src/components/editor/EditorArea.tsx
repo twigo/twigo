@@ -8,8 +8,8 @@ import {
   type DockviewTheme,
 } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
-import { Radio, Send, Search } from "lucide-react";
-import { EmptyState } from "@twigo/ui";
+import { Radio, Send, Search, Settings } from "lucide-react";
+import { EmptyState, Kbd } from "@twigo/ui";
 import { useUi } from "@/store/ui";
 import { useStream } from "@/store/stream";
 import { useConnections } from "@/store/connections";
@@ -19,6 +19,7 @@ import { useWorkspace } from "@/store/workspace";
 import {
   setEditorApi,
   openStream,
+  openSettings,
   isReplacingLayout,
   setReplacingLayout,
   closeEditorsForConn,
@@ -31,9 +32,37 @@ import { NewTabButton } from "./NewTabButton";
 // anything is live so the first thing a new user sees is a way forward, not a
 // dead end.
 function Watermark() {
+  const noContexts = useConnections(
+    (s) => s.status === "ready" && s.contexts.length === 0,
+  );
   const hasLive = useConnections((s) =>
     Object.values(s.connected).some((i) => i.connected),
   );
+  if (noContexts) {
+    return (
+      <EmptyState
+        icon={Radio}
+        className="h-full bg-background"
+        title="No connections yet"
+        action={{
+          label: "Open settings",
+          onClick: () => openSettings(),
+          icon: Settings,
+        }}
+        kbd={fmtBinding("mod+,")}
+      >
+        <p className="max-w-sm">
+          Twigo reads your nats CLI contexts from{" "}
+          <code className="font-mono text-xs">~/.config/nats/context</code>. Add
+          one with <code className="font-mono text-xs">nats context add</code>,
+          or point Twigo at a different folder in Settings.
+        </p>
+        <p className="mt-2 text-xs text-muted-foreground">
+          New here? Press <Kbd>?</Kbd> for keyboard shortcuts.
+        </p>
+      </EmptyState>
+    );
+  }
   if (!hasLive) {
     return (
       <EmptyState
