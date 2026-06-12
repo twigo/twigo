@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { ContextSummary, ConnInfo } from "@/lib/api";
 
 const { listContexts, connect, disconnect, connInfo, pushMock } = vi.hoisted(
@@ -120,20 +120,55 @@ describe("connections active-context persistence", () => {
 });
 
 describe("connections link toasts", () => {
+  const GRACE = 3500;
+
   beforeEach(() => {
+    useConnections.setState({ connected: {}, reconnecting: {} });
+    // Drop any drop-watch leaked from an earlier test before faking timers.
+    useConnections.getState().onEvent("a", "closed");
     pushMock.mockClear();
     connInfo.mockResolvedValue(info("a"));
-    useConnections.setState({ connected: {}, reconnecting: {} });
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
   });
 
-  it("warns when a live connection drops", () => {
+  it("warns only once a drop outlasts the grace window", () => {
     useConnections.setState({
       connected: { a: { ...info(), connected: true } },
     });
     useConnections.getState().onEvent("a", "disconnected");
+    expect(pushMock).not.toHaveBeenCalled(); // deferred, not immediate
+    vi.advanceTimersByTime(GRACE);
     expect(pushMock).toHaveBeenCalledWith(
       "warning",
       expect.stringContaining("Lost connection to a"),
+    );
+  });
+
+  it("stays silent for a transient blip that self-heals", () => {
+    useConnections.setState({
+      connected: { a: { ...info(), connected: true } },
+    });
+    useConnections.getState().onEvent("a", "disconnected");
+    useConnections.getState().onEvent("a", "connected"); // back within grace
+    vi.advanceTimersByTime(GRACE);
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("announces recovery only after an outage was shown", () => {
+    useConnections.setState({
+      connected: { a: { ...info(), connected: true } },
+    });
+    useConnections.getState().onEvent("a", "disconnected");
+    vi.advanceTimersByTime(GRACE); // outage announced
+    pushMock.mockClear();
+    useConnections.getState().onEvent("a", "connected");
+    expect(pushMock).toHaveBeenCalledWith(
+      "success",
+      expect.stringContaining("Reconnected to a"),
     );
   });
 
@@ -144,6 +179,7 @@ describe("connections link toasts", () => {
     disconnect.mockResolvedValue(undefined);
     const pending = useConnections.getState().disconnect("a");
     useConnections.getState().onEvent("a", "disconnected");
+    vi.advanceTimersByTime(GRACE);
     await pending;
     expect(pushMock).not.toHaveBeenCalledWith(
       "warning",
@@ -151,44 +187,14 @@ describe("connections link toasts", () => {
     );
   });
 
-  it("announces a recovery when a dropped connection returns", () => {
-    useConnections.setState({
-      connected: { a: { ...info(), connected: false } },
-      reconnecting: { a: { attempt: 2, delayMs: 500, at: 0 } },
-    });
-    useConnections.getState().onEvent("a", "connected");
-    expect(pushMock).toHaveBeenCalledWith(
-      "success",
-      expect.stringContaining("Reconnected to a"),
-    );
-  });
-
-  it("stays quiet on a fresh connect", () => {
-    useConnections.setState({
-      connected: { a: { ...info(), connected: true } },
-      reconnecting: {},
-    });
-    useConnections.getState().onEvent("a", "connected");
-    expect(pushMock).not.toHaveBeenCalledWith("success", expect.anything());
-  });
-
-  it("surfaces server errors with their detail", () => {
+  it("dedupes a fault that repeats on every reconnect attempt", () => {
     useConnections
       .getState()
       .onEvent("a", "serverError", "authorization violation");
-    expect(pushMock).toHaveBeenCalledWith(
-      "error",
-      "a: authorization violation",
-    );
-  });
-
-  it("escalates once after repeated reconnect failures", () => {
-    useConnections.getState().onReconnect("a", 7, 15000);
-    expect(pushMock).not.toHaveBeenCalled();
-    useConnections.getState().onReconnect("a", 8, 15000);
-    expect(pushMock).toHaveBeenCalledWith(
-      "error",
-      expect.stringContaining("Still can't reach a"),
-    );
+    useConnections
+      .getState()
+      .onEvent("a", "serverError", "authorization violation");
+    const errors = pushMock.mock.calls.filter((c) => c[0] === "error");
+    expect(errors).toEqual([["error", "a: authorization violation"]]);
   });
 });

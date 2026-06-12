@@ -24,9 +24,33 @@ type LoadState = "idle" | "loading" | "ready" | "error";
 // emits on its way down. Transient, never persisted.
 const closing = new Set<string>();
 
-// One escalation toast per outage once retries have clearly been failing for a
-// while (backoff is capped at 15s, so this lands tens of seconds in).
-const RECONNECT_ALERT_ATTEMPT = 8;
+// A dropped link usually self-heals in well under a second; only a sustained
+// outage deserves a toast. Wait this long before announcing a drop, and stay
+// silent entirely if it recovers within the window (transparent reconnect).
+const DROP_GRACE_MS = 3000;
+// A repeating condition (slow consumer) re-fires for as long as it lasts; toast
+// it at most once per this window.
+const SLOW_COOLDOWN_MS = 30_000;
+
+const dropTimers = new Map<string, ReturnType<typeof setTimeout>>();
+// Conns whose outage we actually announced — gates the matching "reconnected"
+// toast so a self-healed blip stays silent both ways.
+const announced = new Set<string>();
+// Last error message toasted per conn: a fault that repeats on every reconnect
+// attempt (e.g. an auth failure) then toasts once, not once per attempt.
+const lastError = new Map<string, string>();
+const slowConsumerAt = new Map<string, number>();
+
+// Drop all transient per-conn toast bookkeeping (on recovery, close, or a
+// deliberate disconnect) so the next outage starts from a clean slate.
+function clearLinkWatch(conn: string) {
+  const t = dropTimers.get(conn);
+  if (t !== undefined) clearTimeout(t);
+  dropTimers.delete(conn);
+  announced.delete(conn);
+  lastError.delete(conn);
+  slowConsumerAt.delete(conn);
+}
 
 function teardown(conn: string) {
   useSubjects.getState().reset(conn);
@@ -134,6 +158,7 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
 
   disconnect: async (name) => {
     closing.add(name);
+    clearLinkWatch(name);
     try {
       await apiDisconnect(name);
       teardown(name);
@@ -156,19 +181,17 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
   onEvent: (conn, kind, detail) => {
     const toasts = useToasts.getState();
     if (kind === "connected") {
-      // A "connected" that follows a drop (we marked it down, or a retry is in
-      // flight) is a recovery — announce it. A fresh connect stays quiet.
-      const prev = get();
-      const recovered =
-        prev.reconnecting[conn] !== undefined ||
-        prev.connected[conn]?.connected === false;
+      // Cancel a pending drop announcement and, if we already told the user the
+      // link was down, tell them it's back. A self-healed blip stays silent.
+      const wasAnnounced = announced.has(conn);
+      clearLinkWatch(conn);
       // Link is up: clear any backoff state and refresh real server info / rtt
       // (covers a pending connect and transparent mid-session reconnects).
       set((s) => {
         const { [conn]: _r, ...reconnecting } = s.reconnecting;
         return { reconnecting };
       });
-      if (recovered) toasts.push("success", `Reconnected to ${conn}`);
+      if (wasAnnounced) toasts.push("success", `Reconnected to ${conn}`);
       void apiConnInfo(conn).then((info) => {
         set((s) =>
           s.connected[conn]
@@ -178,20 +201,33 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       });
     } else if (kind === "disconnected") {
       const cur = get().connected[conn];
-      // Toast only on the live→down transition (not repeats, not while still
-      // connecting) and not for a disconnect the user asked for.
-      const announce = cur?.connected === true && !closing.has(conn);
       if (cur) {
         set((s) => ({
           connected: { ...s.connected, [conn]: { ...cur, connected: false } },
         }));
       }
-      if (announce) {
-        toasts.push("warning", `Lost connection to ${conn} — reconnecting…`);
+      // Defer the toast past the grace window: a quick auto-reconnect should be
+      // invisible. Arm once per outage, skip repeats and user-led disconnects.
+      const watch =
+        cur?.connected === true &&
+        !closing.has(conn) &&
+        !dropTimers.has(conn) &&
+        !announced.has(conn);
+      if (watch) {
+        const timer = setTimeout(() => {
+          dropTimers.delete(conn);
+          const down = get().connected[conn];
+          if (down && !down.connected && !closing.has(conn)) {
+            announced.add(conn);
+            useToasts
+              .getState()
+              .push("warning", `Lost connection to ${conn} — reconnecting…`);
+          }
+        }, DROP_GRACE_MS);
+        dropTimers.set(conn, timer);
       }
     } else if (kind === "closed") {
-      // `closing` is owned solely by disconnect()'s finally; closed only ever
-      // follows the client being dropped there, so don't touch it here.
+      clearLinkWatch(conn);
       teardown(conn);
       set((s) => {
         const { [conn]: _removed, ...connected } = s.connected;
@@ -206,7 +242,12 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
         );
       }
     } else if (kind === "slowConsumer") {
-      if (!closing.has(conn)) {
+      const last = slowConsumerAt.get(conn);
+      if (
+        !closing.has(conn) &&
+        (last === undefined || Date.now() - last > SLOW_COOLDOWN_MS)
+      ) {
+        slowConsumerAt.set(conn, Date.now());
         toasts.push(
           "warning",
           `${conn}: slow consumer — messages may be dropped`,
@@ -214,25 +255,20 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       }
     } else if (kind === "serverError" || kind === "clientError") {
       const fallback = kind === "serverError" ? "server error" : "client error";
-      toasts.push("error", `${conn}: ${detail ?? fallback}`);
+      const msg = `${conn}: ${detail ?? fallback}`;
+      // Dedupe: the same fault repeats on every reconnect attempt.
+      if (lastError.get(conn) !== msg) {
+        lastError.set(conn, msg);
+        toasts.push("error", msg);
+      }
     }
   },
 
-  onReconnect: (conn, attempt, delayMs) => {
+  onReconnect: (conn, attempt, delayMs) =>
     set((s) => ({
       reconnecting: {
         ...s.reconnecting,
         [conn]: { attempt, delayMs, at: Date.now() },
       },
-    }));
-    // Fires exactly once per outage (async-nats resets the counter on success).
-    if (attempt === RECONNECT_ALERT_ATTEMPT) {
-      useToasts
-        .getState()
-        .push(
-          "error",
-          `Still can't reach ${conn} after ${attempt} tries — retrying`,
-        );
-    }
-  },
+    })),
 }));
