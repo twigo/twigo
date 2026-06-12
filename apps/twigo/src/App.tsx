@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { AppShell } from "@/components/workbench/AppShell";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { applyTheme, useUi } from "@/store/ui";
+import { applyZoom, useZoom } from "@/store/zoom";
 import { useAppHydrated } from "@/lib/hydration";
 import { useNatsRuntime } from "@/modules/nats/runtime";
 
@@ -13,6 +14,7 @@ function Workbench() {
 function App() {
   const themeChoice = useUi((s) => s.theme);
   const resolvedTheme = useUi((s) => s.resolvedTheme);
+  const zoom = useZoom((s) => s.factor);
   const hydrated = useAppHydrated();
 
   // Re-resolve when the choice changes (also covers post-hydration) and, while
@@ -29,6 +31,10 @@ function App() {
   useEffect(() => {
     applyTheme(resolvedTheme);
   }, [resolvedTheme]);
+
+  useEffect(() => {
+    applyZoom(zoom);
+  }, [zoom]);
 
   return (
     <ErrorBoundary>

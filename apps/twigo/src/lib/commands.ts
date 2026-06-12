@@ -1,5 +1,6 @@
 import { useUi } from "@/store/ui";
 import { useHelp } from "@/store/help";
+import { useZoom } from "@/store/zoom";
 import {
   openSettings,
   splitActiveEditor,
@@ -52,6 +53,30 @@ const SHELL_COMMANDS: Command[] = [
     category: "View",
     keywords: "dark light system appearance",
     run: () => useUi.getState().toggleTheme(),
+  },
+  {
+    id: "zoom.in",
+    title: "Zoom in",
+    category: "View",
+    keywords: "zoom in larger bigger increase scale font",
+    keybinding: "mod+=",
+    run: () => useZoom.getState().zoomIn(),
+  },
+  {
+    id: "zoom.out",
+    title: "Zoom out",
+    category: "View",
+    keywords: "zoom out smaller decrease scale font",
+    keybinding: "mod+-",
+    run: () => useZoom.getState().zoomOut(),
+  },
+  {
+    id: "zoom.reset",
+    title: "Reset zoom",
+    category: "View",
+    keywords: "zoom reset default actual size 100",
+    keybinding: "mod+0",
+    run: () => useZoom.getState().reset(),
   },
   {
     id: "help.shortcuts",

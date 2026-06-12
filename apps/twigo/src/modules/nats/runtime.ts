@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useConnections } from "@/store/connections";
 import { useSubjects } from "@/store/subjects";
 import { useWorkspace } from "@/store/workspace";
+import { setWindowTitle } from "@/shell/title";
 import type { NatsEvent, ReconnectEvent, SubjectsUpdate } from "@/lib/api";
 
 // The NATS module's runtime wiring: restore the previous session and bridge
@@ -14,6 +15,13 @@ export function useNatsRuntime(): void {
   const onEvent = useConnections((s) => s.onEvent);
   const onReconnect = useConnections((s) => s.onReconnect);
   const updateSubjects = useSubjects((s) => s.update);
+  const activeContext = useConnections((s) => s.activeContext);
+
+  // Reflect the active connection in the window/document title — the shell owns
+  // the "Twigo" base, the NATS module supplies the context as the suffix.
+  useEffect(() => {
+    setWindowTitle(activeContext);
+  }, [activeContext]);
 
   // Load contexts, then restore the previous session: reconnect the saved
   // connections and resume their subject watches. The editor area (Dockview)

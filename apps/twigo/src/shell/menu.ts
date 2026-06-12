@@ -106,6 +106,19 @@ async function buildAndSetMenu(): Promise<void> {
           cmdItem("layout.sidebar", "Toggle Sidebar"),
           cmdItem("layout.inspector", "Toggle Inspector"),
           cmdItem("theme.toggle", "Toggle Theme"),
+          { item: "Separator" },
+          cmdItem("zoom.in", "Zoom In"),
+          cmdItem("zoom.out", "Zoom Out"),
+          cmdItem("zoom.reset", "Actual Size"),
+          { item: "Separator" },
+          {
+            text: "Reload",
+            accelerator: "CmdOrCtrl+R",
+            action: () => {
+              window.location.reload();
+            },
+          },
+          { item: "Fullscreen" },
         ],
       },
       {

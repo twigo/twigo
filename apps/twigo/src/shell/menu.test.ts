@@ -7,5 +7,8 @@ describe("toAccelerator", () => {
     expect(toAccelerator("mod+,")).toBe("CmdOrCtrl+,");
     expect(toAccelerator("mod+alt+b")).toBe("CmdOrCtrl+Alt+B");
     expect(toAccelerator("mod+\\")).toBe("CmdOrCtrl+\\");
+    expect(toAccelerator("mod+=")).toBe("CmdOrCtrl+=");
+    expect(toAccelerator("mod+-")).toBe("CmdOrCtrl+-");
+    expect(toAccelerator("mod+0")).toBe("CmdOrCtrl+0");
   });
 });
