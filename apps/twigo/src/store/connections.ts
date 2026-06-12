@@ -14,6 +14,7 @@ import { useResponder } from "@/store/responder";
 import { useJetStream } from "@/store/jetstream";
 import { useKv } from "@/store/kv";
 import { useObjStore } from "@/store/objstore";
+import { useMonitor } from "@/store/monitor";
 import { useToasts } from "@/store/toasts";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -23,6 +24,7 @@ function teardown(conn: string) {
   useJetStream.getState().reset(conn);
   useKv.getState().reset(conn);
   useObjStore.getState().reset(conn);
+  useMonitor.getState().reset(conn);
   // The editor layer injects this (setEditorTeardown) so the store doesn't
   // depend on the UI — keeps the dependency one-way (editor → store).
   useConnections.getState().editorTeardown(conn);
