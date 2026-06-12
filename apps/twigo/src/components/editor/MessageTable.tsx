@@ -1,5 +1,10 @@
 import { cn } from "@twigo/ui";
-import { fmtTime, fmtBytes, type StreamMessage } from "@twigo/utils";
+import {
+  fmtTime,
+  fmtDateTime,
+  fmtBytes,
+  type StreamMessage,
+} from "@twigo/utils";
 
 export function MessageTable({
   items,
@@ -37,7 +42,10 @@ export function MessageTable({
               m.id === selectedId && "bg-selected",
             )}
           >
-            <td className="px-2 py-1 tabular-nums text-muted-foreground">
+            <td
+              className="px-2 py-1 tabular-nums text-muted-foreground"
+              title={fmtDateTime(m.receivedAt)}
+            >
               {fmtTime(m.receivedAt)}
             </td>
             <td className="px-2 py-1 text-brand">{m.subject}</td>

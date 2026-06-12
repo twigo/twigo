@@ -19,6 +19,34 @@ export function fmtRtt(ms: number): string {
   return `${ms.toFixed(1)}ms`;
 }
 
+// Absolute local date + time, ISO-like and sortable: "2026-06-12 23:24:01.123".
+// The full form for tooltips and inspectors (fmtTime is the compact table form).
+export function fmtDateTime(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number, len = 2) => n.toString().padStart(len, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
+}
+
+// Relative time for the recent window: "just now", "12s ago", "3m ago",
+// "2h ago", "5d ago". `now` is a parameter so the result is pure/testable.
+export function fmtRelTime(ms: number, now: number = Date.now()): string {
+  const s = Math.max(0, Math.round((now - ms) / 1000));
+  if (s < 1) return "just now";
+  if (s < 60) return `${s.toString()}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m.toString()}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h.toString()}h ago`;
+  return `${Math.round(h / 24).toString()}d ago`;
+}
+
+// Format a server ISO timestamp (e.g. a stored JetStream message time) for
+// display, falling back to the raw string if it isn't parseable.
+export function fmtIsoDateTime(iso: string): string {
+  const ms = Date.parse(iso);
+  return Number.isNaN(ms) ? iso : fmtDateTime(ms);
+}
+
 // Compact integer count: 999 → "999", 12_400 → "12.4k", 3_200_000 → "3.2M".
 export function fmtCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;

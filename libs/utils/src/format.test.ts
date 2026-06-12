@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { fmtBytes, fmtRtt, fmtTime, fmtCount, fmtDuration } from "./format";
+import {
+  fmtBytes,
+  fmtRtt,
+  fmtTime,
+  fmtCount,
+  fmtDuration,
+  fmtDateTime,
+  fmtRelTime,
+  fmtIsoDateTime,
+} from "./format";
 
 describe("fmtBytes", () => {
   it("formats B / KB / MB / GB / TB consistently", () => {
@@ -40,5 +49,38 @@ describe("fmtDuration", () => {
     expect(fmtDuration(5 * 60 * 1e9)).toBe("5m");
     expect(fmtDuration(2 * 3600 * 1e9)).toBe("2h");
     expect(fmtDuration(7 * 86_400 * 1e9)).toBe("7d");
+  });
+});
+
+describe("fmtDateTime", () => {
+  it("renders YYYY-MM-DD HH:MM:SS.mmm", () => {
+    expect(fmtDateTime(Date.UTC(2026, 5, 12, 10, 0, 0))).toMatch(
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/,
+    );
+  });
+});
+
+describe("fmtRelTime", () => {
+  const now = 1_000_000_000_000;
+  it("describes recent times relative to now", () => {
+    expect(fmtRelTime(now, now)).toBe("just now");
+    expect(fmtRelTime(now - 12_000, now)).toBe("12s ago");
+    expect(fmtRelTime(now - 3 * 60_000, now)).toBe("3m ago");
+    expect(fmtRelTime(now - 2 * 3_600_000, now)).toBe("2h ago");
+    expect(fmtRelTime(now - 5 * 86_400_000, now)).toBe("5d ago");
+  });
+  it("never goes negative for a future timestamp", () => {
+    expect(fmtRelTime(now + 5_000, now)).toBe("just now");
+  });
+});
+
+describe("fmtIsoDateTime", () => {
+  it("formats a parseable ISO timestamp", () => {
+    expect(fmtIsoDateTime("2026-06-12T10:00:00Z")).toMatch(
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/,
+    );
+  });
+  it("falls back to the raw string when unparseable", () => {
+    expect(fmtIsoDateTime("not-a-date")).toBe("not-a-date");
   });
 });

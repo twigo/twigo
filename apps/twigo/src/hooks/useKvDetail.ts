@@ -3,10 +3,10 @@ import {
   kvGetEntry,
   kvBucketInfo,
   kvHistory,
-  type KvEntryDetail,
   type KvBucketDetail,
   type KvEntrySummary,
 } from "@/lib/api";
+import { useAsyncDetail } from "./useAsyncDetail";
 
 export function useKvEntry(
   connId: string,
@@ -14,40 +14,10 @@ export function useKvEntry(
   key: string,
   revision: number | null,
 ) {
-  const [data, setData] = useState<KvEntryDetail | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [reloadKey, setReloadKey] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    kvGetEntry(connId, bucket, key, revision)
-      .then((d) => {
-        if (!cancelled) {
-          setData(d);
-          setError(null);
-        }
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setError(String(e));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [connId, bucket, key, revision, reloadKey]);
-
-  return {
-    data,
-    error,
-    loading,
-    refresh: () => {
-      setLoading(true);
-      setReloadKey((k) => k + 1);
-    },
-  };
+  return useAsyncDetail(
+    () => kvGetEntry(connId, bucket, key, revision),
+    [connId, bucket, key, revision],
+  );
 }
 
 export function useKvBucketInfo(connId: string, bucket: string) {
