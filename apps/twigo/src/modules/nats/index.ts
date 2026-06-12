@@ -1,6 +1,7 @@
 import { registerWatermark } from "@/shell/watermark";
 import { registerStatusSegment } from "@/shell/statusBar";
 import { registerNatsViews } from "./views";
+import { registerNatsCommands } from "./commands";
 import { NatsWatermark } from "./Watermark";
 import { NatsConnectionStatus } from "./StatusSegments";
 
@@ -15,6 +16,7 @@ export function registerNatsModule(): void {
   registered = true;
 
   registerNatsViews();
+  registerNatsCommands();
   registerWatermark(NatsWatermark);
   registerStatusSegment({
     id: "nats.connection",
