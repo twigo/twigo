@@ -34,6 +34,7 @@ export interface ConnInfo {
 export interface NatsEvent {
   conn: string;
   kind: string;
+  detail?: string | null;
 }
 
 export interface ReconnectEvent {

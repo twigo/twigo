@@ -1,14 +1,20 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { ContextSummary, ConnInfo } from "@/lib/api";
 
-const { listContexts, connect, disconnect, connInfo } = vi.hoisted(() => ({
-  listContexts: vi.fn(),
-  connect: vi.fn(),
-  disconnect: vi.fn(),
-  connInfo: vi.fn(),
-}));
+const { listContexts, connect, disconnect, connInfo, pushMock } = vi.hoisted(
+  () => ({
+    listContexts: vi.fn(),
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+    connInfo: vi.fn(),
+    pushMock: vi.fn(),
+  }),
+);
 vi.mock("@/lib/api", () => ({ listContexts, connect, disconnect, connInfo }));
 vi.mock("@/lib/editor", () => ({ closeEditorsForConn: vi.fn() }));
+vi.mock("@/store/toasts", () => ({
+  useToasts: { getState: () => ({ push: pushMock }) },
+}));
 
 import { useConnections } from "./connections";
 import { useWorkspace } from "./workspace";
@@ -110,5 +116,79 @@ describe("connections active-context persistence", () => {
     connInfo.mockResolvedValue(info("a"));
     useConnections.getState().onEvent("a", "connected");
     expect(useConnections.getState().reconnecting.a).toBeUndefined();
+  });
+});
+
+describe("connections link toasts", () => {
+  beforeEach(() => {
+    pushMock.mockClear();
+    connInfo.mockResolvedValue(info("a"));
+    useConnections.setState({ connected: {}, reconnecting: {} });
+  });
+
+  it("warns when a live connection drops", () => {
+    useConnections.setState({
+      connected: { a: { ...info(), connected: true } },
+    });
+    useConnections.getState().onEvent("a", "disconnected");
+    expect(pushMock).toHaveBeenCalledWith(
+      "warning",
+      expect.stringContaining("Lost connection to a"),
+    );
+  });
+
+  it("stays silent when the user is the one disconnecting", async () => {
+    useConnections.setState({
+      connected: { a: { ...info(), connected: true } },
+    });
+    disconnect.mockResolvedValue(undefined);
+    const pending = useConnections.getState().disconnect("a");
+    useConnections.getState().onEvent("a", "disconnected");
+    await pending;
+    expect(pushMock).not.toHaveBeenCalledWith(
+      "warning",
+      expect.stringContaining("Lost connection"),
+    );
+  });
+
+  it("announces a recovery when a dropped connection returns", () => {
+    useConnections.setState({
+      connected: { a: { ...info(), connected: false } },
+      reconnecting: { a: { attempt: 2, delayMs: 500, at: 0 } },
+    });
+    useConnections.getState().onEvent("a", "connected");
+    expect(pushMock).toHaveBeenCalledWith(
+      "success",
+      expect.stringContaining("Reconnected to a"),
+    );
+  });
+
+  it("stays quiet on a fresh connect", () => {
+    useConnections.setState({
+      connected: { a: { ...info(), connected: true } },
+      reconnecting: {},
+    });
+    useConnections.getState().onEvent("a", "connected");
+    expect(pushMock).not.toHaveBeenCalledWith("success", expect.anything());
+  });
+
+  it("surfaces server errors with their detail", () => {
+    useConnections
+      .getState()
+      .onEvent("a", "serverError", "authorization violation");
+    expect(pushMock).toHaveBeenCalledWith(
+      "error",
+      "a: authorization violation",
+    );
+  });
+
+  it("escalates once after repeated reconnect failures", () => {
+    useConnections.getState().onReconnect("a", 7, 15000);
+    expect(pushMock).not.toHaveBeenCalled();
+    useConnections.getState().onReconnect("a", 8, 15000);
+    expect(pushMock).toHaveBeenCalledWith(
+      "error",
+      expect.stringContaining("Still can't reach a"),
+    );
   });
 });

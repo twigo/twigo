@@ -40,7 +40,7 @@ function Workbench() {
 
   useEffect(() => {
     const unlisten = listen<NatsEvent>("nats:event", (e) => {
-      onEvent(e.payload.conn, e.payload.kind);
+      onEvent(e.payload.conn, e.payload.kind, e.payload.detail ?? null);
     });
     return () => {
       void unlisten.then((fn) => {
