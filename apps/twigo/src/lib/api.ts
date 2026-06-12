@@ -1,8 +1,41 @@
-import { invoke, Channel } from "@tauri-apps/api/core";
+import { invoke as rawInvoke, Channel } from "@tauri-apps/api/core";
 import type { SubjectStat } from "@twigo/utils";
 
 export { Channel };
 export type { SubjectStat };
+
+// A backend error: a stable `kind` (see Rust `Error::kind`) the UI can branch on
+// plus the human message. Extends Error and stringifies to just the message, so
+// existing `String(e)` / `${e}` sites keep rendering it cleanly.
+export class IpcError extends Error {
+  readonly kind: string;
+  constructor(kind: string, message: string) {
+    super(message);
+    this.name = "IpcError";
+    this.kind = kind;
+  }
+  override toString(): string {
+    return this.message;
+  }
+}
+
+/** Normalize any caught value into a typed IpcError. */
+export function ipcError(e: unknown): IpcError {
+  if (e instanceof IpcError) return e;
+  if (typeof e === "object" && e !== null && "kind" in e && "message" in e) {
+    return new IpcError(String(e.kind), String(e.message));
+  }
+  if (e instanceof Error) return new IpcError("unknown", e.message);
+  return new IpcError("unknown", typeof e === "string" ? e : String(e));
+}
+
+// Every command goes through here, so a rejected invoke surfaces as a typed
+// IpcError instead of a raw { kind, message } object.
+function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  return rawInvoke<T>(cmd, args).catch((e: unknown) => {
+    throw ipcError(e);
+  });
+}
 
 export interface IncomingMessage {
   subject: string;
@@ -44,27 +77,27 @@ export interface ReconnectEvent {
 }
 
 export function listContexts(dir?: string | null): Promise<ContextSummary[]> {
-  return invoke<ContextSummary[]>("list_contexts", { dir: dir ?? null });
+  return call<ContextSummary[]>("list_contexts", { dir: dir ?? null });
 }
 
 export function defaultContextDir(): Promise<string | null> {
-  return invoke<string | null>("default_context_dir");
+  return call<string | null>("default_context_dir");
 }
 
 export function connect(name: string, dir?: string | null): Promise<ConnInfo> {
-  return invoke<ConnInfo>("connect", { name, dir: dir ?? null });
+  return call<ConnInfo>("connect", { name, dir: dir ?? null });
 }
 
 export async function disconnect(name: string): Promise<void> {
-  await invoke("disconnect", { name });
+  await call("disconnect", { name });
 }
 
 export function listConnections(): Promise<string[]> {
-  return invoke<string[]>("list_connections");
+  return call<string[]>("list_connections");
 }
 
 export function connInfo(name: string): Promise<ConnInfo> {
-  return invoke<ConnInfo>("conn_info", { name });
+  return call<ConnInfo>("conn_info", { name });
 }
 
 export interface ServerDetails {
@@ -91,7 +124,7 @@ export interface ServerDetails {
 }
 
 export function serverInfo(name: string): Promise<ServerDetails> {
-  return invoke<ServerDetails>("server_info", { name });
+  return call<ServerDetails>("server_info", { name });
 }
 
 export interface SubjectsUpdate {
@@ -104,11 +137,11 @@ export async function startSubjectWatch(
   connId: string,
   pattern?: string | null,
 ): Promise<void> {
-  await invoke("start_subject_watch", { connId, pattern: pattern ?? null });
+  await call("start_subject_watch", { connId, pattern: pattern ?? null });
 }
 
 export async function stopSubjectWatch(connId: string): Promise<void> {
-  await invoke("stop_subject_watch", { connId });
+  await call("stop_subject_watch", { connId });
 }
 
 export async function subscribe(
@@ -117,11 +150,11 @@ export async function subscribe(
   subject: string,
   onMessage: Channel<IncomingMessage>,
 ): Promise<void> {
-  await invoke("subscribe", { connId, subId, subject, onMessage });
+  await call("subscribe", { connId, subId, subject, onMessage });
 }
 
 export async function unsubscribe(subId: string): Promise<void> {
-  await invoke("unsubscribe", { subId });
+  await call("unsubscribe", { subId });
 }
 
 export async function publish(
@@ -130,7 +163,7 @@ export async function publish(
   payload: string,
   headers: [string, string][] = [],
 ): Promise<void> {
-  await invoke("publish", { connId, subject, payload, headers });
+  await call("publish", { connId, subject, payload, headers });
 }
 
 export function request(
@@ -140,7 +173,7 @@ export function request(
   timeoutMs?: number | null,
   headers: [string, string][] = [],
 ): Promise<IncomingMessage> {
-  return invoke<IncomingMessage>("request", {
+  return call<IncomingMessage>("request", {
     connId,
     subject,
     payload,
@@ -201,21 +234,21 @@ export interface ConsumerDetail {
 }
 
 export function jsListStreams(connId: string): Promise<StreamSummary[]> {
-  return invoke<StreamSummary[]>("js_list_streams", { connId });
+  return call<StreamSummary[]>("js_list_streams", { connId });
 }
 
 export function jsStreamDetail(
   connId: string,
   stream: string,
 ): Promise<StreamDetail> {
-  return invoke<StreamDetail>("js_stream_detail", { connId, stream });
+  return call<StreamDetail>("js_stream_detail", { connId, stream });
 }
 
 export function jsListConsumers(
   connId: string,
   stream: string,
 ): Promise<ConsumerSummary[]> {
-  return invoke<ConsumerSummary[]>("js_list_consumers", { connId, stream });
+  return call<ConsumerSummary[]>("js_list_consumers", { connId, stream });
 }
 
 export function jsConsumerDetail(
@@ -223,7 +256,7 @@ export function jsConsumerDetail(
   stream: string,
   consumer: string,
 ): Promise<ConsumerDetail> {
-  return invoke<ConsumerDetail>("js_consumer_detail", {
+  return call<ConsumerDetail>("js_consumer_detail", {
     connId,
     stream,
     consumer,
@@ -252,7 +285,7 @@ export function jsGetMessages(
   limit: number,
   backward: boolean,
 ): Promise<MessagePage> {
-  return invoke<MessagePage>("js_get_messages", {
+  return call<MessagePage>("js_get_messages", {
     connId,
     stream,
     start,
@@ -265,14 +298,14 @@ export async function jsCreateStream(
   connId: string,
   config: Record<string, unknown>,
 ): Promise<void> {
-  await invoke("js_create_stream", { connId, config });
+  await call("js_create_stream", { connId, config });
 }
 
 export async function jsUpdateStream(
   connId: string,
   config: Record<string, unknown>,
 ): Promise<void> {
-  await invoke("js_update_stream", { connId, config });
+  await call("js_update_stream", { connId, config });
 }
 
 export async function jsCreateConsumer(
@@ -280,7 +313,7 @@ export async function jsCreateConsumer(
   stream: string,
   config: Record<string, unknown>,
 ): Promise<void> {
-  await invoke("js_create_consumer", { connId, stream, config });
+  await call("js_create_consumer", { connId, stream, config });
 }
 
 export function jsPurgeStream(
@@ -289,7 +322,7 @@ export function jsPurgeStream(
   keep: number | null,
   upToSeq: number | null,
 ): Promise<{ purged: number }> {
-  return invoke<{ purged: number }>("js_purge_stream", {
+  return call<{ purged: number }>("js_purge_stream", {
     connId,
     stream,
     keep,
@@ -301,7 +334,7 @@ export async function jsDeleteStream(
   connId: string,
   stream: string,
 ): Promise<void> {
-  await invoke("js_delete_stream", { connId, stream });
+  await call("js_delete_stream", { connId, stream });
 }
 
 export async function jsDeleteConsumer(
@@ -309,7 +342,7 @@ export async function jsDeleteConsumer(
   stream: string,
   consumer: string,
 ): Promise<void> {
-  await invoke("js_delete_consumer", { connId, stream, consumer });
+  await call("js_delete_consumer", { connId, stream, consumer });
 }
 
 export async function jsPauseConsumer(
@@ -317,7 +350,7 @@ export async function jsPauseConsumer(
   stream: string,
   consumer: string,
 ): Promise<void> {
-  await invoke("js_pause_consumer", { connId, stream, consumer });
+  await call("js_pause_consumer", { connId, stream, consumer });
 }
 
 export async function jsResumeConsumer(
@@ -325,7 +358,7 @@ export async function jsResumeConsumer(
   stream: string,
   consumer: string,
 ): Promise<void> {
-  await invoke("js_resume_consumer", { connId, stream, consumer });
+  await call("js_resume_consumer", { connId, stream, consumer });
 }
 
 export async function jsDeleteMessage(
@@ -333,7 +366,7 @@ export async function jsDeleteMessage(
   stream: string,
   seq: number,
 ): Promise<void> {
-  await invoke("js_delete_message", { connId, stream, seq });
+  await call("js_delete_message", { connId, stream, seq });
 }
 
 export interface KvBucketSummary {
@@ -377,21 +410,21 @@ export interface KvEntryDetail {
 }
 
 export function kvListBuckets(connId: string): Promise<KvBucketSummary[]> {
-  return invoke<KvBucketSummary[]>("kv_list_buckets", { connId });
+  return call<KvBucketSummary[]>("kv_list_buckets", { connId });
 }
 
 export function kvBucketInfo(
   connId: string,
   bucket: string,
 ): Promise<KvBucketDetail> {
-  return invoke<KvBucketDetail>("kv_bucket_info", { connId, bucket });
+  return call<KvBucketDetail>("kv_bucket_info", { connId, bucket });
 }
 
 export function kvListKeys(
   connId: string,
   bucket: string,
 ): Promise<KvEntrySummary[]> {
-  return invoke<KvEntrySummary[]>("kv_list_keys", { connId, bucket });
+  return call<KvEntrySummary[]>("kv_list_keys", { connId, bucket });
 }
 
 export function kvGetEntry(
@@ -400,7 +433,7 @@ export function kvGetEntry(
   key: string,
   revision: number | null,
 ): Promise<KvEntryDetail | null> {
-  return invoke<KvEntryDetail | null>("kv_get_entry", {
+  return call<KvEntryDetail | null>("kv_get_entry", {
     connId,
     bucket,
     key,
@@ -413,7 +446,7 @@ export function kvHistory(
   bucket: string,
   key: string,
 ): Promise<KvEntrySummary[]> {
-  return invoke<KvEntrySummary[]>("kv_history", { connId, bucket, key });
+  return call<KvEntrySummary[]>("kv_history", { connId, bucket, key });
 }
 
 export function kvPut(
@@ -423,7 +456,7 @@ export function kvPut(
   payloadB64: string,
   revision: number | null,
 ): Promise<{ revision: number }> {
-  return invoke<{ revision: number }>("kv_put", {
+  return call<{ revision: number }>("kv_put", {
     connId,
     bucket,
     key,
@@ -438,7 +471,7 @@ export function kvCreate(
   key: string,
   payloadB64: string,
 ): Promise<{ revision: number }> {
-  return invoke<{ revision: number }>("kv_create", {
+  return call<{ revision: number }>("kv_create", {
     connId,
     bucket,
     key,
@@ -451,7 +484,7 @@ export async function kvDelete(
   bucket: string,
   key: string,
 ): Promise<void> {
-  await invoke("kv_delete", { connId, bucket, key });
+  await call("kv_delete", { connId, bucket, key });
 }
 
 export async function kvPurge(
@@ -459,21 +492,21 @@ export async function kvPurge(
   bucket: string,
   key: string,
 ): Promise<void> {
-  await invoke("kv_purge", { connId, bucket, key });
+  await call("kv_purge", { connId, bucket, key });
 }
 
 export async function kvCreateBucket(
   connId: string,
   config: Record<string, unknown>,
 ): Promise<void> {
-  await invoke("kv_create_bucket", { connId, config });
+  await call("kv_create_bucket", { connId, config });
 }
 
 export async function kvDeleteBucket(
   connId: string,
   bucket: string,
 ): Promise<void> {
-  await invoke("kv_delete_bucket", { connId, bucket });
+  await call("kv_delete_bucket", { connId, bucket });
 }
 
 export interface ObjBucketSummary {
@@ -503,14 +536,14 @@ export interface ObjDetail {
 }
 
 export function objListBuckets(connId: string): Promise<ObjBucketSummary[]> {
-  return invoke<ObjBucketSummary[]>("obj_list_buckets", { connId });
+  return call<ObjBucketSummary[]>("obj_list_buckets", { connId });
 }
 
 export function objListObjects(
   connId: string,
   bucket: string,
 ): Promise<ObjSummary[]> {
-  return invoke<ObjSummary[]>("obj_list_objects", { connId, bucket });
+  return call<ObjSummary[]>("obj_list_objects", { connId, bucket });
 }
 
 export function objObjectInfo(
@@ -518,7 +551,7 @@ export function objObjectInfo(
   bucket: string,
   name: string,
 ): Promise<ObjDetail> {
-  return invoke<ObjDetail>("obj_object_info", { connId, bucket, name });
+  return call<ObjDetail>("obj_object_info", { connId, bucket, name });
 }
 
 export async function objGetObject(
@@ -527,7 +560,7 @@ export async function objGetObject(
   name: string,
   dest: string,
 ): Promise<void> {
-  await invoke("obj_get_object", { connId, bucket, name, dest });
+  await call("obj_get_object", { connId, bucket, name, dest });
 }
 
 export async function objPutObject(
@@ -536,7 +569,7 @@ export async function objPutObject(
   name: string,
   src: string,
 ): Promise<void> {
-  await invoke("obj_put_object", { connId, bucket, name, src });
+  await call("obj_put_object", { connId, bucket, name, src });
 }
 
 export async function objDelete(
@@ -544,21 +577,21 @@ export async function objDelete(
   bucket: string,
   name: string,
 ): Promise<void> {
-  await invoke("obj_delete", { connId, bucket, name });
+  await call("obj_delete", { connId, bucket, name });
 }
 
 export async function objCreateBucket(
   connId: string,
   config: Record<string, unknown>,
 ): Promise<void> {
-  await invoke("obj_create_bucket", { connId, config });
+  await call("obj_create_bucket", { connId, config });
 }
 
 export async function objDeleteBucket(
   connId: string,
   bucket: string,
 ): Promise<void> {
-  await invoke("obj_delete_bucket", { connId, bucket });
+  await call("obj_delete_bucket", { connId, bucket });
 }
 
 export interface Varz {
@@ -612,21 +645,21 @@ export function monitorVarz(
   connId: string,
   monitoringUrl: string | null,
 ): Promise<Varz> {
-  return invoke<Varz>("monitor_varz", { connId, monitoringUrl });
+  return call<Varz>("monitor_varz", { connId, monitoringUrl });
 }
 
 export function monitorJsz(
   connId: string,
   monitoringUrl: string | null,
 ): Promise<Jsz> {
-  return invoke<Jsz>("monitor_jsz", { connId, monitoringUrl });
+  return call<Jsz>("monitor_jsz", { connId, monitoringUrl });
 }
 
 export function monitorHealthz(
   connId: string,
   monitoringUrl: string | null,
 ): Promise<Healthz> {
-  return invoke<Healthz>("monitor_healthz", { connId, monitoringUrl });
+  return call<Healthz>("monitor_healthz", { connId, monitoringUrl });
 }
 
 export interface ConnzConn {
@@ -665,7 +698,7 @@ export function monitorConnz(
   offset: number,
   monitoringUrl: string | null,
 ): Promise<Connz> {
-  return invoke<Connz>("monitor_connz", {
+  return call<Connz>("monitor_connz", {
     connId,
     sort,
     limit,
@@ -679,5 +712,5 @@ export function monitorCluster(
   connId: string,
   monitoringUrl: string | null,
 ): Promise<Varz[]> {
-  return invoke<Varz[]>("monitor_cluster", { connId, monitoringUrl });
+  return call<Varz[]>("monitor_cluster", { connId, monitoringUrl });
 }

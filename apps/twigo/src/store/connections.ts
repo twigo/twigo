@@ -4,6 +4,7 @@ import {
   connect as apiConnect,
   disconnect as apiDisconnect,
   connInfo as apiConnInfo,
+  ipcError,
   type ContextSummary,
   type ConnInfo,
 } from "@/lib/api";
@@ -141,13 +142,17 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       }));
       useWorkspace.getState().setConnected(name, true);
     } catch (e) {
+      const err = ipcError(e);
+      // Branch on the typed kind for an actionable hint on the common failure.
+      const hint =
+        err.kind === "credentials" ? " — check the context's credentials" : "";
       set((s) => ({
         connecting: { ...s.connecting, [name]: false },
-        connError: { ...s.connError, [name]: String(e) },
+        connError: { ...s.connError, [name]: err.message },
       }));
       useToasts
         .getState()
-        .push("error", `Couldn't connect to ${name}: ${String(e)}`);
+        .push("error", `Couldn't connect to ${name}: ${err.message}${hint}`);
     }
   },
 
