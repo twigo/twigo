@@ -63,6 +63,9 @@ export const useMonitor = create<MonitorStore>((set, get) => {
 
     poll: async (connId) => {
       const cur = get().byConn[connId] ?? EMPTY;
+      // No $SYS access won't change without a reconnect (which resets); stop
+      // hammering a connection that can't be monitored.
+      if (cur.status === "unavailable") return;
       if (cur.status === "idle")
         patch(connId, (s) => ({ ...s, status: "loading" }));
       try {

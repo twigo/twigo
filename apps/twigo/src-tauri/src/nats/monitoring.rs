@@ -159,9 +159,13 @@ async fn sys_request<T: serde::de::DeserializeOwned>(
 
     let req = async_nats::Request::new().timeout(Some(Duration::from_secs(4)));
     let msg = client.send_request(subject, req).await.map_err(|e| {
-        if matches!(e.kind(), async_nats::client::RequestErrorKind::NoResponders) {
+        // A non-system-account connection can't reach $SYS: the request goes
+        // nowhere and times out (no explicit no-responders). Treat both as the
+        // same actionable "needs a system-account login" state.
+        use async_nats::client::RequestErrorKind::{NoResponders, TimedOut};
+        if matches!(e.kind(), NoResponders | TimedOut) {
             Error::Monitoring(
-                "this connection isn't a system-account login, so server monitoring ($SYS) isn't available".to_string(),
+                "no response on $SYS — this connection isn't a system-account login, so server monitoring isn't available".to_string(),
             )
         } else {
             mon_err(e)
