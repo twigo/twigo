@@ -7,6 +7,12 @@ import { useHelp } from "@/store/help";
 
 const isTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+// This menu is macOS-shaped (an app menu with Services/Hide, a global menu bar,
+// and accelerators the OS consumes before the webview). On Windows/Linux the
+// webview handles clipboard shortcuts itself and there's no global menu bar, and
+// accelerators would double-fire with the keydown loop — so we skip it there.
+const isMac =
+  typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
 
 // "mod+shift+p" → "CmdOrCtrl+Shift+P" (Tauri accelerator syntax). Exported for
 // the unit test.
@@ -47,7 +53,7 @@ function cmdItem(id: string, fallback: string): MenuItemOptions {
 // registry. The predefined Edit/Window/App items keep clipboard shortcuts and
 // standard macOS behaviours working (a custom menu replaces Tauri's default).
 export async function setupAppMenu(): Promise<void> {
-  if (!isTauri) return;
+  if (!isTauri || !isMac) return;
   try {
     await buildAndSetMenu();
   } catch (e) {
