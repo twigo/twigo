@@ -4,7 +4,7 @@ import { createPersistStorage } from "@/lib/persist-storage";
 
 // The user's choice; "system" follows the OS appearance.
 export type Theme = "light" | "dark" | "system";
-// What's actually painted — never "system".
+// What's actually painted - never "system".
 export type ResolvedTheme = "light" | "dark";
 
 function systemPrefersDark(): boolean {
@@ -18,7 +18,7 @@ export function resolveTheme(theme: Theme): ResolvedTheme {
 }
 
 // A registered view's id (e.g. "subjects"). The shell treats it as an opaque
-// string — view ids are owned by domain modules, not the UI store.
+// string - view ids are owned by domain modules, not the UI store.
 export type View = string;
 
 interface UiState {
@@ -55,7 +55,7 @@ export const useUi = create<UiState>()(
           return { theme: next, resolvedTheme: next };
         }),
       setTheme: (theme) => set({ theme, resolvedTheme: resolveTheme(theme) }),
-      // Recompute the painted theme from the current choice — used after
+      // Recompute the painted theme from the current choice - used after
       // hydration and when the OS appearance changes while on "system".
       syncResolvedTheme: () =>
         set((s) => ({ resolvedTheme: resolveTheme(s.theme) })),
@@ -67,7 +67,7 @@ export const useUi = create<UiState>()(
     {
       name: "twigo-ui",
       version: 1,
-      // resolvedTheme is derived, never persisted — recomputed on startup.
+      // resolvedTheme is derived, never persisted - recomputed on startup.
       storage: createPersistStorage(),
       partialize: (s) => ({
         theme: s.theme,

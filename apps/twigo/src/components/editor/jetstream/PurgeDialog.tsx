@@ -8,7 +8,7 @@ import {
 } from "@twigo/ui";
 import { fmtCount, fmtBytes } from "@twigo/utils";
 
-// Purge with a computed blast-radius preview (count + bytes) — what you're
+// Purge with a computed blast-radius preview (count + bytes) - what you're
 // about to lose, before you lose it.
 export function PurgeDialog({
   open,
@@ -58,7 +58,7 @@ export function PurgeDialog({
               onChange={() => setMode("all")}
             />
             <span>
-              Delete all — ~{fmtCount(messages)} messages · {fmtBytes(bytes)}
+              Delete all - ~{fmtCount(messages)} messages · {fmtBytes(bytes)}
             </span>
           </label>
           <label className="flex items-center gap-2">

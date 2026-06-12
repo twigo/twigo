@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Twigo — NATS IDE",
+        "title": "Twigo - NATS IDE",
         "width": 1280,
         "height": 800
       }

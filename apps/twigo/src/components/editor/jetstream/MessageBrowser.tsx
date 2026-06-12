@@ -21,7 +21,7 @@ type Format = "json" | "text" | "hex";
 const FORMATS: Format[] = ["json", "text", "hex"];
 const PAGE = 25;
 
-// Non-destructive message browse (direct-get only — never creates a consumer,
+// Non-destructive message browse (direct-get only - never creates a consumer,
 // never advances an ack floor). Walks newest → older.
 export function MessageBrowser({
   connId,
@@ -154,7 +154,7 @@ export function MessageBrowser({
             <p className="px-1 text-xs text-error">{error}</p>
           ) : messages.length === 0 && !loading ? (
             <p className="px-1 py-2 text-xs text-muted-foreground">
-              No messages — use the seq field to jump to a sequence.
+              No messages - use the seq field to jump to a sequence.
             </p>
           ) : (
             <>
@@ -202,7 +202,7 @@ export function MessageBrowser({
                 </Button>
               ) : (
                 <p className="py-1 text-center text-[10px] uppercase tracking-wider text-muted-foreground">
-                  — start of stream —
+                  - start of stream -
                 </p>
               )}
 

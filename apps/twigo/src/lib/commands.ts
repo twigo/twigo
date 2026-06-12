@@ -21,7 +21,7 @@ export interface Command {
   run: () => void;
 }
 
-// The workbench's own commands — view/editor/theme/help, no domain knowledge.
+// The workbench's own commands - view/editor/theme/help, no domain knowledge.
 const SHELL_COMMANDS: Command[] = [
   {
     id: "settings.open",
@@ -174,7 +174,7 @@ export interface ShortcutHelp {
   binding: string;
 }
 
-/** Every keyboard shortcut for the help overlay — the static, always-true set
+/** Every keyboard shortcut for the help overlay - the static, always-true set
  *  (not filtered by `when`, so a user learns them even when inapplicable). */
 export function keybindingHelp(): ShortcutHelp[] {
   const palette: ShortcutHelp = {
@@ -193,7 +193,7 @@ export function keybindingHelp(): ShortcutHelp[] {
 const IS_MAC =
   typeof navigator !== "undefined" && /mac/i.test(navigator.userAgent);
 
-// True when a keyboard event targets an editable surface — native fields,
+// True when a keyboard event targets an editable surface - native fields,
 // CodeMirror, or a role-based widget (cmdk/Radix combobox etc.). Used to avoid
 // hijacking bare keys (like "?") while the user is typing.
 export function isTypingTarget(target: EventTarget | null): boolean {

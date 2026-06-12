@@ -10,7 +10,7 @@ const isTauri =
 // This menu is macOS-shaped (an app menu with Services/Hide, a global menu bar,
 // and accelerators the OS consumes before the webview). On Windows/Linux the
 // webview handles clipboard shortcuts itself and there's no global menu bar, and
-// accelerators would double-fire with the keydown loop — so we skip it there.
+// accelerators would double-fire with the keydown loop - so we skip it there.
 const isMac =
   typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
 

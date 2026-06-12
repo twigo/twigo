@@ -3,9 +3,9 @@ import { disp, limitCount, limitBytes, supportsPause } from "./format";
 
 describe("jetstream config formatters", () => {
   it("disp renders primitives and falls back for objects", () => {
-    expect(disp(null)).toBe("—");
+    expect(disp(null)).toBe("-");
     expect(disp("file")).toBe("file");
-    expect(disp("")).toBe("—");
+    expect(disp("")).toBe("-");
     expect(disp(5)).toBe("5");
     expect(disp(true)).toBe("true");
     expect(disp({ a: 1 })).toBe('{"a":1}');
@@ -14,7 +14,7 @@ describe("jetstream config formatters", () => {
   it("limitCount/limitBytes show ∞ for -1 (unlimited)", () => {
     expect(limitCount(-1)).toBe("∞");
     expect(limitCount(1500)).toBe("1.5k");
-    expect(limitCount("x")).toBe("—");
+    expect(limitCount("x")).toBe("-");
     expect(limitBytes(-1)).toBe("∞");
     expect(limitBytes(2048)).toBe("2.0 KB");
   });

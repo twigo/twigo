@@ -22,8 +22,8 @@ import { ConfirmDialog } from "./ConfirmDialog";
 
 function nanos(v: unknown): string {
   const n = num(v);
-  if (n === null) return "—";
-  if (n <= 0) return "—";
+  if (n === null) return "-";
+  if (n <= 0) return "-";
   if (n < 1e9) return `${Math.round(n / 1e6)}ms`;
   return `${Math.round(n / 1e9)}s`;
 }

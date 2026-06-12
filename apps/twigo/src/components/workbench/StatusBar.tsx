@@ -15,7 +15,7 @@ function openRepo(): void {
   });
 }
 
-// GitHub mark — lucide dropped its brand icons, so inline the official path.
+// GitHub mark - lucide dropped its brand icons, so inline the official path.
 function GitHubMark() {
   return (
     <svg

@@ -201,7 +201,7 @@ export function ServerHealthPanel({ connId }: { connId: string }) {
                     {r.cid}
                   </td>
                   <td className="max-w-48 truncate px-2 py-1">
-                    {r.name || "—"}
+                    {r.name || "-"}
                     {r.lang && (
                       <span className="ml-1 text-muted-foreground">
                         {r.lang}
@@ -232,7 +232,7 @@ export function ServerHealthPanel({ connId }: { connId: string }) {
                     {fmtCount(r.outMsgs)} · {fmtBytes(r.outBytes)}
                   </td>
                   <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
-                    {r.rtt || "—"}
+                    {r.rtt || "-"}
                   </td>
                   <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
                     {r.idle}
@@ -247,7 +247,7 @@ export function ServerHealthPanel({ connId }: { connId: string }) {
       {connz && total > 0 && (
         <div className="flex h-7 shrink-0 items-center gap-2 border-t border-border px-3 text-[11px] text-muted-foreground">
           <span className="tabular-nums">
-            {from}–{to} of {fmtCount(total)}
+            {from}-{to} of {fmtCount(total)}
           </span>
           <div className="ml-auto flex items-center gap-0.5">
             <Button

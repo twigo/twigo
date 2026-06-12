@@ -55,7 +55,7 @@ export function CommandPalette() {
   const record = useCommandHistory((s) => s.record);
 
   // Clear the query when the palette opens so a stale search never lingers
-  // between opens — adjust-state-during-render (React-recommended), no effect.
+  // between opens - adjust-state-during-render (React-recommended), no effect.
   const [prevOpen, setPrevOpen] = useState(open);
   if (open !== prevOpen) {
     setPrevOpen(open);

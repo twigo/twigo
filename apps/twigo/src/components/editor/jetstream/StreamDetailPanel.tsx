@@ -35,7 +35,7 @@ function pick(v: unknown, fallback: string): string {
 
 function nanos(v: unknown): string {
   const n = num(v);
-  if (n === null) return "—";
+  if (n === null) return "-";
   if (n <= 0) return "∞";
   return `${Math.round(n / 1e9)}s`;
 }
@@ -279,7 +279,7 @@ export function StreamDetailPanel({
           <Section title="Config">
             <Row
               label="Subjects"
-              value={subjects.length ? subjects.join(", ") : "—"}
+              value={subjects.length ? subjects.join(", ") : "-"}
             />
             <Row label="Retention" value={disp(cfg.retention)} />
             <Row label="Storage" value={disp(cfg.storage)} />

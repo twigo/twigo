@@ -11,7 +11,7 @@ import { registerConnScoped } from "@/store/connScoped";
 
 type Status = "idle" | "loading" | "ready" | "error" | "unavailable";
 
-// One ring-buffer sample per poll — feeds rates (deltas of cumulative counters)
+// One ring-buffer sample per poll - feeds rates (deltas of cumulative counters)
 // and sparklines without re-querying.
 export interface Sample {
   t: number;

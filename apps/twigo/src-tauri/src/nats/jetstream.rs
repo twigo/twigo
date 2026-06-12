@@ -132,7 +132,7 @@ pub async fn js_list_streams(
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct StreamDetail {
-    // Full stream config (Config is Serialize) — drives the Config panel + the
+    // Full stream config (Config is Serialize) - drives the Config panel + the
     // Raw-JSON toggle. State is split out because Info itself isn't Serialize.
     config: serde_json::Value,
     created: Option<String>,

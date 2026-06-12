@@ -30,7 +30,7 @@ pub struct ConnInfo {
     rtt_ms: f64,
     jetstream: bool,
     max_payload: usize,
-    // False while the client is still (re)connecting in the background — the
+    // False while the client is still (re)connecting in the background - the
     // server info/rtt above are placeholders until a real link is up.
     connected: bool,
 }
@@ -183,7 +183,7 @@ fn build_options(
     let name = name.to_string();
     let rc_app = app.clone();
     let rc_name = name.clone();
-    // Keep the client alive across a server that is briefly unavailable — this
+    // Keep the client alive across a server that is briefly unavailable - this
     // lets a saved connection restore on launch even if its server is down,
     // and survives transient drops mid-session.
     Ok(base
@@ -191,7 +191,7 @@ fn build_options(
         // Twigo is an inspection tool: a connection must stay on the exact
         // server the user picked. Without this, async-nats adds the cluster
         // peers a server advertises (INFO.connect_urls) to its pool and can
-        // (re)connect to any of them — so a dev/staging context clustered with
+        // (re)connect to any of them - so a dev/staging context clustered with
         // prod would silently show prod's data. Pin to the configured URL.
         .ignore_discovered_servers()
         .retain_servers_order()

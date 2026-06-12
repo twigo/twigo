@@ -90,7 +90,7 @@ export function ServerInfoPanel({ connId }: { connId: string }) {
           <Section title="Network">
             <Row label="Host" value={`${data.host}:${data.port.toString()}`} />
             <Row label="Client ID" value={data.clientId} />
-            <Row label="Client IP" value={data.clientIp || "—"} />
+            <Row label="Client IP" value={data.clientIp || "-"} />
             <Row label="Protocol" value={data.proto} />
           </Section>
 

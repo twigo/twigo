@@ -5,7 +5,7 @@ shell** (activity bar, sidebar, tabbed editor, detail panel, status bar, command
 palette) that knows nothing about NATS, plus a **NATS module** that contributes
 everything domain-specific through a small set of registries. The goal is that
 the core could host a second domain (e.g. a Kubernetes IDE) by adding a sibling
-module — not by editing the shell.
+module - not by editing the shell.
 
 This document describes how the pieces fit and how to add a new domain.
 
@@ -30,7 +30,7 @@ This document describes how the pieces fit and how to add a new domain.
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-Monorepo (pnpm workspace): `apps/twigo` (the app), `libs/ui` (design system —
+Monorepo (pnpm workspace): `apps/twigo` (the app), `libs/ui` (design system -
 shadcn/Tailwind tokens), `libs/utils` (pure helpers). The frontend talks to the
 Rust backend only through `src/lib/api.ts`.
 
@@ -42,15 +42,15 @@ It reaches NATS only through registries that the module fills.
 |                    | Shell (domain-free)                                                                                 | NATS domain                                                                                      |
 | ------------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | UI                 | `components/workbench/*` (AppShell, ActivityBar, StatusBar, CommandPalette, ShortcutsHelp, Toaster) | `components/views/*`, `components/editor/*`, `src/modules/nats/*`                                |
-| Registries / infra | `src/shell/*`, `lib/commands.ts`, `store/connScoped.ts`                                             | —                                                                                                |
+| Registries / infra | `src/shell/*`, `lib/commands.ts`, `store/connScoped.ts`                                             | -                                                                                                |
 | Stores             | `store/ui`, `store/palette`, `store/help`, `store/toasts`                                           | `store/connections`, `stream`, `subjects`, `jetstream`, `kv`, `objstore`, `monitor`, `responder` |
-| IPC                | —                                                                                                   | `lib/api.ts`, `lib/actions.ts`, `lib/editor.ts`                                                  |
+| IPC                | -                                                                                                   | `lib/api.ts`, `lib/actions.ts`, `lib/editor.ts`                                                  |
 
 This boundary is **enforced by ESLint** (`@typescript-eslint/no-restricted-imports`
 in `eslint.config.js`): `components/workbench/**` and `src/shell/**` may not
 import NATS stores, `@/modules/**`, `@/lib/api`, `@/lib/actions`, or domain
-view/editor components. `AppShell` is the one exception — it composes the pane
-components — but still may not reach into domain state/modules/IPC.
+view/editor components. `AppShell` is the one exception - it composes the pane
+components - but still may not reach into domain state/modules/IPC.
 
 `App.tsx` (the composition root) and `main.tsx` (the entry) are allowed to wire
 the domain in; that is where module registration happens.
@@ -80,7 +80,7 @@ Notes:
   importing any of them.
 - The **editor** panel registry (`components/editor/registry.ts`) is still a
   typed `Record<EditorType, EditorDef>` (compile-time exhaustiveness), not a
-  runtime registry — it becomes one when a second domain actually exists
+  runtime registry - it becomes one when a second domain actually exists
   (rule of three).
 
 ## Module lifecycle
@@ -102,16 +102,16 @@ So `App.tsx` is just: call the runtime hook, render `<AppShell/>`.
 
 ## Store layer
 
-- **`createConnTreeStore(...)`** (`store/connTree.ts`) — the shared per-connection
+- **`createConnTreeStore(...)`** (`store/connTree.ts`) - the shared per-connection
   "lazy tree" (parents loaded on demand, children fetched on first expand and
   cached). JetStream, KV and Object Store are one-liners over it; it
   auto-registers each store for conn-scoped teardown. `store/monitor.ts` is
   bespoke (polling, not a tree).
-- **Persistence** — `createPersistStorage()` (`lib/persist-storage.ts`) persists
+- **Persistence** - `createPersistStorage()` (`lib/persist-storage.ts`) persists
   through `tauri-plugin-store` (falls back to `localStorage` in the browser/tests)
   and parses defensively. `lib/hydration.ts` gates the first render until the
   persisted stores have loaded. (Schema migrations are deferred until the app is
-  in production — see `todo.md` #29.)
+  in production - see `todo.md` #29.)
 
 ## Editor area
 
@@ -132,7 +132,7 @@ registry). `lib.rs` registers the `#[tauri::command]` handlers; live subscriptio
 flow to the frontend over Tauri Channels (the `stream` store ring-buffers and
 batches them on the UI side). Connection lifecycle is pushed to the frontend as
 `nats:*` events. Errors currently serialize to a string (typed `{ kind, message }`
-is planned — `todo.md` #30).
+is planned - `todo.md` #30).
 
 ## Adding a new domain
 
@@ -148,7 +148,7 @@ The shape a `registerKubernetesModule()` would follow:
    `use<Domain>Runtime()` hook for its event listeners.
 5. **Wire-up:** call `register<Domain>Module()` in `main.tsx` and the runtime
    hook in `Workbench`.
-6. The shell needs **no changes** — and the ESLint boundary guarantees it.
+6. The shell needs **no changes** - and the ESLint boundary guarantees it.
 
 When a real second domain lands, the shell + registries extract into
 `libs/workbench` and NATS into `libs/domain-nats` (the pnpm workspace already

@@ -94,7 +94,7 @@ export function KvEntryDetailPanel({
   // useRevision=true → optimistic CAS; false → force overwrite (blind put).
   const save = async (useRevision: boolean) => {
     if (!data) return;
-    // The value as loaded — re-putting it is a real "undo" (KV keeps history).
+    // The value as loaded - re-putting it is a real "undo" (KV keeps history).
     const prevB64 = data.payloadB64;
     try {
       await kvPut(
@@ -374,7 +374,7 @@ export function KvEntryDetailPanel({
 
           <Section title="Entry">
             <Row label="Revision" value={data.revision} />
-            <Row label="Created" value={data.created ?? "—"} />
+            <Row label="Created" value={data.created ?? "-"} />
             <Row
               label="Operation"
               value={

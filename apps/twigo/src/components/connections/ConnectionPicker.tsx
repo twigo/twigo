@@ -127,7 +127,7 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
                 : `Make ${c.name} read-only`
             }
             title={
-              readOnly ? "Read-only — click to allow writes" : "Make read-only"
+              readOnly ? "Read-only - click to allow writes" : "Make read-only"
             }
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => {

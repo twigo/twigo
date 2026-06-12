@@ -105,7 +105,7 @@ function prepare(ctx: QuickJSContext, msg: MsgContext): void {
     $json: msg.body,
   });
   // Hand the bus data to the VM as a string value and JSON.parse it *inside*,
-  // never concatenated into source — so payload bytes can't influence the code
+  // never concatenated into source - so payload bytes can't influence the code
   // (e.g. U+2028/U+2029, which JSON.stringify doesn't escape).
   const dataHandle = ctx.newString(data);
   ctx.setProp(ctx.global, "__twigo_data", dataHandle);

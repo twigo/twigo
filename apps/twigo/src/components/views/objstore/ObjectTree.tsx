@@ -63,7 +63,7 @@ export function ObjectTree({
         return;
       }
     } catch {
-      // info() errors when the object doesn't exist yet — safe to upload.
+      // info() errors when the object doesn't exist yet - safe to upload.
     }
     await runUpload(bkt, src, objName);
   };
@@ -180,7 +180,7 @@ export function ObjectTree({
             if (!o) setPendingUpload(null);
           }}
           title={`Replace ${pendingUpload.name}?`}
-          description="An object with this name already exists in the store. Uploading replaces it — the current contents are lost."
+          description="An object with this name already exists in the store. Uploading replaces it - the current contents are lost."
           confirmLabel="Replace object"
           onConfirm={() =>
             void runUpload(

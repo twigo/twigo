@@ -112,7 +112,7 @@ describe("matchKeybinding", () => {
 
   it("never matches the display-only '?' binding (shift is implicit)", () => {
     // "?" is typed with Shift, but the binding can't express that, so the
-    // command loop never fires it — the overlay opens via a dedicated handler.
+    // command loop never fires it - the overlay opens via a dedicated handler.
     expect(matchKeybinding(ev({ key: "?", shiftKey: true }), "?")).toBe(false);
   });
 });

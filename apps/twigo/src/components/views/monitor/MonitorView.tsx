@@ -154,9 +154,9 @@ function Dashboard({
       />
       <Row
         label="Throughput"
-        value={r ? `${fmtCount(Math.round(r.msgsPerSec))}/s` : "—"}
+        value={r ? `${fmtCount(Math.round(r.msgsPerSec))}/s` : "-"}
       />
-      <Row label="Data rate" value={r ? `${fmtBytes(r.bytesPerSec)}/s` : "—"} />
+      <Row label="Data rate" value={r ? `${fmtBytes(r.bytesPerSec)}/s` : "-"} />
       <Row label="Subscriptions" value={fmtCount(varz.subscriptions)} />
       <Row
         label="Slow consumers"
@@ -307,7 +307,7 @@ export function MonitorView({ connId }: ViewProps) {
   }
 
   if (status === "error") {
-    // An HTTP URL is set but unreachable — let the user fix it in place.
+    // An HTTP URL is set but unreachable - let the user fix it in place.
     if (monitoringUrl) {
       return (
         <MonitoringSetup

@@ -50,7 +50,7 @@ export function Sidebar() {
           <Panel filter={filter} connId={activeContext ?? null} />
         ) : (
           <EmptyState density="inline" icon={icon}>
-            {title} is on the roadmap — not available yet.
+            {title} is on the roadmap - not available yet.
           </EmptyState>
         )}
       </div>

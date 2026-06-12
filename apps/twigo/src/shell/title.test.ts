@@ -10,7 +10,7 @@ describe("composeTitle", () => {
   });
 
   it("appends a trimmed suffix", () => {
-    expect(composeTitle("prod-eu")).toBe("Twigo — prod-eu");
-    expect(composeTitle("  local  ")).toBe("Twigo — local");
+    expect(composeTitle("prod-eu")).toBe("Twigo - prod-eu");
+    expect(composeTitle("  local  ")).toBe("Twigo - local");
   });
 });

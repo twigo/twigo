@@ -8,7 +8,7 @@ use tauri::State;
 use super::connection::ConnState;
 use super::error::{self, Error};
 
-const NO_SYS: &str = "no response on $SYS — this connection isn't a system-account login, so server monitoring isn't available";
+const NO_SYS: &str = "no response on $SYS - this connection isn't a system-account login, so server monitoring isn't available";
 
 fn mon_err<E: std::fmt::Display>(e: E) -> Error {
     Error::Monitoring(e.to_string())
@@ -16,7 +16,7 @@ fn mon_err<E: std::fmt::Display>(e: E) -> Error {
 
 // HTTP monitoring port (:8222) returns the same shapes as $SYS but BARE (no
 // {server,data} envelope) and single-server. Used when a context opts in with a
-// monitoring_url — the path for connections that aren't system-account logins.
+// monitoring_url - the path for connections that aren't system-account logins.
 async fn http_get<T: serde::de::DeserializeOwned>(base: &str, path: &str) -> error::Result<T> {
     let url = format!("{}/{}", base.trim_end_matches('/'), path);
     let resp = reqwest::get(&url)
@@ -331,7 +331,7 @@ pub async fn monitor_cluster(
     conn_id: String,
     monitoring_url: Option<String>,
 ) -> error::Result<Vec<Varz>> {
-    // HTTP :8222 is one server's endpoint — no cluster fan-in, just this node.
+    // HTTP :8222 is one server's endpoint - no cluster fan-in, just this node.
     if let Some(url) = monitoring_url {
         return Ok(vec![http_get(&url, "varz").await?]);
     }

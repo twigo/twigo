@@ -6,10 +6,10 @@ const isTauri =
 const BASE = "Twigo";
 
 /** Compose the window title from an optional suffix. The shell owns the base
- *  name; domains supply the suffix (e.g. the active connection). Pure — tested. */
+ *  name; domains supply the suffix (e.g. the active connection). Pure - tested. */
 export function composeTitle(suffix?: string | null): string {
   const s = suffix?.trim();
-  return s ? `${BASE} — ${s}` : BASE;
+  return s ? `${BASE} - ${s}` : BASE;
 }
 
 /** Set the document and (under Tauri) the native window title. */

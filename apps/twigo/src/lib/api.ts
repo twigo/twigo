@@ -45,7 +45,7 @@ function assertWritable(connId: string): void {
   if (useReadOnly.getState().isReadOnly(connId)) {
     throw new IpcError(
       "readOnly",
-      `${connId} is read-only — writes are blocked`,
+      `${connId} is read-only - writes are blocked`,
     );
   }
 }
