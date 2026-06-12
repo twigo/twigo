@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { Pause, Play, Trash2, ArrowDown, Radio } from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
+import { fmtCount } from "@twigo/utils";
 import { useStream } from "@/store/stream";
 import { MessageTable } from "./MessageTable";
 
@@ -57,7 +58,10 @@ export function MessageStream({ streamId }: { streamId: string }) {
     );
   }
 
-  const { subject, paused, selectedId } = session;
+  const { subject, paused, selectedId, received } = session;
+  // The view keeps a capped window; show the true received total (and the
+  // retained slice when it's smaller) so the user knows they're tailing.
+  const windowed = items.length > 0 && items.length < received;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
@@ -85,7 +89,9 @@ export function MessageStream({ streamId }: { streamId: string }) {
           <span className="truncate font-mono">{subject}</span>
         </span>
         <span className="ml-auto text-[11px] tabular-nums text-muted-foreground">
-          {items.length} msgs{paused && " · paused"}
+          {fmtCount(received)} msgs
+          {windowed && ` · last ${fmtCount(items.length)}`}
+          {paused && " · paused"}
         </span>
       </div>
 
