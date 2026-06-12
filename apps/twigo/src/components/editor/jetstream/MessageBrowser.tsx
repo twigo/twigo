@@ -11,6 +11,7 @@ import {
 } from "@twigo/utils";
 import { jsGetMessages, jsDeleteMessage, type StoredMessage } from "@/lib/api";
 import { openPublish } from "@/lib/editor";
+import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import { useJetStream } from "@/store/jetstream";
 import { useToasts } from "@/store/toasts";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -37,6 +38,7 @@ export function MessageBrowser({
   const [format, setFormat] = useState<Format>("json");
   const [seqInput, setSeqInput] = useState("");
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const readOnly = useIsReadOnly(connId);
 
   const load = async (start: number | null, append: boolean) => {
     setLoading(true);
@@ -196,7 +198,12 @@ export function MessageBrowser({
                       size="icon-sm"
                       className="ml-auto"
                       aria-label="Republish"
-                      title="Republish to a new publish tab"
+                      title={
+                        readOnly
+                          ? "Connection is read-only"
+                          : "Republish to a new publish tab"
+                      }
+                      disabled={readOnly}
                       onClick={() =>
                         openPublish(
                           connId,
@@ -212,8 +219,11 @@ export function MessageBrowser({
                       variant="ghost"
                       size="icon-sm"
                       aria-label="Delete message"
-                      title="Delete message"
+                      title={
+                        readOnly ? "Connection is read-only" : "Delete message"
+                      }
                       className="text-error"
+                      disabled={readOnly}
                       onClick={() => setDeleteOpen(true)}
                     >
                       <Trash2 />

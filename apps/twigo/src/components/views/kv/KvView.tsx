@@ -5,6 +5,7 @@ import { kvCreateBucket } from "@/lib/api";
 import { useConnections } from "@/store/connections";
 import { useKv } from "@/store/kv";
 import { useToasts } from "@/store/toasts";
+import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import type { ViewProps } from "@/shell/views";
 import { TreeSkeleton } from "@/components/views/TreeSkeleton";
 import { KvTree } from "./KvTree";
@@ -18,10 +19,11 @@ export function KvView({ filter, connId }: ViewProps) {
   const data = useKv((s) => (connId ? s.byConn[connId] : undefined));
   const load = useKv((s) => s.load);
   const collapseAll = useKv((s) => s.collapseAll);
+  const readOnly = useIsReadOnly(connId);
   const [createOpen, setCreateOpen] = useState(false);
 
   const doCreate = async (config: Record<string, unknown>) => {
-    if (!connId) return;
+    if (!connId || readOnly) return;
     try {
       await kvCreateBucket(connId, config);
       useToasts
@@ -78,7 +80,8 @@ export function KvView({ filter, connId }: ViewProps) {
             variant="ghost"
             size="icon"
             aria-label="New bucket"
-            title="New bucket"
+            title={readOnly ? "Connection is read-only" : "New bucket"}
+            disabled={readOnly}
             onClick={() => setCreateOpen(true)}
           >
             <Plus />
@@ -129,11 +132,15 @@ export function KvView({ filter, connId }: ViewProps) {
             icon={Database}
             className="flex-1"
             title="No KV buckets"
-            action={{
-              label: "New bucket",
-              onClick: () => setCreateOpen(true),
-              icon: Plus,
-            }}
+            action={
+              readOnly
+                ? undefined
+                : {
+                    label: "New bucket",
+                    onClick: () => setCreateOpen(true),
+                    icon: Plus,
+                  }
+            }
           >
             This context has no KV buckets yet.
           </EmptyState>

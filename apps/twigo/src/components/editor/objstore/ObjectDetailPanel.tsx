@@ -5,6 +5,7 @@ import { Button, EmptyState } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
 import { objGetObject, objDelete } from "@/lib/api";
 import { useObjectInfo } from "@/hooks/useObjectInfo";
+import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import { useObjStore } from "@/store/objstore";
 import { useToasts } from "@/store/toasts";
 import { closeObjectEntry } from "@/lib/editor";
@@ -21,6 +22,7 @@ export function ObjectDetailPanel({
   name: string;
 }) {
   const { data, error, loading, refresh } = useObjectInfo(connId, bucket, name);
+  const readOnly = useIsReadOnly(connId);
   const meta = data ? Object.entries(data.metadata) : [];
   const [downloading, setDownloading] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -41,6 +43,7 @@ export function ObjectDetailPanel({
   };
 
   const doDelete = async () => {
+    if (readOnly) return;
     try {
       await objDelete(connId, bucket, name);
       useToasts.getState().push("success", `Deleted ${name}`);
@@ -76,8 +79,9 @@ export function ObjectDetailPanel({
                 variant="ghost"
                 size="icon"
                 aria-label="Delete object"
-                title="Delete object"
+                title={readOnly ? "Connection is read-only" : "Delete object"}
                 className="text-error"
+                disabled={readOnly}
                 onClick={() => setDeleteOpen(true)}
               >
                 <Trash2 />

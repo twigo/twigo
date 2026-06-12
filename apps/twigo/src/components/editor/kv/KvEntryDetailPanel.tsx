@@ -30,6 +30,7 @@ import {
 } from "@twigo/utils";
 import { kvPut, kvDelete, kvPurge } from "@/lib/api";
 import { useKvEntry, useKvBucketInfo, useKvHistory } from "@/hooks/useKvDetail";
+import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import { useKv } from "@/store/kv";
 import { useToasts } from "@/store/toasts";
 import { closeKvEntry } from "@/lib/editor";
@@ -56,6 +57,7 @@ export function KvEntryDetailPanel({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [conflict, setConflict] = useState(false);
+  const readOnly = useIsReadOnly(connId);
 
   const { data, error, loading, refresh } = useKvEntry(
     connId,
@@ -177,7 +179,10 @@ export function KvEntryDetailPanel({
                 variant="ghost"
                 size="icon"
                 aria-label="Save"
-                title="Save (optimistic)"
+                title={
+                  readOnly ? "Connection is read-only" : "Save (optimistic)"
+                }
+                disabled={readOnly}
                 onClick={() => void save(true)}
               >
                 <Save />
@@ -201,11 +206,13 @@ export function KvEntryDetailPanel({
                   size="icon"
                   aria-label="Edit value"
                   title={
-                    editable
-                      ? "Edit value"
-                      : "Can't edit a truncated or non-UTF-8 value"
+                    readOnly
+                      ? "Connection is read-only"
+                      : editable
+                        ? "Edit value"
+                        : "Can't edit a truncated or non-UTF-8 value"
                   }
-                  disabled={!editable}
+                  disabled={!editable || readOnly}
                   onClick={startEdit}
                 >
                   <Pencil />
@@ -214,8 +221,13 @@ export function KvEntryDetailPanel({
                   variant="ghost"
                   size="icon"
                   aria-label="Delete key"
-                  title="Delete key (tombstone)"
+                  title={
+                    readOnly
+                      ? "Connection is read-only"
+                      : "Delete key (tombstone)"
+                  }
                   className="text-error"
+                  disabled={readOnly}
                   onClick={() => setDeleteOpen(true)}
                 >
                   <Trash2 />
@@ -224,8 +236,13 @@ export function KvEntryDetailPanel({
                   variant="ghost"
                   size="icon"
                   aria-label="Purge key"
-                  title="Purge key (wipe history)"
+                  title={
+                    readOnly
+                      ? "Connection is read-only"
+                      : "Purge key (wipe history)"
+                  }
                   className="text-error"
+                  disabled={readOnly}
                   onClick={() => setPurgeOpen(true)}
                 >
                   <Eraser />
@@ -279,6 +296,8 @@ export function KvEntryDetailPanel({
             <Button
               variant="destructive"
               size="sm"
+              title={readOnly ? "Connection is read-only" : undefined}
+              disabled={readOnly}
               onClick={() => void save(false)}
             >
               Overwrite

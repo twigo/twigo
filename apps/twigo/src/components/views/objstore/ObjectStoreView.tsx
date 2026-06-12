@@ -5,6 +5,7 @@ import { objCreateBucket } from "@/lib/api";
 import { useConnections } from "@/store/connections";
 import { useObjStore } from "@/store/objstore";
 import { useToasts } from "@/store/toasts";
+import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import type { ViewProps } from "@/shell/views";
 import { TreeSkeleton } from "@/components/views/TreeSkeleton";
 import { ObjectTree } from "./ObjectTree";
@@ -18,10 +19,11 @@ export function ObjectStoreView({ filter, connId }: ViewProps) {
   const data = useObjStore((s) => (connId ? s.byConn[connId] : undefined));
   const load = useObjStore((s) => s.load);
   const collapseAll = useObjStore((s) => s.collapseAll);
+  const readOnly = useIsReadOnly(connId);
   const [createOpen, setCreateOpen] = useState(false);
 
   const doCreate = async (config: Record<string, unknown>) => {
-    if (!connId) return;
+    if (!connId || readOnly) return;
     try {
       await objCreateBucket(connId, config);
       useToasts
@@ -78,7 +80,8 @@ export function ObjectStoreView({ filter, connId }: ViewProps) {
             variant="ghost"
             size="icon"
             aria-label="New object store"
-            title="New object store"
+            title={readOnly ? "Connection is read-only" : "New object store"}
+            disabled={readOnly}
             onClick={() => setCreateOpen(true)}
           >
             <Plus />
@@ -129,13 +132,19 @@ export function ObjectStoreView({ filter, connId }: ViewProps) {
             icon={Box}
             className="flex-1"
             title="No object stores"
-            action={{
-              label: "New object store",
-              onClick: () => setCreateOpen(true),
-              icon: Plus,
-            }}
+            action={
+              readOnly
+                ? undefined
+                : {
+                    label: "New object store",
+                    onClick: () => setCreateOpen(true),
+                    icon: Plus,
+                  }
+            }
           >
-            This context has no object stores yet.
+            {readOnly
+              ? "This context has no object stores yet. The connection is read-only."
+              : "This context has no object stores yet."}
           </EmptyState>
         )
       ) : (

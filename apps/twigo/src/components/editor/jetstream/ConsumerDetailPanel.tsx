@@ -11,6 +11,7 @@ import { Button, EmptyState } from "@twigo/ui";
 import { fmtCount } from "@twigo/utils";
 import { jsPauseConsumer, jsResumeConsumer, jsDeleteConsumer } from "@/lib/api";
 import { useConsumerDetail } from "@/hooks/useJetStreamDetail";
+import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import { useConnections } from "@/store/connections";
 import { useJetStream } from "@/store/jetstream";
 import { useToasts } from "@/store/toasts";
@@ -53,6 +54,7 @@ export function ConsumerDetailPanel({
   const serverVersion = useConnections(
     (s) => s.connected[connId]?.serverVersion ?? "",
   );
+  const readOnly = useIsReadOnly(connId);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const cfg = data?.config ?? {};
   const canPause = supportsPause(serverVersion);
@@ -108,13 +110,15 @@ export function ConsumerDetailPanel({
               size="icon"
               aria-label={data.paused ? "Resume consumer" : "Pause consumer"}
               title={
-                canPause
-                  ? data.paused
-                    ? "Resume consumer"
-                    : "Pause consumer"
-                  : "Pause/resume requires NATS Server 2.11+"
+                readOnly
+                  ? "Connection is read-only"
+                  : canPause
+                    ? data.paused
+                      ? "Resume consumer"
+                      : "Pause consumer"
+                    : "Pause/resume requires NATS Server 2.11+"
               }
-              disabled={!canPause}
+              disabled={!canPause || readOnly}
               onClick={() => void doPauseResume()}
             >
               {data.paused ? <Play /> : <Pause />}
@@ -125,8 +129,9 @@ export function ConsumerDetailPanel({
               variant="ghost"
               size="icon"
               aria-label="Delete consumer"
-              title="Delete consumer"
+              title={readOnly ? "Connection is read-only" : "Delete consumer"}
               className="text-error"
+              disabled={readOnly}
               onClick={() => setDeleteOpen(true)}
             >
               <Trash2 />
