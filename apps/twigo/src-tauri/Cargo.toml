@@ -37,6 +37,10 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 futures-util = "0.3.32"
 base64 = "0.22.1"
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "json",
+] }
 tauri-plugin-store = "2.4.3"
 time = { version = "0.3", features = ["formatting"] }
 

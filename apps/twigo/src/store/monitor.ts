@@ -45,7 +45,7 @@ const MAX_SAMPLES = 90;
 
 interface MonitorStore {
   byConn: Record<string, MonitorConnState>;
-  poll: (connId: string) => Promise<void>;
+  poll: (connId: string, monitoringUrl: string | null) => Promise<void>;
   reset: (connId: string) => void;
 }
 
@@ -61,7 +61,7 @@ export const useMonitor = create<MonitorStore>((set, get) => {
   return {
     byConn: {},
 
-    poll: async (connId) => {
+    poll: async (connId, monitoringUrl) => {
       const cur = get().byConn[connId] ?? EMPTY;
       // No $SYS access won't change without a reconnect (which resets); stop
       // hammering a connection that can't be monitored.
@@ -69,9 +69,11 @@ export const useMonitor = create<MonitorStore>((set, get) => {
       if (cur.status === "idle")
         patch(connId, (s) => ({ ...s, status: "loading" }));
       try {
-        const varz = await monitorVarz(connId);
-        const jsz = await monitorJsz(connId).catch(() => null);
-        const healthz = await monitorHealthz(connId).catch(() => null);
+        const varz = await monitorVarz(connId, monitoringUrl);
+        const jsz = await monitorJsz(connId, monitoringUrl).catch(() => null);
+        const healthz = await monitorHealthz(connId, monitoringUrl).catch(
+          () => null,
+        );
         const sample: Sample = {
           t: Date.now(),
           inMsgs: varz.inMsgs,

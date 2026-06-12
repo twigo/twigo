@@ -14,6 +14,25 @@ fn mon_err<E: std::fmt::Display>(e: E) -> Error {
     Error::Monitoring(e.to_string())
 }
 
+// HTTP monitoring port (:8222) returns the same shapes as $SYS but BARE (no
+// {server,data} envelope) and single-server. Used when a context opts in with a
+// monitoring_url — the path for connections that aren't system-account logins.
+async fn http_get<T: serde::de::DeserializeOwned>(base: &str, path: &str) -> error::Result<T> {
+    let url = format!("{}/{}", base.trim_end_matches('/'), path);
+    let resp = reqwest::get(&url)
+        .await
+        .map_err(|e| Error::Monitoring(format!("monitoring request failed: {e}")))?;
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(Error::Monitoring(format!(
+            "monitoring endpoint returned {status}"
+        )));
+    }
+    resp.json::<T>()
+        .await
+        .map_err(|e| Error::Monitoring(format!("monitoring response parse failed: {e}")))
+}
+
 // $SYS server-API replies wrap the payload: { server, data, error? }. We only
 // need data/error; the server block is ignored (serde drops unknown fields).
 #[derive(Deserialize)]
@@ -186,21 +205,39 @@ async fn sys_request<T: serde::de::DeserializeOwned>(
 }
 
 #[tauri::command]
-pub async fn monitor_varz(conns: State<'_, ConnState>, conn_id: String) -> error::Result<Varz> {
-    sys_request(&conns, &conn_id, "VARZ", Vec::new()).await
+pub async fn monitor_varz(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    monitoring_url: Option<String>,
+) -> error::Result<Varz> {
+    match monitoring_url {
+        Some(url) => http_get(&url, "varz").await,
+        None => sys_request(&conns, &conn_id, "VARZ", Vec::new()).await,
+    }
 }
 
 #[tauri::command]
-pub async fn monitor_jsz(conns: State<'_, ConnState>, conn_id: String) -> error::Result<Jsz> {
-    sys_request(&conns, &conn_id, "JSZ", Vec::new()).await
+pub async fn monitor_jsz(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    monitoring_url: Option<String>,
+) -> error::Result<Jsz> {
+    match monitoring_url {
+        Some(url) => http_get(&url, "jsz").await,
+        None => sys_request(&conns, &conn_id, "JSZ", Vec::new()).await,
+    }
 }
 
 #[tauri::command]
 pub async fn monitor_healthz(
     conns: State<'_, ConnState>,
     conn_id: String,
+    monitoring_url: Option<String>,
 ) -> error::Result<Healthz> {
-    sys_request(&conns, &conn_id, "HEALTHZ", Vec::new()).await
+    match monitoring_url {
+        Some(url) => http_get(&url, "healthz").await,
+        None => sys_request(&conns, &conn_id, "HEALTHZ", Vec::new()).await,
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -268,7 +305,11 @@ pub async fn monitor_connz(
     sort: String,
     limit: u32,
     offset: u32,
+    monitoring_url: Option<String>,
 ) -> error::Result<Connz> {
+    if let Some(url) = monitoring_url {
+        return http_get(&url, &format!("connz?sort={sort}&limit={limit}&offset={offset}")).await;
+    }
     let body = serde_json::to_vec(&ConnzReq {
         sort: &sort,
         limit,
@@ -284,7 +325,13 @@ pub async fn monitor_connz(
 pub async fn monitor_cluster(
     conns: State<'_, ConnState>,
     conn_id: String,
+    monitoring_url: Option<String>,
 ) -> error::Result<Vec<Varz>> {
+    // HTTP :8222 is one server's endpoint — no cluster fan-in, just this node.
+    if let Some(url) = monitoring_url {
+        return Ok(vec![http_get(&url, "varz").await?]);
+    }
+
     let client = conns
         .client(&conn_id)
         .await

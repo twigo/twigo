@@ -8,17 +8,22 @@ import { useMonitor, rates, type Sample } from "@/store/monitor";
 import type { ViewProps } from "@/components/views/registry";
 import type { Varz, Jsz, Healthz } from "@/lib/api";
 
-function useMonitorPoll(connId: string | null, intervalMs = 3000) {
+function useMonitorPoll(
+  connId: string | null,
+  monitoringUrl: string | null,
+  intervalMs = 3000,
+) {
   const poll = useMonitor((s) => s.poll);
   useEffect(() => {
     if (!connId) return;
     const tick = () => {
-      if (document.visibilityState === "visible") void poll(connId);
+      if (document.visibilityState === "visible")
+        void poll(connId, monitoringUrl);
     };
     tick();
     const id = setInterval(tick, intervalMs);
     return () => clearInterval(id);
-  }, [connId, intervalMs, poll]);
+  }, [connId, monitoringUrl, intervalMs, poll]);
 }
 
 type Verdict = "ok" | "warn" | "error";
@@ -203,8 +208,11 @@ function Dashboard({
 
 export function MonitorView({ connId }: ViewProps) {
   const isConnected = useConnections((s) => !!(connId && s.connected[connId]));
+  const monitoringUrl = useConnections(
+    (s) => s.contexts.find((c) => c.name === connId)?.monitoringUrl ?? null,
+  );
   const data = useMonitor((s) => (connId ? s.byConn[connId] : undefined));
-  useMonitorPoll(isConnected ? connId : null);
+  useMonitorPoll(isConnected ? connId : null, monitoringUrl);
 
   if (!isConnected || !connId) {
     return (
@@ -236,7 +244,7 @@ export function MonitorView({ connId }: ViewProps) {
         className="flex-1"
         action={{
           label: "Retry",
-          onClick: () => void useMonitor.getState().poll(connId),
+          onClick: () => void useMonitor.getState().poll(connId, monitoringUrl),
           icon: RefreshCw,
         }}
       >

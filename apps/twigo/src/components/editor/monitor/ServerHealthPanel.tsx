@@ -10,6 +10,7 @@ import {
 import { Button, EmptyState, cn } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
 import { monitorConnz, monitorCluster, type Connz, type Varz } from "@/lib/api";
+import { useConnections } from "@/store/connections";
 
 const LIMIT = 100;
 
@@ -31,6 +32,9 @@ const COLS: Col[] = [
 ];
 
 export function ServerHealthPanel({ connId }: { connId: string }) {
+  const monitoringUrl = useConnections(
+    (s) => s.contexts.find((c) => c.name === connId)?.monitoringUrl ?? null,
+  );
   const [sort, setSort] = useState("pending");
   const [offset, setOffset] = useState(0);
   const [tick, setTick] = useState(0);
@@ -41,7 +45,7 @@ export function ServerHealthPanel({ connId }: { connId: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    monitorConnz(connId, sort, LIMIT, offset)
+    monitorConnz(connId, sort, LIMIT, offset, monitoringUrl)
       .then((c) => {
         if (!cancelled) {
           setConnz(c);
@@ -57,11 +61,11 @@ export function ServerHealthPanel({ connId }: { connId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [connId, sort, offset, tick]);
+  }, [connId, sort, offset, tick, monitoringUrl]);
 
   useEffect(() => {
     let cancelled = false;
-    monitorCluster(connId)
+    monitorCluster(connId, monitoringUrl)
       .then((c) => {
         if (!cancelled) setCluster(c);
       })
@@ -71,7 +75,7 @@ export function ServerHealthPanel({ connId }: { connId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [connId, tick]);
+  }, [connId, tick, monitoringUrl]);
 
   useEffect(() => {
     const id = setInterval(() => {

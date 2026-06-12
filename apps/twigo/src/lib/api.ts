@@ -19,6 +19,7 @@ export interface ContextSummary {
   authMethod: string;
   hasTls: boolean;
   selected: boolean;
+  monitoringUrl: string | null;
 }
 
 export interface ConnInfo {
@@ -607,16 +608,25 @@ export interface Healthz {
   statusCode: number;
 }
 
-export function monitorVarz(connId: string): Promise<Varz> {
-  return invoke<Varz>("monitor_varz", { connId });
+export function monitorVarz(
+  connId: string,
+  monitoringUrl: string | null,
+): Promise<Varz> {
+  return invoke<Varz>("monitor_varz", { connId, monitoringUrl });
 }
 
-export function monitorJsz(connId: string): Promise<Jsz> {
-  return invoke<Jsz>("monitor_jsz", { connId });
+export function monitorJsz(
+  connId: string,
+  monitoringUrl: string | null,
+): Promise<Jsz> {
+  return invoke<Jsz>("monitor_jsz", { connId, monitoringUrl });
 }
 
-export function monitorHealthz(connId: string): Promise<Healthz> {
-  return invoke<Healthz>("monitor_healthz", { connId });
+export function monitorHealthz(
+  connId: string,
+  monitoringUrl: string | null,
+): Promise<Healthz> {
+  return invoke<Healthz>("monitor_healthz", { connId, monitoringUrl });
 }
 
 export interface ConnzConn {
@@ -653,11 +663,21 @@ export function monitorConnz(
   sort: string,
   limit: number,
   offset: number,
+  monitoringUrl: string | null,
 ): Promise<Connz> {
-  return invoke<Connz>("monitor_connz", { connId, sort, limit, offset });
+  return invoke<Connz>("monitor_connz", {
+    connId,
+    sort,
+    limit,
+    offset,
+    monitoringUrl,
+  });
 }
 
-// One varz per cluster node (PING fan-in); a single-server reply has length 1.
-export function monitorCluster(connId: string): Promise<Varz[]> {
-  return invoke<Varz[]>("monitor_cluster", { connId });
+// One varz per cluster node (PING fan-in); HTTP / single-server reply has 1.
+export function monitorCluster(
+  connId: string,
+  monitoringUrl: string | null,
+): Promise<Varz[]> {
+  return invoke<Varz[]>("monitor_cluster", { connId, monitoringUrl });
 }
