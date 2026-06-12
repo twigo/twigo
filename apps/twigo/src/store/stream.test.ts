@@ -126,6 +126,33 @@ describe("stream store (multi-session)", () => {
     expect(useStream.getState().sessions.a?.following).toBe(true);
   });
 
+  it("counts every message received even past the display cap", async () => {
+    await useStream.getState().open("a", "local", "orders.>");
+    const ch = mocks.channels[0];
+
+    const N = 2050; // CAP (retained window while following) is 2000
+    for (let i = 0; i < N; i++) ch?.onmessage(msg("orders.new", `m${i}`));
+    vi.advanceTimersByTime(150);
+
+    const s = useStream.getState().sessions.a;
+    expect(s?.items).toHaveLength(2000); // view is windowed
+    expect(s?.received).toBe(N); // but the running total is honest
+  });
+
+  it("keeps counting received while paused, without showing rows", async () => {
+    await useStream.getState().open("a", "local", "orders.>");
+    const ch = mocks.channels[0];
+
+    useStream.getState().togglePause("a");
+    ch?.onmessage(msg("orders.new", "x"));
+    ch?.onmessage(msg("orders.new", "y"));
+    vi.advanceTimersByTime(150);
+
+    const s = useStream.getState().sessions.a;
+    expect(s?.items).toHaveLength(0);
+    expect(s?.received).toBe(2);
+  });
+
   it("closes a session, unsubscribes and clears active when it was active", async () => {
     await useStream.getState().open("a", "local", "orders.>");
     await useStream.getState().open("b", "local", "audit.>");

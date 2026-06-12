@@ -20,6 +20,10 @@ export interface StreamSession {
   paused: boolean;
   following: boolean;
   selectedId: number | null;
+  // All-time messages received on this subscription. The live view only retains
+  // a capped window (CAP while following), so this is how the user learns the
+  // true volume — and that it keeps climbing while paused.
+  received: number;
 }
 
 interface Runtime {
@@ -64,8 +68,10 @@ function flush(id: string) {
   if (!session) return;
   if (session.paused) {
     // Paused streams keep receiving from the backend; bound the staging buffer
-    // so a long pause on a busy subject can't grow memory without limit.
+    // so a long pause on a busy subject can't grow memory without limit. Still
+    // surface the running total so the user sees the stream is live upstream.
     if (rt.buffer.length > HARD_CAP) rt.buffer = rt.buffer.slice(-HARD_CAP);
+    patch(id, (s) => ({ ...s, received: rt.seq }));
     return;
   }
   const batch = rt.buffer;
@@ -73,7 +79,11 @@ function flush(id: string) {
   // Only trim from the top while following the tail; otherwise dropping old
   // rows would shift the scrolled-up view. Hard cap guards memory.
   const cap = session.following ? CAP : HARD_CAP;
-  patch(id, (s) => ({ ...s, items: [...s.items, ...batch].slice(-cap) }));
+  patch(id, (s) => ({
+    ...s,
+    items: [...s.items, ...batch].slice(-cap),
+    received: rt.seq,
+  }));
 }
 
 export const useStream = create<StreamState>((set, get) => ({
@@ -114,6 +124,7 @@ export const useStream = create<StreamState>((set, get) => ({
           paused: false,
           following: true,
           selectedId: null,
+          received: 0,
         },
       },
       activeId: id,

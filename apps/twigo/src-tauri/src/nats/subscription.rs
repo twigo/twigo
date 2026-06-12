@@ -93,6 +93,7 @@ pub async fn subscribe(
     stop(&subs, &sub_id);
     let mut sub = client.subscribe(subject.clone()).await?;
 
+    let task_subject = subject.clone();
     let handle = tokio::spawn(async move {
         while let Some(message) = sub.next().await {
             let dto = encode_message(
@@ -101,7 +102,10 @@ pub async fn subscribe(
                 &message.payload,
                 flatten_headers(message.headers.as_ref()),
             );
+            // The channel closes when its UI tab goes away; end the task quietly
+            // (a debug line for observability — this is normal teardown).
             if on_message.send(dto).is_err() {
+                tracing::debug!(subject = %task_subject, "stream channel closed; ending subscription");
                 break;
             }
         }
