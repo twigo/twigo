@@ -61,7 +61,7 @@ export function ObjectStoreView({ filter, connId }: ViewProps) {
   }
 
   const status = data?.status ?? "idle";
-  const buckets = data?.buckets ?? [];
+  const buckets = data?.parents ?? [];
   const f = filter.trim().toLowerCase();
   const filtered = f
     ? buckets.filter((b) => b.bucket.toLowerCase().includes(f))

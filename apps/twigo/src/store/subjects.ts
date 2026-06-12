@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { startSubjectWatch, stopSubjectWatch } from "@/lib/api";
 import { useWorkspace } from "@/store/workspace";
+import { registerConnScoped } from "@/store/connScoped";
 import type { SubjectStat } from "@twigo/utils";
 
 interface ConnSubjects {
@@ -51,3 +52,5 @@ export const useSubjects = create<SubjectsState>((set) => ({
     });
   },
 }));
+
+registerConnScoped(useSubjects);

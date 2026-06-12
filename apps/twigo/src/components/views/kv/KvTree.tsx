@@ -44,9 +44,9 @@ export function KvTree({
   buckets: KvBucketSummary[];
 }) {
   const expanded = useKv((s) => s.byConn[connId]?.expanded ?? {});
-  const keysByBucket = useKv((s) => s.byConn[connId]?.keys ?? {});
-  const loading = useKv((s) => s.byConn[connId]?.keysLoading ?? {});
-  const toggleBucket = useKv((s) => s.toggleBucket);
+  const keysByBucket = useKv((s) => s.byConn[connId]?.children ?? {});
+  const loading = useKv((s) => s.byConn[connId]?.childrenLoading ?? {});
+  const toggleBucket = useKv((s) => s.toggle);
 
   const [openNodes, setOpenNodes] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState(0);
@@ -57,7 +57,7 @@ export function KvTree({
     try {
       await kvCreate(connId, bkt, key, encodeText(value));
       useToasts.getState().push("success", `Created ${key}`);
-      void useKv.getState().refreshKeys(connId, bkt);
+      void useKv.getState().refreshChildren(connId, bkt);
       void useKv.getState().load(connId);
     } catch (e) {
       useToasts.getState().push("error", `Create failed: ${String(e)}`);

@@ -50,7 +50,7 @@ describe("jetstream store", () => {
     await useJetStream.getState().load("dev");
     const s = useJetStream.getState().byConn.dev;
     expect(s?.status).toBe("ready");
-    expect(s?.streams.map((x) => x.name)).toEqual(["ORDERS", "EVENTS"]);
+    expect(s?.parents.map((x) => x.name)).toEqual(["ORDERS", "EVENTS"]);
   });
 
   it("records an error status on load failure", async () => {
@@ -64,15 +64,15 @@ describe("jetstream store", () => {
     mocks.listConsumers.mockResolvedValue([consumer("worker")]);
     await useJetStream.getState().load("dev");
 
-    await useJetStream.getState().toggleStream("dev", "ORDERS");
+    await useJetStream.getState().toggle("dev", "ORDERS");
     const s = useJetStream.getState().byConn.dev;
     expect(s?.expanded.ORDERS).toBe(true);
-    expect(s?.consumers.ORDERS?.[0]?.name).toBe("worker");
+    expect(s?.children.ORDERS?.[0]?.name).toBe("worker");
     expect(mocks.listConsumers).toHaveBeenCalledTimes(1);
 
     // Collapse then re-expand: no refetch (consumers are cached).
-    await useJetStream.getState().toggleStream("dev", "ORDERS");
-    await useJetStream.getState().toggleStream("dev", "ORDERS");
+    await useJetStream.getState().toggle("dev", "ORDERS");
+    await useJetStream.getState().toggle("dev", "ORDERS");
     expect(mocks.listConsumers).toHaveBeenCalledTimes(1);
   });
 

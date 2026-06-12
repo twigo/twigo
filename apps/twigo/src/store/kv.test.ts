@@ -45,7 +45,7 @@ describe("kv store", () => {
     await useKv.getState().load("dev");
     const s = useKv.getState().byConn.dev;
     expect(s?.status).toBe("ready");
-    expect(s?.buckets.map((b) => b.bucket)).toEqual(["config", "sessions"]);
+    expect(s?.parents.map((b) => b.bucket)).toEqual(["config", "sessions"]);
   });
 
   it("records an error status on load failure", async () => {
@@ -59,15 +59,18 @@ describe("kv store", () => {
     mocks.listKeys.mockResolvedValue([entry("db.host"), entry("db.port")]);
     await useKv.getState().load("dev");
 
-    await useKv.getState().toggleBucket("dev", "config");
+    await useKv.getState().toggle("dev", "config");
     const s = useKv.getState().byConn.dev;
     expect(s?.expanded.config).toBe(true);
-    expect(s?.keys.config?.map((k) => k.key)).toEqual(["db.host", "db.port"]);
+    expect(s?.children.config?.map((k) => k.key)).toEqual([
+      "db.host",
+      "db.port",
+    ]);
     expect(mocks.listKeys).toHaveBeenCalledTimes(1);
 
     // collapse + re-expand: no refetch (cached)
-    await useKv.getState().toggleBucket("dev", "config");
-    await useKv.getState().toggleBucket("dev", "config");
+    await useKv.getState().toggle("dev", "config");
+    await useKv.getState().toggle("dev", "config");
     expect(mocks.listKeys).toHaveBeenCalledTimes(1);
   });
 

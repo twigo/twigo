@@ -102,7 +102,7 @@ export function StreamDetailPanel({
       useToasts
         .getState()
         .push("success", `Created consumer ${String(config.name)}`);
-      void useJetStream.getState().refreshConsumers(connId, stream);
+      void useJetStream.getState().refreshChildren(connId, stream);
       void useJetStream.getState().load(connId);
     } catch (e) {
       useToasts.getState().push("error", `Create failed: ${String(e)}`);

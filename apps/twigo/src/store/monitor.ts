@@ -7,6 +7,7 @@ import {
   type Jsz,
   type Healthz,
 } from "@/lib/api";
+import { registerConnScoped } from "@/store/connScoped";
 
 type Status = "idle" | "loading" | "ready" | "error" | "unavailable";
 
@@ -112,6 +113,8 @@ export const useMonitor = create<MonitorStore>((set, get) => {
       }),
   };
 });
+
+registerConnScoped(useMonitor);
 
 // Live msgs/s + bytes/s from the last two samples; null until there are two.
 // Guards a counter reset (server restart) by treating cur<prev as no rate.

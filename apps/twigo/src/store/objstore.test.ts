@@ -31,7 +31,7 @@ describe("objstore store", () => {
     await useObjStore.getState().load("dev");
     const s = useObjStore.getState().byConn.dev;
     expect(s?.status).toBe("ready");
-    expect(s?.buckets.map((b) => b.bucket)).toEqual(["assets", "backups"]);
+    expect(s?.parents.map((b) => b.bucket)).toEqual(["assets", "backups"]);
   });
 
   it("lazily loads objects on first expand, and caches them", async () => {
@@ -42,17 +42,17 @@ describe("objstore store", () => {
     ]);
     await useObjStore.getState().load("dev");
 
-    await useObjStore.getState().toggleBucket("dev", "assets");
+    await useObjStore.getState().toggle("dev", "assets");
     const s = useObjStore.getState().byConn.dev;
     expect(s?.expanded.assets).toBe(true);
-    expect(s?.objects.assets?.map((o) => o.name)).toEqual([
+    expect(s?.children.assets?.map((o) => o.name)).toEqual([
       "logo.png",
       "doc.pdf",
     ]);
     expect(mocks.listObjects).toHaveBeenCalledTimes(1);
 
-    await useObjStore.getState().toggleBucket("dev", "assets");
-    await useObjStore.getState().toggleBucket("dev", "assets");
+    await useObjStore.getState().toggle("dev", "assets");
+    await useObjStore.getState().toggle("dev", "assets");
     expect(mocks.listObjects).toHaveBeenCalledTimes(1);
   });
 

@@ -25,9 +25,9 @@ export function StreamTree({
   streams: StreamSummary[];
 }) {
   const expanded = useJetStream((s) => s.byConn[connId]?.expanded ?? {});
-  const consumers = useJetStream((s) => s.byConn[connId]?.consumers ?? {});
-  const loading = useJetStream((s) => s.byConn[connId]?.consumersLoading ?? {});
-  const toggleStream = useJetStream((s) => s.toggleStream);
+  const consumers = useJetStream((s) => s.byConn[connId]?.children ?? {});
+  const loading = useJetStream((s) => s.byConn[connId]?.childrenLoading ?? {});
+  const toggleStream = useJetStream((s) => s.toggle);
 
   const [selected, setSelected] = useState(0);
 

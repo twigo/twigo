@@ -22,9 +22,9 @@ export function ObjectTree({
   buckets: ObjBucketSummary[];
 }) {
   const expanded = useObjStore((s) => s.byConn[connId]?.expanded ?? {});
-  const objectsByBucket = useObjStore((s) => s.byConn[connId]?.objects ?? {});
-  const loading = useObjStore((s) => s.byConn[connId]?.objectsLoading ?? {});
-  const toggleBucket = useObjStore((s) => s.toggleBucket);
+  const objectsByBucket = useObjStore((s) => s.byConn[connId]?.children ?? {});
+  const loading = useObjStore((s) => s.byConn[connId]?.childrenLoading ?? {});
+  const toggleBucket = useObjStore((s) => s.toggle);
 
   const [selected, setSelected] = useState(0);
   const [delBucket, setDelBucket] = useState<string | null>(null);
@@ -40,7 +40,7 @@ export function ObjectTree({
     try {
       await objPutObject(connId, bkt, objName, src);
       useToasts.getState().push("success", `Uploaded ${objName}`);
-      void useObjStore.getState().refreshObjects(connId, bkt);
+      void useObjStore.getState().refreshChildren(connId, bkt);
       void useObjStore.getState().load(connId);
     } catch (e) {
       useToasts.getState().push("error", `Upload failed: ${String(e)}`);

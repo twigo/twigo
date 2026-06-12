@@ -45,7 +45,7 @@ export function ObjectDetailPanel({
       await objDelete(connId, bucket, name);
       useToasts.getState().push("success", `Deleted ${name}`);
       closeObjectEntry(connId, bucket, name);
-      void useObjStore.getState().refreshObjects(connId, bucket);
+      void useObjStore.getState().refreshChildren(connId, bucket);
       void useObjStore.getState().load(connId);
     } catch (e) {
       useToasts.getState().push("error", `Delete failed: ${String(e)}`);
