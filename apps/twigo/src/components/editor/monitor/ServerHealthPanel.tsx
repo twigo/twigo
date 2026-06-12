@@ -10,7 +10,7 @@ import {
 import { Button, EmptyState, cn } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
 import { monitorConnz, monitorCluster, type Connz, type Varz } from "@/lib/api";
-import { useConnections } from "@/store/connections";
+import { useMonitorConfig } from "@/store/monitorConfig";
 
 const LIMIT = 100;
 
@@ -32,9 +32,7 @@ const COLS: Col[] = [
 ];
 
 export function ServerHealthPanel({ connId }: { connId: string }) {
-  const monitoringUrl = useConnections(
-    (s) => s.contexts.find((c) => c.name === connId)?.monitoringUrl ?? null,
-  );
+  const monitoringUrl = useMonitorConfig((s) => s.urls[connId] ?? null);
   const [sort, setSort] = useState("pending");
   const [offset, setOffset] = useState(0);
   const [tick, setTick] = useState(0);

@@ -30,10 +30,6 @@ pub(crate) struct ContextFile {
     pub(crate) jetstream_domain: Option<String>,
     #[serde(default)]
     pub(crate) jetstream_api_prefix: Option<String>,
-    // Twigo extension: HTTP monitoring URL (:8222) for servers without a
-    // system-account ($SYS) login — enables the Monitoring view over HTTP.
-    #[serde(default)]
-    pub(crate) monitoring_url: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -52,7 +48,6 @@ pub struct ContextSummary {
     pub auth_method: String,
     pub has_tls: bool,
     pub selected: bool,
-    pub monitoring_url: Option<String>,
 }
 
 impl NatsContext {
@@ -79,7 +74,6 @@ impl NatsContext {
             auth_method: self.auth_method().to_string(),
             has_tls: self.file.cert.is_some() || self.file.ca.is_some(),
             selected: self.selected,
-            monitoring_url: self.file.monitoring_url.clone(),
         }
     }
 }

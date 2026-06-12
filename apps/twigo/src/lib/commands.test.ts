@@ -23,7 +23,6 @@ function ctx(name: string): ContextSummary {
     url: `nats://${name}:4222`,
     authMethod: "none",
     hasTls: false,
-    monitoringUrl: null,
     selected: false,
   };
 }

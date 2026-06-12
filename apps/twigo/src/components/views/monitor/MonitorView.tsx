@@ -1,8 +1,9 @@
-import { useEffect } from "react";
-import { RefreshCw, Activity, ShieldCheck } from "lucide-react";
-import { EmptyState, cn } from "@twigo/ui";
+import { useEffect, useState } from "react";
+import { RefreshCw, Activity, ShieldCheck, Plug } from "lucide-react";
+import { Button, EmptyState, Input, cn } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
 import { useConnections } from "@/store/connections";
+import { useMonitorConfig } from "@/store/monitorConfig";
 import { openServerHealth } from "@/lib/editor";
 import { useMonitor, rates, type Sample } from "@/store/monitor";
 import type { ViewProps } from "@/components/views/registry";
@@ -206,10 +207,87 @@ function Dashboard({
   );
 }
 
+// $SYS metrics need a system-account login; when that's unavailable, let the
+// user point Twigo at the server's HTTP monitoring port (:8222) instead. The
+// URL lives in Twigo's own store (useMonitorConfig), not the nats context file.
+function MonitoringSetup({
+  connId,
+  currentUrl,
+  error,
+}: {
+  connId: string;
+  currentUrl: string | null;
+  error?: string | null;
+}) {
+  const [value, setValue] = useState(currentUrl ?? "");
+  const setUrl = useMonitorConfig((s) => s.setUrl);
+  const apply = (url: string | null) => {
+    setUrl(connId, url);
+    useMonitor.getState().reset(connId);
+  };
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+      <Activity className="size-8 text-muted-foreground/40" />
+      <div className="space-y-1">
+        <p className="text-sm font-medium text-foreground">
+          {error ? "Monitoring unreachable" : "Monitoring off"}
+        </p>
+        <p className="mx-auto max-w-64 text-xs text-muted-foreground">
+          {error ? (
+            "Couldn't reach the HTTP monitoring endpoint. Check the URL and try again."
+          ) : (
+            <>
+              This connection isn&apos;t a system-account login, so server
+              metrics (<code className="font-mono">$SYS</code>) aren&apos;t
+              available. If the server exposes its HTTP monitoring port, point
+              Twigo at it:
+            </>
+          )}
+        </p>
+        {error && (
+          <p className="mx-auto max-w-64 break-words font-mono text-[11px] text-error">
+            {error}
+          </p>
+        )}
+      </div>
+      <form
+        className="flex w-full max-w-64 flex-col gap-1.5"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const v = value.trim();
+          if (v) apply(v);
+        }}
+      >
+        <Input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="http://127.0.0.1:8222"
+          aria-label="HTTP monitoring URL"
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <Button type="submit" size="sm" disabled={!value.trim()}>
+          <Plug className="size-3.5" />
+          {error ? "Reconnect" : "Use HTTP monitoring"}
+        </Button>
+        {currentUrl && (
+          <button
+            type="button"
+            onClick={() => apply(null)}
+            className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          >
+            Clear monitoring URL
+          </button>
+        )}
+      </form>
+    </div>
+  );
+}
+
 export function MonitorView({ connId }: ViewProps) {
   const isConnected = useConnections((s) => !!(connId && s.connected[connId]));
-  const monitoringUrl = useConnections(
-    (s) => s.contexts.find((c) => c.name === connId)?.monitoringUrl ?? null,
+  const monitoringUrl = useMonitorConfig((s) =>
+    connId ? (s.urls[connId] ?? null) : null,
   );
   const data = useMonitor((s) => (connId ? s.byConn[connId] : undefined));
   useMonitorPoll(isConnected ? connId : null, monitoringUrl);
@@ -225,18 +303,20 @@ export function MonitorView({ connId }: ViewProps) {
   const status = data?.status ?? "idle";
 
   if (status === "unavailable") {
-    return (
-      <EmptyState icon={Activity} className="flex-1" title="Monitoring off">
-        <p className="max-w-64 text-xs">
-          This connection isn&apos;t a system-account login, so server metrics (
-          <code className="font-mono">$SYS</code>) aren&apos;t available.
-          Connect with a system-account user to see them.
-        </p>
-      </EmptyState>
-    );
+    return <MonitoringSetup connId={connId} currentUrl={monitoringUrl} />;
   }
 
   if (status === "error") {
+    // An HTTP URL is set but unreachable — let the user fix it in place.
+    if (monitoringUrl) {
+      return (
+        <MonitoringSetup
+          connId={connId}
+          currentUrl={monitoringUrl}
+          error={data?.error ?? null}
+        />
+      );
+    }
     return (
       <EmptyState
         icon={Activity}

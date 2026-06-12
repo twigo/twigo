@@ -19,7 +19,6 @@ export interface ContextSummary {
   authMethod: string;
   hasTls: boolean;
   selected: boolean;
-  monitoringUrl: string | null;
 }
 
 export interface ConnInfo {

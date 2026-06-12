@@ -20,7 +20,6 @@ function ctx(name: string, selected = false): ContextSummary {
     url: `nats://${name}:4222`,
     authMethod: "none",
     hasTls: false,
-    monitoringUrl: null,
     selected,
   };
 }

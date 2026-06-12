@@ -308,7 +308,11 @@ pub async fn monitor_connz(
     monitoring_url: Option<String>,
 ) -> error::Result<Connz> {
     if let Some(url) = monitoring_url {
-        return http_get(&url, &format!("connz?sort={sort}&limit={limit}&offset={offset}")).await;
+        return http_get(
+            &url,
+            &format!("connz?sort={sort}&limit={limit}&offset={offset}"),
+        )
+        .await;
     }
     let body = serde_json::to_vec(&ConnzReq {
         sort: &sort,
