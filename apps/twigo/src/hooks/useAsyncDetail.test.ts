@@ -44,7 +44,8 @@ describe("useAsyncDetail", () => {
 
   it("re-fetches when deps change", async () => {
     const { result, rerender } = renderHook(
-      ({ id }: { id: number }) => useAsyncDetail(() => Promise.resolve(id), [id]),
+      ({ id }: { id: number }) =>
+        useAsyncDetail(() => Promise.resolve(id), [id]),
       { initialProps: { id: 1 } },
     );
     await waitFor(() => {

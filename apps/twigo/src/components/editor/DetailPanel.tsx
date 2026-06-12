@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Copy, Send, Reply } from "lucide-react";
 import { Button, EmptyState, CodeViewer, cn } from "@twigo/ui";
 import {
-  fmtTime,
+  fmtDateTime,
+  fmtRelTime,
   fmtBytes,
   decodeText,
   tryPrettyJson,
@@ -104,7 +105,10 @@ export function DetailPanel() {
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
           <div className="space-y-1.5">
             <Field label="Subject" value={msg.subject} />
-            <Field label="Received" value={fmtTime(msg.receivedAt)} />
+            <Field
+              label="Received"
+              value={`${fmtDateTime(msg.receivedAt)} · ${fmtRelTime(msg.receivedAt)}`}
+            />
             <Field label="Size" value={fmtBytes(msg.size)} />
             {msg.reply && <Field label="Reply" value={msg.reply} />}
           </div>

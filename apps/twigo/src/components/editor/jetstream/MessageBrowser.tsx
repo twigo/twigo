@@ -3,6 +3,7 @@ import { ChevronRight, RefreshCw, Send, Loader2, Trash2 } from "lucide-react";
 import { Button, CodeViewer, cn } from "@twigo/ui";
 import {
   fmtBytes,
+  fmtIsoDateTime,
   decodeText,
   decodePreview,
   tryPrettyJson,
@@ -186,7 +187,9 @@ export function MessageBrowser({
                   <div className="flex items-center gap-2">
                     <span className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                       #{selected.seq} · {selected.subject}
-                      {selected.time ? ` · ${selected.time}` : ""}
+                      {selected.time
+                        ? ` · ${fmtIsoDateTime(selected.time)}`
+                        : ""}
                     </span>
                     <Button
                       variant="ghost"

@@ -2,10 +2,7 @@ import { jsStreamDetail, jsConsumerDetail } from "@/lib/api";
 import { useAsyncDetail } from "./useAsyncDetail";
 
 export function useStreamDetail(connId: string, stream: string) {
-  return useAsyncDetail(
-    () => jsStreamDetail(connId, stream),
-    [connId, stream],
-  );
+  return useAsyncDetail(() => jsStreamDetail(connId, stream), [connId, stream]);
 }
 
 export function useConsumerDetail(
