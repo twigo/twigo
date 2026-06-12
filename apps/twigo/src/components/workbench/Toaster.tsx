@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Info,
   CircleAlert,
+  CircleCheck,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@twigo/ui";
@@ -12,18 +13,21 @@ const ICON: Record<ToastKind, LucideIcon> = {
   error: CircleAlert,
   warning: AlertTriangle,
   info: Info,
+  success: CircleCheck,
 };
 
 const TONE: Record<ToastKind, string> = {
   error: "border-error/40",
   warning: "border-warn/40",
   info: "border-border",
+  success: "border-ok/40",
 };
 
 const ICON_TONE: Record<ToastKind, string> = {
   error: "text-error",
   warning: "text-warn",
   info: "text-muted-foreground",
+  success: "text-ok",
 };
 
 export function Toaster() {
@@ -42,7 +46,7 @@ export function Toaster() {
             key={t.id}
             role="status"
             className={cn(
-              "pointer-events-auto flex items-start gap-2 rounded-md border bg-panel px-3 py-2 text-xs shadow-md",
+              "pointer-events-auto flex items-start gap-2 rounded-md border bg-panel px-3 py-2 text-xs shadow-md duration-200 animate-in fade-in slide-in-from-right-2",
               TONE[t.kind],
             )}
           >
@@ -52,6 +56,18 @@ export function Toaster() {
             <span className="min-w-0 flex-1 break-words text-foreground">
               {t.message}
             </span>
+            {t.action && (
+              <button
+                type="button"
+                onClick={() => {
+                  t.action?.run();
+                  dismiss(t.id);
+                }}
+                className="shrink-0 font-medium text-brand hover:underline"
+              >
+                {t.action.label}
+              </button>
+            )}
             <button
               type="button"
               aria-label="Dismiss"

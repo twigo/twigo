@@ -61,10 +61,10 @@ export function ConsumerDetailPanel({
     try {
       if (data?.paused) {
         await jsResumeConsumer(connId, stream, consumer);
-        useToasts.getState().push("info", `Resumed ${consumer}`);
+        useToasts.getState().push("success", `Resumed ${consumer}`);
       } else {
         await jsPauseConsumer(connId, stream, consumer);
-        useToasts.getState().push("info", `Paused ${consumer}`);
+        useToasts.getState().push("success", `Paused ${consumer}`);
       }
       refresh();
       void useJetStream.getState().refreshConsumers(connId, stream);
@@ -77,7 +77,7 @@ export function ConsumerDetailPanel({
   const doDelete = async () => {
     try {
       await jsDeleteConsumer(connId, stream, consumer);
-      useToasts.getState().push("info", `Deleted consumer ${consumer}`);
+      useToasts.getState().push("success", `Deleted consumer ${consumer}`);
       closeConsumerDetail(connId, stream, consumer);
       void useJetStream.getState().refreshConsumers(connId, stream);
       void useJetStream.getState().load(connId);

@@ -56,7 +56,7 @@ export function KvTree({
   const doCreateKey = async (bkt: string, key: string, value: string) => {
     try {
       await kvCreate(connId, bkt, key, encodeText(value));
-      useToasts.getState().push("info", `Created ${key}`);
+      useToasts.getState().push("success", `Created ${key}`);
       void useKv.getState().refreshKeys(connId, bkt);
       void useKv.getState().load(connId);
     } catch (e) {
@@ -67,7 +67,7 @@ export function KvTree({
   const doDeleteBucket = async (bkt: string) => {
     try {
       await kvDeleteBucket(connId, bkt);
-      useToasts.getState().push("info", `Deleted bucket ${bkt}`);
+      useToasts.getState().push("success", `Deleted bucket ${bkt}`);
       void useKv.getState().load(connId);
     } catch (e) {
       useToasts.getState().push("error", `Delete failed: ${String(e)}`);

@@ -26,7 +26,7 @@ export function JetStreamView({ filter, connId }: ViewProps) {
       await jsCreateStream(connId, config);
       useToasts
         .getState()
-        .push("info", `Created stream ${String(config.name)}`);
+        .push("success", `Created stream ${String(config.name)}`);
       void load(connId);
     } catch (e) {
       useToasts.getState().push("error", `Create failed: ${String(e)}`);

@@ -92,6 +92,8 @@ export function KvEntryDetailPanel({
   // useRevision=true → optimistic CAS; false → force overwrite (blind put).
   const save = async (useRevision: boolean) => {
     if (!data) return;
+    // The value as loaded — re-putting it is a real "undo" (KV keeps history).
+    const prevB64 = data.payloadB64;
     try {
       await kvPut(
         connId,
@@ -100,7 +102,19 @@ export function KvEntryDetailPanel({
         encodeText(draft),
         useRevision ? data.revision : null,
       );
-      useToasts.getState().push("info", `Saved ${kvkey}`);
+      useToasts.getState().push("success", `Saved ${kvkey}`, {
+        label: "Undo",
+        run: () => {
+          void kvPut(connId, bucket, kvkey, prevB64, null)
+            .then(() => {
+              useToasts.getState().push("info", `Restored ${kvkey}`);
+              doRefresh();
+            })
+            .catch((e: unknown) => {
+              useToasts.getState().push("error", `Undo failed: ${String(e)}`);
+            });
+        },
+      });
       doRefresh();
     } catch (e) {
       const msg = String(e);
@@ -115,7 +129,7 @@ export function KvEntryDetailPanel({
   const doDelete = async () => {
     try {
       await kvDelete(connId, bucket, kvkey);
-      useToasts.getState().push("info", `Deleted ${kvkey}`);
+      useToasts.getState().push("success", `Deleted ${kvkey}`);
       closeKvEntry(connId, bucket, kvkey);
       void useKv.getState().refreshKeys(connId, bucket);
       void useKv.getState().load(connId);
@@ -127,7 +141,7 @@ export function KvEntryDetailPanel({
   const doPurge = async () => {
     try {
       await kvPurge(connId, bucket, kvkey);
-      useToasts.getState().push("info", `Purged ${kvkey}`);
+      useToasts.getState().push("success", `Purged ${kvkey}`);
       closeKvEntry(connId, bucket, kvkey);
       void useKv.getState().refreshKeys(connId, bucket);
       void useKv.getState().load(connId);

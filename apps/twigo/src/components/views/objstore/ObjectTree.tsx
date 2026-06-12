@@ -39,7 +39,7 @@ export function ObjectTree({
     setUploadingBucket(bkt);
     try {
       await objPutObject(connId, bkt, objName, src);
-      useToasts.getState().push("info", `Uploaded ${objName}`);
+      useToasts.getState().push("success", `Uploaded ${objName}`);
       void useObjStore.getState().refreshObjects(connId, bkt);
       void useObjStore.getState().load(connId);
     } catch (e) {
@@ -69,7 +69,7 @@ export function ObjectTree({
   const doDeleteBucket = async (bkt: string) => {
     try {
       await objDeleteBucket(connId, bkt);
-      useToasts.getState().push("info", `Deleted object store ${bkt}`);
+      useToasts.getState().push("success", `Deleted object store ${bkt}`);
       void useObjStore.getState().load(connId);
     } catch (e) {
       useToasts.getState().push("error", `Delete failed: ${String(e)}`);
