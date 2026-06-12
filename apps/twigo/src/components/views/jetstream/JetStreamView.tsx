@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { RefreshCw, ChevronsDownUp, Loader2, Layers, Plus } from "lucide-react";
+import { RefreshCw, ChevronsDownUp, Layers, Plus } from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
 import { jsCreateStream } from "@/lib/api";
 import { useConnections } from "@/store/connections";
 import { useJetStream } from "@/store/jetstream";
 import { useToasts } from "@/store/toasts";
 import type { ViewProps } from "@/components/views/registry";
+import { TreeSkeleton } from "@/components/views/TreeSkeleton";
 import { StreamTree } from "./StreamTree";
 import { StreamFormDialog } from "@/components/editor/jetstream/StreamFormDialog";
 
@@ -104,9 +105,7 @@ export function JetStreamView({ filter, connId }: ViewProps) {
       </div>
 
       {status === "loading" && streams.length === 0 ? (
-        <EmptyState icon={Loader2} className="flex-1 [&>svg]:animate-spin">
-          Loading streams…
-        </EmptyState>
+        <TreeSkeleton />
       ) : status === "error" ? (
         <EmptyState
           icon={Layers}

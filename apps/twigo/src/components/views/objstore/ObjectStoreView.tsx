@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { RefreshCw, ChevronsDownUp, Loader2, Box, Plus } from "lucide-react";
+import { RefreshCw, ChevronsDownUp, Box, Plus } from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
 import { objCreateBucket } from "@/lib/api";
 import { useConnections } from "@/store/connections";
 import { useObjStore } from "@/store/objstore";
 import { useToasts } from "@/store/toasts";
 import type { ViewProps } from "@/components/views/registry";
+import { TreeSkeleton } from "@/components/views/TreeSkeleton";
 import { ObjectTree } from "./ObjectTree";
 import { CreateObjBucketDialog } from "@/components/editor/objstore/CreateObjBucketDialog";
 
@@ -104,9 +105,7 @@ export function ObjectStoreView({ filter, connId }: ViewProps) {
       </div>
 
       {status === "loading" && buckets.length === 0 ? (
-        <EmptyState icon={Loader2} className="flex-1 [&>svg]:animate-spin">
-          Loading object stores…
-        </EmptyState>
+        <TreeSkeleton />
       ) : status === "error" ? (
         <EmptyState
           icon={Box}

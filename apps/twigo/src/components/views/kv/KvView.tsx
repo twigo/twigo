@@ -1,17 +1,12 @@
 import { useEffect, useState } from "react";
-import {
-  RefreshCw,
-  ChevronsDownUp,
-  Loader2,
-  Database,
-  Plus,
-} from "lucide-react";
+import { RefreshCw, ChevronsDownUp, Database, Plus } from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
 import { kvCreateBucket } from "@/lib/api";
 import { useConnections } from "@/store/connections";
 import { useKv } from "@/store/kv";
 import { useToasts } from "@/store/toasts";
 import type { ViewProps } from "@/components/views/registry";
+import { TreeSkeleton } from "@/components/views/TreeSkeleton";
 import { KvTree } from "./KvTree";
 import { CreateBucketDialog } from "@/components/editor/kv/CreateBucketDialog";
 
@@ -110,9 +105,7 @@ export function KvView({ filter, connId }: ViewProps) {
       </div>
 
       {status === "loading" && buckets.length === 0 ? (
-        <EmptyState icon={Loader2} className="flex-1 [&>svg]:animate-spin">
-          Loading buckets…
-        </EmptyState>
+        <TreeSkeleton />
       ) : status === "error" ? (
         <EmptyState
           icon={Database}
