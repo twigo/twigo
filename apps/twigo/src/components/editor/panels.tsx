@@ -9,6 +9,7 @@ import {
   ArrowDownToLine,
   Database,
   Box,
+  Activity,
   type LucideIcon,
 } from "lucide-react";
 import type {
@@ -24,6 +25,7 @@ import { StreamDetailPanel } from "./jetstream/StreamDetailPanel";
 import { ConsumerDetailPanel } from "./jetstream/ConsumerDetailPanel";
 import { KvEntryDetailPanel } from "./kv/KvEntryDetailPanel";
 import { ObjectDetailPanel } from "./objstore/ObjectDetailPanel";
+import { ServerHealthPanel } from "./monitor/ServerHealthPanel";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 
 export function StreamPanel(props: IDockviewPanelProps) {
@@ -94,6 +96,11 @@ export function ObjectPanel(props: IDockviewPanelProps) {
     name: string;
   };
   return <ObjectDetailPanel connId={connId} bucket={bucket} name={name} />;
+}
+
+export function ServerHealthPanelHost(props: IDockviewPanelProps) {
+  const { connId } = props.params as { connId: string };
+  return <ServerHealthPanel connId={connId} />;
 }
 
 export function JsConsumerPanel(props: IDockviewPanelProps) {
@@ -244,6 +251,19 @@ export function ObjectTab(props: IDockviewPanelHeaderProps) {
       icon={Box}
       iconClass="text-brand"
       mono
+      title={props.api.title}
+      onClose={() => {
+        props.api.close();
+      }}
+    />
+  );
+}
+
+export function ServerHealthTab(props: IDockviewPanelHeaderProps) {
+  return (
+    <ClosableTab
+      icon={Activity}
+      iconClass="text-brand"
       title={props.api.title}
       onClose={() => {
         props.api.close();

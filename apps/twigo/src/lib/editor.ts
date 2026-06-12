@@ -247,6 +247,16 @@ export function closeObjectEntry(connId: string, bucket: string, name: string) {
   api?.getPanel(objEntryEditorId(connId, bucket, name))?.api.close();
 }
 
+/** Open the wide Server-health tab (connections table) for a connection. */
+export function openServerHealth(connId: string) {
+  openEditor({
+    type: "serverhealth",
+    id: `serverhealth:${encodeURIComponent(connId)}`,
+    title: "Server health",
+    params: { connId },
+  });
+}
+
 /** Open settings as the first editor tab. */
 export function openSettings() {
   openEditor({ type: "settings", id: "settings", title: "Settings", index: 0 });

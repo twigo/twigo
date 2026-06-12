@@ -64,7 +64,12 @@ pub fn run() {
             nats::obj::obj_put_object,
             nats::obj::obj_delete,
             nats::obj::obj_create_bucket,
-            nats::obj::obj_delete_bucket
+            nats::obj::obj_delete_bucket,
+            nats::monitoring::monitor_varz,
+            nats::monitoring::monitor_jsz,
+            nats::monitoring::monitor_healthz,
+            nats::monitoring::monitor_connz,
+            nats::monitoring::monitor_cluster
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

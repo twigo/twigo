@@ -559,3 +559,124 @@ export async function objDeleteBucket(
 ): Promise<void> {
   await invoke("obj_delete_bucket", { connId, bucket });
 }
+
+export interface Varz {
+  serverId: string;
+  serverName: string;
+  version: string;
+  host: string;
+  port: number;
+  maxPayload: number;
+  now: string;
+  uptime: string;
+  mem: number;
+  cores: number;
+  cpu: number;
+  connections: number;
+  totalConnections: number;
+  subscriptions: number;
+  inMsgs: number;
+  inBytes: number;
+  outMsgs: number;
+  outBytes: number;
+  slowConsumers: number;
+  routes: number;
+  remotes: number;
+  leafnodes: number;
+  cluster: { name: string | null };
+  lameDuckMode: boolean;
+}
+
+export interface Jsz {
+  memory: number;
+  storage: number;
+  reservedMemory: number;
+  reservedStorage: number;
+  accounts: number;
+  haAssets: number;
+  streams: number;
+  consumers: number;
+  messages: number;
+  bytes: number;
+  config: { maxMemory: number; maxStorage: number };
+  api: { level: number; total: number; errors: number };
+}
+
+export interface Healthz {
+  status: string;
+  statusCode: number;
+}
+
+export function monitorVarz(
+  connId: string,
+  monitoringUrl: string | null,
+): Promise<Varz> {
+  return invoke<Varz>("monitor_varz", { connId, monitoringUrl });
+}
+
+export function monitorJsz(
+  connId: string,
+  monitoringUrl: string | null,
+): Promise<Jsz> {
+  return invoke<Jsz>("monitor_jsz", { connId, monitoringUrl });
+}
+
+export function monitorHealthz(
+  connId: string,
+  monitoringUrl: string | null,
+): Promise<Healthz> {
+  return invoke<Healthz>("monitor_healthz", { connId, monitoringUrl });
+}
+
+export interface ConnzConn {
+  cid: number;
+  name: string;
+  lang: string;
+  version: string;
+  ip: string;
+  port: number;
+  account: string | null;
+  subscriptions: number;
+  pendingBytes: number;
+  inMsgs: number;
+  outMsgs: number;
+  inBytes: number;
+  outBytes: number;
+  rtt: string;
+  idle: string;
+  uptime: string;
+  lastActivity: string;
+}
+
+export interface Connz {
+  now: string;
+  numConnections: number;
+  total: number;
+  offset: number;
+  limit: number;
+  connections: ConnzConn[];
+}
+
+export function monitorConnz(
+  connId: string,
+  sort: string,
+  limit: number,
+  offset: number,
+  monitoringUrl: string | null,
+): Promise<Connz> {
+  return invoke<Connz>("monitor_connz", {
+    connId,
+    sort,
+    limit,
+    offset,
+    monitoringUrl,
+  });
+}
+
+// One varz per cluster node (PING fan-in); HTTP / single-server reply has 1.
+export function monitorCluster(
+  connId: string,
+  monitoringUrl: string | null,
+): Promise<Varz[]> {
+  return invoke<Varz[]>("monitor_cluster", { connId, monitoringUrl });
+}

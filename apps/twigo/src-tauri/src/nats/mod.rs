@@ -3,6 +3,7 @@ pub mod context;
 pub mod error;
 pub mod jetstream;
 pub mod kv;
+pub mod monitoring;
 pub mod obj;
 pub mod publish;
 pub mod subjects;

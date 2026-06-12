@@ -2,11 +2,13 @@ import { describe, it, expect } from "vitest";
 import { fmtBytes, fmtRtt, fmtTime, fmtCount, fmtDuration } from "./format";
 
 describe("fmtBytes", () => {
-  it("formats B / KB / MB consistently", () => {
+  it("formats B / KB / MB / GB / TB consistently", () => {
     expect(fmtBytes(0)).toBe("0 B");
     expect(fmtBytes(512)).toBe("512 B");
     expect(fmtBytes(2048)).toBe("2.0 KB");
     expect(fmtBytes(4 * 1024 * 1024)).toBe("4.0 MB");
+    expect(fmtBytes(3 * 1024 ** 3)).toBe("3.0 GB");
+    expect(fmtBytes(2 * 1024 ** 4)).toBe("2.0 TB");
   });
 });
 
