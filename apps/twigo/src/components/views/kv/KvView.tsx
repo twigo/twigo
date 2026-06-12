@@ -5,7 +5,7 @@ import { kvCreateBucket } from "@/lib/api";
 import { useConnections } from "@/store/connections";
 import { useKv } from "@/store/kv";
 import { useToasts } from "@/store/toasts";
-import type { ViewProps } from "@/components/views/registry";
+import type { ViewProps } from "@/shell/views";
 import { TreeSkeleton } from "@/components/views/TreeSkeleton";
 import { KvTree } from "./KvTree";
 import { CreateBucketDialog } from "@/components/editor/kv/CreateBucketDialog";

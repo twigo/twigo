@@ -8,93 +8,25 @@ import {
   type DockviewTheme,
 } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
-import { Radio, Send, Search, Settings } from "lucide-react";
-import { EmptyState, Kbd } from "@twigo/ui";
 import { useUi } from "@/store/ui";
 import { useStream } from "@/store/stream";
 import { useConnections } from "@/store/connections";
-import { usePalette } from "@/store/palette";
-import { fmtBinding } from "@/lib/commands";
 import { useWorkspace } from "@/store/workspace";
 import {
   setEditorApi,
   openStream,
-  openSettings,
   isReplacingLayout,
   setReplacingLayout,
   closeEditorsForConn,
 } from "@/lib/editor";
-import { newPublish } from "@/lib/actions";
+import { getWatermark } from "@/shell/watermark";
 import { editorComponents, editorTabComponents } from "./registry";
 import { NewTabButton } from "./NewTabButton";
 
-// Shown by Dockview when the editor area has no open tabs. Branches on whether
-// anything is live so the first thing a new user sees is a way forward, not a
-// dead end.
-function Watermark() {
-  const noContexts = useConnections(
-    (s) => s.status === "ready" && s.contexts.length === 0,
-  );
-  const hasLive = useConnections((s) =>
-    Object.values(s.connected).some((i) => i.connected),
-  );
-  if (noContexts) {
-    return (
-      <EmptyState
-        icon={Radio}
-        className="h-full bg-background"
-        title="No connections yet"
-        action={{
-          label: "Open settings",
-          onClick: () => openSettings(),
-          icon: Settings,
-        }}
-        kbd={fmtBinding("mod+,")}
-      >
-        <p className="max-w-sm">
-          Twigo reads your nats CLI contexts from{" "}
-          <code className="font-mono text-xs">~/.config/nats/context</code>. Add
-          one with <code className="font-mono text-xs">nats context add</code>,
-          or point Twigo at a different folder in Settings.
-        </p>
-        <p className="mt-2 text-xs text-muted-foreground">
-          New here? Press <Kbd>?</Kbd> for keyboard shortcuts.
-        </p>
-      </EmptyState>
-    );
-  }
-  if (!hasLive) {
-    return (
-      <EmptyState
-        icon={Radio}
-        className="h-full bg-background"
-        title="No live connection"
-        action={{
-          label: "Open command palette",
-          onClick: () => usePalette.getState().setOpen(true),
-          icon: Search,
-        }}
-        kbd={fmtBinding("mod+shift+p")}
-      >
-        <p className="max-w-xs">
-          Connect to a server from the switcher in the top-left, then pick a
-          subject to watch it live.
-        </p>
-      </EmptyState>
-    );
-  }
-  return (
-    <EmptyState
-      icon={Radio}
-      className="h-full bg-background"
-      title="Pick a subject to stream"
-      action={{ label: "New publish", onClick: () => newPublish(), icon: Send }}
-    >
-      <p className="max-w-xs">
-        Choose a subject in the Explorer — each opens in its own live tab.
-      </p>
-    </EmptyState>
-  );
+// Fallback for the editor zero-state when no domain module contributed a
+// watermark (the NATS module registers its own via registerNatsModule).
+function EmptyWatermark() {
+  return <div className="h-full bg-background" />;
 }
 
 // A restored stream tab comes back as a placeholder (no live session). Subscribe
@@ -115,6 +47,8 @@ function subscribeActiveStream(api: DockviewApi) {
 
 export function EditorArea() {
   const uiTheme = useUi((s) => s.resolvedTheme);
+  // Resolved at render (after registerNatsModule ran in main.tsx); stable after.
+  const Watermark = getWatermark() ?? EmptyWatermark;
   const apiRef = useRef<DockviewApi | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,

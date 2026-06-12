@@ -4,7 +4,7 @@ import { cn } from "@twigo/ui";
 import { useConnections } from "@/store/connections";
 import { useResponder } from "@/store/responder";
 import { openResponderTab } from "@/lib/editor";
-import type { ViewProps } from "@/components/views/registry";
+import type { ViewProps } from "@/shell/views";
 
 function IconButton({
   label,

@@ -6,7 +6,7 @@ import { useConnections } from "@/store/connections";
 import { useMonitorConfig } from "@/store/monitorConfig";
 import { openServerHealth } from "@/lib/editor";
 import { useMonitor, rates, type Sample } from "@/store/monitor";
-import type { ViewProps } from "@/components/views/registry";
+import type { ViewProps } from "@/shell/views";
 import type { Varz, Jsz, Healthz } from "@/lib/api";
 
 function useMonitorPoll(

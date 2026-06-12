@@ -5,7 +5,7 @@ import { useConnections } from "@/store/connections";
 import { useSubjects } from "@/store/subjects";
 import { buildSubjectTree } from "@twigo/utils";
 import { openStream } from "@/lib/editor";
-import type { ViewProps } from "@/components/views/registry";
+import type { ViewProps } from "@/shell/views";
 import { SubjectTree } from "./SubjectTree";
 import { WatchForm } from "./WatchForm";
 

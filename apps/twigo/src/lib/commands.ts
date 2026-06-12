@@ -1,10 +1,5 @@
-import { useConnections } from "@/store/connections";
 import { useUi } from "@/store/ui";
 import { useHelp } from "@/store/help";
-import { useJetStream } from "@/store/jetstream";
-import { useKv } from "@/store/kv";
-import { useObjStore } from "@/store/objstore";
-import { newPublish, newResponder } from "@/lib/actions";
 import {
   openSettings,
   splitActiveEditor,
@@ -13,7 +8,7 @@ import {
   canSplitActiveEditor,
   editorGroupCount,
 } from "@/lib/editor";
-import { VIEWS, VIEW_ORDER } from "@/components/views/registry";
+import { getViews } from "@/shell/views";
 
 export interface Command {
   id: string;
@@ -25,83 +20,8 @@ export interface Command {
   run: () => void;
 }
 
-const hasLive = () =>
-  Object.values(useConnections.getState().connected).some((i) => i.connected);
-
-const STATIC: Command[] = [
-  {
-    id: "publish.new",
-    title: "New publish",
-    category: "Create",
-    keywords: "request reply",
-    keybinding: "mod+n",
-    when: hasLive,
-    run: newPublish,
-  },
-  {
-    id: "responder.new",
-    title: "New responder (mock)",
-    category: "Create",
-    keywords: "mock service template",
-    when: hasLive,
-    run: newResponder,
-  },
-  {
-    id: "connections.reload",
-    title: "Reload nats contexts",
-    category: "Connections",
-    run: () => void useConnections.getState().load(),
-  },
-  {
-    id: "jetstream.refresh",
-    title: "JetStream: Refresh streams",
-    category: "Connections",
-    keywords: "jetstream stream consumer",
-    when: () => {
-      const { activeContext, connected } = useConnections.getState();
-      return !!(activeContext && connected[activeContext]?.jetstream);
-    },
-    run: () => {
-      const active = useConnections.getState().activeContext;
-      if (active) void useJetStream.getState().load(active);
-    },
-  },
-  {
-    id: "kv.refresh",
-    title: "KV: Refresh buckets",
-    category: "Connections",
-    keywords: "kv key value bucket",
-    when: () => {
-      const { activeContext, connected } = useConnections.getState();
-      return !!(activeContext && connected[activeContext]?.jetstream);
-    },
-    run: () => {
-      const active = useConnections.getState().activeContext;
-      if (active) void useKv.getState().load(active);
-    },
-  },
-  {
-    id: "objstore.refresh",
-    title: "Object Store: Refresh",
-    category: "Connections",
-    keywords: "object store bucket file",
-    when: () => {
-      const { activeContext, connected } = useConnections.getState();
-      return !!(activeContext && connected[activeContext]?.jetstream);
-    },
-    run: () => {
-      const active = useConnections.getState().activeContext;
-      if (active) void useObjStore.getState().load(active);
-    },
-  },
-  ...VIEW_ORDER.map(
-    (v): Command => ({
-      id: `view.${v}`,
-      title: `Go to ${VIEWS[v].title}`,
-      category: "Go",
-      run: () => useUi.getState().setView(v),
-    }),
-  ),
+// The workbench's own commands — view/editor/theme/help, no domain knowledge.
+const SHELL_COMMANDS: Command[] = [
   {
     id: "settings.open",
     title: "Open settings",
@@ -176,35 +96,48 @@ const STATIC: Command[] = [
   },
 ];
 
-function connectionCommands(): Command[] {
-  const { contexts, connected } = useConnections.getState();
-  return contexts.map((c): Command => {
-    const isConnected = !!connected[c.name];
-    return {
-      id: `conn.${c.name}`,
-      title: isConnected ? `Switch to ${c.name}` : `Connect to ${c.name}`,
-      category: "Connections",
-      keywords: c.name,
-      run: isConnected
-        ? () => useConnections.getState().setActive(c.name)
-        : () => {
-            // Connect to and switch to it, matching the connection switcher.
-            useConnections.getState().setActive(c.name);
-            void useConnections.getState().connect(c.name);
-          },
-    };
-  });
+// Domain modules contribute commands here: fixed ones via registerCommand, and
+// dynamic sets (e.g. one per connection) via registerCommandProvider.
+const staticCommands: Command[] = [...SHELL_COMMANDS];
+const providers: (() => Command[])[] = [];
+
+export function registerCommand(...cmds: Command[]): void {
+  staticCommands.push(...cmds);
+}
+
+export function registerCommandProvider(provider: () => Command[]): void {
+  providers.push(provider);
+}
+
+// Test-only: drop module contributions, leaving the shell's own commands.
+export function clearRegisteredCommands(): void {
+  staticCommands.length = 0;
+  staticCommands.push(...SHELL_COMMANDS);
+  providers.length = 0;
 }
 
 // Open the palette with the familiar combos: VS Code (⇧⌘P), JetBrains (⇧⌘A),
 // and the modern ⌘K alias.
 export const PALETTE_BINDINGS = ["mod+shift+p", "mod+shift+a", "mod+k"];
 
+// "Go to X" for each registered view. Built at call time because views are
+// registered by domain modules after this module is imported.
+function viewCommands(): Command[] {
+  return getViews().map((v) => ({
+    id: `view.${v.id}`,
+    title: `Go to ${v.title}`,
+    category: "Go",
+    run: () => useUi.getState().setView(v.id),
+  }));
+}
+
 /** The currently-available commands (static + dynamic, filtered by `when`). */
 export function getCommands(): Command[] {
-  return [...STATIC, ...connectionCommands()].filter(
-    (c) => !c.when || c.when(),
-  );
+  return [
+    ...staticCommands,
+    ...viewCommands(),
+    ...providers.flatMap((p) => p()),
+  ].filter((c) => !c.when || c.when());
 }
 
 export interface ShortcutHelp {
@@ -221,7 +154,7 @@ export function keybindingHelp(): ShortcutHelp[] {
     title: "Command palette",
     binding: PALETTE_BINDINGS[0] ?? "mod+shift+p",
   };
-  const fromCommands = STATIC.flatMap((c) =>
+  const fromCommands = staticCommands.flatMap((c) =>
     c.keybinding
       ? [{ category: c.category, title: c.title, binding: c.keybinding }]
       : [],
