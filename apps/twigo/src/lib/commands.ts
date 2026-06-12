@@ -4,7 +4,14 @@ import { useJetStream } from "@/store/jetstream";
 import { useKv } from "@/store/kv";
 import { useObjStore } from "@/store/objstore";
 import { newPublish, newResponder } from "@/lib/actions";
-import { openSettings } from "@/lib/editor";
+import {
+  openSettings,
+  splitActiveEditor,
+  focusNextEditorGroup,
+  resetEditorLayout,
+  canSplitActiveEditor,
+  editorGroupCount,
+} from "@/lib/editor";
 import { VIEWS, VIEW_ORDER } from "@/components/views/registry";
 
 export interface Command {
@@ -119,8 +126,42 @@ const STATIC: Command[] = [
     id: "theme.toggle",
     title: "Toggle theme",
     category: "View",
-    keywords: "dark light",
+    keywords: "dark light system",
     run: () => useUi.getState().toggleTheme(),
+  },
+  {
+    id: "editor.splitRight",
+    title: "Split editor right",
+    category: "Editor",
+    keywords: "split pane group side vertical",
+    keybinding: "mod+\\",
+    when: canSplitActiveEditor,
+    run: () => splitActiveEditor("right"),
+  },
+  {
+    id: "editor.splitDown",
+    title: "Split editor down",
+    category: "Editor",
+    keywords: "split pane group below horizontal",
+    keybinding: "mod+alt+\\",
+    when: canSplitActiveEditor,
+    run: () => splitActiveEditor("below"),
+  },
+  {
+    id: "editor.focusNextGroup",
+    title: "Focus next editor group",
+    category: "Editor",
+    keywords: "split pane cycle next",
+    when: () => editorGroupCount() > 1,
+    run: focusNextEditorGroup,
+  },
+  {
+    id: "editor.resetLayout",
+    title: "Reset editor layout",
+    category: "Editor",
+    keywords: "split pane merge unsplit single collapse",
+    when: () => editorGroupCount() > 1,
+    run: resetEditorLayout,
   },
 ];
 

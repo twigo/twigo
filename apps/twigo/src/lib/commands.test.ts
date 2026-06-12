@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useConnections } from "@/store/connections";
 import type { ContextSummary, ConnInfo } from "@/lib/api";
 import { getCommands, matchKeybinding, fmtBinding } from "./commands";
+import { canSplitActiveEditor, editorGroupCount } from "@/lib/editor";
 
 vi.mock("@/lib/editor", () => ({
   openSettings: vi.fn(),
@@ -10,6 +11,11 @@ vi.mock("@/lib/editor", () => ({
   openResponder: vi.fn(),
   openResponderTab: vi.fn(),
   openServerInfo: vi.fn(),
+  splitActiveEditor: vi.fn(),
+  focusNextEditorGroup: vi.fn(),
+  resetEditorLayout: vi.fn(),
+  canSplitActiveEditor: vi.fn(() => false),
+  editorGroupCount: vi.fn(() => 0),
 }));
 vi.mock("@/lib/actions", () => ({
   newPublish: vi.fn(),
@@ -49,6 +55,26 @@ describe("command registry", () => {
     expect(getCommands().some((c) => c.id === "publish.new")).toBe(false);
     useConnections.setState({ connected: { a: info("a") } });
     expect(getCommands().some((c) => c.id === "publish.new")).toBe(true);
+  });
+
+  it("gates editor split commands behind a splittable layout", () => {
+    vi.mocked(canSplitActiveEditor).mockReturnValue(false);
+    expect(getCommands().some((c) => c.id === "editor.splitRight")).toBe(false);
+    vi.mocked(canSplitActiveEditor).mockReturnValue(true);
+    const split = getCommands().find((c) => c.id === "editor.splitRight");
+    expect(split).toBeDefined();
+    expect(split?.keybinding).toBe("mod+\\");
+    vi.mocked(canSplitActiveEditor).mockReturnValue(false);
+  });
+
+  it("gates focus/reset commands behind multiple editor groups", () => {
+    vi.mocked(editorGroupCount).mockReturnValue(0);
+    expect(getCommands().some((c) => c.id === "editor.resetLayout")).toBe(
+      false,
+    );
+    vi.mocked(editorGroupCount).mockReturnValue(2);
+    expect(getCommands().some((c) => c.id === "editor.resetLayout")).toBe(true);
+    vi.mocked(editorGroupCount).mockReturnValue(0);
   });
 
   it("generates connect/switch commands per context", () => {
