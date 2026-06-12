@@ -45,7 +45,7 @@ const segment =
   "flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors duration-100 hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50";
 
 export function StatusBar() {
-  const { theme, toggleTheme } = useUi();
+  const { resolvedTheme, toggleTheme } = useUi();
   const { activeContext, connected } = useConnections();
   const info = activeContext ? connected[activeContext] : undefined;
   const { active, rate } = useThroughput(info?.connected ? info.name : null);
@@ -128,7 +128,7 @@ export function StatusBar() {
           title="Toggle theme"
           className="flex size-5 items-center justify-center rounded transition-colors duration-100 hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
         >
-          {theme === "dark" ? (
+          {resolvedTheme === "dark" ? (
             <Sun className="size-3.5" />
           ) : (
             <Moon className="size-3.5" />

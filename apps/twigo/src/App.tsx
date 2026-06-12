@@ -75,12 +75,24 @@ function Workbench() {
 }
 
 function App() {
-  const theme = useUi((s) => s.theme);
+  const themeChoice = useUi((s) => s.theme);
+  const resolvedTheme = useUi((s) => s.resolvedTheme);
   const hydrated = useAppHydrated();
 
+  // Re-resolve when the choice changes (also covers post-hydration) and, while
+  // on "system", follow the OS appearance live.
   useEffect(() => {
-    applyTheme(theme);
-  }, [theme]);
+    useUi.getState().syncResolvedTheme();
+    if (themeChoice !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => useUi.getState().syncResolvedTheme();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [themeChoice]);
+
+  useEffect(() => {
+    applyTheme(resolvedTheme);
+  }, [resolvedTheme]);
 
   return (
     <ErrorBoundary>
