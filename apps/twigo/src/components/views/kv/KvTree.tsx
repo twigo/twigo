@@ -19,6 +19,7 @@ import {
 import { kvCreate, kvDeleteBucket } from "@/lib/api";
 import { useKv } from "@/store/kv";
 import { useToasts } from "@/store/toasts";
+import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import { openKvEntry } from "@/lib/editor";
 import { CreateKeyDialog } from "@/components/editor/kv/CreateKeyDialog";
 import { ConfirmDialog } from "@/components/editor/jetstream/ConfirmDialog";
@@ -47,6 +48,7 @@ export function KvTree({
   const keysByBucket = useKv((s) => s.byConn[connId]?.children ?? {});
   const loading = useKv((s) => s.byConn[connId]?.childrenLoading ?? {});
   const toggleBucket = useKv((s) => s.toggle);
+  const readOnly = useIsReadOnly(connId);
 
   const [openNodes, setOpenNodes] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState(0);
@@ -171,6 +173,7 @@ export function KvTree({
               selected={i === sel}
               expanded={!!expanded[row.bucket.bucket]}
               loading={!!loading[row.bucket.bucket]}
+              readOnly={readOnly}
               onSelect={() => setSelected(i)}
               onToggle={() => void toggleBucket(connId, row.bucket.bucket)}
               onNewKey={() => setNewKeyBucket(row.bucket.bucket)}
@@ -221,6 +224,7 @@ function BucketRow({
   selected,
   expanded,
   loading,
+  readOnly,
   onSelect,
   onToggle,
   onNewKey,
@@ -230,6 +234,7 @@ function BucketRow({
   selected: boolean;
   expanded: boolean;
   loading: boolean;
+  readOnly: boolean;
   onSelect: () => void;
   onToggle: () => void;
   onNewKey: () => void;
@@ -276,24 +281,26 @@ function BucketRow({
         <button
           type="button"
           aria-label="New key"
-          title="New key"
+          title={readOnly ? "Connection is read-only" : "New key"}
+          disabled={readOnly}
           onClick={(e) => {
             e.stopPropagation();
             onNewKey();
           }}
-          className="text-muted-foreground hover:text-foreground"
+          className="text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Plus className="size-3" />
         </button>
         <button
           type="button"
           aria-label="Delete bucket"
-          title="Delete bucket"
+          title={readOnly ? "Connection is read-only" : "Delete bucket"}
+          disabled={readOnly}
           onClick={(e) => {
             e.stopPropagation();
             onDelete();
           }}
-          className="text-muted-foreground hover:text-error"
+          className="text-muted-foreground hover:text-error disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Trash2 className="size-3" />
         </button>

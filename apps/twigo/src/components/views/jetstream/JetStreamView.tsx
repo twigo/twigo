@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { RefreshCw, ChevronsDownUp, Layers, Plus } from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
 import { jsCreateStream } from "@/lib/api";
+import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import { useConnections } from "@/store/connections";
 import { useJetStream } from "@/store/jetstream";
 import { useToasts } from "@/store/toasts";
@@ -18,10 +19,11 @@ export function JetStreamView({ filter, connId }: ViewProps) {
   const data = useJetStream((s) => (connId ? s.byConn[connId] : undefined));
   const load = useJetStream((s) => s.load);
   const collapseAll = useJetStream((s) => s.collapseAll);
+  const readOnly = useIsReadOnly(connId);
   const [createOpen, setCreateOpen] = useState(false);
 
   const doCreate = async (config: Record<string, unknown>) => {
-    if (!connId) return;
+    if (!connId || readOnly) return;
     try {
       await jsCreateStream(connId, config);
       useToasts
@@ -78,7 +80,8 @@ export function JetStreamView({ filter, connId }: ViewProps) {
             variant="ghost"
             size="icon"
             aria-label="New stream"
-            title="New stream"
+            title={readOnly ? "Connection is read-only" : "New stream"}
+            disabled={readOnly}
             onClick={() => setCreateOpen(true)}
           >
             <Plus />
@@ -129,11 +132,15 @@ export function JetStreamView({ filter, connId }: ViewProps) {
             icon={Layers}
             className="flex-1"
             title="No streams"
-            action={{
-              label: "New stream",
-              onClick: () => setCreateOpen(true),
-              icon: Plus,
-            }}
+            action={
+              readOnly
+                ? undefined
+                : {
+                    label: "New stream",
+                    onClick: () => setCreateOpen(true),
+                    icon: Plus,
+                  }
+            }
           >
             This context has no JetStream streams yet.
           </EmptyState>

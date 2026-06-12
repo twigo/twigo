@@ -17,6 +17,7 @@ import {
   jsUpdateStream,
 } from "@/lib/api";
 import { useStreamDetail } from "@/hooks/useJetStreamDetail";
+import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import { useJetStream } from "@/store/jetstream";
 import { useToasts } from "@/store/toasts";
 import { closeStreamDetail } from "@/lib/editor";
@@ -47,6 +48,7 @@ export function StreamDetailPanel({
   stream: string;
 }) {
   const { data, error, loading, refresh } = useStreamDetail(connId, stream);
+  const readOnly = useIsReadOnly(connId);
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [consumerOpen, setConsumerOpen] = useState(false);
@@ -134,7 +136,8 @@ export function StreamDetailPanel({
                 variant="ghost"
                 size="icon"
                 aria-label="New consumer"
-                title="New consumer"
+                title={readOnly ? "Connection is read-only" : "New consumer"}
+                disabled={readOnly}
                 onClick={() => setConsumerOpen(true)}
               >
                 <Plus />
@@ -144,9 +147,13 @@ export function StreamDetailPanel({
                 size="icon"
                 aria-label="Edit stream"
                 title={
-                  sealed ? "Sealed streams can't be edited" : "Edit stream"
+                  readOnly
+                    ? "Connection is read-only"
+                    : sealed
+                      ? "Sealed streams can't be edited"
+                      : "Edit stream"
                 }
-                disabled={sealed}
+                disabled={sealed || readOnly}
                 onClick={() => setEditOpen(true)}
               >
                 <Pencil />
@@ -156,9 +163,13 @@ export function StreamDetailPanel({
                 size="icon"
                 aria-label="Purge messages"
                 title={
-                  denyPurge ? "Purge denied on this stream" : "Purge messages"
+                  readOnly
+                    ? "Connection is read-only"
+                    : denyPurge
+                      ? "Purge denied on this stream"
+                      : "Purge messages"
                 }
-                disabled={denyPurge}
+                disabled={denyPurge || readOnly}
                 onClick={() => setPurgeOpen(true)}
               >
                 <Eraser />
@@ -168,11 +179,13 @@ export function StreamDetailPanel({
                 size="icon"
                 aria-label="Delete stream"
                 title={
-                  denyDelete
-                    ? "Delete denied (sealed/deny-delete)"
-                    : "Delete stream"
+                  readOnly
+                    ? "Connection is read-only"
+                    : denyDelete
+                      ? "Delete denied (sealed/deny-delete)"
+                      : "Delete stream"
                 }
-                disabled={denyDelete}
+                disabled={denyDelete || readOnly}
                 className="text-error"
                 onClick={() => setDeleteOpen(true)}
               >

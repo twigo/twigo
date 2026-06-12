@@ -1,5 +1,48 @@
-import { describe, it, expect } from "vitest";
-import { IpcError, ipcError } from "./api";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { IpcError, ipcError, publish, kvListKeys } from "./api";
+import { useReadOnly } from "@/store/readonly";
+
+const { invokeMock } = vi.hoisted(() => ({
+  invokeMock: vi.fn(() => Promise.resolve()),
+}));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: invokeMock,
+  Channel: class {
+    onmessage: ((m: unknown) => void) | null = null;
+  },
+}));
+
+describe("read-only guard", () => {
+  beforeEach(() => {
+    invokeMock.mockClear();
+    useReadOnly.setState({ byConn: {} });
+  });
+
+  it("blocks a write on a read-only connection before it hits the backend", async () => {
+    useReadOnly.getState().setReadOnly("prod", true);
+    await expect(publish("prod", "orders.new", "x")).rejects.toMatchObject({
+      kind: "readOnly",
+    });
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("allows the same write when the connection is writable", async () => {
+    await publish("dev", "orders.new", "x");
+    expect(invokeMock).toHaveBeenCalledWith(
+      "publish",
+      expect.objectContaining({ connId: "dev" }),
+    );
+  });
+
+  it("never blocks reads, even on a read-only connection", async () => {
+    useReadOnly.getState().setReadOnly("prod", true);
+    await kvListKeys("prod", "config");
+    expect(invokeMock).toHaveBeenCalledWith(
+      "kv_list_keys",
+      expect.objectContaining({ connId: "prod" }),
+    );
+  });
+});
 
 describe("IpcError", () => {
   it("stringifies to just the message (keeps String(e) sites clean)", () => {

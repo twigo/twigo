@@ -6,6 +6,7 @@ import { fmtBytes, fmtCount } from "@twigo/utils";
 import { objPutObject, objDeleteBucket, objObjectInfo } from "@/lib/api";
 import { useObjStore } from "@/store/objstore";
 import { useToasts } from "@/store/toasts";
+import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import { openObjectEntry } from "@/lib/editor";
 import { ConfirmDialog } from "@/components/editor/jetstream/ConfirmDialog";
 import type { ObjBucketSummary, ObjSummary } from "@/lib/api";
@@ -25,6 +26,7 @@ export function ObjectTree({
   const objectsByBucket = useObjStore((s) => s.byConn[connId]?.children ?? {});
   const loading = useObjStore((s) => s.byConn[connId]?.childrenLoading ?? {});
   const toggleBucket = useObjStore((s) => s.toggle);
+  const readOnly = useIsReadOnly(connId);
 
   const [selected, setSelected] = useState(0);
   const [delBucket, setDelBucket] = useState<string | null>(null);
@@ -141,6 +143,7 @@ export function ObjectTree({
               uploading={uploadingBucket === row.bucket.bucket}
               onUpload={() => void startUpload(row.bucket.bucket)}
               onDelete={() => setDelBucket(row.bucket.bucket)}
+              readOnly={readOnly}
             />
           ) : (
             <ObjectRow
@@ -202,6 +205,7 @@ function BucketRow({
   onToggle,
   onUpload,
   onDelete,
+  readOnly,
 }: {
   bucket: ObjBucketSummary;
   selected: boolean;
@@ -212,6 +216,7 @@ function BucketRow({
   onToggle: () => void;
   onUpload: () => void;
   onDelete: () => void;
+  readOnly: boolean;
 }) {
   return (
     <li
@@ -259,8 +264,8 @@ function BucketRow({
         <button
           type="button"
           aria-label="Upload object"
-          title="Upload object"
-          disabled={uploading}
+          title={readOnly ? "Connection is read-only" : "Upload object"}
+          disabled={uploading || readOnly}
           onClick={(e) => {
             e.stopPropagation();
             onUpload();
@@ -276,12 +281,13 @@ function BucketRow({
         <button
           type="button"
           aria-label="Delete object store"
-          title="Delete object store"
+          title={readOnly ? "Connection is read-only" : "Delete object store"}
+          disabled={readOnly}
           onClick={(e) => {
             e.stopPropagation();
             onDelete();
           }}
-          className="text-muted-foreground hover:text-error"
+          className="text-muted-foreground hover:text-error disabled:opacity-50"
         >
           <Trash2 className="size-3" />
         </button>

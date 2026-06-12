@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Unplug, Server, RotateCw, Plus } from "lucide-react";
+import { Unplug, Server, RotateCw, Plus, Lock, LockOpen } from "lucide-react";
 import {
   cn,
   Command,
@@ -11,6 +11,7 @@ import {
   CommandSeparator,
 } from "@twigo/ui";
 import { useConnections } from "@/store/connections";
+import { useReadOnly } from "@/store/readonly";
 import { openServerInfo } from "@/lib/editor";
 import type { ContextSummary } from "@/lib/api";
 import { StatusGlyph } from "./StatusGlyph";
@@ -56,6 +57,8 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
   const connect = useConnections((s) => s.connect);
   const disconnect = useConnections((s) => s.disconnect);
   const load = useConnections((s) => s.load);
+  const readOnlyMap = useReadOnly((s) => s.byConn);
+  const toggleReadOnly = useReadOnly((s) => s.toggle);
 
   const live = contexts.filter((c) => connected[c.name]);
   const available = contexts.filter((c) => !connected[c.name]);
@@ -74,6 +77,7 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
     const info = connected[c.name];
     const err = connError[c.name];
     const isActive = activeContext === c.name;
+    const readOnly = !!readOnlyMap[c.name];
     return (
       <CommandItem
         key={c.name}
@@ -102,36 +106,65 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
         ) : err && !info ? (
           <span className="min-w-0 truncate text-[11px] text-error">{err}</span>
         ) : (
-          // Always show the target host so two contexts pointing at the same
-          // server are obvious; the title reveals the actually-reached server.
+          // The target host, but capped so it never crowds out the name (two
+          // contexts on the same server stay distinguishable; the title reveals
+          // the actually-reached server).
           <span
-            className="min-w-0 truncate font-mono text-[11px] text-muted-foreground"
+            className="min-w-0 max-w-[40%] truncate font-mono text-[11px] text-muted-foreground"
             title={info ? `${c.url} · server: ${info.serverName}` : c.url}
           >
             {c.url.replace(/^\w+:\/\//, "")}
           </span>
         )}
-        {info && (
-          <span className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 group-data-[selected=true]:opacity-100">
-            <ActionButton
-              label="Server info"
-              disabled={!info.connected}
-              onClick={() => {
-                setActive(c.name);
-                openServerInfo(c.name);
-                onClose();
-              }}
-            >
-              <Server />
-            </ActionButton>
-            <ActionButton
-              label={`Disconnect ${c.name}`}
-              onClick={() => void disconnect(c.name)}
-            >
-              <Unplug />
-            </ActionButton>
-          </span>
-        )}
+        <span className="flex shrink-0 items-center gap-0.5">
+          {/* The lock is its own indicator: lit and always shown when read-only,
+              revealed on hover (to lock) otherwise. */}
+          <button
+            type="button"
+            aria-label={
+              readOnly
+                ? `Allow writes on ${c.name}`
+                : `Make ${c.name} read-only`
+            }
+            title={
+              readOnly ? "Read-only — click to allow writes" : "Make read-only"
+            }
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleReadOnly(c.name);
+            }}
+            className={cn(
+              "flex size-5 items-center justify-center rounded hover:bg-background [&_svg]:size-3.5",
+              readOnly
+                ? "text-warn"
+                : "text-muted-foreground opacity-0 hover:text-foreground group-data-[selected=true]:opacity-100",
+            )}
+          >
+            {readOnly ? <Lock /> : <LockOpen />}
+          </button>
+          {info && (
+            <span className="flex items-center gap-0.5 opacity-0 group-data-[selected=true]:opacity-100">
+              <ActionButton
+                label="Server info"
+                disabled={!info.connected}
+                onClick={() => {
+                  setActive(c.name);
+                  openServerInfo(c.name);
+                  onClose();
+                }}
+              >
+                <Server />
+              </ActionButton>
+              <ActionButton
+                label={`Disconnect ${c.name}`}
+                onClick={() => void disconnect(c.name)}
+              >
+                <Unplug />
+              </ActionButton>
+            </span>
+          )}
+        </span>
       </CommandItem>
     );
   }

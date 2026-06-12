@@ -3,6 +3,7 @@ import { Send, Loader2, ArrowLeftRight, Plus, X } from "lucide-react";
 import { Button, Input, Label, CodeViewer } from "@twigo/ui";
 import { decodeText, tryPrettyJson, fmtBytes } from "@twigo/utils";
 import { useConnections } from "@/store/connections";
+import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import { publish, request, type IncomingMessage } from "@/lib/api";
 
 type Reply =
@@ -30,6 +31,7 @@ export function PublishEditor({
   initialHeaders?: [string, string][];
 }) {
   const live = useConnections((s) => s.connected[connId]?.connected === true);
+  const readOnly = useIsReadOnly(connId);
   const [subject, setSubject] = useState(initialSubject);
   const [payload, setPayload] = useState(initialPayload);
   const [headers, setHeaders] = useState<[string, string][]>(
@@ -39,7 +41,8 @@ export function PublishEditor({
   const [reply, setReply] = useState<Reply | null>(null);
   const [sent, setSent] = useState(false);
 
-  const canSend = live && subject.trim().length > 0 && busy === null;
+  const canSend =
+    live && !readOnly && subject.trim().length > 0 && busy === null;
   const invalidJson = payload.trim() !== "" && !isJson(payload);
   const cleanHeaders = (): [string, string][] =>
     headers.filter(([k]) => k.trim() !== "");
@@ -200,6 +203,7 @@ export function PublishEditor({
           variant="brand"
           size="sm"
           disabled={!canSend}
+          title={readOnly ? "Connection is read-only" : undefined}
           onClick={() => void doPublish()}
         >
           {busy === "publish" ? <Loader2 className="animate-spin" /> : <Send />}
@@ -209,6 +213,7 @@ export function PublishEditor({
           variant="outline"
           size="sm"
           disabled={!canSend}
+          title={readOnly ? "Connection is read-only" : undefined}
           onClick={() => void doRequest()}
         >
           {busy === "request" ? (
