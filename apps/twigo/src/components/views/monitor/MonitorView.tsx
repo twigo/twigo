@@ -335,7 +335,11 @@ export function MonitorView({ connId }: ViewProps) {
 
   if (!data?.varz) {
     return (
-      <EmptyState icon={Activity} className="flex-1 [&>svg]:animate-pulse">
+      <EmptyState
+        icon={Activity}
+        className="flex-1"
+        iconClassName="animate-pulse"
+      >
         Reading server health…
       </EmptyState>
     );

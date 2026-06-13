@@ -24,7 +24,7 @@ export function ActivityBar() {
               onClick={() => setView(id)}
               className={cn(
                 "relative flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                active && "text-foreground",
+                active && "bg-brand/10 text-brand",
               )}
             >
               {active && (

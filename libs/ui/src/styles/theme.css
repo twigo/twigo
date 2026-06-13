@@ -18,89 +18,111 @@
   --dur-slow: 0.3s;
 
   /* change these two to re-skin the whole app */
-  --brand: oklch(0.62 0.11 195);
-  --brand-foreground: oklch(0.98 0 0);
+  --brand: oklch(0.6 0.118 195);
+  --brand-foreground: oklch(0.99 0.005 195);
 
+  /* Light chrome is cool-tinted toward the brand hue (never dead gray);
+     content surfaces stay white so data reads on paper. */
   --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --foreground: oklch(0.18 0.008 235);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.18 0.008 235);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  --popover-foreground: oklch(0.18 0.008 235);
+  --primary: oklch(0.24 0.012 235);
+  --primary-foreground: oklch(0.985 0.002 220);
+  --secondary: oklch(0.966 0.004 225);
+  --secondary-foreground: oklch(0.24 0.012 235);
+  --muted: oklch(0.966 0.004 225);
+  --muted-foreground: oklch(0.5 0.012 235);
   /* Tertiary text: units, timestamps, kbd hints, section labels. */
-  --muted-foreground-2: oklch(0.62 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --muted-foreground-2: oklch(0.6 0.01 235);
+  --accent: oklch(0.957 0.006 225);
+  --accent-foreground: oklch(0.24 0.012 235);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
+  --border: oklch(0.917 0.006 225);
+  --input: oklch(0.905 0.007 225);
   --ring: var(--brand);
 
-  /* Row interaction: hover = neutral gray, selection = brand-tint (+ a 2px
-     brand bar in the component) so teal reads as wayfinding, not decoration. */
-  --row-hover: oklch(0.965 0 0);
-  --selected: color-mix(in oklab, var(--brand) 12%, var(--card));
+  /* Row interaction: hover = neutral, selection = brand-tint (+ a 2px brand
+     bar in the component) so teal reads as wayfinding, not decoration. */
+  --row-hover: oklch(0.962 0.005 225);
+  --selected: color-mix(in oklab, var(--brand) 11%, var(--card));
 
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --panel: oklch(0.985 0 0);
-  --statusbar: var(--brand);
-  --statusbar-foreground: var(--brand-foreground);
+  --sidebar: oklch(0.977 0.003 225);
+  --sidebar-foreground: oklch(0.18 0.008 235);
+  --sidebar-border: oklch(0.917 0.006 225);
+  --panel: oklch(0.977 0.003 225);
+  /* Brand-ink bar: deeper than raw brand so it anchors instead of shouting. */
+  --statusbar: oklch(0.46 0.085 205);
+  --statusbar-foreground: oklch(0.97 0.012 195);
 
   --ok: oklch(0.62 0.14 150);
   --warn: oklch(0.72 0.15 75);
   --error: oklch(0.577 0.245 27.325);
+
+  /* Layered elevation shadows (ambient + key); the large step also draws a
+     hairline ring so floating surfaces hold an edge on any background. */
+  --shadow-sm: 0 1px 2px oklch(0.2 0.02 235 / 8%);
+  --shadow-md:
+    0 2px 8px oklch(0.2 0.02 235 / 9%), 0 1px 2px oklch(0.2 0.02 235 / 7%);
+  --shadow-lg:
+    0 12px 32px oklch(0.2 0.02 235 / 14%), 0 4px 12px oklch(0.2 0.02 235 / 8%),
+    0 0 0 1px oklch(0.2 0.02 235 / 4%);
 }
 
 .dark {
-  --brand: oklch(0.68 0.12 195);
-  --brand-foreground: oklch(0.16 0.02 200);
+  --brand: oklch(0.75 0.125 192);
+  --brand-foreground: oklch(0.16 0.03 210);
 
-  /* Elevation ladder: each surface sits a clear step above the last so panels
-     separate without borders doing all the work.
-     bg 0.16 < sidebar/panel 0.185 < card 0.205 < popover 0.225. */
-  --background: oklch(0.16 0 0);
-  --foreground: oklch(0.95 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.95 0 0);
-  --popover: oklch(0.225 0 0);
-  --popover-foreground: oklch(0.95 0 0);
-  --primary: oklch(0.95 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.25 0 0);
-  --secondary-foreground: oklch(0.95 0 0);
-  --muted: oklch(0.25 0 0);
-  --muted-foreground: oklch(0.65 0 0);
-  --muted-foreground-2: oklch(0.5 0 0);
-  --accent: oklch(0.27 0 0);
-  --accent-foreground: oklch(0.95 0 0);
+  /* Deep-ocean neutrals: every surface carries a trace of the brand hue
+     (dead-gray dark themes read flat; Linear keeps chroma at 0.003-0.006 - we
+     sit just above for the teal identity). Elevation ladder, dimmest first:
+     bg 0.15 < sidebar/panel 0.178 < card 0.205 < popover 0.235. */
+  --background: oklch(0.15 0.006 230);
+  --foreground: oklch(0.93 0.005 220);
+  --card: oklch(0.205 0.008 230);
+  --card-foreground: oklch(0.93 0.005 220);
+  --popover: oklch(0.235 0.009 230);
+  --popover-foreground: oklch(0.93 0.005 220);
+  --primary: oklch(0.93 0.005 220);
+  --primary-foreground: oklch(0.2 0.008 230);
+  --secondary: oklch(0.25 0.009 230);
+  --secondary-foreground: oklch(0.93 0.005 220);
+  --muted: oklch(0.25 0.009 230);
+  --muted-foreground: oklch(0.66 0.011 225);
+  --muted-foreground-2: oklch(0.51 0.01 225);
+  --accent: oklch(0.272 0.011 228);
+  --accent-foreground: oklch(0.93 0.005 220);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
+  --border: oklch(0.93 0.02 220 / 10%);
+  --input: oklch(0.93 0.02 220 / 14%);
   --ring: var(--brand);
 
-  --row-hover: oklch(0.225 0 0);
-  --selected: color-mix(in oklab, var(--brand) 16%, var(--card));
+  --row-hover: oklch(0.225 0.009 230);
+  --selected: color-mix(in oklab, var(--brand) 15%, var(--card));
 
-  --sidebar: oklch(0.185 0 0);
-  --sidebar-foreground: oklch(0.95 0 0);
-  --sidebar-border: oklch(1 0 0 / 8%);
-  --panel: oklch(0.185 0 0);
-  /* --statusbar / --statusbar-foreground inherit from :root and recompute from
-     the dark --brand / --brand-foreground above. */
+  --sidebar: oklch(0.178 0.007 230);
+  --sidebar-foreground: oklch(0.93 0.005 220);
+  --sidebar-border: oklch(0.93 0.02 220 / 8%);
+  --panel: oklch(0.178 0.007 230);
+  /* Ink, not neon: the bar sits a step above the canvas with brand undertone. */
+  --statusbar: oklch(0.31 0.045 215);
+  --statusbar-foreground: oklch(0.9 0.025 200);
 
   --ok: oklch(0.72 0.15 150);
   --warn: oklch(0.78 0.15 75);
   --error: oklch(0.704 0.191 22.216);
+
+  /* Floating layers only; the 1px inset rim is what keeps popovers crisp on a
+     dark canvas (luminance stacking handles levels below). */
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 30%);
+  --shadow-md: 0 2px 8px oklch(0 0 0 / 35%), 0 1px 2px oklch(0 0 0 / 25%);
+  --shadow-lg:
+    0 16px 40px oklch(0 0 0 / 45%), 0 4px 16px oklch(0 0 0 / 30%),
+    inset 0 0 0 1px oklch(0.93 0.02 220 / 8%);
 }
 
 @theme inline {
@@ -144,6 +166,13 @@
   --color-warn: var(--warn);
   --color-error: var(--error);
 
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+
+  --font-sans:
+    "Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
   --font-mono:
     "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
     monospace;

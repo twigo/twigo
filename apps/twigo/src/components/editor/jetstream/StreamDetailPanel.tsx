@@ -255,7 +255,11 @@ export function StreamDetailPanel({
           </Button>
         </EmptyState>
       ) : !data ? (
-        <EmptyState icon={Loader2} className="flex-1 [&>svg]:animate-spin">
+        <EmptyState
+          icon={Loader2}
+          className="flex-1"
+          iconClassName="animate-spin"
+        >
           Loading…
         </EmptyState>
       ) : (

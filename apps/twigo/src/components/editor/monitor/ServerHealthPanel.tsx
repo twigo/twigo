@@ -162,7 +162,11 @@ export function ServerHealthPanel({ connId }: { connId: string }) {
           <span className="max-w-md break-words">{error}</span>
         </EmptyState>
       ) : !connz ? (
-        <EmptyState icon={Loader2} className="flex-1 [&>svg]:animate-spin">
+        <EmptyState
+          icon={Loader2}
+          className="flex-1"
+          iconClassName="animate-spin"
+        >
           Reading connections…
         </EmptyState>
       ) : rows.length === 0 ? (

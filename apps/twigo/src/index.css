@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "@fontsource-variable/inter";
 @import "@twigo/ui/theme.css";
 
 /* libs/ui lives outside this app, so register it as a Tailwind source. */
@@ -15,14 +16,37 @@
     height: 100%;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background font-sans text-foreground;
     font-size: 13px;
     line-height: 1.45;
+    /* Inter's alternate glyphs (cv01 single-story a, ss03) - the typeface
+       reads generic without them. tnum keeps metric columns from jittering. */
+    font-feature-settings:
+      "cv01" 1,
+      "ss03" 1;
     -webkit-font-smoothing: antialiased;
     overflow: hidden;
     /* WKWebView (Tauri) needs the prefix; without it a tab drag selects text. */
     -webkit-user-select: none;
     user-select: none;
+  }
+
+  /* UI labels sit between regular and medium (Linear's 510): emphasis without
+     heaviness. Tailwind's font-medium maps to it via the variable axis. */
+  .font-medium,
+  .font-semibold,
+  button,
+  th {
+    font-variation-settings: "wght" 510;
+  }
+  .font-semibold {
+    font-variation-settings: "wght" 590;
+  }
+  .tabular-nums {
+    font-feature-settings:
+      "cv01" 1,
+      "ss03" 1,
+      "tnum" 1;
   }
 
   /* Native <button> doesn't show the pointer cursor and Tailwind's reset
@@ -103,11 +127,19 @@
 /* Central editor tabs (VS Code-like): inactive tabs recede into the strip,
    the active tab takes the content colour with a brand accent on top. */
 .twigo-dockview .dv-tabs-container > .dv-tab {
+  position: relative;
   border-right: 1px solid var(--border);
   transition: background-color var(--dur-instant) var(--ease-out);
 }
 .twigo-dockview .dv-tabs-container > .dv-tab.dv-inactive-tab:hover {
   background-color: var(--accent);
+}
+.twigo-dockview .dv-tabs-container > .dv-tab.dv-active-tab::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: var(--brand);
 }
 
 /* Close button shows only on the active tab or on hover (less clutter). */

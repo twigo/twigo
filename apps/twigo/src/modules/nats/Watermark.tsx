@@ -20,6 +20,7 @@ export function NatsWatermark() {
     return (
       <EmptyState
         icon={Radio}
+        aurora
         className="h-full bg-background"
         title="No connections yet"
         action={{
@@ -45,6 +46,7 @@ export function NatsWatermark() {
     return (
       <EmptyState
         icon={Radio}
+        aurora
         className="h-full bg-background"
         title="No live connection"
         action={{
@@ -64,6 +66,7 @@ export function NatsWatermark() {
   return (
     <EmptyState
       icon={Radio}
+      aurora
       className="h-full bg-background"
       title="Pick a subject to stream"
       action={{ label: "New publish", onClick: () => newPublish(), icon: Send }}
