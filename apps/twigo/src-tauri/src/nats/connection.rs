@@ -5,7 +5,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 
-use super::context::{load_contexts, NatsContext};
+use super::context::{demo_context, load_contexts, NatsContext, DEMO_CONTEXT_NAME};
 use super::error::{self, Error};
 use super::subjects::{self, SubjectWatch};
 use super::subscription::{abort_conn, SubState};
@@ -255,16 +255,22 @@ pub async fn connect(
         .filter(|d| !d.trim().is_empty())
         .map(std::path::PathBuf::from);
 
-    // Config + creds reads are blocking std::fs; keep them off the async runtime.
-    let lookup = name.clone();
-    let ctx = tokio::task::spawn_blocking(move || {
-        load_contexts(custom)?
-            .into_iter()
-            .find(|c| c.name == lookup)
-            .ok_or_else(|| Error::ContextNotFound(lookup.clone()))
-    })
-    .await
-    .map_err(|e| Error::Task(e.to_string()))??;
+    // The demo server is synthetic (no file on disk); everything else is read
+    // from the context dir. Config + creds reads are blocking std::fs, so keep
+    // them off the async runtime.
+    let ctx = if name == DEMO_CONTEXT_NAME {
+        demo_context()
+    } else {
+        let lookup = name.clone();
+        tokio::task::spawn_blocking(move || {
+            load_contexts(custom)?
+                .into_iter()
+                .find(|c| c.name == lookup)
+                .ok_or_else(|| Error::ContextNotFound(lookup.clone()))
+        })
+        .await
+        .map_err(|e| Error::Task(e.to_string()))??
+    };
 
     let url = if ctx.file.url.trim().is_empty() {
         "127.0.0.1:4222".to_string()

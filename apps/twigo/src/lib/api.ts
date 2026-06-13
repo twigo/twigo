@@ -89,8 +89,14 @@ export interface ReconnectEvent {
   delayMs: number;
 }
 
-export function listContexts(dir?: string | null): Promise<ContextSummary[]> {
-  return call<ContextSummary[]>("list_contexts", { dir: dir ?? null });
+export function listContexts(
+  dir?: string | null,
+  includeDemo = false,
+): Promise<ContextSummary[]> {
+  return call<ContextSummary[]>("list_contexts", {
+    dir: dir ?? null,
+    includeDemo,
+  });
 }
 
 export function defaultContextDir(): Promise<string | null> {

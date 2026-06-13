@@ -6,6 +6,7 @@ export * from "./components/popover";
 export * from "./components/select";
 export * from "./components/toggle-group";
 export * from "./components/radio-group";
+export * from "./components/switch";
 export * from "./components/table";
 export * from "./components/scroll-area";
 export * from "./components/tooltip";
