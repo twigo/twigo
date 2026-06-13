@@ -8,7 +8,7 @@ import {
   Trash2,
   Plus,
 } from "lucide-react";
-import { cn } from "@twigo/ui";
+import { cn, ScrollArea } from "@twigo/ui";
 import {
   fmtBytes,
   fmtCount,
@@ -159,41 +159,43 @@ export function KvTree({
 
   return (
     <>
-      <ul
-        role="tree"
-        tabIndex={0}
-        onKeyDown={onKeyDown}
-        className="min-h-0 flex-1 overflow-auto py-0.5 outline-none"
-      >
-        {rows.map((row, i) =>
-          row.kind === "bucket" ? (
-            <BucketRow
-              key={`b:${row.bucket.bucket}`}
-              bucket={row.bucket}
-              selected={i === sel}
-              expanded={!!expanded[row.bucket.bucket]}
-              loading={!!loading[row.bucket.bucket]}
-              readOnly={readOnly}
-              onSelect={() => setSelected(i)}
-              onToggle={() => void toggleBucket(connId, row.bucket.bucket)}
-              onNewKey={() => setNewKeyBucket(row.bucket.bucket)}
-              onDelete={() => setDelBucket(row.bucket.bucket)}
-            />
-          ) : (
-            <NodeRow
-              key={`n:${row.bucket}:${row.node.path}`}
-              row={row}
-              selected={i === sel}
-              open={openNodes.has(nodeId(row.bucket, row.node.path))}
-              onSelect={() => setSelected(i)}
-              onToggle={() => toggleNode(row.bucket, row.node.path)}
-              onOpen={() => {
-                if (row.entry) openKvEntry(connId, row.bucket, row.node.path);
-              }}
-            />
-          ),
-        )}
-      </ul>
+      <ScrollArea className="min-h-0 flex-1">
+        <ul
+          role="tree"
+          tabIndex={0}
+          onKeyDown={onKeyDown}
+          className="py-0.5 outline-none"
+        >
+          {rows.map((row, i) =>
+            row.kind === "bucket" ? (
+              <BucketRow
+                key={`b:${row.bucket.bucket}`}
+                bucket={row.bucket}
+                selected={i === sel}
+                expanded={!!expanded[row.bucket.bucket]}
+                loading={!!loading[row.bucket.bucket]}
+                readOnly={readOnly}
+                onSelect={() => setSelected(i)}
+                onToggle={() => void toggleBucket(connId, row.bucket.bucket)}
+                onNewKey={() => setNewKeyBucket(row.bucket.bucket)}
+                onDelete={() => setDelBucket(row.bucket.bucket)}
+              />
+            ) : (
+              <NodeRow
+                key={`n:${row.bucket}:${row.node.path}`}
+                row={row}
+                selected={i === sel}
+                open={openNodes.has(nodeId(row.bucket, row.node.path))}
+                onSelect={() => setSelected(i)}
+                onToggle={() => toggleNode(row.bucket, row.node.path)}
+                onOpen={() => {
+                  if (row.entry) openKvEntry(connId, row.bucket, row.node.path);
+                }}
+              />
+            ),
+          )}
+        </ul>
+      </ScrollArea>
 
       {newKeyBucket && (
         <CreateKeyDialog

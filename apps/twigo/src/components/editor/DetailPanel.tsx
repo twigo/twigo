@@ -69,7 +69,7 @@ export function DetailPanel() {
               variant="ghost"
               size="icon-sm"
               aria-label="Republish"
-              title="Republish"
+              tooltip="Republish"
               onClick={() =>
                 openPublish(
                   session.connId,
@@ -86,7 +86,7 @@ export function DetailPanel() {
                 variant="ghost"
                 size="icon-sm"
                 aria-label="Reply"
-                title={`Reply to ${replyTo}`}
+                tooltip={`Reply to ${replyTo}`}
                 onClick={() => openPublish(session.connId, replyTo, "")}
               >
                 <Reply />
@@ -96,7 +96,7 @@ export function DetailPanel() {
               variant="ghost"
               size="icon-sm"
               aria-label={isPinned ? "Unpin compare base" : "Pin to compare"}
-              title={isPinned ? "Unpin compare base" : "Pin to compare"}
+              tooltip={isPinned ? "Unpin compare base" : "Pin to compare"}
               className={cn(isPinned && "text-brand")}
               onClick={() => {
                 if (isPinned) clearPin();
@@ -109,7 +109,7 @@ export function DetailPanel() {
               variant="ghost"
               size="icon-sm"
               aria-label="Copy payload"
-              title="Copy payload"
+              tooltip="Copy payload"
               onClick={() => void navigator.clipboard.writeText(body)}
             >
               <Copy />
@@ -118,7 +118,7 @@ export function DetailPanel() {
               variant="ghost"
               size="icon-sm"
               aria-label="Copy as JSON"
-              title="Copy message as JSON"
+              tooltip="Copy message as JSON"
               onClick={() =>
                 void navigator.clipboard.writeText(
                   JSON.stringify(

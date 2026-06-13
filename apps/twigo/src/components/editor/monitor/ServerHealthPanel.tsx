@@ -7,7 +7,17 @@ import {
   ChevronRight,
   ChevronDown,
 } from "lucide-react";
-import { Button, EmptyState, cn } from "@twigo/ui";
+import {
+  Button,
+  EmptyState,
+  cn,
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
 import { monitorConnz, monitorCluster, type Connz, type Varz } from "@/lib/api";
 import { useMonitorConfig } from "@/store/monitorConfig";
@@ -161,16 +171,16 @@ export function ServerHealthPanel({ connId }: { connId: string }) {
         </EmptyState>
       ) : (
         <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full border-collapse text-xs">
-            <thead className="sticky top-0 z-10 bg-panel text-left text-muted-foreground">
-              <tr>
+          <Table>
+            <TableHeader className="sticky top-0 z-10 bg-panel">
+              <TableRow>
                 {COLS.map((c) => {
                   const active = c.sort === sort;
                   return (
-                    <th
+                    <TableHead
                       key={c.label}
                       className={cn(
-                        "whitespace-nowrap px-2 py-1.5 font-medium",
+                        "whitespace-nowrap",
                         c.align === "right" && "text-right",
                         c.sort &&
                           "cursor-pointer select-none hover:text-foreground",
@@ -186,21 +196,21 @@ export function ServerHealthPanel({ connId }: { connId: string }) {
                         {c.label}
                         {active && <ChevronDown className="size-3" />}
                       </span>
-                    </th>
+                    </TableHead>
                   );
                 })}
-              </tr>
-            </thead>
-            <tbody className="font-mono">
+              </TableRow>
+            </TableHeader>
+            <TableBody className="font-mono">
               {rows.map((r) => (
-                <tr
+                <TableRow
                   key={r.cid}
                   className="border-b border-border/50 hover:bg-row-hover"
                 >
-                  <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
                     {r.cid}
-                  </td>
-                  <td className="max-w-48 truncate px-2 py-1">
+                  </TableCell>
+                  <TableCell className="max-w-48 truncate">
                     {r.name || "-"}
                     {r.lang && (
                       <span className="ml-1 text-muted-foreground">
@@ -208,39 +218,39 @@ export function ServerHealthPanel({ connId }: { connId: string }) {
                         {r.version ? ` ${r.version}` : ""}
                       </span>
                     )}
-                  </td>
-                  <td className="px-2 py-1 text-muted-foreground">
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
                     {r.ip}:{r.port}
-                  </td>
-                  <td className="px-2 py-1 text-right tabular-nums">
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
                     {fmtCount(r.subscriptions)}
-                  </td>
-                  <td
+                  </TableCell>
+                  <TableCell
                     className={cn(
-                      "px-2 py-1 text-right tabular-nums",
+                      "text-right tabular-nums",
                       r.pendingBytes > 0
                         ? "text-warn"
                         : "text-muted-foreground",
                     )}
                   >
                     {fmtBytes(r.pendingBytes)}
-                  </td>
-                  <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
                     {fmtCount(r.inMsgs)} · {fmtBytes(r.inBytes)}
-                  </td>
-                  <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
                     {fmtCount(r.outMsgs)} · {fmtBytes(r.outBytes)}
-                  </td>
-                  <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
                     {r.rtt || "-"}
-                  </td>
-                  <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
                     {r.idle}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
 

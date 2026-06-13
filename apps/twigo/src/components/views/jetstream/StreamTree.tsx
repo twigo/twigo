@@ -7,7 +7,7 @@ import {
   Loader2,
   Pause,
 } from "lucide-react";
-import { cn } from "@twigo/ui";
+import { cn, ScrollArea } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
 import { useJetStream } from "@/store/jetstream";
 import { openStreamDetail, openConsumerDetail } from "@/lib/editor";
@@ -78,35 +78,37 @@ export function StreamTree({
   };
 
   return (
-    <ul
-      role="tree"
-      tabIndex={0}
-      onKeyDown={onKeyDown}
-      className="min-h-0 flex-1 overflow-auto py-0.5 outline-none"
-    >
-      {rows.map((row, i) =>
-        row.kind === "stream" ? (
-          <StreamRow
-            key={`s:${row.stream.name}`}
-            stream={row.stream}
-            selected={i === sel}
-            expanded={!!expanded[row.stream.name]}
-            loading={!!loading[row.stream.name]}
-            onSelect={() => setSelected(i)}
-            onToggle={() => void toggleStream(connId, row.stream.name)}
-            onOpen={() => open(row)}
-          />
-        ) : (
-          <ConsumerRow
-            key={`c:${row.stream}:${row.consumer.name}`}
-            consumer={row.consumer}
-            selected={i === sel}
-            onSelect={() => setSelected(i)}
-            onOpen={() => open(row)}
-          />
-        ),
-      )}
-    </ul>
+    <ScrollArea className="min-h-0 flex-1">
+      <ul
+        role="tree"
+        tabIndex={0}
+        onKeyDown={onKeyDown}
+        className="py-0.5 outline-none"
+      >
+        {rows.map((row, i) =>
+          row.kind === "stream" ? (
+            <StreamRow
+              key={`s:${row.stream.name}`}
+              stream={row.stream}
+              selected={i === sel}
+              expanded={!!expanded[row.stream.name]}
+              loading={!!loading[row.stream.name]}
+              onSelect={() => setSelected(i)}
+              onToggle={() => void toggleStream(connId, row.stream.name)}
+              onOpen={() => open(row)}
+            />
+          ) : (
+            <ConsumerRow
+              key={`c:${row.stream}:${row.consumer.name}`}
+              consumer={row.consumer}
+              selected={i === sel}
+              onSelect={() => setSelected(i)}
+              onOpen={() => open(row)}
+            />
+          ),
+        )}
+      </ul>
+    </ScrollArea>
   );
 }
 
