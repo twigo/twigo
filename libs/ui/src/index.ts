@@ -3,6 +3,8 @@ export * from "./components/input";
 export * from "./components/label";
 export * from "./components/context-menu";
 export * from "./components/popover";
+export * from "./components/select";
+export * from "./components/toggle-group";
 export * from "./components/command";
 export * from "./components/dialog";
 export * from "./components/empty-state";
