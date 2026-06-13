@@ -5,6 +5,10 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "core:menu:default",
+    "core:app:default",
+    "core:window:allow-set-title",
+    "core:webview:allow-set-webview-zoom",
     "opener:default",
     "dialog:allow-open",
     "dialog:allow-save",

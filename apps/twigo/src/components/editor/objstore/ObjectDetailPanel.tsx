@@ -126,10 +126,10 @@ export function ObjectDetailPanel({
           <Section title="Object">
             <Row label="Size" value={fmtBytes(data.size)} />
             <Row label="Chunks" value={fmtCount(data.chunks)} />
-            <Row label="Modified" value={data.modified ?? "—"} />
+            <Row label="Modified" value={data.modified ?? "-"} />
             <Row
               label="Digest"
-              value={<span className="truncate">{data.digest ?? "—"}</span>}
+              value={<span className="truncate">{data.digest ?? "-"}</span>}
             />
             <Row
               label="Deleted"

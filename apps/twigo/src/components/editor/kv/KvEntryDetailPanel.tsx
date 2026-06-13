@@ -36,9 +36,7 @@ import { useToasts } from "@/store/toasts";
 import { closeKvEntry } from "@/lib/editor";
 import { Row, Section } from "@/components/editor/jetstream/parts";
 import { ConfirmDialog } from "@/components/editor/jetstream/ConfirmDialog";
-
-type Format = "json" | "text" | "hex";
-const FORMATS: Format[] = ["json", "text", "hex"];
+import { FormatToggle, type PayloadFormat } from "../FormatToggle";
 
 export function KvEntryDetailPanel({
   connId,
@@ -50,7 +48,7 @@ export function KvEntryDetailPanel({
   kvkey: string;
 }) {
   const [revision, setRevision] = useState<number | null>(null);
-  const [format, setFormat] = useState<Format>("json");
+  const [format, setFormat] = useState<PayloadFormat>("json");
   const [histKey, setHistKey] = useState(0);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -94,7 +92,7 @@ export function KvEntryDetailPanel({
   // useRevision=true → optimistic CAS; false → force overwrite (blind put).
   const save = async (useRevision: boolean) => {
     if (!data) return;
-    // The value as loaded — re-putting it is a real "undo" (KV keeps history).
+    // The value as loaded - re-putting it is a real "undo" (KV keeps history).
     const prevB64 = data.payloadB64;
     try {
       await kvPut(
@@ -332,23 +330,7 @@ export function KvEntryDetailPanel({
                 Editing value
               </span>
             ) : (
-              <div className="flex items-center gap-0.5">
-                {FORMATS.map((fmt) => (
-                  <button
-                    key={fmt}
-                    type="button"
-                    onClick={() => setFormat(fmt)}
-                    className={cn(
-                      "rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider",
-                      format === fmt
-                        ? "bg-accent text-foreground"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    {fmt}
-                  </button>
-                ))}
-              </div>
+              <FormatToggle value={format} onChange={setFormat} />
             )}
             {data.truncated && !editing && (
               <p className="text-[10px] text-warn">
@@ -374,7 +356,7 @@ export function KvEntryDetailPanel({
 
           <Section title="Entry">
             <Row label="Revision" value={data.revision} />
-            <Row label="Created" value={data.created ?? "—"} />
+            <Row label="Created" value={data.created ?? "-"} />
             <Row
               label="Operation"
               value={

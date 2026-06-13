@@ -19,7 +19,7 @@ const MODES: { key: ResponderMode; label: string; hint: string }[] = [
   {
     key: "down",
     label: "Down",
-    hint: "Don't answer — let the request time out",
+    hint: "Don't answer - let the request time out",
   },
 ];
 
@@ -169,7 +169,7 @@ export function ResponderEditor({
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto bg-background p-3">
       {!live && (
         <p className="text-xs text-warn">
-          Not connected — connect{" "}
+          Not connected - connect{" "}
           <span className="font-mono">{session.connId}</span> to respond.
         </p>
       )}

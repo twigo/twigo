@@ -114,7 +114,7 @@ export function PublishEditor({
     >
       {!live && (
         <p className="text-xs text-warn">
-          Not connected — connect <span className="font-mono">{connId}</span> to
+          Not connected - connect <span className="font-mono">{connId}</span> to
           publish.
         </p>
       )}

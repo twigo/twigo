@@ -22,7 +22,7 @@ export interface StreamSession {
   selectedId: number | null;
   // All-time messages received on this subscription. The live view only retains
   // a capped window (CAP while following), so this is how the user learns the
-  // true volume — and that it keeps climbing while paused.
+  // true volume - and that it keeps climbing while paused.
   received: number;
 }
 

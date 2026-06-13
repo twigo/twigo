@@ -31,7 +31,7 @@ export function PayloadDiff({ a, b }: { a: string; b: string }) {
                 l.type === "ctx" && "text-muted-foreground/40",
               )}
             >
-              {l.type === "add" ? "+" : l.type === "del" ? "−" : ""}
+              {l.type === "add" ? "+" : l.type === "del" ? "-" : ""}
             </span>
             <span
               className={cn(

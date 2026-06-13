@@ -6,7 +6,7 @@
 :root {
   --radius: 0.5rem;
 
-  /* Motion ladder — instant-in / gentle-out. Keyboard-bound actions stay
+  /* Motion ladder - instant-in / gentle-out. Keyboard-bound actions stay
      instant (Raycast restraint). Raw CSS uses these; JSX uses duration-100/150
      /200 + ease-[var(--ease-out)]. */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);

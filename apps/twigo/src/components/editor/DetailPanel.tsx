@@ -14,11 +14,9 @@ import { useStream } from "@/store/stream";
 import { useCompare } from "@/store/compare";
 import { openPublish } from "@/lib/editor";
 import { PayloadDiff } from "./PayloadDiff";
+import { FormatToggle, type PayloadFormat } from "./FormatToggle";
 
-type Format = "json" | "text" | "hex";
-const FORMATS: Format[] = ["json", "text", "hex"];
-
-function bodyFor(m: StreamMessage, format: Format): string {
+function bodyFor(m: StreamMessage, format: PayloadFormat): string {
   if (format === "hex") return toHex(m.payloadB64);
   if (format === "text") return decodeText(m.payloadB64);
   return tryPrettyJson(m.payloadB64) ?? decodeText(m.payloadB64);
@@ -39,7 +37,7 @@ export function DetailPanel() {
   const session = useStream((s) =>
     s.activeId ? s.sessions[s.activeId] : undefined,
   );
-  const [format, setFormat] = useState<Format>("json");
+  const [format, setFormat] = useState<PayloadFormat>("json");
   const pinned = useCompare((s) => s.pinned);
   const pin = useCompare((s) => s.pin);
   const clearPin = useCompare((s) => s.clear);
@@ -71,7 +69,7 @@ export function DetailPanel() {
               variant="ghost"
               size="icon-sm"
               aria-label="Republish"
-              title="Republish"
+              tooltip="Republish"
               onClick={() =>
                 openPublish(
                   session.connId,
@@ -88,7 +86,7 @@ export function DetailPanel() {
                 variant="ghost"
                 size="icon-sm"
                 aria-label="Reply"
-                title={`Reply to ${replyTo}`}
+                tooltip={`Reply to ${replyTo}`}
                 onClick={() => openPublish(session.connId, replyTo, "")}
               >
                 <Reply />
@@ -98,7 +96,7 @@ export function DetailPanel() {
               variant="ghost"
               size="icon-sm"
               aria-label={isPinned ? "Unpin compare base" : "Pin to compare"}
-              title={isPinned ? "Unpin compare base" : "Pin to compare"}
+              tooltip={isPinned ? "Unpin compare base" : "Pin to compare"}
               className={cn(isPinned && "text-brand")}
               onClick={() => {
                 if (isPinned) clearPin();
@@ -111,7 +109,7 @@ export function DetailPanel() {
               variant="ghost"
               size="icon-sm"
               aria-label="Copy payload"
-              title="Copy payload"
+              tooltip="Copy payload"
               onClick={() => void navigator.clipboard.writeText(body)}
             >
               <Copy />
@@ -120,7 +118,7 @@ export function DetailPanel() {
               variant="ghost"
               size="icon-sm"
               aria-label="Copy as JSON"
-              title="Copy message as JSON"
+              tooltip="Copy message as JSON"
               onClick={() =>
                 void navigator.clipboard.writeText(
                   JSON.stringify(
@@ -180,21 +178,7 @@ export function DetailPanel() {
 
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="mb-1 flex items-center gap-0.5">
-              {FORMATS.map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => setFormat(f)}
-                  className={cn(
-                    "rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    format === f
-                      ? "bg-accent text-foreground"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {f}
-                </button>
-              ))}
+              <FormatToggle value={format} onChange={setFormat} />
               {comparePinned && (
                 <span className="ml-auto flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground">
                   diff vs pinned

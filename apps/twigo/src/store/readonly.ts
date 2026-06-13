@@ -5,7 +5,7 @@ import { createPersistStorage } from "@/lib/persist-storage";
 // A per-connection read-only guardrail (fat-finger protection for prod): when a
 // connection is locked, every write command is blocked before it reaches the
 // server. Persisted so the lock survives restarts. Reads/subscribe/browse stay
-// allowed — see api.ts assertWritable for what counts as a write.
+// allowed - see api.ts assertWritable for what counts as a write.
 interface ReadOnlyState {
   byConn: Record<string, boolean>;
   isReadOnly: (conn: string) => boolean;

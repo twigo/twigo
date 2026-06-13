@@ -5,8 +5,8 @@ import { registerConnScoped } from "@/store/connScoped";
 // The shared shape behind every per-connection "lazy tree" browser (JetStream
 // streams→consumers, KV buckets→keys, Object Store buckets→objects): a parent
 // list loaded on demand, children fetched the first time a parent expands and
-// cached after. A new domain gets the whole store — including conn-scoped
-// teardown — by supplying two loaders and a noun.
+// cached after. A new domain gets the whole store - including conn-scoped
+// teardown - by supplying two loaders and a noun.
 
 export type Status = "idle" | "loading" | "ready" | "error";
 

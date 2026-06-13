@@ -21,7 +21,7 @@ const jsEnabled = () => {
 
 const activeConn = () => useConnections.getState().activeContext;
 
-// One connect/switch command per known context (dynamic — contexts change).
+// One connect/switch command per known context (dynamic - contexts change).
 function connectionCommands(): Command[] {
   const { contexts, connected } = useConnections.getState();
   return contexts.map((c): Command => {

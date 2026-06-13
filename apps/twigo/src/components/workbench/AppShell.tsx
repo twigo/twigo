@@ -18,7 +18,7 @@ export function AppShell() {
   const setShellSizes = useUi((s) => s.setShellSizes);
 
   // Persist pane sizes, debounced so a drag doesn't thrash localStorage.
-  // Skip arrays containing a 0 — Allotment reports 0 for a hidden pane, which
+  // Skip arrays containing a 0 - Allotment reports 0 for a hidden pane, which
   // would otherwise reopen it collapsed on the next launch.
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const persistSizes = useCallback(

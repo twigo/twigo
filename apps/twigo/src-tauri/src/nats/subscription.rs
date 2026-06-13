@@ -103,7 +103,7 @@ pub async fn subscribe(
                 flatten_headers(message.headers.as_ref()),
             );
             // The channel closes when its UI tab goes away; end the task quietly
-            // (a debug line for observability — this is normal teardown).
+            // (a debug line for observability - this is normal teardown).
             if on_message.send(dto).is_err() {
                 tracing::debug!(subject = %task_subject, "stream channel closed; ending subscription");
                 break;

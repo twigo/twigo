@@ -1,5 +1,6 @@
 import { useUi } from "@/store/ui";
 import { useHelp } from "@/store/help";
+import { useZoom } from "@/store/zoom";
 import {
   openSettings,
   splitActiveEditor,
@@ -20,7 +21,7 @@ export interface Command {
   run: () => void;
 }
 
-// The workbench's own commands — view/editor/theme/help, no domain knowledge.
+// The workbench's own commands - view/editor/theme/help, no domain knowledge.
 const SHELL_COMMANDS: Command[] = [
   {
     id: "settings.open",
@@ -52,6 +53,30 @@ const SHELL_COMMANDS: Command[] = [
     category: "View",
     keywords: "dark light system appearance",
     run: () => useUi.getState().toggleTheme(),
+  },
+  {
+    id: "zoom.in",
+    title: "Zoom in",
+    category: "View",
+    keywords: "zoom in larger bigger increase scale font",
+    keybinding: "mod+=",
+    run: () => useZoom.getState().zoomIn(),
+  },
+  {
+    id: "zoom.out",
+    title: "Zoom out",
+    category: "View",
+    keywords: "zoom out smaller decrease scale font",
+    keybinding: "mod+-",
+    run: () => useZoom.getState().zoomOut(),
+  },
+  {
+    id: "zoom.reset",
+    title: "Reset zoom",
+    category: "View",
+    keywords: "zoom reset default actual size 100",
+    keybinding: "mod+0",
+    run: () => useZoom.getState().reset(),
   },
   {
     id: "help.shortcuts",
@@ -149,7 +174,7 @@ export interface ShortcutHelp {
   binding: string;
 }
 
-/** Every keyboard shortcut for the help overlay — the static, always-true set
+/** Every keyboard shortcut for the help overlay - the static, always-true set
  *  (not filtered by `when`, so a user learns them even when inapplicable). */
 export function keybindingHelp(): ShortcutHelp[] {
   const palette: ShortcutHelp = {
@@ -168,7 +193,7 @@ export function keybindingHelp(): ShortcutHelp[] {
 const IS_MAC =
   typeof navigator !== "undefined" && /mac/i.test(navigator.userAgent);
 
-// True when a keyboard event targets an editable surface — native fields,
+// True when a keyboard event targets an editable surface - native fields,
 // CodeMirror, or a role-based widget (cmdk/Radix combobox etc.). Used to avoid
 // hijacking bare keys (like "?") while the user is typing.
 export function isTypingTarget(target: EventTarget | null): boolean {

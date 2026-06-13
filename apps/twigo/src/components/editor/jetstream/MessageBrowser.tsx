@@ -16,12 +16,11 @@ import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import { useJetStream } from "@/store/jetstream";
 import { useToasts } from "@/store/toasts";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { FormatToggle, type PayloadFormat } from "../FormatToggle";
 
-type Format = "json" | "text" | "hex";
-const FORMATS: Format[] = ["json", "text", "hex"];
 const PAGE = 25;
 
-// Non-destructive message browse (direct-get only — never creates a consumer,
+// Non-destructive message browse (direct-get only - never creates a consumer,
 // never advances an ack floor). Walks newest → older.
 export function MessageBrowser({
   connId,
@@ -36,7 +35,7 @@ export function MessageBrowser({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
-  const [format, setFormat] = useState<Format>("json");
+  const [format, setFormat] = useState<PayloadFormat>("json");
   const [seqInput, setSeqInput] = useState("");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [filter, setFilter] = useState("");
@@ -154,7 +153,7 @@ export function MessageBrowser({
             <p className="px-1 text-xs text-error">{error}</p>
           ) : messages.length === 0 && !loading ? (
             <p className="px-1 py-2 text-xs text-muted-foreground">
-              No messages — use the seq field to jump to a sequence.
+              No messages - use the seq field to jump to a sequence.
             </p>
           ) : (
             <>
@@ -202,7 +201,7 @@ export function MessageBrowser({
                 </Button>
               ) : (
                 <p className="py-1 text-center text-[10px] uppercase tracking-wider text-muted-foreground">
-                  — start of stream —
+                  - start of stream -
                 </p>
               )}
 
@@ -266,23 +265,7 @@ export function MessageBrowser({
                     </div>
                   )}
 
-                  <div className="flex items-center gap-0.5">
-                    {FORMATS.map((f) => (
-                      <button
-                        key={f}
-                        type="button"
-                        onClick={() => setFormat(f)}
-                        className={cn(
-                          "rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider",
-                          format === f
-                            ? "bg-accent text-foreground"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                      >
-                        {f}
-                      </button>
-                    ))}
-                  </div>
+                  <FormatToggle value={format} onChange={setFormat} />
                   {selected.truncated && (
                     <p className="text-[10px] text-warn">
                       Payload truncated to 1 MB for display ·{" "}

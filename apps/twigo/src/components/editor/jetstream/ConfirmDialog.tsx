@@ -8,7 +8,7 @@ import {
 } from "@twigo/ui";
 
 // Confirmation for a destructive JetStream action. When `confirmWord` is set
-// (e.g. a stream name), the user must type it to enable the action — the strong
+// (e.g. a stream name), the user must type it to enable the action - the strong
 // guard for irreversible operations.
 export function ConfirmDialog({
   open,

@@ -5,10 +5,12 @@ import {
   DialogTitle,
   DialogDescription,
   Button,
+  RadioGroup,
+  RadioGroupItem,
 } from "@twigo/ui";
 import { fmtCount, fmtBytes } from "@twigo/utils";
 
-// Purge with a computed blast-radius preview (count + bytes) — what you're
+// Purge with a computed blast-radius preview (count + bytes) - what you're
 // about to lose, before you lose it.
 export function PurgeDialog({
   open,
@@ -49,26 +51,20 @@ export function PurgeDialog({
           be undone.
         </DialogDescription>
 
-        <div className="mt-3 space-y-2 text-xs">
-          <label className="flex items-center gap-2">
-            <input
-              type="radio"
-              name="purge-mode"
-              checked={mode === "all"}
-              onChange={() => setMode("all")}
-            />
-            <span>
-              Delete all — ~{fmtCount(messages)} messages · {fmtBytes(bytes)}
-            </span>
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="radio"
-              name="purge-mode"
-              checked={mode === "keep"}
-              onChange={() => setMode("keep")}
-            />
-            <span>Keep last</span>
+        <RadioGroup
+          value={mode}
+          onValueChange={(v) => setMode(v as "all" | "keep")}
+          className="mt-3 gap-2 text-xs"
+        >
+          <div className="flex items-center gap-2">
+            <RadioGroupItem value="all" id="purge-all" />
+            <label htmlFor="purge-all">
+              Delete all - ~{fmtCount(messages)} messages · {fmtBytes(bytes)}
+            </label>
+          </div>
+          <div className="flex items-center gap-2">
+            <RadioGroupItem value="keep" id="purge-keep" />
+            <label htmlFor="purge-keep">Keep last</label>
             <input
               value={keep}
               onChange={(e) => setKeep(e.target.value)}
@@ -78,11 +74,11 @@ export function PurgeDialog({
               className="h-7 w-20 rounded border border-border bg-background px-1.5 font-mono"
             />
             <span>messages</span>
-          </label>
+          </div>
           <p className="text-[10px] text-muted-foreground">
             Counts are from the last refresh.
           </p>
-        </div>
+        </RadioGroup>
 
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>

@@ -1,3 +1,11 @@
+import {
+  Select as SelectRoot,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@twigo/ui";
+
 export function Field({
   label,
   children,
@@ -25,17 +33,17 @@ export function Select({
   disabled?: boolean;
 }) {
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      disabled={disabled}
-      className="h-7 w-40 rounded border border-border bg-background px-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-    >
-      {options.map((o) => (
-        <option key={o} value={o}>
-          {o}
-        </option>
-      ))}
-    </select>
+    <SelectRoot value={value} onValueChange={onChange} disabled={disabled}>
+      <SelectTrigger>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((o) => (
+          <SelectItem key={o} value={o}>
+            {o}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </SelectRoot>
   );
 }

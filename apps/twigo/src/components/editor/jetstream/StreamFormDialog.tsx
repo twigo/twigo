@@ -22,7 +22,7 @@ export function StreamFormDialog({
   title,
   submitLabel,
   initial,
-  // On edit, name/storage/retention can't change — gray them.
+  // On edit, name/storage/retention can't change - gray them.
   lockIdentity = false,
   onClose,
   onSubmit,

@@ -16,7 +16,7 @@ import { useToasts } from "@/store/toasts";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
-// Connections the user is intentionally closing — suppresses the "lost
+// Connections the user is intentionally closing - suppresses the "lost
 // connection" toast for drop/lame-duck events that a deliberate disconnect
 // emits on its way down. Transient, never persisted.
 const closing = new Set<string>();
@@ -30,7 +30,7 @@ const DROP_GRACE_MS = 3000;
 const SLOW_COOLDOWN_MS = 30_000;
 
 const dropTimers = new Map<string, ReturnType<typeof setTimeout>>();
-// Conns whose outage we actually announced — gates the matching "reconnected"
+// Conns whose outage we actually announced - gates the matching "reconnected"
 // toast so a self-healed blip stays silent both ways.
 const announced = new Set<string>();
 // Last error message toasted per conn: a fault that repeats on every reconnect
@@ -55,7 +55,7 @@ function teardown(conn: string) {
   // without editing this file.
   resetConnScopedStores(conn);
   // The editor layer injects this (setEditorTeardown) so the store doesn't
-  // depend on the UI — keeps the dependency one-way (editor → store).
+  // depend on the UI - keeps the dependency one-way (editor → store).
   useConnections.getState().editorTeardown(conn);
 }
 
@@ -145,7 +145,7 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       const err = ipcError(e);
       // Branch on the typed kind for an actionable hint on the common failure.
       const hint =
-        err.kind === "credentials" ? " — check the context's credentials" : "";
+        err.kind === "credentials" ? " - check the context's credentials" : "";
       set((s) => ({
         connecting: { ...s.connecting, [name]: false },
         connError: { ...s.connError, [name]: err.message },
@@ -221,7 +221,7 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
             announced.add(conn);
             useToasts
               .getState()
-              .push("warning", `Lost connection to ${conn} — reconnecting…`);
+              .push("warning", `Lost connection to ${conn} - reconnecting…`);
           }
         }, DROP_GRACE_MS);
         dropTimers.set(conn, timer);
@@ -238,7 +238,7 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       if (!closing.has(conn)) {
         toasts.push(
           "warning",
-          `${conn} is entering lame-duck mode — server shutting down`,
+          `${conn} is entering lame-duck mode - server shutting down`,
         );
       }
     } else if (kind === "slowConsumer") {
@@ -250,7 +250,7 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
         slowConsumerAt.set(conn, Date.now());
         toasts.push(
           "warning",
-          `${conn}: slow consumer — messages may be dropped`,
+          `${conn}: slow consumer - messages may be dropped`,
         );
       }
     } else if (kind === "serverError" || kind === "clientError") {

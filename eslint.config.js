@@ -6,7 +6,7 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import importPlugin from "eslint-plugin-import";
 import prettier from "eslint-config-prettier";
 
-// Domain state/logic the workbench shell must never reach into — it talks to
+// Domain state/logic the workbench shell must never reach into - it talks to
 // NATS only through the shell registries (src/shell/*) that the module fills.
 const DOMAIN_STATE = [
   "@/store/connections",
@@ -32,7 +32,7 @@ const DOMAIN_UI = [
   "@/components/editor/**",
 ];
 const SHELL_BOUNDARY_MSG =
-  "Workbench shell stays domain-free: contribute through a shell registry (src/shell/*) or use a shell store (ui/palette/help/toasts) — don't import NATS state, modules, views, editors or IPC.";
+  "Workbench shell stays domain-free: contribute through a shell registry (src/shell/*) or use a shell store (ui/palette/help/toasts) - don't import NATS state, modules, views, editors or IPC.";
 
 export default tseslint.config(
   { ignores: ["**/dist", "**/src-tauri", "**/node_modules"] },
@@ -101,7 +101,7 @@ export default tseslint.config(
     },
   },
   // Shell/domain boundary (#23): the workbench shell and the contribution
-  // registries must not import NATS state, modules, views, editors or IPC —
+  // registries must not import NATS state, modules, views, editors or IPC -
   // they talk to the domain only through the registries the module fills.
   {
     files: [

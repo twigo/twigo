@@ -265,7 +265,7 @@ export function openSettings() {
 // --- Editor pane management (split / focus / reset) --------------------------
 // Dockview suppresses its add/remove-panel events during a programmatic move
 // (the `_moving` lock), so moving a panel between groups never trips
-// EditorArea's onDidRemovePanel teardown — live stream subscriptions survive.
+// EditorArea's onDidRemovePanel teardown - live stream subscriptions survive.
 // onDidLayoutChange still fires afterwards, so the new layout is persisted.
 
 /** True when the active tab shares its group with others, so a split is visible. */
@@ -308,7 +308,7 @@ export function closeEditorsForConn(connId: string) {
   setReplacingLayout(true);
   try {
     // Responders and streams are tab-independent (they persist across context
-    // switches), so tear down this connection's sessions from the stores —
+    // switches), so tear down this connection's sessions from the stores -
     // including ones whose tabs aren't in the currently shown layout.
     useResponder.getState().removeConn(connId);
     const { sessions, close } = useStream.getState();
@@ -316,7 +316,7 @@ export function closeEditorsForConn(connId: string) {
       if (s.connId === connId) void close(s.id);
     }
     // Close this connection's panels in the shown layout (its persisted layout
-    // is preserved — the save is suppressed while replacingLayout is set).
+    // is preserved - the save is suppressed while replacingLayout is set).
     if (api) {
       for (const panel of api.panels) {
         const p = panel.params as

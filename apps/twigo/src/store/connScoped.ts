@@ -1,6 +1,6 @@
 // Registry of per-connection stores that must drop a connection's state when it
 // disconnects, drops, or closes. Domain stores self-register here so the
-// connections store doesn't import every domain by hand — a new domain (or a
+// connections store doesn't import every domain by hand - a new domain (or a
 // future non-NATS module) joins teardown without editing connections.ts.
 
 interface Resettable {

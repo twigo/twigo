@@ -2,8 +2,8 @@ import type { FunctionComponent } from "react";
 
 // Status-bar segments. The shell renders a brand-coloured bar with two clusters
 // (left/right) and its own chrome (palette, theme); domain modules contribute
-// segments — each a self-contained component that reads whatever stores it needs
-// — so the shell never imports connection/stream state to draw the bar.
+// segments - each a self-contained component that reads whatever stores it needs
+// - so the shell never imports connection/stream state to draw the bar.
 
 export interface StatusSegment {
   id: string;

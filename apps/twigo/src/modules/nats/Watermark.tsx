@@ -69,7 +69,7 @@ export function NatsWatermark() {
       action={{ label: "New publish", onClick: () => newPublish(), icon: Send }}
     >
       <p className="max-w-xs">
-        Choose a subject in the Explorer — each opens in its own live tab.
+        Choose a subject in the Explorer - each opens in its own live tab.
       </p>
     </EmptyState>
   );

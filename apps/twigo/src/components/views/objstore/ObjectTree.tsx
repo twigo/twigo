@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ChevronRight, Box, File, Loader2, Trash2, Upload } from "lucide-react";
 import { open as openFile } from "@tauri-apps/plugin-dialog";
-import { cn } from "@twigo/ui";
+import { cn, ScrollArea } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
 import { objPutObject, objDeleteBucket, objObjectInfo } from "@/lib/api";
 import { useObjStore } from "@/store/objstore";
@@ -63,7 +63,7 @@ export function ObjectTree({
         return;
       }
     } catch {
-      // info() errors when the object doesn't exist yet — safe to upload.
+      // info() errors when the object doesn't exist yet - safe to upload.
     }
     await runUpload(bkt, src, objName);
   };
@@ -124,40 +124,42 @@ export function ObjectTree({
 
   return (
     <>
-      <ul
-        role="tree"
-        tabIndex={0}
-        onKeyDown={onKeyDown}
-        className="min-h-0 flex-1 overflow-auto py-0.5 outline-none"
-      >
-        {rows.map((row, i) =>
-          row.kind === "bucket" ? (
-            <BucketRow
-              key={`b:${row.bucket.bucket}`}
-              bucket={row.bucket}
-              selected={i === sel}
-              expanded={!!expanded[row.bucket.bucket]}
-              loading={!!loading[row.bucket.bucket]}
-              onSelect={() => setSelected(i)}
-              onToggle={() => void toggleBucket(connId, row.bucket.bucket)}
-              uploading={uploadingBucket === row.bucket.bucket}
-              onUpload={() => void startUpload(row.bucket.bucket)}
-              onDelete={() => setDelBucket(row.bucket.bucket)}
-              readOnly={readOnly}
-            />
-          ) : (
-            <ObjectRow
-              key={`o:${row.bucket}:${row.object.name}`}
-              object={row.object}
-              selected={i === sel}
-              onSelect={() => setSelected(i)}
-              onOpen={() =>
-                openObjectEntry(connId, row.bucket, row.object.name)
-              }
-            />
-          ),
-        )}
-      </ul>
+      <ScrollArea className="min-h-0 flex-1">
+        <ul
+          role="tree"
+          tabIndex={0}
+          onKeyDown={onKeyDown}
+          className="py-0.5 outline-none"
+        >
+          {rows.map((row, i) =>
+            row.kind === "bucket" ? (
+              <BucketRow
+                key={`b:${row.bucket.bucket}`}
+                bucket={row.bucket}
+                selected={i === sel}
+                expanded={!!expanded[row.bucket.bucket]}
+                loading={!!loading[row.bucket.bucket]}
+                onSelect={() => setSelected(i)}
+                onToggle={() => void toggleBucket(connId, row.bucket.bucket)}
+                uploading={uploadingBucket === row.bucket.bucket}
+                onUpload={() => void startUpload(row.bucket.bucket)}
+                onDelete={() => setDelBucket(row.bucket.bucket)}
+                readOnly={readOnly}
+              />
+            ) : (
+              <ObjectRow
+                key={`o:${row.bucket}:${row.object.name}`}
+                object={row.object}
+                selected={i === sel}
+                onSelect={() => setSelected(i)}
+                onOpen={() =>
+                  openObjectEntry(connId, row.bucket, row.object.name)
+                }
+              />
+            ),
+          )}
+        </ul>
+      </ScrollArea>
 
       {delBucket && (
         <ConfirmDialog
@@ -180,7 +182,7 @@ export function ObjectTree({
             if (!o) setPendingUpload(null);
           }}
           title={`Replace ${pendingUpload.name}?`}
-          description="An object with this name already exists in the store. Uploading replaces it — the current contents are lost."
+          description="An object with this name already exists in the store. Uploading replaces it - the current contents are lost."
           confirmLabel="Replace object"
           onConfirm={() =>
             void runUpload(

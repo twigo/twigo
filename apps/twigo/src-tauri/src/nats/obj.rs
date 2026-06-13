@@ -142,7 +142,7 @@ pub async fn obj_object_info(
 
 /// Download an object to a local path. Streams chunk-by-chunk so a multi-GB
 /// object never lands wholly in memory, and writes to a sidecar temp file that
-/// is atomically renamed on success — a failed download never leaves a
+/// is atomically renamed on success - a failed download never leaves a
 /// truncated file at `dest`.
 #[tauri::command]
 pub async fn obj_get_object(

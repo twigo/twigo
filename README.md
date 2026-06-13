@@ -1,6 +1,6 @@
 # Twigo
 
-A desktop IDE for [NATS](https://nats.io) — connect to a server and work with
+A desktop IDE for [NATS](https://nats.io) - connect to a server and work with
 it like an IDE, the way Lens does for Kubernetes.
 
 > **Status: early / work in progress.** Core connection management works;
@@ -60,7 +60,7 @@ pnpm tauri build
 
 ## Contributing
 
-Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributions are welcome - see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

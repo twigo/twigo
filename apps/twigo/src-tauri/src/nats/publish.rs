@@ -15,7 +15,7 @@ fn build_headers(pairs: Vec<(String, String)>) -> Option<async_nats::HeaderMap> 
             continue;
         }
         // CR/LF are illegal in NATS headers (async-nats asserts on them), and a
-        // rendered responder value can be multi-line — collapse so a stray
+        // rendered responder value can be multi-line - collapse so a stray
         // newline can't panic the publish command.
         let key = key.replace(['\r', '\n'], " ");
         let value = value.replace(['\r', '\n'], " ");
