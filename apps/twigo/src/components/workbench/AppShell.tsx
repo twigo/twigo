@@ -8,12 +8,10 @@ import { CommandPalette } from "./CommandPalette";
 import { ShortcutsHelp } from "./ShortcutsHelp";
 import { EditorArea } from "@/components/editor/EditorArea";
 import { Sidebar } from "@/components/views/Sidebar";
-import { DetailPanel } from "@/components/editor/DetailPanel";
 import { useUi } from "@/store/ui";
 
 export function AppShell() {
   const sidebarOpen = useUi((s) => s.sidebarOpen);
-  const detailOpen = useUi((s) => s.detailOpen);
   const shellSizes = useUi((s) => s.shellSizes);
   const setShellSizes = useUi((s) => s.setShellSizes);
 
@@ -40,7 +38,7 @@ export function AppShell() {
   );
 
   const restored =
-    shellSizes.length === 3 && shellSizes.every((n) => n > 0)
+    shellSizes.length === 2 && shellSizes.every((n) => n > 0)
       ? shellSizes
       : undefined;
 
@@ -62,13 +60,6 @@ export function AppShell() {
           </Allotment.Pane>
           <Allotment.Pane minSize={320}>
             <EditorArea />
-          </Allotment.Pane>
-          <Allotment.Pane
-            minSize={240}
-            preferredSize={360}
-            visible={detailOpen}
-          >
-            <DetailPanel />
           </Allotment.Pane>
         </Allotment>
       </div>

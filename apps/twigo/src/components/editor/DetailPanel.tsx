@@ -33,10 +33,9 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function DetailPanel() {
-  const session = useStream((s) =>
-    s.activeId ? s.sessions[s.activeId] : undefined,
-  );
+export function DetailPanel({ streamId }: { streamId: string }) {
+  const session = useStream((s) => s.sessions[streamId]);
+  const select = useStream((s) => s.select);
   const [format, setFormat] = useState<PayloadFormat>("json");
   const pinned = useCompare((s) => s.pinned);
   const pin = useCompare((s) => s.pin);
@@ -63,83 +62,95 @@ export function DetailPanel() {
         <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           Message
         </span>
-        {msg && session && (
-          <div className="flex items-center gap-0.5">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Republish"
-              tooltip="Republish"
-              onClick={() =>
-                openPublish(
-                  session.connId,
-                  msg.subject,
-                  payloadText,
-                  msg.headers,
-                )
-              }
-            >
-              <Send />
-            </Button>
-            {replyTo && (
+        <div className="flex items-center gap-0.5">
+          {msg && session && (
+            <>
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Reply"
-                tooltip={`Reply to ${replyTo}`}
-                onClick={() => openPublish(session.connId, replyTo, "")}
+                aria-label="Republish"
+                tooltip="Republish"
+                onClick={() =>
+                  openPublish(
+                    session.connId,
+                    msg.subject,
+                    payloadText,
+                    msg.headers,
+                  )
+                }
               >
-                <Reply />
+                <Send />
               </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={isPinned ? "Unpin compare base" : "Pin to compare"}
-              tooltip={isPinned ? "Unpin compare base" : "Pin to compare"}
-              className={cn(isPinned && "text-brand")}
-              onClick={() => {
-                if (isPinned) clearPin();
-                else pin(msg);
-              }}
-            >
-              {isPinned ? <PinOff /> : <Pin />}
-            </Button>
-            <span className="mx-0.5 h-4 w-px bg-border-subtle" />
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Copy payload"
-              tooltip="Copy payload"
-              onClick={() => void navigator.clipboard.writeText(body)}
-            >
-              <Copy />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Copy as JSON"
-              tooltip="Copy message as JSON"
-              onClick={() =>
-                void navigator.clipboard.writeText(
-                  JSON.stringify(
-                    {
-                      subject: msg.subject,
-                      receivedAt: new Date(msg.receivedAt).toISOString(),
-                      reply: msg.reply,
-                      headers: msg.headers,
-                      payload: payloadText,
-                    },
-                    null,
-                    2,
-                  ),
-                )
-              }
-            >
-              <Braces />
-            </Button>
-          </div>
-        )}
+              {replyTo && (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Reply"
+                  tooltip={`Reply to ${replyTo}`}
+                  onClick={() => openPublish(session.connId, replyTo, "")}
+                >
+                  <Reply />
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={isPinned ? "Unpin compare base" : "Pin to compare"}
+                tooltip={isPinned ? "Unpin compare base" : "Pin to compare"}
+                className={cn(isPinned && "text-brand")}
+                onClick={() => {
+                  if (isPinned) clearPin();
+                  else pin(msg);
+                }}
+              >
+                {isPinned ? <PinOff /> : <Pin />}
+              </Button>
+              <span className="mx-0.5 h-4 w-px bg-border-subtle" />
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Copy payload"
+                tooltip="Copy payload"
+                onClick={() => void navigator.clipboard.writeText(body)}
+              >
+                <Copy />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Copy as JSON"
+                tooltip="Copy message as JSON"
+                onClick={() =>
+                  void navigator.clipboard.writeText(
+                    JSON.stringify(
+                      {
+                        subject: msg.subject,
+                        receivedAt: new Date(msg.receivedAt).toISOString(),
+                        reply: msg.reply,
+                        headers: msg.headers,
+                        payload: payloadText,
+                      },
+                      null,
+                      2,
+                    ),
+                  )
+                }
+              >
+                <Braces />
+              </Button>
+              <span className="mx-0.5 h-4 w-px bg-border-subtle" />
+            </>
+          )}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Close inspector"
+            tooltip="Close inspector"
+            onClick={() => select(streamId, null)}
+          >
+            <X />
+          </Button>
+        </div>
       </div>
 
       {!msg ? (
