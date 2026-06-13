@@ -25,6 +25,22 @@
     user-select: none;
   }
 
+  /* Native <button> doesn't show the pointer cursor and Tailwind's reset
+     doesn't add it. Interactive controls should show the hand. Radix triggers
+     (Select/Tooltip/Toggle/RadioGroup) render <button>, so they're covered too;
+     the role selectors catch clickable non-button elements (tree rows, cmdk
+     items, menu items, the radio labels). Disabled controls keep the default. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="treeitem"],
+  [role="option"]:not([aria-disabled="true"]),
+  [role="menuitem"]:not([aria-disabled="true"]),
+  [role="tab"],
+  summary,
+  label[for] {
+    cursor: pointer;
+  }
+
   /* Respect reduced-motion: collapse (not zero, so transitionend still fires). */
   @media (prefers-reduced-motion: reduce) {
     *,
