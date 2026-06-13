@@ -1,13 +1,5 @@
 import { useState } from "react";
-import {
-  RefreshCw,
-  Loader2,
-  Layers,
-  Eraser,
-  Trash2,
-  Plus,
-  Pencil,
-} from "lucide-react";
+import { RefreshCw, Layers, Eraser, Trash2, Plus, Pencil } from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
 import {
@@ -21,7 +13,7 @@ import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import { useJetStream } from "@/store/jetstream";
 import { useToasts } from "@/store/toasts";
 import { closeStreamDetail } from "@/lib/editor";
-import { Row, Section, RawJson } from "./parts";
+import { Row, Section, RawJson, DetailSkeleton } from "./parts";
 import { disp, num, limitCount, limitBytes } from "./format";
 import { MessageBrowser } from "./MessageBrowser";
 import { PurgeDialog } from "./PurgeDialog";
@@ -255,13 +247,7 @@ export function StreamDetailPanel({
           </Button>
         </EmptyState>
       ) : !data ? (
-        <EmptyState
-          icon={Loader2}
-          className="flex-1"
-          iconClassName="animate-spin"
-        >
-          Loading…
-        </EmptyState>
+        <DetailSkeleton />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3">
           <Section title="State">

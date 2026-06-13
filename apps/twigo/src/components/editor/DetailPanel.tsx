@@ -105,6 +105,7 @@ export function DetailPanel() {
             >
               {isPinned ? <PinOff /> : <Pin />}
             </Button>
+            <span className="mx-0.5 h-4 w-px bg-border-subtle" />
             <Button
               variant="ghost"
               size="icon-sm"

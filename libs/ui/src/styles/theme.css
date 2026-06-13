@@ -51,6 +51,11 @@
   --selected: color-mix(in oklab, var(--brand) 10%, oklch(0 0 0 / 4%));
   --selected-unfocused: oklch(0 0 0 / 6%);
 
+  /* Selected editor-tab chip: a faint azure-tinted raised fill + tinted border
+     (never pure gray - that azure tint is the premium tell). */
+  --tab-selected-bg: color-mix(in oklab, var(--brand) 8%, var(--card));
+  --tab-selected-border: color-mix(in oklab, var(--brand) 22%, var(--border));
+
   /* Two-layer focus: tight inner ring + translucent halo (one ring reads
      cheap). Shared - the nested var(--brand) resolves per theme at use. */
   --focus-ring:
@@ -120,6 +125,9 @@
   --row-active: oklch(1 0 0 / 8%);
   --selected: color-mix(in oklab, var(--brand) 16%, oklch(1 0 0 / 6%));
   --selected-unfocused: oklch(1 0 0 / 8%);
+
+  --tab-selected-bg: color-mix(in oklab, var(--brand) 14%, var(--card));
+  --tab-selected-border: color-mix(in oklab, var(--brand) 30%, var(--border));
   --border-subtle: oklch(0.93 0.02 240 / 5%);
   --border-micro: oklch(0.93 0.02 240 / 2.5%);
 

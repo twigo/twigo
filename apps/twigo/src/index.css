@@ -114,13 +114,14 @@
   --dv-background-color: var(--editor);
   --dv-group-view-background-color: var(--editor);
   --dv-tabs-and-actions-container-background-color: var(--panel);
-  --dv-activegroup-visiblepanel-tab-background-color: var(--background);
+  /* Tab fills are drawn by our own pill CSS below; keep the engine transparent. */
+  --dv-activegroup-visiblepanel-tab-background-color: transparent;
   --dv-activegroup-visiblepanel-tab-color: var(--foreground);
-  --dv-activegroup-hiddenpanel-tab-background-color: var(--panel);
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
   --dv-activegroup-hiddenpanel-tab-color: var(--muted-foreground);
-  --dv-inactivegroup-visiblepanel-tab-background-color: var(--background);
+  --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
   --dv-inactivegroup-visiblepanel-tab-color: var(--muted-foreground);
-  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--panel);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
   --dv-inactivegroup-hiddenpanel-tab-color: var(--muted-foreground);
   --dv-tabs-container-scrollbar-color: var(--muted-foreground);
   --dv-tab-divider-color: var(--border);
@@ -130,24 +131,42 @@
   --dv-icon-hover-background-color: var(--accent);
 }
 
-/* Central editor tabs: inactive tabs recede into the strip,
-   the active tab takes the content colour with a brand accent on top. */
+/* Editor tabs (New UI style): each tab is a rounded chip floating on the strip.
+   The selected one gets a subtly-raised fill + hairline border; inactive tabs
+   are plain text that lifts on hover. No vertical separators, no underline. */
+.twigo-dockview .dv-tabs-and-actions-container {
+  padding-left: 4px;
+  border-bottom: 1px solid var(--border-subtle);
+}
 .twigo-dockview .dv-tabs-container > .dv-tab {
-  position: relative;
-  border-right: 1px solid var(--border);
-  transition: background-color var(--dur-instant) var(--ease-out);
+  margin: 4px 1.5px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  transition:
+    background-color var(--dur-instant) var(--ease-out),
+    border-color var(--dur-instant) var(--ease-out);
 }
 .twigo-dockview .dv-tabs-container > .dv-tab.dv-inactive-tab:hover {
-  background-color: var(--accent);
+  background-color: var(--row-hover);
 }
-.twigo-dockview .dv-tabs-container > .dv-tab.dv-active-tab::after {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 2px;
-  background: var(--brand);
+/* Selected chip: azure-tinted raised fill + tinted border. */
+.twigo-dockview .dv-tabs-container > .dv-tab.dv-active-tab {
+  background-color: var(--tab-selected-bg);
+  border-color: var(--tab-selected-border);
 }
-
+.twigo-dockview .dv-tabs-container > .dv-tab.dv-active-tab:hover {
+  background-color: color-mix(in oklab, var(--brand) 20%, var(--card));
+}
+/* Focus axis: when this split isn't focused, the tint drops to neutral. */
+.twigo-dockview .dv-groupview.dv-inactive-group .dv-tab.dv-active-tab {
+  background-color: var(--card);
+  border-color: var(--border);
+}
+/* Icons inherit the tab's text colour and fade on inactive tabs (alpha, not
+   hue) so the bar stays near-monochrome - the one accent is the chip tint. */
+.twigo-dockview .dv-tab.dv-inactive-tab .lucide {
+  opacity: 0.7;
+}
 /* Close button shows only on the active tab or on hover (less clutter). */
 .twigo-dockview .dv-tab .twigo-tab-close {
   opacity: 0;

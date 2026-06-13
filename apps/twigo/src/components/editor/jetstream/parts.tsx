@@ -1,6 +1,28 @@
 import { useState } from "react";
 import { ChevronRight } from "lucide-react";
-import { cn } from "@twigo/ui";
+import { cn, Skeleton } from "@twigo/ui";
+
+// Loading shape for a detail panel: a couple of titled sections of key/value
+// rows, mirroring the real Section/Row layout so a load reads as "almost here".
+export function DetailSkeleton() {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-4 p-3">
+      {[0, 1].map((s) => (
+        <div key={s} className="space-y-1.5">
+          <Skeleton className="h-2.5 w-20" />
+          <div className="space-y-2.5 rounded-md border border-border px-3 py-2.5">
+            {[0, 1, 2].map((r) => (
+              <div key={r} className="flex items-center justify-between gap-4">
+                <Skeleton className="h-2.5 w-16" />
+                <Skeleton className="h-2.5 w-24" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export function Row({
   label,
