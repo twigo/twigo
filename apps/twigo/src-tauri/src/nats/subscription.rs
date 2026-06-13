@@ -64,6 +64,19 @@ fn stop(subs: &SubState, sub_id: &str) {
     }
 }
 
+fn register(subs: &SubState, sub_id: String, conn_id: String, handle: AbortHandle) {
+    if let Some((_conn, displaced)) = subs
+        .handles
+        .lock()
+        .unwrap()
+        .insert(sub_id, (conn_id, handle))
+    {
+        // Concurrent re-subscribes with one sub_id can race past the upfront
+        // stop(); an unaborted displaced task would pump duplicates forever.
+        displaced.abort();
+    }
+}
+
 /// Abort every subscription belonging to a connection (used on disconnect).
 pub(crate) fn abort_conn(subs: &SubState, conn_id: &str) {
     subs.handles.lock().unwrap().retain(|_, (conn, handle)| {
@@ -111,10 +124,7 @@ pub async fn subscribe(
         }
     });
 
-    subs.handles
-        .lock()
-        .unwrap()
-        .insert(sub_id, (conn_id.clone(), handle.abort_handle()));
+    register(&subs, sub_id, conn_id.clone(), handle.abort_handle());
     tracing::info!(conn = %conn_id, %subject, "subscribed");
     Ok(())
 }
@@ -135,6 +145,18 @@ mod tests {
         assert_eq!(msg.size, 5);
         assert_eq!(msg.payload_b64, "aGVsbG8=");
         assert!(msg.reply.is_none());
+    }
+
+    #[tokio::test]
+    async fn re_registering_a_sub_id_aborts_the_displaced_task() {
+        let subs = SubState::default();
+        let first = tokio::spawn(async { std::future::pending::<()>().await });
+        register(&subs, "s".into(), "a".into(), first.abort_handle());
+        let second = tokio::spawn(async { std::future::pending::<()>().await });
+        register(&subs, "s".into(), "a".into(), second.abort_handle());
+        assert!(first.await.unwrap_err().is_cancelled());
+        assert_eq!(subs.handles.lock().unwrap().len(), 1);
+        second.abort();
     }
 
     #[tokio::test]
