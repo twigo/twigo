@@ -123,7 +123,6 @@
   --dv-inactivegroup-visiblepanel-tab-color: var(--muted-foreground);
   --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
   --dv-inactivegroup-hiddenpanel-tab-color: var(--muted-foreground);
-  --dv-tabs-container-scrollbar-color: var(--muted-foreground);
   --dv-tab-divider-color: var(--border);
   --dv-separator-border: var(--border);
   --dv-paneview-active-outline-color: transparent;
@@ -137,6 +136,18 @@
 .twigo-dockview .dv-tabs-and-actions-container {
   padding-left: 4px;
   border-bottom: 1px solid var(--border-subtle);
+}
+/* Hide the tab-strip scrollbar: on overflow dockview overlays a custom 4px bar
+   on the strip's bottom edge (and a native one in its fallback mode), both
+   crowding the short tab chips. Wheel/trackpad still pans the strip. */
+.twigo-dockview .dv-scrollbar-horizontal {
+  display: none;
+}
+.twigo-dockview .dv-tabs-container {
+  scrollbar-width: none;
+}
+.twigo-dockview .dv-tabs-container::-webkit-scrollbar {
+  display: none;
 }
 .twigo-dockview .dv-tabs-container > .dv-tab {
   margin: 4px 1.5px;
