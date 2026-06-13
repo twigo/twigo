@@ -27,7 +27,7 @@ import {
   ServerHealthTab,
 } from "./panels";
 
-// Editor inputs (VS Code model). One registry drives the Dockview component &
+// One registry drives the Dockview component &
 // tab maps and connection-scoped teardown, so a new tab type is a single entry
 // and an omission is a compile error (Record<EditorType, …>).
 export type EditorType =

@@ -4,6 +4,7 @@ import {
   DialogContent,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
   Button,
 } from "@twigo/ui";
 
@@ -37,7 +38,7 @@ export function ConfirmDialog({
 
   return (
     <Dialog open={open} onOpenChange={change}>
-      <DialogContent className="p-4">
+      <DialogContent className="p-5">
         <DialogTitle className="text-sm font-semibold">{title}</DialogTitle>
         <DialogDescription className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
           {description}
@@ -51,11 +52,11 @@ export function ConfirmDialog({
             spellCheck={false}
             placeholder={`Type "${confirmWord}" to confirm`}
             aria-label="Type to confirm"
-            className="mt-3 h-8 w-full rounded border border-border bg-background px-2 font-mono text-xs"
+            className="mt-3 h-7 w-full rounded border border-border bg-background px-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         )}
 
-        <div className="mt-4 flex justify-end gap-2">
+        <DialogFooter>
           <Button variant="ghost" size="sm" onClick={() => change(false)}>
             Cancel
           </Button>
@@ -70,7 +71,7 @@ export function ConfirmDialog({
           >
             {confirmLabel}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

@@ -1,6 +1,14 @@
 import { useState } from "react";
-import { Dialog, DialogContent, DialogTitle, Button, Input } from "@twigo/ui";
-import { Field } from "@/components/editor/jetstream/form";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogFooter,
+  Button,
+  Input,
+  FieldGrid,
+  FormField,
+} from "@twigo/ui";
 
 export function CreateKeyDialog({
   bucket,
@@ -28,41 +36,40 @@ export function CreateKeyDialog({
         if (!o) onClose();
       }}
     >
-      <DialogContent className="p-4">
+      <DialogContent className="p-5">
         <DialogTitle className="text-sm font-semibold">
           New key in {bucket}
         </DialogTitle>
 
-        <div className="mt-3 space-y-2">
-          <Field label="Key">
+        <FieldGrid className="mt-4">
+          <FormField label="Key">
             <Input
               value={key}
               onChange={(e) => setKey(e.target.value)}
               autoFocus
               spellCheck={false}
               placeholder="db.host"
-              className="h-7 w-40 font-mono text-xs"
+              className="h-7 font-mono text-xs"
             />
-          </Field>
-          <div>
-            <span className="text-xs text-muted-foreground">Value</span>
+          </FormField>
+          <FormField label="Value">
             <textarea
               value={value}
               onChange={(e) => setValue(e.target.value)}
               spellCheck={false}
-              className="mt-1 h-24 w-full resize-none rounded border border-border bg-background p-2 font-mono text-xs"
+              className="h-24 w-full resize-none rounded border border-border bg-background p-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
-          </div>
-        </div>
+          </FormField>
+        </FieldGrid>
 
-        <div className="mt-4 flex justify-end gap-2">
+        <DialogFooter>
           <Button variant="ghost" size="sm" onClick={onClose}>
             Cancel
           </Button>
-          <Button size="sm" disabled={!valid} onClick={submit}>
+          <Button variant="brand" size="sm" disabled={!valid} onClick={submit}>
             Create key
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

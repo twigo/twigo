@@ -114,24 +114,24 @@ export function JsConsumerPanel(props: IDockviewPanelProps) {
   );
 }
 
-// Close button shows only on the active/hovered tab (styled in index.css).
+// The type icon is monochrome (inherits the tab's text colour, fades when
+// inactive); the one accent on the bar is the selected chip's azure tint. The
+// close X keeps a fixed size so the tab width never shifts on hover.
 function ClosableTab({
   icon: Icon,
   title,
   mono,
-  iconClass,
   onClose,
 }: {
   icon: LucideIcon;
   title: string | undefined;
   mono?: boolean;
-  iconClass?: string;
   onClose: () => void;
 }) {
   return (
-    <div className="flex h-full items-center gap-2 pl-3 pr-2 text-xs">
-      <Icon className={cn("size-3 shrink-0", iconClass)} />
-      <span className={cn("max-w-44 truncate", mono && "font-mono")}>
+    <div className="flex h-full items-center gap-1.5 pl-3 pr-2 text-[13px]">
+      <Icon className="size-3.5 shrink-0" />
+      <span className={cn("max-w-44 truncate", mono && "font-mono text-xs")}>
         {title}
       </span>
       <button
@@ -154,7 +154,6 @@ export function StreamTab(props: IDockviewPanelHeaderProps) {
   return (
     <ClosableTab
       icon={Radio}
-      iconClass="text-brand"
       mono
       title={props.api.title}
       onClose={() => {
@@ -168,7 +167,6 @@ export function ServerTab(props: IDockviewPanelHeaderProps) {
   return (
     <ClosableTab
       icon={Server}
-      iconClass="text-brand"
       mono
       title={props.api.title}
       onClose={() => {
@@ -182,7 +180,6 @@ export function PublishTab(props: IDockviewPanelHeaderProps) {
   return (
     <ClosableTab
       icon={Send}
-      iconClass="text-brand"
       title={props.api.title}
       onClose={() => {
         props.api.close();
@@ -195,7 +192,6 @@ export function ResponderTab(props: IDockviewPanelHeaderProps) {
   return (
     <ClosableTab
       icon={Webhook}
-      iconClass="text-brand"
       title={props.api.title}
       onClose={() => {
         props.api.close();
@@ -208,7 +204,6 @@ export function SettingsTab(props: IDockviewPanelHeaderProps) {
   return (
     <ClosableTab
       icon={Settings}
-      iconClass="text-muted-foreground"
       title={props.api.title}
       onClose={() => {
         props.api.close();
@@ -221,7 +216,6 @@ export function JsStreamTab(props: IDockviewPanelHeaderProps) {
   return (
     <ClosableTab
       icon={Layers}
-      iconClass="text-brand"
       mono
       title={props.api.title}
       onClose={() => {
@@ -235,7 +229,6 @@ export function KvEntryTab(props: IDockviewPanelHeaderProps) {
   return (
     <ClosableTab
       icon={Database}
-      iconClass="text-brand"
       mono
       title={props.api.title}
       onClose={() => {
@@ -249,7 +242,6 @@ export function ObjectTab(props: IDockviewPanelHeaderProps) {
   return (
     <ClosableTab
       icon={Box}
-      iconClass="text-brand"
       mono
       title={props.api.title}
       onClose={() => {
@@ -263,7 +255,6 @@ export function ServerHealthTab(props: IDockviewPanelHeaderProps) {
   return (
     <ClosableTab
       icon={Activity}
-      iconClass="text-brand"
       title={props.api.title}
       onClose={() => {
         props.api.close();
@@ -276,7 +267,6 @@ export function JsConsumerTab(props: IDockviewPanelHeaderProps) {
   return (
     <ClosableTab
       icon={ArrowDownToLine}
-      iconClass="text-brand"
       mono
       title={props.api.title}
       onClose={() => {

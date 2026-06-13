@@ -26,7 +26,7 @@ import { NewTabButton } from "./NewTabButton";
 // Fallback for the editor zero-state when no domain module contributed a
 // watermark (the NATS module registers its own via registerNatsModule).
 function EmptyWatermark() {
-  return <div className="h-full bg-background" />;
+  return <div className="h-full bg-editor" />;
 }
 
 // A restored stream tab comes back as a placeholder (no live session). Subscribe

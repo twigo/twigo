@@ -46,7 +46,7 @@ export function Toaster() {
             key={t.id}
             role="status"
             className={cn(
-              "pointer-events-auto flex items-start gap-2 rounded-md border bg-panel px-3 py-2 text-xs shadow-md duration-200 animate-in fade-in slide-in-from-right-2",
+              "pointer-events-auto flex items-start gap-2 rounded-md border bg-popover/90 px-3 py-2 text-xs shadow-lg backdrop-blur-xl duration-200 animate-in fade-in slide-in-from-right-2",
               TONE[t.kind],
             )}
           >

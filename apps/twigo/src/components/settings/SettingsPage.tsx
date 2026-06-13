@@ -17,7 +17,7 @@ export function SettingsPage() {
   const [category, setCategory] = useState<Category>("connections");
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
+    <div className="flex h-full min-h-0 flex-col bg-editor">
       <div className="flex min-h-0 flex-1">
         <nav className="w-44 shrink-0 border-r border-border bg-sidebar p-2">
           {categories.map(({ id, label, icon: Icon }) => (

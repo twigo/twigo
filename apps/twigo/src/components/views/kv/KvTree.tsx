@@ -250,13 +250,10 @@ function BucketRow({
       onClick={onSelect}
       onDoubleClick={onToggle}
       className={cn(
-        "group relative flex cursor-pointer items-center gap-1 py-1 pl-2 pr-2 text-xs",
+        "group relative mx-1.5 rounded-md flex cursor-pointer items-center gap-1 py-1 pl-2 pr-2 text-xs",
         selected ? "bg-selected" : "hover:bg-row-hover",
       )}
     >
-      {selected && (
-        <span className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-brand" />
-      )}
       <button
         type="button"
         aria-label={expanded ? "Collapse" : "Expand"}
@@ -340,13 +337,10 @@ function NodeRow({
       onDoubleClick={onOpen}
       style={{ paddingLeft: `${String(row.depth * 0.85 + 0.5)}rem` }}
       className={cn(
-        "group relative flex cursor-pointer items-center gap-1 py-1 pr-2 text-xs",
+        "group relative mx-1.5 rounded-md flex cursor-pointer items-center gap-1 py-1 pr-2 text-xs",
         selected ? "bg-selected" : "hover:bg-row-hover",
       )}
     >
-      {selected && (
-        <span className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-brand" />
-      )}
       {isFolder ? (
         <button
           type="button"

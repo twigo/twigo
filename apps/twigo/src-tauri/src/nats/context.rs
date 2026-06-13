@@ -151,10 +151,34 @@ pub fn load_contexts(custom_dir: Option<PathBuf>) -> error::Result<Vec<NatsConte
     Ok(contexts)
 }
 
+// The public NATS demo server (demo.nats.io) - core, JetStream and KV are open
+// for trying the app with zero setup. Exposed as a synthetic, file-less context
+// the user opts into; `connect` recognises this reserved name.
+pub const DEMO_CONTEXT_NAME: &str = "demo.nats.io";
+
+pub fn demo_context() -> NatsContext {
+    NatsContext {
+        name: DEMO_CONTEXT_NAME.to_string(),
+        file: ContextFile {
+            description: "Public NATS demo server - try core, JetStream and KV.".to_string(),
+            url: "nats://demo.nats.io:4222".to_string(),
+            ..Default::default()
+        },
+        selected: false,
+    }
+}
+
 #[tauri::command]
-pub fn list_contexts(dir: Option<String>) -> error::Result<Vec<ContextSummary>> {
+pub fn list_contexts(
+    dir: Option<String>,
+    include_demo: bool,
+) -> error::Result<Vec<ContextSummary>> {
     let custom = dir.filter(|d| !d.trim().is_empty()).map(PathBuf::from);
-    Ok(load_contexts(custom)?.iter().map(|c| c.summary()).collect())
+    let mut out: Vec<ContextSummary> = load_contexts(custom)?.iter().map(|c| c.summary()).collect();
+    if include_demo {
+        out.push(demo_context().summary());
+    }
+    Ok(out)
 }
 
 #[tauri::command]

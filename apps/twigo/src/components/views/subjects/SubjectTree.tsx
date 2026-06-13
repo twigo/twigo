@@ -13,7 +13,7 @@ import { useStream } from "@/store/stream";
 import { useFlash } from "@/hooks/useFlash";
 import { openPublish, openResponder } from "@/lib/editor";
 
-const ROW_H = 26;
+const ROW_H = 24;
 
 interface Row {
   node: SubjectNode;
@@ -133,21 +133,18 @@ function SubjectRow({
       role="treeitem"
       aria-selected={isActive}
       aria-expanded={hasChildren ? open : undefined}
-      className="absolute left-0 top-0 w-full pb-0.5"
+      className="absolute left-0 top-0 w-full"
       style={style}
     >
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div
             className={cn(
-              "group relative flex h-full items-center rounded-sm",
+              "group relative mx-1.5 flex h-full items-center rounded-md",
               isActive ? "bg-selected" : "hover:bg-row-hover",
             )}
             style={{ paddingLeft: depth * 12 }}
           >
-            {isActive && (
-              <span className="absolute inset-y-0.5 left-0 w-0.5 rounded-full bg-brand" />
-            )}
             {hasChildren ? (
               <button
                 type="button"
@@ -158,7 +155,7 @@ function SubjectRow({
               >
                 <ChevronRight
                   className={cn(
-                    "size-3.5 transition-transform",
+                    "size-3 transition-transform",
                     open && "rotate-90",
                   )}
                 />

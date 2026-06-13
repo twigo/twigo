@@ -4,6 +4,7 @@ import {
   DialogContent,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
   Button,
   RadioGroup,
   RadioGroupItem,
@@ -42,7 +43,7 @@ export function PurgeDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="p-4">
+      <DialogContent className="p-5">
         <DialogTitle className="text-sm font-semibold">
           Purge {stream}
         </DialogTitle>
@@ -80,14 +81,14 @@ export function PurgeDialog({
           </p>
         </RadioGroup>
 
-        <div className="mt-4 flex justify-end gap-2">
+        <DialogFooter>
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
           <Button variant="destructive" size="sm" onClick={submit}>
             Purge
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

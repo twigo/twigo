@@ -16,12 +16,12 @@ function DialogContent({
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay
         data-slot="dialog-overlay"
-        className="fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
+        className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
       />
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed left-1/2 top-[18%] z-50 w-full max-w-lg -translate-x-1/2 rounded-lg border border-border bg-popover text-popover-foreground shadow-lg outline-none",
+          "fixed left-1/2 top-[18%] z-50 w-full max-w-lg -translate-x-1/2 rounded-lg border border-border bg-popover/95 text-popover-foreground shadow-lg outline-none backdrop-blur-xl",
           "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
           className,
         )}
@@ -47,4 +47,15 @@ function DialogDescription(
   );
 }
 
-export { Dialog, DialogContent, DialogTitle, DialogDescription };
+// One footer recipe (right-aligned, cancel before primary) so dialogs agree.
+function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="dialog-footer"
+      className={cn("mt-5 flex items-center justify-end gap-2", className)}
+      {...props}
+    />
+  );
+}
+
+export { Dialog, DialogContent, DialogTitle, DialogDescription, DialogFooter };

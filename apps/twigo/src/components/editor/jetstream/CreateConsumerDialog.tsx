@@ -1,6 +1,16 @@
 import { useState } from "react";
-import { Dialog, DialogContent, DialogTitle, Button, Input } from "@twigo/ui";
-import { Field, Select } from "./form";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  Button,
+  Input,
+  FieldGrid,
+  FormField,
+} from "@twigo/ui";
+import { Select } from "./form";
 
 const ACK = ["explicit", "all", "none"];
 const DELIVER = ["all", "last", "new"];
@@ -46,54 +56,54 @@ export function CreateConsumerDialog({
         if (!o) onClose();
       }}
     >
-      <DialogContent className="p-4">
+      <DialogContent className="p-5">
         <DialogTitle className="text-sm font-semibold">
           New consumer on {stream}
         </DialogTitle>
+        <DialogDescription className="mt-1 text-xs text-muted-foreground">
+          Creates a durable pull consumer.
+        </DialogDescription>
 
-        <div className="mt-3 space-y-2">
-          <Field label="Durable name">
+        <FieldGrid className="mt-4">
+          <FormField label="Durable name">
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
               autoFocus
               spellCheck={false}
               placeholder="worker"
-              className="h-7 w-40 font-mono text-xs"
+              className="h-7 font-mono text-xs"
             />
-          </Field>
-          <Field label="Filter subjects (comma, optional)">
+          </FormField>
+          <FormField label="Filter subjects" hint="Optional; comma-separated.">
             <Input
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               spellCheck={false}
               placeholder="orders.>"
-              className="h-7 w-40 font-mono text-xs"
+              className="h-7 font-mono text-xs"
             />
-          </Field>
-          <Field label="Ack policy">
+          </FormField>
+          <FormField label="Ack policy">
             <Select value={ackPolicy} onChange={setAckPolicy} options={ACK} />
-          </Field>
-          <Field label="Deliver policy">
+          </FormField>
+          <FormField label="Deliver policy">
             <Select
               value={deliverPolicy}
               onChange={setDeliverPolicy}
               options={DELIVER}
             />
-          </Field>
-        </div>
-        <p className="mt-2 text-[10px] text-muted-foreground">
-          Creates a durable pull consumer.
-        </p>
+          </FormField>
+        </FieldGrid>
 
-        <div className="mt-4 flex justify-end gap-2">
+        <DialogFooter>
           <Button variant="ghost" size="sm" onClick={onClose}>
             Cancel
           </Button>
-          <Button size="sm" disabled={!valid} onClick={submit}>
+          <Button variant="brand" size="sm" disabled={!valid} onClick={submit}>
             Create consumer
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

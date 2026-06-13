@@ -97,8 +97,8 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
   load: async () => {
     set({ status: "loading", error: null });
     try {
-      const dir = useSettings.getState().contextDir;
-      const contexts = await listContexts(dir);
+      const { contextDir, includeDemo } = useSettings.getState();
+      const contexts = await listContexts(contextDir, includeDemo);
       // Drop persisted state for contexts that no longer exist (renamed/deleted
       // in the nats CLI) before restoring, so it can't orphan or ghost-reconnect.
       const names = contexts.map((c) => c.name);

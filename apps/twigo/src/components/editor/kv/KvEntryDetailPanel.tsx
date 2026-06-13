@@ -159,7 +159,7 @@ export function KvEntryDetailPanel({
     : "";
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
+    <div className="flex h-full min-h-0 flex-col bg-editor">
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
         <Database className="size-3.5 text-brand" />
         <span className="ml-1 truncate font-mono text-[11px] font-medium">
@@ -314,7 +314,11 @@ export function KvEntryDetailPanel({
         </EmptyState>
       ) : !data ? (
         loading ? (
-          <EmptyState icon={Loader2} className="flex-1 [&>svg]:animate-spin">
+          <EmptyState
+            icon={Loader2}
+            className="flex-1"
+            iconClassName="animate-spin"
+          >
             Loading…
           </EmptyState>
         ) : (
@@ -385,7 +389,7 @@ export function KvEntryDetailPanel({
 
           <section>
             <h3 className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              <History className="size-3" />
+              <History className="size-3.5" />
               History
               {revision !== null && (
                 <button

@@ -1,13 +1,17 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { Allotment } from "allotment";
 import { Pause, Play, Trash2, ArrowDown, Radio, Search } from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
 import { fmtCount } from "@twigo/utils";
 import { useStream } from "@/store/stream";
+import { useUi } from "@/store/ui";
 import { messageMatches } from "@/lib/messageFilter";
 import { MessageTable } from "./MessageTable";
+import { DetailPanel } from "./DetailPanel";
 
 export function MessageStream({ streamId }: { streamId: string }) {
   const session = useStream((s) => s.sessions[streamId]);
+  const detailOpen = useUi((s) => s.detailOpen);
   const togglePause = useStream((s) => s.togglePause);
   const clear = useStream((s) => s.clear);
   const setFollowing = useStream((s) => s.setFollowing);
@@ -79,8 +83,13 @@ export function MessageStream({ streamId }: { streamId: string }) {
   // retained slice when it's smaller) so the user knows they're tailing.
   const windowed = allItems.length > 0 && allItems.length < received;
 
+  // The inspector is a right split inside this tab, shown only when a message is
+  // selected and the user hasn't collapsed it (mod+alt+b) - so the table keeps
+  // full width otherwise, and no inspector exists on non-stream tabs.
+  const inspectorVisible = detailOpen && selectedId !== null;
+
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
         <Button
           variant="ghost"
@@ -136,40 +145,52 @@ export function MessageStream({ streamId }: { streamId: string }) {
           No messages match “{filter.trim()}”.
         </EmptyState>
       ) : (
-        <div
-          ref={attachScroll}
-          onScroll={onScroll}
-          className="min-h-0 flex-1 overflow-auto"
-        >
-          <MessageTable
-            items={items}
-            selectedId={selectedId}
-            scrollEl={scrollEl}
-            onSelect={(id) => {
-              select(streamId, id);
-            }}
-          />
-        </div>
-      )}
-
-      {!atBottom && items.length > 0 && (
-        <button
-          type="button"
-          onClick={jumpToLatest}
-          aria-label={
-            unread > 0
-              ? `Jump to ${unread.toString()} new messages`
-              : "Jump to latest"
-          }
-          className="absolute bottom-4 right-4 flex size-9 items-center justify-center rounded-full border border-border bg-popover text-foreground shadow-lg transition-colors duration-150 animate-in fade-in zoom-in-90 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <ArrowDown className="size-4" />
-          {unread > 0 && (
-            <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold tabular-nums text-brand-foreground">
-              {unread > 99 ? "99+" : unread}
-            </span>
-          )}
-        </button>
+        <Allotment className="min-h-0 flex-1" proportionalLayout={false}>
+          <Allotment.Pane minSize={320}>
+            <div className="relative h-full">
+              <div
+                ref={attachScroll}
+                onScroll={onScroll}
+                className="h-full overflow-auto"
+              >
+                <MessageTable
+                  items={items}
+                  selectedId={selectedId}
+                  scrollEl={scrollEl}
+                  onSelect={(id) => {
+                    select(streamId, id);
+                  }}
+                />
+              </div>
+              {!atBottom && (
+                <button
+                  type="button"
+                  onClick={jumpToLatest}
+                  aria-label={
+                    unread > 0
+                      ? `Jump to ${unread.toString()} new messages`
+                      : "Jump to latest"
+                  }
+                  className="absolute bottom-4 right-4 flex size-9 items-center justify-center rounded-full border border-border bg-popover text-foreground shadow-lg transition-colors duration-150 animate-in fade-in zoom-in-90 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <ArrowDown className="size-4" />
+                  {unread > 0 && (
+                    <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold tabular-nums text-brand-foreground">
+                      {unread > 99 ? "99+" : unread}
+                    </span>
+                  )}
+                </button>
+              )}
+            </div>
+          </Allotment.Pane>
+          <Allotment.Pane
+            visible={inspectorVisible}
+            preferredSize={380}
+            minSize={260}
+          >
+            <DetailPanel streamId={streamId} />
+          </Allotment.Pane>
+        </Allotment>
       )}
     </div>
   );

@@ -74,7 +74,7 @@ export function MessageTable({
               }}
               className={cn(
                 GRID,
-                "absolute left-0 top-0 w-full cursor-pointer border-b border-border/50 hover:bg-row-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&>*]:px-2",
+                "absolute left-0 top-0 w-full cursor-pointer border-b border-border-micro hover:bg-row-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&>*]:px-2",
                 m.id === selectedId && "bg-selected",
               )}
               style={{
@@ -84,7 +84,7 @@ export function MessageTable({
             >
               <span
                 role="cell"
-                className="tabular-nums text-muted-foreground"
+                className="tabular-nums text-muted-foreground-2"
                 title={fmtDateTime(m.receivedAt)}
               >
                 {fmtTime(m.receivedAt)}
@@ -94,11 +94,11 @@ export function MessageTable({
               </span>
               <span
                 role="cell"
-                className="text-right tabular-nums text-muted-foreground"
+                className="text-right tabular-nums text-muted-foreground-2"
               >
                 {fmtBytes(m.size)}
               </span>
-              <span role="cell" className="truncate">
+              <span role="cell" className="truncate text-muted-foreground">
                 {m.preview}
               </span>
             </div>

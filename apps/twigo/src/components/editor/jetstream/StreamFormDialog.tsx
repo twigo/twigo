@@ -1,6 +1,16 @@
 import { useState } from "react";
-import { Dialog, DialogContent, DialogTitle, Button, Input } from "@twigo/ui";
-import { Field, Select } from "./form";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogFooter,
+  Button,
+  Input,
+  FormSection,
+  FieldGrid,
+  FormField,
+} from "@twigo/ui";
+import { Select } from "./form";
 
 const STORAGE = ["file", "memory"];
 const RETENTION = ["limits", "interest", "workqueue"];
@@ -66,8 +76,7 @@ export function StreamFormDialog({
     onClose();
   };
 
-  const lock = (label: string) =>
-    lockIdentity ? `${label} (immutable)` : label;
+  const immutable = lockIdentity ? "Immutable after creation." : undefined;
 
   return (
     <Dialog
@@ -76,91 +85,112 @@ export function StreamFormDialog({
         if (!o) onClose();
       }}
     >
-      <DialogContent className="p-4">
+      <DialogContent className="p-5">
         <DialogTitle className="text-sm font-semibold">{title}</DialogTitle>
 
-        <div className="mt-3 space-y-2">
-          <Field label={lock("Name")}>
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              autoFocus={!lockIdentity}
-              disabled={lockIdentity}
-              spellCheck={false}
-              placeholder="ORDERS"
-              className="h-7 w-40 font-mono text-xs"
-            />
-          </Field>
-          <Field label="Subjects (comma-separated)">
-            <Input
-              value={subjects}
-              onChange={(e) => setSubjects(e.target.value)}
-              spellCheck={false}
-              placeholder="orders.>"
-              className="h-7 w-40 font-mono text-xs"
-            />
-          </Field>
-          <Field label={lock("Storage")}>
-            <Select
-              value={storage}
-              onChange={setStorage}
-              options={STORAGE}
-              disabled={lockIdentity}
-            />
-          </Field>
-          <Field label={lock("Retention")}>
-            <Select
-              value={retention}
-              onChange={setRetention}
-              options={RETENTION}
-              disabled={lockIdentity}
-            />
-          </Field>
-          <Field label="Discard">
-            <Select value={discard} onChange={setDiscard} options={DISCARD} />
-          </Field>
-          <Field label="Max messages (-1 = ∞)">
-            <Input
-              value={maxMsgs}
-              onChange={(e) => setMaxMsgs(e.target.value)}
-              inputMode="numeric"
-              className="h-7 w-40 font-mono text-xs"
-            />
-          </Field>
-          <Field label="Max bytes (-1 = ∞)">
-            <Input
-              value={maxBytes}
-              onChange={(e) => setMaxBytes(e.target.value)}
-              inputMode="numeric"
-              className="h-7 w-40 font-mono text-xs"
-            />
-          </Field>
-          <Field label="Max age sec (0 = ∞)">
-            <Input
-              value={maxAgeSec}
-              onChange={(e) => setMaxAgeSec(e.target.value)}
-              inputMode="numeric"
-              className="h-7 w-40 font-mono text-xs"
-            />
-          </Field>
-          <Field label="Replicas">
-            <Input
-              value={replicas}
-              onChange={(e) => setReplicas(e.target.value)}
-              inputMode="numeric"
-              className="h-7 w-40 font-mono text-xs"
-            />
-          </Field>
+        <div className="mt-4 space-y-5">
+          <FormSection title="Stream">
+            <FieldGrid>
+              <FormField label="Name" hint={immutable}>
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  autoFocus={!lockIdentity}
+                  disabled={lockIdentity}
+                  spellCheck={false}
+                  placeholder="ORDERS"
+                  className="h-7 font-mono text-xs"
+                />
+              </FormField>
+              <FormField
+                label="Subjects"
+                hint="Comma-separated; wildcards allowed."
+              >
+                <Input
+                  value={subjects}
+                  onChange={(e) => setSubjects(e.target.value)}
+                  spellCheck={false}
+                  placeholder="orders.>, audit.*"
+                  className="h-7 font-mono text-xs"
+                />
+              </FormField>
+            </FieldGrid>
+          </FormSection>
+
+          <FormSection title="Storage">
+            <FieldGrid>
+              <FormField label="Storage" hint={immutable}>
+                <Select
+                  value={storage}
+                  onChange={setStorage}
+                  options={STORAGE}
+                  disabled={lockIdentity}
+                />
+              </FormField>
+              <FormField label="Retention" hint={immutable}>
+                <Select
+                  value={retention}
+                  onChange={setRetention}
+                  options={RETENTION}
+                  disabled={lockIdentity}
+                />
+              </FormField>
+              <FormField label="Replicas">
+                <Input
+                  value={replicas}
+                  onChange={(e) => setReplicas(e.target.value)}
+                  inputMode="numeric"
+                  className="h-7 w-24 font-mono text-xs"
+                />
+              </FormField>
+            </FieldGrid>
+          </FormSection>
+
+          <FormSection title="Limits">
+            <FieldGrid>
+              <FormField label="Discard policy">
+                <Select
+                  value={discard}
+                  onChange={setDiscard}
+                  options={DISCARD}
+                />
+              </FormField>
+              <FormField label="Max messages" hint="-1 = unlimited.">
+                <Input
+                  value={maxMsgs}
+                  onChange={(e) => setMaxMsgs(e.target.value)}
+                  inputMode="numeric"
+                  className="h-7 w-32 font-mono text-xs"
+                />
+              </FormField>
+              <FormField label="Max bytes" hint="-1 = unlimited.">
+                <Input
+                  value={maxBytes}
+                  onChange={(e) => setMaxBytes(e.target.value)}
+                  inputMode="numeric"
+                  className="h-7 w-32 font-mono text-xs"
+                />
+              </FormField>
+              <FormField label="Max age (sec)" hint="0 = unlimited.">
+                <Input
+                  value={maxAgeSec}
+                  onChange={(e) => setMaxAgeSec(e.target.value)}
+                  inputMode="numeric"
+                  className="h-7 w-32 font-mono text-xs"
+                />
+              </FormField>
+            </FieldGrid>
+          </FormSection>
         </div>
 
-        <div className="mt-4 flex justify-end gap-2">
+        <DialogFooter>
           <Button variant="ghost" size="sm" onClick={onClose}>
             Cancel
           </Button>
-          <Button size="sm" disabled={!valid} onClick={submit}>
+          <Button variant="brand" size="sm" disabled={!valid} onClick={submit}>
             {submitLabel}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

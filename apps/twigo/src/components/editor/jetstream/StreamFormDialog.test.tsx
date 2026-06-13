@@ -22,7 +22,7 @@ describe("StreamFormDialog", () => {
     fireEvent.change(screen.getByPlaceholderText("ORDERS"), {
       target: { value: "ORDERS" },
     });
-    fireEvent.change(screen.getByPlaceholderText("orders.>"), {
+    fireEvent.change(screen.getByPlaceholderText("orders.>, audit.*"), {
       target: { value: "orders.>, orders.dlq" },
     });
     expect(create).not.toBeDisabled();
@@ -62,6 +62,6 @@ describe("StreamFormDialog", () => {
     );
     const name = screen.getByDisplayValue("ORDERS");
     expect(name).toBeDisabled();
-    expect(screen.getByText("Name (immutable)")).toBeInTheDocument();
+    expect(screen.getAllByText("Immutable after creation.")).toHaveLength(3);
   });
 });

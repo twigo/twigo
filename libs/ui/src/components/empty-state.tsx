@@ -9,6 +9,7 @@ import { Kbd } from "./kbd";
 // muted line for nested panels. Outer sizing stays with the caller (className).
 export function EmptyState({
   icon: Icon,
+  iconClassName,
   variant = "muted",
   density = "hero",
   title,
@@ -18,6 +19,7 @@ export function EmptyState({
   children,
 }: {
   icon?: LucideIcon;
+  iconClassName?: string;
   variant?: "muted" | "error";
   density?: "hero" | "inline";
   title?: string;
@@ -35,7 +37,11 @@ export function EmptyState({
           className,
         )}
       >
-        {Icon && <Icon className="mt-0.5 size-3.5 shrink-0 opacity-60" />}
+        {Icon && (
+          <Icon
+            className={cn("mt-0.5 size-3.5 shrink-0 opacity-60", iconClassName)}
+          />
+        )}
         <span>{children}</span>
       </p>
     );
@@ -55,6 +61,7 @@ export function EmptyState({
           className={cn(
             "size-8",
             variant === "error" ? "opacity-70" : "opacity-30",
+            iconClassName,
           )}
         />
       )}

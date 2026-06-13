@@ -1,12 +1,5 @@
 import { useState } from "react";
-import {
-  RefreshCw,
-  Loader2,
-  ArrowDownToLine,
-  Pause,
-  Play,
-  Trash2,
-} from "lucide-react";
+import { RefreshCw, ArrowDownToLine, Pause, Play, Trash2 } from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
 import { fmtCount } from "@twigo/utils";
 import { jsPauseConsumer, jsResumeConsumer, jsDeleteConsumer } from "@/lib/api";
@@ -16,7 +9,7 @@ import { useConnections } from "@/store/connections";
 import { useJetStream } from "@/store/jetstream";
 import { useToasts } from "@/store/toasts";
 import { closeConsumerDetail } from "@/lib/editor";
-import { Row, Section, RawJson } from "./parts";
+import { Row, Section, RawJson, DetailSkeleton } from "./parts";
 import { disp, num, supportsPause } from "./format";
 import { ConfirmDialog } from "./ConfirmDialog";
 
@@ -89,7 +82,7 @@ export function ConsumerDetailPanel({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
+    <div className="flex h-full min-h-0 flex-col bg-editor">
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
         <ArrowDownToLine className="size-3.5 text-brand" />
         <span className="ml-1 truncate font-mono text-[11px] font-medium">
@@ -172,9 +165,7 @@ export function ConsumerDetailPanel({
           </Button>
         </EmptyState>
       ) : !data ? (
-        <EmptyState icon={Loader2} className="flex-1 [&>svg]:animate-spin">
-          Loading…
-        </EmptyState>
+        <DetailSkeleton />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3">
           <Section title="State">

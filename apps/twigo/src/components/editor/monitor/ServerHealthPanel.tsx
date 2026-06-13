@@ -98,10 +98,10 @@ export function ServerHealthPanel({ connId }: { connId: string }) {
   const to = offset + rows.length;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
+    <div className="flex h-full min-h-0 flex-col bg-editor">
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-2">
         <Activity className="size-3.5 text-brand" />
-        <span className="text-[11px] font-medium">Connections</span>
+        <span className="text-[11px] font-semibold">Connections</span>
         <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
           {fmtCount(total)}
         </span>
@@ -162,7 +162,11 @@ export function ServerHealthPanel({ connId }: { connId: string }) {
           <span className="max-w-md break-words">{error}</span>
         </EmptyState>
       ) : !connz ? (
-        <EmptyState icon={Loader2} className="flex-1 [&>svg]:animate-spin">
+        <EmptyState
+          icon={Loader2}
+          className="flex-1"
+          iconClassName="animate-spin"
+        >
           Reading connections…
         </EmptyState>
       ) : rows.length === 0 ? (

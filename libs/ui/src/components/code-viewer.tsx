@@ -18,8 +18,9 @@ const editorTheme = EditorView.theme({
     color: "var(--foreground)",
     height: "100%",
     fontSize: "12px",
+    borderRadius: "var(--radius-md)",
   },
-  "&.cm-focused": { outline: "none" },
+  "&.cm-focused": { outline: "none", boxShadow: "var(--focus-ring)" },
   ".cm-scroller": {
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
     lineHeight: "1.6",

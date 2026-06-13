@@ -266,7 +266,12 @@ function MonitoringSetup({
           autoComplete="off"
           spellCheck={false}
         />
-        <Button type="submit" size="sm" disabled={!value.trim()}>
+        <Button
+          type="submit"
+          variant="brand"
+          size="sm"
+          disabled={!value.trim()}
+        >
           <Plug className="size-3.5" />
           {error ? "Reconnect" : "Use HTTP monitoring"}
         </Button>
@@ -335,7 +340,11 @@ export function MonitorView({ connId }: ViewProps) {
 
   if (!data?.varz) {
     return (
-      <EmptyState icon={Activity} className="flex-1 [&>svg]:animate-pulse">
+      <EmptyState
+        icon={Activity}
+        className="flex-1"
+        iconClassName="animate-pulse"
+      >
         Reading server health…
       </EmptyState>
     );
