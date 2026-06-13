@@ -12,7 +12,15 @@ export function MessageStream({ streamId }: { streamId: string }) {
   const clear = useStream((s) => s.clear);
   const setFollowing = useStream((s) => s.setFollowing);
   const select = useStream((s) => s.select);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  // The ref serves imperative scrolling; the state copy re-renders the
+  // virtualizer once the element exists (a bare ref would still be null when
+  // MessageTable's layout effect mounts it).
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const attachScroll = (el: HTMLDivElement | null) => {
+    scrollRef.current = el;
+    setScrollEl(el);
+  };
   const [atBottom, setAtBottom] = useState(true);
   const [lastSeenId, setLastSeenId] = useState(0);
   const [filter, setFilter] = useState("");
@@ -31,7 +39,7 @@ export function MessageStream({ streamId }: { streamId: string }) {
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el && atBottom) el.scrollTop = el.scrollHeight;
-  }, [lastId, atBottom]);
+  }, [scrollEl, lastId, atBottom]);
 
   function onScroll() {
     const el = scrollRef.current;
@@ -129,13 +137,14 @@ export function MessageStream({ streamId }: { streamId: string }) {
         </EmptyState>
       ) : (
         <div
-          ref={scrollRef}
+          ref={attachScroll}
           onScroll={onScroll}
           className="min-h-0 flex-1 overflow-auto"
         >
           <MessageTable
             items={items}
             selectedId={selectedId}
+            scrollEl={scrollEl}
             onSelect={(id) => {
               select(streamId, id);
             }}
