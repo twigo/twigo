@@ -56,7 +56,7 @@ export function ObjectDetailPanel({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
+    <div className="flex h-full min-h-0 flex-col bg-editor">
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
         <Box className="size-3.5 text-brand" />
         <span className="ml-1 truncate font-mono text-[11px] font-medium">

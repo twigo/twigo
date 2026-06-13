@@ -137,13 +137,10 @@ function StreamRow({
       onClick={onSelect}
       onDoubleClick={onOpen}
       className={cn(
-        "group relative flex cursor-pointer items-center gap-1 py-1 pl-2 pr-2 text-xs",
+        "group relative mx-1.5 rounded-md flex cursor-pointer items-center gap-1 py-1 pl-2 pr-2 text-xs",
         selected ? "bg-selected" : "hover:bg-row-hover",
       )}
     >
-      {selected && (
-        <span className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-brand" />
-      )}
       <button
         type="button"
         aria-label={expanded ? "Collapse" : "Expand"}
@@ -193,13 +190,10 @@ function ConsumerRow({
       onClick={onSelect}
       onDoubleClick={onOpen}
       className={cn(
-        "group relative flex cursor-pointer items-center gap-1.5 py-1 pl-8 pr-2 text-xs",
+        "group relative mx-1.5 rounded-md flex cursor-pointer items-center gap-1.5 py-1 pl-8 pr-2 text-xs",
         selected ? "bg-selected" : "hover:bg-row-hover",
       )}
     >
-      {selected && (
-        <span className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-brand" />
-      )}
       <Icon className="size-3 shrink-0 text-muted-foreground" />
       <span className="min-w-0 flex-1 truncate font-mono">{consumer.name}</span>
       {consumer.paused && <Pause className="size-3 shrink-0 text-warn" />}

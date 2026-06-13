@@ -144,8 +144,7 @@ export function clearRegisteredCommands(): void {
   providers.length = 0;
 }
 
-// Open the palette with the familiar combos: VS Code (⇧⌘P), JetBrains (⇧⌘A),
-// and the modern ⌘K alias.
+// The familiar palette combos: ⇧⌘P, ⇧⌘A, and the ⌘K alias.
 export const PALETTE_BINDINGS = ["mod+shift+p", "mod+shift+a", "mod+k"];
 
 // "Go to X" for each registered view. Built at call time because views are

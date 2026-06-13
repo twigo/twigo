@@ -3,8 +3,8 @@ import { useStream } from "@/store/stream";
 import { useResponder } from "@/store/responder";
 import { EDITORS, type EditorType } from "@/components/editor/registry";
 
-// Editor "inputs" (VS Code model): a type + a stable id. Opening the same id
-// focuses the existing tab instead of duplicating it.
+// Editor "inputs": a type + a stable id. Opening the same id focuses the
+// existing tab instead of duplicating it.
 export type { EditorType };
 
 interface EditorDescriptor {

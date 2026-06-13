@@ -98,7 +98,7 @@ export function ServerHealthPanel({ connId }: { connId: string }) {
   const to = offset + rows.length;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
+    <div className="flex h-full min-h-0 flex-col bg-editor">
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-2">
         <Activity className="size-3.5 text-brand" />
         <span className="text-[11px] font-semibold">Connections</span>

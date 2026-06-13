@@ -1,8 +1,8 @@
 import { cn } from "../lib/cn";
 
-// JetBrains-style form recipes: titled groups, one aligned label column and
-// hints under the control, so every dialog and settings pane breathes the same
-// rhythm. Compose: FormSection > FieldGrid > FormField.
+// Form recipes so every dialog and settings pane shares one rhythm: titled
+// groups, one aligned label column, hints under the control.
+// Compose: FormSection > FieldGrid > FormField.
 
 export function FormSection({
   title,

@@ -74,7 +74,7 @@ export function MessageTable({
               }}
               className={cn(
                 GRID,
-                "absolute left-0 top-0 w-full cursor-pointer border-b border-border/50 hover:bg-row-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&>*]:px-2",
+                "absolute left-0 top-0 w-full cursor-pointer border-b border-border-micro hover:bg-row-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&>*]:px-2",
                 m.id === selectedId && "bg-selected",
               )}
               style={{

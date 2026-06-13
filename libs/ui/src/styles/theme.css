@@ -6,9 +6,8 @@
 :root {
   --radius: 0.5rem;
 
-  /* Motion ladder - instant-in / gentle-out. Keyboard-bound actions stay
-     instant (Raycast restraint). Raw CSS uses these; JSX uses duration-100/150
-     /200 + ease-[var(--ease-out)]. */
+  /* Motion ladder - instant-in / gentle-out; keyboard-bound actions stay
+     instant. Raw CSS uses these; JSX uses duration-100/150/200 + ease. */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in: cubic-bezier(0.4, 0, 1, 1);
   --ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
@@ -45,10 +44,25 @@
   --input: oklch(0.905 0.007 242);
   --ring: var(--brand);
 
-  /* Row interaction: hover = neutral, selection = brand-tint (+ a 2px brand
-     bar in the component) so teal reads as wayfinding, not decoration. */
-  --row-hover: oklch(0.962 0.005 242);
-  --selected: color-mix(in oklab, var(--brand) 11%, var(--card));
+  /* States are ALPHA overlays so they composite over any surface (not a solid
+     fill that only works on one). Selection = a calm brand tint. */
+  --row-hover: oklch(0 0 0 / 4%);
+  --row-active: oklch(0 0 0 / 7%);
+  --selected: color-mix(in oklab, var(--brand) 10%, oklch(0 0 0 / 4%));
+  --selected-unfocused: oklch(0 0 0 / 6%);
+
+  /* Two-layer focus: tight inner ring + translucent halo (one ring reads
+     cheap). Shared - the nested var(--brand) resolves per theme at use. */
+  --focus-ring:
+    0 0 0 2px color-mix(in oklab, var(--brand) 45%, transparent),
+    0 0 0 4px color-mix(in oklab, var(--brand) 18%, transparent);
+
+  /* Hairlines in alpha tiers; micro for in-table row separators. */
+  --border-subtle: oklch(0 0 0 / 4%);
+  --border-micro: oklch(0 0 0 / 2.5%);
+
+  /* Editor pane = the content surface; on light it stays white like the canvas. */
+  --editor: oklch(1 0 0);
 
   --sidebar: oklch(0.977 0.003 242);
   --sidebar-foreground: oklch(0.18 0.008 248);
@@ -76,13 +90,14 @@
   --brand: oklch(0.72 0.135 245);
   --brand-foreground: oklch(0.15 0.03 250);
 
-  /* Deep-ocean neutrals: every surface carries a trace of the brand hue
-     (dead-gray dark themes read flat; Linear keeps chroma at 0.003-0.006 - we
-     sit just above for the teal identity). Elevation ladder, dimmest first:
-     bg 0.15 < sidebar/panel 0.178 < card 0.205 < popover 0.235. */
+  /* Deep-ocean neutrals (trace of brand hue; flat-gray darks read cheap).
+     Depth comes from a luminance ramp - the focused EDITOR is the darkest
+     surface and chrome steps lighter outward, no shadows on docked chrome:
+     editor 0.135 < canvas 0.15 < sidebar/panel 0.188 < card 0.215 < popover 0.235. */
+  --editor: oklch(0.135 0.006 245);
   --background: oklch(0.15 0.006 245);
   --foreground: oklch(0.93 0.005 240);
-  --card: oklch(0.205 0.008 245);
+  --card: oklch(0.215 0.008 245);
   --card-foreground: oklch(0.93 0.005 240);
   --popover: oklch(0.235 0.009 245);
   --popover-foreground: oklch(0.93 0.005 240);
@@ -101,13 +116,17 @@
   --input: oklch(0.93 0.02 240 / 14%);
   --ring: var(--brand);
 
-  --row-hover: oklch(0.225 0.009 245);
-  --selected: color-mix(in oklab, var(--brand) 15%, var(--card));
+  --row-hover: oklch(1 0 0 / 4%);
+  --row-active: oklch(1 0 0 / 8%);
+  --selected: color-mix(in oklab, var(--brand) 16%, oklch(1 0 0 / 6%));
+  --selected-unfocused: oklch(1 0 0 / 8%);
+  --border-subtle: oklch(0.93 0.02 240 / 5%);
+  --border-micro: oklch(0.93 0.02 240 / 2.5%);
 
-  --sidebar: oklch(0.178 0.007 245);
+  --sidebar: oklch(0.188 0.007 245);
   --sidebar-foreground: oklch(0.93 0.005 240);
   --sidebar-border: oklch(0.93 0.02 240 / 8%);
-  --panel: oklch(0.178 0.007 245);
+  --panel: oklch(0.188 0.007 245);
   /* Ink, not neon: the bar sits a step above the canvas with brand undertone. */
   --statusbar: oklch(0.3 0.05 248);
   --statusbar-foreground: oklch(0.9 0.025 245);
@@ -119,7 +138,9 @@
   /* Floating layers only; the 1px inset rim is what keeps popovers crisp on a
      dark canvas (luminance stacking handles levels below). */
   --shadow-sm: 0 1px 2px oklch(0 0 0 / 30%);
-  --shadow-md: 0 2px 8px oklch(0 0 0 / 35%), 0 1px 2px oklch(0 0 0 / 25%);
+  --shadow-md:
+    0 2px 8px oklch(0 0 0 / 35%), 0 1px 2px oklch(0 0 0 / 25%),
+    inset 0 0 0 1px oklch(0.93 0.02 240 / 7%);
   --shadow-lg:
     0 16px 40px oklch(0 0 0 / 45%), 0 4px 16px oklch(0 0 0 / 30%),
     inset 0 0 0 1px oklch(0.93 0.02 240 / 8%);
@@ -146,8 +167,13 @@
   --color-muted-foreground-2: var(--muted-foreground-2);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-editor: var(--editor);
   --color-row-hover: var(--row-hover);
+  --color-row-active: var(--row-active);
   --color-selected: var(--selected);
+  --color-selected-unfocused: var(--selected-unfocused);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-micro: var(--border-micro);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
