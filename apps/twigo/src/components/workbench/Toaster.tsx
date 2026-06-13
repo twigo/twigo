@@ -16,11 +16,13 @@ const ICON: Record<ToastKind, LucideIcon> = {
   success: CircleCheck,
 };
 
-const TONE: Record<ToastKind, string> = {
-  error: "border-error/40",
-  warning: "border-warn/40",
-  info: "border-border",
-  success: "border-ok/40",
+// Surface stays neutral like every other floating layer; severity reads from
+// the icon and a thin left accent rule, not a loud full-perimeter border.
+const ACCENT: Record<ToastKind, string> = {
+  error: "bg-error",
+  warning: "bg-warn",
+  info: "bg-muted-foreground/40",
+  success: "bg-ok",
 };
 
 const ICON_TONE: Record<ToastKind, string> = {
@@ -45,15 +47,15 @@ export function Toaster() {
           <div
             key={t.id}
             role="status"
-            className={cn(
-              "pointer-events-auto flex items-start gap-2 rounded-md border bg-popover/90 px-3 py-2 text-xs shadow-lg backdrop-blur-xl duration-200 animate-in fade-in slide-in-from-right-2",
-              TONE[t.kind],
-            )}
+            className="pointer-events-auto relative flex items-start gap-2 overflow-hidden rounded-md border border-border bg-popover/90 py-2 pl-3.5 pr-2 text-xs shadow-lg backdrop-blur-xl duration-200 animate-in fade-in slide-in-from-right-2"
           >
-            <Icon
-              className={cn("mt-0.5 size-3.5 shrink-0", ICON_TONE[t.kind])}
+            <span
+              className={cn("absolute inset-y-0 left-0 w-0.5", ACCENT[t.kind])}
             />
-            <span className="min-w-0 flex-1 break-words text-foreground">
+            <Icon
+              className={cn("mt-px size-3.5 shrink-0", ICON_TONE[t.kind])}
+            />
+            <span className="min-w-0 flex-1 break-words leading-relaxed text-foreground">
               {t.message}
             </span>
             {t.action && (
@@ -63,7 +65,7 @@ export function Toaster() {
                   t.action?.run();
                   dismiss(t.id);
                 }}
-                className="shrink-0 font-medium text-brand hover:underline"
+                className="shrink-0 rounded px-1.5 py-0.5 font-medium text-brand transition-colors hover:bg-brand/10 focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
               >
                 {t.action.label}
               </button>
@@ -72,7 +74,7 @@ export function Toaster() {
               type="button"
               aria-label="Dismiss"
               onClick={() => dismiss(t.id)}
-              className="shrink-0 text-muted-foreground hover:text-foreground"
+              className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
             >
               <X className="size-3.5" />
             </button>
