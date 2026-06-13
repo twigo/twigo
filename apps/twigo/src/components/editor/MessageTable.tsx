@@ -84,7 +84,7 @@ export function MessageTable({
             >
               <span
                 role="cell"
-                className="tabular-nums text-muted-foreground"
+                className="tabular-nums text-muted-foreground-2"
                 title={fmtDateTime(m.receivedAt)}
               >
                 {fmtTime(m.receivedAt)}
@@ -94,11 +94,11 @@ export function MessageTable({
               </span>
               <span
                 role="cell"
-                className="text-right tabular-nums text-muted-foreground"
+                className="text-right tabular-nums text-muted-foreground-2"
               >
                 {fmtBytes(m.size)}
               </span>
-              <span role="cell" className="truncate">
+              <span role="cell" className="truncate text-muted-foreground">
                 {m.preview}
               </span>
             </div>

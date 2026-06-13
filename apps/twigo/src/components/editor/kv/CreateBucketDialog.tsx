@@ -1,6 +1,15 @@
 import { useState } from "react";
-import { Dialog, DialogContent, DialogTitle, Button, Input } from "@twigo/ui";
-import { Field, Select } from "@/components/editor/jetstream/form";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogFooter,
+  Button,
+  Input,
+  FieldGrid,
+  FormField,
+} from "@twigo/ui";
+import { Select } from "@/components/editor/jetstream/form";
 
 const STORAGE = ["file", "memory"];
 
@@ -38,57 +47,57 @@ export function CreateBucketDialog({
         if (!o) onClose();
       }}
     >
-      <DialogContent className="p-4">
+      <DialogContent className="p-5">
         <DialogTitle className="text-sm font-semibold">New bucket</DialogTitle>
 
-        <div className="mt-3 space-y-2">
-          <Field label="Name">
+        <FieldGrid className="mt-4">
+          <FormField label="Name">
             <Input
               value={bucket}
               onChange={(e) => setBucket(e.target.value)}
               autoFocus
               spellCheck={false}
               placeholder="config"
-              className="h-7 w-40 font-mono text-xs"
+              className="h-7 font-mono text-xs"
             />
-          </Field>
-          <Field label="History per key">
+          </FormField>
+          <FormField label="History per key">
             <Input
               value={history}
               onChange={(e) => setHistory(e.target.value)}
               inputMode="numeric"
-              className="h-7 w-40 font-mono text-xs"
+              className="h-7 w-32 font-mono text-xs"
             />
-          </Field>
-          <Field label="TTL sec (0 = ∞)">
+          </FormField>
+          <FormField label="TTL (sec)" hint="0 = no expiry.">
             <Input
               value={ttlSec}
               onChange={(e) => setTtlSec(e.target.value)}
               inputMode="numeric"
-              className="h-7 w-40 font-mono text-xs"
+              className="h-7 w-32 font-mono text-xs"
             />
-          </Field>
-          <Field label="Storage">
+          </FormField>
+          <FormField label="Storage">
             <Select value={storage} onChange={setStorage} options={STORAGE} />
-          </Field>
-          <Field label="Replicas">
+          </FormField>
+          <FormField label="Replicas">
             <Input
               value={replicas}
               onChange={(e) => setReplicas(e.target.value)}
               inputMode="numeric"
-              className="h-7 w-40 font-mono text-xs"
+              className="h-7 w-24 font-mono text-xs"
             />
-          </Field>
-        </div>
+          </FormField>
+        </FieldGrid>
 
-        <div className="mt-4 flex justify-end gap-2">
+        <DialogFooter>
           <Button variant="ghost" size="sm" onClick={onClose}>
             Cancel
           </Button>
-          <Button size="sm" disabled={!valid} onClick={submit}>
+          <Button variant="brand" size="sm" disabled={!valid} onClick={submit}>
             Create bucket
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

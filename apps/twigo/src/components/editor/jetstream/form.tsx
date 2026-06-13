@@ -6,21 +6,6 @@ import {
   SelectItem,
 } from "@twigo/ui";
 
-export function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="flex items-center justify-between gap-3 text-xs">
-      <span className="text-muted-foreground">{label}</span>
-      {children}
-    </label>
-  );
-}
-
 export function Select({
   value,
   onChange,

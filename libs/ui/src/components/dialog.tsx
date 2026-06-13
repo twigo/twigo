@@ -47,4 +47,15 @@ function DialogDescription(
   );
 }
 
-export { Dialog, DialogContent, DialogTitle, DialogDescription };
+// One footer recipe (right-aligned, cancel before primary) so dialogs agree.
+function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="dialog-footer"
+      className={cn("mt-5 flex items-center justify-end gap-2", className)}
+      {...props}
+    />
+  );
+}
+
+export { Dialog, DialogContent, DialogTitle, DialogDescription, DialogFooter };

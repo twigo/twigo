@@ -2,19 +2,7 @@ import { RefreshCw, Loader2, Server, Check, Minus } from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
 import { fmtBytes, fmtRtt } from "@twigo/utils";
 import { useServerInfo } from "@/hooks/useServerInfo";
-
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-baseline justify-between gap-4 py-1">
-      <span className="shrink-0 text-[11px] uppercase tracking-wider text-muted-foreground">
-        {label}
-      </span>
-      <span className="min-w-0 truncate text-right font-mono text-xs">
-        {value}
-      </span>
-    </div>
-  );
-}
+import { Row, Section } from "@/components/editor/jetstream/parts";
 
 function Bool({ value }: { value: boolean }) {
   return value ? (
@@ -28,25 +16,6 @@ function Bool({ value }: { value: boolean }) {
   );
 }
 
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section>
-      <h3 className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-        {title}
-      </h3>
-      <div className="rounded-md border border-border px-3 py-1">
-        {children}
-      </div>
-    </section>
-  );
-}
-
 export function ServerInfoPanel({ connId }: { connId: string }) {
   const { data, error, loading, refresh } = useServerInfo(connId);
 
@@ -54,7 +23,9 @@ export function ServerInfoPanel({ connId }: { connId: string }) {
     <div className="flex h-full min-h-0 flex-col bg-background">
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
         <Server className="size-3.5 text-brand" />
-        <span className="ml-1 truncate text-[11px] font-medium">{connId}</span>
+        <span className="ml-1 truncate text-[11px] font-semibold">
+          {connId}
+        </span>
         {data && (
           <span className="ml-1 text-[11px] tabular-nums text-muted-foreground">
             RTT {fmtRtt(data.rttMs)}

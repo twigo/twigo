@@ -146,7 +146,7 @@ export function DetailPanel() {
           Select a message to inspect it.
         </EmptyState>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3">
           <div className="space-y-1.5">
             <Field label="Subject" value={msg.subject} />
             <Field

@@ -8,7 +8,7 @@ export function WatchForm({ onStart }: { onStart: (pattern: string) => void }) {
   const [pattern, setPattern] = useState(">");
   return (
     <div className="space-y-2 px-2 py-2">
-      <p className="px-2 py-3 text-xs leading-relaxed text-muted-foreground">
+      <p className="py-1 text-xs leading-relaxed text-muted-foreground">
         Core NATS has no subject registry. Subscribe to a pattern to discover
         subjects from live traffic - this receives matching messages while
         running.

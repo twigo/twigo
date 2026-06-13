@@ -9,6 +9,7 @@ export * from "./components/radio-group";
 export * from "./components/table";
 export * from "./components/scroll-area";
 export * from "./components/tooltip";
+export * from "./components/field";
 export * from "./components/command";
 export * from "./components/dialog";
 export * from "./components/empty-state";
