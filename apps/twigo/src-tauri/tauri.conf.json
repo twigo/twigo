@@ -25,6 +25,11 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "category": "DeveloperTool",
+    "copyright": "© 2026 Serhii Mazurok",
+    "publisher": "Serhii Mazurok",
+    "shortDescription": "Desktop IDE for NATS",
+    "longDescription": "Twigo is a fast, keyboard-first desktop IDE for NATS. It imports your existing nats CLI contexts and gives you a subject explorer, live subscriptions, publish and request/reply, JetStream, KV and Object Store browsers, and a server monitoring overview.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

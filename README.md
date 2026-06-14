@@ -1,10 +1,10 @@
 # Twigo
 
+[![CI](https://github.com/twigo/twigo/actions/workflows/ci.yml/badge.svg)](https://github.com/twigo/twigo/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A desktop IDE for [NATS](https://nats.io) - connect to a server and work with
 it like an IDE, the way Lens does for Kubernetes.
-
-> **Status: early / work in progress.** Core connection management works;
-> messaging, JetStream, KV and Object Store are on the roadmap below.
 
 ## Why
 
@@ -14,28 +14,30 @@ that imports your existing `nats` CLI contexts and gets out of your way.
 
 ## Features
 
-**Working today**
-
 - Imports your existing `nats` CLI contexts (`~/.config/nats/context/`), with a
-  configurable contexts directory
-- Connect / disconnect with live status (creds, token, user/password, or nkey)
-- Light & dark themes
-
-**Roadmap**
-
+  configurable directory and an opt-in public demo server (`demo.nats.io`)
+- Connect / disconnect with live status; creds, token, user/password, nkey, and
+  TLS (CA, client certificate, handshake-first); read-only contexts
 - Subject explorer with live message rates
-- Live subscriptions, publish & request/reply
-- Message viewer (JSON / hex / …)
-- JetStream (streams & consumers), KV and Object Store browsers
-- Server monitoring overview
-- Command palette, request collections
+- Live subscriptions, publish, and request/reply
+- Message viewer (JSON / text / hex) with message-to-message diff
+- JetStream: streams & consumers, plus a message browser
+- KV store browser with revision history
+- Object store browser
+- Server monitoring overview (varz / connz / jsz)
+- Command palette, native menu, light & dark themes
 
-## Stack
+## Install
 
-[Tauri 2](https://tauri.app) · React + TypeScript · [async-nats](https://github.com/nats-io/nats.rs)
-· Tailwind CSS + shadcn/ui
+Download the latest build for your platform from the
+[Releases page](https://github.com/twigo/twigo/releases/latest):
 
-## Getting started
+- **macOS** - `.dmg` (Apple silicon and Intel)
+- **Linux** - `.AppImage` or `.deb`
+
+Windows is not packaged yet. On Linux the builds are currently unsigned.
+
+## Building from source
 
 Prerequisites: [Node.js](https://nodejs.org) + [pnpm](https://pnpm.io),
 [Rust](https://rustup.rs), and (for a local server) [Docker](https://docker.com).
@@ -44,6 +46,7 @@ Prerequisites: [Node.js](https://nodejs.org) + [pnpm](https://pnpm.io),
 pnpm install
 docker compose up -d   # local NATS with JetStream (:4222) + monitoring (:8222)
 pnpm tauri dev         # run the app
+pnpm tauri build       # produce a release bundle
 ```
 
 To generate continuous fake traffic for testing the subject explorer:
@@ -52,11 +55,10 @@ To generate continuous fake traffic for testing the subject explorer:
 docker compose --profile traffic up -d   # publishes to telemetry.*, orders.*, …
 ```
 
-To package a release build:
+## Stack
 
-```bash
-pnpm tauri build
-```
+[Tauri 2](https://tauri.app) · React + TypeScript · [async-nats](https://github.com/nats-io/nats.rs)
+· Tailwind CSS + shadcn/ui
 
 ## Contributing
 
