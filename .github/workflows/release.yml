@@ -16,17 +16,20 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
+            os: macos
             args: "--target aarch64-apple-darwin"
           - platform: macos-latest
+            os: macos
             args: "--target x86_64-apple-darwin"
           - platform: ubuntu-22.04
+            os: ubuntu
             args: ""
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
+        if: matrix.os == 'ubuntu'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -50,6 +53,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/twigo/src-tauri
+          shared-key: tauri
+          cache-on-failure: true
 
       - run: pnpm install --frozen-lockfile
 

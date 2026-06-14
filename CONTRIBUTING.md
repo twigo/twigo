@@ -4,8 +4,8 @@ Thanks for your interest in improving Twigo!
 
 ## Development setup
 
-See the [README](README.md#getting-started) for prerequisites and how to run
-the app. In short:
+See the [README](README.md#building-from-source) for prerequisites and how to
+run the app. In short:
 
 ```bash
 pnpm install
@@ -16,13 +16,13 @@ pnpm tauri dev
 ## Before opening a PR
 
 ```bash
-pnpm typecheck   # TypeScript
-pnpm lint        # ESLint
-pnpm format      # Prettier
-pnpm test        # frontend tests
-cargo fmt --manifest-path src-tauri/Cargo.toml
-cargo clippy --manifest-path src-tauri/Cargo.toml
-cargo test  --manifest-path src-tauri/Cargo.toml
+pnpm typecheck      # TypeScript
+pnpm lint           # ESLint
+pnpm format:check   # Prettier (use `pnpm format` to auto-fix)
+pnpm test           # frontend tests
+cargo fmt    --manifest-path apps/twigo/src-tauri/Cargo.toml --check
+cargo clippy --manifest-path apps/twigo/src-tauri/Cargo.toml -- -D warnings
+cargo test   --manifest-path apps/twigo/src-tauri/Cargo.toml
 ```
 
 CI runs the same checks on every pull request.
