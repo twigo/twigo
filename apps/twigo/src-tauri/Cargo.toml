@@ -44,6 +44,11 @@ reqwest = { version = "0.12", default-features = false, features = [
 tauri-plugin-store = "2.4.3"
 time = { version = "0.3", features = ["formatting"] }
 tauri-plugin-window-state = "2.4.1"
+tauri-plugin-process = "2"
+
+# The updater is desktop-only.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "2"
 
 [dev-dependencies]
 tempfile = "3.27.0"
