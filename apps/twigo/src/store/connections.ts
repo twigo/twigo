@@ -152,7 +152,9 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       }));
       useToasts
         .getState()
-        .push("error", `Couldn't connect to ${name}: ${err.message}${hint}`);
+        .push("error", `Couldn't connect to ${name}: ${err.message}${hint}`, {
+          key: `conn:${name}:err`,
+        });
     }
   },
 
@@ -191,7 +193,10 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
         const { [conn]: _r, ...reconnecting } = s.reconnecting;
         return { reconnecting };
       });
-      if (wasAnnounced) toasts.push("success", `Reconnected to ${conn}`);
+      if (wasAnnounced)
+        toasts.push("success", `Reconnected to ${conn}`, {
+          key: `conn:${conn}:link`,
+        });
       void apiConnInfo(conn).then((info) => {
         set((s) =>
           s.connected[conn]
@@ -221,7 +226,9 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
             announced.add(conn);
             useToasts
               .getState()
-              .push("warning", `Lost connection to ${conn} - reconnecting…`);
+              .push("warning", `Lost connection to ${conn} - reconnecting…`, {
+                key: `conn:${conn}:link`,
+              });
           }
         }, DROP_GRACE_MS);
         dropTimers.set(conn, timer);
@@ -259,7 +266,7 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       // Dedupe: the same fault repeats on every reconnect attempt.
       if (lastError.get(conn) !== msg) {
         lastError.set(conn, msg);
-        toasts.push("error", msg);
+        toasts.push("error", msg, { key: `conn:${conn}:err` });
       }
     }
   },

@@ -32,6 +32,14 @@ const ICON_TONE: Record<ToastKind, string> = {
   success: "text-ok",
 };
 
+// Reserve the assertive announcement for faults; routine outcomes are polite.
+const ROLE: Record<ToastKind, "alert" | "status"> = {
+  error: "alert",
+  warning: "alert",
+  info: "status",
+  success: "status",
+};
+
 export function Toaster() {
   const toasts = useToasts((s) => s.toasts);
   const dismiss = useToasts((s) => s.dismiss);
@@ -46,18 +54,33 @@ export function Toaster() {
         return (
           <div
             key={t.id}
-            role="status"
-            className="pointer-events-auto relative flex items-start gap-2 overflow-hidden rounded-md border border-border bg-popover/90 py-2 pl-3.5 pr-2 text-xs shadow-lg backdrop-blur-xl duration-200 animate-in fade-in slide-in-from-right-2"
+            data-twigo-toast=""
+            data-state={t.leaving ? "leaving" : "open"}
+            role={ROLE[t.kind]}
+            className="pointer-events-auto relative flex items-start gap-2 overflow-hidden rounded-md border border-border bg-popover/90 py-2 pl-3.5 pr-2 text-xs shadow-lg backdrop-blur-xl"
           >
             <span
               className={cn("absolute inset-y-0 left-0 w-0.5", ACCENT[t.kind])}
             />
-            <Icon
-              className={cn("mt-px size-3.5 shrink-0", ICON_TONE[t.kind])}
-            />
-            <span className="min-w-0 flex-1 break-words leading-relaxed text-foreground">
+            {/* h-5 matches the message's leading-5 so the icon centers on the
+                first line (and stays by the first line when text wraps). */}
+            <span className="flex h-5 shrink-0 items-center">
+              <Icon className={cn("size-3.5", ICON_TONE[t.kind])} />
+            </span>
+            <span className="min-w-0 flex-1 break-words leading-5 text-foreground">
               {t.message}
             </span>
+            {t.count > 1 && (
+              // aria-hidden so a repeat ticking the badge doesn't re-announce.
+              <span
+                aria-hidden="true"
+                className="flex h-5 shrink-0 items-center"
+              >
+                <span className="rounded bg-muted-foreground/15 px-1 text-[10px] font-medium tabular-nums text-muted-foreground">
+                  ×{t.count > 99 ? "99+" : t.count}
+                </span>
+              </span>
+            )}
             {t.action && (
               <button
                 type="button"

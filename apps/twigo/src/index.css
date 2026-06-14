@@ -215,3 +215,34 @@
   --separator-border: var(--border);
   --focus-border: var(--brand);
 }
+
+/* Toast enter/exit: one calm moment - an 8px rise + fade, no scale or bounce.
+   Anchored bottom-right, so it rises from just below. Coalesced updates reuse
+   the same node (stable React key), so the enter animation never replays. The
+   global reduced-motion rule above collapses this to an instant appear. */
+[data-twigo-toast] {
+  animation: twigo-toast-in var(--dur-base) var(--ease-out);
+}
+[data-twigo-toast][data-state="leaving"] {
+  animation: twigo-toast-out var(--dur-quick) var(--ease-in) forwards;
+}
+@keyframes twigo-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes twigo-toast-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}

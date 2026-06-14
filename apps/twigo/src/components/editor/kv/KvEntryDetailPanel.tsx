@@ -103,16 +103,18 @@ export function KvEntryDetailPanel({
         useRevision ? data.revision : null,
       );
       useToasts.getState().push("success", `Saved ${kvkey}`, {
-        label: "Undo",
-        run: () => {
-          void kvPut(connId, bucket, kvkey, prevB64, null)
-            .then(() => {
-              useToasts.getState().push("info", `Restored ${kvkey}`);
-              doRefresh();
-            })
-            .catch((e: unknown) => {
-              useToasts.getState().push("error", `Undo failed: ${String(e)}`);
-            });
+        action: {
+          label: "Undo",
+          run: () => {
+            void kvPut(connId, bucket, kvkey, prevB64, null)
+              .then(() => {
+                useToasts.getState().push("info", `Restored ${kvkey}`);
+                doRefresh();
+              })
+              .catch((e: unknown) => {
+                useToasts.getState().push("error", `Undo failed: ${String(e)}`);
+              });
+          },
         },
       });
       doRefresh();
