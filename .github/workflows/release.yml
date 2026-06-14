@@ -58,6 +58,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Stamp the tag's version (v0.1.0-beta1 -> 0.1.0-beta1) into every
+      # manifest so the bundle + in-app version match the tag. Tag pushes only.
+      - if: startsWith(github.ref, 'refs/tags/')
+        run: node apps/twigo/scripts/set-version.mjs "${GITHUB_REF_NAME#v}"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

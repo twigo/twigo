@@ -3,6 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useUi } from "@/store/ui";
 import { usePalette } from "@/store/palette";
 import { fmtBinding } from "@/lib/commands";
+import { useAppVersion } from "@/lib/appVersion";
 import { getStatusSegments, statusSegmentClass } from "@/shell/statusBar";
 
 const REPO_URL = "https://github.com/twigo/twigo";
@@ -31,6 +32,7 @@ function GitHubMark() {
 
 export function StatusBar() {
   const { resolvedTheme, toggleTheme } = useUi();
+  const version = useAppVersion();
   const left = getStatusSegments("left");
   const right = getStatusSegments("right");
 
@@ -62,7 +64,11 @@ export function StatusBar() {
           className={statusSegmentClass}
         >
           <GitHubMark />
-          <span className="opacity-90">v0.1.0</span>
+          {version && (
+            <span className="opacity-90">
+              {version === "dev" ? "dev" : `v${version}`}
+            </span>
+          )}
         </button>
         <button
           type="button"
