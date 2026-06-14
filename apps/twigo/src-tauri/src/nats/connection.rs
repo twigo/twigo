@@ -1,11 +1,11 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 
-use super::context::{demo_context, load_contexts, NatsContext, DEMO_CONTEXT_NAME};
+use super::context::{demo_context, load_contexts, ContextFile, NatsContext, DEMO_CONTEXT_NAME};
 use super::error::{self, Error};
 use super::subjects::{self, SubjectWatch};
 use super::subscription::{abort_conn, SubState};
@@ -154,6 +154,39 @@ async fn build_conn_info(name: String, client: &async_nats::Client) -> ConnInfo 
     }
 }
 
+// Pure so the decision is unit-testable; ConnectOptions itself is opaque.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct TlsPlan {
+    ca: Option<PathBuf>,
+    client: Option<(PathBuf, PathBuf)>,
+    tls_first: bool,
+}
+
+fn tls_plan(f: &ContextFile) -> TlsPlan {
+    TlsPlan {
+        ca: non_empty(&f.ca).map(PathBuf::from),
+        client: match (non_empty(&f.cert), non_empty(&f.key)) {
+            (Some(cert), Some(key)) => Some((PathBuf::from(cert), PathBuf::from(key))),
+            _ => None,
+        },
+        tls_first: f.tls_first,
+    }
+}
+
+fn apply_tls(opts: async_nats::ConnectOptions, plan: TlsPlan) -> async_nats::ConnectOptions {
+    let mut opts = opts;
+    if let Some(ca) = plan.ca {
+        opts = opts.add_root_certificates(ca);
+    }
+    if let Some((cert, key)) = plan.client {
+        opts = opts.add_client_certificate(cert, key);
+    }
+    if plan.tls_first {
+        opts = opts.tls_first();
+    }
+    opts
+}
+
 fn build_options(
     ctx: &NatsContext,
     app: &AppHandle,
@@ -178,6 +211,9 @@ fn build_options(
     } else {
         async_nats::ConnectOptions::new()
     };
+
+    // Without this a TLS context silently fails despite summary().has_tls.
+    let base = apply_tls(base, tls_plan(f));
 
     let app = app.clone();
     let name = name.to_string();
@@ -359,6 +395,46 @@ mod tests {
         assert_eq!(non_empty(&Some(String::new())), None);
         assert_eq!(non_empty(&Some("   ".into())), None);
         assert_eq!(non_empty(&Some(" token ".into())), Some("token"));
+    }
+
+    #[test]
+    fn tls_plan_maps_context_materials() {
+        let none = tls_plan(&ContextFile::default());
+        assert_eq!(none, TlsPlan::default());
+        assert!(none.ca.is_none() && none.client.is_none() && !none.tls_first);
+
+        let ca_only = tls_plan(&ContextFile {
+            ca: Some("/etc/ca.pem".into()),
+            ..Default::default()
+        });
+        assert_eq!(ca_only.ca, Some(PathBuf::from("/etc/ca.pem")));
+        assert!(ca_only.client.is_none());
+
+        let mtls = tls_plan(&ContextFile {
+            cert: Some("/c.pem".into()),
+            key: Some("/k.pem".into()),
+            tls_first: true,
+            ..Default::default()
+        });
+        assert_eq!(
+            mtls.client,
+            Some((PathBuf::from("/c.pem"), PathBuf::from("/k.pem")))
+        );
+        assert!(mtls.tls_first);
+
+        // A cert without its key (or vice versa) is not usable for client auth.
+        let half = tls_plan(&ContextFile {
+            cert: Some("/c.pem".into()),
+            ..Default::default()
+        });
+        assert!(half.client.is_none());
+
+        // Blank strings are treated as absent.
+        let blank = tls_plan(&ContextFile {
+            ca: Some("   ".into()),
+            ..Default::default()
+        });
+        assert!(blank.ca.is_none());
     }
 
     #[test]
