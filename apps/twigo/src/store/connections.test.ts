@@ -145,6 +145,7 @@ describe("connections link toasts", () => {
     expect(pushMock).toHaveBeenCalledWith(
       "warning",
       expect.stringContaining("Lost connection to a"),
+      { key: "conn:a:link" },
     );
   });
 
@@ -169,6 +170,7 @@ describe("connections link toasts", () => {
     expect(pushMock).toHaveBeenCalledWith(
       "success",
       expect.stringContaining("Reconnected to a"),
+      { key: "conn:a:link" },
     );
   });
 
@@ -184,6 +186,7 @@ describe("connections link toasts", () => {
     expect(pushMock).not.toHaveBeenCalledWith(
       "warning",
       expect.stringContaining("Lost connection"),
+      { key: "conn:a:link" },
     );
   });
 
@@ -195,6 +198,8 @@ describe("connections link toasts", () => {
       .getState()
       .onEvent("a", "serverError", "authorization violation");
     const errors = pushMock.mock.calls.filter((c) => c[0] === "error");
-    expect(errors).toEqual([["error", "a: authorization violation"]]);
+    expect(errors).toEqual([
+      ["error", "a: authorization violation", { key: "conn:a:err" }],
+    ]);
   });
 });
