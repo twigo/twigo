@@ -51,8 +51,12 @@ Prerequisites: [Node.js](https://nodejs.org) + [pnpm](https://pnpm.io),
 pnpm install
 docker compose up -d   # local NATS with JetStream (:4222) + monitoring (:8222)
 pnpm tauri dev         # run the app
-pnpm tauri build       # produce a release bundle
 ```
+
+Day-to-day development only needs `pnpm tauri dev`. Producing a release bundle
+(`pnpm tauri build`) signs the auto-update artifacts, so it needs the
+`TAURI_SIGNING_PRIVATE_KEY` environment variable set; the release workflow does
+this in CI.
 
 To generate continuous fake traffic for testing the subject explorer:
 
