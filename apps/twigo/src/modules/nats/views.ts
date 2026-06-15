@@ -11,18 +11,6 @@ import { MonitorView } from "@/components/views/monitor/MonitorView";
 // registry by registerNatsModule().
 export function registerNatsViews(): void {
   registerView({
-    id: "subjects",
-    title: "Subjects",
-    icon: Radio,
-    Panel: SubjectsView,
-  });
-  registerView({
-    id: "responders",
-    title: "Responders",
-    icon: Webhook,
-    Panel: RespondersView,
-  });
-  registerView({
     id: "jetstream",
     title: "Streams & Consumers",
     icon: Layers,
@@ -39,6 +27,18 @@ export function registerNatsViews(): void {
     title: "Object Stores",
     icon: Box,
     Panel: ObjectStoreView,
+  });
+  registerView({
+    id: "subjects",
+    title: "Subjects",
+    icon: Radio,
+    Panel: SubjectsView,
+  });
+  registerView({
+    id: "responders",
+    title: "Responders",
+    icon: Webhook,
+    Panel: RespondersView,
   });
   registerView({
     id: "monitor",
