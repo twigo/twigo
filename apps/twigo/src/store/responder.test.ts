@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { encodeText } from "@twigo/utils";
 import type { IncomingMessage } from "@/lib/api";
 
 const { subscribe, unsubscribe, publish } = vi.hoisted(() => ({
@@ -27,7 +28,7 @@ function req(over: Partial<IncomingMessage> = {}): IncomingMessage {
   return {
     subject: "svc.get",
     reply: "_INBOX.1",
-    payloadB64: Buffer.from("{}", "utf8").toString("base64"),
+    payloadB64: encodeText("{}"),
     headers: [],
     size: 2,
     ...over,

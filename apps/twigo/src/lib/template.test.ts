@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
+import { encodeText } from "@twigo/utils";
 import { render, scan, buildMsgContext, type MsgContext } from "./template";
 import type { IncomingMessage } from "@/lib/api";
 
 function b64(s: string): string {
-  return Buffer.from(s, "utf8").toString("base64");
+  return encodeText(s);
 }
 
 function msg(
