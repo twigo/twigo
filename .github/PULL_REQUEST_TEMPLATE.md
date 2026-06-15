@@ -14,6 +14,5 @@
 - [ ] `pnpm typecheck && pnpm lint && pnpm format:check && pnpm test` pass
 - [ ] `cargo fmt --check && cargo clippy -- -D warnings && cargo test` pass (if backend changed)
 - [ ] Tests added or updated
-- [ ] UI strings are English-only
 - [ ] No `any`, no silent `catch`, no throwaway hacks
 - [ ] Interactive UI is keyboard-accessible
