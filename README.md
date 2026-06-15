@@ -2,7 +2,7 @@
   <img src="apps/twigo/src-tauri/icons/128x128@2x.png" width="120" alt="Twigo" />
 </p>
 <h1 align="center">Twigo</h1>
-<p align="center"><b>A desktop IDE for NATS - work with your server the way Lens does for Kubernetes.</b></p>
+<p align="center"><b>A fast, keyboard-first desktop IDE for NATS.</b></p>
 <p align="center">
   <a href="https://github.com/twigo/twigo/releases/latest"><img src="https://img.shields.io/github/v/release/twigo/twigo?style=flat-square" alt="Release" /></a>
   <a href="https://github.com/twigo/twigo/releases"><img src="https://img.shields.io/github/downloads/twigo/twigo/total?style=flat-square" alt="Downloads" /></a>
