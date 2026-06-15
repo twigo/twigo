@@ -22,9 +22,23 @@
       "devCsp": "default-src 'self'; img-src 'self' asset: data: blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; connect-src 'self' ipc: http://ipc.localhost ws://localhost:* http://localhost:*"
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDUzNTdBNUZEMEEyQ0ExREMKUldUY29Td0svYVZYVXkyblRNTERGNkYvYm5laklQOGkzUGpPN1J1b3Rwd01aek5Nb3ZCLzJ4UUIK",
+      "endpoints": [
+        "https://github.com/twigo/twigo/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
+    "category": "DeveloperTool",
+    "copyright": "© 2026 Serhii Mazurok",
+    "publisher": "Serhii Mazurok",
+    "shortDescription": "Desktop IDE for NATS",
+    "longDescription": "Twigo is a fast, keyboard-first desktop IDE for NATS. It imports your existing nats CLI contexts and gives you a subject explorer, live subscriptions, publish and request/reply, JetStream, KV and Object Store browsers, and a server monitoring overview.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

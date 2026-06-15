@@ -26,6 +26,9 @@ pub(crate) struct ContextFile {
     pub(crate) key: Option<String>,
     #[serde(default)]
     pub(crate) ca: Option<String>,
+    // Server does the TLS handshake before sending INFO (vs upgrade after).
+    #[serde(default)]
+    pub(crate) tls_first: bool,
     #[serde(default)]
     pub(crate) jetstream_domain: Option<String>,
     #[serde(default)]
@@ -236,6 +239,20 @@ mod tests {
         assert!(!ctxs[0].selected);
         assert_eq!(ctxs[1].summary().auth_method, "token");
         assert_eq!(ctxs[0].summary().auth_method, "none");
+    }
+
+    #[test]
+    fn tls_fields_parse_and_summarize() {
+        let plain: ContextFile = serde_json::from_str(r#"{"url":"nats://x:4222"}"#).unwrap();
+        assert!(!plain.tls_first, "tls_first defaults to false when absent");
+        assert!(!ctx(plain).summary().has_tls);
+
+        let tls: ContextFile = serde_json::from_str(
+            r#"{"url":"tls://x:4222","ca":"/ca.pem","cert":"/c.pem","key":"/k.pem","tls_first":true}"#,
+        )
+        .unwrap();
+        assert!(tls.tls_first);
+        assert!(ctx(tls).summary().has_tls);
     }
 
     #[test]

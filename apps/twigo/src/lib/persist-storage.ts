@@ -53,6 +53,9 @@ async function delRaw(name: string): Promise<void> {
   }
 }
 
+// Bumping a store's version post-launch needs a `migrate` in that release, or
+// zustand silently drops the user's state (the migrate runs in the new build).
+
 // Custom PersistStorage that parses defensively: a corrupt/foreign value
 // resolves to null (→ store defaults) instead of throwing into zustand's
 // hydrate(), which would otherwise never finish and hang the hydration gate.

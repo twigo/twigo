@@ -1,10 +1,14 @@
-# Twigo
-
-A desktop IDE for [NATS](https://nats.io) - connect to a server and work with
-it like an IDE, the way Lens does for Kubernetes.
-
-> **Status: early / work in progress.** Core connection management works;
-> messaging, JetStream, KV and Object Store are on the roadmap below.
+<p align="center">
+  <img src="apps/twigo/src-tauri/icons/128x128@2x.png" width="120" alt="Twigo" />
+</p>
+<h1 align="center">Twigo</h1>
+<p align="center"><b>A fast, keyboard-first desktop IDE for NATS.</b></p>
+<p align="center">
+  <a href="https://github.com/twigo/twigo/releases/latest"><img src="https://img.shields.io/github/v/release/twigo/twigo?style=flat-square" alt="Release" /></a>
+  <a href="https://github.com/twigo/twigo/releases"><img src="https://img.shields.io/github/downloads/twigo/twigo/total?style=flat-square" alt="Downloads" /></a>
+  <a href="https://github.com/twigo/twigo/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/twigo/twigo/ci.yml?branch=main&style=flat-square" alt="CI" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/twigo/twigo?style=flat-square" alt="License" /></a>
+</p>
 
 ## Why
 
@@ -14,28 +18,31 @@ that imports your existing `nats` CLI contexts and gets out of your way.
 
 ## Features
 
-**Working today**
-
 - Imports your existing `nats` CLI contexts (`~/.config/nats/context/`), with a
-  configurable contexts directory
-- Connect / disconnect with live status (creds, token, user/password, or nkey)
-- Light & dark themes
-
-**Roadmap**
-
+  configurable directory and an opt-in public demo server (`demo.nats.io`)
+- Connect / disconnect with live status; creds, token, user/password, nkey, and
+  TLS (CA, client certificate, handshake-first); read-only contexts
 - Subject explorer with live message rates
-- Live subscriptions, publish & request/reply
-- Message viewer (JSON / hex / …)
-- JetStream (streams & consumers), KV and Object Store browsers
-- Server monitoring overview
-- Command palette, request collections
+- Live subscriptions, publish, and request/reply
+- Message viewer (JSON / text / hex) with message-to-message diff
+- JetStream: streams & consumers, plus a message browser
+- KV store browser with revision history
+- Object store browser
+- Server monitoring overview (varz / connz / jsz)
+- Command palette, native menu, light & dark themes
 
-## Stack
+## Install
 
-[Tauri 2](https://tauri.app) · React + TypeScript · [async-nats](https://github.com/nats-io/nats.rs)
-· Tailwind CSS + shadcn/ui
+Grab the latest build from the
+[Releases page](https://github.com/twigo/twigo/releases/latest):
 
-## Getting started
+| Platform | Download            | Notes                 |
+| -------- | ------------------- | --------------------- |
+| macOS    | `.dmg`              | Apple silicon + Intel |
+| Linux    | `.AppImage`, `.deb` | currently unsigned    |
+| Windows  | coming soon         | not packaged yet      |
+
+## Building from source
 
 Prerequisites: [Node.js](https://nodejs.org) + [pnpm](https://pnpm.io),
 [Rust](https://rustup.rs), and (for a local server) [Docker](https://docker.com).
@@ -46,21 +53,26 @@ docker compose up -d   # local NATS with JetStream (:4222) + monitoring (:8222)
 pnpm tauri dev         # run the app
 ```
 
+Day-to-day development only needs `pnpm tauri dev`. Producing a release bundle
+(`pnpm tauri build`) signs the auto-update artifacts, so it needs the
+`TAURI_SIGNING_PRIVATE_KEY` environment variable set; the release workflow does
+this in CI.
+
 To generate continuous fake traffic for testing the subject explorer:
 
 ```bash
 docker compose --profile traffic up -d   # publishes to telemetry.*, orders.*, …
 ```
 
-To package a release build:
+## Stack
 
-```bash
-pnpm tauri build
-```
+[Tauri 2](https://tauri.app) · React + TypeScript · [async-nats](https://github.com/nats-io/nats.rs)
+· Tailwind CSS + shadcn/ui
 
 ## Contributing
 
-Contributions are welcome - see [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributions are welcome - see [CONTRIBUTING.md](CONTRIBUTING.md). Maintainers:
+[RELEASING.md](RELEASING.md) covers cutting a release.
 
 ## License
 

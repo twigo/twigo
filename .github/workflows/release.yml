@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            os: macos
+            args: "--target aarch64-apple-darwin"
+          - platform: macos-latest
+            os: macos
+            args: "--target x86_64-apple-darwin"
+          - platform: ubuntu-22.04
+            os: ubuntu
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # git-cliff needs full history + tags
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/twigo/src-tauri
+          shared-key: tauri
+          cache-on-failure: true
+
+      - run: pnpm install --frozen-lockfile
+
+      # Stamp the tag's version (v0.1.0-beta1 -> 0.1.0-beta1) into every
+      # manifest so the bundle + in-app version match the tag. Tag pushes only.
+      - if: startsWith(github.ref, 'refs/tags/')
+        run: node apps/twigo/scripts/set-version.mjs "${GITHUB_REF_NAME#v}"
+
+      # Release notes for this tag, from Conventional Commits.
+      - if: startsWith(github.ref, 'refs/tags/')
+        id: changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip all
+        env:
+          GITHUB_REPO: ${{ github.repository }}
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Set these repo secrets to ship a signed + notarized macOS build;
+          # without them the macOS artifact is unsigned.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Required: signs the updater artifacts (.sig + latest.json).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/twigo
+          tagName: ${{ github.ref_name }}
+          releaseName: "Twigo ${{ github.ref_name }}"
+          releaseBody: ${{ steps.changelog.outputs.content }}
+          releaseDraft: true
+          # A tag with a pre-release suffix (v0.1.0-beta1) ships as a GitHub
+          # pre-release; a clean tag (v0.1.0) ships as a full release.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          args: ${{ matrix.args }}

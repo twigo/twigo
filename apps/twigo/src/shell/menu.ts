@@ -1,4 +1,5 @@
 import { Menu, type MenuItemOptions } from "@tauri-apps/api/menu";
+import { getVersion } from "@tauri-apps/api/app";
 import { getCommands } from "@/lib/commands";
 import { getViews } from "@/shell/views";
 import { useUi } from "@/store/ui";
@@ -63,6 +64,7 @@ export async function setupAppMenu(): Promise<void> {
 }
 
 async function buildAndSetMenu(): Promise<void> {
+  const appVersion = await getVersion();
   const goToViews: MenuItemOptions[] = getViews().map((v) => ({
     text: `Go to ${v.title}`,
     action: () => {
@@ -75,7 +77,7 @@ async function buildAndSetMenu(): Promise<void> {
       {
         text: "Twigo",
         items: [
-          { item: { About: { name: "Twigo", version: "0.1.0" } } },
+          { item: { About: { name: "Twigo", version: appVersion } } },
           { item: "Separator" },
           cmdItem("settings.open", "Settings…"),
           { item: "Separator" },

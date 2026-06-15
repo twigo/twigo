@@ -1,3 +1,5 @@
+<!-- Use a Conventional Commit title, e.g. feat(jetstream): add consumer view -->
+
 ## What
 
 <!-- What does this PR change, and why? -->
@@ -8,6 +10,9 @@
 
 ## Checklist
 
-- [ ] `pnpm typecheck`, `pnpm lint`, `pnpm test` pass
-- [ ] `cargo fmt --check`, `cargo clippy`, `cargo test` pass (if backend changed)
+- [ ] Conventional Commit PR title (feat / fix / docs / refactor / chore / …)
+- [ ] `pnpm typecheck && pnpm lint && pnpm format:check && pnpm test` pass
+- [ ] `cargo fmt --check && cargo clippy -- -D warnings && cargo test` pass (if backend changed)
+- [ ] Tests added or updated
+- [ ] No `any`, no silent `catch`, no throwaway hacks
 - [ ] Interactive UI is keyboard-accessible

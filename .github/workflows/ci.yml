@@ -47,6 +47,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/twigo/src-tauri
+          shared-key: tauri
       - run: cargo fmt --manifest-path apps/twigo/src-tauri/Cargo.toml --check
       - run: cargo clippy --manifest-path apps/twigo/src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path apps/twigo/src-tauri/Cargo.toml

@@ -10,6 +10,7 @@ import {
   editorGroupCount,
 } from "@/lib/editor";
 import { getViews } from "@/shell/views";
+import { checkForUpdates } from "@/lib/updater";
 
 export interface Command {
   id: string;
@@ -87,6 +88,13 @@ const SHELL_COMMANDS: Command[] = [
     // implicit shift the character needs). See CommandPalette's key handler.
     keybinding: "?",
     run: () => useHelp.getState().toggle(),
+  },
+  {
+    id: "help.checkUpdates",
+    title: "Check for updates",
+    category: "Help",
+    keywords: "update upgrade version release",
+    run: () => void checkForUpdates(),
   },
   {
     id: "editor.splitRight",
