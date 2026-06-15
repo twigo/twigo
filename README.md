@@ -71,7 +71,8 @@ docker compose --profile traffic up -d   # publishes to telemetry.*, orders.*, â
 
 ## Contributing
 
-Contributions are welcome - see [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributions are welcome - see [CONTRIBUTING.md](CONTRIBUTING.md). Maintainers:
+[RELEASING.md](RELEASING.md) covers cutting a release.
 
 ## License
 

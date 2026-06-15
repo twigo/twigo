@@ -44,13 +44,5 @@ CI runs the same checks on every pull request.
 
 ## Releasing (maintainers)
 
-The changelog is generated from Conventional Commits by
-[git-cliff](https://git-cliff.org). Before tagging, prepend the new version's
-entries (this keeps the curated earlier entries intact):
-
-```bash
-git cliff --unreleased --tag vX.Y.Z --prepend CHANGELOG.md   # then commit it
-git tag vX.Y.Z && git push origin vX.Y.Z # release.yml builds + drafts the release
-```
-
-The release workflow also generates that tag's notes for the GitHub release body.
+See [RELEASING.md](RELEASING.md) for the full release process (changelog, tag,
+draft review).
