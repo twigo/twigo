@@ -42,7 +42,7 @@ export const useUi = create<UiState>()(
     (set) => ({
       theme: "dark",
       resolvedTheme: "dark",
-      activeView: "subjects",
+      activeView: "jetstream",
       sidebarOpen: true,
       detailOpen: true,
       shellSizes: [],
