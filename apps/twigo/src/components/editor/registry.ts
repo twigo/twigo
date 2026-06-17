@@ -48,6 +48,8 @@ interface EditorDef {
   // Conn-scoped tabs are closed when their connection drops.
   connScoped?: boolean;
   // Release any non-Dockview resource bound to the panel (e.g. a subscription).
+  // Dispatched by EditorArea.onDidRemovePanel when a tab is closed, so the
+  // registry is the single source of per-panel cleanup.
   dispose?: (panelId: string) => void;
 }
 

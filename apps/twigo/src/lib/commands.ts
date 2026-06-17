@@ -8,7 +8,7 @@ import {
   resetEditorLayout,
   canSplitActiveEditor,
   editorGroupCount,
-} from "@/lib/editor";
+} from "@/shell/editorHost";
 import { getViews } from "@/shell/views";
 import { checkForUpdates } from "@/lib/updater";
 

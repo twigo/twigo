@@ -15,6 +15,9 @@ export interface ViewDef {
   title: string;
   icon: LucideIcon;
   order?: number;
+  // The view the shell lands on when none is chosen. The shell never names a
+  // view itself; a domain module opts one in.
+  default?: boolean;
   Panel?: FC<ViewProps>;
 }
 
@@ -31,6 +34,13 @@ export function getViews(): ViewDef[] {
 
 export function getView(id: string): ViewDef | undefined {
   return views.get(id);
+}
+
+// The id the shell should show when the user hasn't picked a view: a module's
+// opted-in default, else the first registered view, else nothing.
+export function getDefaultViewId(): string {
+  const all = getViews();
+  return (all.find((v) => v.default) ?? all[0])?.id ?? "";
 }
 
 // Test-only: drop registered views so a suite starts clean.

@@ -1,11 +1,13 @@
 import { Settings } from "lucide-react";
 import { cn } from "@twigo/ui";
 import { useUi } from "@/store/ui";
-import { openSettings } from "@/lib/editor";
-import { getViews } from "@/shell/views";
+import { openSettings } from "@/shell/editorHost";
+import { getViews, getDefaultViewId } from "@/shell/views";
 
 export function ActivityBar() {
   const { activeView, setView } = useUi();
+  // Empty activeView resolves to the module's default view (see store/ui).
+  const current = activeView || getDefaultViewId();
   return (
     <nav
       aria-label="Primary"
@@ -13,7 +15,7 @@ export function ActivityBar() {
     >
       <div className="flex flex-col items-center gap-0.5">
         {getViews().map(({ id, title, icon: Icon }) => {
-          const active = activeView === id;
+          const active = current === id;
           return (
             <button
               key={id}

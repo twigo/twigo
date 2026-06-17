@@ -1,5 +1,13 @@
 import { registerWatermark } from "@/shell/watermark";
 import { registerStatusSegment } from "@/shell/statusBar";
+// Conn-scoped stores register themselves for teardown on import (via
+// registerConnScoped). Import them here so registration is eager and explicit -
+// a load-bearing constraint, not a side effect of a view happening to render.
+import "@/store/subjects";
+import "@/store/jetstream";
+import "@/store/kv";
+import "@/store/objstore";
+import "@/store/monitor";
 import { registerNatsViews } from "./views";
 import { registerNatsCommands } from "./commands";
 import { NatsWatermark } from "./Watermark";

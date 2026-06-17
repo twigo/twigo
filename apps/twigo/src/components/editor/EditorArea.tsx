@@ -14,13 +14,17 @@ import { useConnections } from "@/store/connections";
 import { useWorkspace } from "@/store/workspace";
 import {
   setEditorApi,
-  openStream,
   isReplacingLayout,
-  setReplacingLayout,
-  closeEditorsForConn,
-} from "@/lib/editor";
+  withReplacingLayout,
+} from "@/shell/editorHost";
+import { openStream, closeEditorsForConn } from "@/lib/editor";
 import { getWatermark } from "@/shell/watermark";
-import { editorComponents, editorTabComponents } from "./registry";
+import {
+  editorComponents,
+  editorTabComponents,
+  EDITORS,
+  type EditorType,
+} from "./registry";
 import { NewTabButton } from "./NewTabButton";
 
 // Fallback for the editor zero-state when no domain module contributed a
@@ -101,9 +105,10 @@ export function EditorArea() {
 
     api.onDidRemovePanel((panel) => {
       if (isReplacingLayout()) return;
-      if (useStream.getState().sessions[panel.id]) {
-        void useStream.getState().close(panel.id);
-      }
+      // Per-panel cleanup runs through the editor registry (the single source),
+      // so a tab type's resources (e.g. a stream subscription) release on close.
+      const type = (panel.params as { type?: EditorType }).type;
+      if (type) EDITORS[type].dispose?.(panel.id);
     });
 
     api.onDidLayoutChange(() => {
@@ -120,14 +125,14 @@ export function EditorArea() {
 
   // Swap the editor layout when the active connection changes (tabs are
   // per-context), and wake the focused restored stream as connections come up.
+  // Selector subscriptions so this only runs on the two transitions that matter
+  // - not on every link tick (rtt/reconnect) - per IDE-7.
   useEffect(() => {
-    const unsub = useConnections.subscribe((s) => {
+    const swap = (conn: string) => {
       const api = apiRef.current;
       if (!api) return;
-      const conn = s.activeContext ?? "";
       if (conn !== shownRef.current) {
-        setReplacingLayout(true);
-        try {
+        withReplacingLayout(() => {
           useWorkspace.getState().setLayout(shownRef.current, api.toJSON());
           shownRef.current = conn;
           api.clear();
@@ -139,12 +144,26 @@ export function EditorArea() {
               api.clear();
             }
           }
-        } finally {
-          setReplacingLayout(false);
-        }
+        });
       }
       subscribeActiveStream(api);
-    });
+    };
+
+    const unsubContext = useConnections.subscribe(
+      (s) => s.activeContext ?? "",
+      swap,
+    );
+    // Wake the focused restored stream when its (active) connection comes up.
+    const unsubUp = useConnections.subscribe(
+      (s) => {
+        const c = s.activeContext;
+        return c ? (s.connected[c]?.connected ?? false) : false;
+      },
+      (up) => {
+        const api = apiRef.current;
+        if (up && api) subscribeActiveStream(api);
+      },
+    );
 
     // Flush a pending (debounced) layout save before the window closes, so
     // quitting right after a layout change doesn't lose it.
@@ -160,7 +179,8 @@ export function EditorArea() {
     window.addEventListener("beforeunload", flushOnExit);
 
     return () => {
-      unsub();
+      unsubContext();
+      unsubUp();
       window.removeEventListener("beforeunload", flushOnExit);
       clearTimeout(saveTimerRef.current);
     };
