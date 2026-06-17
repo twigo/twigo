@@ -590,23 +590,39 @@ export function objObjectInfo(
   return call<ObjDetail>("obj_object_info", { connId, bucket, name });
 }
 
-export async function objGetObject(
+// Download: the save dialog runs in Rust (no destination path crosses IPC).
+// Resolves to the saved path, or null if the user cancels.
+export function objGetObject(
   connId: string,
   bucket: string,
   name: string,
-  dest: string,
-): Promise<void> {
-  await call("obj_get_object", { connId, bucket, name, dest });
+): Promise<string | null> {
+  return call<string | null>("obj_get_object", { connId, bucket, name });
 }
 
-export async function objPutObject(
+export interface StagedUploadInfo {
+  name: string;
+  exists: boolean;
+}
+
+// Upload is a stage -> commit pair: the file picker runs in Rust and the chosen
+// path is held backend-side, so no source path crosses IPC. Stage reports
+// whether the object name already exists so the UI can confirm an overwrite.
+export async function objStageUpload(
   connId: string,
   bucket: string,
-  name: string,
-  src: string,
-): Promise<void> {
+): Promise<StagedUploadInfo | null> {
   assertWritable(connId);
-  await call("obj_put_object", { connId, bucket, name, src });
+  return call<StagedUploadInfo | null>("obj_stage_upload", { connId, bucket });
+}
+
+export async function objCommitUpload(connId: string): Promise<string | null> {
+  assertWritable(connId);
+  return call<string | null>("obj_commit_upload", {});
+}
+
+export function objCancelUpload(): Promise<void> {
+  return call("obj_cancel_upload", {});
 }
 
 export async function objDelete(

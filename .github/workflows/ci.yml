@@ -29,10 +29,18 @@ jobs:
       - run: pnpm build
 
   rust:
-    runs-on: ubuntu-latest
+    # Build the backend on every shipped desktop platform, not just Linux, so a
+    # platform-specific compile/clippy/test failure surfaces on the PR instead of
+    # at release-tag time (the most expensive moment).
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
-      - name: Install system dependencies
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -47,7 +55,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/twigo/src-tauri
-          shared-key: tauri
+          shared-key: tauri-${{ matrix.os }}
       - run: cargo fmt --manifest-path apps/twigo/src-tauri/Cargo.toml --check
       - run: cargo clippy --manifest-path apps/twigo/src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path apps/twigo/src-tauri/Cargo.toml

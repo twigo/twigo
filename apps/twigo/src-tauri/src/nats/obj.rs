@@ -1,15 +1,30 @@
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use async_nats::jetstream::stream::StorageType;
 use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_dialog::DialogExt;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::Mutex;
 
 use super::connection::ConnState;
 use super::error::{self, Error};
 use super::jetstream::{fmt_time, js_err, storage_str};
+
+// Holds the picked upload path backend-side between pick and commit, so it never
+// round-trips through (untrusted) JS. One slot - uploads are a sequential action.
+#[derive(Default)]
+pub struct UploadStaging(Mutex<Option<StagedUpload>>);
+
+struct StagedUpload {
+    conn_id: String,
+    bucket: String,
+    name: String,
+    path: PathBuf,
+}
 
 async fn store(
     conns: &State<'_, ConnState>,
@@ -140,43 +155,62 @@ pub async fn obj_object_info(
     })
 }
 
-/// Download an object to a local path. Streams chunk-by-chunk so a multi-GB
-/// object never lands wholly in memory, and writes to a sidecar temp file that
-/// is atomically renamed on success - a failed download never leaves a
-/// truncated file at `dest`.
+/// Download an object. The save picker runs in Rust so a destination path never
+/// crosses IPC; streams to a sidecar temp file renamed atomically on success.
+/// Returns the saved path, or None if cancelled.
 #[tauri::command]
 pub async fn obj_get_object(
+    app: AppHandle,
     conns: State<'_, ConnState>,
     conn_id: String,
     bucket: String,
     name: String,
-    dest: String,
-) -> error::Result<()> {
+) -> error::Result<Option<String>> {
+    let suggested = name
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("object")
+        .to_string();
+    let picked = tokio::task::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_file_name(suggested)
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|e| Error::Task(e.to_string()))?;
+    let Some(dest) = picked.and_then(|p| p.as_path().map(Path::to_path_buf)) else {
+        return Ok(None);
+    };
+
     let os = store(&conns, &conn_id, &bucket).await?;
     let mut object = os.get(&name).await.map_err(js_err)?;
-    let tmp = format!("{dest}.twigo-part");
+    let mut tmp = dest.clone().into_os_string();
+    tmp.push(".twigo-part");
+    let tmp = PathBuf::from(tmp);
 
     let download = async {
         let mut file = tokio::fs::File::create(&tmp)
             .await
             .map_err(|source| Error::Io {
-                path: tmp.clone(),
+                path: tmp.display().to_string(),
                 source,
             })?;
         tokio::io::copy(&mut object, &mut file)
             .await
             .map_err(|source| Error::Io {
-                path: tmp.clone(),
+                path: tmp.display().to_string(),
                 source,
             })?;
         file.flush().await.map_err(|source| Error::Io {
-            path: tmp.clone(),
+            path: tmp.display().to_string(),
             source,
         })?;
         tokio::fs::rename(&tmp, &dest)
             .await
             .map_err(|source| Error::Io {
-                path: dest.clone(),
+                path: dest.display().to_string(),
                 source,
             })?;
         Ok::<(), Error>(())
@@ -186,31 +220,83 @@ pub async fn obj_get_object(
         let _ = tokio::fs::remove_file(&tmp).await;
         return Err(e);
     }
-    Ok(())
+    Ok(Some(dest.display().to_string()))
 }
 
-/// Upload a local file as an object (name = the caller-chosen object name).
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct StagedUploadInfo {
+    name: String,
+    exists: bool,
+}
+
+/// Stage an upload: the picker runs in Rust and the chosen path is held
+/// backend-side (never crosses IPC). Reports whether the name already exists so
+/// the UI can confirm an overwrite. Returns None if cancelled; then commit.
 #[tauri::command]
-pub async fn obj_put_object(
+pub async fn obj_stage_upload(
+    app: AppHandle,
     conns: State<'_, ConnState>,
+    staging: State<'_, UploadStaging>,
     conn_id: String,
     bucket: String,
-    name: String,
-    src: String,
-) -> error::Result<()> {
+) -> error::Result<Option<StagedUploadInfo>> {
+    let picked = tokio::task::spawn_blocking(move || app.dialog().file().blocking_pick_file())
+        .await
+        .map_err(|e| Error::Task(e.to_string()))?;
+    let Some(path) = picked.and_then(|p| p.as_path().map(Path::to_path_buf)) else {
+        *staging.0.lock().await = None;
+        return Ok(None);
+    };
+    let name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("object")
+        .to_string();
+
     let os = store(&conns, &conn_id, &bucket).await?;
-    let mut file = tokio::fs::File::open(&src)
+    // info() errors when the object doesn't exist yet - treat that as "new".
+    let exists = matches!(os.info(&name).await, Ok(i) if !i.deleted);
+
+    *staging.0.lock().await = Some(StagedUpload {
+        conn_id,
+        bucket,
+        name: name.clone(),
+        path,
+    });
+    Ok(Some(StagedUploadInfo { name, exists }))
+}
+
+/// Commit the staged upload, streaming the chosen file into the object store.
+/// Returns the object name, or None if nothing is staged.
+#[tauri::command]
+pub async fn obj_commit_upload(
+    conns: State<'_, ConnState>,
+    staging: State<'_, UploadStaging>,
+) -> error::Result<Option<String>> {
+    let Some(s) = staging.0.lock().await.take() else {
+        return Ok(None);
+    };
+    let os = store(&conns, &s.conn_id, &s.bucket).await?;
+    let mut file = tokio::fs::File::open(&s.path)
         .await
         .map_err(|source| Error::Io {
-            path: src.clone(),
+            path: s.path.display().to_string(),
             source,
         })?;
-    if let Err(e) = os.put(name.as_str(), &mut file).await {
+    if let Err(e) = os.put(s.name.as_str(), &mut file).await {
         // Best-effort cleanup so a mid-stream failure doesn't leave a partial
         // object occupying the store.
-        let _ = os.delete(&name).await;
+        let _ = os.delete(&s.name).await;
         return Err(js_err(e));
     }
+    Ok(Some(s.name))
+}
+
+/// Discard a staged upload (the user declined the overwrite confirmation).
+#[tauri::command]
+pub async fn obj_cancel_upload(staging: State<'_, UploadStaging>) -> error::Result<()> {
+    *staging.0.lock().await = None;
     Ok(())
 }
 

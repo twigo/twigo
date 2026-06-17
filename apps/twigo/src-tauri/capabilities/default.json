@@ -11,7 +11,6 @@
     "core:webview:allow-set-webview-zoom",
     "opener:default",
     "dialog:allow-open",
-    "dialog:allow-save",
     "store:default",
     "updater:default",
     "process:default"

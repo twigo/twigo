@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { RefreshCw, Loader2, Box, Download, Trash2 } from "lucide-react";
-import { save } from "@tauri-apps/plugin-dialog";
 import { Button, EmptyState } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
 import { objGetObject, objDelete } from "@/lib/api";
@@ -28,13 +27,10 @@ export function ObjectDetailPanel({
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const doDownload = async () => {
-    const suggested = name.split("/").filter(Boolean).pop() ?? "object";
-    const dest = await save({ defaultPath: suggested });
-    if (!dest) return;
     setDownloading(true);
     try {
-      await objGetObject(connId, bucket, name, dest);
-      useToasts.getState().push("success", `Saved ${name}`);
+      const saved = await objGetObject(connId, bucket, name);
+      if (saved) useToasts.getState().push("success", `Saved ${name}`);
     } catch (e) {
       useToasts.getState().push("error", `Download failed: ${String(e)}`);
     } finally {
