@@ -26,6 +26,7 @@ pub fn run() {
         .manage(nats::connection::ConnState::default())
         .manage(nats::subjects::SubjectWatch::default())
         .manage(nats::subscription::SubState::default())
+        .manage(nats::obj::UploadStaging::default())
         .invoke_handler(tauri::generate_handler![
             nats::context::list_contexts,
             nats::context::default_context_dir,
@@ -69,7 +70,9 @@ pub fn run() {
             nats::obj::obj_list_objects,
             nats::obj::obj_object_info,
             nats::obj::obj_get_object,
-            nats::obj::obj_put_object,
+            nats::obj::obj_stage_upload,
+            nats::obj::obj_commit_upload,
+            nats::obj::obj_cancel_upload,
             nats::obj::obj_delete,
             nats::obj::obj_create_bucket,
             nats::obj::obj_delete_bucket,

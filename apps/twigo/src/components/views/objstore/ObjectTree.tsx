@@ -1,9 +1,13 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ChevronRight, Box, File, Loader2, Trash2, Upload } from "lucide-react";
-import { open as openFile } from "@tauri-apps/plugin-dialog";
 import { cn, ScrollArea } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
-import { objPutObject, objDeleteBucket, objObjectInfo } from "@/lib/api";
+import {
+  objStageUpload,
+  objCommitUpload,
+  objCancelUpload,
+  objDeleteBucket,
+} from "@/lib/api";
 import { useObjStore } from "@/store/objstore";
 import { useToasts } from "@/store/toasts";
 import { useIsReadOnly } from "@/hooks/useIsReadOnly";
@@ -33,17 +37,21 @@ export function ObjectTree({
   const [uploadingBucket, setUploadingBucket] = useState<string | null>(null);
   const [pendingUpload, setPendingUpload] = useState<{
     bucket: string;
-    src: string;
     name: string;
   } | null>(null);
+  // ConfirmDialog fires onConfirm then onOpenChange(false); this flag lets the
+  // dismiss handler skip cancelling the staged upload that was just committed.
+  const confirmedRef = useRef(false);
 
-  const runUpload = async (bkt: string, src: string, objName: string) => {
+  const commitUpload = async (bkt: string) => {
     setUploadingBucket(bkt);
     try {
-      await objPutObject(connId, bkt, objName, src);
-      useToasts.getState().push("success", `Uploaded ${objName}`);
-      void useObjStore.getState().refreshChildren(connId, bkt);
-      void useObjStore.getState().load(connId);
+      const name = await objCommitUpload(connId);
+      if (name) {
+        useToasts.getState().push("success", `Uploaded ${name}`);
+        void useObjStore.getState().refreshChildren(connId, bkt);
+        void useObjStore.getState().load(connId);
+      }
     } catch (e) {
       useToasts.getState().push("error", `Upload failed: ${String(e)}`);
     } finally {
@@ -52,20 +60,21 @@ export function ObjectTree({
   };
 
   const startUpload = async (bkt: string) => {
-    const src = await openFile({ multiple: false, directory: false });
-    if (typeof src !== "string") return;
-    const objName = src.split(/[\\/]/).filter(Boolean).pop() ?? src;
-    // Object store put() replaces; warn before clobbering an existing object.
+    // null = the user cancelled the Rust-side picker.
+    let staged;
     try {
-      const existing = await objObjectInfo(connId, bkt, objName);
-      if (!existing.deleted) {
-        setPendingUpload({ bucket: bkt, src, name: objName });
-        return;
-      }
-    } catch {
-      // info() errors when the object doesn't exist yet - safe to upload.
+      staged = await objStageUpload(connId, bkt);
+    } catch (e) {
+      useToasts.getState().push("error", `Upload failed: ${String(e)}`);
+      return;
     }
-    await runUpload(bkt, src, objName);
+    if (!staged) return;
+    // Object store put() replaces; warn before clobbering an existing object.
+    if (staged.exists) {
+      setPendingUpload({ bucket: bkt, name: staged.name });
+    } else {
+      await commitUpload(bkt);
+    }
   };
 
   const doDeleteBucket = async (bkt: string) => {
@@ -179,18 +188,19 @@ export function ObjectTree({
         <ConfirmDialog
           open
           onOpenChange={(o) => {
-            if (!o) setPendingUpload(null);
+            if (o) return;
+            // Dismissed without confirming -> drop the staged file backend-side.
+            if (!confirmedRef.current) void objCancelUpload();
+            confirmedRef.current = false;
+            setPendingUpload(null);
           }}
           title={`Replace ${pendingUpload.name}?`}
           description="An object with this name already exists in the store. Uploading replaces it - the current contents are lost."
           confirmLabel="Replace object"
-          onConfirm={() =>
-            void runUpload(
-              pendingUpload.bucket,
-              pendingUpload.src,
-              pendingUpload.name,
-            )
-          }
+          onConfirm={() => {
+            confirmedRef.current = true;
+            void commitUpload(pendingUpload.bucket);
+          }}
         />
       )}
     </>

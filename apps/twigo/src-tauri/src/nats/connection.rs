@@ -160,21 +160,32 @@ struct TlsPlan {
     ca: Option<PathBuf>,
     client: Option<(PathBuf, PathBuf)>,
     tls_first: bool,
+    // Force a TLS handshake when the context carries TLS material: without it
+    // async-nats only upgrades on a tls:// URL or server-advertised tls_required,
+    // so a ca/cert context on nats:// could silently connect in plaintext.
+    require: bool,
 }
 
 fn tls_plan(f: &ContextFile) -> TlsPlan {
+    let ca = non_empty(&f.ca).map(PathBuf::from);
+    let client = match (non_empty(&f.cert), non_empty(&f.key)) {
+        (Some(cert), Some(key)) => Some((PathBuf::from(cert), PathBuf::from(key))),
+        _ => None,
+    };
+    let require = ca.is_some() || client.is_some() || f.tls_first;
     TlsPlan {
-        ca: non_empty(&f.ca).map(PathBuf::from),
-        client: match (non_empty(&f.cert), non_empty(&f.key)) {
-            (Some(cert), Some(key)) => Some((PathBuf::from(cert), PathBuf::from(key))),
-            _ => None,
-        },
+        ca,
+        client,
         tls_first: f.tls_first,
+        require,
     }
 }
 
 fn apply_tls(opts: async_nats::ConnectOptions, plan: TlsPlan) -> async_nats::ConnectOptions {
     let mut opts = opts;
+    if plan.require {
+        opts = opts.require_tls(true);
+    }
     if let Some(ca) = plan.ca {
         opts = opts.add_root_certificates(ca);
     }
@@ -212,7 +223,6 @@ fn build_options(
         async_nats::ConnectOptions::new()
     };
 
-    // Without this a TLS context silently fails despite summary().has_tls.
     let base = apply_tls(base, tls_plan(f));
 
     let app = app.clone();
@@ -402,6 +412,7 @@ mod tests {
         let none = tls_plan(&ContextFile::default());
         assert_eq!(none, TlsPlan::default());
         assert!(none.ca.is_none() && none.client.is_none() && !none.tls_first);
+        assert!(!none.require);
 
         let ca_only = tls_plan(&ContextFile {
             ca: Some("/etc/ca.pem".into()),
@@ -409,6 +420,7 @@ mod tests {
         });
         assert_eq!(ca_only.ca, Some(PathBuf::from("/etc/ca.pem")));
         assert!(ca_only.client.is_none());
+        assert!(ca_only.require);
 
         let mtls = tls_plan(&ContextFile {
             cert: Some("/c.pem".into()),
@@ -421,6 +433,7 @@ mod tests {
             Some((PathBuf::from("/c.pem"), PathBuf::from("/k.pem")))
         );
         assert!(mtls.tls_first);
+        assert!(mtls.require);
 
         // A cert without its key (or vice versa) is not usable for client auth.
         let half = tls_plan(&ContextFile {
@@ -428,6 +441,14 @@ mod tests {
             ..Default::default()
         });
         assert!(half.client.is_none());
+        assert!(!half.require);
+
+        // tls_first alone (no certs) still forces TLS.
+        let first_only = tls_plan(&ContextFile {
+            tls_first: true,
+            ..Default::default()
+        });
+        assert!(first_only.require);
 
         // Blank strings are treated as absent.
         let blank = tls_plan(&ContextFile {
@@ -435,6 +456,7 @@ mod tests {
             ..Default::default()
         });
         assert!(blank.ca.is_none());
+        assert!(!blank.require);
     }
 
     #[test]

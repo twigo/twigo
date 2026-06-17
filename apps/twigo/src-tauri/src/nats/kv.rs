@@ -155,6 +155,12 @@ pub async fn kv_bucket_info(
     })
 }
 
+// Bound the listing (mirrors subjects.rs MAX_SUBJECTS) so a huge bucket can't
+// buffer unboundedly, and fetch entries with bounded concurrency rather than a
+// sequential chain of round-trips.
+const MAX_KV_KEYS: usize = 10_000;
+const KV_ENTRY_CONCURRENCY: usize = 64;
+
 #[tauri::command]
 pub async fn kv_list_keys(
     conns: State<'_, ConnState>,
@@ -162,13 +168,32 @@ pub async fn kv_list_keys(
     bucket: String,
 ) -> error::Result<Vec<KvEntrySummary>> {
     let kv = store(&conns, &conn_id, &bucket).await?;
-    let mut keys = kv.keys().await.map_err(js_err)?.boxed();
-    let mut out = Vec::new();
-    while let Some(key) = keys.try_next().await.map_err(js_err)? {
-        if let Ok(Some(entry)) = kv.entry(&key).await {
-            out.push(entry_summary(&entry));
+    let mut key_stream = kv.keys().await.map_err(js_err)?.boxed();
+    let mut keys = Vec::new();
+    while let Some(key) = key_stream.try_next().await.map_err(js_err)? {
+        keys.push(key);
+        if keys.len() >= MAX_KV_KEYS {
+            tracing::warn!(
+                bucket = %bucket,
+                cap = MAX_KV_KEYS,
+                "kv_list_keys truncated at cap"
+            );
+            break;
         }
     }
+
+    let kv = &kv;
+    let mut out: Vec<KvEntrySummary> = futures_util::stream::iter(keys)
+        .map(|key| async move { kv.entry(&key).await })
+        .buffer_unordered(KV_ENTRY_CONCURRENCY)
+        .filter_map(|res| async move {
+            match res {
+                Ok(Some(entry)) => Some(entry_summary(&entry)),
+                _ => None,
+            }
+        })
+        .collect()
+        .await;
     out.sort_by(|a, b| a.key.cmp(&b.key));
     Ok(out)
 }
