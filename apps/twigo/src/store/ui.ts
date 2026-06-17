@@ -42,7 +42,9 @@ export const useUi = create<UiState>()(
     (set) => ({
       theme: "dark",
       resolvedTheme: "dark",
-      activeView: "jetstream",
+      // Empty = land on the module's default view, resolved at read time (the
+      // shell doesn't hardcode a domain view id).
+      activeView: "",
       sidebarOpen: true,
       detailOpen: true,
       shellSizes: [],

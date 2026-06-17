@@ -6,12 +6,12 @@ import {
   fmtBinding,
   isTypingTarget,
 } from "./commands";
-import { canSplitActiveEditor, editorGroupCount } from "@/lib/editor";
+import { canSplitActiveEditor, editorGroupCount } from "@/shell/editorHost";
 import { useHelp } from "@/store/help";
 import { registerView, clearViews } from "@/shell/views";
 import { Radio } from "lucide-react";
 
-vi.mock("@/lib/editor", () => ({
+vi.mock("@/shell/editorHost", () => ({
   openSettings: vi.fn(),
   splitActiveEditor: vi.fn(),
   focusNextEditorGroup: vi.fn(),

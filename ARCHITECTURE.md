@@ -47,10 +47,16 @@ It reaches NATS only through registries that the module fills.
 | IPC                | -                                                                                                   | `lib/api.ts`, `lib/actions.ts`, `lib/editor.ts`                                                  |
 
 This boundary is **enforced by ESLint** (`@typescript-eslint/no-restricted-imports`
-in `eslint.config.js`): `components/workbench/**` and `src/shell/**` may not
-import NATS stores, `@/modules/**`, `@/lib/api`, `@/lib/actions`, or domain
-view/editor components. `AppShell` is the one exception - it composes the pane
-components - but still may not reach into domain state/modules/IPC.
+in `eslint.config.js`), applied to `components/workbench/**`, `src/shell/**`, and
+`lib/commands.ts` (shell infra that lives under `lib/`). It is **deny-by-default**:
+all of `@/store/*` is banned and only the genuinely shell-owned stores
+(`ui`, `palette`, `help`, `toasts`, `zoom`, `commandHistory`) are re-included, so
+a new domain store (or `compare`/`readonly`) can't leak into the shell without an
+explicit allow. `@/modules/**`, `@/lib/api`, `@/lib/actions`, `@/lib/editor`, and
+domain view/editor components are also banned - the shell reaches editor panes
+through the domain-free `@/shell/editorHost`, never `@/lib/editor`. `AppShell` is
+the one exception - it composes the pane components - but still may not reach into
+domain state/modules/IPC.
 
 `App.tsx` (the composition root) and `main.tsx` (the entry) are allowed to wire
 the domain in; that is where module registration happens.
@@ -77,7 +83,9 @@ Notes:
   registry) + registered providers, filtered by each command's `when()`.
 - **Conn-scoped** stores self-register (`registerConnScoped(useX)`); the
   connections store drops them all via `resetConnScopedStores(connId)` without
-  importing any of them.
+  importing any of them. Registration happens at module import, which is
+  **load-bearing**: `registerNatsModule()` imports the conn-scoped stores
+  eagerly so a store can never be missed because its view hasn't rendered yet.
 - The **editor** panel registry (`components/editor/registry.ts`) is still a
   typed `Record<EditorType, EditorDef>` (compile-time exhaustiveness), not a
   runtime registry - it becomes one when a second domain actually exists
@@ -120,8 +128,27 @@ tabbed/split area. Layout is serialized per connection in `store/workspace.ts`
 and swapped when the active connection changes. Tabs are "editor inputs"
 (a type + stable id; opening the same id focuses the existing tab). Live stream
 subscriptions survive splits because Dockview suppresses add/remove-panel events
-during a programmatic move. `lib/editor.ts` is the open/close API
-(`openStream`, `openPublish`, …) and the conn-scoped editor teardown.
+during a programmatic move.
+
+The editor layer is split along the shell/domain seam:
+
+- **`src/shell/editorHost.ts`** (shell, domain-free) owns the `DockviewApi`
+  singleton and the **generic** pane operations: `openPanel`/`closePanel`/
+  `listPanels`, split/focus/reset, the `withReplacingLayout` guard, and
+  `openSettings`. It knows panels only as a `{ component: string }` - never a
+  NATS editor type.
+- **`lib/editor.ts`** (domain) builds the typed NATS opens (`openStream`,
+  `openPublish`, …) and the conn-scoped teardown on top of `editorHost`.
+
+Per-panel cleanup is routed through the editor registry: `EditorArea`'s
+`onDidRemovePanel` calls `EDITORS[type].dispose?.(id)`, so a tab type's
+resources (e.g. a stream subscription) release on close without `EditorArea`
+hardcoding any one type.
+
+> Extraction note: the generic half (`editorHost`) is ready to move into
+> `libs/workbench`; the domain half (`lib/editor.ts`) moves with the NATS module.
+> When a second domain lands, fold the compile-time `EDITORS` record
+> (`components/editor/registry.ts`) into a runtime registry too.
 
 ## Rust backend
 
@@ -151,5 +178,7 @@ The shape a `registerKubernetesModule()` would follow:
 6. The shell needs **no changes** - and the ESLint boundary guarantees it.
 
 When a real second domain lands, the shell + registries extract into
-`libs/workbench` and NATS into `libs/domain-nats` (the pnpm workspace already
-makes this mechanical). Until then, everything lives in `apps/twigo`.
+`libs/workbench` and NATS into `libs/domain-nats`. The pnpm workspace makes most
+of this mechanical (the registries and `editorHost` are already generic); the one
+real change is folding the compile-time `EDITORS` record into a runtime registry.
+Until then, everything lives in `apps/twigo`.

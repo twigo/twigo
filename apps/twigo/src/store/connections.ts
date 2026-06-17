@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { subscribeWithSelector } from "zustand/middleware";
 import {
   listContexts,
   connect as apiConnect,
@@ -82,200 +83,205 @@ interface ConnectionsState {
   setEditorTeardown: (fn: (conn: string) => void) => void;
 }
 
-export const useConnections = create<ConnectionsState>((set, get) => ({
-  contexts: [],
-  status: "idle",
-  error: null,
-  activeContext: null,
-  connected: {},
-  connecting: {},
-  connError: {},
-  reconnecting: {},
-  editorTeardown: () => undefined,
-  setEditorTeardown: (fn) => set({ editorTeardown: fn }),
+export const useConnections = create<ConnectionsState>()(
+  subscribeWithSelector((set, get) => ({
+    contexts: [],
+    status: "idle",
+    error: null,
+    activeContext: null,
+    connected: {},
+    connecting: {},
+    connError: {},
+    reconnecting: {},
+    editorTeardown: () => undefined,
+    setEditorTeardown: (fn) => set({ editorTeardown: fn }),
 
-  load: async () => {
-    set({ status: "loading", error: null });
-    try {
-      const { contextDir, includeDemo } = useSettings.getState();
-      const contexts = await listContexts(contextDir, includeDemo);
-      // Drop persisted state for contexts that no longer exist (renamed/deleted
-      // in the nats CLI) before restoring, so it can't orphan or ghost-reconnect.
-      const names = contexts.map((c) => c.name);
-      useWorkspace.getState().prune(names);
-      useResponder.getState().pruneConns(names);
+    load: async () => {
+      set({ status: "loading", error: null });
+      try {
+        const { contextDir, includeDemo } = useSettings.getState();
+        const contexts = await listContexts(contextDir, includeDemo);
+        // Drop persisted state for contexts that no longer exist (renamed/deleted
+        // in the nats CLI) before restoring, so it can't orphan or ghost-reconnect.
+        const names = contexts.map((c) => c.name);
+        useWorkspace.getState().prune(names);
+        useResponder.getState().pruneConns(names);
 
-      const selected = contexts.find((c) => c.selected)?.name ?? null;
-      const remembered = useWorkspace.getState().activeContext;
-      const restored =
-        remembered && names.includes(remembered) ? remembered : null;
-      set({
-        contexts,
-        status: "ready",
-        activeContext: get().activeContext ?? restored ?? selected,
-      });
-    } catch (e) {
-      set({ status: "error", error: String(e) });
-    }
-  },
-
-  setActive: (name) => {
-    set({ activeContext: name });
-    useWorkspace.getState().setActiveContext(name);
-  },
-
-  connect: async (name) => {
-    if (get().connecting[name]) return;
-    set((s) => {
-      const { [name]: _cleared, ...connError } = s.connError;
-      return {
-        connecting: { ...s.connecting, [name]: true },
-        connError,
-      };
-    });
-    try {
-      const dir = useSettings.getState().contextDir;
-      const info = await apiConnect(name, dir);
-      set((s) => ({
-        connected: { ...s.connected, [name]: info },
-        connecting: { ...s.connecting, [name]: false },
-      }));
-      useWorkspace.getState().setConnected(name, true);
-    } catch (e) {
-      const err = ipcError(e);
-      // Branch on the typed kind for an actionable hint on the common failure.
-      const hint =
-        err.kind === "credentials" ? " - check the context's credentials" : "";
-      set((s) => ({
-        connecting: { ...s.connecting, [name]: false },
-        connError: { ...s.connError, [name]: err.message },
-      }));
-      useToasts
-        .getState()
-        .push("error", `Couldn't connect to ${name}: ${err.message}${hint}`, {
-          key: `conn:${name}:err`,
+        const selected = contexts.find((c) => c.selected)?.name ?? null;
+        const remembered = useWorkspace.getState().activeContext;
+        const restored =
+          remembered && names.includes(remembered) ? remembered : null;
+        set({
+          contexts,
+          status: "ready",
+          activeContext: get().activeContext ?? restored ?? selected,
         });
-    }
-  },
+      } catch (e) {
+        set({ status: "error", error: String(e) });
+      }
+    },
 
-  disconnect: async (name) => {
-    closing.add(name);
-    clearLinkWatch(name);
-    try {
-      await apiDisconnect(name);
-      teardown(name);
-      // Explicit disconnect clears the restore intent (connection + its watch);
-      // a dropped connection keeps them so the next launch/reconnect resumes.
-      useWorkspace.getState().setConnected(name, false);
-      useWorkspace.getState().setWatching(name, null);
-      set((s) => {
-        const { [name]: _removed, ...connected } = s.connected;
-        const { [name]: _r, ...reconnecting } = s.reconnecting;
-        return { connected, reconnecting };
-      });
-    } finally {
-      closing.delete(name);
-    }
-  },
+    setActive: (name) => {
+      set({ activeContext: name });
+      useWorkspace.getState().setActiveContext(name);
+    },
 
-  // The link state is driven by backend events, not the optimistic connect()
-  // result (which can resolve while still background-reconnecting).
-  onEvent: (conn, kind, detail) => {
-    const toasts = useToasts.getState();
-    if (kind === "connected") {
-      // Cancel a pending drop announcement and, if we already told the user the
-      // link was down, tell them it's back. A self-healed blip stays silent.
-      const wasAnnounced = announced.has(conn);
-      clearLinkWatch(conn);
-      // Link is up: clear any backoff state and refresh real server info / rtt
-      // (covers a pending connect and transparent mid-session reconnects).
+    connect: async (name) => {
+      if (get().connecting[name]) return;
       set((s) => {
-        const { [conn]: _r, ...reconnecting } = s.reconnecting;
-        return { reconnecting };
+        const { [name]: _cleared, ...connError } = s.connError;
+        return {
+          connecting: { ...s.connecting, [name]: true },
+          connError,
+        };
       });
-      if (wasAnnounced)
-        toasts.push("success", `Reconnected to ${conn}`, {
-          key: `conn:${conn}:link`,
-        });
-      void apiConnInfo(conn).then((info) => {
-        set((s) =>
-          s.connected[conn]
-            ? { connected: { ...s.connected, [conn]: info } }
-            : s,
-        );
-      });
-    } else if (kind === "disconnected") {
-      const cur = get().connected[conn];
-      if (cur) {
+      try {
+        const dir = useSettings.getState().contextDir;
+        const info = await apiConnect(name, dir);
         set((s) => ({
-          connected: { ...s.connected, [conn]: { ...cur, connected: false } },
+          connected: { ...s.connected, [name]: info },
+          connecting: { ...s.connecting, [name]: false },
         }));
+        useWorkspace.getState().setConnected(name, true);
+      } catch (e) {
+        const err = ipcError(e);
+        // Branch on the typed kind for an actionable hint on the common failure.
+        const hint =
+          err.kind === "credentials"
+            ? " - check the context's credentials"
+            : "";
+        set((s) => ({
+          connecting: { ...s.connecting, [name]: false },
+          connError: { ...s.connError, [name]: err.message },
+        }));
+        useToasts
+          .getState()
+          .push("error", `Couldn't connect to ${name}: ${err.message}${hint}`, {
+            key: `conn:${name}:err`,
+          });
       }
-      // Defer the toast past the grace window: a quick auto-reconnect should be
-      // invisible. Arm once per outage, skip repeats and user-led disconnects.
-      const watch =
-        cur?.connected === true &&
-        !closing.has(conn) &&
-        !dropTimers.has(conn) &&
-        !announced.has(conn);
-      if (watch) {
-        const timer = setTimeout(() => {
-          dropTimers.delete(conn);
-          const down = get().connected[conn];
-          if (down && !down.connected && !closing.has(conn)) {
-            announced.add(conn);
-            useToasts
-              .getState()
-              .push("warning", `Lost connection to ${conn} - reconnecting…`, {
-                key: `conn:${conn}:link`,
-              });
-          }
-        }, DROP_GRACE_MS);
-        dropTimers.set(conn, timer);
-      }
-    } else if (kind === "closed") {
-      clearLinkWatch(conn);
-      teardown(conn);
-      set((s) => {
-        const { [conn]: _removed, ...connected } = s.connected;
-        const { [conn]: _r, ...reconnecting } = s.reconnecting;
-        return { connected, reconnecting };
-      });
-    } else if (kind === "lameDuck") {
-      if (!closing.has(conn)) {
-        toasts.push(
-          "warning",
-          `${conn} is entering lame-duck mode - server shutting down`,
-        );
-      }
-    } else if (kind === "slowConsumer") {
-      const last = slowConsumerAt.get(conn);
-      if (
-        !closing.has(conn) &&
-        (last === undefined || Date.now() - last > SLOW_COOLDOWN_MS)
-      ) {
-        slowConsumerAt.set(conn, Date.now());
-        toasts.push(
-          "warning",
-          `${conn}: slow consumer - messages may be dropped`,
-        );
-      }
-    } else if (kind === "serverError" || kind === "clientError") {
-      const fallback = kind === "serverError" ? "server error" : "client error";
-      const msg = `${conn}: ${detail ?? fallback}`;
-      // Dedupe: the same fault repeats on every reconnect attempt.
-      if (lastError.get(conn) !== msg) {
-        lastError.set(conn, msg);
-        toasts.push("error", msg, { key: `conn:${conn}:err` });
-      }
-    }
-  },
+    },
 
-  onReconnect: (conn, attempt, delayMs) =>
-    set((s) => ({
-      reconnecting: {
-        ...s.reconnecting,
-        [conn]: { attempt, delayMs, at: Date.now() },
-      },
-    })),
-}));
+    disconnect: async (name) => {
+      closing.add(name);
+      clearLinkWatch(name);
+      try {
+        await apiDisconnect(name);
+        teardown(name);
+        // Explicit disconnect clears the restore intent (connection + its watch);
+        // a dropped connection keeps them so the next launch/reconnect resumes.
+        useWorkspace.getState().setConnected(name, false);
+        useWorkspace.getState().setWatching(name, null);
+        set((s) => {
+          const { [name]: _removed, ...connected } = s.connected;
+          const { [name]: _r, ...reconnecting } = s.reconnecting;
+          return { connected, reconnecting };
+        });
+      } finally {
+        closing.delete(name);
+      }
+    },
+
+    // The link state is driven by backend events, not the optimistic connect()
+    // result (which can resolve while still background-reconnecting).
+    onEvent: (conn, kind, detail) => {
+      const toasts = useToasts.getState();
+      if (kind === "connected") {
+        // Cancel a pending drop announcement and, if we already told the user the
+        // link was down, tell them it's back. A self-healed blip stays silent.
+        const wasAnnounced = announced.has(conn);
+        clearLinkWatch(conn);
+        // Link is up: clear any backoff state and refresh real server info / rtt
+        // (covers a pending connect and transparent mid-session reconnects).
+        set((s) => {
+          const { [conn]: _r, ...reconnecting } = s.reconnecting;
+          return { reconnecting };
+        });
+        if (wasAnnounced)
+          toasts.push("success", `Reconnected to ${conn}`, {
+            key: `conn:${conn}:link`,
+          });
+        void apiConnInfo(conn).then((info) => {
+          set((s) =>
+            s.connected[conn]
+              ? { connected: { ...s.connected, [conn]: info } }
+              : s,
+          );
+        });
+      } else if (kind === "disconnected") {
+        const cur = get().connected[conn];
+        if (cur) {
+          set((s) => ({
+            connected: { ...s.connected, [conn]: { ...cur, connected: false } },
+          }));
+        }
+        // Defer the toast past the grace window: a quick auto-reconnect should be
+        // invisible. Arm once per outage, skip repeats and user-led disconnects.
+        const watch =
+          cur?.connected === true &&
+          !closing.has(conn) &&
+          !dropTimers.has(conn) &&
+          !announced.has(conn);
+        if (watch) {
+          const timer = setTimeout(() => {
+            dropTimers.delete(conn);
+            const down = get().connected[conn];
+            if (down && !down.connected && !closing.has(conn)) {
+              announced.add(conn);
+              useToasts
+                .getState()
+                .push("warning", `Lost connection to ${conn} - reconnecting…`, {
+                  key: `conn:${conn}:link`,
+                });
+            }
+          }, DROP_GRACE_MS);
+          dropTimers.set(conn, timer);
+        }
+      } else if (kind === "closed") {
+        clearLinkWatch(conn);
+        teardown(conn);
+        set((s) => {
+          const { [conn]: _removed, ...connected } = s.connected;
+          const { [conn]: _r, ...reconnecting } = s.reconnecting;
+          return { connected, reconnecting };
+        });
+      } else if (kind === "lameDuck") {
+        if (!closing.has(conn)) {
+          toasts.push(
+            "warning",
+            `${conn} is entering lame-duck mode - server shutting down`,
+          );
+        }
+      } else if (kind === "slowConsumer") {
+        const last = slowConsumerAt.get(conn);
+        if (
+          !closing.has(conn) &&
+          (last === undefined || Date.now() - last > SLOW_COOLDOWN_MS)
+        ) {
+          slowConsumerAt.set(conn, Date.now());
+          toasts.push(
+            "warning",
+            `${conn}: slow consumer - messages may be dropped`,
+          );
+        }
+      } else if (kind === "serverError" || kind === "clientError") {
+        const fallback =
+          kind === "serverError" ? "server error" : "client error";
+        const msg = `${conn}: ${detail ?? fallback}`;
+        // Dedupe: the same fault repeats on every reconnect attempt.
+        if (lastError.get(conn) !== msg) {
+          lastError.set(conn, msg);
+          toasts.push("error", msg, { key: `conn:${conn}:err` });
+        }
+      }
+    },
+
+    onReconnect: (conn, attempt, delayMs) =>
+      set((s) => ({
+        reconnecting: {
+          ...s.reconnecting,
+          [conn]: { attempt, delayMs, at: Date.now() },
+        },
+      })),
+  })),
+);

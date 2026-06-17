@@ -52,4 +52,10 @@ describe("ui theme store", () => {
     expect(useUi.getState().theme).toBe("light");
     expect(useUi.getState().resolvedTheme).toBe("light");
   });
+
+  it("defaults activeView to empty so the shell resolves the module default", () => {
+    // The shell must not hardcode a domain view id; an empty default is resolved
+    // to the module's default view at read time (ActivityBar/Sidebar).
+    expect(useUi.getInitialState().activeView).toBe("");
+  });
 });

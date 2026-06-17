@@ -14,11 +14,10 @@ vi.mock("@/lib/api", () => ({
   unsubscribe: mocks.unsubscribe,
 }));
 
+import { setEditorApi, openSettings } from "@/shell/editorHost";
 import {
-  setEditorApi,
   openStream,
   openServerInfo,
-  openSettings,
   openPublish,
   closeEditorsForConn,
 } from "./editor";

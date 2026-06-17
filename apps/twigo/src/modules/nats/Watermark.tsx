@@ -2,7 +2,7 @@ import { Radio, Send, Search, Settings } from "lucide-react";
 import { EmptyState, Kbd } from "@twigo/ui";
 import { useConnections } from "@/store/connections";
 import { usePalette } from "@/store/palette";
-import { openSettings } from "@/lib/editor";
+import { openSettings } from "@/shell/editorHost";
 import { fmtBinding } from "@/lib/commands";
 import { newPublish } from "@/lib/actions";
 

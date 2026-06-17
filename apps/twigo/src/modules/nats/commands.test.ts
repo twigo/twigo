@@ -8,14 +8,6 @@ vi.mock("@/lib/actions", () => ({
   newPublish: vi.fn(),
   newResponder: vi.fn(),
 }));
-vi.mock("@/lib/editor", () => ({
-  openSettings: vi.fn(),
-  splitActiveEditor: vi.fn(),
-  focusNextEditorGroup: vi.fn(),
-  resetEditorLayout: vi.fn(),
-  canSplitActiveEditor: vi.fn(() => false),
-  editorGroupCount: vi.fn(() => 0),
-}));
 
 function ctx(name: string): ContextSummary {
   return {

@@ -10,8 +10,10 @@ export function Sidebar() {
   const activeView = useUi((s) => s.activeView);
   const activeContext = useConnections((s) => s.activeContext);
   const [filter, setFilter] = useState("");
-  // Fall back to the first registered view if the persisted one is gone.
-  const view = getView(activeView) ?? getViews()[0];
+  // Fall back to the module's default (then first) view if the persisted one is
+  // gone or unset.
+  const view =
+    getView(activeView) ?? getViews().find((v) => v.default) ?? getViews()[0];
   const title = view?.title ?? "";
   const icon = view?.icon ?? Search;
   const Panel = view?.Panel;

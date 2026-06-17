@@ -14,6 +14,7 @@ export function registerNatsViews(): void {
     id: "jetstream",
     title: "Streams & Consumers",
     icon: Layers,
+    default: true,
     Panel: JetStreamView,
   });
   registerView({
