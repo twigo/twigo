@@ -1,5 +1,13 @@
 import type { ReactNode } from "react";
-import { Unplug, Server, RotateCw, Plus, Lock, LockOpen } from "lucide-react";
+import {
+  Unplug,
+  Server,
+  RotateCw,
+  Plus,
+  Pencil,
+  Lock,
+  LockOpen,
+} from "lucide-react";
 import {
   cn,
   Command,
@@ -47,7 +55,15 @@ function ActionButton({
   );
 }
 
-export function ConnectionPicker({ onClose }: { onClose: () => void }) {
+export function ConnectionPicker({
+  onClose,
+  onAdd,
+  onEdit,
+}: {
+  onClose: () => void;
+  onAdd: () => void;
+  onEdit: (name: string) => void;
+}) {
   const contexts = useConnections((s) => s.contexts);
   const connected = useConnections((s) => s.connected);
   const connecting = useConnections((s) => s.connecting);
@@ -143,6 +159,22 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
           >
             {readOnly ? <Lock /> : <LockOpen />}
           </button>
+          {/* The demo context is synthetic (no file on disk), so it can't be edited. */}
+          {c.name !== "demo.nats.io" && (
+            <button
+              type="button"
+              aria-label={`Edit ${c.name}`}
+              title="Edit connection"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit(c.name);
+              }}
+              className="flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-background hover:text-foreground group-data-[selected=true]:opacity-100 [&_svg]:size-3.5"
+            >
+              <Pencil />
+            </button>
+          )}
           {info && (
             <span className="flex items-center gap-0.5 opacity-0 group-data-[selected=true]:opacity-100">
               <ActionButton
@@ -195,9 +227,9 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
         </button>
         <button
           type="button"
-          disabled
-          title="Import nats contexts into ~/.config/nats/context (in-app editing coming soon)"
-          className="flex items-center gap-1.5 rounded px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent [&_svg]:size-3.5"
+          onClick={onAdd}
+          title="Create a new nats context"
+          className="flex items-center gap-1.5 rounded px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground [&_svg]:size-3.5"
         >
           <Plus />
           Add connection…

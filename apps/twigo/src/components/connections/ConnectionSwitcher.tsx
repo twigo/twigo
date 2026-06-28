@@ -5,9 +5,13 @@ import { useConnections } from "@/store/connections";
 import { useReadOnly } from "@/store/readonly";
 import { StatusGlyph } from "./StatusGlyph";
 import { ConnectionPicker } from "./ConnectionPicker";
+import { ConnectionForm } from "./ConnectionForm";
 
 export function ConnectionSwitcher() {
   const [open, setOpen] = useState(false);
+  // null = closed; { name: null } = create; { name } = edit. Hosted here (not in
+  // the picker) so it outlives the popover closing.
+  const [form, setForm] = useState<{ name: string | null } | null>(null);
   const activeContext = useConnections((s) => s.activeContext);
   const readOnly = useReadOnly((s) =>
     activeContext ? (s.byConn[activeContext] ?? false) : false,
@@ -68,9 +72,22 @@ export function ConnectionSwitcher() {
           align="start"
           className="w-[var(--radix-popover-trigger-width)] min-w-64 p-0"
         >
-          <ConnectionPicker onClose={() => setOpen(false)} />
+          <ConnectionPicker
+            onClose={() => setOpen(false)}
+            onAdd={() => {
+              setOpen(false);
+              setForm({ name: null });
+            }}
+            onEdit={(name) => {
+              setOpen(false);
+              setForm({ name });
+            }}
+          />
         </PopoverContent>
       </Popover>
+      {form && (
+        <ConnectionForm editName={form.name} onClose={() => setForm(null)} />
+      )}
     </div>
   );
 }

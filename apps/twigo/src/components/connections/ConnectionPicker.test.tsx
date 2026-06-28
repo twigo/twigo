@@ -55,7 +55,13 @@ describe("ConnectionPicker", () => {
   afterEach(cleanup);
 
   it("groups live and available connections", () => {
-    render(<ConnectionPicker onClose={() => undefined} />);
+    render(
+      <ConnectionPicker
+        onClose={() => undefined}
+        onAdd={() => undefined}
+        onEdit={() => undefined}
+      />,
+    );
     expect(screen.getByText("Live")).toBeInTheDocument();
     expect(screen.getByText("Available")).toBeInTheDocument();
     expect(screen.getByText("prod-eu")).toBeInTheDocument();
@@ -64,7 +70,13 @@ describe("ConnectionPicker", () => {
 
   it("activates a connected connection and closes", async () => {
     const onClose = vi.fn();
-    render(<ConnectionPicker onClose={onClose} />);
+    render(
+      <ConnectionPicker
+        onClose={onClose}
+        onAdd={() => undefined}
+        onEdit={() => undefined}
+      />,
+    );
     await userEvent.click(screen.getByText("prod-eu"));
     expect(setActive).toHaveBeenCalledWith("prod-eu");
     expect(onClose).toHaveBeenCalled();
@@ -72,14 +84,26 @@ describe("ConnectionPicker", () => {
   });
 
   it("connects a disconnected connection on select", async () => {
-    render(<ConnectionPicker onClose={() => undefined} />);
+    render(
+      <ConnectionPicker
+        onClose={() => undefined}
+        onAdd={() => undefined}
+        onEdit={() => undefined}
+      />,
+    );
     await userEvent.click(screen.getByText("dev-local"));
     expect(connect).toHaveBeenCalledWith("dev-local");
     expect(setActive).toHaveBeenCalledWith("dev-local");
   });
 
   it("disconnects from the inline action", async () => {
-    render(<ConnectionPicker onClose={() => undefined} />);
+    render(
+      <ConnectionPicker
+        onClose={() => undefined}
+        onAdd={() => undefined}
+        onEdit={() => undefined}
+      />,
+    );
     await userEvent.click(
       screen.getByRole("button", { name: "Disconnect prod-eu" }),
     );

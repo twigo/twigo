@@ -5,6 +5,7 @@ import {
   connect as apiConnect,
   disconnect as apiDisconnect,
   connInfo as apiConnInfo,
+  deleteContext as apiDeleteContext,
   ipcError,
   type ContextSummary,
   type ConnInfo,
@@ -77,6 +78,7 @@ interface ConnectionsState {
   setActive: (name: string) => void;
   connect: (name: string) => Promise<void>;
   disconnect: (name: string) => Promise<void>;
+  removeContext: (name: string) => Promise<void>;
   onEvent: (conn: string, kind: string, detail?: string | null) => void;
   onReconnect: (conn: string, attempt: number, delayMs: number) => void;
   editorTeardown: (conn: string) => void;
@@ -180,6 +182,22 @@ export const useConnections = create<ConnectionsState>()(
       } finally {
         closing.delete(name);
       }
+    },
+
+    // Delete a context entirely. Deleting only the file would leave a live client
+    // connected (messages keep arriving) and a stale active selection, so tear
+    // the connection down first, then drop the file and re-resolve the selection.
+    removeContext: async (name) => {
+      if (get().connected[name]) {
+        await get().disconnect(name);
+      }
+      const dir = useSettings.getState().contextDir;
+      await apiDeleteContext(dir, name);
+      if (get().activeContext === name) {
+        set({ activeContext: null });
+        useWorkspace.getState().setActiveContext(null);
+      }
+      await get().load();
     },
 
     // The link state is driven by backend events, not the optimistic connect()
