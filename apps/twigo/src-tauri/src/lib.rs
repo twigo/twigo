@@ -30,6 +30,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             nats::context::list_contexts,
             nats::context::default_context_dir,
+            nats::context::get_context,
+            nats::context::save_context,
+            nats::context::delete_context,
             nats::connection::connect,
             nats::connection::disconnect,
             nats::connection::list_connections,

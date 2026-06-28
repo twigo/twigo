@@ -99,6 +99,49 @@ export function listContexts(
   });
 }
 
+// The connection form's write-back shape - mirrors the nats context JSON. Inline
+// secrets (token/password/nkey) are written into the context file like the nats
+// CLI does; creds/cert/key/ca are file paths.
+export interface ContextInput {
+  description?: string;
+  url: string;
+  token?: string;
+  user?: string;
+  password?: string;
+  creds?: string;
+  nkey?: string;
+  ca?: string;
+  cert?: string;
+  key?: string;
+  tlsFirst: boolean;
+}
+
+export interface ContextDetail extends ContextInput {
+  name: string;
+}
+
+export function getContext(
+  dir: string | null,
+  name: string,
+): Promise<ContextDetail> {
+  return call<ContextDetail>("get_context", { dir: dir ?? null, name });
+}
+
+export async function saveContext(
+  dir: string | null,
+  name: string,
+  input: ContextInput,
+): Promise<void> {
+  await call("save_context", { dir: dir ?? null, name, input });
+}
+
+export async function deleteContext(
+  dir: string | null,
+  name: string,
+): Promise<void> {
+  await call("delete_context", { dir: dir ?? null, name });
+}
+
 export function defaultContextDir(): Promise<string | null> {
   return call<string | null>("default_context_dir");
 }
