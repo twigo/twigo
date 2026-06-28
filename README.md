@@ -4,7 +4,7 @@
 <h1 align="center">Twigo</h1>
 <p align="center"><b>A fast, keyboard-first desktop IDE for NATS.</b></p>
 <p align="center">
-  <a href="https://github.com/twigo/twigo/releases/latest"><img src="https://img.shields.io/github/v/release/twigo/twigo?style=flat-square" alt="Release" /></a>
+  <a href="https://github.com/twigo/twigo/releases/latest"><img src="https://img.shields.io/github/v/release/twigo/twigo?include_prereleases&style=flat-square" alt="Release" /></a>
   <a href="https://github.com/twigo/twigo/releases"><img src="https://img.shields.io/github/downloads/twigo/twigo/total?style=flat-square" alt="Downloads" /></a>
   <a href="https://github.com/twigo/twigo/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/twigo/twigo/ci.yml?branch=main&style=flat-square" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/twigo/twigo?style=flat-square" alt="License" /></a>
