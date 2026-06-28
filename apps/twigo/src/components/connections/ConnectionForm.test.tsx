@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { getContext, saveContext, deleteContext } from "@/lib/api";
+import { getContext, saveContext } from "@/lib/api";
 import { useConnections } from "@/store/connections";
 import { useSettings } from "@/store/settings";
 import { ConnectionForm } from "./ConnectionForm";
@@ -9,18 +9,18 @@ import { ConnectionForm } from "./ConnectionForm";
 vi.mock("@/lib/api", () => ({
   getContext: vi.fn(),
   saveContext: vi.fn(() => Promise.resolve()),
-  deleteContext: vi.fn(() => Promise.resolve()),
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
 const load = vi.fn(() => Promise.resolve());
+const removeContext = vi.fn(() => Promise.resolve());
 
 beforeEach(() => {
   vi.mocked(getContext).mockReset();
   vi.mocked(saveContext).mockClear();
-  vi.mocked(deleteContext).mockClear();
   load.mockClear();
-  useConnections.setState({ load });
+  removeContext.mockClear();
+  useConnections.setState({ load, removeContext });
   useSettings.setState({ contextDir: null });
 });
 afterEach(cleanup);
@@ -96,9 +96,7 @@ describe("ConnectionForm", () => {
     await userEvent.click(screen.getByRole("button", { name: /^delete$/i }));
     await userEvent.click(screen.getByRole("button", { name: /^delete$/i })); // confirm
 
-    await waitFor(() =>
-      expect(deleteContext).toHaveBeenCalledWith(null, "old"),
-    );
-    expect(load).toHaveBeenCalled();
+    // removeContext (store) disconnects a live conn before deleting the file.
+    await waitFor(() => expect(removeContext).toHaveBeenCalledWith("old"));
   });
 });

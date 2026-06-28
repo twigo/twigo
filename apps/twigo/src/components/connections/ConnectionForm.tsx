@@ -14,12 +14,7 @@ import {
   FormField,
 } from "@twigo/ui";
 import { Select } from "@/components/editor/jetstream/form";
-import {
-  getContext,
-  saveContext,
-  deleteContext,
-  type ContextInput,
-} from "@/lib/api";
+import { getContext, saveContext, type ContextInput } from "@/lib/api";
 import { useSettings } from "@/store/settings";
 import { useConnections } from "@/store/connections";
 import { useToasts } from "@/store/toasts";
@@ -155,8 +150,9 @@ export function ConnectionForm({
     if (!editName) return;
     setSaving(true);
     try {
-      await deleteContext(dir, editName);
-      await reload();
+      // removeContext disconnects a live connection first, so deleting the
+      // active context also stops its stream and clears the selection.
+      await useConnections.getState().removeContext(editName);
       useToasts.getState().push("success", `Deleted ${editName}`);
       onClose();
     } catch (e) {

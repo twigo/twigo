@@ -1,16 +1,22 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { ContextSummary, ConnInfo } from "@/lib/api";
 
-const { listContexts, connect, disconnect, connInfo, pushMock } = vi.hoisted(
-  () => ({
+const { listContexts, connect, disconnect, connInfo, deleteContext, pushMock } =
+  vi.hoisted(() => ({
     listContexts: vi.fn(),
     connect: vi.fn(),
     disconnect: vi.fn(),
     connInfo: vi.fn(),
+    deleteContext: vi.fn(),
     pushMock: vi.fn(),
-  }),
-);
-vi.mock("@/lib/api", () => ({ listContexts, connect, disconnect, connInfo }));
+  }));
+vi.mock("@/lib/api", () => ({
+  listContexts,
+  connect,
+  disconnect,
+  connInfo,
+  deleteContext,
+}));
 vi.mock("@/lib/editor", () => ({ closeEditorsForConn: vi.fn() }));
 vi.mock("@/store/toasts", () => ({
   useToasts: { getState: () => ({ push: pushMock }) },
@@ -90,6 +96,36 @@ describe("connections active-context persistence", () => {
     expect(w.layouts.gone).toBeUndefined();
     expect(w.lastConnected).toEqual([]);
     expect(w.activeContext).not.toBe("gone");
+  });
+
+  it("removeContext disconnects a live connection and clears the active selection", async () => {
+    disconnect.mockResolvedValue(undefined);
+    deleteContext.mockResolvedValue(undefined);
+    listContexts.mockResolvedValue([ctx("other")]);
+    useConnections.setState({
+      activeContext: "doomed",
+      connected: { doomed: info("doomed") },
+    });
+
+    await useConnections.getState().removeContext("doomed");
+
+    // The live client is torn down (so messages stop) before the file is removed.
+    expect(disconnect).toHaveBeenCalledWith("doomed");
+    expect(deleteContext).toHaveBeenCalledWith(null, "doomed");
+    // The deleted context is no longer the active selection.
+    expect(useConnections.getState().activeContext).not.toBe("doomed");
+  });
+
+  it("removeContext deletes a non-connected context without disconnecting", async () => {
+    disconnect.mockClear(); // beforeEach only resets listContexts
+    deleteContext.mockResolvedValue(undefined);
+    listContexts.mockResolvedValue([]);
+    useConnections.setState({ activeContext: null, connected: {} });
+
+    await useConnections.getState().removeContext("idle-ctx");
+
+    expect(disconnect).not.toHaveBeenCalled();
+    expect(deleteContext).toHaveBeenCalledWith(null, "idle-ctx");
   });
 
   it("marks a connection reconnecting on a disconnected event", () => {
