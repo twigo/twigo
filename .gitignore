@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Scheduler tooling state - not part of the repo
+.claude/scheduled_tasks.lock
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
