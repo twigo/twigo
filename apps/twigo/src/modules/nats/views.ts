@@ -1,4 +1,12 @@
-import { Radio, Webhook, Layers, Database, Box, Activity } from "lucide-react";
+import {
+  Radio,
+  Webhook,
+  Layers,
+  Database,
+  Box,
+  Activity,
+  Server,
+} from "lucide-react";
 import { registerView } from "@/shell/views";
 import { SubjectsView } from "@/components/views/subjects/SubjectsView";
 import { RespondersView } from "@/components/views/responders/RespondersView";
@@ -6,6 +14,7 @@ import { JetStreamView } from "@/components/views/jetstream/JetStreamView";
 import { KvView } from "@/components/views/kv/KvView";
 import { ObjectStoreView } from "@/components/views/objstore/ObjectStoreView";
 import { MonitorView } from "@/components/views/monitor/MonitorView";
+import { ServicesView } from "@/components/views/services/ServicesView";
 
 // The NATS sidebar views, in display order. Contributed to the shell's view
 // registry by registerNatsModule().
@@ -40,6 +49,12 @@ export function registerNatsViews(): void {
     title: "Responders",
     icon: Webhook,
     Panel: RespondersView,
+  });
+  registerView({
+    id: "services",
+    title: "Services",
+    icon: Server,
+    Panel: ServicesView,
   });
   registerView({
     id: "monitor",

@@ -5,6 +5,7 @@ import {
   fmtTime,
   fmtCount,
   fmtDuration,
+  fmtLatency,
   fmtDateTime,
   fmtRelTime,
   fmtIsoDateTime,
@@ -49,6 +50,16 @@ describe("fmtDuration", () => {
     expect(fmtDuration(5 * 60 * 1e9)).toBe("5m");
     expect(fmtDuration(2 * 3600 * 1e9)).toBe("2h");
     expect(fmtDuration(7 * 86_400 * 1e9)).toBe("7d");
+  });
+});
+
+describe("fmtLatency", () => {
+  it("humanizes nanosecond latencies, 0 = none", () => {
+    expect(fmtLatency(0)).toBe("0");
+    expect(fmtLatency(500)).toBe("500ns");
+    expect(fmtLatency(1_500)).toBe("1.5µs");
+    expect(fmtLatency(2_500_000)).toBe("2.5ms");
+    expect(fmtLatency(3_000_000_000)).toBe("3.0s");
   });
 });
 
