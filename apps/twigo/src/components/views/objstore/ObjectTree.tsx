@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronRight, Box, File, Loader2, Trash2, Upload } from "lucide-react";
-import { cn, ScrollArea } from "@twigo/ui";
+import { cn } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
 import {
   objStageUpload,
@@ -18,6 +19,8 @@ import type { ObjBucketSummary, ObjSummary } from "@/lib/api";
 type Row =
   | { kind: "bucket"; bucket: ObjBucketSummary }
   | { kind: "object"; bucket: string; object: ObjSummary };
+
+const ROW_H = 26;
 
 export function ObjectTree({
   connId,
@@ -102,6 +105,18 @@ export function ObjectTree({
 
   const sel = Math.min(selected, rows.length - 1);
 
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollEl,
+    estimateSize: () => ROW_H,
+    overscan: 12,
+  });
+  // Keep the keyboard-selected row in view (rows unmount when scrolled off).
+  useEffect(() => {
+    if (sel >= 0) virtualizer.scrollToIndex(sel);
+  }, [sel, virtualizer]);
+
   const open = (row: Row) => {
     if (row.kind === "bucket") void toggleBucket(connId, row.bucket.bucket);
     else openObjectEntry(connId, row.bucket, row.object.name);
@@ -133,21 +148,30 @@ export function ObjectTree({
 
   return (
     <>
-      <ScrollArea className="min-h-0 flex-1">
+      <div ref={setScrollEl} className="min-h-0 flex-1 overflow-y-auto">
         <ul
           role="tree"
           tabIndex={0}
           onKeyDown={onKeyDown}
-          className="py-0.5 outline-none"
+          className="relative w-full py-0.5 outline-none"
+          style={{ height: virtualizer.getTotalSize() }}
         >
-          {rows.map((row, i) =>
-            row.kind === "bucket" ? (
+          {virtualizer.getVirtualItems().map((v) => {
+            const row = rows[v.index];
+            if (!row) return null;
+            const i = v.index;
+            const style: React.CSSProperties = {
+              height: v.size,
+              transform: `translateY(${v.start.toString()}px)`,
+            };
+            return row.kind === "bucket" ? (
               <BucketRow
-                key={`b:${row.bucket.bucket}`}
+                key={v.key}
                 bucket={row.bucket}
                 selected={i === sel}
                 expanded={!!expanded[row.bucket.bucket]}
                 loading={!!loading[row.bucket.bucket]}
+                style={style}
                 onSelect={() => setSelected(i)}
                 onToggle={() => void toggleBucket(connId, row.bucket.bucket)}
                 uploading={uploadingBucket === row.bucket.bucket}
@@ -157,18 +181,19 @@ export function ObjectTree({
               />
             ) : (
               <ObjectRow
-                key={`o:${row.bucket}:${row.object.name}`}
+                key={v.key}
                 object={row.object}
                 selected={i === sel}
+                style={style}
                 onSelect={() => setSelected(i)}
                 onOpen={() =>
                   openObjectEntry(connId, row.bucket, row.object.name)
                 }
               />
-            ),
-          )}
+            );
+          })}
         </ul>
-      </ScrollArea>
+      </div>
 
       {delBucket && (
         <ConfirmDialog
@@ -213,6 +238,7 @@ function BucketRow({
   expanded,
   loading,
   uploading,
+  style,
   onSelect,
   onToggle,
   onUpload,
@@ -224,6 +250,7 @@ function BucketRow({
   expanded: boolean;
   loading: boolean;
   uploading: boolean;
+  style: React.CSSProperties;
   onSelect: () => void;
   onToggle: () => void;
   onUpload: () => void;
@@ -237,73 +264,80 @@ function BucketRow({
       aria-expanded={expanded}
       onClick={onSelect}
       onDoubleClick={onToggle}
-      className={cn(
-        "group relative mx-1.5 rounded-md flex cursor-pointer items-center gap-1 py-1 pl-2 pr-2 text-xs",
-        selected ? "bg-selected" : "hover:bg-row-hover",
-      )}
+      className="absolute left-0 top-0 w-full"
+      style={style}
     >
-      <button
-        type="button"
-        aria-label={expanded ? "Collapse" : "Expand"}
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggle();
-        }}
-        className="flex size-4 shrink-0 items-center justify-center text-muted-foreground"
-      >
-        {loading ? (
-          <Loader2 className="size-3 animate-spin" />
-        ) : (
-          <ChevronRight
-            className={cn(
-              "size-3 transition-transform",
-              expanded && "rotate-90",
-            )}
-          />
-        )}
-      </button>
-      <Box className="size-3 shrink-0 text-brand" />
-      <span className="min-w-0 flex-1 truncate font-mono">{bucket.bucket}</span>
-      <span
+      <div
         className={cn(
-          "flex shrink-0 items-center gap-0.5",
-          uploading ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+          "group relative mx-1.5 flex h-full cursor-pointer items-center gap-1 rounded-md pl-2 pr-2 text-xs",
+          selected ? "bg-selected" : "hover:bg-row-hover",
         )}
       >
         <button
           type="button"
-          aria-label="Upload object"
-          title={readOnly ? "Connection is read-only" : "Upload object"}
-          disabled={uploading || readOnly}
+          aria-label={expanded ? "Collapse" : "Expand"}
           onClick={(e) => {
             e.stopPropagation();
-            onUpload();
+            onToggle();
           }}
-          className="text-muted-foreground hover:text-foreground"
+          className="flex size-4 shrink-0 items-center justify-center text-muted-foreground"
         >
-          {uploading ? (
+          {loading ? (
             <Loader2 className="size-3 animate-spin" />
           ) : (
-            <Upload className="size-3" />
+            <ChevronRight
+              className={cn(
+                "size-3 transition-transform",
+                expanded && "rotate-90",
+              )}
+            />
           )}
         </button>
-        <button
-          type="button"
-          aria-label="Delete object store"
-          title={readOnly ? "Connection is read-only" : "Delete object store"}
-          disabled={readOnly}
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-          className="text-muted-foreground hover:text-error disabled:opacity-50"
+        <Box className="size-3 shrink-0 text-brand" />
+        <span className="min-w-0 flex-1 truncate font-mono">
+          {bucket.bucket}
+        </span>
+        <span
+          className={cn(
+            "flex shrink-0 items-center gap-0.5",
+            uploading ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+          )}
         >
-          <Trash2 className="size-3" />
-        </button>
-      </span>
-      <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
-        {fmtBytes(bucket.bytes)} · {bucket.storage}
-      </span>
+          <button
+            type="button"
+            aria-label="Upload object"
+            title={readOnly ? "Connection is read-only" : "Upload object"}
+            disabled={uploading || readOnly}
+            onClick={(e) => {
+              e.stopPropagation();
+              onUpload();
+            }}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            {uploading ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <Upload className="size-3" />
+            )}
+          </button>
+          <button
+            type="button"
+            aria-label="Delete object store"
+            title={readOnly ? "Connection is read-only" : "Delete object store"}
+            disabled={readOnly}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="text-muted-foreground hover:text-error disabled:opacity-50"
+          >
+            <Trash2 className="size-3" />
+          </button>
+        </span>
+        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+          {fmtBytes(bucket.bytes)} · {bucket.storage}
+        </span>
+      </div>
     </li>
   );
 }
@@ -311,11 +345,13 @@ function BucketRow({
 function ObjectRow({
   object,
   selected,
+  style,
   onSelect,
   onOpen,
 }: {
   object: ObjSummary;
   selected: boolean;
+  style: React.CSSProperties;
   onSelect: () => void;
   onOpen: () => void;
 }) {
@@ -325,17 +361,22 @@ function ObjectRow({
       aria-selected={selected}
       onClick={onSelect}
       onDoubleClick={onOpen}
-      className={cn(
-        "group relative mx-1.5 rounded-md flex cursor-pointer items-center gap-1.5 py-1 pl-8 pr-2 text-xs",
-        selected ? "bg-selected" : "hover:bg-row-hover",
-      )}
+      className="absolute left-0 top-0 w-full"
+      style={style}
     >
-      <File className="size-3 shrink-0 text-muted-foreground" />
-      <span className="min-w-0 flex-1 truncate font-mono">{object.name}</span>
-      {object.deleted && <Trash2 className="size-3 shrink-0 text-warn" />}
-      <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
-        {fmtBytes(object.size)} · {fmtCount(object.chunks)} chunks
-      </span>
+      <div
+        className={cn(
+          "group relative mx-1.5 flex h-full cursor-pointer items-center gap-1.5 rounded-md pl-8 pr-2 text-xs",
+          selected ? "bg-selected" : "hover:bg-row-hover",
+        )}
+      >
+        <File className="size-3 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate font-mono">{object.name}</span>
+        {object.deleted && <Trash2 className="size-3 shrink-0 text-warn" />}
+        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+          {fmtBytes(object.size)} · {fmtCount(object.chunks)} chunks
+        </span>
+      </div>
     </li>
   );
 }
