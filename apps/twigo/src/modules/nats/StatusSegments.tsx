@@ -8,26 +8,31 @@ import { openServerInfo } from "@/lib/editor";
 import { statusSegmentClass } from "@/shell/statusBar";
 import { ReconnectStatus } from "./ReconnectStatus";
 
-// Live message throughput for the active connection: count of messages landed
-// across its open stream tabs in the last second, plus how many are streaming.
+// Live message throughput for the active connection: messages landed across its
+// open stream tabs in the last second, plus how many are streaming. Rate comes
+// from the delta of each session's monotonic `received` counter over the tick -
+// not a per-flush scan of every retained item - and the hook reads the store
+// imperatively on a 1s interval so it doesn't re-render on every batch flush.
 function useThroughput(connId: string | null) {
-  const sessions = useStream((s) => s.sessions);
-  const [now, setNow] = useState(() => Date.now());
+  const [stats, setStats] = useState({ active: 0, rate: 0 });
   useEffect(() => {
     if (!connId) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
+    const mineNow = () =>
+      Object.values(useStream.getState().sessions).filter(
+        (s) => s.connId === connId,
+      );
+    let prev = mineNow().reduce((n, s) => n + s.received, 0);
+    const id = setInterval(() => {
+      const mine = mineNow();
+      const total = mine.reduce((n, s) => n + s.received, 0);
+      setStats({ active: mine.length, rate: Math.max(0, total - prev) });
+      prev = total;
+    }, 1000);
     return () => clearInterval(id);
   }, [connId]);
-
-  const mine = Object.values(sessions).filter((s) => s.connId === connId);
-  const since = now - 1000;
-  let rate = 0;
-  for (const session of mine) {
-    for (const item of session.items) {
-      if (item.receivedAt >= since) rate++;
-    }
-  }
-  return { active: mine.length, rate };
+  // The null case is derived at read time, so the effect never setState's
+  // synchronously (stale stats from a previous connection are never shown).
+  return connId ? stats : { active: 0, rate: 0 };
 }
 
 // The NATS left-cluster of the status bar: active connection, RTT, JetStream
