@@ -28,7 +28,7 @@
     "@twigo/utils": "workspace:*",
     "allotment": "^1.20.5",
     "diff": "^9.0.0",
-    "dockview-react": "^6.6.1",
+    "dockview-react": "^7.0.2",
     "lucide-react": "^1.22.0",
     "quickjs-emscripten": "^0.32.0",
     "quickjs-emscripten-core": "^0.32.0",
