@@ -8,7 +8,7 @@ import {
   Trash2,
   Plus,
 } from "lucide-react";
-import { cn, ScrollArea } from "@twigo/ui";
+import { cn } from "@twigo/ui";
 import {
   fmtBytes,
   fmtCount,
@@ -23,6 +23,7 @@ import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import { openKvEntry } from "@/lib/editor";
 import { CreateKeyDialog } from "@/components/editor/kv/CreateKeyDialog";
 import { ConfirmDialog } from "@/components/editor/jetstream/ConfirmDialog";
+import { VirtualTree } from "@/components/views/VirtualTree";
 import type { KvBucketSummary, KvEntrySummary } from "@/lib/api";
 
 type Row =
@@ -51,7 +52,6 @@ export function KvTree({
   const readOnly = useIsReadOnly(connId);
 
   const [openNodes, setOpenNodes] = useState<Set<string>>(new Set());
-  const [selected, setSelected] = useState(0);
   const [newKeyBucket, setNewKeyBucket] = useState<string | null>(null);
   const [delBucket, setDelBucket] = useState<string | null>(null);
 
@@ -108,8 +108,6 @@ export function KvTree({
     return out;
   }, [buckets, expanded, keysByBucket, openNodes]);
 
-  const sel = Math.min(selected, rows.length - 1);
-
   const toggleNode = (bucket: string, path: string) =>
     setOpenNodes((prev) => {
       const next = new Set(prev);
@@ -129,73 +127,55 @@ export function KvTree({
     }
   };
 
-  const isOpen = (row: Row) =>
-    row.kind === "bucket"
-      ? !!expanded[row.bucket.bucket]
-      : openNodes.has(nodeId(row.bucket, row.node.path));
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    const row = rows[sel];
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setSelected(Math.min(sel + 1, rows.length - 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setSelected(Math.max(sel - 1, 0));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      if (row) activate(row);
-    } else if (e.key === "ArrowRight" && row && !isOpen(row)) {
-      if (row.kind === "bucket" || row.node.children.length) {
-        e.preventDefault();
-        activate(row);
-      }
-    } else if (e.key === "ArrowLeft" && row && isOpen(row)) {
-      e.preventDefault();
-      if (row.kind === "bucket") void toggleBucket(connId, row.bucket.bucket);
-      else toggleNode(row.bucket, row.node.path);
-    }
+  // null = not expandable (a leaf key or a childless node).
+  const rowExpanded = (row: Row): boolean | null => {
+    if (row.kind === "bucket") return !!expanded[row.bucket.bucket];
+    return row.node.children.length
+      ? openNodes.has(nodeId(row.bucket, row.node.path))
+      : null;
+  };
+  const toggleRow = (row: Row) => {
+    if (row.kind === "bucket") void toggleBucket(connId, row.bucket.bucket);
+    else toggleNode(row.bucket, row.node.path);
   };
 
   return (
     <>
-      <ScrollArea className="min-h-0 flex-1">
-        <ul
-          role="tree"
-          tabIndex={0}
-          onKeyDown={onKeyDown}
-          className="py-0.5 outline-none"
-        >
-          {rows.map((row, i) =>
-            row.kind === "bucket" ? (
-              <BucketRow
-                key={`b:${row.bucket.bucket}`}
-                bucket={row.bucket}
-                selected={i === sel}
-                expanded={!!expanded[row.bucket.bucket]}
-                loading={!!loading[row.bucket.bucket]}
-                readOnly={readOnly}
-                onSelect={() => setSelected(i)}
-                onToggle={() => void toggleBucket(connId, row.bucket.bucket)}
-                onNewKey={() => setNewKeyBucket(row.bucket.bucket)}
-                onDelete={() => setDelBucket(row.bucket.bucket)}
-              />
-            ) : (
-              <NodeRow
-                key={`n:${row.bucket}:${row.node.path}`}
-                row={row}
-                selected={i === sel}
-                open={openNodes.has(nodeId(row.bucket, row.node.path))}
-                onSelect={() => setSelected(i)}
-                onToggle={() => toggleNode(row.bucket, row.node.path)}
-                onOpen={() => {
-                  if (row.entry) openKvEntry(connId, row.bucket, row.node.path);
-                }}
-              />
-            ),
-          )}
-        </ul>
-      </ScrollArea>
+      <VirtualTree
+        rows={rows}
+        rowKey={(row) =>
+          row.kind === "bucket"
+            ? `b:${row.bucket.bucket}`
+            : `n:${row.bucket}:${row.node.path}`
+        }
+        nav={{
+          onActivate: activate,
+          expanded: rowExpanded,
+          onExpand: toggleRow,
+          onCollapse: toggleRow,
+        }}
+        renderRow={(row, selected) =>
+          row.kind === "bucket" ? (
+            <BucketRow
+              bucket={row.bucket}
+              selected={selected}
+              expanded={!!expanded[row.bucket.bucket]}
+              loading={!!loading[row.bucket.bucket]}
+              readOnly={readOnly}
+              onToggle={() => void toggleBucket(connId, row.bucket.bucket)}
+              onNewKey={() => setNewKeyBucket(row.bucket.bucket)}
+              onDelete={() => setDelBucket(row.bucket.bucket)}
+            />
+          ) : (
+            <NodeRow
+              row={row}
+              selected={selected}
+              open={openNodes.has(nodeId(row.bucket, row.node.path))}
+              onToggle={() => toggleNode(row.bucket, row.node.path)}
+            />
+          )
+        }
+      />
 
       {newKeyBucket && (
         <CreateKeyDialog
@@ -227,7 +207,6 @@ function BucketRow({
   expanded,
   loading,
   readOnly,
-  onSelect,
   onToggle,
   onNewKey,
   onDelete,
@@ -237,20 +216,14 @@ function BucketRow({
   expanded: boolean;
   loading: boolean;
   readOnly: boolean;
-  onSelect: () => void;
   onToggle: () => void;
   onNewKey: () => void;
   onDelete: () => void;
 }) {
   return (
-    <li
-      role="treeitem"
-      aria-selected={selected}
-      aria-expanded={expanded}
-      onClick={onSelect}
-      onDoubleClick={onToggle}
+    <div
       className={cn(
-        "group relative mx-1.5 rounded-md flex cursor-pointer items-center gap-1 py-1 pl-2 pr-2 text-xs",
+        "group relative mx-1.5 flex h-full cursor-pointer items-center gap-1 rounded-md pl-2 pr-2 text-xs",
         selected ? "bg-selected" : "hover:bg-row-hover",
       )}
     >
@@ -307,7 +280,7 @@ function BucketRow({
       <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
         {fmtCount(bucket.values)} · {fmtBytes(bucket.bytes)} · {bucket.storage}
       </span>
-    </li>
+    </div>
   );
 }
 
@@ -315,31 +288,23 @@ function NodeRow({
   row,
   selected,
   open,
-  onSelect,
   onToggle,
-  onOpen,
 }: {
   row: Extract<Row, { kind: "node" }>;
   selected: boolean;
   open: boolean;
-  onSelect: () => void;
   onToggle: () => void;
-  onOpen: () => void;
 }) {
   const isFolder = row.node.children.length > 0;
   const isKey = !!row.entry;
   const deleted = row.entry && row.entry.operation !== "put";
   return (
-    <li
-      role="treeitem"
-      aria-selected={selected}
-      onClick={onSelect}
-      onDoubleClick={onOpen}
-      style={{ paddingLeft: `${String(row.depth * 0.85 + 0.5)}rem` }}
+    <div
       className={cn(
-        "group relative mx-1.5 rounded-md flex cursor-pointer items-center gap-1 py-1 pr-2 text-xs",
+        "group relative mx-1.5 flex h-full cursor-pointer items-center gap-1 rounded-md pr-2 text-xs",
         selected ? "bg-selected" : "hover:bg-row-hover",
       )}
+      style={{ paddingLeft: `${String(row.depth * 0.85 + 0.5)}rem` }}
     >
       {isFolder ? (
         <button
@@ -376,6 +341,6 @@ function NodeRow({
           {fmtCount(row.node.count)}
         </span>
       )}
-    </li>
+    </div>
   );
 }

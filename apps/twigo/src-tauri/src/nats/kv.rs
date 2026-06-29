@@ -13,6 +13,9 @@ use super::jetstream::{fmt_time, js_err, storage_str};
 // base64-encoded and rendered whole. `size` stays the true byte length.
 const MAX_KV_PAYLOAD: usize = 1024 * 1024;
 
+// Concurrency for per-bucket status() round-trips when listing buckets.
+const BUCKET_CONCURRENCY: usize = 32;
+
 // A failed optimistic update is almost always a CAS conflict (someone wrote a
 // newer revision). Map that to a typed `conflict` error so the UI can offer the
 // reload-and-retry flow instead of regex-matching the message.
@@ -125,23 +128,26 @@ pub async fn kv_list_buckets(
         }
     }
 
-    let mut out = Vec::new();
-    for bucket in buckets {
-        let Ok(kv) = js.get_key_value(&bucket).await else {
-            continue;
-        };
-        let Ok(status) = kv.status().await else {
-            continue;
-        };
-        out.push(KvBucketSummary {
-            bucket: status.bucket().to_string(),
-            values: status.values(),
-            bytes: status.info.state.bytes,
-            history: status.history(),
-            max_age: status.max_age().as_nanos() as u64,
-            storage: storage_str(&status.info.config.storage),
-        });
-    }
+    // Each bucket needs its own status() round-trip; run them concurrently so a
+    // server with many buckets (e.g. demo.nats.io) isn't a sequential N+1 stall.
+    let js = &js;
+    let mut out: Vec<KvBucketSummary> = futures_util::stream::iter(buckets)
+        .map(|bucket| async move {
+            let kv = js.get_key_value(&bucket).await.ok()?;
+            let status = kv.status().await.ok()?;
+            Some(KvBucketSummary {
+                bucket: status.bucket().to_string(),
+                values: status.values(),
+                bytes: status.info.state.bytes,
+                history: status.history(),
+                max_age: status.max_age().as_nanos() as u64,
+                storage: storage_str(&status.info.config.storage),
+            })
+        })
+        .buffer_unordered(BUCKET_CONCURRENCY)
+        .filter_map(|x| async move { x })
+        .collect()
+        .await;
     out.sort_by(|a, b| a.bucket.cmp(&b.bucket));
     Ok(out)
 }

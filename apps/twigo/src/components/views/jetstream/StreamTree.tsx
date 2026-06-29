@@ -1,4 +1,3 @@
-import { useMemo, useState } from "react";
 import {
   ChevronRight,
   Layers,
@@ -7,10 +6,12 @@ import {
   Loader2,
   Pause,
 } from "lucide-react";
-import { cn, ScrollArea } from "@twigo/ui";
+import { useMemo } from "react";
+import { cn } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
 import { useJetStream } from "@/store/jetstream";
 import { openStreamDetail, openConsumerDetail } from "@/lib/editor";
+import { VirtualTree } from "@/components/views/VirtualTree";
 import type { StreamSummary, ConsumerSummary } from "@/lib/api";
 
 type Row =
@@ -29,8 +30,6 @@ export function StreamTree({
   const loading = useJetStream((s) => s.byConn[connId]?.childrenLoading ?? {});
   const toggleStream = useJetStream((s) => s.toggle);
 
-  const [selected, setSelected] = useState(0);
-
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = [];
     for (const stream of streams) {
@@ -44,71 +43,45 @@ export function StreamTree({
     return out;
   }, [streams, expanded, consumers]);
 
-  const sel = Math.min(selected, rows.length - 1);
-
-  const open = (row: Row) => {
+  const activate = (row: Row) => {
     if (row.kind === "stream") openStreamDetail(connId, row.stream.name);
     else openConsumerDetail(connId, row.stream, row.consumer.name);
   };
-
-  // Keyboard-first: arrows move selection, Enter opens, Right/Left expand/
-  // collapse a stream. Single-click only selects (no RPC), double-click opens.
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    const row = rows[sel];
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setSelected(Math.min(sel + 1, rows.length - 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setSelected(Math.max(sel - 1, 0));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      if (row) open(row);
-    } else if (e.key === "ArrowRight" && row?.kind === "stream") {
-      if (!expanded[row.stream.name]) {
-        e.preventDefault();
-        void toggleStream(connId, row.stream.name);
-      }
-    } else if (e.key === "ArrowLeft" && row?.kind === "stream") {
-      if (expanded[row.stream.name]) {
-        e.preventDefault();
-        void toggleStream(connId, row.stream.name);
-      }
-    }
+  // null = not expandable (consumers are leaves).
+  const rowExpanded = (row: Row): boolean | null =>
+    row.kind === "stream" ? !!expanded[row.stream.name] : null;
+  const toggleRow = (row: Row) => {
+    if (row.kind === "stream") void toggleStream(connId, row.stream.name);
   };
 
   return (
-    <ScrollArea className="min-h-0 flex-1">
-      <ul
-        role="tree"
-        tabIndex={0}
-        onKeyDown={onKeyDown}
-        className="py-0.5 outline-none"
-      >
-        {rows.map((row, i) =>
-          row.kind === "stream" ? (
-            <StreamRow
-              key={`s:${row.stream.name}`}
-              stream={row.stream}
-              selected={i === sel}
-              expanded={!!expanded[row.stream.name]}
-              loading={!!loading[row.stream.name]}
-              onSelect={() => setSelected(i)}
-              onToggle={() => void toggleStream(connId, row.stream.name)}
-              onOpen={() => open(row)}
-            />
-          ) : (
-            <ConsumerRow
-              key={`c:${row.stream}:${row.consumer.name}`}
-              consumer={row.consumer}
-              selected={i === sel}
-              onSelect={() => setSelected(i)}
-              onOpen={() => open(row)}
-            />
-          ),
-        )}
-      </ul>
-    </ScrollArea>
+    <VirtualTree
+      rows={rows}
+      rowKey={(row) =>
+        row.kind === "stream"
+          ? `s:${row.stream.name}`
+          : `c:${row.stream}:${row.consumer.name}`
+      }
+      nav={{
+        onActivate: activate,
+        expanded: rowExpanded,
+        onExpand: toggleRow,
+        onCollapse: toggleRow,
+      }}
+      renderRow={(row, selected) =>
+        row.kind === "stream" ? (
+          <StreamRow
+            stream={row.stream}
+            selected={selected}
+            expanded={!!expanded[row.stream.name]}
+            loading={!!loading[row.stream.name]}
+            onToggle={() => void toggleStream(connId, row.stream.name)}
+          />
+        ) : (
+          <ConsumerRow consumer={row.consumer} selected={selected} />
+        )
+      }
+    />
   );
 }
 
@@ -117,27 +90,18 @@ function StreamRow({
   selected,
   expanded,
   loading,
-  onSelect,
   onToggle,
-  onOpen,
 }: {
   stream: StreamSummary;
   selected: boolean;
   expanded: boolean;
   loading: boolean;
-  onSelect: () => void;
   onToggle: () => void;
-  onOpen: () => void;
 }) {
   return (
-    <li
-      role="treeitem"
-      aria-selected={selected}
-      aria-expanded={expanded}
-      onClick={onSelect}
-      onDoubleClick={onOpen}
+    <div
       className={cn(
-        "group relative mx-1.5 rounded-md flex cursor-pointer items-center gap-1 py-1 pl-2 pr-2 text-xs",
+        "group relative mx-1.5 flex h-full cursor-pointer items-center gap-1 rounded-md pl-2 pr-2 text-xs",
         selected ? "bg-selected" : "hover:bg-row-hover",
       )}
     >
@@ -167,30 +131,22 @@ function StreamRow({
         {fmtCount(stream.messages)} · {fmtBytes(stream.bytes)} ·{" "}
         {stream.storage} · {stream.consumerCount}
       </span>
-    </li>
+    </div>
   );
 }
 
 function ConsumerRow({
   consumer,
   selected,
-  onSelect,
-  onOpen,
 }: {
   consumer: ConsumerSummary;
   selected: boolean;
-  onSelect: () => void;
-  onOpen: () => void;
 }) {
   const Icon = consumer.kind === "push" ? Radio : ArrowDownToLine;
   return (
-    <li
-      role="treeitem"
-      aria-selected={selected}
-      onClick={onSelect}
-      onDoubleClick={onOpen}
+    <div
       className={cn(
-        "group relative mx-1.5 rounded-md flex cursor-pointer items-center gap-1.5 py-1 pl-8 pr-2 text-xs",
+        "group relative mx-1.5 flex h-full cursor-pointer items-center gap-1.5 rounded-md pl-8 pr-2 text-xs",
         selected ? "bg-selected" : "hover:bg-row-hover",
       )}
     >
@@ -205,6 +161,6 @@ function ConsumerRow({
       >
         {consumer.kind} · {consumer.ackPolicy} · {fmtCount(consumer.numPending)}
       </span>
-    </li>
+    </div>
   );
 }
