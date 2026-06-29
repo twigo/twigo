@@ -94,7 +94,8 @@ export function EditorArea() {
     // These dockview listeners are disposed with the api on unmount. They all
     // bail while a layout swap/teardown is in flight, so bulk panel removals
     // don't tear down live streams or persist an empty layout.
-    api.onDidActivePanelChange((panel) => {
+    // dockview 7 wraps this in a { panel, origin } event (was the panel directly).
+    api.onDidActivePanelChange(({ panel }) => {
       if (isReplacingLayout()) return;
       subscribeActiveStream(api);
       const id = panel?.id;
