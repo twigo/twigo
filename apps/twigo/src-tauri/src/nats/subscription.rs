@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use base64::Engine;
 use futures_util::StreamExt;
@@ -8,6 +9,7 @@ use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::State;
 use tokio::task::AbortHandle;
+use tokio::time::MissedTickBehavior;
 
 use super::connection::ConnState;
 use super::error::{self, Error};
@@ -38,6 +40,35 @@ pub struct IncomingMessage {
     payload_b64: String,
     headers: Vec<(String, String)>,
     size: usize,
+}
+
+// A coalesced delivery to the frontend. `dropped` reports messages shed
+// oldest-first to bound memory/IPC under a flood, so a batched view doesn't
+// silently lose data.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageBatch {
+    messages: Vec<IncomingMessage>,
+    dropped: u32,
+}
+
+// Cap the per-window buffer so a high-rate wildcard can't grow memory or the IPC
+// payload without limit; excess is dropped oldest-first with a counter.
+const MAX_COALESCE_BUFFER: usize = 10_000;
+
+// Push a message into the bounded coalescing buffer, shedding the oldest (and
+// counting it) once the cap is reached.
+fn push_bounded(
+    buf: &mut VecDeque<IncomingMessage>,
+    msg: IncomingMessage,
+    dropped: &mut u32,
+    cap: usize,
+) {
+    if buf.len() >= cap {
+        buf.pop_front();
+        *dropped = dropped.saturating_add(1);
+    }
+    buf.push_back(msg);
 }
 
 pub(super) fn encode_message(
@@ -119,7 +150,10 @@ pub async fn subscribe(
     conn_id: String,
     sub_id: String,
     subject: String,
-    on_message: Channel<IncomingMessage>,
+    on_message: Channel<MessageBatch>,
+    // None/0 = deliver each message immediately (request/reply responders need
+    // low latency); Some(ms) = coalesce into batches over the window (streams).
+    coalesce_ms: Option<u64>,
 ) -> error::Result<()> {
     let client = conns
         .client(&conn_id)
@@ -133,19 +167,65 @@ pub async fn subscribe(
     let handles = subs.handles.clone();
     let task_subject = subject.clone();
     let task_sub_id = sub_id.clone();
+    let coalesce = coalesce_ms.filter(|&ms| ms > 0);
+    let to_dto = |m: async_nats::Message| {
+        encode_message(
+            m.subject.to_string(),
+            m.reply.map(|r| r.to_string()),
+            &m.payload,
+            flatten_headers(m.headers.as_ref()),
+        )
+    };
     let handle = tokio::spawn(async move {
-        while let Some(message) = sub.next().await {
-            let dto = encode_message(
-                message.subject.to_string(),
-                message.reply.map(|r| r.to_string()),
-                &message.payload,
-                flatten_headers(message.headers.as_ref()),
-            );
-            // The channel closes when its UI tab goes away; end the task quietly
-            // (a debug line for observability - this is normal teardown).
-            if on_message.send(dto).is_err() {
-                tracing::debug!(subject = %task_subject, "stream channel closed; ending subscription");
-                break;
+        // The channel closes when its UI tab goes away; end the task quietly (a
+        // debug line for observability - this is normal teardown).
+        match coalesce {
+            None => {
+                while let Some(message) = sub.next().await {
+                    let batch = MessageBatch {
+                        messages: vec![to_dto(message)],
+                        dropped: 0,
+                    };
+                    if on_message.send(batch).is_err() {
+                        tracing::debug!(subject = %task_subject, "stream channel closed; ending subscription");
+                        break;
+                    }
+                }
+            }
+            Some(ms) => {
+                let mut buf: VecDeque<IncomingMessage> = VecDeque::new();
+                let mut dropped = 0u32;
+                let mut tick = tokio::time::interval(Duration::from_millis(ms));
+                tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
+                loop {
+                    tokio::select! {
+                        msg = sub.next() => {
+                            let Some(message) = msg else { break };
+                            push_bounded(&mut buf, to_dto(message), &mut dropped, MAX_COALESCE_BUFFER);
+                        }
+                        _ = tick.tick() => {
+                            if buf.is_empty() && dropped == 0 {
+                                continue;
+                            }
+                            let batch = MessageBatch {
+                                messages: buf.drain(..).collect(),
+                                dropped,
+                            };
+                            dropped = 0;
+                            if on_message.send(batch).is_err() {
+                                tracing::debug!(subject = %task_subject, "stream channel closed; ending subscription");
+                                break;
+                            }
+                        }
+                    }
+                }
+                // Flush whatever remains when the subscription ends on its own.
+                if !buf.is_empty() || dropped > 0 {
+                    let _ = on_message.send(MessageBatch {
+                        messages: buf.drain(..).collect(),
+                        dropped,
+                    });
+                }
             }
         }
         // Ended on its own (server closed the sub or the UI channel went away);
@@ -236,5 +316,18 @@ mod tests {
         assert_eq!(h.get("s").unwrap().token, 2);
         drop(h);
         new.abort();
+    }
+
+    #[test]
+    fn push_bounded_sheds_oldest_past_cap() {
+        let mut buf: VecDeque<IncomingMessage> = VecDeque::new();
+        let mut dropped = 0u32;
+        let mk = |s: &str| encode_message(s.into(), None, b"x", Vec::new());
+        push_bounded(&mut buf, mk("a"), &mut dropped, 2);
+        push_bounded(&mut buf, mk("b"), &mut dropped, 2);
+        push_bounded(&mut buf, mk("c"), &mut dropped, 2); // sheds "a"
+        assert_eq!(dropped, 1);
+        let subjects: Vec<_> = buf.iter().map(|m| m.subject.clone()).collect();
+        assert_eq!(subjects, vec!["b", "c"]);
     }
 }

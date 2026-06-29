@@ -102,7 +102,7 @@ export function MessageStream({ streamId }: { streamId: string }) {
     );
   }
 
-  const { subject, paused, selectedId, received } = session;
+  const { subject, paused, selectedId, received, dropped } = session;
   // The view keeps a capped window; show the true received total (and the
   // retained slice when it's smaller) so the user knows they're tailing.
   const windowed = allItems.length > 0 && allItems.length < received;
@@ -155,6 +155,14 @@ export function MessageStream({ streamId }: { streamId: string }) {
               }`}
           {paused && " · paused"}
         </span>
+        {dropped > 0 && (
+          <span
+            className="text-[11px] tabular-nums text-warn"
+            title="Messages dropped under load to keep the UI responsive"
+          >
+            · {fmtCount(dropped)} dropped
+          </span>
+        )}
       </div>
 
       {allItems.length === 0 ? (

@@ -58,6 +58,14 @@ export interface IncomingMessage {
   size: number;
 }
 
+// A coalesced subscription delivery. `dropped` is how many messages the backend
+// shed (oldest-first) to bound memory/IPC under a flood - shown as a marker so a
+// batched view never silently loses data.
+export interface MessageBatch {
+  messages: IncomingMessage[];
+  dropped: number;
+}
+
 export interface ContextSummary {
   name: string;
   description: string;
@@ -210,9 +218,12 @@ export async function subscribe(
   connId: string,
   subId: string,
   subject: string,
-  onMessage: Channel<IncomingMessage>,
+  onMessage: Channel<MessageBatch>,
+  // null = deliver each message immediately (responders); a window in ms
+  // coalesces into batches on the backend (streams).
+  coalesceMs: number | null = null,
 ): Promise<void> {
-  await call("subscribe", { connId, subId, subject, onMessage });
+  await call("subscribe", { connId, subId, subject, onMessage, coalesceMs });
 }
 
 export async function unsubscribe(subId: string): Promise<void> {

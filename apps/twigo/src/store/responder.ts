@@ -6,6 +6,7 @@ import {
   unsubscribe as apiUnsubscribe,
   publish as apiPublish,
   type IncomingMessage,
+  type MessageBatch,
 } from "@/lib/api";
 import { decodePreview } from "@twigo/utils";
 import { render, buildMsgContext, warmUp } from "@/lib/template";
@@ -49,7 +50,7 @@ export interface ResponderSession {
 }
 
 interface Runtime {
-  channel: Channel<IncomingMessage>;
+  channel: Channel<MessageBatch>;
 }
 
 const runtimes = new Map<string, Runtime>();
@@ -123,9 +124,17 @@ function patch(
   });
 }
 
-function appendLog(connId: string, id: string, entry: ResponderLog) {
+// One store write per request: fold the lastRequest update into the log append
+// rather than a separate patch (was two writes -> two re-renders per message).
+function appendLog(
+  connId: string,
+  id: string,
+  lastRequest: IncomingMessage,
+  entry: ResponderLog,
+) {
   patch(connId, id, (s) => ({
     ...s,
+    lastRequest,
     handled: s.handled + 1,
     log: [entry, ...s.log].slice(0, LOG_CAP),
   }));
@@ -138,7 +147,6 @@ async function handleMessage(connId: string, id: string, m: IncomingMessage) {
 
   const entryId = ++nextLogId;
   const cfg = session.config;
-  patch(connId, id, (s) => ({ ...s, lastRequest: m }));
   const base: Omit<ResponderLog, "outcome" | "ms"> = {
     id: entryId,
     receivedAt: Date.now(),
@@ -147,7 +155,7 @@ async function handleMessage(connId: string, id: string, m: IncomingMessage) {
   };
 
   if (!m.reply) {
-    appendLog(connId, id, {
+    appendLog(connId, id, m, {
       ...base,
       outcome: { kind: "skipped", reason: "no reply subject" },
       ms: 0,
@@ -155,7 +163,7 @@ async function handleMessage(connId: string, id: string, m: IncomingMessage) {
     return;
   }
   if (cfg.mode === "down") {
-    appendLog(connId, id, {
+    appendLog(connId, id, m, {
       ...base,
       outcome: { kind: "skipped", reason: "simulated no-responder" },
       ms: 0,
@@ -171,7 +179,7 @@ async function handleMessage(connId: string, id: string, m: IncomingMessage) {
   // runtime; a stale reply must not still go out after the user stopped.
   const live = useResponder.getState().byConn[connId]?.[id];
   if (!live?.listening || runtimes.get(id) !== rt) {
-    appendLog(connId, id, {
+    appendLog(connId, id, m, {
       ...base,
       outcome: { kind: "skipped", reason: "stopped before reply" },
       ms: Math.round(performance.now() - t0),
@@ -189,7 +197,7 @@ async function handleMessage(connId: string, id: string, m: IncomingMessage) {
     } catch {
       /* connection gone; the local log still records the failure */
     }
-    appendLog(connId, id, {
+    appendLog(connId, id, m, {
       ...base,
       outcome: { kind: "error", error: rendered.error },
       ms,
@@ -212,13 +220,13 @@ async function handleMessage(connId: string, id: string, m: IncomingMessage) {
       rendered.output,
       headers as [string, string][],
     );
-    appendLog(connId, id, {
+    appendLog(connId, id, m, {
       ...base,
       outcome: { kind: "sent", output: rendered.output },
       ms,
     });
   } catch (e) {
-    appendLog(connId, id, {
+    appendLog(connId, id, m, {
       ...base,
       outcome: { kind: "error", error: String(e) },
       ms,
@@ -264,15 +272,17 @@ export const useResponder = create<ResponderState>()(
 
         warmUp();
         const subId = `responder::${id}`;
-        const channel = new Channel<IncomingMessage>();
-        channel.onmessage = (m) => {
-          void handleMessage(connId, id, m);
+        const channel = new Channel<MessageBatch>();
+        // Responders reply per request - keep immediate (no coalescing) so reply
+        // latency isn't padded by a batching window.
+        channel.onmessage = (batch) => {
+          for (const m of batch.messages) void handleMessage(connId, id, m);
         };
         runtimes.set(id, { channel });
         patch(connId, id, (s) => ({ ...s, subId, listening: true }));
 
         try {
-          await apiSubscribe(connId, subId, subject, channel);
+          await apiSubscribe(connId, subId, subject, channel, null);
         } catch (e) {
           runtimes.delete(id);
           patch(connId, id, (s) => ({ ...s, subId: null, listening: false }));
