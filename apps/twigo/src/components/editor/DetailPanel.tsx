@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Copy, Braces, Send, Reply, Pin, PinOff, X } from "lucide-react";
 import { Button, EmptyState, CodeViewer, cn } from "@twigo/ui";
 import {
@@ -10,7 +10,7 @@ import {
   toHex,
   type StreamMessage,
 } from "@twigo/utils";
-import { useStream } from "@/store/stream";
+import { useStream, type StreamSession } from "@/store/stream";
 import { useCompare } from "@/store/compare";
 import { openPublish } from "@/lib/editor";
 import { PayloadDiff } from "./PayloadDiff";
@@ -20,6 +20,18 @@ function bodyFor(m: StreamMessage, format: PayloadFormat): string {
   if (format === "hex") return toHex(m.payloadB64);
   if (format === "text") return decodeText(m.payloadB64);
   return tryPrettyJson(m.payloadB64) ?? decodeText(m.payloadB64);
+}
+
+// Resolve the selected message. Returned as a stable object reference (the same
+// StreamMessage stays in `items` until evicted), so a narrow selector over this
+// re-renders the panel only when the selection changes - not on every flush.
+export function selectedMessage(
+  session: StreamSession | undefined,
+): StreamMessage | undefined {
+  if (!session) return undefined;
+  const { selectedId, items } = session;
+  if (selectedId === null) return undefined;
+  return items.find((m) => m.id === selectedId);
 }
 
 function Field({ label, value }: { label: string; value: string }) {
@@ -34,21 +46,22 @@ function Field({ label, value }: { label: string; value: string }) {
 }
 
 export function DetailPanel({ streamId }: { streamId: string }) {
-  const session = useStream((s) => s.sessions[streamId]);
+  // Narrow subscriptions: re-render only when the selected message (or connId)
+  // changes, not on every batch flush that mutates the session's items.
+  const msg = useStream((s) => selectedMessage(s.sessions[streamId]));
+  const connId = useStream((s) => s.sessions[streamId]?.connId);
   const select = useStream((s) => s.select);
   const [format, setFormat] = useState<PayloadFormat>("json");
   const pinned = useCompare((s) => s.pinned);
   const pin = useCompare((s) => s.pin);
   const clearPin = useCompare((s) => s.clear);
 
-  const selectedId = session?.selectedId ?? null;
-  const msg =
-    selectedId !== null
-      ? session?.items.find((m) => m.id === selectedId)
-      : undefined;
-
-  const body = msg ? bodyFor(msg, format) : "";
-  const payloadText = msg ? decodeText(msg.payloadB64) : "";
+  // Decode only when the message or format actually changes, not every render.
+  const body = useMemo(() => (msg ? bodyFor(msg, format) : ""), [msg, format]);
+  const payloadText = useMemo(
+    () => (msg ? decodeText(msg.payloadB64) : ""),
+    [msg],
+  );
   const replyTo = msg?.reply ?? null;
   // Reference identity: the same StreamMessage object stays in `items` until
   // evicted, so this is unambiguous across sessions (unlike per-session ids).
@@ -63,7 +76,7 @@ export function DetailPanel({ streamId }: { streamId: string }) {
           Message
         </span>
         <div className="flex items-center gap-0.5">
-          {msg && session && (
+          {msg && connId && (
             <>
               <Button
                 variant="ghost"
@@ -71,12 +84,7 @@ export function DetailPanel({ streamId }: { streamId: string }) {
                 aria-label="Republish"
                 tooltip="Republish"
                 onClick={() =>
-                  openPublish(
-                    session.connId,
-                    msg.subject,
-                    payloadText,
-                    msg.headers,
-                  )
+                  openPublish(connId, msg.subject, payloadText, msg.headers)
                 }
               >
                 <Send />
@@ -87,7 +95,7 @@ export function DetailPanel({ streamId }: { streamId: string }) {
                   size="icon-sm"
                   aria-label="Reply"
                   tooltip={`Reply to ${replyTo}`}
-                  onClick={() => openPublish(session.connId, replyTo, "")}
+                  onClick={() => openPublish(connId, replyTo, "")}
                 >
                   <Reply />
                 </Button>

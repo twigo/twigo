@@ -13,8 +13,8 @@ vi.mock("@twigo/ui", async () => {
   };
 });
 
-import { DetailPanel } from "./DetailPanel";
-import { useStream } from "@/store/stream";
+import { DetailPanel, selectedMessage } from "./DetailPanel";
+import { useStream, type StreamSession } from "@/store/stream";
 import { useCompare } from "@/store/compare";
 
 const STREAM = "stream-1";
@@ -55,6 +55,41 @@ function seed(
     activeId: STREAM,
   });
 }
+
+function session(
+  selectedId: number | null,
+  items: StreamMessage[],
+): StreamSession {
+  return {
+    id: STREAM,
+    connId: "conn-1",
+    subject: "orders.>",
+    subId: "sub-1",
+    items,
+    paused: false,
+    following: true,
+    selectedId,
+    received: items.length,
+    dropped: 0,
+  };
+}
+
+describe("selectedMessage", () => {
+  it("returns a stable reference as unrelated messages arrive", () => {
+    const m1 = message(1);
+    const before = session(1, [m1]);
+    const after = session(1, [m1, message(2), message(3)]);
+    // Same selection, new items appended: the panel must not see a new ref
+    // (so the narrow selector doesn't re-render on every flush).
+    expect(selectedMessage(before)).toBe(m1);
+    expect(selectedMessage(after)).toBe(m1);
+  });
+
+  it("is undefined with no selection or no session", () => {
+    expect(selectedMessage(session(null, [message(1)]))).toBeUndefined();
+    expect(selectedMessage(undefined)).toBeUndefined();
+  });
+});
 
 describe("DetailPanel", () => {
   beforeEach(() => {
