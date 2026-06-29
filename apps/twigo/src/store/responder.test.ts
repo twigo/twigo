@@ -121,10 +121,31 @@ describe("responder store", () => {
 
     deliver(req());
     await waitFor(() => publish.mock.calls.length > 0);
+    // The wire reply carries a generic message; the detail stays in the log.
     expect(publish).toHaveBeenCalledWith("conn", "_INBOX.1", "", [
-      ["Nats-Service-Error", "boom"],
+      ["Nats-Service-Error", "template render error"],
       ["Nats-Service-Error-Code", "500"],
     ]);
+    await waitFor(() => sess().log.length > 0);
+    expect(sess().log[0]?.outcome).toMatchObject({
+      kind: "error",
+      error: "boom",
+    });
+  });
+
+  it("does not reply if stopped during the simulated delay", async () => {
+    render.mockResolvedValue({ ok: true, output: "PONG" });
+    useResponder.getState().ensure("r1", "conn", "svc.get");
+    useResponder.getState().setConfig("conn", "r1", { delayMs: 50 });
+    await useResponder.getState().start("conn", "r1");
+
+    deliver(req());
+    // Stop while the 50ms delay is still pending.
+    await useResponder.getState().stop("conn", "r1");
+
+    await waitFor(() => sess().log.length > 0);
+    expect(publish).not.toHaveBeenCalled();
+    expect(sess().log[0]?.outcome).toMatchObject({ kind: "skipped" });
   });
 
   it("stops listening and unsubscribes", async () => {

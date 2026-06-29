@@ -79,6 +79,10 @@ function defaultConfig(subject: string): ResponderConfig {
 const ERROR_HEADER = "Nats-Service-Error";
 const ERROR_CODE_HEADER = "Nats-Service-Error-Code";
 
+// A render failure keeps its detail in the local log; the wire reply gets a
+// generic message so template/engine internals aren't leaked to requesters.
+const WIRE_RENDER_ERROR = "template render error";
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -162,12 +166,24 @@ async function handleMessage(connId: string, id: string, m: IncomingMessage) {
   const t0 = performance.now();
   const rendered = await render(cfg.template, buildMsgContext(m));
   if (cfg.delayMs > 0) await sleep(cfg.delayMs);
+
+  // stop() (or a stop/start) during the render+delay window tears down the
+  // runtime; a stale reply must not still go out after the user stopped.
+  const live = useResponder.getState().byConn[connId]?.[id];
+  if (!live?.listening || runtimes.get(id) !== rt) {
+    appendLog(connId, id, {
+      ...base,
+      outcome: { kind: "skipped", reason: "stopped before reply" },
+      ms: Math.round(performance.now() - t0),
+    });
+    return;
+  }
   const ms = Math.round(performance.now() - t0);
 
   if (!rendered.ok) {
     try {
       await apiPublish(connId, m.reply, "", [
-        [ERROR_HEADER, rendered.error.slice(0, 200)],
+        [ERROR_HEADER, WIRE_RENDER_ERROR],
         [ERROR_CODE_HEADER, "500"],
       ]);
     } catch {

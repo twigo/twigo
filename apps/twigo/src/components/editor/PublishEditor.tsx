@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Send, Loader2, ArrowLeftRight, Plus, X } from "lucide-react";
 import { Button, Input, Label, CodeViewer } from "@twigo/ui";
 import { decodeText, tryPrettyJson, fmtBytes } from "@twigo/utils";
@@ -40,6 +40,14 @@ export function PublishEditor({
   const [busy, setBusy] = useState<"publish" | "request" | null>(null);
   const [reply, setReply] = useState<Reply | null>(null);
   const [sent, setSent] = useState(false);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (flashTimer.current !== null) clearTimeout(flashTimer.current);
+    },
+    [],
+  );
 
   const canSend =
     live && !readOnly && subject.trim().length > 0 && busy === null;
@@ -60,7 +68,13 @@ export function PublishEditor({
     try {
       await publish(connId, subject.trim(), payload, cleanHeaders());
       setSent(true);
-      setTimeout(() => setSent(false), 1500);
+      // Reset the flash window on overlapping sends; the unmount effect clears
+      // a pending timer so we never setState after the editor closes.
+      if (flashTimer.current !== null) clearTimeout(flashTimer.current);
+      flashTimer.current = setTimeout(() => {
+        flashTimer.current = null;
+        setSent(false);
+      }, 1500);
     } catch (e) {
       setReply({ kind: "error", error: String(e) });
     } finally {

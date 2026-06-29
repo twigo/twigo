@@ -18,7 +18,7 @@ vi.mock("@twigo/ui", async () => {
   };
 });
 
-import { MessageBrowser } from "./MessageBrowser";
+import { MessageBrowser, nextSelectionAfterDelete } from "./MessageBrowser";
 
 function msg(seq: number, body: string) {
   return {
@@ -78,5 +78,22 @@ describe("MessageBrowser", () => {
       '{"id":2}',
       [],
     );
+  });
+});
+
+describe("nextSelectionAfterDelete", () => {
+  // The filtered view the user sees (newest first); seqs 4/2 are hidden.
+  const shown = [{ seq: 5 }, { seq: 3 }, { seq: 1 }];
+
+  it("selects the row that slides into the deleted slot", () => {
+    expect(nextSelectionAfterDelete(shown, 3)).toBe(1);
+  });
+
+  it("falls back to the previous row when deleting the last visible row", () => {
+    expect(nextSelectionAfterDelete(shown, 1)).toBe(3);
+  });
+
+  it("returns null when the filtered view becomes empty", () => {
+    expect(nextSelectionAfterDelete([{ seq: 7 }], 7)).toBe(null);
   });
 });
