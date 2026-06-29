@@ -22,8 +22,15 @@ export const useSubjects = create<SubjectsState>((set) => ({
   byConn: {},
   watching: {},
 
+  // Live watch stats arrive as events, so a late one can land after reset() /
+  // stopWatch() removed the watch; only apply it while a watch is still active,
+  // else it would resurrect a ghost entry for a dead connection.
   update: (conn, stats, truncated) =>
-    set((s) => ({ byConn: { ...s.byConn, [conn]: { stats, truncated } } })),
+    set((s) =>
+      s.watching[conn]
+        ? { byConn: { ...s.byConn, [conn]: { stats, truncated } } }
+        : s,
+    ),
 
   startWatch: async (conn, pattern) => {
     const effective = pattern.trim() || ">";

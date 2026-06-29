@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use base64::Engine;
 use futures_util::StreamExt;
@@ -11,12 +12,22 @@ use tokio::task::AbortHandle;
 use super::connection::ConnState;
 use super::error::{self, Error};
 
+struct Entry {
+    conn_id: String,
+    // Identifies the task in this slot so a task that ends on its own removes
+    // only itself, never a newer re-subscribe that displaced it.
+    token: u64,
+    handle: AbortHandle,
+}
+
 #[derive(Default)]
 pub struct SubState {
-    // sub_id -> (conn_id, task) so a connection's subscriptions can all be
-    // aborted on disconnect (otherwise the task holds the Subscriber alive and
-    // the async-nats event loop never closes the socket).
-    handles: Mutex<HashMap<String, (String, AbortHandle)>>,
+    // sub_id -> task entry so a connection's subscriptions can all be aborted on
+    // disconnect (otherwise the task holds the Subscriber alive and the
+    // async-nats event loop never closes the socket). Arc so a task can clean up
+    // its own slot when it ends naturally.
+    handles: Arc<Mutex<HashMap<String, Entry>>>,
+    next_token: AtomicU64,
 }
 
 #[derive(Serialize, Clone)]
@@ -59,29 +70,41 @@ pub(super) fn flatten_headers(headers: Option<&async_nats::HeaderMap>) -> Vec<(S
 }
 
 fn stop(subs: &SubState, sub_id: &str) {
-    if let Some((_conn, handle)) = subs.handles.lock().unwrap().remove(sub_id) {
-        handle.abort();
+    if let Some(entry) = subs.handles.lock().unwrap().remove(sub_id) {
+        entry.handle.abort();
     }
 }
 
-fn register(subs: &SubState, sub_id: String, conn_id: String, handle: AbortHandle) {
-    if let Some((_conn, displaced)) = subs
-        .handles
-        .lock()
-        .unwrap()
-        .insert(sub_id, (conn_id, handle))
-    {
+fn register(subs: &SubState, sub_id: String, conn_id: String, token: u64, handle: AbortHandle) {
+    if let Some(displaced) = subs.handles.lock().unwrap().insert(
+        sub_id,
+        Entry {
+            conn_id,
+            token,
+            handle,
+        },
+    ) {
         // Concurrent re-subscribes with one sub_id can race past the upfront
         // stop(); an unaborted displaced task would pump duplicates forever.
-        displaced.abort();
+        displaced.handle.abort();
+    }
+}
+
+// Drop a slot when its task ended on its own, but only if it still owns the slot
+// (a re-subscribe may have displaced it) - so a self-ended subscription doesn't
+// leave a dead handle in the map until the next disconnect.
+fn deregister(handles: &Mutex<HashMap<String, Entry>>, sub_id: &str, token: u64) {
+    let mut map = handles.lock().unwrap();
+    if map.get(sub_id).is_some_and(|e| e.token == token) {
+        map.remove(sub_id);
     }
 }
 
 /// Abort every subscription belonging to a connection (used on disconnect).
 pub(crate) fn abort_conn(subs: &SubState, conn_id: &str) {
-    subs.handles.lock().unwrap().retain(|_, (conn, handle)| {
-        if conn == conn_id {
-            handle.abort();
+    subs.handles.lock().unwrap().retain(|_, e| {
+        if e.conn_id == conn_id {
+            e.handle.abort();
             false
         } else {
             true
@@ -106,7 +129,10 @@ pub async fn subscribe(
     stop(&subs, &sub_id);
     let mut sub = client.subscribe(subject.clone()).await?;
 
+    let token = subs.next_token.fetch_add(1, Ordering::Relaxed);
+    let handles = subs.handles.clone();
     let task_subject = subject.clone();
+    let task_sub_id = sub_id.clone();
     let handle = tokio::spawn(async move {
         while let Some(message) = sub.next().await {
             let dto = encode_message(
@@ -122,9 +148,12 @@ pub async fn subscribe(
                 break;
             }
         }
+        // Ended on its own (server closed the sub or the UI channel went away);
+        // drop the now-dead handle instead of leaking it until disconnect.
+        deregister(&handles, &task_sub_id, token);
     });
 
-    register(&subs, sub_id, conn_id.clone(), handle.abort_handle());
+    register(&subs, sub_id, conn_id.clone(), token, handle.abort_handle());
     tracing::info!(conn = %conn_id, %subject, "subscribed");
     Ok(())
 }
@@ -151,9 +180,9 @@ mod tests {
     async fn re_registering_a_sub_id_aborts_the_displaced_task() {
         let subs = SubState::default();
         let first = tokio::spawn(async { std::future::pending::<()>().await });
-        register(&subs, "s".into(), "a".into(), first.abort_handle());
+        register(&subs, "s".into(), "a".into(), 1, first.abort_handle());
         let second = tokio::spawn(async { std::future::pending::<()>().await });
-        register(&subs, "s".into(), "a".into(), second.abort_handle());
+        register(&subs, "s".into(), "a".into(), 2, second.abort_handle());
         assert!(first.await.unwrap_err().is_cancelled());
         assert_eq!(subs.handles.lock().unwrap().len(), 1);
         second.abort();
@@ -162,21 +191,50 @@ mod tests {
     #[tokio::test]
     async fn abort_conn_drops_only_that_connections_subs() {
         let subs = SubState::default();
-        let spawn = || {
-            tokio::spawn(async {
+        let entry = |conn: &str| Entry {
+            conn_id: conn.into(),
+            token: 0,
+            handle: tokio::spawn(async {
                 std::future::pending::<()>().await;
             })
-            .abort_handle()
+            .abort_handle(),
         };
         {
             let mut h = subs.handles.lock().unwrap();
-            h.insert("s1".into(), ("a".into(), spawn()));
-            h.insert("s2".into(), ("a".into(), spawn()));
-            h.insert("s3".into(), ("b".into(), spawn()));
+            h.insert("s1".into(), entry("a"));
+            h.insert("s2".into(), entry("a"));
+            h.insert("s3".into(), entry("b"));
         }
         abort_conn(&subs, "a");
         let h = subs.handles.lock().unwrap();
         assert_eq!(h.len(), 1);
         assert!(h.contains_key("s3"));
+    }
+
+    #[tokio::test]
+    async fn deregister_clears_a_self_ended_task() {
+        let subs = SubState::default();
+        let h = tokio::spawn(async {});
+        let handle = h.abort_handle();
+        h.await.unwrap();
+        register(&subs, "s".into(), "a".into(), 7, handle);
+        deregister(&subs.handles, "s", 7);
+        assert!(subs.handles.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn deregister_keeps_a_newer_re_registration() {
+        let subs = SubState::default();
+        let old = tokio::spawn(async { std::future::pending::<()>().await });
+        register(&subs, "s".into(), "a".into(), 1, old.abort_handle());
+        let new = tokio::spawn(async { std::future::pending::<()>().await });
+        register(&subs, "s".into(), "a".into(), 2, new.abort_handle());
+        // The displaced (old) task ends late and tries to clean up: must no-op.
+        deregister(&subs.handles, "s", 1);
+        let h = subs.handles.lock().unwrap();
+        assert_eq!(h.len(), 1);
+        assert_eq!(h.get("s").unwrap().token, 2);
+        drop(h);
+        new.abort();
     }
 }
