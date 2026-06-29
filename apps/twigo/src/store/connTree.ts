@@ -47,6 +47,12 @@ export function createConnTreeStore<P, C>(
     childrenLoading: {},
   };
 
+  // Per-conn generation, bumped on reset(). An async load captures the epoch
+  // before awaiting and drops its write-back if reset() ran meanwhile - so a
+  // disconnect mid-load can't resurrect a ghost entry for a dead connection.
+  const epochs = new Map<string, number>();
+  const epochOf = (connId: string) => epochs.get(connId) ?? 0;
+
   const store = create<ConnTreeStore<P, C>>((set, get) => {
     const patch = (
       connId: string,
@@ -64,10 +70,13 @@ export function createConnTreeStore<P, C>(
 
       load: async (connId) => {
         patch(connId, (s) => ({ ...s, status: "loading", error: null }));
+        const epoch = epochOf(connId);
         try {
           const parents = await cfg.loadParents(connId);
+          if (epochOf(connId) !== epoch) return; // reset() ran mid-load
           patch(connId, (s) => ({ ...s, parents, status: "ready" }));
         } catch (e) {
+          if (epochOf(connId) !== epoch) return;
           patch(connId, (s) => ({ ...s, status: "error", error: String(e) }));
         }
       },
@@ -89,14 +98,17 @@ export function createConnTreeStore<P, C>(
           ...s,
           childrenLoading: { ...s.childrenLoading, [key]: true },
         }));
+        const epoch = epochOf(connId);
         try {
           const children = await cfg.loadChildren(connId, key);
+          if (epochOf(connId) !== epoch) return; // reset() ran mid-load
           patch(connId, (s) => ({
             ...s,
             children: { ...s.children, [key]: children },
             childrenLoading: { ...s.childrenLoading, [key]: false },
           }));
         } catch (e) {
+          if (epochOf(connId) !== epoch) return;
           patch(connId, (s) => ({
             ...s,
             childrenLoading: { ...s.childrenLoading, [key]: false },
@@ -112,11 +124,13 @@ export function createConnTreeStore<P, C>(
 
       collapseAll: (connId) => patch(connId, (s) => ({ ...s, expanded: {} })),
 
-      reset: (connId) =>
+      reset: (connId) => {
+        epochs.set(connId, epochOf(connId) + 1); // invalidate in-flight loads
         set((state) => {
           const { [connId]: _drop, ...byConn } = state.byConn;
           return { byConn };
-        }),
+        });
+      },
     };
   });
 

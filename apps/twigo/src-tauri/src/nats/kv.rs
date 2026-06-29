@@ -13,6 +13,17 @@ use super::jetstream::{fmt_time, js_err, storage_str};
 // base64-encoded and rendered whole. `size` stays the true byte length.
 const MAX_KV_PAYLOAD: usize = 1024 * 1024;
 
+// A failed optimistic update is almost always a CAS conflict (someone wrote a
+// newer revision). Map that to a typed `conflict` error so the UI can offer the
+// reload-and-retry flow instead of regex-matching the message.
+fn kv_update_err(e: async_nats::jetstream::kv::UpdateError) -> Error {
+    use async_nats::jetstream::kv::UpdateErrorKind;
+    match e.kind() {
+        UpdateErrorKind::WrongLastRevision => Error::Conflict(e.to_string()),
+        _ => Error::JetStream(e.to_string()),
+    }
+}
+
 fn op_str(op: &Operation) -> String {
     match op {
         Operation::Put => "put",
@@ -286,7 +297,10 @@ pub async fn kv_put(
         .decode(payload_b64.as_bytes())
         .map_err(js_err)?;
     let rev = match revision {
-        Some(r) => kv.update(&key, val.into(), r).await.map_err(js_err)?,
+        Some(r) => kv
+            .update(&key, val.into(), r)
+            .await
+            .map_err(kv_update_err)?,
         None => kv.put(&key, val.into()).await.map_err(js_err)?,
     };
     Ok(PutResult { revision: rev })

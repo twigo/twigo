@@ -28,7 +28,7 @@ import {
   tryPrettyJson,
   toHex,
 } from "@twigo/utils";
-import { kvPut, kvDelete, kvPurge } from "@/lib/api";
+import { kvPut, kvDelete, kvPurge, ipcError } from "@/lib/api";
 import { useKvEntry, useKvBucketInfo, useKvHistory } from "@/hooks/useKvDetail";
 import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import { useKv } from "@/store/kv";
@@ -119,11 +119,11 @@ export function KvEntryDetailPanel({
       });
       doRefresh();
     } catch (e) {
-      const msg = String(e);
-      if (/wrong last sequence|revision|expected/i.test(msg)) {
+      // CAS conflict is a typed kind now - no message-string matching.
+      if (ipcError(e).kind === "conflict") {
         setConflict(true);
       } else {
-        useToasts.getState().push("error", `Save failed: ${msg}`);
+        useToasts.getState().push("error", `Save failed: ${String(e)}`);
       }
     }
   };

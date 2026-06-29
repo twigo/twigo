@@ -24,6 +24,12 @@ pub enum Error {
     #[error("jetstream error: {0}")]
     JetStream(String),
 
+    #[error("conflict: {0}")]
+    Conflict(String),
+
+    #[error("operation timed out: {0}")]
+    Timeout(String),
+
     #[error("monitoring unavailable: {0}")]
     Monitoring(String),
 
@@ -57,6 +63,8 @@ impl Error {
             Error::Credentials(_) => "credentials",
             Error::Task(_) => "task",
             Error::JetStream(_) => "jetstream",
+            Error::Conflict(_) => "conflict",
+            Error::Timeout(_) => "timeout",
             Error::Monitoring(_) => "monitoring",
             Error::Connect(_) => "connect",
             Error::Subscribe(_) => "subscribe",
@@ -95,5 +103,7 @@ mod tests {
     fn kind_is_stable_per_variant() {
         assert_eq!(Error::Credentials("x".into()).kind(), "credentials");
         assert_eq!(Error::ContextNotFound("x".into()).kind(), "contextNotFound");
+        assert_eq!(Error::Conflict("x".into()).kind(), "conflict");
+        assert_eq!(Error::Timeout("x".into()).kind(), "timeout");
     }
 }

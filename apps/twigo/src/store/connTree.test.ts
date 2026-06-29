@@ -100,4 +100,31 @@ describe("createConnTreeStore", () => {
     useTree.getState().reset("dev");
     expect(useTree.getState().byConn.dev).toBeUndefined();
   });
+
+  it("a load that resolves after reset() does not resurrect a ghost entry", async () => {
+    let release!: (v: Node[]) => void;
+    const useTree = tree(
+      () => new Promise<Node[]>((r) => (release = r)),
+      () => Promise.resolve([]),
+    );
+    const pending = useTree.getState().load("dev"); // awaits loadParents
+    useTree.getState().reset("dev"); // disconnect mid-load
+    release([{ id: "p1" }]); // load resolves afterward
+    await pending;
+    // The stale write-back is dropped - no ghost state for the dead connection.
+    expect(useTree.getState().byConn.dev).toBeUndefined();
+  });
+
+  it("children loaded after reset() are dropped too", async () => {
+    let release!: (v: Node[]) => void;
+    const useTree = tree(
+      () => Promise.resolve([{ id: "p1" }]),
+      () => new Promise<Node[]>((r) => (release = r)),
+    );
+    const pending = useTree.getState().refreshChildren("dev", "p1");
+    useTree.getState().reset("dev");
+    release([{ id: "c1" }]);
+    await pending;
+    expect(useTree.getState().byConn.dev).toBeUndefined();
+  });
 });
