@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { encodeText } from "@twigo/utils";
-import type { IncomingMessage } from "@/lib/api";
+import type { IncomingMessage, MessageBatch } from "@/lib/api";
 
 const { subscribe, unsubscribe, publish } = vi.hoisted(() => ({
   subscribe: vi.fn(),
@@ -10,7 +10,7 @@ const { subscribe, unsubscribe, publish } = vi.hoisted(() => ({
 
 vi.mock("@/lib/api", () => {
   class FakeChannel {
-    onmessage: ((m: IncomingMessage) => void) | null = null;
+    onmessage: ((b: MessageBatch) => void) | null = null;
   }
   return { Channel: FakeChannel, subscribe, unsubscribe, publish };
 });
@@ -47,8 +47,7 @@ async function waitFor(pred: () => boolean, ms = 1000) {
 function deliver(msg: IncomingMessage) {
   const calls = subscribe.mock.calls;
   const channel = calls[calls.length - 1]?.[3] as {
-    onmessage:
-      ((b: { messages: IncomingMessage[]; dropped: number }) => void) | null;
+    onmessage: ((b: MessageBatch) => void) | null;
   };
   channel.onmessage?.({ messages: [msg], dropped: 0 });
 }
