@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronRight, Radio, Send, Webhook } from "lucide-react";
 import {
@@ -14,6 +15,18 @@ import { useFlash } from "@/hooks/useFlash";
 import { openPublish, openResponder } from "@/lib/editor";
 
 const ROW_H = 24;
+
+// Subjects with a live stream tab on this connection. Pure so the parent can
+// subscribe once (with shallow equality) instead of every row scanning the
+// session map on every flush.
+export function activeSubjects(
+  sessions: Record<string, { connId: string; subject: string }>,
+  connId: string,
+): string[] {
+  return Object.values(sessions)
+    .filter((s) => s.connId === connId)
+    .map((s) => s.subject);
+}
 
 interface Row {
   node: SubjectNode;
@@ -53,6 +66,13 @@ export function SubjectTree({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
 
+  // One subscription for the whole tree, recomputed only when the active set
+  // actually changes - rows then read membership from a stable Set prop.
+  const active = useStream(
+    useShallow((s) => activeSubjects(s.sessions, connId)),
+  );
+  const activeSet = useMemo(() => new Set(active), [active]);
+
   const rows = useMemo(() => flatten(nodes, collapsed), [nodes, collapsed]);
 
   const virtualizer = useVirtualizer({
@@ -87,6 +107,7 @@ export function SubjectTree({
               node={row.node}
               depth={row.depth}
               connId={connId}
+              active={activeSet}
               open={!collapsed.has(row.node.path)}
               onToggle={() => toggle(row.node.path)}
               onSelect={onSelect}
@@ -106,6 +127,7 @@ function SubjectRow({
   node,
   depth,
   connId,
+  active,
   open,
   onToggle,
   onSelect,
@@ -114,6 +136,7 @@ function SubjectRow({
   node: SubjectNode;
   depth: number;
   connId: string;
+  active: Set<string>;
   open: boolean;
   onToggle: () => void;
   onSelect: (subject: string) => void;
@@ -121,11 +144,7 @@ function SubjectRow({
 }) {
   const hasChildren = node.children.length > 0;
   const subject = hasChildren ? `${node.path}.>` : node.path;
-  const isActive = useStream((s) =>
-    Object.values(s.sessions).some(
-      (x) => x.connId === connId && x.subject === subject,
-    ),
-  );
+  const isActive = active.has(subject);
   const flash = useFlash(node.rate);
 
   return (
