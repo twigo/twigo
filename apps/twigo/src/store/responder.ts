@@ -50,10 +50,14 @@ export interface ResponderSession {
 
 interface Runtime {
   channel: Channel<IncomingMessage>;
-  seq: number;
 }
 
 const runtimes = new Map<string, Runtime>();
+
+// Session-global, monotonic log-entry id. A per-runtime counter resets to 0 on
+// each start(), which (with the log not cleared) made new ids collide with old
+// ones and duplicated React keys after stop -> start.
+let nextLogId = 0;
 
 const DEFAULT_TEMPLATE = `{
   "ok": true,
@@ -128,8 +132,7 @@ async function handleMessage(connId: string, id: string, m: IncomingMessage) {
   const rt = runtimes.get(id);
   if (!session || !session.listening || !rt) return;
 
-  rt.seq += 1;
-  const entryId = rt.seq;
+  const entryId = ++nextLogId;
   const cfg = session.config;
   patch(connId, id, (s) => ({ ...s, lastRequest: m }));
   const base: Omit<ResponderLog, "outcome" | "ms"> = {
@@ -249,7 +252,7 @@ export const useResponder = create<ResponderState>()(
         channel.onmessage = (m) => {
           void handleMessage(connId, id, m);
         };
-        runtimes.set(id, { channel, seq: 0 });
+        runtimes.set(id, { channel });
         patch(connId, id, (s) => ({ ...s, subId, listening: true }));
 
         try {

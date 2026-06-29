@@ -70,7 +70,7 @@ pub async fn start_subject_watch(
     let client = conns
         .client(&conn_id)
         .await
-        .ok_or_else(|| Error::ContextNotFound(conn_id.clone()))?;
+        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let pattern = pattern
         .filter(|p| !p.trim().is_empty())
         .unwrap_or_else(|| ">".to_string());

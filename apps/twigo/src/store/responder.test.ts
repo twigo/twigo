@@ -135,4 +135,25 @@ describe("responder store", () => {
     expect(unsubscribe).toHaveBeenCalledWith("responder::r1");
     expect(sess().listening).toBe(false);
   });
+
+  it("keeps log ids unique across a stop/restart (no key collision)", async () => {
+    render.mockResolvedValue({ ok: true, output: "PONG" });
+    useResponder.getState().ensure("r1", "conn", "svc.get");
+
+    await useResponder.getState().start("conn", "r1");
+    deliver(req());
+    await waitFor(() => sess().log.length === 1);
+    const firstId = sess().log[0]?.id;
+
+    await useResponder.getState().stop("conn", "r1");
+    await useResponder.getState().start("conn", "r1");
+    deliver(req());
+    await waitFor(() => sess().log.length === 2);
+
+    // The log isn't cleared on restart, so the new entry must get a fresh id.
+    const ids = sess().log.map((e) => e.id);
+    expect(new Set(ids).size).toBe(2);
+    expect(ids).not.toContain(undefined);
+    expect(firstId).toBeDefined();
+  });
 });

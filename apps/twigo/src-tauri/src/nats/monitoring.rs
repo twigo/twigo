@@ -18,10 +18,23 @@ fn mon_err<E: std::fmt::Display>(e: E) -> Error {
 // {server,data} envelope) and single-server. Used when a context opts in with a
 // monitoring_url - the path for connections that aren't system-account logins.
 async fn http_get<T: serde::de::DeserializeOwned>(base: &str, path: &str) -> error::Result<T> {
+    // The base is a frontend-supplied URL, so guard the SSRF surface: only
+    // http(s) (no file://, etc.). The legit target is often a private/localhost
+    // monitoring port, so don't block private ranges - just refuse redirects so a
+    // crafted URL can't bounce the request somewhere it otherwise couldn't reach.
+    let parsed = reqwest::Url::parse(base)
+        .map_err(|e| Error::Monitoring(format!("invalid monitoring URL: {e}")))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(Error::Monitoring(format!(
+            "monitoring URL must be http or https (got {})",
+            parsed.scheme()
+        )));
+    }
     let url = format!("{}/{}", base.trim_end_matches('/'), path);
     // Bound the request so a hung :8222 endpoint can't stall the poll forever.
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| Error::Monitoring(format!("monitoring client init failed: {e}")))?;
     let resp = client
@@ -297,6 +310,25 @@ pub struct ConnzConn {
     last_activity: String,
 }
 
+// The connz sort options NATS accepts. The frontend value is checked against
+// this before it reaches the HTTP query string (no injection) or the $SYS body.
+const CONNZ_SORTS: &[&str] = &[
+    "cid",
+    "start",
+    "subs",
+    "pending",
+    "msgs_to",
+    "msgs_from",
+    "bytes_to",
+    "bytes_from",
+    "last",
+    "idle",
+    "uptime",
+    "stop",
+    "reason",
+    "rtt",
+];
+
 // Connz request options become the request body; the server sorts & paginates.
 #[derive(Serialize)]
 struct ConnzReq<'a> {
@@ -314,6 +346,13 @@ pub async fn monitor_connz(
     offset: u32,
     monitoring_url: Option<String>,
 ) -> error::Result<Connz> {
+    // Reject an unknown sort (falls back to the server default) so it can't be
+    // smuggled into the HTTP query string.
+    let sort = if CONNZ_SORTS.contains(&sort.as_str()) {
+        sort
+    } else {
+        "cid".to_string()
+    };
     if let Some(url) = monitoring_url {
         return http_get(
             &url,
