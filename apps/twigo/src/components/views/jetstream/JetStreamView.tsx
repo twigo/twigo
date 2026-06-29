@@ -70,7 +70,7 @@ export function JetStreamView({ filter, connId }: ViewProps) {
     : streams;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between gap-2 px-2 pb-1.5">
         <span className="text-[11px] text-muted-foreground">
           {streams.length} {streams.length === 1 ? "stream" : "streams"}
