@@ -9,6 +9,21 @@ import { messageMatches } from "@/lib/messageFilter";
 import { MessageTable } from "./MessageTable";
 import { DetailPanel } from "./DetailPanel";
 
+export function computeUnread(
+  atBottom: boolean,
+  filterActive: boolean,
+  filteredItems: { id: number }[],
+  allLastId: number,
+  lastSeenId: number,
+): number {
+  if (atBottom) return 0;
+  // With a filter on, ids are non-contiguous, so a delta would also count the
+  // hidden messages; count only the filtered rows newer than what was seen.
+  if (filterActive)
+    return filteredItems.filter((m) => m.id > lastSeenId).length;
+  return Math.max(0, allLastId - lastSeenId);
+}
+
 export function MessageStream({ streamId }: { streamId: string }) {
   const session = useStream((s) => s.sessions[streamId]);
   const detailOpen = useUi((s) => s.detailOpen);
@@ -36,8 +51,17 @@ export function MessageStream({ streamId }: { streamId: string }) {
   const items = f
     ? allItems.filter((m) => messageMatches(m.subject, m.preview, filter))
     : allItems;
-  const lastId = (items.length ? items[items.length - 1] : undefined)?.id ?? 0;
-  const unread = atBottom ? 0 : Math.max(0, lastId - lastSeenId);
+  // Track the tail against the full stream so lastSeenId and the unread count
+  // live in the same id space whether or not a filter is active.
+  const lastId =
+    (allItems.length ? allItems[allItems.length - 1] : undefined)?.id ?? 0;
+  const unread = computeUnread(
+    atBottom,
+    f.length > 0,
+    items,
+    lastId,
+    lastSeenId,
+  );
 
   // Follow the tail while pinned to the bottom.
   useLayoutEffect(() => {

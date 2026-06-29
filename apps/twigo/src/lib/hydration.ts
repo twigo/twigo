@@ -3,6 +3,8 @@ import { useUi } from "@/store/ui";
 import { useSettings } from "@/store/settings";
 import { useWorkspace } from "@/store/workspace";
 import { useResponder } from "@/store/responder";
+import { useReadOnly } from "@/store/readonly";
+import { useMonitorConfig } from "@/store/monitorConfig";
 
 interface Hydratable {
   persist: {
@@ -11,7 +13,17 @@ interface Hydratable {
   };
 }
 
-const STORES: Hydratable[] = [useUi, useSettings, useWorkspace, useResponder];
+// useReadOnly gates writes, so it must load before the first interaction (else a
+// locked connection looks writable for a microtask at launch); useMonitorConfig
+// likewise so a saved monitoring URL isn't briefly treated as missing.
+const STORES: Hydratable[] = [
+  useUi,
+  useSettings,
+  useWorkspace,
+  useResponder,
+  useReadOnly,
+  useMonitorConfig,
+];
 
 /**
  * True once every persisted store has loaded from disk. With the async Tauri

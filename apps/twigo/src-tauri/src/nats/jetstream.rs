@@ -1,7 +1,7 @@
 use async_nats::jetstream::consumer::AckPolicy;
-use async_nats::jetstream::stream::{RetentionPolicy, StorageType};
+use async_nats::jetstream::stream::{RawMessageErrorKind, RetentionPolicy, StorageType};
 use base64::Engine;
-use futures_util::TryStreamExt;
+use futures_util::{StreamExt, TryStreamExt};
 use serde::Serialize;
 use tauri::State;
 use time::format_description::well_known::Rfc3339;
@@ -267,6 +267,45 @@ pub struct MessagePage {
     next_seq: Option<u64>,
 }
 
+// Fetch this many sequences concurrently per page; a sequential per-seq walk is
+// a latency-bound N+1 stall on a remote server (e.g. demo.nats.io).
+const GET_CONCURRENCY: usize = 32;
+
+// Sequences to scan for one page, in walk order, capped at `max_scan` and the
+// stream's [first, last] bounds. Pure, so the paging edges stay unit-testable.
+fn candidate_seqs(first: u64, last: u64, start: u64, max_scan: u64, backward: bool) -> Vec<u64> {
+    if last == 0 || first > last || max_scan == 0 {
+        return Vec::new();
+    }
+    let mut seq = start.clamp(first, last);
+    let mut seqs = Vec::new();
+    while (seqs.len() as u64) < max_scan {
+        seqs.push(seq);
+        if backward {
+            if seq <= first {
+                break;
+            }
+            seq -= 1;
+        } else {
+            if seq >= last {
+                break;
+            }
+            seq += 1;
+        }
+    }
+    seqs
+}
+
+// The cursor to resume browsing from after consuming up to `consumed_last`, or
+// None once the walk has reached the stream edge.
+fn next_cursor(consumed_last: u64, first: u64, last: u64, backward: bool) -> Option<u64> {
+    if backward {
+        (consumed_last > first).then(|| consumed_last - 1)
+    } else {
+        (consumed_last < last).then(|| consumed_last + 1)
+    }
+}
+
 /// Non-destructive message browse: walks sequences via get_raw_message (never
 /// creates a consumer, never advances any ack floor), skipping deleted gaps.
 #[tauri::command]
@@ -295,49 +334,51 @@ pub async fn js_get_messages(
     }
 
     let limit = limit.clamp(1, 500) as usize;
-    let max_scan = (limit as u32).saturating_mul(4).saturating_add(50);
-    let mut seq = start
+    let max_scan = (limit as u64).saturating_mul(4).saturating_add(50);
+    let start = start
         .unwrap_or(if backward { last } else { first })
         .clamp(first, last);
 
-    let mut messages = Vec::new();
-    let mut scanned = 0u32;
-    let next_seq = loop {
-        if messages.len() >= limit || scanned >= max_scan {
-            break Some(seq);
-        }
-        if (backward && seq < first) || (!backward && seq > last) {
-            break None;
-        }
-        scanned += 1;
-        // StreamMessage is an unnameable type, so build the DTO inline.
-        if let Ok(raw) = handle.get_raw_message(seq).await {
-            let truncated = raw.payload.len() > MAX_BROWSE_PAYLOAD;
-            let bytes = if truncated {
-                &raw.payload[..MAX_BROWSE_PAYLOAD]
-            } else {
-                &raw.payload[..]
-            };
-            messages.push(StoredMessage {
-                seq: raw.sequence,
-                subject: raw.subject.to_string(),
-                time: fmt_time(raw.time),
-                size: raw.payload.len(),
-                payload_b64: base64::engine::general_purpose::STANDARD.encode(bytes),
-                headers: super::subscription::flatten_headers(Some(&raw.headers)),
-                truncated,
-            });
-        }
-        if backward {
-            if seq == 0 {
-                break None;
-            }
-            seq -= 1;
-        } else {
-            seq += 1;
-        }
-    };
+    let candidates = candidate_seqs(first, last, start, max_scan, backward);
+    let handle = &handle;
+    let mut fetches = futures_util::stream::iter(candidates)
+        .map(|seq| async move { (seq, handle.get_raw_message(seq).await) })
+        .buffered(GET_CONCURRENCY);
 
+    let mut messages = Vec::with_capacity(limit);
+    let mut consumed_last = start;
+    while let Some((seq, result)) = fetches.next().await {
+        consumed_last = seq;
+        match result {
+            // StreamMessage is an unnameable type, so build the DTO inline.
+            Ok(raw) => {
+                let truncated = raw.payload.len() > MAX_BROWSE_PAYLOAD;
+                let bytes = if truncated {
+                    &raw.payload[..MAX_BROWSE_PAYLOAD]
+                } else {
+                    &raw.payload[..]
+                };
+                messages.push(StoredMessage {
+                    seq: raw.sequence,
+                    subject: raw.subject.to_string(),
+                    time: fmt_time(raw.time),
+                    size: raw.payload.len(),
+                    payload_b64: base64::engine::general_purpose::STANDARD.encode(bytes),
+                    headers: super::subscription::flatten_headers(Some(&raw.headers)),
+                    truncated,
+                });
+                if messages.len() >= limit {
+                    break;
+                }
+            }
+            // A deleted/purged sequence is an expected gap - keep walking.
+            Err(e) if matches!(e.kind(), RawMessageErrorKind::NoMessageFound) => {}
+            // A real fetch failure must surface, not be silently skipped.
+            Err(e) => return Err(js_err(e)),
+        }
+    }
+
+    let next_seq = next_cursor(consumed_last, first, last, backward);
     Ok(MessagePage { messages, next_seq })
 }
 
@@ -528,5 +569,37 @@ mod tests {
         assert_eq!(retention_str(&RetentionPolicy::Interest), "interest");
         assert_eq!(ack_policy_str(&AckPolicy::Explicit), "explicit");
         assert_eq!(ack_policy_str(&AckPolicy::None), "none");
+    }
+
+    #[test]
+    fn candidate_seqs_walks_to_the_stream_edge() {
+        assert_eq!(candidate_seqs(1, 10, 8, 100, false), vec![8, 9, 10]);
+        assert_eq!(candidate_seqs(3, 10, 5, 100, true), vec![5, 4, 3]);
+    }
+
+    #[test]
+    fn candidate_seqs_is_bounded_by_max_scan() {
+        assert_eq!(candidate_seqs(1, 100, 1, 3, false), vec![1, 2, 3]);
+        assert_eq!(candidate_seqs(1, 100, 10, 3, true), vec![10, 9, 8]);
+    }
+
+    #[test]
+    fn candidate_seqs_clamps_start_into_range() {
+        assert_eq!(candidate_seqs(5, 8, 1, 100, false), vec![5, 6, 7, 8]);
+        assert_eq!(candidate_seqs(5, 8, 99, 100, true), vec![8, 7, 6, 5]);
+    }
+
+    #[test]
+    fn candidate_seqs_empty_on_empty_stream_or_zero_scan() {
+        assert!(candidate_seqs(0, 0, 0, 10, false).is_empty());
+        assert!(candidate_seqs(1, 10, 5, 0, false).is_empty());
+    }
+
+    #[test]
+    fn next_cursor_stops_at_the_edge() {
+        assert_eq!(next_cursor(5, 1, 10, false), Some(6));
+        assert_eq!(next_cursor(10, 1, 10, false), None);
+        assert_eq!(next_cursor(5, 1, 10, true), Some(4));
+        assert_eq!(next_cursor(1, 1, 10, true), None);
     }
 }

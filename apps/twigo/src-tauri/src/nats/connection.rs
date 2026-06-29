@@ -334,10 +334,6 @@ pub async fn connect(
     let client = opts.connect(url.clone()).await?;
     let info = build_conn_info(name.clone(), &client).await;
 
-    // Reconnecting the same name: tear down the previous connection's tasks so
-    // the old client/socket closes instead of leaking behind the new one.
-    abort_conn(&subs, &name);
-    subjects::stop(&watch, &name);
     tracing::info!(
         conn = %name,
         url = %url,
@@ -345,7 +341,16 @@ pub async fn connect(
         connected = info.connected,
         "connect"
     );
-    state.clients.lock().await.insert(name, client);
+    // Reconnecting the same name: tear down the previous connection's tasks so
+    // the old client/socket closes instead of leaking behind the new one. Hold
+    // the clients lock across teardown + insert so a concurrent reconnect of the
+    // same name can't interleave the two and leave a half-swapped connection.
+    {
+        let mut clients = state.clients.lock().await;
+        abort_conn(&subs, &name);
+        subjects::stop(&watch, &name);
+        clients.insert(name, client);
+    }
     Ok(info)
 }
 

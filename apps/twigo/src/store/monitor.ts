@@ -51,6 +51,12 @@ interface MonitorStore {
 }
 
 export const useMonitor = create<MonitorStore>((set, get) => {
+  // Per-conn generation, bumped on reset(). A poll captures the epoch before
+  // awaiting and drops its write-back if reset() (disconnect) ran meanwhile -
+  // so a poll in flight at disconnect can't resurrect a ghost dead connection.
+  const epochs = new Map<string, number>();
+  const epochOf = (connId: string) => epochs.get(connId) ?? 0;
+
   const patch = (
     connId: string,
     fn: (s: MonitorConnState) => MonitorConnState,
@@ -69,12 +75,14 @@ export const useMonitor = create<MonitorStore>((set, get) => {
       if (cur.status === "unavailable") return;
       if (cur.status === "idle")
         patch(connId, (s) => ({ ...s, status: "loading" }));
+      const epoch = epochOf(connId);
       try {
         const varz = await monitorVarz(connId, monitoringUrl);
         const jsz = await monitorJsz(connId, monitoringUrl).catch(() => null);
         const healthz = await monitorHealthz(connId, monitoringUrl).catch(
           () => null,
         );
+        if (epochOf(connId) !== epoch) return; // reset() ran mid-poll
         const sample: Sample = {
           t: Date.now(),
           inMsgs: varz.inMsgs,
@@ -95,6 +103,7 @@ export const useMonitor = create<MonitorStore>((set, get) => {
           samples: [...s.samples, sample].slice(-MAX_SAMPLES),
         }));
       } catch (e) {
+        if (epochOf(connId) !== epoch) return; // reset() ran mid-poll
         const msg = String(e);
         // No $SYS responders = the connection isn't a system-account login.
         const unavailable = /system-account|\$SYS|no responders/i.test(msg);
@@ -106,11 +115,13 @@ export const useMonitor = create<MonitorStore>((set, get) => {
       }
     },
 
-    reset: (connId) =>
+    reset: (connId) => {
+      epochs.set(connId, epochOf(connId) + 1); // invalidate in-flight polls
       set((state) => {
         const { [connId]: _drop, ...byConn } = state.byConn;
         return { byConn };
-      }),
+      });
+    },
   };
 });
 

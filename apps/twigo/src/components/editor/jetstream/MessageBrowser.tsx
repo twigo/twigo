@@ -20,6 +20,18 @@ import { FormatToggle, type PayloadFormat } from "../FormatToggle";
 
 const PAGE = 25;
 
+// After deleting a row, keep the selection inside the *filtered* view the user
+// actually sees: prefer the row that slid into the deleted slot, else the
+// previous one. (Indexing the unfiltered list here selected a hidden row.)
+export function nextSelectionAfterDelete(
+  shown: { seq: number }[],
+  deletedSeq: number,
+): number | null {
+  const idx = shown.findIndex((m) => m.seq === deletedSeq);
+  const rest = shown.filter((m) => m.seq !== deletedSeq);
+  return rest[idx]?.seq ?? rest[idx - 1]?.seq ?? null;
+}
+
 // Non-destructive message browse (direct-get only - never creates a consumer,
 // never advances an ack floor). Walks newest → older.
 export function MessageBrowser({
@@ -72,11 +84,9 @@ export function MessageBrowser({
   const doDelete = async (seq: number) => {
     try {
       await jsDeleteMessage(connId, stream, seq);
-      const idx = messages.findIndex((m) => m.seq === seq);
-      const next = messages.filter((m) => m.seq !== seq);
-      setMessages(next);
-      // Keep a selection: the row that took the deleted slot, else the previous.
-      setSelectedSeq(next[idx]?.seq ?? next[idx - 1]?.seq ?? null);
+      const nextSelected = nextSelectionAfterDelete(shown, seq);
+      setMessages((prev) => prev.filter((m) => m.seq !== seq));
+      setSelectedSeq(nextSelected);
       useToasts.getState().push("success", `Deleted message #${String(seq)}`);
       void useJetStream.getState().load(connId);
     } catch (e) {

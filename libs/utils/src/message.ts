@@ -31,8 +31,17 @@ export function encodeText(text: string): string {
 
 /** Single-line, truncated preview of a payload for the message table. */
 export function decodePreview(payloadB64: string, max = 200): string {
-  const text = decodeText(payloadB64).replace(/\s+/g, " ").trim();
-  return text.length > max ? `${text.slice(0, max)}…` : text;
+  // Only decode a bounded base64 head, not a multi-MB payload, for a short
+  // preview. base64 packs 3 bytes per 4 chars; (max + 1) * 4 bytes yields more
+  // than `max` chars even for all-4-byte UTF-8. Slice to a multiple of 4 so
+  // atob sees whole groups; a cut trailing char decodes to U+FFFD we drop.
+  const headLen = Math.ceil(((max + 1) * 4) / 3) * 4;
+  const truncated = payloadB64.length > headLen;
+  const head = truncated ? payloadB64.slice(0, headLen) : payloadB64;
+  let text = decodeText(head).replace(/\s+/g, " ").trim();
+  if (truncated) text = text.replace(/�+$/, "");
+  if (text.length > max) return `${text.slice(0, max)}…`;
+  return truncated ? `${text}…` : text;
 }
 
 /** Pretty-print the payload as JSON, or null if it isn't valid JSON. */
