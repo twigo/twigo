@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ChevronRight,
   Database,
@@ -8,7 +9,7 @@ import {
   Trash2,
   Plus,
 } from "lucide-react";
-import { cn, ScrollArea } from "@twigo/ui";
+import { cn } from "@twigo/ui";
 import {
   fmtBytes,
   fmtCount,
@@ -24,6 +25,8 @@ import { openKvEntry } from "@/lib/editor";
 import { CreateKeyDialog } from "@/components/editor/kv/CreateKeyDialog";
 import { ConfirmDialog } from "@/components/editor/jetstream/ConfirmDialog";
 import type { KvBucketSummary, KvEntrySummary } from "@/lib/api";
+
+const ROW_H = 26;
 
 type Row =
   | { kind: "bucket"; bucket: KvBucketSummary }
@@ -110,6 +113,18 @@ export function KvTree({
 
   const sel = Math.min(selected, rows.length - 1);
 
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollEl,
+    estimateSize: () => ROW_H,
+    overscan: 12,
+  });
+  // Keep the keyboard-selected row in view (rows unmount when scrolled off).
+  useEffect(() => {
+    if (sel >= 0) virtualizer.scrollToIndex(sel);
+  }, [sel, virtualizer]);
+
   const toggleNode = (bucket: string, path: string) =>
     setOpenNodes((prev) => {
       const next = new Set(prev);
@@ -159,22 +174,31 @@ export function KvTree({
 
   return (
     <>
-      <ScrollArea className="min-h-0 flex-1">
+      <div ref={setScrollEl} className="min-h-0 flex-1 overflow-y-auto">
         <ul
           role="tree"
           tabIndex={0}
           onKeyDown={onKeyDown}
-          className="py-0.5 outline-none"
+          className="relative w-full py-0.5 outline-none"
+          style={{ height: virtualizer.getTotalSize() }}
         >
-          {rows.map((row, i) =>
-            row.kind === "bucket" ? (
+          {virtualizer.getVirtualItems().map((v) => {
+            const row = rows[v.index];
+            if (!row) return null;
+            const i = v.index;
+            const style: React.CSSProperties = {
+              height: v.size,
+              transform: `translateY(${v.start.toString()}px)`,
+            };
+            return row.kind === "bucket" ? (
               <BucketRow
-                key={`b:${row.bucket.bucket}`}
+                key={v.key}
                 bucket={row.bucket}
                 selected={i === sel}
                 expanded={!!expanded[row.bucket.bucket]}
                 loading={!!loading[row.bucket.bucket]}
                 readOnly={readOnly}
+                style={style}
                 onSelect={() => setSelected(i)}
                 onToggle={() => void toggleBucket(connId, row.bucket.bucket)}
                 onNewKey={() => setNewKeyBucket(row.bucket.bucket)}
@@ -182,20 +206,21 @@ export function KvTree({
               />
             ) : (
               <NodeRow
-                key={`n:${row.bucket}:${row.node.path}`}
+                key={v.key}
                 row={row}
                 selected={i === sel}
                 open={openNodes.has(nodeId(row.bucket, row.node.path))}
+                style={style}
                 onSelect={() => setSelected(i)}
                 onToggle={() => toggleNode(row.bucket, row.node.path)}
                 onOpen={() => {
                   if (row.entry) openKvEntry(connId, row.bucket, row.node.path);
                 }}
               />
-            ),
-          )}
+            );
+          })}
         </ul>
-      </ScrollArea>
+      </div>
 
       {newKeyBucket && (
         <CreateKeyDialog
@@ -227,6 +252,7 @@ function BucketRow({
   expanded,
   loading,
   readOnly,
+  style,
   onSelect,
   onToggle,
   onNewKey,
@@ -237,6 +263,7 @@ function BucketRow({
   expanded: boolean;
   loading: boolean;
   readOnly: boolean;
+  style: React.CSSProperties;
   onSelect: () => void;
   onToggle: () => void;
   onNewKey: () => void;
@@ -249,64 +276,72 @@ function BucketRow({
       aria-expanded={expanded}
       onClick={onSelect}
       onDoubleClick={onToggle}
-      className={cn(
-        "group relative mx-1.5 rounded-md flex cursor-pointer items-center gap-1 py-1 pl-2 pr-2 text-xs",
-        selected ? "bg-selected" : "hover:bg-row-hover",
-      )}
+      className="absolute left-0 top-0 w-full"
+      style={style}
     >
-      <button
-        type="button"
-        aria-label={expanded ? "Collapse" : "Expand"}
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggle();
-        }}
-        className="flex size-4 shrink-0 items-center justify-center text-muted-foreground"
-      >
-        {loading ? (
-          <Loader2 className="size-3 animate-spin" />
-        ) : (
-          <ChevronRight
-            className={cn(
-              "size-3 transition-transform",
-              expanded && "rotate-90",
-            )}
-          />
+      <div
+        className={cn(
+          "group relative mx-1.5 flex h-full cursor-pointer items-center gap-1 rounded-md pl-2 pr-2 text-xs",
+          selected ? "bg-selected" : "hover:bg-row-hover",
         )}
-      </button>
-      <Database className="size-3 shrink-0 text-brand" />
-      <span className="min-w-0 flex-1 truncate font-mono">{bucket.bucket}</span>
-      <span className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100">
+      >
         <button
           type="button"
-          aria-label="New key"
-          title={readOnly ? "Connection is read-only" : "New key"}
-          disabled={readOnly}
+          aria-label={expanded ? "Collapse" : "Expand"}
           onClick={(e) => {
             e.stopPropagation();
-            onNewKey();
+            onToggle();
           }}
-          className="text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex size-4 shrink-0 items-center justify-center text-muted-foreground"
         >
-          <Plus className="size-3" />
+          {loading ? (
+            <Loader2 className="size-3 animate-spin" />
+          ) : (
+            <ChevronRight
+              className={cn(
+                "size-3 transition-transform",
+                expanded && "rotate-90",
+              )}
+            />
+          )}
         </button>
-        <button
-          type="button"
-          aria-label="Delete bucket"
-          title={readOnly ? "Connection is read-only" : "Delete bucket"}
-          disabled={readOnly}
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-          className="text-muted-foreground hover:text-error disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <Trash2 className="size-3" />
-        </button>
-      </span>
-      <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
-        {fmtCount(bucket.values)} · {fmtBytes(bucket.bytes)} · {bucket.storage}
-      </span>
+        <Database className="size-3 shrink-0 text-brand" />
+        <span className="min-w-0 flex-1 truncate font-mono">
+          {bucket.bucket}
+        </span>
+        <span className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100">
+          <button
+            type="button"
+            aria-label="New key"
+            title={readOnly ? "Connection is read-only" : "New key"}
+            disabled={readOnly}
+            onClick={(e) => {
+              e.stopPropagation();
+              onNewKey();
+            }}
+            className="text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Plus className="size-3" />
+          </button>
+          <button
+            type="button"
+            aria-label="Delete bucket"
+            title={readOnly ? "Connection is read-only" : "Delete bucket"}
+            disabled={readOnly}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="text-muted-foreground hover:text-error disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Trash2 className="size-3" />
+          </button>
+        </span>
+        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+          {fmtCount(bucket.values)} · {fmtBytes(bucket.bytes)} ·{" "}
+          {bucket.storage}
+        </span>
+      </div>
     </li>
   );
 }
@@ -315,6 +350,7 @@ function NodeRow({
   row,
   selected,
   open,
+  style,
   onSelect,
   onToggle,
   onOpen,
@@ -322,6 +358,7 @@ function NodeRow({
   row: Extract<Row, { kind: "node" }>;
   selected: boolean;
   open: boolean;
+  style: React.CSSProperties;
   onSelect: () => void;
   onToggle: () => void;
   onOpen: () => void;
@@ -335,47 +372,52 @@ function NodeRow({
       aria-selected={selected}
       onClick={onSelect}
       onDoubleClick={onOpen}
-      style={{ paddingLeft: `${String(row.depth * 0.85 + 0.5)}rem` }}
-      className={cn(
-        "group relative mx-1.5 rounded-md flex cursor-pointer items-center gap-1 py-1 pr-2 text-xs",
-        selected ? "bg-selected" : "hover:bg-row-hover",
-      )}
+      className="absolute left-0 top-0 w-full"
+      style={style}
     >
-      {isFolder ? (
-        <button
-          type="button"
-          aria-label={open ? "Collapse" : "Expand"}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggle();
-          }}
-          className="flex size-4 shrink-0 items-center justify-center text-muted-foreground"
-        >
-          <ChevronRight
-            className={cn("size-3 transition-transform", open && "rotate-90")}
-          />
-        </button>
-      ) : (
-        <span className="size-4 shrink-0" />
-      )}
-      {isKey ? (
-        <Key className="size-3 shrink-0 text-muted-foreground" />
-      ) : (
-        <Folder className="size-3 shrink-0 text-muted-foreground" />
-      )}
-      <span className="min-w-0 flex-1 truncate font-mono">
-        {row.node.token}
-      </span>
-      {deleted && <Trash2 className="size-3 shrink-0 text-warn" />}
-      {isKey && row.entry ? (
-        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
-          r{row.entry.revision} · {fmtBytes(row.entry.size)}
+      <div
+        className={cn(
+          "group relative mx-1.5 flex h-full cursor-pointer items-center gap-1 rounded-md pr-2 text-xs",
+          selected ? "bg-selected" : "hover:bg-row-hover",
+        )}
+        style={{ paddingLeft: `${String(row.depth * 0.85 + 0.5)}rem` }}
+      >
+        {isFolder ? (
+          <button
+            type="button"
+            aria-label={open ? "Collapse" : "Expand"}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggle();
+            }}
+            className="flex size-4 shrink-0 items-center justify-center text-muted-foreground"
+          >
+            <ChevronRight
+              className={cn("size-3 transition-transform", open && "rotate-90")}
+            />
+          </button>
+        ) : (
+          <span className="size-4 shrink-0" />
+        )}
+        {isKey ? (
+          <Key className="size-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <Folder className="size-3 shrink-0 text-muted-foreground" />
+        )}
+        <span className="min-w-0 flex-1 truncate font-mono">
+          {row.node.token}
         </span>
-      ) : (
-        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
-          {fmtCount(row.node.count)}
-        </span>
-      )}
+        {deleted && <Trash2 className="size-3 shrink-0 text-warn" />}
+        {isKey && row.entry ? (
+          <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+            r{row.entry.revision} · {fmtBytes(row.entry.size)}
+          </span>
+        ) : (
+          <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+            {fmtCount(row.node.count)}
+          </span>
+        )}
+      </div>
     </li>
   );
 }
