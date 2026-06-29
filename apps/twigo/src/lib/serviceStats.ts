@@ -1,4 +1,4 @@
-import type { ServiceStats } from "@/lib/api";
+import type { ServiceStats, ServiceInfo } from "@/lib/api";
 
 export interface ServiceAggregate {
   requests: number;
@@ -69,6 +69,42 @@ export function sortServices(
       return key === "name" ? byName * sign : byName;
     })
     .map((r) => r.s);
+}
+
+// A per-endpoint view that merges runtime stats with its definition (subject /
+// queue group / metadata from INFO, requests / errors / timing from STATS).
+export interface MergedEndpoint {
+  name: string;
+  subject: string;
+  queueGroup: string;
+  metadata: Record<string, string>;
+  numRequests: number;
+  numErrors: number;
+  processingTime: number;
+  averageProcessingTime: number;
+  lastError: string;
+}
+
+export function mergeEndpoints(
+  stats: ServiceStats,
+  info?: ServiceInfo,
+): MergedEndpoint[] {
+  const byName = new Map((info?.endpoints ?? []).map((e) => [e.name, e]));
+  return stats.endpoints.map((e) => {
+    const i = byName.get(e.name);
+    return {
+      name: e.name,
+      // Empty string falls through to the INFO value (so not `??`).
+      subject: e.subject !== "" ? e.subject : (i?.subject ?? ""),
+      queueGroup: e.queueGroup !== "" ? e.queueGroup : (i?.queueGroup ?? ""),
+      metadata: i?.metadata ?? {},
+      numRequests: e.numRequests,
+      numErrors: e.numErrors,
+      processingTime: e.processingTime,
+      averageProcessingTime: e.averageProcessingTime,
+      lastError: e.lastError,
+    };
+  });
 }
 
 // Match a service against a free-text filter by name, id, or any endpoint subject.

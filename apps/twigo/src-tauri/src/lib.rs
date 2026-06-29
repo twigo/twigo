@@ -45,6 +45,7 @@ pub fn run() {
             nats::publish::publish,
             nats::publish::request,
             nats::service::service_stats,
+            nats::service::service_info,
             nats::jetstream::js_list_streams,
             nats::jetstream::js_stream_detail,
             nats::jetstream::js_list_consumers,

@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import type { ServiceStats } from "@/lib/api";
-import { aggregate, sortServices, matchesServiceFilter } from "./serviceStats";
+import type { ServiceInfo } from "@/lib/api";
+import {
+  aggregate,
+  sortServices,
+  matchesServiceFilter,
+  mergeEndpoints,
+} from "./serviceStats";
 
 function svc(over: Partial<ServiceStats> = {}): ServiceStats {
   return {
@@ -78,6 +84,42 @@ describe("sortServices", () => {
       "1",
       "2",
     ]);
+  });
+});
+
+describe("mergeEndpoints", () => {
+  it("joins stats with info by endpoint name, info filling metadata/queue", () => {
+    const stats = svc({
+      endpoints: [
+        endpoint({ name: "add", subject: "calc.add", numRequests: 7 }),
+      ],
+    });
+    const info: ServiceInfo = {
+      name: "svc",
+      id: "id",
+      version: "1.0.0",
+      description: "d",
+      metadata: {},
+      endpoints: [
+        {
+          name: "add",
+          subject: "calc.add",
+          queueGroup: "q",
+          metadata: { k: "v" },
+        },
+      ],
+    };
+    const [m] = mergeEndpoints(stats, info);
+    expect(m?.numRequests).toBe(7);
+    expect(m?.queueGroup).toBe("q");
+    expect(m?.metadata).toEqual({ k: "v" });
+  });
+
+  it("works with no info (stats-only)", () => {
+    const stats = svc({ endpoints: [endpoint({ name: "x", subject: "a.x" })] });
+    const [m] = mergeEndpoints(stats, undefined);
+    expect(m?.subject).toBe("a.x");
+    expect(m?.metadata).toEqual({});
   });
 });
 

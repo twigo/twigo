@@ -851,3 +851,26 @@ export interface ServiceStats {
 export function serviceStats(connId: string): Promise<ServiceStats[]> {
   return call<ServiceStats[]>("service_stats", { connId });
 }
+
+export interface ServiceEndpointInfo {
+  name: string;
+  subject: string;
+  queueGroup: string;
+  metadata: Record<string, string>;
+}
+
+// A service instance's definition (description + metadata that STATS omits).
+export interface ServiceInfo {
+  name: string;
+  id: string;
+  version: string;
+  description: string;
+  metadata: Record<string, string>;
+  endpoints: ServiceEndpointInfo[];
+}
+
+// Service definitions via a $SRV.INFO scatter-gather; pair with serviceStats by
+// (name, id) for a full instance detail.
+export function serviceInfo(connId: string): Promise<ServiceInfo[]> {
+  return call<ServiceInfo[]>("service_info", { connId });
+}
