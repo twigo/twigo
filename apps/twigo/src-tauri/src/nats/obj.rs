@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use async_nats::jetstream::stream::StorageType;
-use futures_util::TryStreamExt;
+use futures_util::{StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
@@ -25,6 +25,9 @@ struct StagedUpload {
     name: String,
     path: PathBuf,
 }
+
+// Concurrency for per-bucket get_stream round-trips when listing object stores.
+const BUCKET_CONCURRENCY: usize = 32;
 
 async fn store(
     conns: &State<'_, ConnState>,
@@ -101,18 +104,23 @@ pub async fn obj_list_buckets(
         }
     }
 
-    let mut out = Vec::new();
-    for bucket in buckets {
-        let Ok(handle) = js.get_stream(format!("OBJ_{bucket}")).await else {
-            continue;
-        };
-        let info = handle.cached_info();
-        out.push(ObjBucketSummary {
-            bucket,
-            bytes: info.state.bytes,
-            storage: storage_str(&info.config.storage),
-        });
-    }
+    // Concurrent per-bucket get_stream so a server with many object stores
+    // (e.g. demo.nats.io) isn't a sequential N+1 stall.
+    let js = &js;
+    let mut out: Vec<ObjBucketSummary> = futures_util::stream::iter(buckets)
+        .map(|bucket| async move {
+            let handle = js.get_stream(format!("OBJ_{bucket}")).await.ok()?;
+            let info = handle.cached_info();
+            Some(ObjBucketSummary {
+                bucket,
+                bytes: info.state.bytes,
+                storage: storage_str(&info.config.storage),
+            })
+        })
+        .buffer_unordered(BUCKET_CONCURRENCY)
+        .filter_map(|x| async move { x })
+        .collect()
+        .await;
     out.sort_by(|a, b| a.bucket.cmp(&b.bucket));
     Ok(out)
 }
