@@ -49,6 +49,7 @@ function seed(
         following: true,
         selectedId,
         received: items.length,
+        dropped: 0,
       },
     },
     activeId: STREAM,

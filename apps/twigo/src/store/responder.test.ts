@@ -47,9 +47,10 @@ async function waitFor(pred: () => boolean, ms = 1000) {
 function deliver(msg: IncomingMessage) {
   const calls = subscribe.mock.calls;
   const channel = calls[calls.length - 1]?.[3] as {
-    onmessage: ((m: IncomingMessage) => void) | null;
+    onmessage:
+      ((b: { messages: IncomingMessage[]; dropped: number }) => void) | null;
   };
-  channel.onmessage?.(msg);
+  channel.onmessage?.({ messages: [msg], dropped: 0 });
 }
 
 function sess(id = "r1", connId = "conn") {
@@ -84,6 +85,7 @@ describe("responder store", () => {
       "responder::r1",
       "svc.get",
       expect.anything(),
+      null,
     );
 
     deliver(req());

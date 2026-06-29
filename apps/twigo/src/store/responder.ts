@@ -6,6 +6,7 @@ import {
   unsubscribe as apiUnsubscribe,
   publish as apiPublish,
   type IncomingMessage,
+  type MessageBatch,
 } from "@/lib/api";
 import { decodePreview } from "@twigo/utils";
 import { render, buildMsgContext, warmUp } from "@/lib/template";
@@ -49,7 +50,7 @@ export interface ResponderSession {
 }
 
 interface Runtime {
-  channel: Channel<IncomingMessage>;
+  channel: Channel<MessageBatch>;
 }
 
 const runtimes = new Map<string, Runtime>();
@@ -264,15 +265,17 @@ export const useResponder = create<ResponderState>()(
 
         warmUp();
         const subId = `responder::${id}`;
-        const channel = new Channel<IncomingMessage>();
-        channel.onmessage = (m) => {
-          void handleMessage(connId, id, m);
+        const channel = new Channel<MessageBatch>();
+        // Responders reply per request - keep immediate (no coalescing) so reply
+        // latency isn't padded by a batching window.
+        channel.onmessage = (batch) => {
+          for (const m of batch.messages) void handleMessage(connId, id, m);
         };
         runtimes.set(id, { channel });
         patch(connId, id, (s) => ({ ...s, subId, listening: true }));
 
         try {
-          await apiSubscribe(connId, subId, subject, channel);
+          await apiSubscribe(connId, subId, subject, channel, null);
         } catch (e) {
           runtimes.delete(id);
           patch(connId, id, (s) => ({ ...s, subId: null, listening: false }));

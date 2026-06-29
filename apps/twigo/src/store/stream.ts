@@ -3,13 +3,16 @@ import {
   Channel,
   subscribe as apiSubscribe,
   unsubscribe as apiUnsubscribe,
-  type IncomingMessage,
+  type MessageBatch,
 } from "@/lib/api";
 import { decodePreview, type StreamMessage } from "@twigo/utils";
 
 const CAP = 2000;
 const HARD_CAP = 50000;
+// Frontend render-batch interval (commit buffered rows to the store). The
+// backend additionally coalesces IPC sends over COALESCE_MS.
 const FLUSH_MS = 100;
+const COALESCE_MS = 100;
 
 export interface StreamSession {
   id: string;
@@ -24,13 +27,17 @@ export interface StreamSession {
   // a capped window (CAP while following), so this is how the user learns the
   // true volume - and that it keeps climbing while paused.
   received: number;
+  // Messages the backend shed under a flood (bounded coalescing); surfaced so
+  // the user knows a busy stream was sampled rather than fully delivered.
+  dropped: number;
 }
 
 interface Runtime {
-  channel: Channel<IncomingMessage>;
+  channel: Channel<MessageBatch>;
   buffer: StreamMessage[];
   timer: ReturnType<typeof setInterval>;
   seq: number;
+  dropped: number;
 }
 
 // Per-session runtime kept outside the store: channels, batching buffers and
@@ -71,7 +78,7 @@ function flush(id: string) {
     // so a long pause on a busy subject can't grow memory without limit. Still
     // surface the running total so the user sees the stream is live upstream.
     if (rt.buffer.length > HARD_CAP) rt.buffer = rt.buffer.slice(-HARD_CAP);
-    patch(id, (s) => ({ ...s, received: rt.seq }));
+    patch(id, (s) => ({ ...s, received: rt.seq, dropped: rt.dropped }));
     return;
   }
   const batch = rt.buffer;
@@ -83,6 +90,7 @@ function flush(id: string) {
     ...s,
     items: [...s.items, ...batch].slice(-cap),
     received: rt.seq,
+    dropped: rt.dropped,
   }));
 }
 
@@ -92,26 +100,29 @@ export const useStream = create<StreamState>((set, get) => ({
 
   open: async (id, connId, subject) => {
     const subId = `${id}::${connId}::${subject}`;
-    const channel = new Channel<IncomingMessage>();
-    channel.onmessage = (m) => {
+    const channel = new Channel<MessageBatch>();
+    channel.onmessage = (batch) => {
       const rt = runtimes.get(id);
       if (!rt) return;
-      rt.seq += 1;
-      rt.buffer.push({
-        id: rt.seq,
-        receivedAt: Date.now(),
-        subject: m.subject,
-        reply: m.reply,
-        payloadB64: m.payloadB64,
-        headers: m.headers,
-        size: m.size,
-        preview: decodePreview(m.payloadB64),
-      });
+      for (const m of batch.messages) {
+        rt.seq += 1;
+        rt.buffer.push({
+          id: rt.seq,
+          receivedAt: Date.now(),
+          subject: m.subject,
+          reply: m.reply,
+          payloadB64: m.payloadB64,
+          headers: m.headers,
+          size: m.size,
+          preview: decodePreview(m.payloadB64),
+        });
+      }
+      rt.dropped += batch.dropped;
     };
     const timer = setInterval(() => {
       flush(id);
     }, FLUSH_MS);
-    runtimes.set(id, { channel, buffer: [], timer, seq: 0 });
+    runtimes.set(id, { channel, buffer: [], timer, seq: 0, dropped: 0 });
     set((state) => ({
       sessions: {
         ...state.sessions,
@@ -125,13 +136,14 @@ export const useStream = create<StreamState>((set, get) => ({
           following: true,
           selectedId: null,
           received: 0,
+          dropped: 0,
         },
       },
       activeId: id,
     }));
 
     try {
-      await apiSubscribe(connId, subId, subject, channel);
+      await apiSubscribe(connId, subId, subject, channel, COALESCE_MS);
     } catch (e) {
       clearInterval(timer);
       runtimes.delete(id);
