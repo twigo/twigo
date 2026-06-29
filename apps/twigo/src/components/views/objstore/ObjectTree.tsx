@@ -1,5 +1,4 @@
 import { useMemo, useRef, useState } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronRight, Box, File, Loader2, Trash2, Upload } from "lucide-react";
 import { cn } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
@@ -14,13 +13,12 @@ import { useToasts } from "@/store/toasts";
 import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import { openObjectEntry } from "@/lib/editor";
 import { ConfirmDialog } from "@/components/editor/jetstream/ConfirmDialog";
+import { VirtualTree } from "@/components/views/VirtualTree";
 import type { ObjBucketSummary, ObjSummary } from "@/lib/api";
 
 type Row =
   | { kind: "bucket"; bucket: ObjBucketSummary }
   | { kind: "object"; bucket: string; object: ObjSummary };
-
-const ROW_H = 26;
 
 export function ObjectTree({
   connId,
@@ -35,7 +33,6 @@ export function ObjectTree({
   const toggleBucket = useObjStore((s) => s.toggle);
   const readOnly = useIsReadOnly(connId);
 
-  const [selected, setSelected] = useState(0);
   const [delBucket, setDelBucket] = useState<string | null>(null);
   const [uploadingBucket, setUploadingBucket] = useState<string | null>(null);
   const [pendingUpload, setPendingUpload] = useState<{
@@ -103,99 +100,50 @@ export function ObjectTree({
     return out;
   }, [buckets, expanded, objectsByBucket]);
 
-  const sel = Math.min(selected, rows.length - 1);
-
-  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
-  const virtualizer = useVirtualizer({
-    count: rows.length,
-    getScrollElement: () => scrollEl,
-    estimateSize: () => ROW_H,
-    overscan: 12,
-  });
-  // Move selection and scroll the target into view (rows unmount when off-screen,
-  // so this must drive the scroll - native scroll is preventDefault'd).
-  const moveTo = (next: number) => {
-    setSelected(next);
-    virtualizer.scrollToIndex(next);
-  };
-
-  const open = (row: Row) => {
+  const activate = (row: Row) => {
     if (row.kind === "bucket") void toggleBucket(connId, row.bucket.bucket);
     else openObjectEntry(connId, row.bucket, row.object.name);
   };
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    const row = rows[sel];
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      moveTo(Math.min(sel + 1, rows.length - 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      moveTo(Math.max(sel - 1, 0));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      if (row) open(row);
-    } else if (e.key === "ArrowRight" && row?.kind === "bucket") {
-      if (!expanded[row.bucket.bucket]) {
-        e.preventDefault();
-        void toggleBucket(connId, row.bucket.bucket);
-      }
-    } else if (e.key === "ArrowLeft" && row?.kind === "bucket") {
-      if (expanded[row.bucket.bucket]) {
-        e.preventDefault();
-        void toggleBucket(connId, row.bucket.bucket);
-      }
-    }
+  // null = not expandable (objects are leaves).
+  const rowExpanded = (row: Row): boolean | null =>
+    row.kind === "bucket" ? !!expanded[row.bucket.bucket] : null;
+  const toggleRow = (row: Row) => {
+    if (row.kind === "bucket") void toggleBucket(connId, row.bucket.bucket);
   };
 
   return (
     <>
-      <div ref={setScrollEl} className="min-h-0 flex-1 overflow-y-auto">
-        <ul
-          role="tree"
-          tabIndex={0}
-          onKeyDown={onKeyDown}
-          className="relative w-full py-0.5 outline-none"
-          style={{ height: virtualizer.getTotalSize() }}
-        >
-          {virtualizer.getVirtualItems().map((v) => {
-            const row = rows[v.index];
-            if (!row) return null;
-            const i = v.index;
-            const style: React.CSSProperties = {
-              height: v.size,
-              transform: `translateY(${v.start.toString()}px)`,
-            };
-            return row.kind === "bucket" ? (
-              <BucketRow
-                key={v.key}
-                bucket={row.bucket}
-                selected={i === sel}
-                expanded={!!expanded[row.bucket.bucket]}
-                loading={!!loading[row.bucket.bucket]}
-                style={style}
-                onSelect={() => setSelected(i)}
-                onToggle={() => void toggleBucket(connId, row.bucket.bucket)}
-                uploading={uploadingBucket === row.bucket.bucket}
-                onUpload={() => void startUpload(row.bucket.bucket)}
-                onDelete={() => setDelBucket(row.bucket.bucket)}
-                readOnly={readOnly}
-              />
-            ) : (
-              <ObjectRow
-                key={v.key}
-                object={row.object}
-                selected={i === sel}
-                style={style}
-                onSelect={() => setSelected(i)}
-                onOpen={() =>
-                  openObjectEntry(connId, row.bucket, row.object.name)
-                }
-              />
-            );
-          })}
-        </ul>
-      </div>
+      <VirtualTree
+        rows={rows}
+        rowKey={(row) =>
+          row.kind === "bucket"
+            ? `b:${row.bucket.bucket}`
+            : `o:${row.bucket}:${row.object.name}`
+        }
+        nav={{
+          onActivate: activate,
+          expanded: rowExpanded,
+          onExpand: toggleRow,
+          onCollapse: toggleRow,
+        }}
+        renderRow={(row, selected) =>
+          row.kind === "bucket" ? (
+            <BucketRow
+              bucket={row.bucket}
+              selected={selected}
+              expanded={!!expanded[row.bucket.bucket]}
+              loading={!!loading[row.bucket.bucket]}
+              uploading={uploadingBucket === row.bucket.bucket}
+              readOnly={readOnly}
+              onToggle={() => void toggleBucket(connId, row.bucket.bucket)}
+              onUpload={() => void startUpload(row.bucket.bucket)}
+              onDelete={() => setDelBucket(row.bucket.bucket)}
+            />
+          ) : (
+            <ObjectRow object={row.object} selected={selected} />
+          )
+        }
+      />
 
       {delBucket && (
         <ConfirmDialog
@@ -240,145 +188,114 @@ function BucketRow({
   expanded,
   loading,
   uploading,
-  style,
-  onSelect,
+  readOnly,
   onToggle,
   onUpload,
   onDelete,
-  readOnly,
 }: {
   bucket: ObjBucketSummary;
   selected: boolean;
   expanded: boolean;
   loading: boolean;
   uploading: boolean;
-  style: React.CSSProperties;
-  onSelect: () => void;
+  readOnly: boolean;
   onToggle: () => void;
   onUpload: () => void;
   onDelete: () => void;
-  readOnly: boolean;
 }) {
   return (
-    <li
-      role="treeitem"
-      aria-selected={selected}
-      aria-expanded={expanded}
-      onClick={onSelect}
-      onDoubleClick={onToggle}
-      className="absolute left-0 top-0 w-full"
-      style={style}
+    <div
+      className={cn(
+        "group relative mx-1.5 flex h-full cursor-pointer items-center gap-1 rounded-md pl-2 pr-2 text-xs",
+        selected ? "bg-selected" : "hover:bg-row-hover",
+      )}
     >
-      <div
+      <button
+        type="button"
+        aria-label={expanded ? "Collapse" : "Expand"}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggle();
+        }}
+        className="flex size-4 shrink-0 items-center justify-center text-muted-foreground"
+      >
+        {loading ? (
+          <Loader2 className="size-3 animate-spin" />
+        ) : (
+          <ChevronRight
+            className={cn(
+              "size-3 transition-transform",
+              expanded && "rotate-90",
+            )}
+          />
+        )}
+      </button>
+      <Box className="size-3 shrink-0 text-brand" />
+      <span className="min-w-0 flex-1 truncate font-mono">{bucket.bucket}</span>
+      <span
         className={cn(
-          "group relative mx-1.5 flex h-full cursor-pointer items-center gap-1 rounded-md pl-2 pr-2 text-xs",
-          selected ? "bg-selected" : "hover:bg-row-hover",
+          "flex shrink-0 items-center gap-0.5",
+          uploading ? "opacity-100" : "opacity-0 group-hover:opacity-100",
         )}
       >
         <button
           type="button"
-          aria-label={expanded ? "Collapse" : "Expand"}
+          aria-label="Upload object"
+          title={readOnly ? "Connection is read-only" : "Upload object"}
+          disabled={uploading || readOnly}
           onClick={(e) => {
             e.stopPropagation();
-            onToggle();
+            onUpload();
           }}
-          className="flex size-4 shrink-0 items-center justify-center text-muted-foreground"
+          className="text-muted-foreground hover:text-foreground"
         >
-          {loading ? (
+          {uploading ? (
             <Loader2 className="size-3 animate-spin" />
           ) : (
-            <ChevronRight
-              className={cn(
-                "size-3 transition-transform",
-                expanded && "rotate-90",
-              )}
-            />
+            <Upload className="size-3" />
           )}
         </button>
-        <Box className="size-3 shrink-0 text-brand" />
-        <span className="min-w-0 flex-1 truncate font-mono">
-          {bucket.bucket}
-        </span>
-        <span
-          className={cn(
-            "flex shrink-0 items-center gap-0.5",
-            uploading ? "opacity-100" : "opacity-0 group-hover:opacity-100",
-          )}
+        <button
+          type="button"
+          aria-label="Delete object store"
+          title={readOnly ? "Connection is read-only" : "Delete object store"}
+          disabled={readOnly}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          className="text-muted-foreground hover:text-error disabled:opacity-50"
         >
-          <button
-            type="button"
-            aria-label="Upload object"
-            title={readOnly ? "Connection is read-only" : "Upload object"}
-            disabled={uploading || readOnly}
-            onClick={(e) => {
-              e.stopPropagation();
-              onUpload();
-            }}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            {uploading ? (
-              <Loader2 className="size-3 animate-spin" />
-            ) : (
-              <Upload className="size-3" />
-            )}
-          </button>
-          <button
-            type="button"
-            aria-label="Delete object store"
-            title={readOnly ? "Connection is read-only" : "Delete object store"}
-            disabled={readOnly}
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-            className="text-muted-foreground hover:text-error disabled:opacity-50"
-          >
-            <Trash2 className="size-3" />
-          </button>
-        </span>
-        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
-          {fmtBytes(bucket.bytes)} · {bucket.storage}
-        </span>
-      </div>
-    </li>
+          <Trash2 className="size-3" />
+        </button>
+      </span>
+      <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+        {fmtBytes(bucket.bytes)} · {bucket.storage}
+      </span>
+    </div>
   );
 }
 
 function ObjectRow({
   object,
   selected,
-  style,
-  onSelect,
-  onOpen,
 }: {
   object: ObjSummary;
   selected: boolean;
-  style: React.CSSProperties;
-  onSelect: () => void;
-  onOpen: () => void;
 }) {
   return (
-    <li
-      role="treeitem"
-      aria-selected={selected}
-      onClick={onSelect}
-      onDoubleClick={onOpen}
-      className="absolute left-0 top-0 w-full"
-      style={style}
+    <div
+      className={cn(
+        "group relative mx-1.5 flex h-full cursor-pointer items-center gap-1.5 rounded-md pl-8 pr-2 text-xs",
+        selected ? "bg-selected" : "hover:bg-row-hover",
+      )}
     >
-      <div
-        className={cn(
-          "group relative mx-1.5 flex h-full cursor-pointer items-center gap-1.5 rounded-md pl-8 pr-2 text-xs",
-          selected ? "bg-selected" : "hover:bg-row-hover",
-        )}
-      >
-        <File className="size-3 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate font-mono">{object.name}</span>
-        {object.deleted && <Trash2 className="size-3 shrink-0 text-warn" />}
-        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
-          {fmtBytes(object.size)} · {fmtCount(object.chunks)} chunks
-        </span>
-      </div>
-    </li>
+      <File className="size-3 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1 truncate font-mono">{object.name}</span>
+      {object.deleted && <Trash2 className="size-3 shrink-0 text-warn" />}
+      <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+        {fmtBytes(object.size)} · {fmtCount(object.chunks)} chunks
+      </span>
+    </div>
   );
 }

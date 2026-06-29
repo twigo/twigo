@@ -1,5 +1,3 @@
-import { useMemo, useState } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ChevronRight,
   Layers,
@@ -8,13 +6,13 @@ import {
   Loader2,
   Pause,
 } from "lucide-react";
+import { useMemo } from "react";
 import { cn } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
 import { useJetStream } from "@/store/jetstream";
 import { openStreamDetail, openConsumerDetail } from "@/lib/editor";
+import { VirtualTree } from "@/components/views/VirtualTree";
 import type { StreamSummary, ConsumerSummary } from "@/lib/api";
-
-const ROW_H = 26;
 
 type Row =
   | { kind: "stream"; stream: StreamSummary }
@@ -32,8 +30,6 @@ export function StreamTree({
   const loading = useJetStream((s) => s.byConn[connId]?.childrenLoading ?? {});
   const toggleStream = useJetStream((s) => s.toggle);
 
-  const [selected, setSelected] = useState(0);
-
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = [];
     for (const stream of streams) {
@@ -47,95 +43,45 @@ export function StreamTree({
     return out;
   }, [streams, expanded, consumers]);
 
-  const sel = Math.min(selected, rows.length - 1);
-
-  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
-  const virtualizer = useVirtualizer({
-    count: rows.length,
-    getScrollElement: () => scrollEl,
-    estimateSize: () => ROW_H,
-    overscan: 12,
-  });
-  // Move selection and scroll the target into view (rows unmount when off-screen,
-  // so this must drive the scroll - native scroll is preventDefault'd).
-  const moveTo = (next: number) => {
-    setSelected(next);
-    virtualizer.scrollToIndex(next);
-  };
-
-  const open = (row: Row) => {
+  const activate = (row: Row) => {
     if (row.kind === "stream") openStreamDetail(connId, row.stream.name);
     else openConsumerDetail(connId, row.stream, row.consumer.name);
   };
-
-  // Keyboard-first: arrows move selection, Enter opens, Right/Left expand/
-  // collapse a stream. Single-click only selects (no RPC), double-click opens.
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    const row = rows[sel];
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      moveTo(Math.min(sel + 1, rows.length - 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      moveTo(Math.max(sel - 1, 0));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      if (row) open(row);
-    } else if (e.key === "ArrowRight" && row?.kind === "stream") {
-      if (!expanded[row.stream.name]) {
-        e.preventDefault();
-        void toggleStream(connId, row.stream.name);
-      }
-    } else if (e.key === "ArrowLeft" && row?.kind === "stream") {
-      if (expanded[row.stream.name]) {
-        e.preventDefault();
-        void toggleStream(connId, row.stream.name);
-      }
-    }
+  // null = not expandable (consumers are leaves).
+  const rowExpanded = (row: Row): boolean | null =>
+    row.kind === "stream" ? !!expanded[row.stream.name] : null;
+  const toggleRow = (row: Row) => {
+    if (row.kind === "stream") void toggleStream(connId, row.stream.name);
   };
 
   return (
-    <div ref={setScrollEl} className="min-h-0 flex-1 overflow-y-auto">
-      <ul
-        role="tree"
-        tabIndex={0}
-        onKeyDown={onKeyDown}
-        className="relative w-full py-0.5 outline-none"
-        style={{ height: virtualizer.getTotalSize() }}
-      >
-        {virtualizer.getVirtualItems().map((v) => {
-          const row = rows[v.index];
-          if (!row) return null;
-          const i = v.index;
-          const style: React.CSSProperties = {
-            height: v.size,
-            transform: `translateY(${v.start.toString()}px)`,
-          };
-          return row.kind === "stream" ? (
-            <StreamRow
-              key={v.key}
-              stream={row.stream}
-              selected={i === sel}
-              expanded={!!expanded[row.stream.name]}
-              loading={!!loading[row.stream.name]}
-              style={style}
-              onSelect={() => setSelected(i)}
-              onToggle={() => void toggleStream(connId, row.stream.name)}
-              onOpen={() => open(row)}
-            />
-          ) : (
-            <ConsumerRow
-              key={v.key}
-              consumer={row.consumer}
-              selected={i === sel}
-              style={style}
-              onSelect={() => setSelected(i)}
-              onOpen={() => open(row)}
-            />
-          );
-        })}
-      </ul>
-    </div>
+    <VirtualTree
+      rows={rows}
+      rowKey={(row) =>
+        row.kind === "stream"
+          ? `s:${row.stream.name}`
+          : `c:${row.stream}:${row.consumer.name}`
+      }
+      nav={{
+        onActivate: activate,
+        expanded: rowExpanded,
+        onExpand: toggleRow,
+        onCollapse: toggleRow,
+      }}
+      renderRow={(row, selected) =>
+        row.kind === "stream" ? (
+          <StreamRow
+            stream={row.stream}
+            selected={selected}
+            expanded={!!expanded[row.stream.name]}
+            loading={!!loading[row.stream.name]}
+            onToggle={() => void toggleStream(connId, row.stream.name)}
+          />
+        ) : (
+          <ConsumerRow consumer={row.consumer} selected={selected} />
+        )
+      }
+    />
   );
 }
 
@@ -144,111 +90,77 @@ function StreamRow({
   selected,
   expanded,
   loading,
-  style,
-  onSelect,
   onToggle,
-  onOpen,
 }: {
   stream: StreamSummary;
   selected: boolean;
   expanded: boolean;
   loading: boolean;
-  style: React.CSSProperties;
-  onSelect: () => void;
   onToggle: () => void;
-  onOpen: () => void;
 }) {
   return (
-    <li
-      role="treeitem"
-      aria-selected={selected}
-      aria-expanded={expanded}
-      onClick={onSelect}
-      onDoubleClick={onOpen}
-      className="absolute left-0 top-0 w-full"
-      style={style}
+    <div
+      className={cn(
+        "group relative mx-1.5 flex h-full cursor-pointer items-center gap-1 rounded-md pl-2 pr-2 text-xs",
+        selected ? "bg-selected" : "hover:bg-row-hover",
+      )}
     >
-      <div
-        className={cn(
-          "group relative mx-1.5 flex h-full cursor-pointer items-center gap-1 rounded-md pl-2 pr-2 text-xs",
-          selected ? "bg-selected" : "hover:bg-row-hover",
-        )}
+      <button
+        type="button"
+        aria-label={expanded ? "Collapse" : "Expand"}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggle();
+        }}
+        className="flex size-4 shrink-0 items-center justify-center text-muted-foreground"
       >
-        <button
-          type="button"
-          aria-label={expanded ? "Collapse" : "Expand"}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggle();
-          }}
-          className="flex size-4 shrink-0 items-center justify-center text-muted-foreground"
-        >
-          {loading ? (
-            <Loader2 className="size-3 animate-spin" />
-          ) : (
-            <ChevronRight
-              className={cn(
-                "size-3 transition-transform",
-                expanded && "rotate-90",
-              )}
-            />
-          )}
-        </button>
-        <Layers className="size-3 shrink-0 text-brand" />
-        <span className="min-w-0 flex-1 truncate font-mono">{stream.name}</span>
-        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
-          {fmtCount(stream.messages)} · {fmtBytes(stream.bytes)} ·{" "}
-          {stream.storage} · {stream.consumerCount}
-        </span>
-      </div>
-    </li>
+        {loading ? (
+          <Loader2 className="size-3 animate-spin" />
+        ) : (
+          <ChevronRight
+            className={cn(
+              "size-3 transition-transform",
+              expanded && "rotate-90",
+            )}
+          />
+        )}
+      </button>
+      <Layers className="size-3 shrink-0 text-brand" />
+      <span className="min-w-0 flex-1 truncate font-mono">{stream.name}</span>
+      <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+        {fmtCount(stream.messages)} · {fmtBytes(stream.bytes)} ·{" "}
+        {stream.storage} · {stream.consumerCount}
+      </span>
+    </div>
   );
 }
 
 function ConsumerRow({
   consumer,
   selected,
-  style,
-  onSelect,
-  onOpen,
 }: {
   consumer: ConsumerSummary;
   selected: boolean;
-  style: React.CSSProperties;
-  onSelect: () => void;
-  onOpen: () => void;
 }) {
   const Icon = consumer.kind === "push" ? Radio : ArrowDownToLine;
   return (
-    <li
-      role="treeitem"
-      aria-selected={selected}
-      onClick={onSelect}
-      onDoubleClick={onOpen}
-      className="absolute left-0 top-0 w-full"
-      style={style}
+    <div
+      className={cn(
+        "group relative mx-1.5 flex h-full cursor-pointer items-center gap-1.5 rounded-md pl-8 pr-2 text-xs",
+        selected ? "bg-selected" : "hover:bg-row-hover",
+      )}
     >
-      <div
+      <Icon className="size-3 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1 truncate font-mono">{consumer.name}</span>
+      {consumer.paused && <Pause className="size-3 shrink-0 text-warn" />}
+      <span
         className={cn(
-          "group relative mx-1.5 flex h-full cursor-pointer items-center gap-1.5 rounded-md pl-8 pr-2 text-xs",
-          selected ? "bg-selected" : "hover:bg-row-hover",
+          "shrink-0 font-mono text-[10px] tabular-nums",
+          consumer.numPending > 0 ? "text-warn" : "text-muted-foreground",
         )}
       >
-        <Icon className="size-3 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate font-mono">
-          {consumer.name}
-        </span>
-        {consumer.paused && <Pause className="size-3 shrink-0 text-warn" />}
-        <span
-          className={cn(
-            "shrink-0 font-mono text-[10px] tabular-nums",
-            consumer.numPending > 0 ? "text-warn" : "text-muted-foreground",
-          )}
-        >
-          {consumer.kind} · {consumer.ackPolicy} ·{" "}
-          {fmtCount(consumer.numPending)}
-        </span>
-      </div>
-    </li>
+        {consumer.kind} · {consumer.ackPolicy} · {fmtCount(consumer.numPending)}
+      </span>
+    </div>
   );
 }
