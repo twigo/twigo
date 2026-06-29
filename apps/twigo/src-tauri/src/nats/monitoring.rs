@@ -19,7 +19,14 @@ fn mon_err<E: std::fmt::Display>(e: E) -> Error {
 // monitoring_url - the path for connections that aren't system-account logins.
 async fn http_get<T: serde::de::DeserializeOwned>(base: &str, path: &str) -> error::Result<T> {
     let url = format!("{}/{}", base.trim_end_matches('/'), path);
-    let resp = reqwest::get(&url)
+    // Bound the request so a hung :8222 endpoint can't stall the poll forever.
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|e| Error::Monitoring(format!("monitoring client init failed: {e}")))?;
+    let resp = client
+        .get(&url)
+        .send()
         .await
         .map_err(|e| Error::Monitoring(format!("monitoring request failed: {e}")))?;
     let status = resp.status();

@@ -47,7 +47,16 @@ pub async fn publish(
         }
         None => client.publish(subject, bytes.into()).await?,
     }
-    client.flush().await?;
+    // The client keeps reconnecting forever (max_reconnects None), so a flush
+    // against a down server would never resolve and hang the command - bound it.
+    match tokio::time::timeout(Duration::from_secs(5), client.flush()).await {
+        Ok(r) => r?,
+        Err(_) => {
+            return Err(Error::Timeout(
+                "publish flush timed out - the connection may be down".into(),
+            ))
+        }
+    }
     tracing::info!(conn = %conn_id, "published");
     Ok(())
 }
