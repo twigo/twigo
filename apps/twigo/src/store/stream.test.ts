@@ -30,7 +30,8 @@ vi.mock("@/lib/api", () => ({
   unsubscribe: mocks.unsubscribe,
 }));
 
-import { useStream } from "./stream";
+import { useStream, capRetained } from "./stream";
+import type { StreamMessage } from "@twigo/utils";
 
 function msg(subject: string, text: string): IncomingMessage {
   return {
@@ -187,5 +188,34 @@ describe("stream store (multi-session)", () => {
     ch?.onmessage(batch(msg("orders.new", "late")));
     vi.advanceTimersByTime(150);
     expect(useStream.getState().sessions.a).toBeUndefined();
+  });
+});
+
+describe("capRetained", () => {
+  const row = (id: number, bytes: number): StreamMessage => ({
+    id,
+    receivedAt: 0,
+    subject: "s",
+    reply: null,
+    payloadB64: "x".repeat(bytes),
+    headers: [],
+    size: bytes,
+    preview: "",
+  });
+
+  it("keeps the newest rows up to the count cap", () => {
+    const items = [row(1, 1), row(2, 1), row(3, 1), row(4, 1)];
+    expect(capRetained(items, 2, 1_000).map((m) => m.id)).toEqual([3, 4]);
+  });
+
+  it("drops older rows once the byte budget is exceeded", () => {
+    // 4 rows of 100 bytes; a 250-byte budget fits only the newest two.
+    const items = [row(1, 100), row(2, 100), row(3, 100), row(4, 100)];
+    expect(capRetained(items, 100, 250).map((m) => m.id)).toEqual([3, 4]);
+  });
+
+  it("always keeps at least the newest row, even if it alone is over budget", () => {
+    const items = [row(1, 10), row(2, 10_000)];
+    expect(capRetained(items, 100, 100).map((m) => m.id)).toEqual([2]);
   });
 });

@@ -13,6 +13,29 @@ const HARD_CAP = 50000;
 // backend additionally coalesces IPC sends over COALESCE_MS.
 const FLUSH_MS = 100;
 const COALESCE_MS = 100;
+// Cap retained payload bytes (base64 length), not just row count: a stream of
+// large messages must not grow memory unbounded even when scrolled up.
+const MAX_RETAINED_BYTES = 64 * 1024 * 1024;
+
+// Keep the newest rows within BOTH a count cap and a byte budget. Always keeps
+// at least the newest row, even if it alone exceeds the budget.
+export function capRetained(
+  items: StreamMessage[],
+  maxCount: number,
+  maxBytes: number,
+): StreamMessage[] {
+  let bytes = 0;
+  let count = 0;
+  let start = items.length;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const next = bytes + (items[i]?.payloadB64.length ?? 0);
+    if (count > 0 && (count >= maxCount || next > maxBytes)) break;
+    bytes = next;
+    count++;
+    start = i;
+  }
+  return start === 0 ? items : items.slice(start);
+}
 
 export interface StreamSession {
   id: string;
@@ -77,18 +100,18 @@ function flush(id: string) {
     // Paused streams keep receiving from the backend; bound the staging buffer
     // so a long pause on a busy subject can't grow memory without limit. Still
     // surface the running total so the user sees the stream is live upstream.
-    if (rt.buffer.length > HARD_CAP) rt.buffer = rt.buffer.slice(-HARD_CAP);
+    rt.buffer = capRetained(rt.buffer, HARD_CAP, MAX_RETAINED_BYTES);
     patch(id, (s) => ({ ...s, received: rt.seq, dropped: rt.dropped }));
     return;
   }
   const batch = rt.buffer;
   rt.buffer = [];
   // Only trim from the top while following the tail; otherwise dropping old
-  // rows would shift the scrolled-up view. Hard cap guards memory.
+  // rows would shift the scrolled-up view. Caps guard memory (count + bytes).
   const cap = session.following ? CAP : HARD_CAP;
   patch(id, (s) => ({
     ...s,
-    items: [...s.items, ...batch].slice(-cap),
+    items: capRetained([...s.items, ...batch], cap, MAX_RETAINED_BYTES),
     received: rt.seq,
     dropped: rt.dropped,
   }));
@@ -188,7 +211,9 @@ export const useStream = create<StreamState>((set, get) => ({
     patch(id, (s) => ({
       ...s,
       following,
-      items: following ? s.items.slice(-CAP) : s.items,
+      items: following
+        ? capRetained(s.items, CAP, MAX_RETAINED_BYTES)
+        : s.items,
     })),
   select: (id, selectedId) => patch(id, (s) => ({ ...s, selectedId })),
   setActive: (activeId) => set({ activeId }),
