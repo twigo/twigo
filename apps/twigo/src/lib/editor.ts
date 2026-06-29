@@ -228,8 +228,7 @@ export function closeEditorsForConn(connId: string) {
     // store teardown above is the authoritative path here.
     for (const panel of listPanels()) {
       const p = panel.params as
-        | { type?: EditorType; connId?: string }
-        | undefined;
+        { type?: EditorType; connId?: string } | undefined;
       if (p?.type && EDITORS[p.type].connScoped && p.connId === connId) {
         closePanel(panel.id);
       }

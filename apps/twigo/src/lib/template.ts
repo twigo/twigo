@@ -53,8 +53,7 @@ export function buildMsgContext(msg: IncomingMessage): MsgContext {
 }
 
 export type RenderResult =
-  | { ok: true; output: string }
-  | { ok: false; error: string };
+  { ok: true; output: string } | { ok: false; error: string };
 
 type Segment = { literal: string } | { expr: string };
 
