@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronRight, Box, File, Loader2, Trash2, Upload } from "lucide-react";
 import { cn } from "@twigo/ui";
@@ -112,10 +112,12 @@ export function ObjectTree({
     estimateSize: () => ROW_H,
     overscan: 12,
   });
-  // Keep the keyboard-selected row in view (rows unmount when scrolled off).
-  useEffect(() => {
-    if (sel >= 0) virtualizer.scrollToIndex(sel);
-  }, [sel, virtualizer]);
+  // Move selection and scroll the target into view (rows unmount when off-screen,
+  // so this must drive the scroll - native scroll is preventDefault'd).
+  const moveTo = (next: number) => {
+    setSelected(next);
+    virtualizer.scrollToIndex(next);
+  };
 
   const open = (row: Row) => {
     if (row.kind === "bucket") void toggleBucket(connId, row.bucket.bucket);
@@ -126,10 +128,10 @@ export function ObjectTree({
     const row = rows[sel];
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setSelected(Math.min(sel + 1, rows.length - 1));
+      moveTo(Math.min(sel + 1, rows.length - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setSelected(Math.max(sel - 1, 0));
+      moveTo(Math.max(sel - 1, 0));
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (row) open(row);
