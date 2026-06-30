@@ -26,6 +26,7 @@ import { ConsumerDetailPanel } from "./jetstream/ConsumerDetailPanel";
 import { KvEntryDetailPanel } from "./kv/KvEntryDetailPanel";
 import { ObjectDetailPanel } from "./objstore/ObjectDetailPanel";
 import { ServerHealthPanel } from "./monitor/ServerHealthPanel";
+import { ServiceDetailPanel } from "./services/ServiceDetailPanel";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 
 export function StreamPanel(props: IDockviewPanelProps) {
@@ -96,6 +97,15 @@ export function ObjectPanel(props: IDockviewPanelProps) {
     name: string;
   };
   return <ObjectDetailPanel connId={connId} bucket={bucket} name={name} />;
+}
+
+export function ServicePanel(props: IDockviewPanelProps) {
+  const { connId, name, id } = props.params as {
+    connId: string;
+    name: string;
+    id: string;
+  };
+  return <ServiceDetailPanel connId={connId} name={name} id={id} />;
 }
 
 export function ServerHealthPanelHost(props: IDockviewPanelProps) {
@@ -255,6 +265,19 @@ export function ServerHealthTab(props: IDockviewPanelHeaderProps) {
   return (
     <ClosableTab
       icon={Activity}
+      title={props.api.title}
+      onClose={() => {
+        props.api.close();
+      }}
+    />
+  );
+}
+
+export function ServiceTab(props: IDockviewPanelHeaderProps) {
+  return (
+    <ClosableTab
+      icon={Server}
+      mono
       title={props.api.title}
       onClose={() => {
         props.api.close();

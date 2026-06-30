@@ -203,6 +203,19 @@ export function closeObjectEntry(connId: string, bucket: string, name: string) {
   closePanel(objEntryEditorId(connId, bucket, name));
 }
 
+function serviceEditorId(connId: string, name: string, id: string): string {
+  return `service:${encodeURIComponent(connId)}:${encodeURIComponent(name)}:${encodeURIComponent(id)}`;
+}
+
+/** Open a micro service instance detail tab, reusing an existing tab. */
+export function openService(connId: string, name: string, id: string) {
+  open("service", {
+    id: serviceEditorId(connId, name, id),
+    title: name,
+    params: { connId, name, id },
+  });
+}
+
 /** Open the wide Server-health tab (connections table) for a connection. */
 export function openServerHealth(connId: string) {
   open("serverhealth", {

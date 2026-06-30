@@ -1,22 +1,18 @@
 import { useEffect, useState } from "react";
-import { RefreshCw, Server, ArrowUp, ArrowDown, X } from "lucide-react";
+import { RefreshCw, Server, ArrowUp, ArrowDown } from "lucide-react";
 import { Button, EmptyState, cn } from "@twigo/ui";
-import { fmtCount, fmtLatency, fmtRelTime, fmtIsoDateTime } from "@twigo/utils";
+import { fmtCount, fmtLatency, fmtRelTime } from "@twigo/utils";
 import { useConnections } from "@/store/connections";
 import { useServices } from "@/store/services";
-import { type ServiceStats, type ServiceInfo } from "@/lib/api";
+import { openService } from "@/lib/editor";
 import {
   aggregate,
   sortServices,
   matchesServiceFilter,
-  mergeEndpoints,
   type ServiceSortKey,
   type SortDir,
 } from "@/lib/serviceStats";
 import type { ViewProps } from "@/shell/views";
-
-const NUL = " ";
-const rowKey = (s: { name: string; id: string }) => `${s.name}${NUL}${s.id}`;
 
 function fmtUptime(started: string): string {
   const ms = Date.parse(started);
@@ -28,7 +24,6 @@ export function ServicesView({ filter, connId }: ViewProps) {
   const data = useServices((s) => (connId ? s.byConn[connId] : undefined));
   const [sortKey, setSortKey] = useState<ServiceSortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const [selected, setSelected] = useState<string | null>(null);
 
   // Discover on first open / connection change; teardown is conn-scoped.
   useEffect(() => {
@@ -45,7 +40,6 @@ export function ServicesView({ filter, connId }: ViewProps) {
 
   const status = data?.status ?? "idle";
   const services = data?.services ?? [];
-  const info = data?.info ?? {};
   const error = data?.error ?? null;
   const discover = () => void useServices.getState().discover(connId);
 
@@ -63,8 +57,6 @@ export function ServicesView({ filter, connId }: ViewProps) {
     sortKey,
     sortDir,
   );
-  const selectedStats =
-    selected !== null ? rows.find((s) => rowKey(s) === selected) : undefined;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -117,100 +109,88 @@ export function ServicesView({ filter, connId }: ViewProps) {
             : `No services match “${filter.trim()}”.`}
         </EmptyState>
       ) : (
-        <>
-          <div className="min-h-0 flex-1 overflow-auto">
-            <table className="w-full text-xs">
-              <thead className="sticky top-0 z-10 bg-background">
-                <tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-                  <Th
-                    label="Service"
-                    col="name"
-                    {...{ sortKey, sortDir, toggleSort }}
-                  />
-                  <th className="px-2 py-1 font-medium">Instance</th>
-                  <Th
-                    label="Uptime"
-                    col="uptime"
-                    align="right"
-                    {...{ sortKey, sortDir, toggleSort }}
-                  />
-                  <Th
-                    label="Requests"
-                    col="requests"
-                    align="right"
-                    {...{ sortKey, sortDir, toggleSort }}
-                  />
-                  <Th
-                    label="Errors"
-                    col="errors"
-                    align="right"
-                    {...{ sortKey, sortDir, toggleSort }}
-                  />
-                  <Th
-                    label="Avg"
-                    col="avg"
-                    align="right"
-                    {...{ sortKey, sortDir, toggleSort }}
-                  />
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((s) => {
-                  const key = rowKey(s);
-                  const a = aggregate(s);
-                  return (
-                    <tr
-                      key={key}
-                      onClick={() =>
-                        setSelected((cur) => (cur === key ? null : key))
-                      }
+        <div className="min-h-0 flex-1 overflow-auto">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 z-10 bg-background">
+              <tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                <Th
+                  label="Service"
+                  col="name"
+                  {...{ sortKey, sortDir, toggleSort }}
+                />
+                <th className="px-2 py-1 font-medium">Instance</th>
+                <Th
+                  label="Uptime"
+                  col="uptime"
+                  align="right"
+                  {...{ sortKey, sortDir, toggleSort }}
+                />
+                <Th
+                  label="Requests"
+                  col="requests"
+                  align="right"
+                  {...{ sortKey, sortDir, toggleSort }}
+                />
+                <Th
+                  label="Errors"
+                  col="errors"
+                  align="right"
+                  {...{ sortKey, sortDir, toggleSort }}
+                />
+                <Th
+                  label="Avg"
+                  col="avg"
+                  align="right"
+                  {...{ sortKey, sortDir, toggleSort }}
+                />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((s) => {
+                const a = aggregate(s);
+                return (
+                  <tr
+                    key={`${s.name} ${s.id}`}
+                    onClick={() => {
+                      openService(connId, s.name, s.id);
+                    }}
+                    title="Open service detail"
+                    className="cursor-pointer border-b border-border/50 hover:bg-row-hover"
+                  >
+                    <td className="px-2 py-1">
+                      <span className="font-mono">{s.name}</span>
+                      {s.version && (
+                        <span className="ml-1.5 text-[10px] text-muted-foreground">
+                          v{s.version}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-2 py-1 font-mono text-[11px] text-muted-foreground">
+                      {s.id}
+                    </td>
+                    <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
+                      {fmtUptime(s.started)}
+                    </td>
+                    <td className="px-2 py-1 text-right tabular-nums">
+                      {fmtCount(a.requests)}
+                    </td>
+                    <td
                       className={cn(
-                        "cursor-pointer border-b border-border/50",
-                        key === selected ? "bg-selected" : "hover:bg-row-hover",
+                        "px-2 py-1 text-right tabular-nums",
+                        a.errors > 0 ? "text-error" : "text-muted-foreground",
                       )}
                     >
-                      <td className="px-2 py-1">
-                        <span className="font-mono">{s.name}</span>
-                        {s.version && (
-                          <span className="ml-1.5 text-[10px] text-muted-foreground">
-                            v{s.version}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-2 py-1 font-mono text-[11px] text-muted-foreground">
-                        {s.id}
-                      </td>
-                      <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
-                        {fmtUptime(s.started)}
-                      </td>
-                      <td className="px-2 py-1 text-right tabular-nums">
-                        {fmtCount(a.requests)}
-                      </td>
-                      <td
-                        className={cn(
-                          "px-2 py-1 text-right tabular-nums",
-                          a.errors > 0 ? "text-error" : "text-muted-foreground",
-                        )}
-                      >
-                        {fmtCount(a.errors)}
-                      </td>
-                      <td className="px-2 py-1 text-right tabular-nums">
-                        {fmtLatency(a.avgProcessingNs)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          {selectedStats && (
-            <ServiceDetail
-              stats={selectedStats}
-              info={info[rowKey(selectedStats)]}
-              onClose={() => setSelected(null)}
-            />
-          )}
-        </>
+                      {fmtCount(a.errors)}
+                    </td>
+                    <td className="px-2 py-1 text-right tabular-nums">
+                      {fmtLatency(a.avgProcessingNs)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -257,131 +237,5 @@ function Th({
           ))}
       </button>
     </th>
-  );
-}
-
-function ServiceDetail({
-  stats,
-  info,
-  onClose,
-}: {
-  stats: ServiceStats;
-  info?: ServiceInfo;
-  onClose: () => void;
-}) {
-  const endpoints = mergeEndpoints(stats, info);
-  const meta = Object.entries(info?.metadata ?? {});
-  const startedMs = Date.parse(stats.started);
-
-  return (
-    <section className="flex max-h-[45%] shrink-0 flex-col border-t border-border bg-panel">
-      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border px-2">
-        <span className="font-mono text-xs">{stats.name}</span>
-        {stats.version && (
-          <span className="text-[10px] text-muted-foreground">
-            v{stats.version}
-          </span>
-        )}
-        <span className="truncate font-mono text-[11px] text-muted-foreground">
-          {stats.id}
-        </span>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="ml-auto"
-          aria-label="Close detail"
-          onClick={onClose}
-        >
-          <X />
-        </Button>
-      </div>
-
-      <div className="min-h-0 flex-1 space-y-2 overflow-auto p-2">
-        {info?.description && (
-          <p className="text-xs text-muted-foreground">{info.description}</p>
-        )}
-        <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-muted-foreground">
-          <span>
-            Started:{" "}
-            <span className="text-foreground">
-              {Number.isNaN(startedMs) ? "-" : fmtIsoDateTime(stats.started)}
-            </span>
-          </span>
-          {!Number.isNaN(startedMs) && (
-            <span>
-              Uptime:{" "}
-              <span className="text-foreground">{fmtRelTime(startedMs)}</span>
-            </span>
-          )}
-        </div>
-
-        {meta.length > 0 && (
-          <div className="rounded-md border border-border">
-            {meta.map(([k, v]) => (
-              <div
-                key={k}
-                className="flex justify-between gap-2 border-b border-border/50 px-2 py-0.5 font-mono text-[11px] last:border-0"
-              >
-                <span className="text-muted-foreground">{k}</span>
-                <span className="truncate">{v}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <table className="w-full text-[11px]">
-          <thead>
-            <tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-              <th className="px-2 py-1 font-medium">Endpoint</th>
-              <th className="px-2 py-1 font-medium">Subject</th>
-              <th className="px-2 py-1 font-medium">Queue</th>
-              <th className="px-2 py-1 text-right font-medium">Req</th>
-              <th className="px-2 py-1 text-right font-medium">Err</th>
-              <th className="px-2 py-1 text-right font-medium">Avg</th>
-            </tr>
-          </thead>
-          <tbody>
-            {endpoints.map((e) => (
-              <tr
-                key={e.name + NUL + e.subject}
-                className="border-b border-border/30"
-              >
-                <td className="px-2 py-1">{e.name}</td>
-                <td className="px-2 py-1 font-mono text-brand">{e.subject}</td>
-                <td className="px-2 py-1 font-mono text-muted-foreground">
-                  {e.queueGroup || "-"}
-                </td>
-                <td className="px-2 py-1 text-right tabular-nums">
-                  {fmtCount(e.numRequests)}
-                </td>
-                <td
-                  className={cn(
-                    "px-2 py-1 text-right tabular-nums",
-                    e.numErrors > 0 ? "text-error" : "text-muted-foreground",
-                  )}
-                >
-                  {fmtCount(e.numErrors)}
-                </td>
-                <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
-                  {fmtLatency(e.averageProcessingTime)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        {endpoints.some((e) => e.lastError) && (
-          <div className="space-y-0.5">
-            {endpoints
-              .filter((e) => e.lastError)
-              .map((e) => (
-                <p key={e.name} className="text-[11px] text-error">
-                  <span className="font-mono">{e.name}</span>: {e.lastError}
-                </p>
-              ))}
-          </div>
-        )}
-      </div>
-    </section>
   );
 }
