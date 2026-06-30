@@ -14,6 +14,7 @@ import {
   JsConsumerPanel,
   KvEntryPanel,
   ObjectPanel,
+  ServicePanel,
   ServerHealthPanelHost,
   StreamTab,
   ServerTab,
@@ -24,6 +25,7 @@ import {
   JsConsumerTab,
   KvEntryTab,
   ObjectTab,
+  ServiceTab,
   ServerHealthTab,
 } from "./panels";
 
@@ -40,6 +42,7 @@ export type EditorType =
   | "jsconsumer"
   | "kventry"
   | "objentry"
+  | "service"
   | "serverhealth";
 
 interface EditorDef {
@@ -77,6 +80,7 @@ export const EDITORS: Record<EditorType, EditorDef> = {
   },
   kventry: { component: KvEntryPanel, tab: KvEntryTab, connScoped: true },
   objentry: { component: ObjectPanel, tab: ObjectTab, connScoped: true },
+  service: { component: ServicePanel, tab: ServiceTab, connScoped: true },
   serverhealth: {
     component: ServerHealthPanelHost,
     tab: ServerHealthTab,

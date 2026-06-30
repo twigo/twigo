@@ -54,6 +54,16 @@ export function fmtCount(n: number): string {
   return n.toString();
 }
 
+// Latency from nanoseconds, where 0 means "none" (not unlimited): 0 → "0",
+// 500 → "500ns", 1_500 → "1.5µs", 2_500_000 → "2.5ms", 3_000_000_000 → "3.0s".
+export function fmtLatency(ns: number): string {
+  if (ns <= 0) return "0";
+  if (ns < 1_000) return `${Math.round(ns).toString()}ns`;
+  if (ns < 1_000_000) return `${(ns / 1_000).toFixed(1)}µs`;
+  if (ns < 1_000_000_000) return `${(ns / 1_000_000).toFixed(1)}ms`;
+  return `${(ns / 1_000_000_000).toFixed(1)}s`;
+}
+
 // Human-readable duration from nanoseconds (0 = unlimited): 0 → "∞",
 // 90_000_000_000 → "2m", 604_800_000_000_000 → "7d".
 export function fmtDuration(ns: number): string {

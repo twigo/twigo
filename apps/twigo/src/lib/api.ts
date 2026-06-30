@@ -824,3 +824,53 @@ export function monitorCluster(
 ): Promise<Varz[]> {
   return call<Varz[]>("monitor_cluster", { connId, monitoringUrl });
 }
+
+export interface ServiceEndpointStats {
+  name: string;
+  subject: string;
+  numRequests: number;
+  numErrors: number;
+  // Nanoseconds.
+  processingTime: number;
+  averageProcessingTime: number;
+  lastError: string;
+  queueGroup: string;
+}
+
+// One running NATS micro service instance, identified by (name, id).
+export interface ServiceStats {
+  name: string;
+  id: string;
+  version: string;
+  started: string;
+  endpoints: ServiceEndpointStats[];
+}
+
+// Discover running micro services via a $SRV.STATS scatter-gather (one reply per
+// instance). Resolves once the collection window closes.
+export function serviceStats(connId: string): Promise<ServiceStats[]> {
+  return call<ServiceStats[]>("service_stats", { connId });
+}
+
+export interface ServiceEndpointInfo {
+  name: string;
+  subject: string;
+  queueGroup: string;
+  metadata: Record<string, string>;
+}
+
+// A service instance's definition (description + metadata that STATS omits).
+export interface ServiceInfo {
+  name: string;
+  id: string;
+  version: string;
+  description: string;
+  metadata: Record<string, string>;
+  endpoints: ServiceEndpointInfo[];
+}
+
+// Service definitions via a $SRV.INFO scatter-gather; pair with serviceStats by
+// (name, id) for a full instance detail.
+export function serviceInfo(connId: string): Promise<ServiceInfo[]> {
+  return call<ServiceInfo[]>("service_info", { connId });
+}

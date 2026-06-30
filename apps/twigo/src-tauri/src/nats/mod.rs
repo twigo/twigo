@@ -6,5 +6,6 @@ pub mod kv;
 pub mod monitoring;
 pub mod obj;
 pub mod publish;
+pub mod service;
 pub mod subjects;
 pub mod subscription;
