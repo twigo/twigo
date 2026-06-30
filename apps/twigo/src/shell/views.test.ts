@@ -49,4 +49,29 @@ describe("view registry", () => {
       expect(getDefaultViewId()).toBe("");
     });
   });
+
+  describe("domain filtering", () => {
+    it("filters by domain, keeping untagged views in every domain", () => {
+      registerView({ id: "n1", title: "N1", icon: Radio, domain: "nats" });
+      registerView({ id: "k1", title: "K1", icon: Radio, domain: "kubernetes" });
+      registerView({ id: "any", title: "Any", icon: Radio });
+      expect(getViews("nats").map((v) => v.id)).toEqual(["n1", "any"]);
+      expect(getViews("kubernetes").map((v) => v.id)).toEqual(["k1", "any"]);
+      expect(getViews().map((v) => v.id)).toEqual(["n1", "k1", "any"]);
+    });
+
+    it("resolves the default view within a domain", () => {
+      registerView({ id: "n1", title: "N1", icon: Radio, domain: "nats" });
+      registerView({
+        id: "k1",
+        title: "K1",
+        icon: Radio,
+        domain: "kubernetes",
+        default: true,
+      });
+      registerView({ id: "k2", title: "K2", icon: Radio, domain: "kubernetes" });
+      expect(getDefaultViewId("nats")).toBe("n1");
+      expect(getDefaultViewId("kubernetes")).toBe("k1");
+    });
+  });
 });

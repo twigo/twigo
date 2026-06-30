@@ -2,12 +2,15 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { registerNatsModule } from "./modules/nats";
+import { registerK8sModule } from "./modules/k8s";
 import { setupAppMenu } from "./shell/menu";
 import "./index.css";
 
-// Wire the NATS domain into the shell registries before the first render so the
-// workbench (views, commands, status bar, watermark) has its contributions.
+// Wire the domains into the shell registries before the first render so the
+// workbench (views, commands, status bar, watermark) has its contributions. The
+// Kubernetes module is a sibling that proves the shell can host a second domain.
 registerNatsModule();
+registerK8sModule();
 // Build the native app menu from the registries (no-op outside Tauri).
 void setupAppMenu();
 

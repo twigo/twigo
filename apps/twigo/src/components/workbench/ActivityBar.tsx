@@ -3,18 +3,26 @@ import { cn } from "@twigo/ui";
 import { useUi } from "@/store/ui";
 import { openSettings } from "@/shell/editorHost";
 import { getViews, getDefaultViewId } from "@/shell/views";
+import { getDefaultDomainId } from "@/shell/domains";
 
 export function ActivityBar() {
-  const { activeView, setView } = useUi();
-  // Empty activeView resolves to the module's default view (see store/ui).
-  const current = activeView || getDefaultViewId();
+  const activeView = useUi((s) => s.activeView);
+  const activeDomain = useUi((s) => s.activeDomain);
+  const setView = useUi((s) => s.setView);
+  const domain = activeDomain || getDefaultDomainId();
+  const views = getViews(domain);
+  // Resolve to the domain's default when the persisted view isn't one of its
+  // own (e.g. just after switching domain).
+  const current = views.some((v) => v.id === activeView)
+    ? activeView
+    : getDefaultViewId(domain);
   return (
     <nav
       aria-label="Primary"
       className="flex h-full w-12 shrink-0 flex-col items-center justify-between border-r border-sidebar-border bg-sidebar py-2"
     >
       <div className="flex flex-col items-center gap-0.5">
-        {getViews().map(({ id, title, icon: Icon }) => {
+        {views.map(({ id, title, icon: Icon }) => {
           const active = current === id;
           return (
             <button

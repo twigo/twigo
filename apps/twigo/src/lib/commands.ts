@@ -156,13 +156,19 @@ export function clearRegisteredCommands(): void {
 export const PALETTE_BINDINGS = ["mod+shift+p", "mod+shift+a", "mod+k"];
 
 // "Go to X" for each registered view. Built at call time because views are
-// registered by domain modules after this module is imported.
+// registered by domain modules after this module is imported. Switching to a
+// view in another domain switches the domain too, so the palette navigates
+// across domains (setDomain clears activeView, so set the domain first).
 function viewCommands(): Command[] {
   return getViews().map((v) => ({
     id: `view.${v.id}`,
     title: `Go to ${v.title}`,
     category: "Go",
-    run: () => useUi.getState().setView(v.id),
+    run: () => {
+      const ui = useUi.getState();
+      if (v.domain) ui.setDomain(v.domain);
+      ui.setView(v.id);
+    },
   }));
 }
 

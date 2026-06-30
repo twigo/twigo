@@ -68,7 +68,9 @@ async function buildAndSetMenu(): Promise<void> {
   const goToViews: MenuItemOptions[] = getViews().map((v) => ({
     text: `Go to ${v.title}`,
     action: () => {
-      useUi.getState().setView(v.id);
+      const ui = useUi.getState();
+      if (v.domain) ui.setDomain(v.domain);
+      ui.setView(v.id);
     },
   }));
 

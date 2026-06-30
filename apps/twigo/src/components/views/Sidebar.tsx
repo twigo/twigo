@@ -3,24 +3,35 @@ import { Search } from "lucide-react";
 import { EmptyState } from "@twigo/ui";
 import { useUi } from "@/store/ui";
 import { useConnections } from "@/store/connections";
-import { ConnectionSwitcher } from "@/components/connections/ConnectionSwitcher";
-import { getView, getViews } from "@/shell/views";
+import { DomainSwitcher } from "@/components/workbench/DomainSwitcher";
+import { getViews } from "@/shell/views";
+import { getDomain, getDefaultDomainId } from "@/shell/domains";
 
 export function Sidebar() {
   const activeView = useUi((s) => s.activeView);
+  const activeDomain = useUi((s) => s.activeDomain);
   const activeContext = useConnections((s) => s.activeContext);
   const [filter, setFilter] = useState("");
-  // Fall back to the module's default (then first) view if the persisted one is
-  // gone or unset.
+
+  const domainId = activeDomain || getDefaultDomainId();
+  const domain = getDomain(domainId);
+  const ConnectionBar = domain?.ConnectionBar;
+
+  // Resolve within the active domain: fall back to its default (then first) view
+  // if the persisted one belongs to another domain or is gone.
+  const views = getViews(domainId);
   const view =
-    getView(activeView) ?? getViews().find((v) => v.default) ?? getViews()[0];
+    views.find((v) => v.id === activeView) ??
+    views.find((v) => v.default) ??
+    views[0];
   const title = view?.title ?? "";
   const icon = view?.icon ?? Search;
   const Panel = view?.Panel;
 
   return (
     <aside className="flex h-full w-full flex-col border-r border-sidebar-border bg-sidebar">
-      <ConnectionSwitcher />
+      <DomainSwitcher />
+      {ConnectionBar && <ConnectionBar />}
 
       <div className="my-1.5 border-t border-sidebar-border" />
 
@@ -28,7 +39,7 @@ export function Sidebar() {
         <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           {title}
         </span>
-        {activeContext && (
+        {domainId === "nats" && activeContext && (
           <span className="truncate font-mono text-[11px] text-foreground/60">
             · {activeContext}
           </span>
