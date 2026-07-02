@@ -10,6 +10,17 @@ import { isTypingTarget } from "@/lib/commands";
 // practiced context switch there is. "+" opens a picker of registered
 // domains, so a third technology is just another tab. Domain-free: renders
 // purely from the domain registry and the spaces store.
+//
+// Under Tauri on macOS the strip IS the titlebar (titleBarStyle: Overlay):
+// the traffic lights float over its left edge, empty areas drag the window
+// (data-tauri-drag-region fires only when the event target is the attributed
+// element itself, so tab buttons stay clickable), double-click maximizes.
+const isTauri =
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+const isMac =
+  typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
+const inTitlebar = isTauri && isMac;
+
 export function SpaceTabs() {
   const spaces = useSpaces((s) => s.spaces);
   const activeId = useSpaces((s) => s.activeId);
@@ -45,7 +56,13 @@ export function SpaceTabs() {
   }
 
   return (
-    <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border bg-sidebar px-1.5">
+    <div
+      data-tauri-drag-region
+      className={cn(
+        "flex h-9 shrink-0 items-center gap-1 border-b border-border bg-sidebar px-1.5",
+        inTitlebar && "pl-[78px]",
+      )}
+    >
       {spaces.map((s, i) => {
         const domain = getDomain(s.domainId);
         const Icon = domain?.icon;
@@ -123,7 +140,10 @@ export function SpaceTabs() {
           </ul>
         </PopoverContent>
       </Popover>
-      <span className="ml-auto hidden items-center gap-1 pr-1 text-[10px] text-muted-foreground sm:flex">
+      <span
+        data-tauri-drag-region
+        className="ml-auto hidden items-center gap-1 pr-1 text-[10px] text-muted-foreground sm:flex"
+      >
         <Kbd>⌘1</Kbd>
         <Kbd>⌘2</Kbd>
         to switch
