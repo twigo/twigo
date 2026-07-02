@@ -433,19 +433,50 @@ pub async fn js_create_stream(
     Ok(())
 }
 
+// update_stream takes a complete Config: a partial submit would reset every
+// unrendered field to serde defaults.
+fn merge_stream_patch(
+    current: serde_json::Value,
+    patch: serde_json::Value,
+    stream: &str,
+) -> error::Result<serde_json::Value> {
+    let mut merged = current;
+    let (Some(target), Some(fields)) = (merged.as_object_mut(), patch.as_object()) else {
+        return Err(Error::JetStream(
+            "stream config patch must be an object".to_string(),
+        ));
+    };
+    for (key, value) in fields {
+        target.insert(key.clone(), value.clone());
+    }
+    // A mismatched name would rewrite some *other* stream's config.
+    match target.get("name").and_then(|n| n.as_str()) {
+        Some(name) if name == stream => Ok(merged),
+        _ => Err(Error::JetStream(format!(
+            "stream config patch name does not match stream {stream}"
+        ))),
+    }
+}
+
+/// Overlays the patch onto the fresh server config (read-modify-write).
 #[tauri::command]
 pub async fn js_update_stream(
     conns: State<'_, ConnState>,
     conn_id: String,
-    config: serde_json::Value,
+    stream: String,
+    patch: serde_json::Value,
 ) -> error::Result<()> {
     let client = conns
         .client(&conn_id)
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
+    // get_stream fetches fresh info, so cached_info here is current state.
+    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let current = serde_json::to_value(&handle.cached_info().config).map_err(js_err)?;
+    let merged = merge_stream_patch(current, patch, &stream)?;
     let cfg: async_nats::jetstream::stream::Config =
-        serde_json::from_value(config).map_err(js_err)?;
+        serde_json::from_value(merged).map_err(js_err)?;
     js.update_stream(&cfg).await.map_err(js_err)?;
     Ok(())
 }
@@ -601,5 +632,50 @@ mod tests {
         assert_eq!(next_cursor(10, 1, 10, false), None);
         assert_eq!(next_cursor(5, 1, 10, true), Some(4));
         assert_eq!(next_cursor(1, 1, 10, true), None);
+    }
+
+    #[test]
+    fn merge_stream_patch_preserves_unrendered_fields() {
+        let current = serde_json::json!({
+            "name": "ORDERS",
+            "subjects": ["orders.>"],
+            "max_msgs": -1,
+            "deny_delete": true,
+            "duplicate_window": 120_000_000_000u64,
+            "republish": {"src": ">", "dest": "repub.>"},
+        });
+        let patch = serde_json::json!({"name": "ORDERS", "max_msgs": 500});
+        let merged = merge_stream_patch(current, patch, "ORDERS").unwrap();
+        assert_eq!(merged["max_msgs"], 500);
+        assert_eq!(merged["deny_delete"], true);
+        assert_eq!(merged["duplicate_window"], 120_000_000_000u64);
+        assert_eq!(merged["republish"]["dest"], "repub.>");
+        assert_eq!(merged["subjects"][0], "orders.>");
+    }
+
+    #[test]
+    fn merge_stream_patch_overwrites_patched_fields() {
+        let current = serde_json::json!({"name": "S", "subjects": ["a.>"], "max_bytes": -1});
+        let patch = serde_json::json!({"name": "S", "subjects": ["a.>", "b.>"], "max_bytes": 1024});
+        let merged = merge_stream_patch(current, patch, "S").unwrap();
+        assert_eq!(merged["subjects"], serde_json::json!(["a.>", "b.>"]));
+        assert_eq!(merged["max_bytes"], 1024);
+    }
+
+    #[test]
+    fn merge_stream_patch_rejects_name_mismatch() {
+        let current = serde_json::json!({"name": "A"});
+        assert!(
+            merge_stream_patch(current.clone(), serde_json::json!({"name": "B"}), "A").is_err()
+        );
+        let no_name = serde_json::json!({"max_msgs": 1});
+        let merged = merge_stream_patch(current, no_name, "A").unwrap();
+        assert_eq!(merged["name"], "A");
+    }
+
+    #[test]
+    fn merge_stream_patch_rejects_non_object_patch() {
+        let current = serde_json::json!({"name": "A"});
+        assert!(merge_stream_patch(current, serde_json::json!([1, 2]), "A").is_err());
     }
 }

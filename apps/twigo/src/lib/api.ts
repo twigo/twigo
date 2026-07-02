@@ -377,12 +377,14 @@ export async function jsCreateStream(
   await call("js_create_stream", { connId, config });
 }
 
+// Partial update: Rust overlays the patch onto the current server config.
 export async function jsUpdateStream(
   connId: string,
-  config: Record<string, unknown>,
+  stream: string,
+  patch: Record<string, unknown>,
 ): Promise<void> {
   assertWritable(connId);
-  await call("js_update_stream", { connId, config });
+  await call("js_update_stream", { connId, stream, patch });
 }
 
 export async function jsCreateConsumer(

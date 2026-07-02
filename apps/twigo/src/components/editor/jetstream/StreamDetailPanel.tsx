@@ -105,7 +105,7 @@ export function StreamDetailPanel({
 
   const doEdit = async (config: Record<string, unknown>) => {
     try {
-      await jsUpdateStream(connId, config);
+      await jsUpdateStream(connId, stream, config);
       useToasts.getState().push("success", `Updated stream ${stream}`);
       refresh();
       void useJetStream.getState().load(connId);
