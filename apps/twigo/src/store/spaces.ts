@@ -30,10 +30,7 @@ interface SpacesState {
   activateDomain: (domainId: string) => void;
 }
 
-const SEED: Space[] = [
-  { id: "space-nats", domainId: "nats" },
-  { id: "space-k8s", domainId: "kubernetes" },
-];
+const SEED: Space[] = [{ id: "space-nats", domainId: "nats" }];
 
 export const useSpaces = create<SpacesState>()(
   persist(
@@ -99,7 +96,9 @@ export const useSpaces = create<SpacesState>()(
     }),
     {
       name: "twigo-spaces",
-      version: 1,
+      // v2 drops v1 state that could reference the removed mock K8s domain
+      // (pre-prod: no migrations, discard on version mismatch).
+      version: 2,
       storage: createPersistStorage(),
       partialize: (s) => ({
         spaces: s.spaces,

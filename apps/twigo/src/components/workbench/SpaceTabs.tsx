@@ -48,6 +48,20 @@ export function SpaceTabs() {
     };
   }, []);
 
+  // With a single registered technology the tabs earn nothing: render just the
+  // bare draggable titlebar under Tauri (the window still needs one) and
+  // nothing at all in the browser. The full tab UI lights up by itself the
+  // moment a second domain module registers.
+  const multiDomain = getDomains().length > 1;
+  if (!multiDomain) {
+    return inTitlebar ? (
+      <div
+        data-tauri-drag-region
+        className="h-9 shrink-0 border-b border-border bg-sidebar"
+      />
+    ) : null;
+  }
+
   // "NATS · prod-eu" when the space pins a target, "NATS" otherwise, and a
   // trailing counter only when two tabs would read identically.
   const labels = new Map<string, string>();

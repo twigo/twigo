@@ -4,13 +4,16 @@ import { useUi } from "@/store/ui";
 import { useActiveSpace } from "@/store/spaces";
 import { openSettings } from "@/shell/editorHost";
 import { getViews, getDefaultViewId } from "@/shell/views";
-import { getDefaultDomainId } from "@/shell/domains";
+import { getDomain, getDefaultDomainId } from "@/shell/domains";
 
 export function ActivityBar() {
   const activeView = useUi((s) => s.activeView);
   const setView = useUi((s) => s.setView);
-  // The active space (top tab) decides which technology's views show.
-  const domain = useActiveSpace()?.domainId ?? getDefaultDomainId();
+  // The active space (top tab) decides which technology's views show. A space
+  // whose domain is no longer registered falls back to the default domain.
+  const spaceDomain = useActiveSpace()?.domainId;
+  const domain =
+    spaceDomain && getDomain(spaceDomain) ? spaceDomain : getDefaultDomainId();
   const views = getViews(domain);
   // Resolve to the domain's default when the persisted view isn't one of its
   // own (e.g. just after switching domain).

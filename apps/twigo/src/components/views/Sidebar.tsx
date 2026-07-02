@@ -13,8 +13,13 @@ export function Sidebar() {
   const [filter, setFilter] = useState("");
 
   // The active space (top tab) decides the technology; its connection bar and
-  // views follow. No switcher lives in the sidebar.
-  const domainId = useActiveSpace()?.domainId ?? getDefaultDomainId();
+  // views follow. No switcher lives in the sidebar. A space whose domain is no
+  // longer registered falls back to the default domain.
+  const spaceDomain = useActiveSpace()?.domainId;
+  const domainId =
+    spaceDomain && getDomain(spaceDomain)
+      ? spaceDomain
+      : getDefaultDomainId();
   const domain = getDomain(domainId);
   const ConnectionBar = domain?.ConnectionBar;
 
