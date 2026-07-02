@@ -7,6 +7,14 @@ import type { LucideIcon } from "lucide-react";
 // shell needs to host more than one product side by side - it sits beside the
 // view registry and works the same way.
 
+// A concrete place a space can point at (a NATS context, a K8s cluster, …).
+// A space tab then reads "NATS · prod-eu", not just "NATS" - like a browser
+// tab is a site, not "the web".
+export interface DomainTarget {
+  id: string;
+  label: string;
+}
+
 export interface DomainDef {
   id: string;
   title: string;
@@ -19,6 +27,11 @@ export interface DomainDef {
   // connection switcher, Kubernetes cluster switcher, …). Optional: a domain may
   // have no notion of a connection.
   ConnectionBar?: FC;
+  // The domain's targets for the space "+" picker, and the hook a space calls
+  // when it activates with a pinned target. Both optional: a domain without a
+  // notion of targets still gets plain technology tabs.
+  listTargets?: () => DomainTarget[];
+  activateTarget?: (targetId: string) => void;
 }
 
 const domains = new Map<string, DomainDef>();

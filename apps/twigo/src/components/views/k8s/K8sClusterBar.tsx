@@ -2,13 +2,16 @@ import { useState } from "react";
 import { Check, ChevronsUpDown, Circle } from "lucide-react";
 import { cn, Popover, PopoverTrigger, PopoverContent } from "@twigo/ui";
 import { CLUSTERS } from "@/modules/k8s/mock";
+import { useCluster } from "@/modules/k8s/cluster";
 
 // The Kubernetes domain's connection bar: pick the active kubeconfig context.
-// Mock (local state) for the MVP - a real module would list kubeconfig contexts
-// and track reachability, mirroring the NATS ConnectionSwitcher.
+// Mock for the MVP - a real module would list kubeconfig contexts and track
+// reachability, mirroring the NATS ConnectionSwitcher. Shares the cluster
+// store with the space-tab target hook, so tabs and this bar stay in sync.
 export function K8sClusterBar() {
   const [open, setOpen] = useState(false);
-  const [active, setActive] = useState<string>(CLUSTERS[0]);
+  const active = useCluster((s) => s.selected);
+  const setActive = useCluster((s) => s.select);
 
   return (
     <div className="px-2 pb-1 pt-2">

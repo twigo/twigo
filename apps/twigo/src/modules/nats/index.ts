@@ -3,6 +3,7 @@ import { registerWatermark } from "@/shell/watermark";
 import { registerStatusSegment } from "@/shell/statusBar";
 import { registerDomain } from "@/shell/domains";
 import { ConnectionSwitcher } from "@/components/connections/ConnectionSwitcher";
+import { useConnections } from "@/store/connections";
 // Conn-scoped stores register themselves for teardown on import (via
 // registerConnScoped). Import them here so registration is eager and explicit -
 // a load-bearing constraint, not a side effect of a view happening to render.
@@ -33,6 +34,14 @@ export function registerNatsModule(): void {
     order: 1,
     default: true,
     ConnectionBar: ConnectionSwitcher,
+    // Space targets are the imported NATS contexts; pinning one makes the tab
+    // "NATS · <context>" and re-activates that context when the tab focuses.
+    listTargets: () =>
+      useConnections.getState().contexts.map((c) => ({
+        id: c.name,
+        label: c.name,
+      })),
+    activateTarget: (id) => useConnections.getState().setActive(id),
   });
   registerNatsViews();
   registerNatsCommands();

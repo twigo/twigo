@@ -2,6 +2,8 @@ import { Boxes } from "lucide-react";
 import { registerDomain } from "@/shell/domains";
 import { K8sClusterBar } from "@/components/views/k8s/K8sClusterBar";
 import { registerK8sViews } from "./views";
+import { CLUSTERS } from "./mock";
+import { useCluster } from "./cluster";
 
 // The Kubernetes domain module: a sibling to the NATS module that contributes a
 // domain, its views and a connection bar through the same shell registries - the
@@ -19,6 +21,8 @@ export function registerK8sModule(): void {
     icon: Boxes,
     order: 2,
     ConnectionBar: K8sClusterBar,
+    listTargets: () => CLUSTERS.map((c) => ({ id: c, label: c })),
+    activateTarget: (id) => useCluster.getState().select(id),
   });
   registerK8sViews();
 }

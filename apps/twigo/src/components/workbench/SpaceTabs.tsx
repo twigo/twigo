@@ -28,6 +28,9 @@ export function SpaceTabs() {
   const addSpace = useSpaces((s) => s.addSpace);
   const closeSpace = useSpaces((s) => s.closeSpace);
   const [adding, setAdding] = useState(false);
+  // Two-step "+": pick a technology, then (when it has targets) pick where the
+  // tab points - like a new browser tab is a specific site, not "the web".
+  const [pickerDomain, setPickerDomain] = useState<string | null>(null);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -45,14 +48,16 @@ export function SpaceTabs() {
     };
   }, []);
 
-  // "NATS", and "NATS · 2" when several spaces share a domain.
+  // "NATS · prod-eu" when the space pins a target, "NATS" otherwise, and a
+  // trailing counter only when two tabs would read identically.
   const labels = new Map<string, string>();
   const seen = new Map<string, number>();
   for (const s of spaces) {
-    const n = (seen.get(s.domainId) ?? 0) + 1;
-    seen.set(s.domainId, n);
     const title = getDomain(s.domainId)?.title ?? s.domainId;
-    labels.set(s.id, n > 1 ? `${title} · ${n}` : title);
+    const base = s.targetLabel ? `${title} · ${s.targetLabel}` : title;
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
+    labels.set(s.id, n > 1 ? `${base} · ${n}` : base);
   }
 
   return (
@@ -106,7 +111,13 @@ export function SpaceTabs() {
           </div>
         );
       })}
-      <Popover open={adding} onOpenChange={setAdding}>
+      <Popover
+        open={adding}
+        onOpenChange={(open) => {
+          setAdding(open);
+          if (!open) setPickerDomain(null);
+        }}
+      >
         <PopoverTrigger asChild>
           <button
             type="button"
@@ -118,26 +129,78 @@ export function SpaceTabs() {
           </button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-56 p-1">
-          <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            New space
-          </div>
-          <ul className="flex flex-col gap-px">
-            {getDomains().map(({ id, title, icon: Icon }) => (
-              <li key={id}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    addSpace(id);
-                    setAdding(false);
-                  }}
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-row-hover"
-                >
-                  <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate">{title}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          {pickerDomain === null ? (
+            <>
+              <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                New space
+              </div>
+              <ul className="flex flex-col gap-px">
+                {getDomains().map((d) => {
+                  const Icon = d.icon;
+                  return (
+                    <li key={d.id}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const targets = d.listTargets?.() ?? [];
+                          if (targets.length === 0) {
+                            addSpace(d.id);
+                            setAdding(false);
+                          } else {
+                            setPickerDomain(d.id);
+                          }
+                        }}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-row-hover"
+                      >
+                        <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate">
+                          {d.title}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          ) : (
+            <>
+              <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {getDomain(pickerDomain)?.title} · pick a target
+              </div>
+              <ul className="flex flex-col gap-px">
+                {(getDomain(pickerDomain)?.listTargets?.() ?? []).map((t) => (
+                  <li key={t.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        addSpace(pickerDomain, t);
+                        setAdding(false);
+                        setPickerDomain(null);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-row-hover"
+                    >
+                      <span className="min-w-0 flex-1 truncate font-mono">
+                        {t.label}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      addSpace(pickerDomain);
+                      setAdding(false);
+                      setPickerDomain(null);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-row-hover hover:text-foreground"
+                  >
+                    No pinned target
+                  </button>
+                </li>
+              </ul>
+            </>
+          )}
         </PopoverContent>
       </Popover>
       <span

@@ -2,16 +2,20 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { createPersistStorage } from "@/lib/persist-storage";
 import { useUi } from "@/store/ui";
+import { getDomain, type DomainTarget } from "@/shell/domains";
 
-// Spaces: browser-style tabs at the very top of the window. Each space is one
-// technology's full workbench (its activity bar, its connection bar) and
-// remembers where you were (last active view), so switching NATS ↔ Kubernetes
-// is the same motion as switching browser tabs - click or mod+digit. A third
-// technology is just another tab (+). Domain-free workbench state: a space
-// references a domain by id only, so the shell owns this store.
+// Spaces: browser-style tabs at the very top of the window. A space is a
+// session of technology × target - "NATS · prod-eu", not just "NATS" - the way
+// a browser tab is a site, not "the web". Each space is one technology's full
+// workbench (its activity bar, its connection bar), remembers where you were
+// (last active view), and activating it re-activates its pinned target via the
+// domain's registry hook. Domain-free workbench state: a space references a
+// domain/target by id only, so the shell owns this store.
 export interface Space {
   id: string;
   domainId: string;
+  targetId?: string;
+  targetLabel?: string;
 }
 
 interface SpacesState {
@@ -20,7 +24,7 @@ interface SpacesState {
   // Last active view per space, restored when the space re-activates.
   lastView: Record<string, string>;
   setActive: (id: string) => void;
-  addSpace: (domainId: string) => void;
+  addSpace: (domainId: string, target?: DomainTarget) => void;
   closeSpace: (id: string) => void;
   // Palette/menu navigation: jump to (or create) a space of this domain.
   activateDomain: (domainId: string) => void;
@@ -40,7 +44,8 @@ export const useSpaces = create<SpacesState>()(
 
       setActive: (id) => {
         const { activeId, lastView, spaces } = get();
-        if (id === activeId || !spaces.some((s) => s.id === id)) return;
+        const target = spaces.find((s) => s.id === id);
+        if (id === activeId || !target) return;
         const ui = useUi.getState();
         // Park the view we're leaving, then restore the target's parked view
         // (empty = the domain's default, resolved at read time).
@@ -49,11 +54,21 @@ export const useSpaces = create<SpacesState>()(
           lastView: { ...lastView, [activeId]: ui.activeView },
         });
         ui.setView(get().lastView[id] ?? "");
+        // A pinned target re-activates through the domain's hook (NATS context,
+        // K8s cluster, …), so the whole workbench follows the tab.
+        if (target.targetId) {
+          getDomain(target.domainId)?.activateTarget?.(target.targetId);
+        }
       },
 
-      addSpace: (domainId) => {
+      addSpace: (domainId, target) => {
         const id = crypto.randomUUID();
-        set((s) => ({ spaces: [...s.spaces, { id, domainId }] }));
+        set((s) => ({
+          spaces: [
+            ...s.spaces,
+            { id, domainId, targetId: target?.id, targetLabel: target?.label },
+          ],
+        }));
         get().setActive(id);
       },
 
