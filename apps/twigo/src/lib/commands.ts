@@ -1,4 +1,5 @@
 import { useUi } from "@/store/ui";
+import { useSpaces } from "@/store/spaces";
 import { useHelp } from "@/store/help";
 import { useZoom } from "@/store/zoom";
 import {
@@ -156,13 +157,17 @@ export function clearRegisteredCommands(): void {
 export const PALETTE_BINDINGS = ["mod+shift+p", "mod+shift+a", "mod+k"];
 
 // "Go to X" for each registered view. Built at call time because views are
-// registered by domain modules after this module is imported.
+// registered by domain modules after this module is imported; a view of
+// another technology activates its space first.
 function viewCommands(): Command[] {
   return getViews().map((v) => ({
     id: `view.${v.id}`,
     title: `Go to ${v.title}`,
     category: "Go",
-    run: () => useUi.getState().setView(v.id),
+    run: () => {
+      if (v.domain) useSpaces.getState().activateDomain(v.domain);
+      useUi.getState().setView(v.id);
+    },
   }));
 }
 

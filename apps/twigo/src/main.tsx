@@ -6,7 +6,9 @@ import { setupAppMenu } from "./shell/menu";
 import "./index.css";
 
 // Wire the NATS domain into the shell registries before the first render so the
-// workbench (views, commands, status bar, watermark) has its contributions.
+// workbench (views, commands, status bar, watermark) has its contributions. A
+// second technology (e.g. Kubernetes) is a sibling register<Domain>Module()
+// call here - the shell, space tabs and registries already support it.
 registerNatsModule();
 // Build the native app menu from the registries (no-op outside Tauri).
 void setupAppMenu();

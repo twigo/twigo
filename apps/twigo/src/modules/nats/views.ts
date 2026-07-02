@@ -17,12 +17,14 @@ import { MonitorView } from "@/components/views/monitor/MonitorView";
 import { ServicesView } from "@/components/views/services/ServicesView";
 
 // The NATS sidebar views, in display order. Contributed to the shell's view
-// registry by registerNatsModule().
+// registry by registerNatsModule(), tagged with the "nats" domain so the shell
+// shows them only while that domain is active.
 export function registerNatsViews(): void {
   registerView({
     id: "jetstream",
     title: "Streams & Consumers",
     icon: Layers,
+    domain: "nats",
     default: true,
     Panel: JetStreamView,
   });
@@ -30,24 +32,28 @@ export function registerNatsViews(): void {
     id: "kv",
     title: "KV Buckets",
     icon: Database,
+    domain: "nats",
     Panel: KvView,
   });
   registerView({
     id: "objectstore",
     title: "Object Stores",
     icon: Box,
+    domain: "nats",
     Panel: ObjectStoreView,
   });
   registerView({
     id: "subjects",
     title: "Subjects",
     icon: Radio,
+    domain: "nats",
     Panel: SubjectsView,
   });
   registerView({
     id: "responders",
     title: "Responders",
     icon: Webhook,
+    domain: "nats",
     Panel: RespondersView,
   });
   registerView({
@@ -60,6 +66,7 @@ export function registerNatsViews(): void {
     id: "monitor",
     title: "Monitoring",
     icon: Activity,
+    domain: "nats",
     Panel: MonitorView,
   });
 }

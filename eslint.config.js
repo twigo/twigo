@@ -17,6 +17,8 @@ const SHELL_STORES = [
   "toasts",
   "zoom",
   "commandHistory",
+  // Workspace tabs; reference domains by id only, so the shell owns the store.
+  "spaces",
 ];
 // Domain state/logic the workbench shell must never reach into - it talks to
 // NATS only through the shell registries (src/shell/*) that the module fills.

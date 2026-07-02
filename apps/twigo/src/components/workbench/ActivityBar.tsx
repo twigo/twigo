@@ -1,20 +1,32 @@
 import { Settings } from "lucide-react";
 import { cn } from "@twigo/ui";
 import { useUi } from "@/store/ui";
+import { useActiveSpace } from "@/store/spaces";
 import { openSettings } from "@/shell/editorHost";
 import { getViews, getDefaultViewId } from "@/shell/views";
+import { getDomain, getDefaultDomainId } from "@/shell/domains";
 
 export function ActivityBar() {
-  const { activeView, setView } = useUi();
-  // Empty activeView resolves to the module's default view (see store/ui).
-  const current = activeView || getDefaultViewId();
+  const activeView = useUi((s) => s.activeView);
+  const setView = useUi((s) => s.setView);
+  // The active space (top tab) decides which technology's views show. A space
+  // whose domain is no longer registered falls back to the default domain.
+  const spaceDomain = useActiveSpace()?.domainId;
+  const domain =
+    spaceDomain && getDomain(spaceDomain) ? spaceDomain : getDefaultDomainId();
+  const views = getViews(domain);
+  // Resolve to the domain's default when the persisted view isn't one of its
+  // own (e.g. just after switching domain).
+  const current = views.some((v) => v.id === activeView)
+    ? activeView
+    : getDefaultViewId(domain);
   return (
     <nav
       aria-label="Primary"
       className="flex h-full w-12 shrink-0 flex-col items-center justify-between border-r border-sidebar-border bg-sidebar py-2"
     >
       <div className="flex flex-col items-center gap-0.5">
-        {getViews().map(({ id, title, icon: Icon }) => {
+        {views.map(({ id, title, icon: Icon }) => {
           const active = current === id;
           return (
             <button
