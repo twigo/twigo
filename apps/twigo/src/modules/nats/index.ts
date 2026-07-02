@@ -34,8 +34,8 @@ export function registerNatsModule(): void {
     order: 1,
     default: true,
     ConnectionBar: ConnectionSwitcher,
-    // Space targets are the imported NATS contexts; pinning one makes the tab
-    // "NATS · <context>" and re-activates that context when the tab focuses.
+    // Space targets = the imported NATS contexts; a pinned tab re-activates
+    // its context on focus.
     listTargets: () =>
       useConnections.getState().contexts.map((c) => ({
         id: c.name,

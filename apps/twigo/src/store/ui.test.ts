@@ -58,15 +58,4 @@ describe("ui theme store", () => {
     // to the module's default view at read time (ActivityBar/Sidebar).
     expect(useUi.getInitialState().activeView).toBe("");
   });
-
-  it("defaults activeDomain to empty so the shell resolves the registered default", () => {
-    expect(useUi.getInitialState().activeDomain).toBe("");
-  });
-
-  it("setDomain switches domain and drops the active view to its new default", () => {
-    useUi.getState().setView("jetstream");
-    useUi.getState().setDomain("kubernetes");
-    expect(useUi.getState().activeDomain).toBe("kubernetes");
-    expect(useUi.getState().activeView).toBe("");
-  });
 });

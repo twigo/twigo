@@ -1,15 +1,12 @@
 import type { FC } from "react";
 import type { LucideIcon } from "lucide-react";
 
-// Domains ("products"): NATS, Kubernetes, … A domain module registers itself;
-// the shell renders the domain switcher and filters views by the active domain,
-// so the workbench never names a domain itself. This is the second registry the
-// shell needs to host more than one product side by side - it sits beside the
-// view registry and works the same way.
+// Domains ("technologies"): NATS, Kubernetes, … A module registers its domain;
+// the shell renders space tabs and filters views from this registry, so the
+// workbench never names a domain itself.
 
-// A concrete place a space can point at (a NATS context, a K8s cluster, …).
-// A space tab then reads "NATS · prod-eu", not just "NATS" - like a browser
-// tab is a site, not "the web".
+// A concrete place a space can pin (a NATS context, a K8s cluster, …); the tab
+// then reads "NATS · prod-eu".
 export interface DomainTarget {
   id: string;
   label: string;

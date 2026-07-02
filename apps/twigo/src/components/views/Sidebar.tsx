@@ -12,14 +12,11 @@ export function Sidebar() {
   const activeContext = useConnections((s) => s.activeContext);
   const [filter, setFilter] = useState("");
 
-  // The active space (top tab) decides the technology; its connection bar and
-  // views follow. No switcher lives in the sidebar. A space whose domain is no
-  // longer registered falls back to the default domain.
+  // The active space (top tab) decides the technology; a space whose domain is
+  // no longer registered falls back to the default domain.
   const spaceDomain = useActiveSpace()?.domainId;
   const domainId =
-    spaceDomain && getDomain(spaceDomain)
-      ? spaceDomain
-      : getDefaultDomainId();
+    spaceDomain && getDomain(spaceDomain) ? spaceDomain : getDefaultDomainId();
   const domain = getDomain(domainId);
   const ConnectionBar = domain?.ConnectionBar;
 

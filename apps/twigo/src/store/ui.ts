@@ -24,9 +24,6 @@ export type View = string;
 interface UiState {
   theme: Theme;
   resolvedTheme: ResolvedTheme;
-  // The active domain (NATS, Kubernetes, …). Empty = land on the registered
-  // default, resolved at read time so the shell doesn't hardcode a domain id.
-  activeDomain: string;
   activeView: View;
   sidebarOpen: boolean;
   detailOpen: boolean;
@@ -34,7 +31,6 @@ interface UiState {
   toggleTheme: () => void;
   setTheme: (t: Theme) => void;
   syncResolvedTheme: () => void;
-  setDomain: (d: string) => void;
   setView: (v: View) => void;
   toggleSidebar: () => void;
   toggleDetail: () => void;
@@ -46,7 +42,6 @@ export const useUi = create<UiState>()(
     (set) => ({
       theme: "dark",
       resolvedTheme: "dark",
-      activeDomain: "",
       // Empty = land on the module's default view, resolved at read time (the
       // shell doesn't hardcode a domain view id).
       activeView: "",
@@ -66,9 +61,6 @@ export const useUi = create<UiState>()(
       // hydration and when the OS appearance changes while on "system".
       syncResolvedTheme: () =>
         set((s) => ({ resolvedTheme: resolveTheme(s.theme) })),
-      // Switching domain drops the active view so the new domain resolves its
-      // own default (a view id is owned by exactly one domain).
-      setDomain: (activeDomain) => set({ activeDomain, activeView: "" }),
       setView: (activeView) => set({ activeView }),
       toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
       toggleDetail: () => set((s) => ({ detailOpen: !s.detailOpen })),
@@ -81,7 +73,6 @@ export const useUi = create<UiState>()(
       storage: createPersistStorage(),
       partialize: (s) => ({
         theme: s.theme,
-        activeDomain: s.activeDomain,
         activeView: s.activeView,
         sidebarOpen: s.sidebarOpen,
         detailOpen: s.detailOpen,

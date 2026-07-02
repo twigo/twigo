@@ -4,13 +4,10 @@ import { createPersistStorage } from "@/lib/persist-storage";
 import { useUi } from "@/store/ui";
 import { getDomain, type DomainTarget } from "@/shell/domains";
 
-// Spaces: browser-style tabs at the very top of the window. A space is a
-// session of technology × target - "NATS · prod-eu", not just "NATS" - the way
-// a browser tab is a site, not "the web". Each space is one technology's full
-// workbench (its activity bar, its connection bar), remembers where you were
-// (last active view), and activating it re-activates its pinned target via the
-// domain's registry hook. Domain-free workbench state: a space references a
-// domain/target by id only, so the shell owns this store.
+// A space is one workspace tab: a technology plus an optional pinned target
+// ("NATS · prod-eu"). It remembers its last active view, and activating it
+// re-activates its target via the domain's registry hook. References domains
+// and targets by id only, so the shell owns this store.
 export interface Space {
   id: string;
   domainId: string;

@@ -32,7 +32,9 @@ export function registerView(def: ViewDef): void {
 
 export function getViews(domain?: string): ViewDef[] {
   // Stable sort: same `order` keeps registration order.
-  const all = [...views.values()].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const all = [...views.values()].sort(
+    (a, b) => (a.order ?? 0) - (b.order ?? 0),
+  );
   if (domain === undefined) return all;
   return all.filter((v) => v.domain === undefined || v.domain === domain);
 }

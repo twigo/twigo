@@ -157,9 +157,8 @@ export function clearRegisteredCommands(): void {
 export const PALETTE_BINDINGS = ["mod+shift+p", "mod+shift+a", "mod+k"];
 
 // "Go to X" for each registered view. Built at call time because views are
-// registered by domain modules after this module is imported. Navigating to a
-// view of another technology jumps to (or creates) that technology's space
-// first, so the palette moves across spaces like the top tabs do.
+// registered by domain modules after this module is imported; a view of
+// another technology activates its space first.
 function viewCommands(): Command[] {
   return getViews().map((v) => ({
     id: `view.${v.id}`,

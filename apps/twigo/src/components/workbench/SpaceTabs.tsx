@@ -5,16 +5,11 @@ import { useSpaces } from "@/store/spaces";
 import { getDomain, getDomains } from "@/shell/domains";
 import { isTypingTarget } from "@/lib/commands";
 
-// Browser-style space tabs: the top strip of the window. One tab per
-// technology workspace; switching is a click or mod+digit - the most
-// practiced context switch there is. "+" opens a picker of registered
-// domains, so a third technology is just another tab. Domain-free: renders
-// purely from the domain registry and the spaces store.
-//
-// Under Tauri on macOS the strip IS the titlebar (titleBarStyle: Overlay):
-// the traffic lights float over its left edge, empty areas drag the window
-// (data-tauri-drag-region fires only when the event target is the attributed
-// element itself, so tab buttons stay clickable), double-click maximizes.
+// Browser-style workspace tabs (switch: click or mod+digit; "+" adds one per
+// registered domain). Under Tauri on macOS the strip IS the titlebar
+// (titleBarStyle: Overlay): traffic lights float over its left edge, empty
+// areas drag the window (data-tauri-drag-region fires only when the event
+// target is the attributed element itself, so tab buttons stay clickable).
 const isTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 const isMac =
@@ -28,8 +23,7 @@ export function SpaceTabs() {
   const addSpace = useSpaces((s) => s.addSpace);
   const closeSpace = useSpaces((s) => s.closeSpace);
   const [adding, setAdding] = useState(false);
-  // Two-step "+": pick a technology, then (when it has targets) pick where the
-  // tab points - like a new browser tab is a specific site, not "the web".
+  // Non-null while the "+" picker is on its second step (choosing a target).
   const [pickerDomain, setPickerDomain] = useState<string | null>(null);
 
   useEffect(() => {
@@ -48,10 +42,8 @@ export function SpaceTabs() {
     };
   }, []);
 
-  // With a single registered technology the tabs earn nothing: render just the
-  // bare draggable titlebar under Tauri (the window still needs one) and
-  // nothing at all in the browser. The full tab UI lights up by itself the
-  // moment a second domain module registers.
+  // With a single registered technology tabs earn nothing: keep only the bare
+  // draggable titlebar under Tauri. The tab UI returns with a second domain.
   const multiDomain = getDomains().length > 1;
   if (!multiDomain) {
     return inTitlebar ? (
@@ -91,9 +83,7 @@ export function SpaceTabs() {
             key={s.id}
             className={cn(
               "group flex h-7 items-center rounded-md border border-transparent",
-              active
-                ? "border-border bg-background"
-                : "hover:bg-row-hover",
+              active ? "border-border bg-background" : "hover:bg-row-hover",
             )}
           >
             <button
