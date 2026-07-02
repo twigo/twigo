@@ -3,6 +3,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { getCommands } from "@/lib/commands";
 import { getViews } from "@/shell/views";
 import { useUi } from "@/store/ui";
+import { useSpaces } from "@/store/spaces";
 import { usePalette } from "@/store/palette";
 import { useHelp } from "@/store/help";
 
@@ -68,9 +69,8 @@ async function buildAndSetMenu(): Promise<void> {
   const goToViews: MenuItemOptions[] = getViews().map((v) => ({
     text: `Go to ${v.title}`,
     action: () => {
-      const ui = useUi.getState();
-      if (v.domain) ui.setDomain(v.domain);
-      ui.setView(v.id);
+      if (v.domain) useSpaces.getState().activateDomain(v.domain);
+      useUi.getState().setView(v.id);
     },
   }));
 

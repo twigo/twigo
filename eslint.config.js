@@ -17,6 +17,9 @@ const SHELL_STORES = [
   "toasts",
   "zoom",
   "commandHistory",
+  // Browser-style workspace tabs (one per technology). Domain-free workbench
+  // state - a space references a domain by id only - so the shell owns it.
+  "spaces",
 ];
 // Domain state/logic the workbench shell must never reach into - it talks to
 // NATS only through the shell registries (src/shell/*) that the module fills.

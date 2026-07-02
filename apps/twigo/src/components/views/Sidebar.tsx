@@ -3,17 +3,18 @@ import { Search } from "lucide-react";
 import { EmptyState } from "@twigo/ui";
 import { useUi } from "@/store/ui";
 import { useConnections } from "@/store/connections";
-import { DomainSwitcher } from "@/components/workbench/DomainSwitcher";
+import { useActiveSpace } from "@/store/spaces";
 import { getViews } from "@/shell/views";
 import { getDomain, getDefaultDomainId } from "@/shell/domains";
 
 export function Sidebar() {
   const activeView = useUi((s) => s.activeView);
-  const activeDomain = useUi((s) => s.activeDomain);
   const activeContext = useConnections((s) => s.activeContext);
   const [filter, setFilter] = useState("");
 
-  const domainId = activeDomain || getDefaultDomainId();
+  // The active space (top tab) decides the technology; its connection bar and
+  // views follow. No switcher lives in the sidebar.
+  const domainId = useActiveSpace()?.domainId ?? getDefaultDomainId();
   const domain = getDomain(domainId);
   const ConnectionBar = domain?.ConnectionBar;
 
@@ -30,7 +31,6 @@ export function Sidebar() {
 
   return (
     <aside className="flex h-full w-full flex-col border-r border-sidebar-border bg-sidebar">
-      <DomainSwitcher />
       {ConnectionBar && <ConnectionBar />}
 
       <div className="my-1.5 border-t border-sidebar-border" />

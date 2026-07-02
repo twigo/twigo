@@ -1,4 +1,5 @@
 import { useUi } from "@/store/ui";
+import { useSpaces } from "@/store/spaces";
 import { useHelp } from "@/store/help";
 import { useZoom } from "@/store/zoom";
 import {
@@ -156,18 +157,17 @@ export function clearRegisteredCommands(): void {
 export const PALETTE_BINDINGS = ["mod+shift+p", "mod+shift+a", "mod+k"];
 
 // "Go to X" for each registered view. Built at call time because views are
-// registered by domain modules after this module is imported. Switching to a
-// view in another domain switches the domain too, so the palette navigates
-// across domains (setDomain clears activeView, so set the domain first).
+// registered by domain modules after this module is imported. Navigating to a
+// view of another technology jumps to (or creates) that technology's space
+// first, so the palette moves across spaces like the top tabs do.
 function viewCommands(): Command[] {
   return getViews().map((v) => ({
     id: `view.${v.id}`,
     title: `Go to ${v.title}`,
     category: "Go",
     run: () => {
-      const ui = useUi.getState();
-      if (v.domain) ui.setDomain(v.domain);
-      ui.setView(v.id);
+      if (v.domain) useSpaces.getState().activateDomain(v.domain);
+      useUi.getState().setView(v.id);
     },
   }));
 }

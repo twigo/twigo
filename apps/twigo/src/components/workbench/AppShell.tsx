@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { Allotment } from "allotment";
 import "allotment/dist/style.css";
+import { SpaceTabs } from "./SpaceTabs";
 import { ActivityBar } from "./ActivityBar";
 import { StatusBar } from "./StatusBar";
 import { Toaster } from "./Toaster";
@@ -44,6 +45,7 @@ export function AppShell() {
 
   return (
     <div className="flex h-full flex-col border-t border-border">
+      <SpaceTabs />
       <div className="flex min-h-0 flex-1">
         <ActivityBar />
         <Allotment
