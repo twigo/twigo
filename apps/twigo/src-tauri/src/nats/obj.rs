@@ -24,6 +24,7 @@ struct StagedUpload {
     bucket: String,
     name: String,
     path: PathBuf,
+    existed: bool,
 }
 
 // Concurrency for per-bucket get_stream round-trips when listing object stores.
@@ -74,6 +75,11 @@ pub struct ObjDetail {
     headers: Vec<(String, String)>,
 }
 
+// Object-store buckets are JetStream streams named "OBJ_<bucket>".
+fn bucket_name(stream_name: &str) -> Option<&str> {
+    stream_name.strip_prefix("OBJ_")
+}
+
 fn obj_summary(i: &async_nats::jetstream::object_store::ObjectInfo) -> ObjSummary {
     ObjSummary {
         name: i.name.clone(),
@@ -95,11 +101,10 @@ pub async fn obj_list_buckets(
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
 
-    // Object-store buckets are JetStream streams named "OBJ_<bucket>".
     let mut stream_names = js.stream_names();
     let mut buckets = Vec::new();
     while let Some(stream_name) = stream_names.try_next().await.map_err(js_err)? {
-        if let Some(bucket) = stream_name.strip_prefix("OBJ_") {
+        if let Some(bucket) = bucket_name(&stream_name) {
             buckets.push(bucket.to_string());
         }
     }
@@ -263,14 +268,23 @@ pub async fn obj_stage_upload(
         .to_string();
 
     let os = store(&conns, &conn_id, &bucket).await?;
-    // info() errors when the object doesn't exist yet - treat that as "new".
-    let exists = matches!(os.info(&name).await, Ok(i) if !i.deleted);
+    // `exists` gates the destructive cleanup on commit - only a definite
+    // NotFound may count as "new".
+    let exists = match os.info(&name).await {
+        Ok(i) => !i.deleted,
+        Err(e) if e.kind() == async_nats::jetstream::object_store::InfoErrorKind::NotFound => false,
+        Err(e) => {
+            *staging.0.lock().await = None;
+            return Err(js_err(e));
+        }
+    };
 
     *staging.0.lock().await = Some(StagedUpload {
         conn_id,
         bucket,
         name: name.clone(),
         path,
+        existed: exists,
     });
     Ok(Some(StagedUploadInfo { name, exists }))
 }
@@ -293,9 +307,10 @@ pub async fn obj_commit_upload(
             source,
         })?;
     if let Err(e) = os.put(s.name.as_str(), &mut file).await {
-        // Best-effort cleanup so a mid-stream failure doesn't leave a partial
-        // object occupying the store.
-        let _ = os.delete(&s.name).await;
+        // On replace, deleting would tombstone the pre-existing object.
+        if !s.existed {
+            let _ = os.delete(&s.name).await;
+        }
         return Err(js_err(e));
     }
     Ok(Some(s.name))
@@ -336,19 +351,8 @@ struct NewObjBucket {
     num_replicas: usize,
 }
 
-#[tauri::command]
-pub async fn obj_create_bucket(
-    conns: State<'_, ConnState>,
-    conn_id: String,
-    config: serde_json::Value,
-) -> error::Result<()> {
-    let client = conns
-        .client(&conn_id)
-        .await
-        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
-    let js = async_nats::jetstream::new(client);
-    let nb: NewObjBucket = serde_json::from_value(config).map_err(js_err)?;
-    let cfg = async_nats::jetstream::object_store::Config {
+fn object_store_config(nb: NewObjBucket) -> async_nats::jetstream::object_store::Config {
+    async_nats::jetstream::object_store::Config {
         bucket: nb.bucket,
         description: if nb.description.is_empty() {
             None
@@ -368,8 +372,24 @@ pub async fn obj_create_bucket(
             1
         },
         ..Default::default()
-    };
-    js.create_object_store(cfg).await.map_err(js_err)?;
+    }
+}
+
+#[tauri::command]
+pub async fn obj_create_bucket(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    config: serde_json::Value,
+) -> error::Result<()> {
+    let client = conns
+        .client(&conn_id)
+        .await
+        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
+    let js = async_nats::jetstream::new(client);
+    let nb: NewObjBucket = serde_json::from_value(config).map_err(js_err)?;
+    js.create_object_store(object_store_config(nb))
+        .await
+        .map_err(js_err)?;
     Ok(())
 }
 
@@ -386,4 +406,78 @@ pub async fn obj_delete_bucket(
     let js = async_nats::jetstream::new(client);
     js.delete_object_store(&bucket).await.map_err(js_err)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use time::OffsetDateTime;
+
+    fn info(name: &str) -> async_nats::jetstream::object_store::ObjectInfo {
+        async_nats::jetstream::object_store::ObjectInfo {
+            name: name.to_string(),
+            description: Some("d".to_string()),
+            metadata: HashMap::new(),
+            headers: None,
+            options: None,
+            bucket: "B".to_string(),
+            nuid: "n1".to_string(),
+            size: 42,
+            chunks: 3,
+            modified: Some(OffsetDateTime::UNIX_EPOCH),
+            digest: Some("SHA-256=x".to_string()),
+            deleted: true,
+        }
+    }
+
+    #[test]
+    fn obj_summary_maps_fields() {
+        let s = obj_summary(&info("a/b.txt"));
+        assert_eq!(s.name, "a/b.txt");
+        assert_eq!(s.size, 42);
+        assert_eq!(s.chunks, 3);
+        assert_eq!(s.modified.as_deref(), Some("1970-01-01T00:00:00Z"));
+        assert!(s.deleted);
+    }
+
+    #[test]
+    fn bucket_names_come_from_the_obj_prefix() {
+        assert_eq!(bucket_name("OBJ_files"), Some("files"));
+        assert_eq!(bucket_name("KV_files"), None);
+        assert_eq!(bucket_name("ORDERS_OBJ_x"), None);
+    }
+
+    #[test]
+    fn bucket_config_defaults_empty_fields() {
+        let cfg = object_store_config(NewObjBucket {
+            bucket: "files".to_string(),
+            description: String::new(),
+            max_age: 0,
+            max_bytes: 0,
+            storage: String::new(),
+            num_replicas: 0,
+        });
+        assert_eq!(cfg.bucket, "files");
+        assert_eq!(cfg.description, None);
+        assert_eq!(cfg.max_age, Duration::ZERO);
+        assert!(matches!(cfg.storage, StorageType::File));
+        assert_eq!(cfg.num_replicas, 1);
+    }
+
+    #[test]
+    fn bucket_config_maps_explicit_fields() {
+        let cfg = object_store_config(NewObjBucket {
+            bucket: "files".to_string(),
+            description: "docs".to_string(),
+            max_age: 5_000_000_000,
+            max_bytes: 1024,
+            storage: "memory".to_string(),
+            num_replicas: 3,
+        });
+        assert_eq!(cfg.description.as_deref(), Some("docs"));
+        assert_eq!(cfg.max_age, Duration::from_secs(5));
+        assert_eq!(cfg.max_bytes, 1024);
+        assert!(matches!(cfg.storage, StorageType::Memory));
+        assert_eq!(cfg.num_replicas, 3);
+    }
 }
