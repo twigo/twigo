@@ -1,6 +1,10 @@
+use std::path::Path;
 use std::time::Duration;
 
-use tauri::State;
+use base64::Engine;
+use serde::Serialize;
+use tauri::{AppHandle, State};
+use tauri_plugin_dialog::DialogExt;
 
 use super::connection::ConnState;
 use super::error::{self, Error};
@@ -25,12 +29,18 @@ fn build_headers(pairs: Vec<(String, String)>) -> Option<async_nats::HeaderMap> 
     any.then_some(headers)
 }
 
+fn decode_payload(payload_b64: &str) -> error::Result<Vec<u8>> {
+    base64::engine::general_purpose::STANDARD
+        .decode(payload_b64)
+        .map_err(|e| Error::InvalidInput(format!("invalid base64 payload: {e}")))
+}
+
 #[tauri::command]
 pub async fn publish(
     conns: State<'_, ConnState>,
     conn_id: String,
     subject: String,
-    payload: String,
+    payload_b64: String,
     headers: Vec<(String, String)>,
 ) -> error::Result<()> {
     conns.assert_writable(&conn_id).await?;
@@ -39,7 +49,7 @@ pub async fn publish(
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
 
-    let bytes = payload.into_bytes();
+    let bytes = decode_payload(&payload_b64)?;
     match build_headers(headers) {
         Some(h) => {
             client
@@ -67,7 +77,7 @@ pub async fn request(
     conns: State<'_, ConnState>,
     conn_id: String,
     subject: String,
-    payload: String,
+    payload_b64: String,
     timeout_ms: Option<u64>,
     headers: Vec<(String, String)>,
 ) -> error::Result<IncomingMessage> {
@@ -78,7 +88,7 @@ pub async fn request(
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
 
     let mut req = async_nats::Request::new()
-        .payload(payload.into_bytes().into())
+        .payload(decode_payload(&payload_b64)?.into())
         .timeout(Some(Duration::from_millis(timeout_ms.unwrap_or(5000))));
     if let Some(h) = build_headers(headers) {
         req = req.headers(h);
@@ -93,9 +103,58 @@ pub async fn request(
     ))
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PickedPayload {
+    name: String,
+    size: usize,
+    payload_b64: String,
+}
+
+/// Pick a file as a publish payload. The picker and read run in Rust (the path
+/// never crosses IPC); `max_bytes` caps what gets base64'd into the webview.
+#[tauri::command]
+pub async fn pick_payload_file(
+    app: AppHandle,
+    max_bytes: usize,
+) -> error::Result<Option<PickedPayload>> {
+    let picked = tokio::task::spawn_blocking(move || app.dialog().file().blocking_pick_file())
+        .await
+        .map_err(|e| Error::Task(e.to_string()))?;
+    let Some(path) = picked.and_then(|p| p.as_path().map(Path::to_path_buf)) else {
+        return Ok(None);
+    };
+    let meta = tokio::fs::metadata(&path)
+        .await
+        .map_err(|source| Error::Io {
+            path: path.display().to_string(),
+            source,
+        })?;
+    let size = usize::try_from(meta.len()).unwrap_or(usize::MAX);
+    if size > max_bytes {
+        return Err(Error::InvalidInput(format!(
+            "file is {size} bytes - larger than the {max_bytes} byte payload limit"
+        )));
+    }
+    let bytes = tokio::fs::read(&path).await.map_err(|source| Error::Io {
+        path: path.display().to_string(),
+        source,
+    })?;
+    let name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("file")
+        .to_string();
+    Ok(Some(PickedPayload {
+        name,
+        size: bytes.len(),
+        payload_b64: base64::engine::general_purpose::STANDARD.encode(&bytes),
+    }))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::build_headers;
+    use super::*;
 
     #[test]
     fn multiline_value_does_not_panic() {
@@ -108,5 +167,15 @@ mod tests {
     fn blank_keys_are_skipped() {
         assert!(build_headers(vec![("  ".into(), "v".into())]).is_none());
         assert!(build_headers(vec![]).is_none());
+    }
+
+    #[test]
+    fn payload_is_base64_decoded() {
+        assert_eq!(decode_payload("aGk=").unwrap(), b"hi");
+        assert_eq!(decode_payload("").unwrap(), b"");
+        assert_eq!(
+            decode_payload("not base64!").unwrap_err().kind(),
+            "invalidInput"
+        );
     }
 }

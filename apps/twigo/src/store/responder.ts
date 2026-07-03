@@ -8,7 +8,7 @@ import {
   type IncomingMessage,
   type MessageBatch,
 } from "@/lib/api";
-import { decodePreview } from "@twigo/utils";
+import { decodePreview, encodeText } from "@twigo/utils";
 import { render, buildMsgContext, warmUp } from "@/lib/template";
 import { createPersistStorage } from "@/lib/persist-storage";
 import { useReadOnly } from "@/store/readonly";
@@ -194,7 +194,7 @@ async function handleMessage(connId: string, id: string, m: IncomingMessage) {
 
   if (!rendered.ok) {
     try {
-      await apiPublish(connId, m.reply, "", [
+      await apiPublish(connId, m.reply, encodeText(""), [
         [ERROR_HEADER, WIRE_RENDER_ERROR],
         [ERROR_CODE_HEADER, "500"],
       ]);
@@ -221,7 +221,7 @@ async function handleMessage(connId: string, id: string, m: IncomingMessage) {
     await apiPublish(
       connId,
       m.reply,
-      rendered.output,
+      encodeText(rendered.output),
       headers as [string, string][],
     );
     appendLog(connId, id, m, {

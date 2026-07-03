@@ -238,17 +238,17 @@ export async function syncConnReadonly(names: string[]): Promise<void> {
 export async function publish(
   connId: string,
   subject: string,
-  payload: string,
+  payloadB64: string,
   headers: [string, string][] = [],
 ): Promise<void> {
   assertWritable(connId);
-  await call("publish", { connId, subject, payload, headers });
+  await call("publish", { connId, subject, payloadB64, headers });
 }
 
 export async function request(
   connId: string,
   subject: string,
-  payload: string,
+  payloadB64: string,
   timeoutMs?: number | null,
   headers: [string, string][] = [],
 ): Promise<IncomingMessage> {
@@ -256,10 +256,22 @@ export async function request(
   return call<IncomingMessage>("request", {
     connId,
     subject,
-    payload,
+    payloadB64,
     timeoutMs: timeoutMs ?? null,
     headers,
   });
+}
+
+export interface PickedPayload {
+  name: string;
+  size: number;
+  payloadB64: string;
+}
+
+export function pickPayloadFile(
+  maxBytes: number,
+): Promise<PickedPayload | null> {
+  return call<PickedPayload | null>("pick_payload_file", { maxBytes });
 }
 
 export interface StreamSummary {
@@ -390,6 +402,16 @@ export async function jsUpdateStream(
 ): Promise<void> {
   assertWritable(connId);
   await call("js_update_stream", { connId, stream, patch });
+}
+
+// Full replacement (raw JSON editor): absent keys reset to defaults.
+export async function jsReplaceStream(
+  connId: string,
+  stream: string,
+  config: Record<string, unknown>,
+): Promise<void> {
+  assertWritable(connId);
+  await call("js_replace_stream", { connId, stream, config });
 }
 
 export async function jsCreateConsumer(

@@ -91,7 +91,12 @@ describe("responder store", () => {
 
     deliver(req());
     await waitFor(() => publish.mock.calls.length > 0);
-    expect(publish).toHaveBeenCalledWith("conn", "_INBOX.1", "PONG", []);
+    expect(publish).toHaveBeenCalledWith(
+      "conn",
+      "_INBOX.1",
+      encodeText("PONG"),
+      [],
+    );
     expect(sess().handled).toBe(1);
     // lastRequest is folded into the same write as the log entry.
     expect(sess().lastRequest?.subject).toBe("svc.get");

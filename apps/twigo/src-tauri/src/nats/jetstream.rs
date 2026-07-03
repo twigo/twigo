@@ -517,6 +517,35 @@ pub async fn js_update_stream(
     Ok(())
 }
 
+/// Full-config replacement for the raw JSON editor: unlike js_update_stream's
+/// merge, absent keys here reset to defaults - which is the point.
+#[tauri::command]
+pub async fn js_replace_stream(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    stream: String,
+    config: serde_json::Value,
+) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
+    let client = conns
+        .client(&conn_id)
+        .await
+        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
+    let js = async_nats::jetstream::new(client);
+    match config.get("name").and_then(|n| n.as_str()) {
+        Some(name) if name == stream => {}
+        _ => {
+            return Err(Error::InvalidInput(format!(
+                "config name must match stream '{stream}'"
+            )))
+        }
+    }
+    let cfg: async_nats::jetstream::stream::Config = serde_json::from_value(config)
+        .map_err(|e| Error::InvalidInput(format!("invalid stream config: {e}")))?;
+    js.update_stream(&cfg).await.map_err(js_err)?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn js_create_consumer(
     conns: State<'_, ConnState>,

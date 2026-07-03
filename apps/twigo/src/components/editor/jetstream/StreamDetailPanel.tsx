@@ -1,5 +1,13 @@
 import { useState } from "react";
-import { RefreshCw, Layers, Eraser, Trash2, Plus, Pencil } from "lucide-react";
+import {
+  RefreshCw,
+  Layers,
+  Eraser,
+  Trash2,
+  Plus,
+  Pencil,
+  Braces,
+} from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
 import {
@@ -7,6 +15,7 @@ import {
   jsDeleteStream,
   jsCreateConsumer,
   jsUpdateStream,
+  jsReplaceStream,
 } from "@/lib/api";
 import { useStreamDetail } from "@/hooks/useJetStreamDetail";
 import { useIsReadOnly } from "@/hooks/useIsReadOnly";
@@ -20,6 +29,7 @@ import { PurgeDialog } from "./PurgeDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { CreateConsumerDialog } from "./CreateConsumerDialog";
 import { StreamFormDialog, type StreamFormInitial } from "./StreamFormDialog";
+import { RawConfigDialog } from "./RawConfigDialog";
 
 function pick(v: unknown, fallback: string): string {
   return typeof v === "string" ? v : fallback;
@@ -43,8 +53,11 @@ export function StreamDetailPanel({
   const readOnly = useIsReadOnly(connId);
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [consumerOpen, setConsumerOpen] = useState(false);
+  const [consumerOpen, setConsumerOpen] = useState<{
+    startSeq?: number;
+  } | null>(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [rawOpen, setRawOpen] = useState(false);
 
   const cfg = data?.config ?? {};
   const subjects = Array.isArray(cfg.subjects)
@@ -103,6 +116,17 @@ export function StreamDetailPanel({
     }
   };
 
+  const doReplace = async (config: Record<string, unknown>) => {
+    try {
+      await jsReplaceStream(connId, stream, config);
+      useToasts.getState().push("success", `Updated stream ${stream}`);
+      refresh();
+      void useJetStream.getState().load(connId);
+    } catch (e) {
+      useToasts.getState().push("error", `Update failed: ${String(e)}`);
+    }
+  };
+
   const doEdit = async (config: Record<string, unknown>) => {
     try {
       await jsUpdateStream(connId, stream, config);
@@ -130,7 +154,7 @@ export function StreamDetailPanel({
                 aria-label="New consumer"
                 title={readOnly ? "Connection is read-only" : "New consumer"}
                 disabled={readOnly}
-                onClick={() => setConsumerOpen(true)}
+                onClick={() => setConsumerOpen({})}
               >
                 <Plus />
               </Button>
@@ -149,6 +173,22 @@ export function StreamDetailPanel({
                 onClick={() => setEditOpen(true)}
               >
                 <Pencil />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Edit config as JSON"
+                title={
+                  readOnly
+                    ? "Connection is read-only"
+                    : sealed
+                      ? "Sealed streams can't be edited"
+                      : "Edit config as JSON"
+                }
+                disabled={sealed || readOnly}
+                onClick={() => setRawOpen(true)}
+              >
+                <Braces />
               </Button>
               <Button
                 variant="ghost"
@@ -222,8 +262,18 @@ export function StreamDetailPanel({
       {consumerOpen && (
         <CreateConsumerDialog
           stream={stream}
-          onClose={() => setConsumerOpen(false)}
+          initialStartSeq={consumerOpen.startSeq}
+          onClose={() => setConsumerOpen(null)}
           onCreate={(config) => void doCreateConsumer(config)}
+        />
+      )}
+
+      {rawOpen && data && (
+        <RawConfigDialog
+          stream={stream}
+          config={data.config}
+          onClose={() => setRawOpen(false)}
+          onApply={(config) => void doReplace(config)}
         />
       )}
 
@@ -288,6 +338,7 @@ export function StreamDetailPanel({
             key={`${data.firstSeq}:${data.lastSeq}:${data.messages}`}
             connId={connId}
             stream={stream}
+            onReplayFrom={(seq) => setConsumerOpen({ startSeq: seq })}
           />
 
           <RawJson value={data.config} />
