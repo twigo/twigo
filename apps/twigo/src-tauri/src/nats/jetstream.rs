@@ -469,8 +469,7 @@ pub async fn js_create_stream(
     Ok(())
 }
 
-// update_stream takes a complete Config: a partial submit would reset every
-// unrendered field to serde defaults.
+// A partial Config submit would reset unrendered fields to serde defaults.
 fn merge_stream_patch(
     current: serde_json::Value,
     patch: serde_json::Value,

@@ -46,8 +46,7 @@ export interface StreamSession {
   paused: boolean;
   following: boolean;
   selectedId: number | null;
-  // Snapshot of the selected message, so ring-buffer eviction can't pull it
-  // out from under the open inspector.
+  // Snapshot: eviction must not pull the message from under the inspector.
   selected: StreamMessage | null;
   // All-time messages received on this subscription. The live view only retains
   // a capped window (CAP while following), so this is how the user learns the

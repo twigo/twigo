@@ -13,8 +13,7 @@ use super::subscription::{abort_conn, SubState};
 #[derive(Default)]
 pub struct ConnState {
     clients: Mutex<HashMap<String, async_nats::Client>>,
-    // Mirror of the frontend's read-only locks (SEC-4): write commands check
-    // here too, so the guardrail holds even if a UI path forgets its own guard.
+    // Frontend read-only locks mirrored behind IPC (SEC-4).
     readonly: Mutex<HashSet<String>>,
 }
 

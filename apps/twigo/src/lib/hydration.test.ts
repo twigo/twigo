@@ -10,7 +10,6 @@ function fakeStore() {
       hydrated = true;
       for (const cb of cbs) cb();
     },
-    // Hydrate without notifying - the gap the microtask race-closer covers.
     finishSilently() {
       hydrated = true;
     },
@@ -51,7 +50,6 @@ describe("useStoresHydrated", () => {
   it("closes the render→subscribe race via the microtask check", async () => {
     const a = fakeStore();
     const { result } = renderHook(() => useStoresHydrated([a]));
-    // Hydration completed after the initial snapshot but without a callback.
     a.finishSilently();
     await act(() => Promise.resolve());
     expect(result.current).toBe(true);

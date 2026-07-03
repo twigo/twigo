@@ -45,8 +45,7 @@ const EMPTY: MonitorConnState = {
 };
 
 const MAX_SAMPLES = 90;
-// Back off (rather than latch forever) on "unavailable": the classification
-// can be a transient timeout, and server config can change without a reconnect.
+// "unavailable" can be a transient timeout - back off, don't latch forever.
 const UNAVAILABLE_RETRY_MS = 30_000;
 
 interface MonitorStore {

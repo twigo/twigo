@@ -313,8 +313,7 @@ pub async fn obj_commit_upload(
     let Some(peek) = staged.as_ref() else {
         return Ok(None);
     };
-    // Assert before consuming: a denied commit must keep the staging so a
-    // retry after unlocking still works.
+    // A denied commit must keep the staging for retry.
     conns.assert_writable(&peek.conn_id).await?;
     let Some(s) = staged.take() else {
         return Ok(None);

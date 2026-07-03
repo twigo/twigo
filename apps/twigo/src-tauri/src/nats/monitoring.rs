@@ -32,8 +32,7 @@ async fn http_get<T: serde::de::DeserializeOwned>(base: &str, path: &str) -> err
         )));
     }
     let url = format!("{}/{}", base.trim_end_matches('/'), path);
-    // One shared client (connection pooling); a fresh client per poll leaked
-    // pools. Timeout bounds a hung :8222 endpoint.
+    // Shared client; the timeout bounds a hung :8222 endpoint.
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     let client = CLIENT.get_or_init(|| {
         reqwest::Client::builder()

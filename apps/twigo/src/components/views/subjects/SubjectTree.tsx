@@ -43,8 +43,7 @@ export type TreeNavAction =
   | { kind: "toggle"; path: string }
   | null;
 
-// Pure keyboard-nav decision (same scheme as VirtualTree: arrows move,
-// left/right fold branches, Enter streams the row's subject).
+// Same scheme as VirtualTree: arrows move, left/right fold, Enter streams.
 export function navAction(
   key: string,
   rows: Row[],

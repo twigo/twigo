@@ -1,7 +1,6 @@
 import { useToasts } from "@/store/toasts";
 
-// Async errors (store actions on timers, event-bridge callbacks) never reach a
-// React error boundary - surface them as a toast instead of a silent console.
+// Async errors never reach a React boundary - surface them as a toast.
 export function reportUnexpectedError(source: string, err: unknown): void {
   const message = err instanceof Error ? err.message : String(err);
   console.error(`[${source}]`, err);

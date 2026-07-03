@@ -43,7 +43,6 @@ function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
 // server. Throws an IpcError the caller's existing catch surfaces as a toast.
 function assertWritable(connId: string): void {
   if (useReadOnly.getState().isReadOnly(connId)) {
-    // Same kind/message as the Rust-side assert_writable mirror (SEC-4).
     throw new IpcError(
       "permissions",
       `connection '${connId}' is read-only - writes are blocked`,
@@ -231,8 +230,7 @@ export async function unsubscribe(subId: string): Promise<void> {
   await call("unsubscribe", { subId });
 }
 
-// SEC-4: mirror the lock set into Rust so writes are also blocked behind the
-// IPC boundary, not only by assertWritable above.
+// SEC-4: mirrors the lock set into Rust.
 export async function syncConnReadonly(names: string[]): Promise<void> {
   await call("conn_sync_readonly", { names });
 }

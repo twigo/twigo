@@ -2,7 +2,6 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 import { reportUnexpectedError } from "@/lib/errors";
 
 interface Props {
-  // Names the crashed surface ("Streams & Consumers", "editor tab") in the toast.
   label: string;
   children: ReactNode;
 }
@@ -11,8 +10,7 @@ interface State {
   error: Error | null;
 }
 
-// Contains a render crash to one panel instead of blanking the workbench (the
-// root ErrorBoundary stays as the last resort).
+// Contains a render crash to one panel instead of blanking the workbench.
 export class PanelBoundary extends Component<Props, State> {
   state: State = { error: null };
 

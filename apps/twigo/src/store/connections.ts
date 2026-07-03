@@ -194,8 +194,6 @@ export const useConnections = create<ConnectionsState>()(
       if (get().connected[name]) {
         await get().disconnect(name);
       }
-      // A definite deletion (unlike load()'s best-effort listing): drop the
-      // safety lock and monitoring URL keyed to this name.
       useReadOnly.getState().setReadOnly(name, false);
       useMonitorConfig.getState().setUrl(name, null);
       const dir = useSettings.getState().contextDir;
@@ -311,9 +309,7 @@ export const useConnections = create<ConnectionsState>()(
   })),
 );
 
-// Keep the Rust-side lock mirror current (covers hydration and every toggle).
-// Chained so full-set replaces reach Rust in dispatch order; a failed sync is
-// surfaced (the mirror would silently stop backstopping writes).
+// Chained: full-set replaces must reach Rust in dispatch order.
 let readonlySync = Promise.resolve();
 useReadOnly.subscribe((s) => {
   const names = Object.keys(s.byConn);

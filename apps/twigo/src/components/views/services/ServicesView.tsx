@@ -27,8 +27,7 @@ export function ServicesView({ filter, connId }: ViewProps) {
   const [sortKey, setSortKey] = useState<ServiceSortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
-  // Discover on first open / connection change, then keep the stats fresh
-  // while the view is visible; teardown is conn-scoped.
+  // Discover on first open / connection change; teardown is conn-scoped.
   useEffect(() => {
     if (!isConnected || !connId) return;
     void useServices.getState().discover(connId);
