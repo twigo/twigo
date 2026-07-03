@@ -14,7 +14,11 @@ const { publish, request } = vi.hoisted(() => ({
   publish: vi.fn(),
   request: vi.fn(),
 }));
-vi.mock("@/lib/api", () => ({ publish, request }));
+vi.mock("@/lib/api", () => ({
+  publish,
+  request,
+  syncConnReadonly: vi.fn(() => Promise.resolve()),
+}));
 
 function setLive(connected: boolean) {
   useConnections.setState({

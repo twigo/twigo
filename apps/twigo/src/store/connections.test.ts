@@ -251,11 +251,14 @@ describe("connections link toasts", () => {
 });
 
 describe("read-only mirror (SEC-4)", () => {
-  it("syncs the lock set to the backend on every change", () => {
+  it("syncs the lock set to the backend on every change, in order", async () => {
     syncConnReadonly.mockClear();
     useReadOnly.getState().setReadOnly("prod", true);
-    expect(syncConnReadonly).toHaveBeenCalledWith(["prod"]);
     useReadOnly.getState().setReadOnly("prod", false);
-    expect(syncConnReadonly).toHaveBeenLastCalledWith([]);
+    await vi.waitFor(() => {
+      expect(syncConnReadonly).toHaveBeenCalledTimes(2);
+    });
+    expect(syncConnReadonly).toHaveBeenNthCalledWith(1, ["prod"]);
+    expect(syncConnReadonly).toHaveBeenNthCalledWith(2, []);
   });
 });

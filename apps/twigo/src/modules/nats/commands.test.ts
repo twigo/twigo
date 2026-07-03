@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useConnections } from "@/store/connections";
+import { useReadOnly } from "@/store/readonly";
 import type { ContextSummary, ConnInfo } from "@/lib/api";
 import { getCommands } from "@/lib/commands";
 import { registerNatsCommands } from "./commands";
@@ -81,5 +82,28 @@ describe("nats commands", () => {
       .find((c) => c.id === "conn.prod-eu")
       ?.run();
     expect(useConnections.getState().activeContext).toBe("prod-eu");
+  });
+});
+
+describe("connections.toggle-readonly", () => {
+  beforeEach(() => {
+    useReadOnly.setState({ byConn: {} });
+  });
+
+  it("appears only with an active connection and toggles its lock", () => {
+    useConnections.setState({ activeContext: null });
+    expect(
+      getCommands().some((c) => c.id === "connections.toggle-readonly"),
+    ).toBe(false);
+
+    useConnections.setState({ activeContext: "prod" });
+    const cmd = getCommands().find(
+      (c) => c.id === "connections.toggle-readonly",
+    );
+    expect(cmd).toBeDefined();
+    cmd?.run();
+    expect(useReadOnly.getState().isReadOnly("prod")).toBe(true);
+    cmd?.run();
+    expect(useReadOnly.getState().isReadOnly("prod")).toBe(false);
   });
 });

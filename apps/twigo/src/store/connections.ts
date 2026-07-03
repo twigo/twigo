@@ -111,8 +111,6 @@ export const useConnections = create<ConnectionsState>()(
         const names = contexts.map((c) => c.name);
         useWorkspace.getState().prune(names);
         useResponder.getState().pruneConns(names);
-        useReadOnly.getState().prune(names);
-        useMonitorConfig.getState().prune(names);
 
         const selected = contexts.find((c) => c.selected)?.name ?? null;
         const remembered = useWorkspace.getState().activeContext;
@@ -196,6 +194,10 @@ export const useConnections = create<ConnectionsState>()(
       if (get().connected[name]) {
         await get().disconnect(name);
       }
+      // A definite deletion (unlike load()'s best-effort listing): drop the
+      // safety lock and monitoring URL keyed to this name.
+      useReadOnly.getState().setReadOnly(name, false);
+      useMonitorConfig.getState().setUrl(name, null);
       const dir = useSettings.getState().contextDir;
       await apiDeleteContext(dir, name);
       if (get().activeContext === name) {
@@ -310,8 +312,18 @@ export const useConnections = create<ConnectionsState>()(
 );
 
 // Keep the Rust-side lock mirror current (covers hydration and every toggle).
+// Chained so full-set replaces reach Rust in dispatch order; a failed sync is
+// surfaced (the mirror would silently stop backstopping writes).
+let readonlySync = Promise.resolve();
 useReadOnly.subscribe((s) => {
-  syncConnReadonly(Object.keys(s.byConn)).catch((e: unknown) => {
-    console.error("read-only sync failed:", e);
-  });
+  const names = Object.keys(s.byConn);
+  readonlySync = readonlySync.then(() =>
+    syncConnReadonly(names).catch((e: unknown) => {
+      useToasts
+        .getState()
+        .push("error", `Read-only sync failed: ${String(e)}`, {
+          key: "readonly-sync",
+        });
+    }),
+  );
 });

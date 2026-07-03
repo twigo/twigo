@@ -309,10 +309,17 @@ pub async fn obj_commit_upload(
     conns: State<'_, ConnState>,
     staging: State<'_, UploadStaging>,
 ) -> error::Result<Option<String>> {
-    let Some(s) = staging.0.lock().await.take() else {
+    let mut staged = staging.0.lock().await;
+    let Some(peek) = staged.as_ref() else {
         return Ok(None);
     };
-    conns.assert_writable(&s.conn_id).await?;
+    // Assert before consuming: a denied commit must keep the staging so a
+    // retry after unlocking still works.
+    conns.assert_writable(&peek.conn_id).await?;
+    let Some(s) = staged.take() else {
+        return Ok(None);
+    };
+    drop(staged);
     let os = store(&conns, &s.conn_id, &s.bucket).await?;
     let mut file = tokio::fs::File::open(&s.path)
         .await

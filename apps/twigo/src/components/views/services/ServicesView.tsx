@@ -34,8 +34,9 @@ export function ServicesView({ filter, connId }: ViewProps) {
     void useServices.getState().discover(connId);
     const tick = setInterval(() => {
       const cur = useServices.getState().byConn[connId];
-      // Skip a tick that would overlap an in-flight scatter-gather.
-      if (cur?.status !== "loading") {
+      // Skip overlapping gathers and ticks racing a disconnect teardown.
+      const live = useConnections.getState().connected[connId];
+      if (live && cur?.status !== "loading") {
         void useServices.getState().discover(connId);
       }
     }, REFRESH_MS);
@@ -78,18 +79,34 @@ export function ServicesView({ filter, connId }: ViewProps) {
           Services
         </span>
         <span className="text-[11px] tabular-nums text-muted-foreground">
-          {status === "ready" ? fmtCount(services.length) : ""}
+          {status === "ready" || services.length > 0
+            ? fmtCount(services.length)
+            : ""}
         </span>
+        {status === "error" && services.length > 0 && (
+          <span
+            className="text-[10px] text-warn"
+            title={error ?? "The last background refresh failed."}
+          >
+            refresh failing
+          </span>
+        )}
         <Button
           variant="ghost"
           size="icon-sm"
           className="ml-auto"
           aria-label="Refresh"
           title="Rediscover services"
-          disabled={status === "loading"}
+          disabled={status === "loading" && services.length === 0}
           onClick={discover}
         >
-          <RefreshCw className={status === "loading" ? "animate-spin" : ""} />
+          <RefreshCw
+            className={
+              status === "loading" && services.length === 0
+                ? "animate-spin"
+                : ""
+            }
+          />
         </Button>
       </div>
 

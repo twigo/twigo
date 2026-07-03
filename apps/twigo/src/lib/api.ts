@@ -43,9 +43,10 @@ function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
 // server. Throws an IpcError the caller's existing catch surfaces as a toast.
 function assertWritable(connId: string): void {
   if (useReadOnly.getState().isReadOnly(connId)) {
+    // Same kind/message as the Rust-side assert_writable mirror (SEC-4).
     throw new IpcError(
-      "readOnly",
-      `${connId} is read-only - writes are blocked`,
+      "permissions",
+      `connection '${connId}' is read-only - writes are blocked`,
     );
   }
 }

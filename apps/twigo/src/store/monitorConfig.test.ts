@@ -33,12 +33,4 @@ describe("monitorConfig store", () => {
     setUrl("a", "   ");
     expect(useMonitorConfig.getState().urls).not.toHaveProperty("a");
   });
-
-  it("prunes URLs for contexts that no longer exist", () => {
-    const { setUrl } = useMonitorConfig.getState();
-    setUrl("a", "http://a:8222");
-    setUrl("old", "http://old:8222");
-    useMonitorConfig.getState().prune(["a"]);
-    expect(useMonitorConfig.getState().urls).toEqual({ a: "http://a:8222" });
-  });
 });

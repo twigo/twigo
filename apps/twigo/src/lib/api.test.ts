@@ -21,7 +21,8 @@ describe("read-only guard", () => {
   it("blocks a write on a read-only connection before it hits the backend", async () => {
     useReadOnly.getState().setReadOnly("prod", true);
     await expect(publish("prod", "orders.new", "x")).rejects.toMatchObject({
-      kind: "readOnly",
+      // Same kind as the Rust assert_writable mirror.
+      kind: "permissions",
     });
     expect(invokeMock).not.toHaveBeenCalled();
   });

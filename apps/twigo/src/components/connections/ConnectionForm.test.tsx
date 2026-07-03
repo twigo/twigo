@@ -9,6 +9,7 @@ import { ConnectionForm } from "./ConnectionForm";
 vi.mock("@/lib/api", () => ({
   getContext: vi.fn(),
   saveContext: vi.fn(() => Promise.resolve()),
+  syncConnReadonly: vi.fn(() => Promise.resolve()),
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 

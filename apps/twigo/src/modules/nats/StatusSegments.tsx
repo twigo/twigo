@@ -58,9 +58,12 @@ export function NatsConnectionStatus() {
 
   if (info && !info.connected) {
     return (
-      <span className="px-1">
-        <ReconnectStatus name={info.name} />
-      </span>
+      <>
+        <span className="px-1">
+          <ReconnectStatus name={info.name} />
+        </span>
+        {lockChip}
+      </>
     );
   }
   if (info) {
