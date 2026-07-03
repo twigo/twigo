@@ -9,6 +9,13 @@ import { useJetStream } from "@/store/jetstream";
 import { useKv } from "@/store/kv";
 import { useObjStore } from "@/store/objstore";
 import { newPublish, newResponder } from "@/lib/actions";
+import { useServices } from "@/store/services";
+import {
+  openStreamDetail,
+  openConsumerDetail,
+  openService,
+} from "@/lib/editor";
+import { useUi } from "@/store/ui";
 
 const hasLive = () =>
   Object.values(useConnections.getState().connected).some((i) => i.connected);
@@ -41,6 +48,70 @@ function connectionCommands(): Command[] {
           },
     };
   });
+}
+
+// Loaded entities as jumpable palette entries (DataGrip's search-everywhere).
+function entityCommands(): Command[] {
+  const conn = activeConn();
+  if (!conn) return [];
+  const out: Command[] = [];
+  const js = useJetStream.getState().byConn[conn];
+  for (const s of js?.parents ?? []) {
+    out.push({
+      id: `jump.stream.${s.name}`,
+      title: `Stream: ${s.name}`,
+      category: "Jump",
+      keywords: "jetstream stream",
+      run: () => {
+        openStreamDetail(conn, s.name);
+      },
+    });
+    for (const c of js?.children[s.name] ?? []) {
+      out.push({
+        id: `jump.consumer.${s.name}.${c.name}`,
+        title: `Consumer: ${s.name} › ${c.name}`,
+        category: "Jump",
+        keywords: "jetstream consumer",
+        run: () => {
+          openConsumerDetail(conn, s.name, c.name);
+        },
+      });
+    }
+  }
+  for (const b of useKv.getState().byConn[conn]?.parents ?? []) {
+    out.push({
+      id: `jump.kv.${b.bucket}`,
+      title: `KV bucket: ${b.bucket}`,
+      category: "Jump",
+      keywords: "kv key value bucket",
+      run: () => {
+        useUi.setState({ activeView: "kv", sidebarOpen: true });
+      },
+    });
+  }
+  for (const b of useObjStore.getState().byConn[conn]?.parents ?? []) {
+    out.push({
+      id: `jump.obj.${b.bucket}`,
+      title: `Object bucket: ${b.bucket}`,
+      category: "Jump",
+      keywords: "object store bucket",
+      run: () => {
+        useUi.setState({ activeView: "objectstore", sidebarOpen: true });
+      },
+    });
+  }
+  for (const svc of useServices.getState().byConn[conn]?.services ?? []) {
+    out.push({
+      id: `jump.service.${svc.name}.${svc.id}`,
+      title: `Service: ${svc.name} · ${svc.id}`,
+      category: "Jump",
+      keywords: "micro service",
+      run: () => {
+        openService(conn, svc.name, svc.id);
+      },
+    });
+  }
+  return out;
 }
 
 export function registerNatsCommands(): void {
@@ -114,4 +185,5 @@ export function registerNatsCommands(): void {
     },
   );
   registerCommandProvider(connectionCommands);
+  registerCommandProvider(entityCommands);
 }

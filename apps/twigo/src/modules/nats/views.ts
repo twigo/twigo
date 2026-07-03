@@ -6,6 +6,7 @@ import {
   Box,
   Activity,
   Server,
+  History,
 } from "lucide-react";
 import { registerView } from "@/shell/views";
 import { SubjectsView } from "@/components/views/subjects/SubjectsView";
@@ -15,6 +16,7 @@ import { KvView } from "@/components/views/kv/KvView";
 import { ObjectStoreView } from "@/components/views/objstore/ObjectStoreView";
 import { MonitorView } from "@/components/views/monitor/MonitorView";
 import { ServicesView } from "@/components/views/services/ServicesView";
+import { HistoryView } from "@/components/views/history/HistoryView";
 
 // The NATS sidebar views, in display order. Contributed to the shell's view
 // registry by registerNatsModule(), tagged with the "nats" domain so the shell
@@ -55,6 +57,13 @@ export function registerNatsViews(): void {
     icon: Webhook,
     domain: "nats",
     Panel: RespondersView,
+  });
+  registerView({
+    id: "history",
+    title: "Sent History",
+    icon: History,
+    domain: "nats",
+    Panel: HistoryView,
   });
   registerView({
     id: "services",

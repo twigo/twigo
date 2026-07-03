@@ -8,6 +8,7 @@ import { useMonitorConfig } from "@/store/monitorConfig";
 import { useSpaces } from "@/store/spaces";
 import { useZoom } from "@/store/zoom";
 import { useCommandHistory } from "@/store/commandHistory";
+import { useHistory } from "@/store/history";
 
 interface Hydratable {
   persist: {
@@ -29,6 +30,7 @@ const STORES: Hydratable[] = [
   useSpaces,
   useZoom,
   useCommandHistory,
+  useHistory,
 ];
 
 export function useStoresHydrated(stores: Hydratable[]): boolean {

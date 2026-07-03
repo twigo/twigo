@@ -9,6 +9,15 @@ vi.mock("@/lib/actions", () => ({
   newPublish: vi.fn(),
   newResponder: vi.fn(),
 }));
+const { openStreamDetail } = vi.hoisted(() => ({
+  openStreamDetail: vi.fn(),
+}));
+vi.mock("@/lib/editor", () => ({
+  openStreamDetail,
+  openConsumerDetail: vi.fn(),
+  openService: vi.fn(),
+}));
+import { useJetStream } from "@/store/jetstream";
 
 function ctx(name: string): ContextSummary {
   return {
@@ -105,5 +114,33 @@ describe("connections.toggle-readonly", () => {
     expect(useReadOnly.getState().isReadOnly("prod")).toBe(true);
     cmd?.run();
     expect(useReadOnly.getState().isReadOnly("prod")).toBe(false);
+  });
+});
+
+describe("entity jump commands", () => {
+  it("surfaces loaded streams and consumers for the active connection", () => {
+    useConnections.setState({ activeContext: "prod" });
+    useJetStream.setState({
+      byConn: {
+        prod: {
+          parents: [{ name: "ORDERS" }],
+          status: "ready",
+          error: null,
+          expanded: {},
+          children: { ORDERS: [{ name: "worker" }] },
+          childrenLoading: {},
+        },
+      },
+    } as never);
+
+    const cmds = getCommands();
+    expect(cmds.some((c) => c.id === "jump.consumer.ORDERS.worker")).toBe(true);
+    cmds.find((c) => c.id === "jump.stream.ORDERS")?.run();
+    expect(openStreamDetail).toHaveBeenCalledWith("prod", "ORDERS");
+  });
+
+  it("offers no jumps without an active connection", () => {
+    useConnections.setState({ activeContext: null });
+    expect(getCommands().some((c) => c.id.startsWith("jump."))).toBe(false);
   });
 });

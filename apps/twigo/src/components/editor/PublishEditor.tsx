@@ -3,6 +3,7 @@ import { Send, Loader2, ArrowLeftRight, Plus, X, FileUp } from "lucide-react";
 import { Button, Input, Label, CodeViewer, cn } from "@twigo/ui";
 import { decodeText, tryPrettyJson, fmtBytes } from "@twigo/utils";
 import { useConnections } from "@/store/connections";
+import { useHistory } from "@/store/history";
 import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import {
   publish,
@@ -93,6 +94,13 @@ export function PublishEditor({
     setSent(false);
     try {
       await publish(connId, subject.trim(), wire ?? "", cleanHeaders());
+      useHistory.getState().record({
+        connId,
+        kind: "publish",
+        subject: subject.trim(),
+        payloadB64: wire ?? "",
+        headers: cleanHeaders(),
+      });
       setSent(true);
       // Reset the flash window on overlapping sends; the unmount effect clears
       // a pending timer so we never setState after the editor closes.
@@ -121,6 +129,13 @@ export function PublishEditor({
         null,
         cleanHeaders(),
       );
+      useHistory.getState().record({
+        connId,
+        kind: "request",
+        subject: subject.trim(),
+        payloadB64: wire ?? "",
+        headers: cleanHeaders(),
+      });
       setReply({ kind: "msg", msg, ms: Math.round(performance.now() - t0) });
     } catch (e) {
       setReply({ kind: "error", error: String(e) });
