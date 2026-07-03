@@ -11,6 +11,8 @@ import {
 import { decodePreview } from "@twigo/utils";
 import { render, buildMsgContext, warmUp } from "@/lib/template";
 import { createPersistStorage } from "@/lib/persist-storage";
+import { useReadOnly } from "@/store/readonly";
+import { useToasts } from "@/store/toasts";
 
 const LOG_CAP = 200;
 // Head only: full 1 MiB outputs x LOG_CAP would pin ~200 MiB.
@@ -274,6 +276,14 @@ export const useResponder = create<ResponderState>()(
         if (!session || session.listening) return;
         const subject = session.config.subject.trim();
         if (!subject) return;
+        if (useReadOnly.getState().isReadOnly(connId)) {
+          useToasts
+            .getState()
+            .push("error", `${connId} is read-only - responders can't reply`, {
+              key: `responder-ro:${connId}`,
+            });
+          return;
+        }
 
         warmUp();
         const subId = `responder::${id}`;
@@ -382,3 +392,23 @@ export const useResponder = create<ResponderState>()(
     },
   ),
 );
+
+// A lock means this connection changes nothing: leaving mocks "listening" but
+// unable to reply would be a silent failure, so stop them and say so.
+useReadOnly.subscribe((s, prev) => {
+  for (const connId of Object.keys(s.byConn)) {
+    if (prev.byConn[connId]) continue;
+    const sessions = useResponder.getState().byConn[connId];
+    if (!sessions) continue;
+    const listening = Object.values(sessions).filter((r) => r.listening);
+    if (listening.length === 0) continue;
+    for (const r of listening) void useResponder.getState().stop(connId, r.id);
+    useToasts
+      .getState()
+      .push(
+        "warning",
+        `Stopped ${String(listening.length)} responder${listening.length > 1 ? "s" : ""} - ${connId} is read-only`,
+        { key: `responder-ro:${connId}` },
+      );
+  }
+});

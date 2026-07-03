@@ -3,6 +3,7 @@ import { Play, Square, Plus, X, Trash2 } from "lucide-react";
 import { Button, Input, Label, CodeViewer, cn } from "@twigo/ui";
 import { fmtTime } from "@twigo/utils";
 import { useConnections } from "@/store/connections";
+import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import {
   useResponder,
   type ResponderMode,
@@ -128,6 +129,7 @@ export function ResponderEditor({
     (s) =>
       session !== undefined && s.connected[session.connId]?.connected === true,
   );
+  const readOnly = useIsReadOnly(connId);
   const [preview, setPreview] = useState<RenderResult | null>(null);
 
   const template = session?.config.template ?? "";
@@ -163,7 +165,7 @@ export function ResponderEditor({
   const subject = config.subject;
   const set = (p: Partial<ResponderConfig>) =>
     useResponder.getState().setConfig(connId, id, p);
-  const canStart = live && subject.trim().length > 0;
+  const canStart = live && !readOnly && subject.trim().length > 0;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto bg-background p-3">
@@ -171,6 +173,12 @@ export function ResponderEditor({
         <p className="text-xs text-warn">
           Not connected - connect{" "}
           <span className="font-mono">{session.connId}</span> to respond.
+        </p>
+      )}
+      {live && readOnly && (
+        <p className="text-xs text-warn">
+          <span className="font-mono">{session.connId}</span> is read-only -
+          responders can't reply.
         </p>
       )}
 

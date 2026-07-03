@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Play, Plus, Square, Trash2 } from "lucide-react";
 import { cn } from "@twigo/ui";
 import { useConnections } from "@/store/connections";
+import { useReadOnly } from "@/store/readonly";
 import { useResponder } from "@/store/responder";
 import { openResponder, openResponderTab } from "@/lib/editor";
 import type { ViewProps } from "@/shell/views";
@@ -39,6 +40,7 @@ export function RespondersView({ filter, connId }: ViewProps) {
   const live = useConnections(
     (s) => !!(connId && s.connected[connId]?.connected),
   );
+  const locks = useReadOnly((s) => s.byConn);
   const list = Object.values(conns ?? {})
     .filter((s) =>
       s.config.subject.toLowerCase().includes(filter.toLowerCase()),
@@ -128,7 +130,11 @@ export function RespondersView({ filter, connId }: ViewProps) {
                 ) : (
                   <IconButton
                     label="Start responder"
-                    disabled={!live || s.config.subject.trim() === ""}
+                    disabled={
+                      !live ||
+                      !!locks[s.connId] ||
+                      s.config.subject.trim() === ""
+                    }
                     onClick={() =>
                       void useResponder.getState().start(s.connId, s.id)
                     }
