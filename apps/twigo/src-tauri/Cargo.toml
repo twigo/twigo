@@ -2,7 +2,10 @@
 name = "twigo"
 version = "0.1.0"
 description = "Twigo - a NATS IDE"
-authors = ["you"]
+authors = ["Serhii Mazurok"]
+license = "MIT"
+repository = "https://github.com/twigo/twigo"
+homepage = "https://github.com/twigo/twigo"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

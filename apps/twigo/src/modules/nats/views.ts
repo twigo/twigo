@@ -60,6 +60,7 @@ export function registerNatsViews(): void {
     id: "services",
     title: "Services",
     icon: Server,
+    domain: "nats",
     Panel: ServicesView,
   });
   registerView({

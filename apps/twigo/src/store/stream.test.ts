@@ -88,6 +88,29 @@ describe("stream store (multi-session)", () => {
     expect(useStream.getState().sessions.a?.items[0]?.preview).toContain("one");
   });
 
+  it("keeps the selected message for the inspector after eviction", async () => {
+    await useStream.getState().open("a", "local", "orders.>");
+    const [chA] = mocks.channels;
+
+    chA?.onmessage(batch(msg("orders.new", "first")));
+    vi.advanceTimersByTime(150);
+    const first = useStream.getState().sessions.a?.items[0];
+    useStream.getState().select("a", first?.id ?? null);
+
+    const flood = Array.from({ length: 2000 }, (_, i) =>
+      msg("orders.new", `m${i}`),
+    );
+    chA?.onmessage({ messages: flood, dropped: 0 });
+    vi.advanceTimersByTime(150);
+
+    const s = useStream.getState().sessions.a;
+    expect(s?.items.some((m) => m.id === first?.id)).toBe(false);
+    expect(s?.selected).toBe(first);
+
+    useStream.getState().select("a", null);
+    expect(useStream.getState().sessions.a?.selected).toBeNull();
+  });
+
   it("pauses a single session without affecting others", async () => {
     await useStream.getState().open("a", "local", "orders.>");
     await useStream.getState().open("b", "local", "audit.>");

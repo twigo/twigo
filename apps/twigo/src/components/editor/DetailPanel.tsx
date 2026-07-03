@@ -22,16 +22,14 @@ function bodyFor(m: StreamMessage, format: PayloadFormat): string {
   return tryPrettyJson(m.payloadB64) ?? decodeText(m.payloadB64);
 }
 
-// Resolve the selected message. Returned as a stable object reference (the same
-// StreamMessage stays in `items` until evicted), so a narrow selector over this
-// re-renders the panel only when the selection changes - not on every flush.
+// Resolve the selected message from its snapshot: a stable reference that
+// survives ring-buffer eviction, so a narrow selector over this re-renders the
+// panel only when the selection changes - not on every flush.
 export function selectedMessage(
   session: StreamSession | undefined,
 ): StreamMessage | undefined {
-  if (!session) return undefined;
-  const { selectedId, items } = session;
-  if (selectedId === null) return undefined;
-  return items.find((m) => m.id === selectedId);
+  if (session?.selectedId == null) return undefined;
+  return session.selected ?? undefined;
 }
 
 function Field({ label, value }: { label: string; value: string }) {

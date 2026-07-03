@@ -39,6 +39,27 @@ describe("useMonitor.poll", () => {
     expect(s?.varz?.inMsgs).toBe(1);
   });
 
+  it("backs off on unavailable and retries after the cooldown", async () => {
+    vi.useFakeTimers();
+    try {
+      monitorVarz.mockRejectedValue(new Error("no responders"));
+      await useMonitor.getState().poll("c", null);
+      expect(useMonitor.getState().byConn.c?.status).toBe("unavailable");
+      expect(monitorVarz).toHaveBeenCalledTimes(1);
+
+      await useMonitor.getState().poll("c", null);
+      expect(monitorVarz).toHaveBeenCalledTimes(1);
+
+      vi.setSystemTime(Date.now() + 31_000);
+      monitorVarz.mockResolvedValue(varz());
+      await useMonitor.getState().poll("c", null);
+      expect(monitorVarz).toHaveBeenCalledTimes(2);
+      expect(useMonitor.getState().byConn.c?.status).toBe("ready");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("drops the write-back if reset() ran mid-poll (no ghost connection)", async () => {
     let resolve!: (v: unknown) => void;
     monitorVarz.mockReturnValue(

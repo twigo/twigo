@@ -5,6 +5,9 @@ import { useWorkspace } from "@/store/workspace";
 import { useResponder } from "@/store/responder";
 import { useReadOnly } from "@/store/readonly";
 import { useMonitorConfig } from "@/store/monitorConfig";
+import { useSpaces } from "@/store/spaces";
+import { useZoom } from "@/store/zoom";
+import { useCommandHistory } from "@/store/commandHistory";
 
 interface Hydratable {
   persist: {
@@ -23,6 +26,9 @@ const STORES: Hydratable[] = [
   useResponder,
   useReadOnly,
   useMonitorConfig,
+  useSpaces,
+  useZoom,
+  useCommandHistory,
 ];
 
 /**

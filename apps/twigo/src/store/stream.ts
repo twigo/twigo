@@ -46,6 +46,9 @@ export interface StreamSession {
   paused: boolean;
   following: boolean;
   selectedId: number | null;
+  // Snapshot of the selected message, so ring-buffer eviction can't pull it
+  // out from under the open inspector.
+  selected: StreamMessage | null;
   // All-time messages received on this subscription. The live view only retains
   // a capped window (CAP while following), so this is how the user learns the
   // true volume - and that it keeps climbing while paused.
@@ -158,6 +161,7 @@ export const useStream = create<StreamState>((set, get) => ({
           paused: false,
           following: true,
           selectedId: null,
+          selected: null,
           received: 0,
           dropped: 0,
         },
@@ -204,6 +208,7 @@ export const useStream = create<StreamState>((set, get) => ({
       ...s,
       items: [],
       selectedId: null,
+      selected: null,
       following: true,
     })),
   togglePause: (id) => patch(id, (s) => ({ ...s, paused: !s.paused })),
@@ -215,6 +220,14 @@ export const useStream = create<StreamState>((set, get) => ({
         ? capRetained(s.items, CAP, MAX_RETAINED_BYTES)
         : s.items,
     })),
-  select: (id, selectedId) => patch(id, (s) => ({ ...s, selectedId })),
+  select: (id, selectedId) =>
+    patch(id, (s) => ({
+      ...s,
+      selectedId,
+      selected:
+        selectedId === null
+          ? null
+          : (s.items.find((m) => m.id === selectedId) ?? s.selected),
+    })),
   setActive: (activeId) => set({ activeId }),
 }));
