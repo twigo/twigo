@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   decodeBuiltin,
   decodePayload,
@@ -22,13 +22,19 @@ export function useDecodedPayload(
   payloadB64: string | null,
   target: DecodeTarget,
 ): State {
-  const sync =
-    payloadB64 !== null && target.kind === "builtin"
-      ? decodeBuiltin(payloadB64, target.format)
-      : null;
+  const sync = useMemo(
+    () =>
+      payloadB64 !== null && target.kind === "builtin"
+        ? decodeBuiltin(payloadB64, target.format)
+        : null,
+    [payloadB64, target],
+  );
 
   const isCodec = payloadB64 !== null && target.kind === "codec";
-  const key = isCodec ? `${payloadB64} ${JSON.stringify(target)}` : "";
+  const key = useMemo(
+    () => (isCodec ? `${payloadB64} ${JSON.stringify(target)}` : ""),
+    [isCodec, payloadB64, target],
+  );
   const [res, setRes] = useState<Resolved>({
     key: "",
     decoded: null,

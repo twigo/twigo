@@ -9,7 +9,7 @@ import {
   SelectContent,
   SelectItem,
 } from "@twigo/ui";
-import { useCodecs } from "@/store/codecs";
+import { useCodecs, validPattern } from "@/store/codecs";
 import { useConnections } from "@/store/connections";
 import { codecImportProtos, type CodecId } from "@/lib/api";
 import { CODEC_LABELS } from "@/lib/codecs";
@@ -129,7 +129,7 @@ function MappingsEditor({
 
   const schema = useCodecs.getState().schemaById(schemaId);
   const valid =
-    pattern.trim() !== "" &&
+    validPattern(pattern.trim()) &&
     (codec !== "protobuf" || (!!schemaId && !!messageType));
 
   const add = () => {

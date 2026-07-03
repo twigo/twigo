@@ -16,6 +16,10 @@ use super::error::{self, Error};
 #[derive(Default)]
 pub struct CodecState(Mutex<HashMap<String, DescriptorPool>>);
 
+// Re-imports mint new descriptor sets; bound the cache so stale pools don't
+// accumulate for the process lifetime.
+const POOL_CACHE_CAP: usize = 16;
+
 impl CodecState {
     fn pool_for(&self, descriptor_set_b64: &str) -> error::Result<DescriptorPool> {
         if let Some(pool) = self
@@ -29,18 +33,16 @@ impl CodecState {
         let bytes = decode_b64(descriptor_set_b64, "descriptor set")?;
         let pool = DescriptorPool::decode(bytes.as_slice())
             .map_err(|e| Error::InvalidInput(format!("invalid descriptor set: {e}")))?;
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(descriptor_set_b64.to_string(), pool.clone());
+        self.cache(descriptor_set_b64.to_string(), pool.clone());
         Ok(pool)
     }
 
     fn cache(&self, descriptor_set_b64: String, pool: DescriptorPool) {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(descriptor_set_b64, pool);
+        let mut map = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if map.len() >= POOL_CACHE_CAP && !map.contains_key(&descriptor_set_b64) {
+            map.clear();
+        }
+        map.insert(descriptor_set_b64, pool);
     }
 }
 
@@ -115,9 +117,11 @@ fn decode_bytes(
             let desc = message_descriptor(proto)?;
             let msg = DynamicMessage::decode(desc, bytes)
                 .map_err(|e| Error::InvalidInput(format!("protobuf decode failed: {e}")))?;
+            // A viewer should show default-valued fields, not hide them.
             let opts = SerializeOptions::new()
                 .stringify_64_bit_integers(true)
-                .use_proto_field_name(false);
+                .use_proto_field_name(false)
+                .skip_default_fields(false);
             msg.serialize_with_options(serde_json::value::Serializer, &opts)
                 .map_err(|e| Error::InvalidInput(format!("protobuf serialize failed: {e}")))?
         }
@@ -166,17 +170,65 @@ fn parse_json(json: &str) -> error::Result<serde_json::Value> {
     serde_json::from_str(json).map_err(|e| Error::InvalidInput(format!("invalid json: {e}")))
 }
 
+fn proto_imports(src: &str) -> Vec<String> {
+    src.split(';')
+        .filter_map(|stmt| {
+            let stmt = stmt.trim();
+            let rest = stmt.strip_prefix("import")?.trim_start();
+            let rest = rest
+                .strip_prefix("public")
+                .map(str::trim_start)
+                .unwrap_or(rest);
+            let rest = rest.strip_prefix('"')?;
+            rest.split('"').next().map(str::to_string)
+        })
+        .collect()
+}
+
 fn compile_protos(paths: &[PathBuf]) -> error::Result<(ImportedSchema, DescriptorPool)> {
-    let mut includes: Vec<PathBuf> = Vec::new();
+    // protoc semantics: a file's canonical name must match the string its
+    // importers use, so derive include roots from the set's import statements
+    // and pass root-relative names (fallback: parent dir + bare filename).
+    let mut imports: Vec<String> = Vec::new();
     for p in paths {
-        if let Some(dir) = p.parent() {
-            let dir = dir.to_path_buf();
-            if !includes.contains(&dir) {
-                includes.push(dir);
+        let src = std::fs::read_to_string(p).map_err(|source| Error::Io {
+            path: p.display().to_string(),
+            source,
+        })?;
+        imports.extend(proto_imports(&src));
+    }
+    let mut roots: Vec<PathBuf> = Vec::new();
+    let mut names: Vec<String> = Vec::new();
+    for p in paths {
+        let ps = p.to_string_lossy().replace('\\', "/");
+        let import_name = imports.iter().find_map(|imp| {
+            ps.strip_suffix(&format!("/{imp}"))
+                .map(|root| (PathBuf::from(root), imp.clone()))
+        });
+        let name = match import_name {
+            Some((root, name)) => {
+                if !roots.contains(&root) {
+                    roots.push(root);
+                }
+                name
             }
+            None => {
+                if let Some(dir) = p.parent() {
+                    let dir = dir.to_path_buf();
+                    if !roots.contains(&dir) {
+                        roots.push(dir);
+                    }
+                }
+                p.file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_else(|| ps.clone())
+            }
+        };
+        if !names.contains(&name) {
+            names.push(name);
         }
     }
-    let fds = protox::compile(paths, &includes)
+    let fds = protox::compile(&names, &roots)
         .map_err(|e| Error::InvalidInput(format!("proto compile failed: {e}")))?;
     let bytes = fds.encode_to_vec();
     let descriptor_set_b64 = encode_b64(&bytes);
@@ -227,7 +279,9 @@ pub async fn codec_import_protos(
     if paths.is_empty() {
         return Ok(None);
     }
-    let (schema, pool) = compile_protos(&paths)?;
+    let (schema, pool) = tokio::task::spawn_blocking(move || compile_protos(&paths))
+        .await
+        .map_err(|e| Error::Task(e.to_string()))??;
     codecs.cache(schema.descriptor_set_b64.clone(), pool);
     Ok(Some(schema))
 }
@@ -341,6 +395,48 @@ mod tests {
         assert_eq!(schema.name, "t");
         assert!(schema.message_types.contains(&"t.Person".to_string()));
         assert!(!schema.descriptor_set_b64.is_empty());
+    }
+
+    #[test]
+    fn root_relative_imports_resolve_via_ancestor_includes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("myapp/common")).unwrap();
+        std::fs::write(
+            dir.path().join("myapp/common/types.proto"),
+            "syntax = \"proto3\"; package myapp.common; message Id { string v = 1; }",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("myapp/order.proto"),
+            "syntax = \"proto3\"; package myapp; import \"myapp/common/types.proto\"; message Order { myapp.common.Id id = 1; }",
+        )
+        .unwrap();
+        let (schema, _) = compile_protos(&[
+            dir.path().join("myapp/order.proto"),
+            dir.path().join("myapp/common/types.proto"),
+        ])
+        .unwrap();
+        assert!(schema.message_types.contains(&"myapp.Order".to_string()));
+    }
+
+    #[test]
+    fn decoded_protobuf_shows_default_fields() {
+        let pool = test_pool();
+        let bytes = encode_bytes("protobuf", "{}", Some((&pool, "t.Person"))).unwrap();
+        let out = decode_bytes("protobuf", &bytes, Some((&pool, "t.Person"))).unwrap();
+        let v = value(&out);
+        assert_eq!(v["name"], "");
+        assert_eq!(v["age"], "0");
+    }
+
+    #[test]
+    fn pool_cache_is_bounded() {
+        let state = CodecState::default();
+        for i in 0..(POOL_CACHE_CAP + 4) {
+            state.cache(format!("k{i}"), test_pool());
+        }
+        let len = state.0.lock().unwrap().len();
+        assert!(len <= POOL_CACHE_CAP);
     }
 
     #[test]

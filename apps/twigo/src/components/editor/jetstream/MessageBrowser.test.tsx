@@ -75,8 +75,9 @@ describe("MessageBrowser", () => {
     expect(mocks.openPublish).toHaveBeenCalledWith(
       "dev",
       "orders.created",
-      '{"id":2}',
+      "",
       [],
+      btoa('{"id":2}'),
     );
   });
 });

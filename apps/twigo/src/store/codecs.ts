@@ -18,6 +18,14 @@ export interface Mapping {
   messageType?: string;
 }
 
+export function validPattern(pattern: string): boolean {
+  const tokens = pattern.split(".");
+  return (
+    tokens.length > 0 &&
+    tokens.every((t, i) => t !== "" && (t !== ">" || i === tokens.length - 1))
+  );
+}
+
 export function subjectMatches(pattern: string, subject: string): boolean {
   const p = pattern.split(".");
   const s = subject.split(".");
@@ -86,11 +94,10 @@ export const useCodecs = create<CodecsState>()(
           subjectMatches(m.pattern, subject),
         );
         if (ms.length === 0) return null;
+        const literals = (p: string) =>
+          p.split(".").filter((t) => t !== "*" && t !== ">").length;
         return ms.reduce((best, m) =>
-          m.pattern.replace(/[*>]/g, "").length >
-          best.pattern.replace(/[*>]/g, "").length
-            ? m
-            : best,
+          literals(m.pattern) > literals(best.pattern) ? m : best,
         );
       },
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { useCodecs, subjectMatches } from "./codecs";
+import { useCodecs, subjectMatches, validPattern } from "./codecs";
 
 describe("subjectMatches", () => {
   it("matches literals and wildcards", () => {
@@ -10,6 +10,16 @@ describe("subjectMatches", () => {
     expect(subjectMatches("orders.>", "orders")).toBe(false);
     expect(subjectMatches("orders.created", "orders.updated")).toBe(false);
     expect(subjectMatches("a.*.c", "a.b.c")).toBe(true);
+  });
+});
+
+describe("validPattern", () => {
+  it("accepts NATS patterns and rejects malformed ones", () => {
+    expect(validPattern("orders.>")).toBe(true);
+    expect(validPattern("orders.*.created")).toBe(true);
+    expect(validPattern("a.>.b")).toBe(false);
+    expect(validPattern("a..b")).toBe(false);
+    expect(validPattern("")).toBe(false);
   });
 });
 
@@ -34,7 +44,7 @@ describe("useCodecs", () => {
     expect(useCodecs.getState().mappings.c).toHaveLength(0);
   });
 
-  it("resolves the most specific matching mapping", () => {
+  it("resolves the mapping with the most literal tokens", () => {
     const add = useCodecs.getState().addMapping;
     add("c", { pattern: "orders.>", codec: "cbor" });
     add("c", { pattern: "orders.created", codec: "msgpack" });
@@ -45,5 +55,10 @@ describe("useCodecs", () => {
       "cbor",
     );
     expect(useCodecs.getState().resolve("c", "audit.x")).toBeNull();
+
+    add("c", { pattern: "*.created", codec: "protobuf" });
+    expect(useCodecs.getState().resolve("c", "orders.created")?.codec).toBe(
+      "msgpack",
+    );
   });
 });

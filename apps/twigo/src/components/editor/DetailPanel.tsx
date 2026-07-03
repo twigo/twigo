@@ -1,11 +1,10 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Copy, Braces, Send, Reply, Pin, PinOff, X } from "lucide-react";
 import { Button, EmptyState, CodeViewer, cn } from "@twigo/ui";
 import {
   fmtDateTime,
   fmtRelTime,
   fmtBytes,
-  decodeText,
   type StreamMessage,
 } from "@twigo/utils";
 import { useStream, type StreamSession } from "@/store/stream";
@@ -70,10 +69,6 @@ export function DetailPanel({ streamId }: { streamId: string }) {
     target,
   );
   const body = decoded.decoded?.text ?? "";
-  const payloadText = useMemo(
-    () => (msg ? decodeText(msg.payloadB64) : ""),
-    [msg],
-  );
   const replyTo = msg?.reply ?? null;
   // Reference identity: the same StreamMessage object stays in `items` until
   // evicted, so this is unambiguous across sessions (unlike per-session ids).
@@ -94,7 +89,13 @@ export function DetailPanel({ streamId }: { streamId: string }) {
                 aria-label="Republish"
                 tooltip="Republish"
                 onClick={() =>
-                  openPublish(connId, msg.subject, payloadText, msg.headers)
+                  openPublish(
+                    connId,
+                    msg.subject,
+                    "",
+                    msg.headers,
+                    msg.payloadB64,
+                  )
                 }
               >
                 <Send />
@@ -146,7 +147,7 @@ export function DetailPanel({ streamId }: { streamId: string }) {
                         receivedAt: new Date(msg.receivedAt).toISOString(),
                         reply: msg.reply,
                         headers: msg.headers,
-                        payload: payloadText,
+                        payload: body,
                       },
                       null,
                       2,
@@ -224,10 +225,16 @@ export function DetailPanel({ streamId }: { streamId: string }) {
                 </span>
               )}
             </div>
-            {decoded.error ? (
-              <p className="text-xs text-error">{decoded.error}</p>
+            {(decoded.error ?? pinnedDecoded.error) ? (
+              <p className="text-xs text-error">
+                {decoded.error ?? pinnedDecoded.error}
+              </p>
             ) : comparePinned ? (
-              <PayloadDiff a={pinnedDecoded.decoded?.text ?? ""} b={body} />
+              pinnedDecoded.loading || decoded.loading ? (
+                <p className="text-xs text-muted-foreground">Decoding…</p>
+              ) : (
+                <PayloadDiff a={pinnedDecoded.decoded?.text ?? ""} b={body} />
+              )
             ) : (
               <CodeViewer
                 value={decoded.loading ? "Decoding…" : body}
