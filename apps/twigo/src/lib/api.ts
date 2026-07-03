@@ -230,6 +230,12 @@ export async function unsubscribe(subId: string): Promise<void> {
   await call("unsubscribe", { subId });
 }
 
+// SEC-4: mirror the lock set into Rust so writes are also blocked behind the
+// IPC boundary, not only by assertWritable above.
+export async function syncConnReadonly(names: string[]): Promise<void> {
+  await call("conn_sync_readonly", { names });
+}
+
 export async function publish(
   connId: string,
   subject: string,

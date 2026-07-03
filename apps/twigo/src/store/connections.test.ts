@@ -1,21 +1,30 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { ContextSummary, ConnInfo } from "@/lib/api";
 
-const { listContexts, connect, disconnect, connInfo, deleteContext, pushMock } =
-  vi.hoisted(() => ({
-    listContexts: vi.fn(),
-    connect: vi.fn(),
-    disconnect: vi.fn(),
-    connInfo: vi.fn(),
-    deleteContext: vi.fn(),
-    pushMock: vi.fn(),
-  }));
+const {
+  listContexts,
+  connect,
+  disconnect,
+  connInfo,
+  deleteContext,
+  syncConnReadonly,
+  pushMock,
+} = vi.hoisted(() => ({
+  listContexts: vi.fn(),
+  connect: vi.fn(),
+  disconnect: vi.fn(),
+  connInfo: vi.fn(),
+  deleteContext: vi.fn(),
+  syncConnReadonly: vi.fn(() => Promise.resolve()),
+  pushMock: vi.fn(),
+}));
 vi.mock("@/lib/api", () => ({
   listContexts,
   connect,
   disconnect,
   connInfo,
   deleteContext,
+  syncConnReadonly,
 }));
 vi.mock("@/lib/editor", () => ({ closeEditorsForConn: vi.fn() }));
 vi.mock("@/store/toasts", () => ({
@@ -24,6 +33,7 @@ vi.mock("@/store/toasts", () => ({
 
 import { useConnections } from "./connections";
 import { useWorkspace } from "./workspace";
+import { useReadOnly } from "./readonly";
 
 function ctx(name: string, selected = false): ContextSummary {
   return {
@@ -237,5 +247,15 @@ describe("connections link toasts", () => {
     expect(errors).toEqual([
       ["error", "a: authorization violation", { key: "conn:a:err" }],
     ]);
+  });
+});
+
+describe("read-only mirror (SEC-4)", () => {
+  it("syncs the lock set to the backend on every change", () => {
+    syncConnReadonly.mockClear();
+    useReadOnly.getState().setReadOnly("prod", true);
+    expect(syncConnReadonly).toHaveBeenCalledWith(["prod"]);
+    useReadOnly.getState().setReadOnly("prod", false);
+    expect(syncConnReadonly).toHaveBeenLastCalledWith([]);
   });
 });

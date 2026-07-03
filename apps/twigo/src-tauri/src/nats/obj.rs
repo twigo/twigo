@@ -266,6 +266,7 @@ pub async fn obj_stage_upload(
     conn_id: String,
     bucket: String,
 ) -> error::Result<Option<StagedUploadInfo>> {
+    conns.assert_writable(&conn_id).await?;
     let picked = tokio::task::spawn_blocking(move || app.dialog().file().blocking_pick_file())
         .await
         .map_err(|e| Error::Task(e.to_string()))?;
@@ -311,6 +312,7 @@ pub async fn obj_commit_upload(
     let Some(s) = staging.0.lock().await.take() else {
         return Ok(None);
     };
+    conns.assert_writable(&s.conn_id).await?;
     let os = store(&conns, &s.conn_id, &s.bucket).await?;
     let mut file = tokio::fs::File::open(&s.path)
         .await
@@ -342,6 +344,7 @@ pub async fn obj_delete(
     bucket: String,
     name: String,
 ) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
     let os = store(&conns, &conn_id, &bucket).await?;
     os.delete(&name).await.map_err(js_err)?;
     Ok(())
@@ -393,6 +396,7 @@ pub async fn obj_create_bucket(
     conn_id: String,
     config: serde_json::Value,
 ) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await
@@ -411,6 +415,7 @@ pub async fn obj_delete_bucket(
     conn_id: String,
     bucket: String,
 ) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await

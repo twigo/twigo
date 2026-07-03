@@ -61,6 +61,15 @@ describe("stream store (multi-session)", () => {
     vi.useRealTimers();
   });
 
+  it("rolls back the session when subscribe fails", async () => {
+    mocks.subscribe.mockRejectedValueOnce(new Error("no permissions"));
+    await expect(
+      useStream.getState().open("bad", "local", "orders.>"),
+    ).rejects.toThrow("no permissions");
+    expect(useStream.getState().sessions.bad).toBeUndefined();
+    expect(useStream.getState().activeId).toBeNull();
+  });
+
   it("opens independent sessions and marks the last one active", async () => {
     await useStream.getState().open("a", "local", "orders.>");
     await useStream.getState().open("b", "local", "audit.>");

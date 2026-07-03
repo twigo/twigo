@@ -6,6 +6,7 @@ import {
   disconnect as apiDisconnect,
   connInfo as apiConnInfo,
   deleteContext as apiDeleteContext,
+  syncConnReadonly,
   ipcError,
   type ContextSummary,
   type ConnInfo,
@@ -307,3 +308,10 @@ export const useConnections = create<ConnectionsState>()(
       })),
   })),
 );
+
+// Keep the Rust-side lock mirror current (covers hydration and every toggle).
+useReadOnly.subscribe((s) => {
+  syncConnReadonly(Object.keys(s.byConn)).catch((e: unknown) => {
+    console.error("read-only sync failed:", e);
+  });
+});

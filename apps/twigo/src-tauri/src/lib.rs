@@ -38,6 +38,7 @@ pub fn run() {
             nats::connection::list_connections,
             nats::connection::server_info,
             nats::connection::conn_info,
+            nats::connection::conn_sync_readonly,
             nats::subjects::start_subject_watch,
             nats::subjects::stop_subject_watch,
             nats::subscription::subscribe,

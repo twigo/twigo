@@ -33,6 +33,7 @@ pub async fn publish(
     payload: String,
     headers: Vec<(String, String)>,
 ) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await
@@ -70,6 +71,7 @@ pub async fn request(
     timeout_ms: Option<u64>,
     headers: Vec<(String, String)>,
 ) -> error::Result<IncomingMessage> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await

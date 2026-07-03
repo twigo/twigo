@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -13,12 +13,38 @@ use super::subscription::{abort_conn, SubState};
 #[derive(Default)]
 pub struct ConnState {
     clients: Mutex<HashMap<String, async_nats::Client>>,
+    // Mirror of the frontend's read-only locks (SEC-4): write commands check
+    // here too, so the guardrail holds even if a UI path forgets its own guard.
+    readonly: Mutex<HashSet<String>>,
 }
 
 impl ConnState {
     pub(crate) async fn client(&self, name: &str) -> Option<async_nats::Client> {
         self.clients.lock().await.get(name).cloned()
     }
+
+    pub(crate) async fn set_readonly(&self, names: Vec<String>) {
+        *self.readonly.lock().await = names.into_iter().collect();
+    }
+
+    pub(crate) async fn assert_writable(&self, name: &str) -> error::Result<()> {
+        if self.readonly.lock().await.contains(name) {
+            return Err(Error::Permissions(format!(
+                "connection '{name}' is read-only - writes are blocked"
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// Replace the read-only lock set (synced from the frontend store on change).
+#[tauri::command]
+pub async fn conn_sync_readonly(
+    conns: State<'_, ConnState>,
+    names: Vec<String>,
+) -> error::Result<()> {
+    conns.set_readonly(names).await;
+    Ok(())
 }
 
 #[derive(Serialize, Clone)]
@@ -403,6 +429,20 @@ pub async fn server_info(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn readonly_set_gates_writes_until_cleared() {
+        let conns = ConnState::default();
+        assert!(conns.assert_writable("prod").await.is_ok());
+
+        conns.set_readonly(vec!["prod".into()]).await;
+        let err = conns.assert_writable("prod").await.unwrap_err();
+        assert_eq!(err.kind(), "permissions");
+        assert!(conns.assert_writable("dev").await.is_ok());
+
+        conns.set_readonly(Vec::new()).await;
+        assert!(conns.assert_writable("prod").await.is_ok());
+    }
 
     #[test]
     fn non_empty_filters_blank_and_trims() {

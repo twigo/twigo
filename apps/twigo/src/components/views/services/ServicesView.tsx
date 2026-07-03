@@ -19,15 +19,27 @@ function fmtUptime(started: string): string {
   return Number.isNaN(ms) ? "-" : fmtRelTime(ms);
 }
 
+const REFRESH_MS = 5000;
+
 export function ServicesView({ filter, connId }: ViewProps) {
   const isConnected = useConnections((s) => !!(connId && s.connected[connId]));
   const data = useServices((s) => (connId ? s.byConn[connId] : undefined));
   const [sortKey, setSortKey] = useState<ServiceSortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
-  // Discover on first open / connection change; teardown is conn-scoped.
+  // Discover on first open / connection change, then keep the stats fresh
+  // while the view is visible; teardown is conn-scoped.
   useEffect(() => {
-    if (isConnected && connId) void useServices.getState().discover(connId);
+    if (!isConnected || !connId) return;
+    void useServices.getState().discover(connId);
+    const tick = setInterval(() => {
+      const cur = useServices.getState().byConn[connId];
+      // Skip a tick that would overlap an in-flight scatter-gather.
+      if (cur?.status !== "loading") {
+        void useServices.getState().discover(connId);
+      }
+    }, REFRESH_MS);
+    return () => clearInterval(tick);
   }, [isConnected, connId]);
 
   if (!isConnected || !connId) {
@@ -89,7 +101,7 @@ export function ServicesView({ filter, connId }: ViewProps) {
         >
           Discovering services…
         </EmptyState>
-      ) : status === "error" ? (
+      ) : status === "error" && services.length === 0 ? (
         <EmptyState
           icon={Server}
           variant="error"

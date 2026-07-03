@@ -430,6 +430,7 @@ pub async fn js_purge_stream(
     keep: Option<u64>,
     up_to_seq: Option<u64>,
 ) -> error::Result<PurgeResult> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await
@@ -454,6 +455,7 @@ pub async fn js_create_stream(
     conn_id: String,
     config: serde_json::Value,
 ) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await
@@ -500,6 +502,7 @@ pub async fn js_update_stream(
     stream: String,
     patch: serde_json::Value,
 ) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await
@@ -522,6 +525,7 @@ pub async fn js_create_consumer(
     stream: String,
     config: serde_json::Value,
 ) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await
@@ -540,6 +544,7 @@ pub async fn js_delete_stream(
     conn_id: String,
     stream: String,
 ) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await
@@ -556,6 +561,7 @@ pub async fn js_delete_consumer(
     stream: String,
     consumer: String,
 ) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await
@@ -573,6 +579,7 @@ pub async fn js_pause_consumer(
     stream: String,
     consumer: String,
 ) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await
@@ -595,6 +602,7 @@ pub async fn js_resume_consumer(
     stream: String,
     consumer: String,
 ) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await
@@ -612,6 +620,7 @@ pub async fn js_delete_message(
     stream: String,
     seq: u64,
 ) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await
