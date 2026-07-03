@@ -1,14 +1,23 @@
 import { encodeText } from "@twigo/utils";
-import type { PickedPayload } from "@/lib/api";
+import type { CodecId, PickedPayload } from "@/lib/api";
 
-export type PayloadMode = "json" | "text" | "binary" | "file";
+export type PayloadMode = "json" | "text" | "binary" | "file" | CodecId;
 
 export const PAYLOAD_MODES: { key: PayloadMode; label: string }[] = [
   { key: "json", label: "JSON" },
   { key: "text", label: "Text" },
   { key: "binary", label: "Base64" },
   { key: "file", label: "File" },
+  { key: "protobuf", label: "Protobuf" },
+  { key: "msgpack", label: "MessagePack" },
+  { key: "cbor", label: "CBOR" },
 ];
+
+export const CODEC_MODES: CodecId[] = ["protobuf", "msgpack", "cbor"];
+
+export function isCodecMode(mode: PayloadMode): mode is CodecId {
+  return (CODEC_MODES as string[]).includes(mode);
+}
 
 export function isBase64(s: string): boolean {
   const stripped = s.replace(/\s/g, "");
@@ -38,5 +47,7 @@ export function wirePayload(
     }
     case "file":
       return file?.payloadB64 ?? null;
+    default:
+      return null;
   }
 }

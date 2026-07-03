@@ -1,14 +1,16 @@
 import { useState } from "react";
-import { PlugZap, Palette, Check } from "lucide-react";
+import { PlugZap, Palette, Check, Binary } from "lucide-react";
 import { Label, cn } from "@twigo/ui";
 import { useUi, type Theme } from "@/store/ui";
 import { SectionTitle } from "./SectionTitle";
 import { ConnectionSettings } from "./ConnectionSettings";
+import { SchemasSection } from "./SchemasSection";
 
-type Category = "connections" | "appearance";
+type Category = "connections" | "schemas" | "appearance";
 
 const categories: { id: Category; label: string; icon: typeof PlugZap }[] = [
   { id: "connections", label: "Connections", icon: PlugZap },
+  { id: "schemas", label: "Schemas", icon: Binary },
   { id: "appearance", label: "Appearance", icon: Palette },
 ];
 
@@ -37,6 +39,7 @@ export function SettingsPage() {
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto max-w-2xl p-6">
             {category === "connections" && <ConnectionSettings />}
+            {category === "schemas" && <SchemasSection />}
             {category === "appearance" && <AppearanceSection />}
           </div>
         </div>

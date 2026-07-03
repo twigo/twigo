@@ -1,10 +1,23 @@
 import { useState, useEffect, useRef } from "react";
 import { Send, Loader2, ArrowLeftRight, Plus, X, FileUp } from "lucide-react";
-import { Button, Input, Label, CodeViewer, cn } from "@twigo/ui";
+import {
+  Button,
+  Input,
+  Label,
+  CodeViewer,
+  cn,
+  Select as SelectRoot,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@twigo/ui";
 import { decodeText, tryPrettyJson, fmtBytes } from "@twigo/utils";
 import { useConnections } from "@/store/connections";
 import { useHistory } from "@/store/history";
+import { useCodecs } from "@/store/codecs";
 import { useIsReadOnly } from "@/hooks/useIsReadOnly";
+import { encodePayload } from "@/lib/codecs";
 import {
   publish,
   request,
@@ -15,6 +28,7 @@ import {
 import {
   PAYLOAD_MODES,
   isBase64,
+  isCodecMode,
   wirePayload,
   type PayloadMode,
 } from "./publishPayload";
@@ -59,6 +73,12 @@ export function PublishEditor({
   );
   const [file, setFile] = useState<PickedPayload | null>(null);
   const [pickError, setPickError] = useState<string | null>(null);
+  const schemas = useCodecs((s) => s.schemas);
+  const [schemaId, setSchemaId] = useState<string | undefined>(schemas[0]?.id);
+  const [messageType, setMessageType] = useState<string | undefined>(
+    schemas[0]?.messageTypes[0],
+  );
+  const protoSchema = useCodecs.getState().schemaById(schemaId);
   const [headers, setHeaders] = useState<[string, string][]>(
     initialHeaders ?? [],
   );
@@ -74,19 +94,38 @@ export function PublishEditor({
     [],
   );
 
-  const wire = wirePayload(mode, payload, file);
+  const codec = isCodecMode(mode) ? mode : null;
+  const jsonMode = mode === "json" || codec !== null;
+  const wire = codec ? "" : wirePayload(mode, payload, file);
+  const invalidJson = jsonMode && payload.trim() !== "" && !isJson(payload);
+  const invalidBase64 =
+    mode === "binary" && payload.trim() !== "" && !isBase64(payload);
+  const protoReady = mode !== "protobuf" || (!!schemaId && !!messageType);
+  const payloadValid = codec
+    ? payload.trim() !== "" && !invalidJson && protoReady
+    : wire !== null;
   const canSend =
     live &&
     !readOnly &&
     subject.trim().length > 0 &&
     busy === null &&
-    wire !== null;
-  const invalidJson =
-    mode === "json" && payload.trim() !== "" && !isJson(payload);
-  const invalidBase64 =
-    mode === "binary" && payload.trim() !== "" && !isBase64(payload);
+    payloadValid;
   const cleanHeaders = (): [string, string][] =>
     headers.filter(([k]) => k.trim() !== "");
+
+  async function resolveWire(): Promise<string> {
+    if (codec) {
+      return encodePayload(payload, {
+        kind: "codec",
+        codec,
+        schemaId,
+        messageType,
+      });
+    }
+    const w = wirePayload(mode, payload, file);
+    if (w === null) throw new Error("payload is not ready");
+    return w;
+  }
 
   function setHeader(i: number, col: 0 | 1, val: string) {
     setHeaders((hs) =>
@@ -99,12 +138,13 @@ export function PublishEditor({
     setReply(null);
     setSent(false);
     try {
-      await publish(connId, subject.trim(), wire ?? "", cleanHeaders());
+      const w = await resolveWire();
+      await publish(connId, subject.trim(), w, cleanHeaders());
       useHistory.getState().record({
         connId,
         kind: "publish",
         subject: subject.trim(),
-        payloadB64: wire ?? "",
+        payloadB64: w,
         headers: cleanHeaders(),
       });
       setSent(true);
@@ -128,10 +168,11 @@ export function PublishEditor({
     setSent(false);
     const t0 = performance.now();
     try {
+      const w = await resolveWire();
       const msg = await request(
         connId,
         subject.trim(),
-        wire ?? "",
+        w,
         null,
         cleanHeaders(),
       );
@@ -139,7 +180,7 @@ export function PublishEditor({
         connId,
         kind: "request",
         subject: subject.trim(),
-        payloadB64: wire ?? "",
+        payloadB64: w,
         headers: cleanHeaders(),
       });
       setReply({ kind: "msg", msg, ms: Math.round(performance.now() - t0) });
@@ -264,7 +305,7 @@ export function PublishEditor({
             {invalidBase64 && (
               <span className="text-[11px] text-warn">invalid base64</span>
             )}
-            {mode === "json" && (
+            {jsonMode && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -278,6 +319,51 @@ export function PublishEditor({
             )}
           </div>
         </div>
+
+        {mode === "protobuf" && (
+          <div className="flex items-center gap-1.5">
+            <SelectRoot
+              value={schemaId ?? ""}
+              onValueChange={(id) => {
+                setSchemaId(id);
+                setMessageType(
+                  useCodecs.getState().schemaById(id)?.messageTypes[0],
+                );
+              }}
+            >
+              <SelectTrigger className="h-6 w-32 text-[11px]">
+                <SelectValue placeholder="schema" />
+              </SelectTrigger>
+              <SelectContent>
+                {schemas.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </SelectRoot>
+            <SelectRoot
+              value={messageType ?? ""}
+              onValueChange={setMessageType}
+            >
+              <SelectTrigger className="h-6 w-48 text-[11px]">
+                <SelectValue placeholder="message type" />
+              </SelectTrigger>
+              <SelectContent>
+                {(protoSchema?.messageTypes ?? []).map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {t}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </SelectRoot>
+            {schemas.length === 0 && (
+              <span className="text-[11px] text-warn">
+                Import a .proto schema in Settings → Schemas.
+              </span>
+            )}
+          </div>
+        )}
         {mode === "file" ? (
           <div className="flex min-h-0 flex-1 flex-col items-start gap-2 rounded-md border border-dashed border-border p-3">
             <Button
@@ -321,7 +407,7 @@ export function PublishEditor({
         ) : (
           <CodeViewer
             value={payload}
-            language={mode === "json" ? "json" : "text"}
+            language={jsonMode ? "json" : "text"}
             onChange={setPayload}
             className="min-h-0 flex-1"
           />
