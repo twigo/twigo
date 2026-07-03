@@ -9,6 +9,7 @@ import { useSpaces } from "@/store/spaces";
 import { useZoom } from "@/store/zoom";
 import { useCommandHistory } from "@/store/commandHistory";
 import { useHistory } from "@/store/history";
+import { useCodecs } from "@/store/codecs";
 
 interface Hydratable {
   persist: {
@@ -31,6 +32,7 @@ const STORES: Hydratable[] = [
   useZoom,
   useCommandHistory,
   useHistory,
+  useCodecs,
 ];
 
 export function useStoresHydrated(stores: Hydratable[]): boolean {

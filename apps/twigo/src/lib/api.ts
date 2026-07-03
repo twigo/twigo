@@ -268,6 +268,54 @@ export interface PickedPayload {
   payloadB64: string;
 }
 
+export type CodecId = "protobuf" | "msgpack" | "cbor";
+
+export interface ImportedSchema {
+  name: string;
+  descriptorSetB64: string;
+  messageTypes: string[];
+}
+
+export function codecImportProtos(): Promise<ImportedSchema | null> {
+  return call<ImportedSchema | null>("codec_import_protos");
+}
+
+interface CodecArgs {
+  codec: CodecId;
+  descriptorSetB64?: string;
+  messageType?: string;
+}
+
+export async function codecDecode(
+  payloadB64: string,
+  args: CodecArgs,
+): Promise<string> {
+  const { json } = await call<{ json: string }>("codec_decode", {
+    req: {
+      codec: args.codec,
+      payloadB64,
+      descriptorSetB64: args.descriptorSetB64 ?? null,
+      messageType: args.messageType ?? null,
+    },
+  });
+  return json;
+}
+
+export async function codecEncode(
+  json: string,
+  args: CodecArgs,
+): Promise<string> {
+  const { payloadB64 } = await call<{ payloadB64: string }>("codec_encode", {
+    req: {
+      codec: args.codec,
+      json,
+      descriptorSetB64: args.descriptorSetB64 ?? null,
+      messageType: args.messageType ?? null,
+    },
+  });
+  return payloadB64;
+}
+
 export function pickPayloadFile(
   maxBytes: number,
 ): Promise<PickedPayload | null> {
