@@ -6,6 +6,7 @@ import {
   disconnect as apiDisconnect,
   connInfo as apiConnInfo,
   deleteContext as apiDeleteContext,
+  syncConnReadonly,
   ipcError,
   type ContextSummary,
   type ConnInfo,
@@ -13,6 +14,8 @@ import {
 import { useSettings } from "@/store/settings";
 import { useWorkspace } from "@/store/workspace";
 import { useResponder } from "@/store/responder";
+import { useReadOnly } from "@/store/readonly";
+import { useMonitorConfig } from "@/store/monitorConfig";
 import { resetConnScopedStores } from "@/store/connScoped";
 import { useToasts } from "@/store/toasts";
 
@@ -191,6 +194,8 @@ export const useConnections = create<ConnectionsState>()(
       if (get().connected[name]) {
         await get().disconnect(name);
       }
+      useReadOnly.getState().setReadOnly(name, false);
+      useMonitorConfig.getState().setUrl(name, null);
       const dir = useSettings.getState().contextDir;
       await apiDeleteContext(dir, name);
       if (get().activeContext === name) {
@@ -303,3 +308,18 @@ export const useConnections = create<ConnectionsState>()(
       })),
   })),
 );
+
+// Chained: full-set replaces must reach Rust in dispatch order.
+let readonlySync = Promise.resolve();
+useReadOnly.subscribe((s) => {
+  const names = Object.keys(s.byConn);
+  readonlySync = readonlySync.then(() =>
+    syncConnReadonly(names).catch((e: unknown) => {
+      useToasts
+        .getState()
+        .push("error", `Read-only sync failed: ${String(e)}`, {
+          key: "readonly-sync",
+        });
+    }),
+  );
+});

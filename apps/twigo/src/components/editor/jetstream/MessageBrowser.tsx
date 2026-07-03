@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { ChevronRight, RefreshCw, Send, Loader2, Trash2 } from "lucide-react";
+import {
+  ChevronRight,
+  RefreshCw,
+  Send,
+  Loader2,
+  Trash2,
+  History,
+} from "lucide-react";
 import { Button, CodeViewer, cn } from "@twigo/ui";
 import {
   fmtBytes,
@@ -37,9 +44,11 @@ export function nextSelectionAfterDelete(
 export function MessageBrowser({
   connId,
   stream,
+  onReplayFrom,
 }: {
   connId: string;
   stream: string;
+  onReplayFrom?: (seq: number) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<StoredMessage[]>([]);
@@ -245,6 +254,15 @@ export function MessageBrowser({
                       }
                     >
                       <Send />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Replay from here"
+                      title="New consumer starting at this sequence"
+                      onClick={() => onReplayFrom?.(selected.seq)}
+                    >
+                      <History />
                     </Button>
                     <Button
                       variant="ghost"

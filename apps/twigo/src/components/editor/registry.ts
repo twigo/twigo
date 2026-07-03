@@ -1,9 +1,10 @@
-import type { FC } from "react";
+import { createElement, type FC } from "react";
 import type {
   IDockviewPanelProps,
   IDockviewPanelHeaderProps,
 } from "dockview-react";
 import { useStream } from "@/store/stream";
+import { PanelBoundary } from "@/components/PanelBoundary";
 import {
   StreamPanel,
   ServerPanel,
@@ -88,11 +89,25 @@ export const EDITORS: Record<EditorType, EditorDef> = {
   },
 };
 
+// Each editor renders inside its own boundary so a crash stays in that tab.
+function contained(type: string, Panel: FC<IDockviewPanelProps>) {
+  const Contained: FC<IDockviewPanelProps> = (props) =>
+    createElement(PanelBoundary, {
+      label: `${type} tab`,
+      children: createElement(Panel, props),
+    });
+  Contained.displayName = `Contained(${type})`;
+  return Contained;
+}
+
 export const editorComponents: Record<
   string,
   FC<IDockviewPanelProps>
 > = Object.fromEntries(
-  Object.entries(EDITORS).map(([type, def]) => [type, def.component]),
+  Object.entries(EDITORS).map(([type, def]) => [
+    type,
+    contained(type, def.component),
+  ]),
 );
 
 export const editorTabComponents: Record<

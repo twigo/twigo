@@ -11,41 +11,60 @@ import {
   FormField,
 } from "@twigo/ui";
 import { Select } from "./form";
+import {
+  buildConsumerConfig,
+  consumerFormValid,
+  type ConsumerForm,
+} from "./consumerForm";
 
 const ACK = ["explicit", "all", "none"];
-const DELIVER = ["all", "last", "new"];
+const DELIVER = [
+  "all",
+  "last",
+  "new",
+  "last_per_subject",
+  "by_start_sequence",
+  "by_start_time",
+];
+const REPLAY = ["instant", "original"];
 
 export function CreateConsumerDialog({
   stream,
+  initialStartSeq,
   onClose,
   onCreate,
 }: {
   stream: string;
+  initialStartSeq?: number;
   onClose: () => void;
   onCreate: (config: Record<string, unknown>) => void;
 }) {
   const [name, setName] = useState("");
   const [filter, setFilter] = useState("");
   const [ackPolicy, setAckPolicy] = useState("explicit");
-  const [deliverPolicy, setDeliverPolicy] = useState("all");
+  const [deliverPolicy, setDeliverPolicy] = useState(
+    initialStartSeq === undefined ? "all" : "by_start_sequence",
+  );
+  const [startSeq, setStartSeq] = useState(
+    initialStartSeq === undefined ? "" : String(initialStartSeq),
+  );
+  const [startTime, setStartTime] = useState("");
+  const [replayPolicy, setReplayPolicy] = useState("instant");
 
-  const filters = filter
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const valid = name.trim() !== "";
+  const form: ConsumerForm = {
+    name,
+    filter,
+    ackPolicy,
+    deliverPolicy,
+    startSeq,
+    startTime,
+    replayPolicy,
+  };
+  const valid = consumerFormValid(form);
 
   const submit = () => {
     if (!valid) return;
-    const config: Record<string, unknown> = {
-      durable_name: name.trim(),
-      name: name.trim(),
-      ack_policy: ackPolicy,
-      deliver_policy: deliverPolicy,
-    };
-    if (filters.length === 1) config.filter_subject = filters[0];
-    else if (filters.length > 1) config.filter_subjects = filters;
-    onCreate(config);
+    onCreate(buildConsumerConfig(form));
     onClose();
   };
 
@@ -92,6 +111,41 @@ export function CreateConsumerDialog({
               value={deliverPolicy}
               onChange={setDeliverPolicy}
               options={DELIVER}
+            />
+          </FormField>
+          {deliverPolicy === "by_start_sequence" && (
+            <FormField label="Start sequence">
+              <Input
+                value={startSeq}
+                onChange={(e) => setStartSeq(e.target.value)}
+                inputMode="numeric"
+                placeholder="1"
+                className="h-7 w-32 font-mono text-xs"
+              />
+            </FormField>
+          )}
+          {deliverPolicy === "by_start_time" && (
+            <FormField
+              label="Start time"
+              hint="RFC3339 or anything Date-parseable."
+            >
+              <Input
+                value={startTime}
+                onChange={(e) => setStartTime(e.target.value)}
+                spellCheck={false}
+                placeholder="2026-07-03T12:00:00Z"
+                className="h-7 font-mono text-xs"
+              />
+            </FormField>
+          )}
+          <FormField
+            label="Replay"
+            hint="original re-delivers at the recorded rate."
+          >
+            <Select
+              value={replayPolicy}
+              onChange={setReplayPolicy}
+              options={REPLAY}
             />
           </FormField>
         </FieldGrid>

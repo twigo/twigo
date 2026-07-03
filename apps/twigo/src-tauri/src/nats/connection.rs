@@ -1,24 +1,50 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, State};
 use tokio::sync::Mutex;
 
 use super::context::{demo_context, load_contexts, ContextFile, NatsContext, DEMO_CONTEXT_NAME};
 use super::error::{self, Error};
 use super::subjects::{self, SubjectWatch};
 use super::subscription::{abort_conn, SubState};
+use crate::emit::Emit;
 
 #[derive(Default)]
 pub struct ConnState {
     clients: Mutex<HashMap<String, async_nats::Client>>,
+    // Frontend read-only locks mirrored behind IPC (SEC-4).
+    readonly: Mutex<HashSet<String>>,
 }
 
 impl ConnState {
     pub(crate) async fn client(&self, name: &str) -> Option<async_nats::Client> {
         self.clients.lock().await.get(name).cloned()
     }
+
+    pub(crate) async fn set_readonly(&self, names: Vec<String>) {
+        *self.readonly.lock().await = names.into_iter().collect();
+    }
+
+    pub(crate) async fn assert_writable(&self, name: &str) -> error::Result<()> {
+        if self.readonly.lock().await.contains(name) {
+            return Err(Error::Permissions(format!(
+                "connection '{name}' is read-only - writes are blocked"
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// Replace the read-only lock set (synced from the frontend store on change).
+#[tauri::command]
+pub async fn conn_sync_readonly(
+    conns: State<'_, ConnState>,
+    names: Vec<String>,
+) -> error::Result<()> {
+    conns.set_readonly(names).await;
+    Ok(())
 }
 
 #[derive(Serialize, Clone)]
@@ -198,36 +224,59 @@ fn apply_tls(opts: async_nats::ConnectOptions, plan: TlsPlan) -> async_nats::Con
     opts
 }
 
-fn build_options(
-    ctx: &NatsContext,
-    app: &AppHandle,
-    name: &str,
-) -> error::Result<async_nats::ConnectOptions> {
-    let f = &ctx.file;
+// Pure so the auth decision is unit-testable, mirroring TlsPlan.
+#[derive(Debug, PartialEq, Eq)]
+enum AuthPlan {
+    None,
+    Token(String),
+    UserPassword(String, String),
+    NKey(String),
+    Creds(String),
+}
 
-    let base = if let Some(creds) = non_empty(&f.creds) {
+fn auth_plan(f: &ContextFile) -> error::Result<AuthPlan> {
+    if let Some(creds) = non_empty(&f.creds) {
         let content = std::fs::read_to_string(creds).map_err(|source| Error::Io {
             path: creds.to_string(),
             source,
         })?;
-        async_nats::ConnectOptions::new()
-            .credentials(&content)
-            .map_err(|e| Error::Credentials(e.to_string()))?
+        Ok(AuthPlan::Creds(content))
     } else if let Some(token) = non_empty(&f.token) {
-        async_nats::ConnectOptions::with_token(token.to_string())
+        Ok(AuthPlan::Token(token.to_string()))
     } else if let (Some(user), Some(pass)) = (non_empty(&f.user), non_empty(&f.password)) {
-        async_nats::ConnectOptions::with_user_and_password(user.to_string(), pass.to_string())
+        Ok(AuthPlan::UserPassword(user.to_string(), pass.to_string()))
     } else if let Some(nkey) = non_empty(&f.nkey) {
-        async_nats::ConnectOptions::with_nkey(read_maybe_file(nkey))
+        Ok(AuthPlan::NKey(read_maybe_file(nkey)))
     } else {
-        async_nats::ConnectOptions::new()
-    };
+        Ok(AuthPlan::None)
+    }
+}
 
-    let base = apply_tls(base, tls_plan(f));
+fn apply_auth(plan: AuthPlan) -> error::Result<async_nats::ConnectOptions> {
+    Ok(match plan {
+        AuthPlan::None => async_nats::ConnectOptions::new(),
+        AuthPlan::Token(token) => async_nats::ConnectOptions::with_token(token),
+        AuthPlan::UserPassword(user, password) => {
+            async_nats::ConnectOptions::with_user_and_password(user, password)
+        }
+        AuthPlan::NKey(seed) => async_nats::ConnectOptions::with_nkey(seed),
+        AuthPlan::Creds(content) => async_nats::ConnectOptions::new()
+            .credentials(&content)
+            .map_err(|e| Error::Credentials(e.to_string()))?,
+    })
+}
 
-    let app = app.clone();
+fn build_options<E: Emit>(
+    ctx: &NatsContext,
+    emitter: &E,
+    name: &str,
+) -> error::Result<async_nats::ConnectOptions> {
+    let f = &ctx.file;
+    let base = apply_tls(apply_auth(auth_plan(f)?)?, tls_plan(f));
+
+    let emitter = emitter.clone();
     let name = name.to_string();
-    let rc_app = app.clone();
+    let rc_emitter = emitter.clone();
     let rc_name = name.clone();
     // Keep the client alive across a server that is briefly unavailable - this
     // lets a saved connection restore on launch even if its server is down,
@@ -247,20 +296,18 @@ fn build_options(
         // it + the chosen delay so the UI can show "attempt N · next try in Xs".
         .reconnect_delay_callback(move |attempts| {
             let delay = reconnect_backoff(attempts);
-            if let Err(e) = rc_app.emit(
+            rc_emitter.emit_event(
                 "nats:reconnect",
                 ReconnectEvent {
                     conn: rc_name.clone(),
                     attempt: attempts,
                     delay_ms: delay.as_millis() as u64,
                 },
-            ) {
-                tracing::warn!("failed to emit nats:reconnect: {e}");
-            }
+            );
             delay
         })
         .event_callback(move |event| {
-            let app = app.clone();
+            let emitter = emitter.clone();
             let name = name.clone();
             async move {
                 let (kind, detail) = match &event {
@@ -274,16 +321,14 @@ fn build_options(
                     async_nats::Event::ClientError(e) => ("clientError", Some(e.to_string())),
                 };
                 tracing::debug!(conn = %name, event = kind, detail = ?detail, "nats event");
-                if let Err(e) = app.emit(
+                emitter.emit_event(
                     "nats:event",
                     NatsEvent {
                         conn: name,
                         kind: kind.into(),
                         detail,
                     },
-                ) {
-                    tracing::warn!("failed to emit nats:event: {e}");
-                }
+                );
             }
         }))
 }
@@ -294,6 +339,17 @@ pub async fn connect(
     state: State<'_, ConnState>,
     subs: State<'_, SubState>,
     watch: State<'_, SubjectWatch>,
+    name: String,
+    dir: Option<String>,
+) -> error::Result<ConnInfo> {
+    connect_impl(&app, &state, &subs, &watch, name, dir).await
+}
+
+pub(crate) async fn connect_impl<E: Emit>(
+    emitter: &E,
+    state: &ConnState,
+    subs: &SubState,
+    watch: &SubjectWatch,
     name: String,
     dir: Option<String>,
 ) -> error::Result<ConnInfo> {
@@ -325,9 +381,9 @@ pub async fn connect(
     };
 
     let opts = {
-        let app = app.clone();
+        let emitter = emitter.clone();
         let name = name.clone();
-        tokio::task::spawn_blocking(move || build_options(&ctx, &app, &name))
+        tokio::task::spawn_blocking(move || build_options(&ctx, &emitter, &name))
             .await
             .map_err(|e| Error::Task(e.to_string()))??
     };
@@ -347,8 +403,8 @@ pub async fn connect(
     // same name can't interleave the two and leave a half-swapped connection.
     {
         let mut clients = state.clients.lock().await;
-        abort_conn(&subs, &name);
-        subjects::stop(&watch, &name);
+        abort_conn(subs, &name);
+        subjects::stop(watch, &name);
         clients.insert(name, client);
     }
     Ok(info)
@@ -356,6 +412,10 @@ pub async fn connect(
 
 #[tauri::command]
 pub async fn conn_info(state: State<'_, ConnState>, name: String) -> error::Result<ConnInfo> {
+    conn_info_impl(&state, name).await
+}
+
+pub(crate) async fn conn_info_impl(state: &ConnState, name: String) -> error::Result<ConnInfo> {
     let client = state
         .client(&name)
         .await
@@ -370,11 +430,20 @@ pub async fn disconnect(
     watch: State<'_, SubjectWatch>,
     name: String,
 ) -> error::Result<()> {
+    disconnect_impl(&state, &subs, &watch, name).await
+}
+
+pub(crate) async fn disconnect_impl(
+    state: &ConnState,
+    subs: &SubState,
+    watch: &SubjectWatch,
+    name: String,
+) -> error::Result<()> {
     // Abort the connection's subscription + watch tasks first so their
     // Subscribers drop and the async-nats event loop can close the socket;
     // only then drop the client.
-    abort_conn(&subs, &name);
-    subjects::stop(&watch, &name);
+    abort_conn(subs, &name);
+    subjects::stop(watch, &name);
     state.clients.lock().await.remove(&name);
     tracing::info!(conn = %name, "disconnected");
     Ok(())
@@ -382,12 +451,23 @@ pub async fn disconnect(
 
 #[tauri::command]
 pub async fn list_connections(state: State<'_, ConnState>) -> error::Result<Vec<String>> {
+    list_connections_impl(&state).await
+}
+
+pub(crate) async fn list_connections_impl(state: &ConnState) -> error::Result<Vec<String>> {
     Ok(state.clients.lock().await.keys().cloned().collect())
 }
 
 #[tauri::command]
 pub async fn server_info(
     state: State<'_, ConnState>,
+    name: String,
+) -> error::Result<ServerDetails> {
+    server_info_impl(&state, name).await
+}
+
+pub(crate) async fn server_info_impl(
+    state: &ConnState,
     name: String,
 ) -> error::Result<ServerDetails> {
     let client = state
@@ -403,6 +483,36 @@ pub async fn server_info(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write as _;
+
+    #[derive(Clone)]
+    struct NoopEmit;
+
+    impl Emit for NoopEmit {
+        fn emit_event<T: Serialize + Clone>(&self, _event: &str, _payload: T) {}
+    }
+
+    fn ctx(file: ContextFile) -> NatsContext {
+        NatsContext {
+            name: "t".into(),
+            file,
+            selected: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn readonly_set_gates_writes_until_cleared() {
+        let conns = ConnState::default();
+        assert!(conns.assert_writable("prod").await.is_ok());
+
+        conns.set_readonly(vec!["prod".into()]).await;
+        let err = conns.assert_writable("prod").await.unwrap_err();
+        assert_eq!(err.kind(), "permissions");
+        assert!(conns.assert_writable("dev").await.is_ok());
+
+        conns.set_readonly(Vec::new()).await;
+        assert!(conns.assert_writable("prod").await.is_ok());
+    }
 
     #[test]
     fn non_empty_filters_blank_and_trims() {
@@ -462,6 +572,141 @@ mod tests {
         });
         assert!(blank.ca.is_none());
         assert!(!blank.require);
+    }
+
+    #[test]
+    fn auth_plan_maps_each_method() {
+        assert_eq!(auth_plan(&ContextFile::default()).unwrap(), AuthPlan::None);
+
+        let token = auth_plan(&ContextFile {
+            token: Some(" tok ".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(token, AuthPlan::Token("tok".into()));
+
+        let user_pass = auth_plan(&ContextFile {
+            user: Some("u".into()),
+            password: Some("p".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(user_pass, AuthPlan::UserPassword("u".into(), "p".into()));
+
+        let nkey = auth_plan(&ContextFile {
+            nkey: Some("SUAINLINESEED".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(nkey, AuthPlan::NKey("SUAINLINESEED".into()));
+
+        let mut creds_file = tempfile::NamedTempFile::new().unwrap();
+        creds_file.write_all(b"creds-content").unwrap();
+        let creds = auth_plan(&ContextFile {
+            creds: Some(creds_file.path().to_string_lossy().into_owned()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(creds, AuthPlan::Creds("creds-content".into()));
+    }
+
+    #[test]
+    fn auth_plan_precedence_and_partial_user_pass() {
+        // token wins over user/password and nkey.
+        let f = ContextFile {
+            token: Some("t".into()),
+            user: Some("u".into()),
+            password: Some("p".into()),
+            nkey: Some("n".into()),
+            ..Default::default()
+        };
+        assert_eq!(auth_plan(&f).unwrap(), AuthPlan::Token("t".into()));
+
+        // A user without a password is not usable - falls through to nkey.
+        let f = ContextFile {
+            user: Some("u".into()),
+            nkey: Some("n".into()),
+            ..Default::default()
+        };
+        assert_eq!(auth_plan(&f).unwrap(), AuthPlan::NKey("n".into()));
+    }
+
+    #[test]
+    fn nkey_reads_seed_from_a_file_path() {
+        let mut seed_file = tempfile::NamedTempFile::new().unwrap();
+        seed_file.write_all(b" SUAFILESEED \n").unwrap();
+        let f = ContextFile {
+            nkey: Some(seed_file.path().to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+        assert_eq!(auth_plan(&f).unwrap(), AuthPlan::NKey("SUAFILESEED".into()));
+    }
+
+    #[test]
+    fn missing_creds_file_is_an_io_error() {
+        let f = ContextFile {
+            creds: Some("/definitely/not/here.creds".into()),
+            ..Default::default()
+        };
+        assert_eq!(auth_plan(&f).unwrap_err().kind(), "io");
+        let err = build_options(&ctx(f), &NoopEmit, "c").unwrap_err();
+        assert_eq!(err.kind(), "io");
+        assert!(err.to_string().contains("/definitely/not/here.creds"));
+    }
+
+    #[test]
+    fn unparsable_creds_content_is_a_credentials_error() {
+        let mut creds_file = tempfile::NamedTempFile::new().unwrap();
+        creds_file.write_all(b"not a creds file").unwrap();
+        let f = ContextFile {
+            creds: Some(creds_file.path().to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+        assert_eq!(
+            apply_auth(auth_plan(&f).unwrap()).unwrap_err().kind(),
+            "credentials"
+        );
+        assert_eq!(
+            build_options(&ctx(f), &NoopEmit, "c").unwrap_err().kind(),
+            "credentials"
+        );
+    }
+
+    #[test]
+    fn build_options_needs_no_app_handle() {
+        for f in [
+            ContextFile::default(),
+            ContextFile {
+                token: Some("t".into()),
+                ..Default::default()
+            },
+            ContextFile {
+                user: Some("u".into()),
+                password: Some("p".into()),
+                ..Default::default()
+            },
+            ContextFile {
+                nkey: Some("SUAINLINESEED".into()),
+                ..Default::default()
+            },
+        ] {
+            assert!(build_options(&ctx(f), &NoopEmit, "conn").is_ok());
+        }
+    }
+
+    #[test]
+    fn build_options_routes_tls_material_through_the_tls_plan() {
+        // Cert paths are applied lazily, so building options must succeed and
+        // take the tls_plan/apply_tls path (covered in detail by its own tests).
+        let f = ContextFile {
+            ca: Some("/ca.pem".into()),
+            cert: Some("/c.pem".into()),
+            key: Some("/k.pem".into()),
+            tls_first: true,
+            ..Default::default()
+        };
+        assert!(tls_plan(&f).require);
+        assert!(build_options(&ctx(f), &NoopEmit, "conn").is_ok());
     }
 
     #[test]

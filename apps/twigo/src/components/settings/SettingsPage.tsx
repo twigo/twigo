@@ -1,14 +1,13 @@
 import { useState } from "react";
-import { PlugZap, Palette, SlidersHorizontal, Check } from "lucide-react";
+import { PlugZap, Palette, Check } from "lucide-react";
 import { Label, cn } from "@twigo/ui";
 import { useUi, type Theme } from "@/store/ui";
 import { SectionTitle } from "./SectionTitle";
 import { ConnectionSettings } from "./ConnectionSettings";
 
-type Category = "general" | "connections" | "appearance";
+type Category = "connections" | "appearance";
 
 const categories: { id: Category; label: string; icon: typeof PlugZap }[] = [
-  { id: "general", label: "General", icon: SlidersHorizontal },
   { id: "connections", label: "Connections", icon: PlugZap },
   { id: "appearance", label: "Appearance", icon: Palette },
 ];
@@ -37,24 +36,12 @@ export function SettingsPage() {
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto max-w-2xl p-6">
-            {category === "general" && <GeneralSection />}
             {category === "connections" && <ConnectionSettings />}
             {category === "appearance" && <AppearanceSection />}
           </div>
         </div>
       </div>
     </div>
-  );
-}
-
-function GeneralSection() {
-  return (
-    <>
-      <SectionTitle>General</SectionTitle>
-      <p className="text-xs text-muted-foreground">
-        More general settings will appear here.
-      </p>
-    </>
   );
 }
 

@@ -37,7 +37,7 @@ fn op_str(op: &Operation) -> String {
 }
 
 async fn store(
-    conns: &State<'_, ConnState>,
+    conns: &ConnState,
     conn_id: &str,
     bucket: &str,
 ) -> error::Result<async_nats::jetstream::kv::Store> {
@@ -113,6 +113,13 @@ pub async fn kv_list_buckets(
     conns: State<'_, ConnState>,
     conn_id: String,
 ) -> error::Result<Vec<KvBucketSummary>> {
+    kv_list_buckets_impl(&conns, conn_id).await
+}
+
+pub(crate) async fn kv_list_buckets_impl(
+    conns: &ConnState,
+    conn_id: String,
+) -> error::Result<Vec<KvBucketSummary>> {
     let client = conns
         .client(&conn_id)
         .await
@@ -158,7 +165,15 @@ pub async fn kv_bucket_info(
     conn_id: String,
     bucket: String,
 ) -> error::Result<KvBucketDetail> {
-    let kv = store(&conns, &conn_id, &bucket).await?;
+    kv_bucket_info_impl(&conns, conn_id, bucket).await
+}
+
+pub(crate) async fn kv_bucket_info_impl(
+    conns: &ConnState,
+    conn_id: String,
+    bucket: String,
+) -> error::Result<KvBucketDetail> {
+    let kv = store(conns, &conn_id, &bucket).await?;
     let status = kv.status().await.map_err(js_err)?;
     Ok(KvBucketDetail {
         bucket: status.bucket().to_string(),
@@ -184,7 +199,15 @@ pub async fn kv_list_keys(
     conn_id: String,
     bucket: String,
 ) -> error::Result<Vec<KvEntrySummary>> {
-    let kv = store(&conns, &conn_id, &bucket).await?;
+    kv_list_keys_impl(&conns, conn_id, bucket).await
+}
+
+pub(crate) async fn kv_list_keys_impl(
+    conns: &ConnState,
+    conn_id: String,
+    bucket: String,
+) -> error::Result<Vec<KvEntrySummary>> {
+    let kv = store(conns, &conn_id, &bucket).await?;
     let mut key_stream = kv.keys().await.map_err(js_err)?.boxed();
     let mut keys = Vec::new();
     while let Some(key) = key_stream.try_next().await.map_err(js_err)? {
@@ -223,7 +246,17 @@ pub async fn kv_get_entry(
     key: String,
     revision: Option<u64>,
 ) -> error::Result<Option<KvEntryDetail>> {
-    let kv = store(&conns, &conn_id, &bucket).await?;
+    kv_get_entry_impl(&conns, conn_id, bucket, key, revision).await
+}
+
+pub(crate) async fn kv_get_entry_impl(
+    conns: &ConnState,
+    conn_id: String,
+    bucket: String,
+    key: String,
+    revision: Option<u64>,
+) -> error::Result<Option<KvEntryDetail>> {
+    let kv = store(conns, &conn_id, &bucket).await?;
     let entry = match revision {
         None => kv.entry(&key).await.map_err(js_err)?,
         Some(rev) => {
@@ -272,7 +305,16 @@ pub async fn kv_history(
     bucket: String,
     key: String,
 ) -> error::Result<Vec<KvEntrySummary>> {
-    let kv = store(&conns, &conn_id, &bucket).await?;
+    kv_history_impl(&conns, conn_id, bucket, key).await
+}
+
+pub(crate) async fn kv_history_impl(
+    conns: &ConnState,
+    conn_id: String,
+    bucket: String,
+    key: String,
+) -> error::Result<Vec<KvEntrySummary>> {
+    let kv = store(conns, &conn_id, &bucket).await?;
     let mut hist = kv.history(&key).await.map_err(js_err)?;
     let mut out = Vec::new();
     while let Some(e) = hist.try_next().await.map_err(js_err)? {
@@ -298,7 +340,19 @@ pub async fn kv_put(
     // Some(rev) → optimistic CAS update; None → unconditional put.
     revision: Option<u64>,
 ) -> error::Result<PutResult> {
-    let kv = store(&conns, &conn_id, &bucket).await?;
+    kv_put_impl(&conns, conn_id, bucket, key, payload_b64, revision).await
+}
+
+pub(crate) async fn kv_put_impl(
+    conns: &ConnState,
+    conn_id: String,
+    bucket: String,
+    key: String,
+    payload_b64: String,
+    revision: Option<u64>,
+) -> error::Result<PutResult> {
+    conns.assert_writable(&conn_id).await?;
+    let kv = store(conns, &conn_id, &bucket).await?;
     let val = base64::engine::general_purpose::STANDARD
         .decode(payload_b64.as_bytes())
         .map_err(js_err)?;
@@ -320,7 +374,18 @@ pub async fn kv_create(
     key: String,
     payload_b64: String,
 ) -> error::Result<PutResult> {
-    let kv = store(&conns, &conn_id, &bucket).await?;
+    kv_create_impl(&conns, conn_id, bucket, key, payload_b64).await
+}
+
+pub(crate) async fn kv_create_impl(
+    conns: &ConnState,
+    conn_id: String,
+    bucket: String,
+    key: String,
+    payload_b64: String,
+) -> error::Result<PutResult> {
+    conns.assert_writable(&conn_id).await?;
+    let kv = store(conns, &conn_id, &bucket).await?;
     let val = base64::engine::general_purpose::STANDARD
         .decode(payload_b64.as_bytes())
         .map_err(js_err)?;
@@ -335,7 +400,17 @@ pub async fn kv_delete(
     bucket: String,
     key: String,
 ) -> error::Result<()> {
-    let kv = store(&conns, &conn_id, &bucket).await?;
+    kv_delete_impl(&conns, conn_id, bucket, key).await
+}
+
+pub(crate) async fn kv_delete_impl(
+    conns: &ConnState,
+    conn_id: String,
+    bucket: String,
+    key: String,
+) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
+    let kv = store(conns, &conn_id, &bucket).await?;
     kv.delete(&key).await.map_err(js_err)?;
     Ok(())
 }
@@ -347,7 +422,17 @@ pub async fn kv_purge(
     bucket: String,
     key: String,
 ) -> error::Result<()> {
-    let kv = store(&conns, &conn_id, &bucket).await?;
+    kv_purge_impl(&conns, conn_id, bucket, key).await
+}
+
+pub(crate) async fn kv_purge_impl(
+    conns: &ConnState,
+    conn_id: String,
+    bucket: String,
+    key: String,
+) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
+    let kv = store(conns, &conn_id, &bucket).await?;
     kv.purge(&key).await.map_err(js_err)?;
     Ok(())
 }
@@ -374,19 +459,8 @@ struct NewBucket {
     num_replicas: usize,
 }
 
-#[tauri::command]
-pub async fn kv_create_bucket(
-    conns: State<'_, ConnState>,
-    conn_id: String,
-    config: serde_json::Value,
-) -> error::Result<()> {
-    let client = conns
-        .client(&conn_id)
-        .await
-        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
-    let js = async_nats::jetstream::new(client);
-    let nb: NewBucket = serde_json::from_value(config).map_err(js_err)?;
-    let cfg = async_nats::jetstream::kv::Config {
+fn kv_config(nb: NewBucket) -> async_nats::jetstream::kv::Config {
+    async_nats::jetstream::kv::Config {
         bucket: nb.bucket,
         description: nb.description,
         history: if nb.history > 0 { nb.history } else { 1 },
@@ -404,8 +478,31 @@ pub async fn kv_create_bucket(
             1
         },
         ..Default::default()
-    };
-    js.create_key_value(cfg).await.map_err(js_err)?;
+    }
+}
+
+#[tauri::command]
+pub async fn kv_create_bucket(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    config: serde_json::Value,
+) -> error::Result<()> {
+    kv_create_bucket_impl(&conns, conn_id, config).await
+}
+
+pub(crate) async fn kv_create_bucket_impl(
+    conns: &ConnState,
+    conn_id: String,
+    config: serde_json::Value,
+) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
+    let client = conns
+        .client(&conn_id)
+        .await
+        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
+    let js = async_nats::jetstream::new(client);
+    let nb: NewBucket = serde_json::from_value(config).map_err(js_err)?;
+    js.create_key_value(kv_config(nb)).await.map_err(js_err)?;
     Ok(())
 }
 
@@ -415,6 +512,15 @@ pub async fn kv_delete_bucket(
     conn_id: String,
     bucket: String,
 ) -> error::Result<()> {
+    kv_delete_bucket_impl(&conns, conn_id, bucket).await
+}
+
+pub(crate) async fn kv_delete_bucket_impl(
+    conns: &ConnState,
+    conn_id: String,
+    bucket: String,
+) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await
@@ -427,6 +533,49 @@ pub async fn kv_delete_bucket(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn nb() -> NewBucket {
+        NewBucket {
+            bucket: "cfg".to_string(),
+            description: String::new(),
+            history: 0,
+            max_value_size: 0,
+            max_bytes: 0,
+            max_age: 0,
+            storage: String::new(),
+            num_replicas: 0,
+        }
+    }
+
+    #[test]
+    fn kv_config_defaults_empty_fields() {
+        let cfg = kv_config(nb());
+        assert_eq!(cfg.bucket, "cfg");
+        assert_eq!(cfg.history, 1);
+        assert_eq!(cfg.max_age, std::time::Duration::ZERO);
+        assert!(matches!(cfg.storage, StorageType::File));
+        assert_eq!(cfg.num_replicas, 1);
+    }
+
+    #[test]
+    fn kv_config_maps_explicit_fields() {
+        let cfg = kv_config(NewBucket {
+            bucket: "cfg".to_string(),
+            description: "d".to_string(),
+            history: 5,
+            max_value_size: 1024,
+            max_bytes: 2048,
+            max_age: 5_000_000_000,
+            storage: "memory".to_string(),
+            num_replicas: 3,
+        });
+        assert_eq!(cfg.history, 5);
+        assert_eq!(cfg.max_value_size, 1024);
+        assert_eq!(cfg.max_bytes, 2048);
+        assert_eq!(cfg.max_age, std::time::Duration::from_secs(5));
+        assert!(matches!(cfg.storage, StorageType::Memory));
+        assert_eq!(cfg.num_replicas, 3);
+    }
 
     #[test]
     fn maps_operations() {

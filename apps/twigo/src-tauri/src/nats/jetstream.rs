@@ -14,6 +14,37 @@ pub(crate) fn js_err<E: std::fmt::Display>(e: E) -> Error {
     Error::JetStream(e.to_string())
 }
 
+// Typed mappers: branch on the library's error kinds, never on message text.
+pub(crate) fn stream_err(
+    stream: &str,
+) -> impl Fn(async_nats::jetstream::context::GetStreamError) -> Error + '_ {
+    use async_nats::jetstream::context::GetStreamErrorKind;
+    use async_nats::jetstream::ErrorCode;
+    move |e| match e.kind() {
+        GetStreamErrorKind::JetStream(inner)
+            if inner.error_code() == ErrorCode::STREAM_NOT_FOUND =>
+        {
+            Error::NotFound(format!("stream '{stream}' not found"))
+        }
+        GetStreamErrorKind::JetStream(inner) if inner.code() == 403 => {
+            Error::Permissions(inner.to_string())
+        }
+        _ => js_err(e),
+    }
+}
+
+fn consumer_err(
+    consumer: &str,
+) -> impl Fn(async_nats::jetstream::context::ConsumerInfoError) -> Error + '_ {
+    use async_nats::jetstream::context::ConsumerInfoErrorKind;
+    move |e| match e.kind() {
+        ConsumerInfoErrorKind::NotFound => {
+            Error::NotFound(format!("consumer '{consumer}' not found"))
+        }
+        _ => js_err(e),
+    }
+}
+
 pub(crate) fn fmt_time(t: OffsetDateTime) -> Option<String> {
     t.format(&Rfc3339).ok()
 }
@@ -114,6 +145,13 @@ pub async fn js_list_streams(
     conns: State<'_, ConnState>,
     conn_id: String,
 ) -> error::Result<Vec<StreamSummary>> {
+    js_list_streams_impl(&conns, conn_id).await
+}
+
+pub(crate) async fn js_list_streams_impl(
+    conns: &ConnState,
+    conn_id: String,
+) -> error::Result<Vec<StreamSummary>> {
     let client = conns
         .client(&conn_id)
         .await
@@ -153,12 +191,20 @@ pub async fn js_stream_detail(
     conn_id: String,
     stream: String,
 ) -> error::Result<StreamDetail> {
+    js_stream_detail_impl(&conns, conn_id, stream).await
+}
+
+pub(crate) async fn js_stream_detail_impl(
+    conns: &ConnState,
+    conn_id: String,
+    stream: String,
+) -> error::Result<StreamDetail> {
     let client = conns
         .client(&conn_id)
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
-    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
     let info = handle.cached_info();
     let st = &info.state;
     Ok(StreamDetail {
@@ -182,12 +228,20 @@ pub async fn js_list_consumers(
     conn_id: String,
     stream: String,
 ) -> error::Result<Vec<ConsumerSummary>> {
+    js_list_consumers_impl(&conns, conn_id, stream).await
+}
+
+pub(crate) async fn js_list_consumers_impl(
+    conns: &ConnState,
+    conn_id: String,
+    stream: String,
+) -> error::Result<Vec<ConsumerSummary>> {
     let client = conns
         .client(&conn_id)
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
-    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
 
     let mut consumers = handle.consumers();
     let mut out = Vec::new();
@@ -221,13 +275,25 @@ pub async fn js_consumer_detail(
     stream: String,
     consumer: String,
 ) -> error::Result<ConsumerDetail> {
+    js_consumer_detail_impl(&conns, conn_id, stream, consumer).await
+}
+
+pub(crate) async fn js_consumer_detail_impl(
+    conns: &ConnState,
+    conn_id: String,
+    stream: String,
+    consumer: String,
+) -> error::Result<ConsumerDetail> {
     let client = conns
         .client(&conn_id)
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
-    let handle = js.get_stream(&stream).await.map_err(js_err)?;
-    let info = handle.consumer_info(&consumer).await.map_err(js_err)?;
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
+    let info = handle
+        .consumer_info(&consumer)
+        .await
+        .map_err(consumer_err(&consumer))?;
     Ok(ConsumerDetail {
         config: serde_json::to_value(&info.config).map_err(js_err)?,
         created: fmt_time(info.created),
@@ -317,12 +383,23 @@ pub async fn js_get_messages(
     limit: u32,
     backward: bool,
 ) -> error::Result<MessagePage> {
+    js_get_messages_impl(&conns, conn_id, stream, start, limit, backward).await
+}
+
+pub(crate) async fn js_get_messages_impl(
+    conns: &ConnState,
+    conn_id: String,
+    stream: String,
+    start: Option<u64>,
+    limit: u32,
+    backward: bool,
+) -> error::Result<MessagePage> {
     let client = conns
         .client(&conn_id)
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
-    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
     let state = &handle.cached_info().state;
     let (first, last) = (state.first_sequence, state.last_sequence);
 
@@ -396,12 +473,23 @@ pub async fn js_purge_stream(
     keep: Option<u64>,
     up_to_seq: Option<u64>,
 ) -> error::Result<PurgeResult> {
+    js_purge_stream_impl(&conns, conn_id, stream, keep, up_to_seq).await
+}
+
+pub(crate) async fn js_purge_stream_impl(
+    conns: &ConnState,
+    conn_id: String,
+    stream: String,
+    keep: Option<u64>,
+    up_to_seq: Option<u64>,
+) -> error::Result<PurgeResult> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
-    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
     // keep/sequence are mutually exclusive (enforced by the builder's generics).
     let resp = match (keep, up_to_seq) {
         (Some(k), _) => handle.purge().keep(k).await,
@@ -420,6 +508,15 @@ pub async fn js_create_stream(
     conn_id: String,
     config: serde_json::Value,
 ) -> error::Result<()> {
+    js_create_stream_impl(&conns, conn_id, config).await
+}
+
+pub(crate) async fn js_create_stream_impl(
+    conns: &ConnState,
+    conn_id: String,
+    config: serde_json::Value,
+) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await
@@ -433,19 +530,115 @@ pub async fn js_create_stream(
     Ok(())
 }
 
+// A partial Config submit would reset unrendered fields to serde defaults.
+fn merge_stream_patch(
+    current: serde_json::Value,
+    patch: serde_json::Value,
+    stream: &str,
+) -> error::Result<serde_json::Value> {
+    let mut merged = current;
+    let (Some(target), Some(fields)) = (merged.as_object_mut(), patch.as_object()) else {
+        return Err(Error::JetStream(
+            "stream config patch must be an object".to_string(),
+        ));
+    };
+    for (key, value) in fields {
+        target.insert(key.clone(), value.clone());
+    }
+    // A mismatched name would rewrite some *other* stream's config.
+    match target.get("name").and_then(|n| n.as_str()) {
+        Some(name) if name == stream => Ok(merged),
+        _ => Err(Error::JetStream(format!(
+            "stream config patch name does not match stream {stream}"
+        ))),
+    }
+}
+
+/// Overlays the patch onto the fresh server config (read-modify-write).
 #[tauri::command]
 pub async fn js_update_stream(
     conns: State<'_, ConnState>,
     conn_id: String,
-    config: serde_json::Value,
+    stream: String,
+    patch: serde_json::Value,
 ) -> error::Result<()> {
+    js_update_stream_impl(&conns, conn_id, stream, patch).await
+}
+
+pub(crate) async fn js_update_stream_impl(
+    conns: &ConnState,
+    conn_id: String,
+    stream: String,
+    patch: serde_json::Value,
+) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
+    // get_stream fetches fresh info, so cached_info here is current state.
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
+    let current = serde_json::to_value(&handle.cached_info().config).map_err(js_err)?;
+    let merged = merge_stream_patch(current, patch, &stream)?;
     let cfg: async_nats::jetstream::stream::Config =
-        serde_json::from_value(config).map_err(js_err)?;
+        serde_json::from_value(merged).map_err(js_err)?;
+    js.update_stream(&cfg).await.map_err(js_err)?;
+    Ok(())
+}
+
+// serde ignores unknown keys; a raw editor must reject them instead of
+// confirming a typo'd setting as applied.
+fn parse_full_config(
+    config: serde_json::Value,
+) -> error::Result<async_nats::jetstream::stream::Config> {
+    let mut unknown = Vec::new();
+    let cfg = serde_ignored::deserialize(config, |path| unknown.push(path.to_string())).map_err(
+        |e: serde_json::Error| Error::InvalidInput(format!("invalid stream config: {e}")),
+    )?;
+    if unknown.is_empty() {
+        Ok(cfg)
+    } else {
+        Err(Error::InvalidInput(format!(
+            "unknown config keys: {}",
+            unknown.join(", ")
+        )))
+    }
+}
+
+/// Full-config replacement for the raw JSON editor: unlike js_update_stream's
+/// merge, absent keys here reset to defaults - which is the point.
+#[tauri::command]
+pub async fn js_replace_stream(
+    conns: State<'_, ConnState>,
+    conn_id: String,
+    stream: String,
+    config: serde_json::Value,
+) -> error::Result<()> {
+    js_replace_stream_impl(&conns, conn_id, stream, config).await
+}
+
+pub(crate) async fn js_replace_stream_impl(
+    conns: &ConnState,
+    conn_id: String,
+    stream: String,
+    config: serde_json::Value,
+) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
+    let client = conns
+        .client(&conn_id)
+        .await
+        .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
+    let js = async_nats::jetstream::new(client);
+    match config.get("name").and_then(|n| n.as_str()) {
+        Some(name) if name == stream => {}
+        _ => {
+            return Err(Error::InvalidInput(format!(
+                "config name must match stream '{stream}'"
+            )))
+        }
+    }
+    let cfg = parse_full_config(config)?;
     js.update_stream(&cfg).await.map_err(js_err)?;
     Ok(())
 }
@@ -457,12 +650,22 @@ pub async fn js_create_consumer(
     stream: String,
     config: serde_json::Value,
 ) -> error::Result<()> {
+    js_create_consumer_impl(&conns, conn_id, stream, config).await
+}
+
+pub(crate) async fn js_create_consumer_impl(
+    conns: &ConnState,
+    conn_id: String,
+    stream: String,
+    config: serde_json::Value,
+) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
-    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
     let cfg: async_nats::jetstream::consumer::Config =
         serde_json::from_value(config).map_err(js_err)?;
     let _consumer = handle.create_consumer(cfg).await.map_err(js_err)?;
@@ -475,6 +678,15 @@ pub async fn js_delete_stream(
     conn_id: String,
     stream: String,
 ) -> error::Result<()> {
+    js_delete_stream_impl(&conns, conn_id, stream).await
+}
+
+pub(crate) async fn js_delete_stream_impl(
+    conns: &ConnState,
+    conn_id: String,
+    stream: String,
+) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await
@@ -491,12 +703,22 @@ pub async fn js_delete_consumer(
     stream: String,
     consumer: String,
 ) -> error::Result<()> {
+    js_delete_consumer_impl(&conns, conn_id, stream, consumer).await
+}
+
+pub(crate) async fn js_delete_consumer_impl(
+    conns: &ConnState,
+    conn_id: String,
+    stream: String,
+    consumer: String,
+) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
-    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
     handle.delete_consumer(&consumer).await.map_err(js_err)?;
     Ok(())
 }
@@ -508,12 +730,22 @@ pub async fn js_pause_consumer(
     stream: String,
     consumer: String,
 ) -> error::Result<()> {
+    js_pause_consumer_impl(&conns, conn_id, stream, consumer).await
+}
+
+pub(crate) async fn js_pause_consumer_impl(
+    conns: &ConnState,
+    conn_id: String,
+    stream: String,
+    consumer: String,
+) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
-    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
     // Pause far into the future = effectively indefinite (resume re-enables it).
     let until = OffsetDateTime::now_utc() + time::Duration::days(36500);
     handle
@@ -530,12 +762,22 @@ pub async fn js_resume_consumer(
     stream: String,
     consumer: String,
 ) -> error::Result<()> {
+    js_resume_consumer_impl(&conns, conn_id, stream, consumer).await
+}
+
+pub(crate) async fn js_resume_consumer_impl(
+    conns: &ConnState,
+    conn_id: String,
+    stream: String,
+    consumer: String,
+) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
-    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
     handle.resume_consumer(&consumer).await.map_err(js_err)?;
     Ok(())
 }
@@ -547,12 +789,22 @@ pub async fn js_delete_message(
     stream: String,
     seq: u64,
 ) -> error::Result<()> {
+    js_delete_message_impl(&conns, conn_id, stream, seq).await
+}
+
+pub(crate) async fn js_delete_message_impl(
+    conns: &ConnState,
+    conn_id: String,
+    stream: String,
+    seq: u64,
+) -> error::Result<()> {
+    conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
-    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
     handle.delete_message(seq).await.map_err(js_err)?;
     Ok(())
 }
@@ -601,5 +853,62 @@ mod tests {
         assert_eq!(next_cursor(10, 1, 10, false), None);
         assert_eq!(next_cursor(5, 1, 10, true), Some(4));
         assert_eq!(next_cursor(1, 1, 10, true), None);
+    }
+
+    #[test]
+    fn merge_stream_patch_preserves_unrendered_fields() {
+        let current = serde_json::json!({
+            "name": "ORDERS",
+            "subjects": ["orders.>"],
+            "max_msgs": -1,
+            "deny_delete": true,
+            "duplicate_window": 120_000_000_000u64,
+            "republish": {"src": ">", "dest": "repub.>"},
+        });
+        let patch = serde_json::json!({"name": "ORDERS", "max_msgs": 500});
+        let merged = merge_stream_patch(current, patch, "ORDERS").unwrap();
+        assert_eq!(merged["max_msgs"], 500);
+        assert_eq!(merged["deny_delete"], true);
+        assert_eq!(merged["duplicate_window"], 120_000_000_000u64);
+        assert_eq!(merged["republish"]["dest"], "repub.>");
+        assert_eq!(merged["subjects"][0], "orders.>");
+    }
+
+    #[test]
+    fn merge_stream_patch_overwrites_patched_fields() {
+        let current = serde_json::json!({"name": "S", "subjects": ["a.>"], "max_bytes": -1});
+        let patch = serde_json::json!({"name": "S", "subjects": ["a.>", "b.>"], "max_bytes": 1024});
+        let merged = merge_stream_patch(current, patch, "S").unwrap();
+        assert_eq!(merged["subjects"], serde_json::json!(["a.>", "b.>"]));
+        assert_eq!(merged["max_bytes"], 1024);
+    }
+
+    #[test]
+    fn merge_stream_patch_rejects_name_mismatch() {
+        let current = serde_json::json!({"name": "A"});
+        assert!(
+            merge_stream_patch(current.clone(), serde_json::json!({"name": "B"}), "A").is_err()
+        );
+        let no_name = serde_json::json!({"max_msgs": 1});
+        let merged = merge_stream_patch(current, no_name, "A").unwrap();
+        assert_eq!(merged["name"], "A");
+    }
+
+    #[test]
+    fn parse_full_config_rejects_unknown_keys() {
+        let bad = serde_json::json!({
+            "name": "S", "subjects": ["a.>"], "retention": "limits",
+            "storage": "file", "discard": "old", "num_replicas": 1,
+            "max_msgss": 5
+        });
+        let err = parse_full_config(bad).unwrap_err();
+        assert_eq!(err.kind(), "invalidInput");
+        assert!(err.to_string().contains("max_msgss"));
+    }
+
+    #[test]
+    fn merge_stream_patch_rejects_non_object_patch() {
+        let current = serde_json::json!({"name": "A"});
+        assert!(merge_stream_patch(current, serde_json::json!([1, 2]), "A").is_err());
     }
 }

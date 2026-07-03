@@ -23,6 +23,8 @@ vi.mock("@/lib/template", () => ({
 }));
 
 import { useResponder } from "./responder";
+import { useReadOnly } from "./readonly";
+import { useToasts } from "./toasts";
 
 function req(over: Partial<IncomingMessage> = {}): IncomingMessage {
   return {
@@ -89,7 +91,12 @@ describe("responder store", () => {
 
     deliver(req());
     await waitFor(() => publish.mock.calls.length > 0);
-    expect(publish).toHaveBeenCalledWith("conn", "_INBOX.1", "PONG", []);
+    expect(publish).toHaveBeenCalledWith(
+      "conn",
+      "_INBOX.1",
+      encodeText("PONG"),
+      [],
+    );
     expect(sess().handled).toBe(1);
     // lastRequest is folded into the same write as the log entry.
     expect(sess().lastRequest?.subject).toBe("svc.get");
@@ -179,5 +186,41 @@ describe("responder store", () => {
     expect(new Set(ids).size).toBe(2);
     expect(ids).not.toContain(undefined);
     expect(firstId).toBeDefined();
+  });
+});
+
+describe("responders on a read-only connection", () => {
+  beforeEach(() => {
+    subscribe.mockReset().mockResolvedValue(undefined);
+    unsubscribe.mockReset().mockResolvedValue(undefined);
+    useResponder.setState({ byConn: {} });
+    useReadOnly.setState({ byConn: {} });
+    useToasts.setState({ toasts: [] });
+  });
+
+  it("refuses to start and explains why", async () => {
+    useReadOnly.getState().setReadOnly("prod", true);
+    useResponder.getState().ensure("r1", "prod", "svc.get");
+    await useResponder.getState().start("prod", "r1");
+
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(useResponder.getState().byConn.prod?.r1?.listening).toBe(false);
+    expect(useToasts.getState().toasts[0]?.message).toContain("read-only");
+  });
+
+  it("stops listening responders when the connection gets locked", async () => {
+    useResponder.getState().ensure("r1", "prod", "svc.get");
+    await useResponder.getState().start("prod", "r1");
+    expect(useResponder.getState().byConn.prod?.r1?.listening).toBe(true);
+
+    useReadOnly.getState().setReadOnly("prod", true);
+    await waitFor(
+      () => useResponder.getState().byConn.prod?.r1?.listening === false,
+    );
+    expect(unsubscribe).toHaveBeenCalled();
+    const { toasts } = useToasts.getState();
+    expect(toasts[toasts.length - 1]?.message).toBe(
+      "Stopped 1 responder - prod is read-only",
+    );
   });
 });

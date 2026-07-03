@@ -28,9 +28,46 @@ export function activeSubjects(
     .map((s) => s.subject);
 }
 
-interface Row {
+export interface Row {
   node: SubjectNode;
   depth: number;
+}
+
+export function subjectOf(node: SubjectNode): string {
+  return node.children.length > 0 ? `${node.path}.>` : node.path;
+}
+
+export type TreeNavAction =
+  | { kind: "move"; to: number }
+  | { kind: "activate"; subject: string }
+  | { kind: "toggle"; path: string }
+  | null;
+
+// Same scheme as VirtualTree: arrows move, left/right fold, Enter streams.
+export function navAction(
+  key: string,
+  rows: Row[],
+  sel: number,
+  collapsed: Set<string>,
+): TreeNavAction {
+  if (rows.length === 0) return null;
+  if (key === "ArrowDown") {
+    return { kind: "move", to: Math.min(sel + 1, rows.length - 1) };
+  }
+  if (key === "ArrowUp") return { kind: "move", to: Math.max(sel - 1, 0) };
+  const row = rows[sel];
+  if (!row) return null;
+  if (key === "Enter") {
+    return { kind: "activate", subject: subjectOf(row.node) };
+  }
+  const branch = row.node.children.length > 0;
+  if (key === "ArrowRight" && branch && collapsed.has(row.node.path)) {
+    return { kind: "toggle", path: row.node.path };
+  }
+  if (key === "ArrowLeft" && branch && !collapsed.has(row.node.path)) {
+    return { kind: "toggle", path: row.node.path };
+  }
+  return null;
 }
 
 function formatRate(rate: number): string {
@@ -91,11 +128,30 @@ export function SubjectTree({
       return next;
     });
 
+  const [selIdx, setSelIdx] = useState(0);
+  const sel = Math.min(selIdx, Math.max(rows.length - 1, 0));
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const action = navAction(e.key, rows, sel, collapsed);
+    if (!action) return;
+    e.preventDefault();
+    if (action.kind === "move") {
+      setSelIdx(action.to);
+      virtualizer.scrollToIndex(action.to);
+    } else if (action.kind === "activate") {
+      onSelect(action.subject);
+    } else {
+      toggle(action.path);
+    }
+  };
+
   return (
     <div ref={setScrollEl} className="min-h-0 flex-1 overflow-y-auto">
       <ul
         role="tree"
-        className="relative w-full"
+        tabIndex={0}
+        onKeyDown={onKeyDown}
+        className="relative w-full outline-none"
         style={{ height: virtualizer.getTotalSize() }}
       >
         {virtualizer.getVirtualItems().map((v) => {
@@ -109,6 +165,7 @@ export function SubjectTree({
               connId={connId}
               active={activeSet}
               open={!collapsed.has(row.node.path)}
+              selected={v.index === sel}
               onToggle={() => toggle(row.node.path)}
               onSelect={onSelect}
               style={{
@@ -129,6 +186,7 @@ function SubjectRow({
   connId,
   active,
   open,
+  selected,
   onToggle,
   onSelect,
   style,
@@ -138,12 +196,13 @@ function SubjectRow({
   connId: string;
   active: Set<string>;
   open: boolean;
+  selected: boolean;
   onToggle: () => void;
   onSelect: (subject: string) => void;
   style: React.CSSProperties;
 }) {
   const hasChildren = node.children.length > 0;
-  const subject = hasChildren ? `${node.path}.>` : node.path;
+  const subject = subjectOf(node);
   const isActive = active.has(subject);
   const flash = useFlash(node.rate);
 
@@ -160,7 +219,7 @@ function SubjectRow({
           <div
             className={cn(
               "group relative mx-1.5 flex h-full items-center rounded-md",
-              isActive ? "bg-selected" : "hover:bg-row-hover",
+              selected || isActive ? "bg-selected" : "hover:bg-row-hover",
             )}
             style={{ paddingLeft: depth * 12 }}
           >

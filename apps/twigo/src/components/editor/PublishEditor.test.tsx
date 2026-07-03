@@ -14,7 +14,12 @@ const { publish, request } = vi.hoisted(() => ({
   publish: vi.fn(),
   request: vi.fn(),
 }));
-vi.mock("@/lib/api", () => ({ publish, request }));
+vi.mock("@/lib/api", () => ({
+  publish,
+  request,
+  pickPayloadFile: vi.fn(() => Promise.resolve(null)),
+  syncConnReadonly: vi.fn(() => Promise.resolve()),
+}));
 
 function setLive(connected: boolean) {
   useConnections.setState({
@@ -51,7 +56,12 @@ describe("PublishEditor", () => {
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: "Publish" }));
-    expect(publish).toHaveBeenCalledWith("c", "orders.created", "hello", []);
+    expect(publish).toHaveBeenCalledWith(
+      "c",
+      "orders.created",
+      btoa("hello"),
+      [],
+    );
   });
 
   it("disables sending when the connection is not live", () => {

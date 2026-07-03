@@ -1,3 +1,4 @@
+mod emit;
 mod nats;
 
 use tracing_subscriber::EnvFilter;
@@ -38,12 +39,14 @@ pub fn run() {
             nats::connection::list_connections,
             nats::connection::server_info,
             nats::connection::conn_info,
+            nats::connection::conn_sync_readonly,
             nats::subjects::start_subject_watch,
             nats::subjects::stop_subject_watch,
             nats::subscription::subscribe,
             nats::subscription::unsubscribe,
             nats::publish::publish,
             nats::publish::request,
+            nats::publish::pick_payload_file,
             nats::service::service_stats,
             nats::service::service_info,
             nats::jetstream::js_list_streams,
@@ -53,6 +56,7 @@ pub fn run() {
             nats::jetstream::js_get_messages,
             nats::jetstream::js_create_stream,
             nats::jetstream::js_update_stream,
+            nats::jetstream::js_replace_stream,
             nats::jetstream::js_create_consumer,
             nats::jetstream::js_purge_stream,
             nats::jetstream::js_delete_stream,

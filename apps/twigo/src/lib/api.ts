@@ -44,8 +44,8 @@ function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
 function assertWritable(connId: string): void {
   if (useReadOnly.getState().isReadOnly(connId)) {
     throw new IpcError(
-      "readOnly",
-      `${connId} is read-only - writes are blocked`,
+      "permissions",
+      `connection '${connId}' is read-only - writes are blocked`,
     );
   }
 }
@@ -230,20 +230,25 @@ export async function unsubscribe(subId: string): Promise<void> {
   await call("unsubscribe", { subId });
 }
 
+// SEC-4: mirrors the lock set into Rust.
+export async function syncConnReadonly(names: string[]): Promise<void> {
+  await call("conn_sync_readonly", { names });
+}
+
 export async function publish(
   connId: string,
   subject: string,
-  payload: string,
+  payloadB64: string,
   headers: [string, string][] = [],
 ): Promise<void> {
   assertWritable(connId);
-  await call("publish", { connId, subject, payload, headers });
+  await call("publish", { connId, subject, payloadB64, headers });
 }
 
 export async function request(
   connId: string,
   subject: string,
-  payload: string,
+  payloadB64: string,
   timeoutMs?: number | null,
   headers: [string, string][] = [],
 ): Promise<IncomingMessage> {
@@ -251,10 +256,22 @@ export async function request(
   return call<IncomingMessage>("request", {
     connId,
     subject,
-    payload,
+    payloadB64,
     timeoutMs: timeoutMs ?? null,
     headers,
   });
+}
+
+export interface PickedPayload {
+  name: string;
+  size: number;
+  payloadB64: string;
+}
+
+export function pickPayloadFile(
+  maxBytes: number,
+): Promise<PickedPayload | null> {
+  return call<PickedPayload | null>("pick_payload_file", { maxBytes });
 }
 
 export interface StreamSummary {
@@ -377,12 +394,24 @@ export async function jsCreateStream(
   await call("js_create_stream", { connId, config });
 }
 
+// Partial update: Rust overlays the patch onto the current server config.
 export async function jsUpdateStream(
   connId: string,
+  stream: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  assertWritable(connId);
+  await call("js_update_stream", { connId, stream, patch });
+}
+
+// Full replacement (raw JSON editor): absent keys reset to defaults.
+export async function jsReplaceStream(
+  connId: string,
+  stream: string,
   config: Record<string, unknown>,
 ): Promise<void> {
   assertWritable(connId);
-  await call("js_update_stream", { connId, config });
+  await call("js_replace_stream", { connId, stream, config });
 }
 
 export async function jsCreateConsumer(

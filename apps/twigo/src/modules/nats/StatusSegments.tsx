@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { PlugZap, Plug, Gauge, Database, Activity } from "lucide-react";
+import { PlugZap, Plug, Gauge, Database, Activity, Lock } from "lucide-react";
 import { fmtRtt, fmtCount } from "@twigo/utils";
 import { useUi } from "@/store/ui";
 import { useConnections } from "@/store/connections";
+import { useReadOnly } from "@/store/readonly";
 import { useStream } from "@/store/stream";
 import { openServerInfo } from "@/lib/editor";
 import { statusSegmentClass } from "@/shell/statusBar";
@@ -40,13 +41,29 @@ function useThroughput(connId: string | null) {
 export function NatsConnectionStatus() {
   const { activeContext, connected } = useConnections();
   const info = activeContext ? connected[activeContext] : undefined;
+  const readOnly = useReadOnly((s) =>
+    activeContext ? (s.byConn[activeContext] ?? false) : false,
+  );
   const { active, rate } = useThroughput(info?.connected ? info.name : null);
+
+  const lockChip = readOnly && (
+    <span
+      className="flex items-center gap-1 px-1.5 text-warn"
+      title="Connection is read-only - writes are blocked. Toggle from the connection list or the command palette."
+    >
+      <Lock className="size-3.5" />
+      read-only
+    </span>
+  );
 
   if (info && !info.connected) {
     return (
-      <span className="px-1">
-        <ReconnectStatus name={info.name} />
-      </span>
+      <>
+        <span className="px-1">
+          <ReconnectStatus name={info.name} />
+        </span>
+        {lockChip}
+      </>
     );
   }
   if (info) {
@@ -61,6 +78,7 @@ export function NatsConnectionStatus() {
           <PlugZap className="size-3.5" />
           {info.name} · connected
         </button>
+        {lockChip}
         <span className="flex items-center gap-1 px-1.5 opacity-90">
           <Gauge className="size-3.5" />
           RTT <span className="tabular-nums">{fmtRtt(info.rttMs)}</span>
@@ -97,9 +115,12 @@ export function NatsConnectionStatus() {
     );
   }
   return (
-    <span className="flex items-center gap-1 px-1.5 opacity-90">
-      <Plug className="size-3.5" />
-      {activeContext ? `${activeContext} · not connected` : "no connection"}
-    </span>
+    <>
+      <span className="flex items-center gap-1 px-1.5 opacity-90">
+        <Plug className="size-3.5" />
+        {activeContext ? `${activeContext} · not connected` : "no connection"}
+      </span>
+      {lockChip}
+    </>
   );
 }

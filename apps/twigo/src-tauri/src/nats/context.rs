@@ -176,6 +176,13 @@ pub fn list_contexts(
     dir: Option<String>,
     include_demo: bool,
 ) -> error::Result<Vec<ContextSummary>> {
+    list_contexts_impl(dir, include_demo)
+}
+
+pub(crate) fn list_contexts_impl(
+    dir: Option<String>,
+    include_demo: bool,
+) -> error::Result<Vec<ContextSummary>> {
     let custom = dir.filter(|d| !d.trim().is_empty()).map(PathBuf::from);
     let mut out: Vec<ContextSummary> = load_contexts(custom)?.iter().map(|c| c.summary()).collect();
     if include_demo {
@@ -186,6 +193,10 @@ pub fn list_contexts(
 
 #[tauri::command]
 pub fn default_context_dir() -> Option<String> {
+    default_context_dir_impl()
+}
+
+pub(crate) fn default_context_dir_impl() -> Option<String> {
     nats_config_dir().map(|p| p.to_string_lossy().into_owned())
 }
 
@@ -213,6 +224,10 @@ pub struct ContextDetail {
 /// context doesn't exist.
 #[tauri::command]
 pub fn get_context(dir: Option<String>, name: String) -> error::Result<ContextDetail> {
+    get_context_impl(dir, name)
+}
+
+pub(crate) fn get_context_impl(dir: Option<String>, name: String) -> error::Result<ContextDetail> {
     let custom = dir.filter(|d| !d.trim().is_empty()).map(PathBuf::from);
     let ctx = load_contexts(custom)?
         .into_iter()
@@ -341,6 +356,14 @@ fn write_context_file(path: &Path, contents: &str) -> error::Result<()> {
 /// are preserved.
 #[tauri::command]
 pub fn save_context(dir: Option<String>, name: String, input: ContextInput) -> error::Result<()> {
+    save_context_impl(dir, name, input)
+}
+
+pub(crate) fn save_context_impl(
+    dir: Option<String>,
+    name: String,
+    input: ContextInput,
+) -> error::Result<()> {
     if !valid_context_name(&name) {
         return Err(Error::Credentials(format!("invalid context name '{name}'")));
     }
@@ -384,6 +407,10 @@ pub fn save_context(dir: Option<String>, name: String, input: ContextInput) -> e
 /// at the deleted context.
 #[tauri::command]
 pub fn delete_context(dir: Option<String>, name: String) -> error::Result<()> {
+    delete_context_impl(dir, name)
+}
+
+pub(crate) fn delete_context_impl(dir: Option<String>, name: String) -> error::Result<()> {
     if !valid_context_name(&name) {
         return Err(Error::Credentials(format!("invalid context name '{name}'")));
     }

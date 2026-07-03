@@ -61,6 +61,15 @@ describe("stream store (multi-session)", () => {
     vi.useRealTimers();
   });
 
+  it("rolls back the session when subscribe fails", async () => {
+    mocks.subscribe.mockRejectedValueOnce(new Error("no permissions"));
+    await expect(
+      useStream.getState().open("bad", "local", "orders.>"),
+    ).rejects.toThrow("no permissions");
+    expect(useStream.getState().sessions.bad).toBeUndefined();
+    expect(useStream.getState().activeId).toBeNull();
+  });
+
   it("opens independent sessions and marks the last one active", async () => {
     await useStream.getState().open("a", "local", "orders.>");
     await useStream.getState().open("b", "local", "audit.>");
@@ -86,6 +95,29 @@ describe("stream store (multi-session)", () => {
     expect(useStream.getState().sessions.a?.items).toHaveLength(2);
     expect(useStream.getState().sessions.b?.items).toHaveLength(1);
     expect(useStream.getState().sessions.a?.items[0]?.preview).toContain("one");
+  });
+
+  it("keeps the selected message for the inspector after eviction", async () => {
+    await useStream.getState().open("a", "local", "orders.>");
+    const [chA] = mocks.channels;
+
+    chA?.onmessage(batch(msg("orders.new", "first")));
+    vi.advanceTimersByTime(150);
+    const first = useStream.getState().sessions.a?.items[0];
+    useStream.getState().select("a", first?.id ?? null);
+
+    const flood = Array.from({ length: 2000 }, (_, i) =>
+      msg("orders.new", `m${i}`),
+    );
+    chA?.onmessage({ messages: flood, dropped: 0 });
+    vi.advanceTimersByTime(150);
+
+    const s = useStream.getState().sessions.a;
+    expect(s?.items.some((m) => m.id === first?.id)).toBe(false);
+    expect(s?.selected).toBe(first);
+
+    useStream.getState().select("a", null);
+    expect(useStream.getState().sessions.a?.selected).toBeNull();
   });
 
   it("pauses a single session without affecting others", async () => {

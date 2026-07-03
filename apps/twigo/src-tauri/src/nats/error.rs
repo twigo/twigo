@@ -24,6 +24,15 @@ pub enum Error {
     #[error("jetstream error: {0}")]
     JetStream(String),
 
+    #[error("{0}")]
+    NotFound(String),
+
+    #[error("permission denied: {0}")]
+    Permissions(String),
+
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
+
     #[error("conflict: {0}")]
     Conflict(String),
 
@@ -63,6 +72,9 @@ impl Error {
             Error::Credentials(_) => "credentials",
             Error::Task(_) => "task",
             Error::JetStream(_) => "jetstream",
+            Error::NotFound(_) => "notFound",
+            Error::Permissions(_) => "permissions",
+            Error::InvalidInput(_) => "invalidInput",
             Error::Conflict(_) => "conflict",
             Error::Timeout(_) => "timeout",
             Error::Monitoring(_) => "monitoring",
@@ -105,5 +117,7 @@ mod tests {
         assert_eq!(Error::ContextNotFound("x".into()).kind(), "contextNotFound");
         assert_eq!(Error::Conflict("x".into()).kind(), "conflict");
         assert_eq!(Error::Timeout("x".into()).kind(), "timeout");
+        assert_eq!(Error::NotFound("x".into()).kind(), "notFound");
+        assert_eq!(Error::Permissions("x".into()).kind(), "permissions");
     }
 }

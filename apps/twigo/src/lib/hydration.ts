@@ -5,6 +5,10 @@ import { useWorkspace } from "@/store/workspace";
 import { useResponder } from "@/store/responder";
 import { useReadOnly } from "@/store/readonly";
 import { useMonitorConfig } from "@/store/monitorConfig";
+import { useSpaces } from "@/store/spaces";
+import { useZoom } from "@/store/zoom";
+import { useCommandHistory } from "@/store/commandHistory";
+import { useHistory } from "@/store/history";
 
 interface Hydratable {
   persist: {
@@ -23,24 +27,23 @@ const STORES: Hydratable[] = [
   useResponder,
   useReadOnly,
   useMonitorConfig,
+  useSpaces,
+  useZoom,
+  useCommandHistory,
+  useHistory,
 ];
 
-/**
- * True once every persisted store has loaded from disk. With the async Tauri
- * store this gates the first render so the layout/theme aren't built from
- * defaults and then snapped to the restored values.
- */
-export function useAppHydrated(): boolean {
+export function useStoresHydrated(stores: Hydratable[]): boolean {
   const [hydrated, setHydrated] = useState(() =>
-    STORES.every((s) => s.persist.hasHydrated()),
+    stores.every((s) => s.persist.hasHydrated()),
   );
 
   useEffect(() => {
     if (hydrated) return;
     const check = () => {
-      if (STORES.every((s) => s.persist.hasHydrated())) setHydrated(true);
+      if (stores.every((s) => s.persist.hasHydrated())) setHydrated(true);
     };
-    const unsubs = STORES.map((s) => s.persist.onFinishHydration(check));
+    const unsubs = stores.map((s) => s.persist.onFinishHydration(check));
     // Close the render→subscribe gap (a store may finish between the initial
     // snapshot and these subscriptions). Deferred to avoid a sync set in effect.
     queueMicrotask(check);
@@ -52,7 +55,16 @@ export function useAppHydrated(): boolean {
       for (const unsub of unsubs) unsub();
       clearTimeout(watchdog);
     };
-  }, [hydrated]);
+  }, [hydrated, stores]);
 
   return hydrated;
+}
+
+/**
+ * True once every persisted store has loaded from disk. With the async Tauri
+ * store this gates the first render so the layout/theme aren't built from
+ * defaults and then snapped to the restored values.
+ */
+export function useAppHydrated(): boolean {
+  return useStoresHydrated(STORES);
 }

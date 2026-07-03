@@ -31,6 +31,7 @@ interface MonitorConnState {
   jsz: Jsz | null;
   healthz: Healthz | null;
   samples: Sample[];
+  unavailableAt: number | null;
 }
 
 const EMPTY: MonitorConnState = {
@@ -40,9 +41,12 @@ const EMPTY: MonitorConnState = {
   jsz: null,
   healthz: null,
   samples: [],
+  unavailableAt: null,
 };
 
 const MAX_SAMPLES = 90;
+// "unavailable" can be a transient timeout - back off, don't latch forever.
+const UNAVAILABLE_RETRY_MS = 30_000;
 
 interface MonitorStore {
   byConn: Record<string, MonitorConnState>;
@@ -70,9 +74,12 @@ export const useMonitor = create<MonitorStore>((set, get) => {
 
     poll: async (connId, monitoringUrl) => {
       const cur = get().byConn[connId] ?? EMPTY;
-      // No $SYS access won't change without a reconnect (which resets); stop
-      // hammering a connection that can't be monitored.
-      if (cur.status === "unavailable") return;
+      if (
+        cur.status === "unavailable" &&
+        Date.now() - (cur.unavailableAt ?? 0) < UNAVAILABLE_RETRY_MS
+      ) {
+        return;
+      }
       if (cur.status === "idle")
         patch(connId, (s) => ({ ...s, status: "loading" }));
       const epoch = epochOf(connId);
@@ -101,6 +108,7 @@ export const useMonitor = create<MonitorStore>((set, get) => {
           jsz,
           healthz,
           samples: [...s.samples, sample].slice(-MAX_SAMPLES),
+          unavailableAt: null,
         }));
       } catch (e) {
         if (epochOf(connId) !== epoch) return; // reset() ran mid-poll
@@ -111,6 +119,7 @@ export const useMonitor = create<MonitorStore>((set, get) => {
           ...s,
           status: unavailable ? "unavailable" : "error",
           error: msg,
+          unavailableAt: unavailable ? Date.now() : null,
         }));
       }
     },

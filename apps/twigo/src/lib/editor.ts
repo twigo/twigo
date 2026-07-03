@@ -67,9 +67,10 @@ export function openPublish(
   subject?: string,
   payload?: string,
   headers?: [string, string][],
+  payloadB64?: string,
 ) {
   const hasPrefill = Boolean(
-    (subject ?? "") || (payload ?? "") || headers?.length,
+    (subject ?? "") || (payload ?? "") || (payloadB64 ?? "") || headers?.length,
   );
   if (hasPrefill) publishSeed += 1;
   open("publish", {
@@ -79,6 +80,7 @@ export function openPublish(
       connId,
       subject: subject ?? "",
       payload: payload ?? "",
+      payloadB64: payloadB64 ?? "",
       headers: headers ?? [],
       seed: publishSeed,
     },

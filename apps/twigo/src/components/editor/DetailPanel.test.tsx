@@ -48,6 +48,10 @@ function seed(
         paused: false,
         following: true,
         selectedId,
+        selected:
+          selectedId === null
+            ? null
+            : (items.find((m) => m.id === selectedId) ?? null),
         received: items.length,
         dropped: 0,
       },
@@ -69,6 +73,10 @@ function session(
     paused: false,
     following: true,
     selectedId,
+    selected:
+      selectedId === null
+        ? null
+        : (items.find((m) => m.id === selectedId) ?? null),
     received: items.length,
     dropped: 0,
   };
