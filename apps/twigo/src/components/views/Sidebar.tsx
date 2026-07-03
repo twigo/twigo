@@ -6,6 +6,7 @@ import { useConnections } from "@/store/connections";
 import { useActiveSpace } from "@/store/spaces";
 import { getViews } from "@/shell/views";
 import { getDomain, getDefaultDomainId } from "@/shell/domains";
+import { PanelBoundary } from "@/components/PanelBoundary";
 
 export function Sidebar() {
   const activeView = useUi((s) => s.activeView);
@@ -62,7 +63,9 @@ export function Sidebar() {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
         {Panel ? (
-          <Panel filter={filter} connId={activeContext ?? null} />
+          <PanelBoundary label={title}>
+            <Panel filter={filter} connId={activeContext ?? null} />
+          </PanelBoundary>
         ) : (
           <EmptyState density="inline" icon={icon}>
             {title} is on the roadmap - not available yet.

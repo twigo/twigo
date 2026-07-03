@@ -4,6 +4,7 @@ import {
   type Command,
 } from "@/lib/commands";
 import { useConnections } from "@/store/connections";
+import { useReadOnly } from "@/store/readonly";
 import { useJetStream } from "@/store/jetstream";
 import { useKv } from "@/store/kv";
 import { useObjStore } from "@/store/objstore";
@@ -66,6 +67,17 @@ export function registerNatsCommands(): void {
       title: "Reload nats contexts",
       category: "Connections",
       run: () => void useConnections.getState().load(),
+    },
+    {
+      id: "connections.toggle-readonly",
+      title: "Toggle read-only for active connection",
+      category: "Connections",
+      keywords: "lock protect guard write",
+      when: () => !!activeConn(),
+      run: () => {
+        const active = activeConn();
+        if (active) useReadOnly.getState().toggle(active);
+      },
     },
     {
       id: "jetstream.refresh",

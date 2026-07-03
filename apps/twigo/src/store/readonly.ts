@@ -11,6 +11,9 @@ interface ReadOnlyState {
   isReadOnly: (conn: string) => boolean;
   setReadOnly: (conn: string, value: boolean) => void;
   toggle: (conn: string) => void;
+  // Locks are keyed by context name; drop entries for contexts that no longer
+  // exist so a later context reusing the name doesn't inherit a stale lock.
+  prune: (names: string[]) => void;
 }
 
 export const useReadOnly = create<ReadOnlyState>()(
@@ -27,6 +30,15 @@ export const useReadOnly = create<ReadOnlyState>()(
           return { byConn: { ...s.byConn, [conn]: true } };
         }),
       toggle: (conn) => get().setReadOnly(conn, !get().isReadOnly(conn)),
+      prune: (names) =>
+        set((s) => {
+          const keep = new Set(names);
+          return {
+            byConn: Object.fromEntries(
+              Object.entries(s.byConn).filter(([k]) => keep.has(k)),
+            ),
+          };
+        }),
     }),
     {
       name: "twigo-readonly",

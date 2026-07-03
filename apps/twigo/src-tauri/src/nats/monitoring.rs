@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -31,12 +32,16 @@ async fn http_get<T: serde::de::DeserializeOwned>(base: &str, path: &str) -> err
         )));
     }
     let url = format!("{}/{}", base.trim_end_matches('/'), path);
-    // Bound the request so a hung :8222 endpoint can't stall the poll forever.
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|e| Error::Monitoring(format!("monitoring client init failed: {e}")))?;
+    // One shared client (connection pooling); a fresh client per poll leaked
+    // pools. Timeout bounds a hung :8222 endpoint.
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    let client = CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("static reqwest client config is valid")
+    });
     let resp = client
         .get(&url)
         .send()

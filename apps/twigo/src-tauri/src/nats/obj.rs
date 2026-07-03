@@ -154,7 +154,13 @@ pub async fn obj_object_info(
     name: String,
 ) -> error::Result<ObjDetail> {
     let os = store(&conns, &conn_id, &bucket).await?;
-    let info = os.info(&name).await.map_err(js_err)?;
+    let info = os.info(&name).await.map_err(|e| {
+        if e.kind() == async_nats::jetstream::object_store::InfoErrorKind::NotFound {
+            Error::NotFound(format!("object '{name}' not found"))
+        } else {
+            js_err(e)
+        }
+    })?;
     Ok(ObjDetail {
         name: info.name.clone(),
         description: info.description.clone(),
@@ -198,7 +204,13 @@ pub async fn obj_get_object(
     };
 
     let os = store(&conns, &conn_id, &bucket).await?;
-    let mut object = os.get(&name).await.map_err(js_err)?;
+    let mut object = os.get(&name).await.map_err(|e| {
+        if e.kind() == async_nats::jetstream::object_store::GetErrorKind::NotFound {
+            Error::NotFound(format!("object '{name}' not found"))
+        } else {
+            js_err(e)
+        }
+    })?;
     let mut tmp = dest.clone().into_os_string();
     tmp.push(".twigo-part");
     let tmp = PathBuf::from(tmp);

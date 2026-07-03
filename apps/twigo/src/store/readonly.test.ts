@@ -27,4 +27,11 @@ describe("read-only store", () => {
     useReadOnly.getState().setReadOnly("prod", true);
     expect(useReadOnly.getState().isReadOnly("dev")).toBe(false);
   });
+
+  it("prunes locks for contexts that no longer exist", () => {
+    useReadOnly.getState().setReadOnly("prod", true);
+    useReadOnly.getState().setReadOnly("old", true);
+    useReadOnly.getState().prune(["prod", "dev"]);
+    expect(useReadOnly.getState().byConn).toEqual({ prod: true });
+  });
 });

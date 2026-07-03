@@ -13,6 +13,9 @@ import { render, buildMsgContext, warmUp } from "@/lib/template";
 import { createPersistStorage } from "@/lib/persist-storage";
 
 const LOG_CAP = 200;
+// The log keeps a head of the rendered reply, not the full body: 200 entries
+// of 1 MiB template output would otherwise pin ~200 MiB.
+const LOG_OUTPUT_CAP = 2048;
 
 export type ResponderMode = "reply" | "error" | "down";
 
@@ -222,7 +225,10 @@ async function handleMessage(connId: string, id: string, m: IncomingMessage) {
     );
     appendLog(connId, id, m, {
       ...base,
-      outcome: { kind: "sent", output: rendered.output },
+      outcome: {
+        kind: "sent",
+        output: rendered.output.slice(0, LOG_OUTPUT_CAP),
+      },
       ms,
     });
   } catch (e) {

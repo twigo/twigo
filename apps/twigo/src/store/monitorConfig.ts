@@ -7,6 +7,7 @@ import { createPersistStorage } from "@/lib/persist-storage";
 interface MonitorConfigState {
   urls: Record<string, string>;
   setUrl: (conn: string, url: string | null) => void;
+  prune: (names: string[]) => void;
 }
 
 export const useMonitorConfig = create<MonitorConfigState>()(
@@ -21,6 +22,15 @@ export const useMonitorConfig = create<MonitorConfigState>()(
             return { urls };
           }
           return { urls: { ...s.urls, [conn]: trimmed } };
+        }),
+      prune: (names) =>
+        set((s) => {
+          const keep = new Set(names);
+          return {
+            urls: Object.fromEntries(
+              Object.entries(s.urls).filter(([k]) => keep.has(k)),
+            ),
+          };
         }),
     }),
     {

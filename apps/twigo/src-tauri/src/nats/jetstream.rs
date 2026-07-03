@@ -14,6 +14,37 @@ pub(crate) fn js_err<E: std::fmt::Display>(e: E) -> Error {
     Error::JetStream(e.to_string())
 }
 
+// Typed mappers: branch on the library's error kinds, never on message text.
+pub(crate) fn stream_err(
+    stream: &str,
+) -> impl Fn(async_nats::jetstream::context::GetStreamError) -> Error + '_ {
+    use async_nats::jetstream::context::GetStreamErrorKind;
+    use async_nats::jetstream::ErrorCode;
+    move |e| match e.kind() {
+        GetStreamErrorKind::JetStream(inner)
+            if inner.error_code() == ErrorCode::STREAM_NOT_FOUND =>
+        {
+            Error::NotFound(format!("stream '{stream}' not found"))
+        }
+        GetStreamErrorKind::JetStream(inner) if inner.code() == 403 => {
+            Error::Permissions(inner.to_string())
+        }
+        _ => js_err(e),
+    }
+}
+
+fn consumer_err(
+    consumer: &str,
+) -> impl Fn(async_nats::jetstream::context::ConsumerInfoError) -> Error + '_ {
+    use async_nats::jetstream::context::ConsumerInfoErrorKind;
+    move |e| match e.kind() {
+        ConsumerInfoErrorKind::NotFound => {
+            Error::NotFound(format!("consumer '{consumer}' not found"))
+        }
+        _ => js_err(e),
+    }
+}
+
 pub(crate) fn fmt_time(t: OffsetDateTime) -> Option<String> {
     t.format(&Rfc3339).ok()
 }
@@ -158,7 +189,7 @@ pub async fn js_stream_detail(
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
-    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
     let info = handle.cached_info();
     let st = &info.state;
     Ok(StreamDetail {
@@ -187,7 +218,7 @@ pub async fn js_list_consumers(
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
-    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
 
     let mut consumers = handle.consumers();
     let mut out = Vec::new();
@@ -226,8 +257,11 @@ pub async fn js_consumer_detail(
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
-    let handle = js.get_stream(&stream).await.map_err(js_err)?;
-    let info = handle.consumer_info(&consumer).await.map_err(js_err)?;
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
+    let info = handle
+        .consumer_info(&consumer)
+        .await
+        .map_err(consumer_err(&consumer))?;
     Ok(ConsumerDetail {
         config: serde_json::to_value(&info.config).map_err(js_err)?,
         created: fmt_time(info.created),
@@ -322,7 +356,7 @@ pub async fn js_get_messages(
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
-    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
     let state = &handle.cached_info().state;
     let (first, last) = (state.first_sequence, state.last_sequence);
 
@@ -401,7 +435,7 @@ pub async fn js_purge_stream(
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
-    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
     // keep/sequence are mutually exclusive (enforced by the builder's generics).
     let resp = match (keep, up_to_seq) {
         (Some(k), _) => handle.purge().keep(k).await,
@@ -472,7 +506,7 @@ pub async fn js_update_stream(
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
     // get_stream fetches fresh info, so cached_info here is current state.
-    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
     let current = serde_json::to_value(&handle.cached_info().config).map_err(js_err)?;
     let merged = merge_stream_patch(current, patch, &stream)?;
     let cfg: async_nats::jetstream::stream::Config =
@@ -493,7 +527,7 @@ pub async fn js_create_consumer(
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
-    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
     let cfg: async_nats::jetstream::consumer::Config =
         serde_json::from_value(config).map_err(js_err)?;
     let _consumer = handle.create_consumer(cfg).await.map_err(js_err)?;
@@ -527,7 +561,7 @@ pub async fn js_delete_consumer(
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
-    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
     handle.delete_consumer(&consumer).await.map_err(js_err)?;
     Ok(())
 }
@@ -544,7 +578,7 @@ pub async fn js_pause_consumer(
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
-    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
     // Pause far into the future = effectively indefinite (resume re-enables it).
     let until = OffsetDateTime::now_utc() + time::Duration::days(36500);
     handle
@@ -566,7 +600,7 @@ pub async fn js_resume_consumer(
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
-    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
     handle.resume_consumer(&consumer).await.map_err(js_err)?;
     Ok(())
 }
@@ -583,7 +617,7 @@ pub async fn js_delete_message(
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
     let js = async_nats::jetstream::new(client);
-    let handle = js.get_stream(&stream).await.map_err(js_err)?;
+    let handle = js.get_stream(&stream).await.map_err(stream_err(&stream))?;
     handle.delete_message(seq).await.map_err(js_err)?;
     Ok(())
 }
