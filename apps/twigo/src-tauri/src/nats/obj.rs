@@ -316,6 +316,7 @@ pub(crate) async fn stage_upload(
     bucket: String,
     path: Option<PathBuf>,
 ) -> error::Result<Option<StagedUploadInfo>> {
+    conns.assert_writable(&conn_id).await?;
     let Some(path) = path else {
         *staging.0.lock().await = None;
         return Ok(None);

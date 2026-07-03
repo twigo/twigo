@@ -1,17 +1,12 @@
 import { History, Send, ArrowLeftRight, Trash2 } from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
-import { decodeText, fmtRelTime } from "@twigo/utils";
+import { fmtRelTime } from "@twigo/utils";
 import { useHistory, type SentEntry } from "@/store/history";
 import { openPublish } from "@/lib/editor";
 import type { ViewProps } from "@/shell/views";
 
 function replay(e: SentEntry) {
-  openPublish(
-    e.connId,
-    e.subject,
-    e.truncated ? "" : decodeText(e.payloadB64),
-    e.headers,
-  );
+  openPublish(e.connId, e.subject, "", e.headers, e.payloadB64);
 }
 
 export function HistoryView({ filter, connId }: ViewProps) {
@@ -57,9 +52,14 @@ export function HistoryView({ filter, connId }: ViewProps) {
           <li key={e.id}>
             <button
               type="button"
+              disabled={e.truncated}
               onClick={() => replay(e)}
-              title="Open in a publish tab"
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-row-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              title={
+                e.truncated
+                  ? "Payload wasn't kept (too large to store)"
+                  : "Open in a publish tab"
+              }
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-row-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 disabled:hover:bg-transparent"
             >
               {e.kind === "publish" ? (
                 <Send className="size-3.5 shrink-0 text-muted-foreground" />

@@ -587,6 +587,25 @@ pub(crate) async fn js_update_stream_impl(
     Ok(())
 }
 
+// serde ignores unknown keys; a raw editor must reject them instead of
+// confirming a typo'd setting as applied.
+fn parse_full_config(
+    config: serde_json::Value,
+) -> error::Result<async_nats::jetstream::stream::Config> {
+    let mut unknown = Vec::new();
+    let cfg = serde_ignored::deserialize(config, |path| unknown.push(path.to_string())).map_err(
+        |e: serde_json::Error| Error::InvalidInput(format!("invalid stream config: {e}")),
+    )?;
+    if unknown.is_empty() {
+        Ok(cfg)
+    } else {
+        Err(Error::InvalidInput(format!(
+            "unknown config keys: {}",
+            unknown.join(", ")
+        )))
+    }
+}
+
 /// Full-config replacement for the raw JSON editor: unlike js_update_stream's
 /// merge, absent keys here reset to defaults - which is the point.
 #[tauri::command]
@@ -619,8 +638,7 @@ pub(crate) async fn js_replace_stream_impl(
             )))
         }
     }
-    let cfg: async_nats::jetstream::stream::Config = serde_json::from_value(config)
-        .map_err(|e| Error::InvalidInput(format!("invalid stream config: {e}")))?;
+    let cfg = parse_full_config(config)?;
     js.update_stream(&cfg).await.map_err(js_err)?;
     Ok(())
 }
@@ -874,6 +892,18 @@ mod tests {
         let no_name = serde_json::json!({"max_msgs": 1});
         let merged = merge_stream_patch(current, no_name, "A").unwrap();
         assert_eq!(merged["name"], "A");
+    }
+
+    #[test]
+    fn parse_full_config_rejects_unknown_keys() {
+        let bad = serde_json::json!({
+            "name": "S", "subjects": ["a.>"], "retention": "limits",
+            "storage": "file", "discard": "old", "num_replicas": 1,
+            "max_msgss": 5
+        });
+        let err = parse_full_config(bad).unwrap_err();
+        assert_eq!(err.kind(), "invalidInput");
+        assert!(err.to_string().contains("max_msgss"));
     }
 
     #[test]

@@ -8,9 +8,10 @@ describe("isBase64", () => {
     expect(isBase64("")).toBe(true);
   });
 
-  it("rejects junk and bad lengths", () => {
+  it("rejects junk, bad lengths and non-canonical trailing bits", () => {
     expect(isBase64("not base64!")).toBe(false);
     expect(isBase64("abc")).toBe(false);
+    expect(isBase64("ab==")).toBe(false);
   });
 });
 

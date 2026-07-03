@@ -56,8 +56,8 @@ export function RawConfigDialog({
           {stream} · raw config
         </DialogTitle>
         <DialogDescription className="mt-1 text-xs text-muted-foreground">
-          Replaces the full stream config - keys you remove reset to their
-          defaults.
+          Replaces the full stream config. Optional keys you remove reset to
+          their defaults; required keys must stay.
         </DialogDescription>
 
         {review ? (

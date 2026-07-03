@@ -12,7 +12,15 @@ export const PAYLOAD_MODES: { key: PayloadMode; label: string }[] = [
 
 export function isBase64(s: string): boolean {
   const stripped = s.replace(/\s/g, "");
-  return stripped.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(stripped);
+  if (stripped.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(stripped)) {
+    return false;
+  }
+  try {
+    // Canonical round-trip: the Rust decoder rejects non-zero trailing bits.
+    return btoa(atob(stripped)) === stripped;
+  } catch {
+    return false;
+  }
 }
 
 export function wirePayload(

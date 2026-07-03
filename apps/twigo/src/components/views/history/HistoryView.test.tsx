@@ -23,15 +23,29 @@ describe("HistoryView", () => {
     });
   });
 
-  it("lists entries for the connection and replays into a publish tab", () => {
+  it("replays the exact stored bytes into a publish tab", () => {
     render(<HistoryView filter="" connId="prod" />);
     fireEvent.click(screen.getByText("orders.created"));
     expect(openPublish).toHaveBeenCalledWith(
       "prod",
       "orders.created",
-      '{"id":1}',
+      "",
       [["k", "v"]],
+      btoa('{"id":1}'),
     );
+  });
+
+  it("does not replay entries recorded without their payload", () => {
+    useHistory.getState().record({
+      connId: "prod",
+      kind: "publish",
+      subject: "big.one",
+      payloadB64: "x".repeat(300 * 1024),
+      headers: [],
+    });
+    render(<HistoryView filter="" connId="prod" />);
+    const row = screen.getByText("big.one").closest("button");
+    expect(row).toBeDisabled();
   });
 
   it("filters by subject and scopes to the connection", () => {

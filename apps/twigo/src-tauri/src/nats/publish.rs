@@ -168,6 +168,12 @@ pub(crate) async fn load_picked_payload(
         path: path.display().to_string(),
         source,
     })?;
+    if bytes.len() > max_bytes {
+        return Err(Error::InvalidInput(format!(
+            "file is {} bytes - larger than the {max_bytes} byte payload limit",
+            bytes.len()
+        )));
+    }
     let name = path
         .file_name()
         .and_then(|s| s.to_str())

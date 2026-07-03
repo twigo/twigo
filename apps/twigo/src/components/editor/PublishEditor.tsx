@@ -36,11 +36,13 @@ export function PublishEditor({
   connId,
   initialSubject,
   initialPayload = "",
+  initialPayloadB64 = "",
   initialHeaders,
 }: {
   connId: string;
   initialSubject: string;
   initialPayload?: string;
+  initialPayloadB64?: string;
   initialHeaders?: [string, string][];
 }) {
   const live = useConnections((s) => s.connected[connId]?.connected === true);
@@ -49,8 +51,12 @@ export function PublishEditor({
   );
   const readOnly = useIsReadOnly(connId);
   const [subject, setSubject] = useState(initialSubject);
-  const [mode, setMode] = useState<PayloadMode>("json");
-  const [payload, setPayload] = useState(initialPayload);
+  const [mode, setMode] = useState<PayloadMode>(
+    initialPayloadB64 ? "binary" : "json",
+  );
+  const [payload, setPayload] = useState(
+    initialPayloadB64 ? initialPayloadB64 : initialPayload,
+  );
   const [file, setFile] = useState<PickedPayload | null>(null);
   const [pickError, setPickError] = useState<string | null>(null);
   const [headers, setHeaders] = useState<[string, string][]>(

@@ -40,18 +40,21 @@ export function ServerPanel(props: IDockviewPanelProps) {
 }
 
 export function PublishPanel(props: IDockviewPanelProps) {
-  const { connId, subject, payload, headers, seed } = props.params as {
-    connId: string;
-    subject?: string;
-    payload?: string;
-    headers?: [string, string][];
-    seed?: number;
-  };
+  const { connId, subject, payload, payloadB64, headers, seed } =
+    props.params as {
+      connId: string;
+      subject?: string;
+      payload?: string;
+      payloadB64?: string;
+      headers?: [string, string][];
+      seed?: number;
+    };
   return (
     <PublishEditor
       key={seed}
       connId={connId}
       initialSubject={subject ?? ""}
+      initialPayloadB64={payloadB64 ?? ""}
       initialPayload={payload ?? ""}
       initialHeaders={headers}
     />
