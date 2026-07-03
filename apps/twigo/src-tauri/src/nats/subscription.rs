@@ -155,12 +155,38 @@ pub async fn subscribe(
     // low latency); Some(ms) = coalesce into batches over the window (streams).
     coalesce_ms: Option<u64>,
 ) -> error::Result<()> {
+    let deliver = move |batch| on_message.send(batch).is_ok();
+    subscribe_impl(
+        &conns,
+        &subs,
+        conn_id,
+        sub_id,
+        subject,
+        deliver,
+        coalesce_ms,
+    )
+    .await
+}
+
+// `on_message` returns false once the delivery channel is gone.
+pub(crate) async fn subscribe_impl<S>(
+    conns: &ConnState,
+    subs: &SubState,
+    conn_id: String,
+    sub_id: String,
+    subject: String,
+    on_message: S,
+    coalesce_ms: Option<u64>,
+) -> error::Result<()>
+where
+    S: Fn(MessageBatch) -> bool + Send + 'static,
+{
     let client = conns
         .client(&conn_id)
         .await
         .ok_or_else(|| Error::NotConnected(conn_id.clone()))?;
 
-    stop(&subs, &sub_id);
+    stop(subs, &sub_id);
     let mut sub = client.subscribe(subject.clone()).await?;
 
     let token = subs.next_token.fetch_add(1, Ordering::Relaxed);
@@ -186,7 +212,7 @@ pub async fn subscribe(
                         messages: vec![to_dto(message)],
                         dropped: 0,
                     };
-                    if on_message.send(batch).is_err() {
+                    if !on_message(batch) {
                         tracing::debug!(subject = %task_subject, "stream channel closed; ending subscription");
                         break;
                     }
@@ -212,7 +238,7 @@ pub async fn subscribe(
                                 dropped,
                             };
                             dropped = 0;
-                            if on_message.send(batch).is_err() {
+                            if !on_message(batch) {
                                 tracing::debug!(subject = %task_subject, "stream channel closed; ending subscription");
                                 break;
                             }
@@ -221,7 +247,7 @@ pub async fn subscribe(
                 }
                 // Flush whatever remains when the subscription ends on its own.
                 if !buf.is_empty() || dropped > 0 {
-                    let _ = on_message.send(MessageBatch {
+                    on_message(MessageBatch {
                         messages: buf.drain(..).collect(),
                         dropped,
                     });
@@ -233,7 +259,7 @@ pub async fn subscribe(
         deregister(&handles, &task_sub_id, token);
     });
 
-    register(&subs, sub_id, conn_id.clone(), token, handle.abort_handle());
+    register(subs, sub_id, conn_id.clone(), token, handle.abort_handle());
     tracing::info!(conn = %conn_id, %subject, "subscribed");
     Ok(())
 }

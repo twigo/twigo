@@ -1,3 +1,4 @@
+mod emit;
 mod nats;
 
 use tracing_subscriber::EnvFilter;

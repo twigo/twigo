@@ -31,7 +31,7 @@ struct StagedUpload {
 const BUCKET_CONCURRENCY: usize = 32;
 
 async fn store(
-    conns: &State<'_, ConnState>,
+    conns: &ConnState,
     conn_id: &str,
     bucket: &str,
 ) -> error::Result<async_nats::jetstream::object_store::ObjectStore> {
@@ -95,6 +95,13 @@ pub async fn obj_list_buckets(
     conns: State<'_, ConnState>,
     conn_id: String,
 ) -> error::Result<Vec<ObjBucketSummary>> {
+    obj_list_buckets_impl(&conns, conn_id).await
+}
+
+pub(crate) async fn obj_list_buckets_impl(
+    conns: &ConnState,
+    conn_id: String,
+) -> error::Result<Vec<ObjBucketSummary>> {
     let client = conns
         .client(&conn_id)
         .await
@@ -136,7 +143,15 @@ pub async fn obj_list_objects(
     conn_id: String,
     bucket: String,
 ) -> error::Result<Vec<ObjSummary>> {
-    let os = store(&conns, &conn_id, &bucket).await?;
+    obj_list_objects_impl(&conns, conn_id, bucket).await
+}
+
+pub(crate) async fn obj_list_objects_impl(
+    conns: &ConnState,
+    conn_id: String,
+    bucket: String,
+) -> error::Result<Vec<ObjSummary>> {
+    let os = store(conns, &conn_id, &bucket).await?;
     let mut list = os.list().await.map_err(js_err)?;
     let mut out = Vec::new();
     while let Some(info) = list.try_next().await.map_err(js_err)? {
@@ -153,7 +168,16 @@ pub async fn obj_object_info(
     bucket: String,
     name: String,
 ) -> error::Result<ObjDetail> {
-    let os = store(&conns, &conn_id, &bucket).await?;
+    obj_object_info_impl(&conns, conn_id, bucket, name).await
+}
+
+pub(crate) async fn obj_object_info_impl(
+    conns: &ConnState,
+    conn_id: String,
+    bucket: String,
+    name: String,
+) -> error::Result<ObjDetail> {
+    let os = store(conns, &conn_id, &bucket).await?;
     let info = os.info(&name).await.map_err(|e| {
         if e.kind() == async_nats::jetstream::object_store::InfoErrorKind::NotFound {
             Error::NotFound(format!("object '{name}' not found"))
@@ -202,8 +226,19 @@ pub async fn obj_get_object(
     let Some(dest) = picked.and_then(|p| p.as_path().map(Path::to_path_buf)) else {
         return Ok(None);
     };
+    Ok(Some(
+        download_object(&conns, conn_id, bucket, name, dest).await?,
+    ))
+}
 
-    let os = store(&conns, &conn_id, &bucket).await?;
+pub(crate) async fn download_object(
+    conns: &ConnState,
+    conn_id: String,
+    bucket: String,
+    name: String,
+    dest: PathBuf,
+) -> error::Result<String> {
+    let os = store(conns, &conn_id, &bucket).await?;
     let mut object = os.get(&name).await.map_err(|e| {
         if e.kind() == async_nats::jetstream::object_store::GetErrorKind::NotFound {
             Error::NotFound(format!("object '{name}' not found"))
@@ -245,7 +280,7 @@ pub async fn obj_get_object(
         let _ = tokio::fs::remove_file(&tmp).await;
         return Err(e);
     }
-    Ok(Some(dest.display().to_string()))
+    Ok(dest.display().to_string())
 }
 
 #[derive(Serialize, Clone)]
@@ -270,7 +305,18 @@ pub async fn obj_stage_upload(
     let picked = tokio::task::spawn_blocking(move || app.dialog().file().blocking_pick_file())
         .await
         .map_err(|e| Error::Task(e.to_string()))?;
-    let Some(path) = picked.and_then(|p| p.as_path().map(Path::to_path_buf)) else {
+    let path = picked.and_then(|p| p.as_path().map(Path::to_path_buf));
+    stage_upload(&conns, &staging, conn_id, bucket, path).await
+}
+
+pub(crate) async fn stage_upload(
+    conns: &ConnState,
+    staging: &UploadStaging,
+    conn_id: String,
+    bucket: String,
+    path: Option<PathBuf>,
+) -> error::Result<Option<StagedUploadInfo>> {
+    let Some(path) = path else {
         *staging.0.lock().await = None;
         return Ok(None);
     };
@@ -280,7 +326,7 @@ pub async fn obj_stage_upload(
         .unwrap_or("object")
         .to_string();
 
-    let os = store(&conns, &conn_id, &bucket).await?;
+    let os = store(conns, &conn_id, &bucket).await?;
     // `exists` gates the destructive cleanup on commit - only a definite
     // NotFound may count as "new".
     let exists = match os.info(&name).await {
@@ -309,6 +355,13 @@ pub async fn obj_commit_upload(
     conns: State<'_, ConnState>,
     staging: State<'_, UploadStaging>,
 ) -> error::Result<Option<String>> {
+    obj_commit_upload_impl(&conns, &staging).await
+}
+
+pub(crate) async fn obj_commit_upload_impl(
+    conns: &ConnState,
+    staging: &UploadStaging,
+) -> error::Result<Option<String>> {
     let mut staged = staging.0.lock().await;
     let Some(peek) = staged.as_ref() else {
         return Ok(None);
@@ -319,7 +372,7 @@ pub async fn obj_commit_upload(
         return Ok(None);
     };
     drop(staged);
-    let os = store(&conns, &s.conn_id, &s.bucket).await?;
+    let os = store(conns, &s.conn_id, &s.bucket).await?;
     let mut file = tokio::fs::File::open(&s.path)
         .await
         .map_err(|source| Error::Io {
@@ -339,6 +392,10 @@ pub async fn obj_commit_upload(
 /// Discard a staged upload (the user declined the overwrite confirmation).
 #[tauri::command]
 pub async fn obj_cancel_upload(staging: State<'_, UploadStaging>) -> error::Result<()> {
+    obj_cancel_upload_impl(&staging).await
+}
+
+pub(crate) async fn obj_cancel_upload_impl(staging: &UploadStaging) -> error::Result<()> {
     *staging.0.lock().await = None;
     Ok(())
 }
@@ -350,8 +407,17 @@ pub async fn obj_delete(
     bucket: String,
     name: String,
 ) -> error::Result<()> {
+    obj_delete_impl(&conns, conn_id, bucket, name).await
+}
+
+pub(crate) async fn obj_delete_impl(
+    conns: &ConnState,
+    conn_id: String,
+    bucket: String,
+    name: String,
+) -> error::Result<()> {
     conns.assert_writable(&conn_id).await?;
-    let os = store(&conns, &conn_id, &bucket).await?;
+    let os = store(conns, &conn_id, &bucket).await?;
     os.delete(&name).await.map_err(js_err)?;
     Ok(())
 }
@@ -402,6 +468,14 @@ pub async fn obj_create_bucket(
     conn_id: String,
     config: serde_json::Value,
 ) -> error::Result<()> {
+    obj_create_bucket_impl(&conns, conn_id, config).await
+}
+
+pub(crate) async fn obj_create_bucket_impl(
+    conns: &ConnState,
+    conn_id: String,
+    config: serde_json::Value,
+) -> error::Result<()> {
     conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
@@ -418,6 +492,14 @@ pub async fn obj_create_bucket(
 #[tauri::command]
 pub async fn obj_delete_bucket(
     conns: State<'_, ConnState>,
+    conn_id: String,
+    bucket: String,
+) -> error::Result<()> {
+    obj_delete_bucket_impl(&conns, conn_id, bucket).await
+}
+
+pub(crate) async fn obj_delete_bucket_impl(
+    conns: &ConnState,
     conn_id: String,
     bucket: String,
 ) -> error::Result<()> {

@@ -193,7 +193,7 @@ pub struct Healthz {
 // by id (server_info), so it never wanders to a cluster peer. No-responders means
 // the connection isn't a system-account login → a clear, typed unavailable state.
 async fn sys_request<T: serde::de::DeserializeOwned>(
-    conns: &State<'_, ConnState>,
+    conns: &ConnState,
     conn_id: &str,
     endpoint: &str,
     body: Vec<u8>,
@@ -234,9 +234,17 @@ pub async fn monitor_varz(
     conn_id: String,
     monitoring_url: Option<String>,
 ) -> error::Result<Varz> {
+    monitor_varz_impl(&conns, conn_id, monitoring_url).await
+}
+
+pub(crate) async fn monitor_varz_impl(
+    conns: &ConnState,
+    conn_id: String,
+    monitoring_url: Option<String>,
+) -> error::Result<Varz> {
     match monitoring_url {
         Some(url) => http_get(&url, "varz").await,
-        None => sys_request(&conns, &conn_id, "VARZ", Vec::new()).await,
+        None => sys_request(conns, &conn_id, "VARZ", Vec::new()).await,
     }
 }
 
@@ -246,9 +254,17 @@ pub async fn monitor_jsz(
     conn_id: String,
     monitoring_url: Option<String>,
 ) -> error::Result<Jsz> {
+    monitor_jsz_impl(&conns, conn_id, monitoring_url).await
+}
+
+pub(crate) async fn monitor_jsz_impl(
+    conns: &ConnState,
+    conn_id: String,
+    monitoring_url: Option<String>,
+) -> error::Result<Jsz> {
     match monitoring_url {
         Some(url) => http_get(&url, "jsz").await,
-        None => sys_request(&conns, &conn_id, "JSZ", Vec::new()).await,
+        None => sys_request(conns, &conn_id, "JSZ", Vec::new()).await,
     }
 }
 
@@ -258,9 +274,17 @@ pub async fn monitor_healthz(
     conn_id: String,
     monitoring_url: Option<String>,
 ) -> error::Result<Healthz> {
+    monitor_healthz_impl(&conns, conn_id, monitoring_url).await
+}
+
+pub(crate) async fn monitor_healthz_impl(
+    conns: &ConnState,
+    conn_id: String,
+    monitoring_url: Option<String>,
+) -> error::Result<Healthz> {
     match monitoring_url {
         Some(url) => http_get(&url, "healthz").await,
-        None => sys_request(&conns, &conn_id, "HEALTHZ", Vec::new()).await,
+        None => sys_request(conns, &conn_id, "HEALTHZ", Vec::new()).await,
     }
 }
 
@@ -350,6 +374,17 @@ pub async fn monitor_connz(
     offset: u32,
     monitoring_url: Option<String>,
 ) -> error::Result<Connz> {
+    monitor_connz_impl(&conns, conn_id, sort, limit, offset, monitoring_url).await
+}
+
+pub(crate) async fn monitor_connz_impl(
+    conns: &ConnState,
+    conn_id: String,
+    sort: String,
+    limit: u32,
+    offset: u32,
+    monitoring_url: Option<String>,
+) -> error::Result<Connz> {
     // Reject an unknown sort (falls back to the server default) so it can't be
     // smuggled into the HTTP query string.
     let sort = if CONNZ_SORTS.contains(&sort.as_str()) {
@@ -370,7 +405,7 @@ pub async fn monitor_connz(
         offset,
     })
     .map_err(mon_err)?;
-    sys_request(&conns, &conn_id, "CONNZ", body).await
+    sys_request(conns, &conn_id, "CONNZ", body).await
 }
 
 // Cluster-wide health: fan out a PING to every server and collect each node's
@@ -378,6 +413,14 @@ pub async fn monitor_connz(
 #[tauri::command]
 pub async fn monitor_cluster(
     conns: State<'_, ConnState>,
+    conn_id: String,
+    monitoring_url: Option<String>,
+) -> error::Result<Vec<Varz>> {
+    monitor_cluster_impl(&conns, conn_id, monitoring_url).await
+}
+
+pub(crate) async fn monitor_cluster_impl(
+    conns: &ConnState,
     conn_id: String,
     monitoring_url: Option<String>,
 ) -> error::Result<Vec<Varz>> {

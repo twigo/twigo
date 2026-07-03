@@ -145,6 +145,13 @@ pub async fn js_list_streams(
     conns: State<'_, ConnState>,
     conn_id: String,
 ) -> error::Result<Vec<StreamSummary>> {
+    js_list_streams_impl(&conns, conn_id).await
+}
+
+pub(crate) async fn js_list_streams_impl(
+    conns: &ConnState,
+    conn_id: String,
+) -> error::Result<Vec<StreamSummary>> {
     let client = conns
         .client(&conn_id)
         .await
@@ -184,6 +191,14 @@ pub async fn js_stream_detail(
     conn_id: String,
     stream: String,
 ) -> error::Result<StreamDetail> {
+    js_stream_detail_impl(&conns, conn_id, stream).await
+}
+
+pub(crate) async fn js_stream_detail_impl(
+    conns: &ConnState,
+    conn_id: String,
+    stream: String,
+) -> error::Result<StreamDetail> {
     let client = conns
         .client(&conn_id)
         .await
@@ -210,6 +225,14 @@ pub async fn js_stream_detail(
 #[tauri::command]
 pub async fn js_list_consumers(
     conns: State<'_, ConnState>,
+    conn_id: String,
+    stream: String,
+) -> error::Result<Vec<ConsumerSummary>> {
+    js_list_consumers_impl(&conns, conn_id, stream).await
+}
+
+pub(crate) async fn js_list_consumers_impl(
+    conns: &ConnState,
     conn_id: String,
     stream: String,
 ) -> error::Result<Vec<ConsumerSummary>> {
@@ -248,6 +271,15 @@ pub struct ConsumerDetail {
 #[tauri::command]
 pub async fn js_consumer_detail(
     conns: State<'_, ConnState>,
+    conn_id: String,
+    stream: String,
+    consumer: String,
+) -> error::Result<ConsumerDetail> {
+    js_consumer_detail_impl(&conns, conn_id, stream, consumer).await
+}
+
+pub(crate) async fn js_consumer_detail_impl(
+    conns: &ConnState,
     conn_id: String,
     stream: String,
     consumer: String,
@@ -351,6 +383,17 @@ pub async fn js_get_messages(
     limit: u32,
     backward: bool,
 ) -> error::Result<MessagePage> {
+    js_get_messages_impl(&conns, conn_id, stream, start, limit, backward).await
+}
+
+pub(crate) async fn js_get_messages_impl(
+    conns: &ConnState,
+    conn_id: String,
+    stream: String,
+    start: Option<u64>,
+    limit: u32,
+    backward: bool,
+) -> error::Result<MessagePage> {
     let client = conns
         .client(&conn_id)
         .await
@@ -430,6 +473,16 @@ pub async fn js_purge_stream(
     keep: Option<u64>,
     up_to_seq: Option<u64>,
 ) -> error::Result<PurgeResult> {
+    js_purge_stream_impl(&conns, conn_id, stream, keep, up_to_seq).await
+}
+
+pub(crate) async fn js_purge_stream_impl(
+    conns: &ConnState,
+    conn_id: String,
+    stream: String,
+    keep: Option<u64>,
+    up_to_seq: Option<u64>,
+) -> error::Result<PurgeResult> {
     conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
@@ -452,6 +505,14 @@ pub async fn js_purge_stream(
 #[tauri::command]
 pub async fn js_create_stream(
     conns: State<'_, ConnState>,
+    conn_id: String,
+    config: serde_json::Value,
+) -> error::Result<()> {
+    js_create_stream_impl(&conns, conn_id, config).await
+}
+
+pub(crate) async fn js_create_stream_impl(
+    conns: &ConnState,
     conn_id: String,
     config: serde_json::Value,
 ) -> error::Result<()> {
@@ -501,6 +562,15 @@ pub async fn js_update_stream(
     stream: String,
     patch: serde_json::Value,
 ) -> error::Result<()> {
+    js_update_stream_impl(&conns, conn_id, stream, patch).await
+}
+
+pub(crate) async fn js_update_stream_impl(
+    conns: &ConnState,
+    conn_id: String,
+    stream: String,
+    patch: serde_json::Value,
+) -> error::Result<()> {
     conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
@@ -522,6 +592,15 @@ pub async fn js_update_stream(
 #[tauri::command]
 pub async fn js_replace_stream(
     conns: State<'_, ConnState>,
+    conn_id: String,
+    stream: String,
+    config: serde_json::Value,
+) -> error::Result<()> {
+    js_replace_stream_impl(&conns, conn_id, stream, config).await
+}
+
+pub(crate) async fn js_replace_stream_impl(
+    conns: &ConnState,
     conn_id: String,
     stream: String,
     config: serde_json::Value,
@@ -553,6 +632,15 @@ pub async fn js_create_consumer(
     stream: String,
     config: serde_json::Value,
 ) -> error::Result<()> {
+    js_create_consumer_impl(&conns, conn_id, stream, config).await
+}
+
+pub(crate) async fn js_create_consumer_impl(
+    conns: &ConnState,
+    conn_id: String,
+    stream: String,
+    config: serde_json::Value,
+) -> error::Result<()> {
     conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
@@ -569,6 +657,14 @@ pub async fn js_create_consumer(
 #[tauri::command]
 pub async fn js_delete_stream(
     conns: State<'_, ConnState>,
+    conn_id: String,
+    stream: String,
+) -> error::Result<()> {
+    js_delete_stream_impl(&conns, conn_id, stream).await
+}
+
+pub(crate) async fn js_delete_stream_impl(
+    conns: &ConnState,
     conn_id: String,
     stream: String,
 ) -> error::Result<()> {
@@ -589,6 +685,15 @@ pub async fn js_delete_consumer(
     stream: String,
     consumer: String,
 ) -> error::Result<()> {
+    js_delete_consumer_impl(&conns, conn_id, stream, consumer).await
+}
+
+pub(crate) async fn js_delete_consumer_impl(
+    conns: &ConnState,
+    conn_id: String,
+    stream: String,
+    consumer: String,
+) -> error::Result<()> {
     conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
@@ -603,6 +708,15 @@ pub async fn js_delete_consumer(
 #[tauri::command]
 pub async fn js_pause_consumer(
     conns: State<'_, ConnState>,
+    conn_id: String,
+    stream: String,
+    consumer: String,
+) -> error::Result<()> {
+    js_pause_consumer_impl(&conns, conn_id, stream, consumer).await
+}
+
+pub(crate) async fn js_pause_consumer_impl(
+    conns: &ConnState,
     conn_id: String,
     stream: String,
     consumer: String,
@@ -630,6 +744,15 @@ pub async fn js_resume_consumer(
     stream: String,
     consumer: String,
 ) -> error::Result<()> {
+    js_resume_consumer_impl(&conns, conn_id, stream, consumer).await
+}
+
+pub(crate) async fn js_resume_consumer_impl(
+    conns: &ConnState,
+    conn_id: String,
+    stream: String,
+    consumer: String,
+) -> error::Result<()> {
     conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
@@ -644,6 +767,15 @@ pub async fn js_resume_consumer(
 #[tauri::command]
 pub async fn js_delete_message(
     conns: State<'_, ConnState>,
+    conn_id: String,
+    stream: String,
+    seq: u64,
+) -> error::Result<()> {
+    js_delete_message_impl(&conns, conn_id, stream, seq).await
+}
+
+pub(crate) async fn js_delete_message_impl(
+    conns: &ConnState,
     conn_id: String,
     stream: String,
     seq: u64,

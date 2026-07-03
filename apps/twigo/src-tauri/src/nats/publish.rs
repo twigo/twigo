@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use base64::Engine;
@@ -43,6 +43,16 @@ pub async fn publish(
     payload_b64: String,
     headers: Vec<(String, String)>,
 ) -> error::Result<()> {
+    publish_impl(&conns, conn_id, subject, payload_b64, headers).await
+}
+
+pub(crate) async fn publish_impl(
+    conns: &ConnState,
+    conn_id: String,
+    subject: String,
+    payload_b64: String,
+    headers: Vec<(String, String)>,
+) -> error::Result<()> {
     conns.assert_writable(&conn_id).await?;
     let client = conns
         .client(&conn_id)
@@ -75,6 +85,17 @@ pub async fn publish(
 #[tauri::command]
 pub async fn request(
     conns: State<'_, ConnState>,
+    conn_id: String,
+    subject: String,
+    payload_b64: String,
+    timeout_ms: Option<u64>,
+    headers: Vec<(String, String)>,
+) -> error::Result<IncomingMessage> {
+    request_impl(&conns, conn_id, subject, payload_b64, timeout_ms, headers).await
+}
+
+pub(crate) async fn request_impl(
+    conns: &ConnState,
     conn_id: String,
     subject: String,
     payload_b64: String,
@@ -124,6 +145,13 @@ pub async fn pick_payload_file(
     let Some(path) = picked.and_then(|p| p.as_path().map(Path::to_path_buf)) else {
         return Ok(None);
     };
+    Ok(Some(load_picked_payload(path, max_bytes).await?))
+}
+
+pub(crate) async fn load_picked_payload(
+    path: PathBuf,
+    max_bytes: usize,
+) -> error::Result<PickedPayload> {
     let meta = tokio::fs::metadata(&path)
         .await
         .map_err(|source| Error::Io {
@@ -145,11 +173,11 @@ pub async fn pick_payload_file(
         .and_then(|s| s.to_str())
         .unwrap_or("file")
         .to_string();
-    Ok(Some(PickedPayload {
+    Ok(PickedPayload {
         name,
         size: bytes.len(),
         payload_b64: base64::engine::general_purpose::STANDARD.encode(&bytes),
-    }))
+    })
 }
 
 #[cfg(test)]

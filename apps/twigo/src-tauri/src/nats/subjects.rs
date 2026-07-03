@@ -4,12 +4,13 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, State};
 use tokio::task::AbortHandle;
 use tokio::time::MissedTickBehavior;
 
 use super::connection::ConnState;
 use super::error::{self, Error};
+use crate::emit::Emit;
 
 const SNAPSHOT_INTERVAL_MS: u64 = 500;
 const MAX_SUBJECTS: usize = 5000;
@@ -67,6 +68,16 @@ pub async fn start_subject_watch(
     conn_id: String,
     pattern: Option<String>,
 ) -> error::Result<()> {
+    start_subject_watch_impl(&app, &conns, &watch, conn_id, pattern).await
+}
+
+pub(crate) async fn start_subject_watch_impl<E: Emit>(
+    emitter: &E,
+    conns: &ConnState,
+    watch: &SubjectWatch,
+    conn_id: String,
+    pattern: Option<String>,
+) -> error::Result<()> {
     let client = conns
         .client(&conn_id)
         .await
@@ -75,10 +86,11 @@ pub async fn start_subject_watch(
         .filter(|p| !p.trim().is_empty())
         .unwrap_or_else(|| ">".to_string());
 
-    stop(&watch, &conn_id);
+    stop(watch, &conn_id);
 
     let mut sub = client.subscribe(pattern).await?;
     let conn = conn_id.clone();
+    let emitter = emitter.clone();
 
     let handle = tokio::spawn(async move {
         let mut counts: HashMap<String, u64> = HashMap::new();
@@ -102,9 +114,7 @@ pub async fn start_subject_watch(
                         subjects: build_snapshot(&counts, &prev, interval_secs),
                         truncated: counts.len() >= MAX_SUBJECTS,
                     };
-                    if let Err(e) = app.emit("subjects:update", update) {
-                        tracing::warn!("failed to emit subjects:update: {e}");
-                    }
+                    emitter.emit_event("subjects:update", update);
                     prev.clone_from(&counts);
                 }
             }

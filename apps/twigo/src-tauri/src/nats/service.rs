@@ -118,6 +118,13 @@ pub async fn service_stats(
     conns: State<'_, ConnState>,
     conn_id: String,
 ) -> error::Result<Vec<ServiceStats>> {
+    service_stats_impl(&conns, conn_id).await
+}
+
+pub(crate) async fn service_stats_impl(
+    conns: &ConnState,
+    conn_id: String,
+) -> error::Result<Vec<ServiceStats>> {
     let client = conns
         .client(&conn_id)
         .await
@@ -135,6 +142,13 @@ pub async fn service_stats(
 #[tauri::command]
 pub async fn service_info(
     conns: State<'_, ConnState>,
+    conn_id: String,
+) -> error::Result<Vec<ServiceInfo>> {
+    service_info_impl(&conns, conn_id).await
+}
+
+pub(crate) async fn service_info_impl(
+    conns: &ConnState,
     conn_id: String,
 ) -> error::Result<Vec<ServiceInfo>> {
     let client = conns
