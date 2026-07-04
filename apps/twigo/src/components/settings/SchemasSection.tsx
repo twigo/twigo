@@ -118,7 +118,7 @@ function MappingsEditor({
   connId: string;
   codecs: CodecId[];
 }) {
-  const mappings = useCodecs((s) => s.mappings[connId] ?? []);
+  const mappings = useCodecs((s) => s.mappings[connId]) ?? [];
   const schemas = useCodecs((s) => s.schemas);
   const [pattern, setPattern] = useState("");
   const [codec, setCodec] = useState<CodecId>("protobuf");
