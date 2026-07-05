@@ -335,7 +335,12 @@ export function KvEntryDetailPanel({
                 Editing value
               </span>
             ) : (
-              <PayloadFormatBar value={target} onChange={setTarget} />
+              <PayloadFormatBar
+                value={target}
+                onChange={setTarget}
+                connId={connId}
+                subject={subject}
+              />
             )}
             {data.truncated && !editing && (
               <p className="text-[10px] text-warn">

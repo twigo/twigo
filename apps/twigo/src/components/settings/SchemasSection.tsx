@@ -1,21 +1,11 @@
 import { useState } from "react";
-import { FileUp, Trash2, Plus } from "lucide-react";
-import {
-  Button,
-  Input,
-  Select as SelectRoot,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@twigo/ui";
-import { useCodecs, validPattern } from "@/store/codecs";
+import { FileUp, Trash2 } from "lucide-react";
+import { Button } from "@twigo/ui";
+import { useCodecs } from "@/store/codecs";
 import { useConnections } from "@/store/connections";
-import { codecImportProtos, type CodecId } from "@/lib/api";
+import { codecImportProtos } from "@/lib/api";
 import { CODEC_LABELS } from "@/lib/codecs";
 import { SectionTitle } from "./SectionTitle";
-
-const CODECS: CodecId[] = ["protobuf", "msgpack", "cbor"];
 
 export function SchemasSection() {
   const schemas = useCodecs((s) => s.schemas);
@@ -43,9 +33,9 @@ export function SchemasSection() {
     <>
       <SectionTitle>Schemas &amp; codecs</SectionTitle>
       <p className="mb-3 text-xs text-muted-foreground">
-        Import Protobuf <span className="font-mono">.proto</span> files, then
-        map subjects to a codec so messages decode automatically. MessagePack
-        and CBOR need no schema.
+        Import Protobuf <span className="font-mono">.proto</span> files here. To
+        map a subject, pick a codec in a message inspector and pin it — matching
+        messages then decode automatically. MessagePack and CBOR need no schema.
       </p>
 
       <div className="flex items-center gap-2">
@@ -102,51 +92,23 @@ export function SchemasSection() {
       <h3 className="mb-2 mt-6 text-sm font-semibold">Subject mappings</h3>
       {!activeContext ? (
         <p className="text-xs text-muted-foreground">
-          Select a connection to map its subjects to codecs.
+          Select a connection to see its subject mappings.
         </p>
       ) : (
-        <MappingsEditor connId={activeContext} codecs={CODECS} />
+        <MappingsList connId={activeContext} />
       )}
     </>
   );
 }
 
-function MappingsEditor({
-  connId,
-  codecs,
-}: {
-  connId: string;
-  codecs: CodecId[];
-}) {
+function MappingsList({ connId }: { connId: string }) {
   const mappings = useCodecs((s) => s.mappings[connId]) ?? [];
-  const schemas = useCodecs((s) => s.schemas);
-  const [pattern, setPattern] = useState("");
-  const [codec, setCodec] = useState<CodecId>("protobuf");
-  const [schemaId, setSchemaId] = useState<string | undefined>(schemas[0]?.id);
-  const [messageType, setMessageType] = useState<string | undefined>(
-    schemas[0]?.messageTypes[0],
-  );
-
-  const schema = useCodecs.getState().schemaById(schemaId);
-  const valid =
-    validPattern(pattern.trim()) &&
-    (codec !== "protobuf" || (!!schemaId && !!messageType));
-
-  const add = () => {
-    if (!valid) return;
-    useCodecs.getState().addMapping(connId, {
-      pattern: pattern.trim(),
-      codec,
-      schemaId: codec === "protobuf" ? schemaId : undefined,
-      messageType: codec === "protobuf" ? messageType : undefined,
-    });
-    setPattern("");
-  };
 
   return (
     <div className="space-y-2 text-xs">
       <p className="text-muted-foreground">
         Mappings for <span className="font-mono">{connId}</span>.
+        {mappings.length === 0 && " None yet — pin one from a message."}
       </p>
 
       {mappings.map((m) => (
@@ -173,75 +135,6 @@ function MappingsEditor({
           </Button>
         </div>
       ))}
-
-      <div className="flex flex-wrap items-center gap-1.5">
-        <Input
-          value={pattern}
-          onChange={(e) => setPattern(e.target.value)}
-          placeholder="orders.>"
-          spellCheck={false}
-          className="h-7 w-40 font-mono text-xs"
-        />
-        <SelectRoot value={codec} onValueChange={(c) => setCodec(c as CodecId)}>
-          <SelectTrigger className="h-7 w-32 text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {codecs.map((c) => (
-              <SelectItem
-                key={c}
-                value={c}
-                disabled={c === "protobuf" && schemas.length === 0}
-              >
-                {CODEC_LABELS[c]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </SelectRoot>
-        {codec === "protobuf" && (
-          <>
-            <SelectRoot
-              value={schemaId ?? ""}
-              onValueChange={(id) => {
-                setSchemaId(id);
-                setMessageType(
-                  useCodecs.getState().schemaById(id)?.messageTypes[0],
-                );
-              }}
-            >
-              <SelectTrigger className="h-7 w-32 text-xs">
-                <SelectValue placeholder="schema" />
-              </SelectTrigger>
-              <SelectContent>
-                {schemas.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>
-                    {s.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </SelectRoot>
-            <SelectRoot
-              value={messageType ?? ""}
-              onValueChange={setMessageType}
-            >
-              <SelectTrigger className="h-7 w-48 text-xs">
-                <SelectValue placeholder="message type" />
-              </SelectTrigger>
-              <SelectContent>
-                {(schema?.messageTypes ?? []).map((t) => (
-                  <SelectItem key={t} value={t}>
-                    {t}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </SelectRoot>
-          </>
-        )}
-        <Button variant="outline" size="sm" disabled={!valid} onClick={add}>
-          <Plus />
-          Add
-        </Button>
-      </div>
     </div>
   );
 }

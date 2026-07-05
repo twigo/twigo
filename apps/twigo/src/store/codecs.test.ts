@@ -44,6 +44,16 @@ describe("useCodecs", () => {
     expect(useCodecs.getState().mappings.c).toHaveLength(0);
   });
 
+  it("replaces a mapping with the same pattern, keeping its id", () => {
+    const add = useCodecs.getState().addMapping;
+    add("c", { pattern: "orders.>", codec: "cbor" });
+    const id = useCodecs.getState().mappings.c![0]!.id;
+    add("c", { pattern: "orders.>", codec: "msgpack" });
+    expect(useCodecs.getState().mappings.c).toEqual([
+      { id, pattern: "orders.>", codec: "msgpack" },
+    ]);
+  });
+
   it("resolves the mapping with the most literal tokens", () => {
     const add = useCodecs.getState().addMapping;
     add("c", { pattern: "orders.>", codec: "cbor" });

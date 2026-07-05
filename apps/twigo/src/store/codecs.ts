@@ -71,15 +71,20 @@ export const useCodecs = create<CodecsState>()(
         })),
 
       addMapping: (connId, m) =>
-        set((state) => ({
-          mappings: {
-            ...state.mappings,
-            [connId]: [
-              ...(state.mappings[connId] ?? []),
-              { ...m, id: crypto.randomUUID() },
-            ],
-          },
-        })),
+        set((state) => {
+          const ms = state.mappings[connId] ?? [];
+          const existing = ms.find((x) => x.pattern === m.pattern);
+          return {
+            mappings: {
+              ...state.mappings,
+              [connId]: existing
+                ? ms.map((x) =>
+                    x.id === existing.id ? { ...m, id: existing.id } : x,
+                  )
+                : [...ms, { ...m, id: crypto.randomUUID() }],
+            },
+          };
+        }),
 
       removeMapping: (connId, id) =>
         set((state) => ({

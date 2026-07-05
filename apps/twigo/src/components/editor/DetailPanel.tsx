@@ -209,7 +209,12 @@ export function DetailPanel({ streamId }: { streamId: string }) {
 
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="mb-1 flex items-center gap-2">
-              <PayloadFormatBar value={target} onChange={setTarget} />
+              <PayloadFormatBar
+                value={target}
+                onChange={setTarget}
+                connId={connId}
+                subject={msg.subject}
+              />
               {comparePinned && (
                 <span className="ml-auto flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground">
                   diff vs pinned
