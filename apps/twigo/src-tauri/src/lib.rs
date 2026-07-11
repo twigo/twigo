@@ -28,6 +28,7 @@ pub fn run() {
         .manage(nats::subjects::SubjectWatch::default())
         .manage(nats::subscription::SubState::default())
         .manage(nats::obj::UploadStaging::default())
+        .manage(nats::codec::CodecState::default())
         .invoke_handler(tauri::generate_handler![
             nats::context::list_contexts,
             nats::context::default_context_dir,
@@ -89,7 +90,10 @@ pub fn run() {
             nats::monitoring::monitor_jsz,
             nats::monitoring::monitor_healthz,
             nats::monitoring::monitor_connz,
-            nats::monitoring::monitor_cluster
+            nats::monitoring::monitor_cluster,
+            nats::codec::codec_import_protos,
+            nats::codec::codec_decode,
+            nats::codec::codec_encode
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isBase64, wirePayload } from "./publishPayload";
+import { isBase64, isCodecMode, wirePayload } from "./publishPayload";
 
 describe("isBase64", () => {
   it("accepts padded base64 and whitespace", () => {
@@ -12,6 +12,16 @@ describe("isBase64", () => {
     expect(isBase64("not base64!")).toBe(false);
     expect(isBase64("abc")).toBe(false);
     expect(isBase64("ab==")).toBe(false);
+  });
+});
+
+describe("isCodecMode", () => {
+  it("recognizes the schema/rust-backed modes", () => {
+    expect(isCodecMode("protobuf")).toBe(true);
+    expect(isCodecMode("msgpack")).toBe(true);
+    expect(isCodecMode("cbor")).toBe(true);
+    expect(isCodecMode("json")).toBe(false);
+    expect(isCodecMode("file")).toBe(false);
   });
 });
 
@@ -31,5 +41,10 @@ describe("wirePayload", () => {
     expect(
       wirePayload("file", "", { name: "a.bin", size: 2, payloadB64: "aGk=" }),
     ).toBe("aGk=");
+  });
+
+  it("returns null for codec modes (encoded async elsewhere)", () => {
+    expect(wirePayload("protobuf", "{}", null)).toBeNull();
+    expect(wirePayload("msgpack", "{}", null)).toBeNull();
   });
 });

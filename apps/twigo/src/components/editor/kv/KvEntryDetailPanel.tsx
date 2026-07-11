@@ -20,23 +20,18 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@twigo/ui";
-import {
-  fmtBytes,
-  fmtDuration,
-  decodeText,
-  encodeText,
-  tryPrettyJson,
-  toHex,
-} from "@twigo/utils";
+import { fmtBytes, fmtDuration, decodeText, encodeText } from "@twigo/utils";
 import { kvPut, kvDelete, kvPurge, ipcError } from "@/lib/api";
 import { useKvEntry, useKvBucketInfo, useKvHistory } from "@/hooks/useKvDetail";
 import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import { useKv } from "@/store/kv";
 import { useToasts } from "@/store/toasts";
 import { closeKvEntry } from "@/lib/editor";
+import { defaultTarget, type DecodeTarget } from "@/lib/codecs";
+import { useDecodedPayload } from "@/hooks/useDecodedPayload";
 import { Row, Section } from "@/components/editor/jetstream/parts";
 import { ConfirmDialog } from "@/components/editor/jetstream/ConfirmDialog";
-import { FormatToggle, type PayloadFormat } from "../FormatToggle";
+import { PayloadFormatBar } from "../PayloadFormatBar";
 
 export function KvEntryDetailPanel({
   connId,
@@ -48,7 +43,11 @@ export function KvEntryDetailPanel({
   kvkey: string;
 }) {
   const [revision, setRevision] = useState<number | null>(null);
-  const [format, setFormat] = useState<PayloadFormat>("json");
+  const [target, setTarget] = useState<DecodeTarget>({
+    kind: "builtin",
+    format: "json",
+  });
+  const [targetKey, setTargetKey] = useState<string | null>(null);
   const [histKey, setHistKey] = useState(0);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -65,6 +64,15 @@ export function KvEntryDetailPanel({
   );
   const info = useKvBucketInfo(connId, bucket);
   const history = useKvHistory(connId, bucket, kvkey, histKey);
+
+  const subject = `${bucket}.${kvkey}`;
+  const key = `${connId} ${subject}`;
+  if (key !== targetKey) {
+    setTargetKey(key);
+    setTarget(defaultTarget(connId, subject));
+  }
+  const decoded = useDecodedPayload(data?.payloadB64 ?? null, target);
+  const body = decoded.decoded?.text ?? "";
 
   const doRefresh = () => {
     setRevision(null);
@@ -85,7 +93,6 @@ export function KvEntryDetailPanel({
   const startEdit = () => {
     if (!data || !editable) return;
     setDraft(decodeText(data.payloadB64));
-    setFormat("text");
     setEditing(true);
   };
 
@@ -151,14 +158,6 @@ export function KvEntryDetailPanel({
       useToasts.getState().push("error", `Purge failed: ${String(e)}`);
     }
   };
-
-  const body = data
-    ? format === "hex"
-      ? toHex(data.payloadB64)
-      : format === "text"
-        ? decodeText(data.payloadB64)
-        : (tryPrettyJson(data.payloadB64) ?? decodeText(data.payloadB64))
-    : "";
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-editor">
@@ -336,7 +335,12 @@ export function KvEntryDetailPanel({
                 Editing value
               </span>
             ) : (
-              <FormatToggle value={format} onChange={setFormat} />
+              <PayloadFormatBar
+                value={target}
+                onChange={setTarget}
+                connId={connId}
+                subject={subject}
+              />
             )}
             {data.truncated && !editing && (
               <p className="text-[10px] text-warn">
@@ -351,10 +355,12 @@ export function KvEntryDetailPanel({
                 language="text"
                 className="max-h-72"
               />
+            ) : decoded.error ? (
+              <p className="text-xs text-error">{decoded.error}</p>
             ) : (
               <CodeViewer
-                value={body}
-                language={format === "json" ? "json" : "text"}
+                value={decoded.loading ? "Decoding…" : body}
+                language={decoded.decoded?.language ?? "text"}
                 className="max-h-72"
               />
             )}

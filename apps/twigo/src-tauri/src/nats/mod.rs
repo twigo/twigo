@@ -1,3 +1,4 @@
+pub mod codec;
 pub mod connection;
 pub mod context;
 pub mod error;

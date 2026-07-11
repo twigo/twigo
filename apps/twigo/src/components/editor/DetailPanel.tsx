@@ -1,26 +1,19 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Copy, Braces, Send, Reply, Pin, PinOff, X } from "lucide-react";
 import { Button, EmptyState, CodeViewer, cn } from "@twigo/ui";
 import {
   fmtDateTime,
   fmtRelTime,
   fmtBytes,
-  decodeText,
-  tryPrettyJson,
-  toHex,
   type StreamMessage,
 } from "@twigo/utils";
 import { useStream, type StreamSession } from "@/store/stream";
 import { useCompare } from "@/store/compare";
 import { openPublish } from "@/lib/editor";
+import { defaultTarget, type DecodeTarget } from "@/lib/codecs";
+import { useDecodedPayload } from "@/hooks/useDecodedPayload";
 import { PayloadDiff } from "./PayloadDiff";
-import { FormatToggle, type PayloadFormat } from "./FormatToggle";
-
-function bodyFor(m: StreamMessage, format: PayloadFormat): string {
-  if (format === "hex") return toHex(m.payloadB64);
-  if (format === "text") return decodeText(m.payloadB64);
-  return tryPrettyJson(m.payloadB64) ?? decodeText(m.payloadB64);
-}
+import { PayloadFormatBar } from "./PayloadFormatBar";
 
 // Resolve the selected message from its snapshot: a stable reference that
 // survives ring-buffer eviction, so a narrow selector over this re-renders the
@@ -49,23 +42,37 @@ export function DetailPanel({ streamId }: { streamId: string }) {
   const msg = useStream((s) => selectedMessage(s.sessions[streamId]));
   const connId = useStream((s) => s.sessions[streamId]?.connId);
   const select = useStream((s) => s.select);
-  const [format, setFormat] = useState<PayloadFormat>("json");
+  const [target, setTarget] = useState<DecodeTarget>({
+    kind: "builtin",
+    format: "json",
+  });
+  const [targetKey, setTargetKey] = useState<string | null>(null);
   const pinned = useCompare((s) => s.pinned);
   const pin = useCompare((s) => s.pin);
   const clearPin = useCompare((s) => s.clear);
 
-  // Decode only when the message or format actually changes, not every render.
-  const body = useMemo(() => (msg ? bodyFor(msg, format) : ""), [msg, format]);
-  const payloadText = useMemo(
-    () => (msg ? decodeText(msg.payloadB64) : ""),
-    [msg],
+  const subject = msg?.subject ?? null;
+  const key = `${connId ?? ""} ${subject ?? ""}`;
+  if (key !== targetKey) {
+    setTargetKey(key);
+    setTarget(
+      subject
+        ? defaultTarget(connId ?? null, subject)
+        : { kind: "builtin", format: "json" },
+    );
+  }
+
+  const decoded = useDecodedPayload(msg?.payloadB64 ?? null, target);
+  const comparePinned = msg && pinned && pinned !== msg ? pinned : null;
+  const pinnedDecoded = useDecodedPayload(
+    comparePinned?.payloadB64 ?? null,
+    target,
   );
+  const body = decoded.decoded?.text ?? "";
   const replyTo = msg?.reply ?? null;
   // Reference identity: the same StreamMessage object stays in `items` until
   // evicted, so this is unambiguous across sessions (unlike per-session ids).
   const isPinned = !!(msg && msg === pinned);
-  // The pinned message to diff against, when viewing a different one.
-  const comparePinned = msg && pinned && pinned !== msg ? pinned : null;
 
   return (
     <aside className="flex h-full w-full flex-col border-l border-border bg-panel">
@@ -82,7 +89,13 @@ export function DetailPanel({ streamId }: { streamId: string }) {
                 aria-label="Republish"
                 tooltip="Republish"
                 onClick={() =>
-                  openPublish(connId, msg.subject, payloadText, msg.headers)
+                  openPublish(
+                    connId,
+                    msg.subject,
+                    "",
+                    msg.headers,
+                    msg.payloadB64,
+                  )
                 }
               >
                 <Send />
@@ -134,7 +147,7 @@ export function DetailPanel({ streamId }: { streamId: string }) {
                         receivedAt: new Date(msg.receivedAt).toISOString(),
                         reply: msg.reply,
                         headers: msg.headers,
-                        payload: payloadText,
+                        payload: body,
                       },
                       null,
                       2,
@@ -195,8 +208,13 @@ export function DetailPanel({ streamId }: { streamId: string }) {
           )}
 
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className="mb-1 flex items-center gap-0.5">
-              <FormatToggle value={format} onChange={setFormat} />
+            <div className="mb-1 flex items-center gap-2">
+              <PayloadFormatBar
+                value={target}
+                onChange={setTarget}
+                connId={connId}
+                subject={msg.subject}
+              />
               {comparePinned && (
                 <span className="ml-auto flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground">
                   diff vs pinned
@@ -212,12 +230,20 @@ export function DetailPanel({ streamId }: { streamId: string }) {
                 </span>
               )}
             </div>
-            {comparePinned ? (
-              <PayloadDiff a={bodyFor(comparePinned, format)} b={body} />
+            {(decoded.error ?? pinnedDecoded.error) ? (
+              <p className="text-xs text-error">
+                {decoded.error ?? pinnedDecoded.error}
+              </p>
+            ) : comparePinned ? (
+              pinnedDecoded.loading || decoded.loading ? (
+                <p className="text-xs text-muted-foreground">Decoding…</p>
+              ) : (
+                <PayloadDiff a={pinnedDecoded.decoded?.text ?? ""} b={body} />
+              )
             ) : (
               <CodeViewer
-                value={body}
-                language={format === "json" ? "json" : "text"}
+                value={decoded.loading ? "Decoding…" : body}
+                language={decoded.decoded?.language ?? "text"}
                 className="min-h-0 flex-1"
               />
             )}
