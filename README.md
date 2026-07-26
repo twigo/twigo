@@ -10,6 +10,14 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/twigo/twigo?style=flat-square" alt="License" /></a>
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/hero-stream.png" width="900" alt="A live subject stream: the subject tree with per-subject rates on the left, arriving messages in the middle, and the selected message decoded in the inspector on the right." />
+</p>
+
+|                                                                   Browse a stream                                                                    |                                                      Consumer lag over time                                                       |                                                                                Server metrics                                                                                |
+| :--------------------------------------------------------------------------------------------------------------------------------------------------: | :-------------------------------------------------------------------------------------------------------------------------------: | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
+| ![Browsing a JetStream stream: a virtualized table of stored messages beside the same inspector the live view uses.](docs/screenshots/jetstream.png) | ![A pull consumer's detail panel, with unprocessed messages charted over the last 15 minutes.](docs/screenshots/consumer-lag.png) | ![The server health tab: throughput, data rate, connections, subscriptions, memory and CPU charted over time, above the connections table.](docs/screenshots/monitoring.png) |
+
 ## Why
 
 NATS has excellent command-line tooling and a couple of serviceable GUIs. The
