@@ -170,17 +170,73 @@ fn parse_json(json: &str) -> error::Result<serde_json::Value> {
     serde_json::from_str(json).map_err(|e| Error::InvalidInput(format!("invalid json: {e}")))
 }
 
+/// Drops `//` and `/* */` comments, leaving string literals untouched so a path
+/// containing `//` survives. Statement scanning below would otherwise treat a
+/// comment as the head of the statement and miss the `import` that follows it.
+fn strip_comments(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let mut chars = src.chars().peekable();
+    let mut quote: Option<char> = None;
+    while let Some(c) = chars.next() {
+        if let Some(q) = quote {
+            out.push(c);
+            if c == '\\' {
+                if let Some(escaped) = chars.next() {
+                    out.push(escaped);
+                }
+            } else if c == q {
+                quote = None;
+            }
+            continue;
+        }
+        match c {
+            '"' | '\'' => {
+                quote = Some(c);
+                out.push(c);
+            }
+            '/' if chars.peek() == Some(&'/') => {
+                for c in chars.by_ref() {
+                    if c == '\n' {
+                        break;
+                    }
+                }
+                out.push('\n');
+            }
+            '/' if chars.peek() == Some(&'*') => {
+                chars.next();
+                let mut prev = '\0';
+                for c in chars.by_ref() {
+                    if prev == '*' && c == '/' {
+                        break;
+                    }
+                    prev = c;
+                }
+                out.push(' ');
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 fn proto_imports(src: &str) -> Vec<String> {
-    src.split(';')
+    strip_comments(src)
+        .split(';')
         .filter_map(|stmt| {
-            let stmt = stmt.trim();
-            let rest = stmt.strip_prefix("import")?.trim_start();
+            let after = stmt.trim().strip_prefix("import")?;
+            // `import` must be a whole token, not the head of an identifier.
+            if !after.starts_with(|c: char| c.is_whitespace() || c == '"' || c == '\'') {
+                return None;
+            }
+            let rest = after.trim_start();
             let rest = rest
                 .strip_prefix("public")
+                .or_else(|| rest.strip_prefix("weak"))
                 .map(str::trim_start)
                 .unwrap_or(rest);
-            let rest = rest.strip_prefix('"')?;
-            rest.split('"').next().map(str::to_string)
+            let quote = rest.chars().next().filter(|c| *c == '"' || *c == '\'')?;
+            let rest = rest.strip_prefix(quote)?;
+            rest.split(quote).next().map(str::to_string)
         })
         .collect()
 }
@@ -409,6 +465,51 @@ mod tests {
         std::fs::write(
             dir.path().join("myapp/order.proto"),
             "syntax = \"proto3\"; package myapp; import \"myapp/common/types.proto\"; message Order { myapp.common.Id id = 1; }",
+        )
+        .unwrap();
+        let (schema, _) = compile_protos(&[
+            dir.path().join("myapp/order.proto"),
+            dir.path().join("myapp/common/types.proto"),
+        ])
+        .unwrap();
+        assert!(schema.message_types.contains(&"myapp.Order".to_string()));
+    }
+
+    #[test]
+    fn imports_are_found_behind_comments() {
+        let src = r#"
+            syntax = "proto3";
+            package myapp;
+
+            // shared types
+            import "myapp/common/types.proto";
+            /* block */ import public "myapp/common/ids.proto";
+            // import "myapp/commented_out.proto";
+            import 'myapp/single_quoted.proto';
+            message Order { string id = 1; }
+        "#;
+        assert_eq!(
+            proto_imports(src),
+            vec![
+                "myapp/common/types.proto",
+                "myapp/common/ids.proto",
+                "myapp/single_quoted.proto",
+            ]
+        );
+    }
+
+    #[test]
+    fn comment_before_import_still_resolves_include_roots() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("myapp/common")).unwrap();
+        std::fs::write(
+            dir.path().join("myapp/common/types.proto"),
+            "syntax = \"proto3\"; package myapp.common; message Id { string v = 1; }",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("myapp/order.proto"),
+            "syntax = \"proto3\";\npackage myapp;\n\n// shared types\nimport \"myapp/common/types.proto\";\nmessage Order { myapp.common.Id id = 1; }",
         )
         .unwrap();
         let (schema, _) = compile_protos(&[
