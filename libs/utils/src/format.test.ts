@@ -20,6 +20,11 @@ describe("fmtBytes", () => {
     expect(fmtBytes(3 * 1024 ** 3)).toBe("3.0 GB");
     expect(fmtBytes(2 * 1024 ** 4)).toBe("2.0 TB");
   });
+
+  it("rounds a fractional byte rate instead of printing its full float", () => {
+    expect(fmtBytes(558.87345973)).toBe("559 B");
+    expect(fmtBytes(1536.7)).toBe("1.5 KB");
+  });
 });
 
 describe("fmtRtt", () => {
@@ -38,6 +43,7 @@ describe("fmtTime", () => {
 describe("fmtCount", () => {
   it("formats compact integer counts", () => {
     expect(fmtCount(999)).toBe("999");
+    expect(fmtCount(12.6)).toBe("13");
     expect(fmtCount(12_400)).toBe("12.4k");
     expect(fmtCount(3_200_000)).toBe("3.2M");
   });
