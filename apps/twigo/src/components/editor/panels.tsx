@@ -22,6 +22,7 @@ import { ServerInfoPanel } from "./ServerInfoPanel";
 import { PublishEditor } from "./PublishEditor";
 import { ResponderEditor } from "./ResponderEditor";
 import { StreamDetailPanel } from "./jetstream/StreamDetailPanel";
+import { StreamBrowsePanel } from "./jetstream/StreamBrowsePanel";
 import { ConsumerDetailPanel } from "./jetstream/ConsumerDetailPanel";
 import { KvEntryDetailPanel } from "./kv/KvEntryDetailPanel";
 import { ObjectDetailPanel } from "./objstore/ObjectDetailPanel";
@@ -82,6 +83,14 @@ export function JsStreamPanel(props: IDockviewPanelProps) {
     stream: string;
   };
   return <StreamDetailPanel connId={connId} stream={stream} />;
+}
+
+export function JsBrowsePanel(props: IDockviewPanelProps) {
+  const { connId, stream } = props.params as {
+    connId: string;
+    stream: string;
+  };
+  return <StreamBrowsePanel connId={connId} stream={stream} />;
 }
 
 export function KvEntryPanel(props: IDockviewPanelProps) {
@@ -217,6 +226,19 @@ export function SettingsTab(props: IDockviewPanelHeaderProps) {
   return (
     <ClosableTab
       icon={Settings}
+      title={props.api.title}
+      onClose={() => {
+        props.api.close();
+      }}
+    />
+  );
+}
+
+export function JsBrowseTab(props: IDockviewPanelHeaderProps) {
+  return (
+    <ClosableTab
+      icon={Layers}
+      mono
       title={props.api.title}
       onClose={() => {
         props.api.close();

@@ -12,6 +12,7 @@ import {
   ResponderPanel,
   SettingsPanel,
   JsStreamPanel,
+  JsBrowsePanel,
   JsConsumerPanel,
   KvEntryPanel,
   ObjectPanel,
@@ -23,6 +24,7 @@ import {
   ResponderTab,
   SettingsTab,
   JsStreamTab,
+  JsBrowseTab,
   JsConsumerTab,
   KvEntryTab,
   ObjectTab,
@@ -40,6 +42,7 @@ export type EditorType =
   | "publish"
   | "responder"
   | "jsstream"
+  | "jsbrowse"
   | "jsconsumer"
   | "kventry"
   | "objentry"
@@ -74,6 +77,7 @@ export const EDITORS: Record<EditorType, EditorDef> = {
   responder: { component: ResponderPanel, tab: ResponderTab, connScoped: true },
   settings: { component: SettingsPanel, tab: SettingsTab },
   jsstream: { component: JsStreamPanel, tab: JsStreamTab, connScoped: true },
+  jsbrowse: { component: JsBrowsePanel, tab: JsBrowseTab, connScoped: true },
   jsconsumer: {
     component: JsConsumerPanel,
     tab: JsConsumerTab,

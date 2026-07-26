@@ -150,6 +150,19 @@ export function openConsumerDetail(
 
 export function closeStreamDetail(connId: string, stream: string) {
   closePanel(jsStreamEditorId(connId, stream));
+  closePanel(jsBrowseEditorId(connId, stream));
+}
+
+function jsBrowseEditorId(connId: string, stream: string): string {
+  return `jsbrowse:${encodeURIComponent(connId)}:${encodeURIComponent(stream)}`;
+}
+
+export function openStreamBrowse(connId: string, stream: string) {
+  open("jsbrowse", {
+    id: jsBrowseEditorId(connId, stream),
+    title: `${stream} · messages`,
+    params: { connId, stream },
+  });
 }
 
 export function closeConsumerDetail(

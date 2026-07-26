@@ -85,9 +85,10 @@ export function MessageTable({
               <span
                 role="cell"
                 className="tabular-nums text-muted-foreground-2"
-                title={fmtDateTime(m.receivedAt)}
+                title={m.receivedAt > 0 ? fmtDateTime(m.receivedAt) : undefined}
               >
-                {fmtTime(m.receivedAt)}
+                {/* A stored message can carry no timestamp; 1970 would be a lie. */}
+                {m.receivedAt > 0 ? fmtTime(m.receivedAt) : "-"}
               </span>
               <span role="cell" className="truncate text-brand">
                 {m.subject}
