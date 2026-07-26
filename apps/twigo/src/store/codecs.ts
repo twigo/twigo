@@ -44,6 +44,7 @@ interface CodecsState {
   removeSchema: (id: string) => void;
   addMapping: (connId: string, m: Omit<Mapping, "id">) => void;
   removeMapping: (connId: string, id: string) => void;
+  clearConn: (connId: string) => void;
   resolve: (connId: string, subject: string) => Mapping | null;
   schemaById: (id: string | undefined) => Schema | undefined;
 }
@@ -54,10 +55,19 @@ export const useCodecs = create<CodecsState>()(
       schemas: [],
       mappings: {},
 
+      // Re-importing an updated .proto keeps the schema's identity, so existing
+      // mappings decode with the new descriptor instead of the stale one.
       addSchema: (s) =>
-        set((state) => ({
-          schemas: [...state.schemas, { ...s, id: crypto.randomUUID() }],
-        })),
+        set((state) => {
+          const existing = state.schemas.find((x) => x.name === s.name);
+          return {
+            schemas: existing
+              ? state.schemas.map((x) =>
+                  x.id === existing.id ? { ...s, id: existing.id } : x,
+                )
+              : [...state.schemas, { ...s, id: crypto.randomUUID() }],
+          };
+        }),
 
       removeSchema: (id) =>
         set((state) => ({
@@ -93,6 +103,15 @@ export const useCodecs = create<CodecsState>()(
             [connId]: (state.mappings[connId] ?? []).filter((m) => m.id !== id),
           },
         })),
+
+      // Mappings are keyed by context name, so a deleted context must drop them -
+      // otherwise a later context reusing the name inherits another server's codecs.
+      clearConn: (connId) =>
+        set((state) => {
+          if (!(connId in state.mappings)) return state;
+          const { [connId]: _dropped, ...rest } = state.mappings;
+          return { mappings: rest };
+        }),
 
       resolve: (connId, subject) => {
         const ms = (get().mappings[connId] ?? []).filter((m) =>

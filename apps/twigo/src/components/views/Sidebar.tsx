@@ -34,7 +34,11 @@ export function Sidebar() {
 
   return (
     <aside className="flex h-full w-full flex-col border-r border-sidebar-border bg-sidebar">
-      {ConnectionBar && <ConnectionBar />}
+      {ConnectionBar && (
+        <PanelBoundary label="Connections">
+          <ConnectionBar />
+        </PanelBoundary>
+      )}
 
       <div className="my-1.5 border-t border-sidebar-border" />
 

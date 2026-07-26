@@ -30,6 +30,21 @@ export function ipcError(e: unknown): IpcError {
   return new IpcError("unknown", typeof e === "string" ? e : String(e));
 }
 
+// Kinds a publish/request raises *before* anything leaves the process: the
+// read-only guard, no live client, an unusable payload. Every other failure -
+// flush timeout, no responders, reply timeout - happens after the message was
+// handed to the NATS client, so it did go out.
+const PRE_WIRE_ERROR_KINDS = new Set([
+  "permissions",
+  "notConnected",
+  "invalidInput",
+]);
+
+/** Did a failed publish/request still put the message on the wire? */
+export function reachedTheWire(e: unknown): boolean {
+  return !PRE_WIRE_ERROR_KINDS.has(ipcError(e).kind);
+}
+
 // Every command goes through here, so a rejected invoke surfaces as a typed
 // IpcError instead of a raw { kind, message } object.
 function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {

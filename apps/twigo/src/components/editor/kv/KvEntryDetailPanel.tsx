@@ -65,7 +65,9 @@ export function KvEntryDetailPanel({
   const info = useKvBucketInfo(connId, bucket);
   const history = useKvHistory(connId, bucket, kvkey, histKey);
 
-  const subject = `${bucket}.${kvkey}`;
+  // KV entries have no core subject; mirror the server's own `$KV.<bucket>.<key>`
+  // namespace so a codec pinned here can't match a real published subject.
+  const subject = `$KV.${bucket}.${kvkey}`;
   const key = `${connId} ${subject}`;
   if (key !== targetKey) {
     setTargetKey(key);

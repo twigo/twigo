@@ -16,6 +16,7 @@ import { useWorkspace } from "@/store/workspace";
 import { useResponder } from "@/store/responder";
 import { useReadOnly } from "@/store/readonly";
 import { useMonitorConfig } from "@/store/monitorConfig";
+import { useCodecs } from "@/store/codecs";
 import { resetConnScopedStores } from "@/store/connScoped";
 import { useToasts } from "@/store/toasts";
 
@@ -196,6 +197,7 @@ export const useConnections = create<ConnectionsState>()(
       }
       useReadOnly.getState().setReadOnly(name, false);
       useMonitorConfig.getState().setUrl(name, null);
+      useCodecs.getState().clearConn(name);
       const dir = useSettings.getState().contextDir;
       await apiDeleteContext(dir, name);
       if (get().activeContext === name) {

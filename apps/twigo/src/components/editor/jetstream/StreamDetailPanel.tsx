@@ -16,6 +16,7 @@ import {
   jsCreateConsumer,
   jsUpdateStream,
   jsReplaceStream,
+  jsStreamDetail,
 } from "@/lib/api";
 import { useStreamDetail } from "@/hooks/useJetStreamDetail";
 import { useIsReadOnly } from "@/hooks/useIsReadOnly";
@@ -272,6 +273,9 @@ export function StreamDetailPanel({
         <RawConfigDialog
           stream={stream}
           config={data.config}
+          fetchCurrent={async () =>
+            (await jsStreamDetail(connId, stream)).config
+          }
           onClose={() => setRawOpen(false)}
           onApply={(config) => void doReplace(config)}
         />
