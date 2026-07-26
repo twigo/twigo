@@ -1,29 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { RefreshCw, Activity, ShieldCheck, Plug } from "lucide-react";
-import { Button, EmptyState, Input, Sparkline, cn } from "@twigo/ui";
+import { Button, EmptyState, Input, cn } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
 import { useConnections } from "@/store/connections";
 import { useMonitorConfig } from "@/store/monitorConfig";
 import { openServerHealth } from "@/lib/editor";
-import { useMonitorPoll, MONITOR_POLL_MS } from "@/hooks/useMonitorPoll";
-import {
-  useMonitor,
-  rates,
-  rateSeries,
-  gaugeSeries,
-  TOTAL_MSGS,
-  TOTAL_BYTES,
-  type Sample,
-  type SeriesPoint,
-} from "@/store/monitor";
+import { useMonitorPoll } from "@/hooks/useMonitorPoll";
+import { useMonitor, rates, type Sample } from "@/store/monitor";
 import type { ViewProps } from "@/shell/views";
 import type { Varz, Jsz, Healthz } from "@/lib/api";
-
-const SPARK_WINDOW_MS = 15 * 60_000;
-const SPARK_LABEL = "last 15m";
-// A slow or failed poll shouldn't fracture the line; a real pause in sampling
-// (the view was closed) should.
-const SPARK_GAP_MS = MONITOR_POLL_MS * 4;
 
 type Verdict = "ok" | "warn" | "error";
 
@@ -101,61 +86,11 @@ function UsageBar({
   );
 }
 
-function SectionLabel({
-  children,
-  hint,
-}: {
-  children: React.ReactNode;
-  hint?: string;
-}) {
+function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-      <span>{children}</span>
-      {hint && (
-        <span className="font-normal normal-case tracking-normal opacity-70">
-          {hint}
-        </span>
-      )}
+    <div className="px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+      {children}
     </div>
-  );
-}
-
-// The sidebar has room for a glance, not for reading a chart - so the whole row
-// opens the full-size version in a tab.
-function MetricRow({
-  label,
-  value,
-  points,
-  tone,
-  onOpen,
-}: {
-  label: string;
-  value: string;
-  points: SeriesPoint[];
-  tone?: string;
-  onOpen: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      title={`${label} — open full charts`}
-      className="flex w-full items-center gap-2 rounded-sm px-2 py-1 text-xs hover:bg-row-hover focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
-    >
-      <span className="shrink-0 text-muted-foreground">{label}</span>
-      <div className={cn("min-w-8 flex-1", tone ?? "text-brand")}>
-        <Sparkline
-          points={points}
-          windowMs={SPARK_WINDOW_MS}
-          gapMs={SPARK_GAP_MS}
-          height={24}
-          label={`${label}, ${SPARK_LABEL}`}
-        />
-      </div>
-      <span className="shrink-0 font-mono tabular-nums text-foreground">
-        {value}
-      </span>
-    </button>
   );
 }
 
@@ -195,23 +130,16 @@ function Dashboard({
       />
       {varz.cluster.name && <Row label="Cluster" value={varz.cluster.name} />}
 
-      <SectionLabel hint={SPARK_LABEL}>Traffic</SectionLabel>
+      <SectionLabel>Traffic</SectionLabel>
       <Row
         label="Connections"
         value={`${fmtCount(varz.connections)} (${fmtCount(varz.totalConnections)} total)`}
       />
-      <MetricRow
+      <Row
         label="Throughput"
         value={r ? `${fmtCount(Math.round(r.msgsPerSec))}/s` : "-"}
-        points={rateSeries(samples, TOTAL_MSGS)}
-        onOpen={() => openServerHealth(connId)}
       />
-      <MetricRow
-        label="Data rate"
-        value={r ? `${fmtBytes(r.bytesPerSec)}/s` : "-"}
-        points={rateSeries(samples, TOTAL_BYTES)}
-        onOpen={() => openServerHealth(connId)}
-      />
+      <Row label="Data rate" value={r ? `${fmtBytes(r.bytesPerSec)}/s` : "-"} />
       <Row label="Subscriptions" value={fmtCount(varz.subscriptions)} />
       <Row
         label="Slow consumers"
@@ -226,14 +154,8 @@ function Dashboard({
         Server health & charts →
       </button>
 
-      <SectionLabel hint={SPARK_LABEL}>Resources</SectionLabel>
-      <MetricRow
-        label="Memory"
-        value={fmtBytes(varz.mem)}
-        points={gaugeSeries(samples, (s) => s.mem)}
-        tone="text-muted-foreground"
-        onOpen={() => openServerHealth(connId)}
-      />
+      <SectionLabel>Resources</SectionLabel>
+      <Row label="Memory" value={fmtBytes(varz.mem)} />
       <Row label="CPU" value={`${varz.cpu.toFixed(0)}%`} />
 
       {jsz && (
@@ -358,6 +280,16 @@ export function MonitorView({ connId }: ViewProps) {
   const data = useMonitor((s) => (connId ? s.byConn[connId] : undefined));
   useMonitorPoll(isConnected ? connId : null, monitoringUrl);
 
+  const status = data?.status ?? "idle";
+  // Opening Monitoring opens the charts: this panel is the summary, the tab is
+  // where a trend is actually readable. Held until the server answers, so the
+  // monitoring-setup flow stays here instead of opening onto errors. Closing
+  // the tab is respected - this only fires when the view (re)opens.
+  const ready = status === "ready";
+  useEffect(() => {
+    if (connId && ready) openServerHealth(connId);
+  }, [connId, ready]);
+
   if (!isConnected || !connId) {
     return (
       <EmptyState density="inline">
@@ -365,8 +297,6 @@ export function MonitorView({ connId }: ViewProps) {
       </EmptyState>
     );
   }
-
-  const status = data?.status ?? "idle";
 
   if (status === "unavailable") {
     return <MonitoringSetup connId={connId} currentUrl={monitoringUrl} />;
