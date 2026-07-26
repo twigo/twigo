@@ -34,7 +34,6 @@ describe("useCodecs", () => {
     expect(useCodecs.getState().resolve("c", "orders.created")?.codec).toBe(
       "msgpack",
     );
-    // Deeper subjects only the > pattern can match still resolve to it.
     expect(useCodecs.getState().resolve("c", "orders.eu.created")?.codec).toBe(
       "cbor",
     );

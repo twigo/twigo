@@ -107,9 +107,8 @@ fn message_descriptor(
     })
 }
 
-/// A msgpack/cbor value before it is projected onto JSON. Deserializing wire
-/// bytes straight into `serde_json::Value` drops what JSON cannot hold:
-/// non-finite floats collapse to `null` and binary blobs fail the whole decode.
+/// A wire value before it is projected onto JSON. Deserializing straight into
+/// `serde_json::Value` nulls non-finite floats and fails outright on binary.
 enum Loose {
     Null,
     Bool(bool),
@@ -204,8 +203,7 @@ impl Loose {
             Loose::Bool(b) => J::Bool(b),
             Loose::I64(i) => J::from(i),
             Loose::U64(u) => J::from(u),
-            // JSON has no non-finite numbers; proto3's JSON mapping (which the
-            // protobuf path already follows) spells them as strings.
+            // JSON has no non-finite numbers; proto3's JSON mapping names them.
             Loose::F64(f) => serde_json::Number::from_f64(f)
                 .map_or_else(|| J::String(non_finite_name(f).to_string()), J::Number),
             Loose::Str(s) => J::String(s),
@@ -242,8 +240,7 @@ fn non_finite_name(f: f64) -> &'static str {
     }
 }
 
-// A truncated payload fails loudly on its own; extra bytes after a complete
-// value would otherwise render as a clean decode of the first value only.
+// Extra bytes after a complete value would otherwise render as a clean decode.
 fn reject_trailing(codec: &str, read: usize, total: usize) -> error::Result<()> {
     if read < total {
         return Err(Error::InvalidInput(format!(
@@ -327,9 +324,8 @@ fn parse_json(json: &str) -> error::Result<serde_json::Value> {
     serde_json::from_str(json).map_err(|e| Error::InvalidInput(format!("invalid json: {e}")))
 }
 
-/// Drops `//` and `/* */` comments, leaving string literals untouched so a path
-/// containing `//` survives. Statement scanning below would otherwise treat a
-/// comment as the head of the statement and miss the `import` that follows it.
+/// Quote-aware, so a path containing `//` survives. Without this the statement scan
+/// below reads a comment as the head of the statement and misses its `import`.
 fn strip_comments(src: &str) -> String {
     let mut out = String::with_capacity(src.len());
     let mut chars = src.chars().peekable();

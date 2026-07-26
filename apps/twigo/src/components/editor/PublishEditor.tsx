@@ -153,7 +153,6 @@ export function PublishEditor({
       try {
         await publish(connId, subject.trim(), w, cleanHeaders());
       } catch (e) {
-        // A flush timeout still left the message with the client; it goes out.
         if (reachedTheWire(e)) recordSend("publish", w);
         throw e;
       }
@@ -184,7 +183,6 @@ export function PublishEditor({
       try {
         msg = await request(connId, subject.trim(), w, null, cleanHeaders());
       } catch (e) {
-        // A reply timeout (or no responders) means the request was published.
         if (reachedTheWire(e)) recordSend("request", w);
         throw e;
       }

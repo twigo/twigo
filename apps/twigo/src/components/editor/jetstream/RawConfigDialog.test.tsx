@@ -23,8 +23,7 @@ describe("RawConfigDialog", () => {
   };
 
   it("reviews against the server's current config, not the opened snapshot", async () => {
-    // The stream gained a republish block while the dialog sat open; applying
-    // the edited text would drop it, so the review has to show that.
+    // The stream gained a republish block while the dialog sat open.
     open(() =>
       Promise.resolve({
         name: "ORDERS",

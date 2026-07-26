@@ -38,9 +38,8 @@ export function RawConfigDialog({
       setError(parsed.error);
       return;
     }
-    // Apply replaces the whole config, so the diff has to be against the server
-    // as it is now - anything changed since this dialog opened would otherwise
-    // be reverted without ever showing up in the review.
+    // Apply replaces the whole config, so the diff has to be against the server as
+    // it is now - a change made since this dialog opened would silently revert.
     setChecking(true);
     let current: Record<string, unknown>;
     try {

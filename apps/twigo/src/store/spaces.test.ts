@@ -112,7 +112,6 @@ describe("spaces store", () => {
     expect(spaces).toHaveLength(3);
     expect(spaces[0]).toEqual({ id: "a", domainId: "nats" });
     expect(spaces[1]?.targetId).toBe("prod");
-    // Another domain's targets are none of this domain's business.
     expect(spaces[2]?.targetId).toBe("gone");
   });
 

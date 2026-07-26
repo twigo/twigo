@@ -23,8 +23,7 @@ fn build_headers(pairs: Vec<(String, String)>) -> Option<async_nats::HeaderMap> 
         // newline can't panic the publish command.
         let key = key.replace(['\r', '\n'], " ");
         let value = value.replace(['\r', '\n'], " ");
-        // NATS headers are multi-value; `insert` would keep only the last row
-        // when the user repeats a key.
+        // Headers are multi-value; `insert` would keep only the last repeat of a key.
         headers.append(key.as_str(), value.as_str());
         any = true;
     }

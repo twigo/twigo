@@ -25,7 +25,6 @@ interface SpacesState {
   closeSpace: (id: string) => void;
   // Palette/menu navigation: jump to (or create) a space of this domain.
   activateDomain: (domainId: string) => void;
-  // Unpin targets of this domain that no longer exist.
   pruneTargets: (domainId: string, targetIds: string[]) => void;
 }
 
@@ -86,8 +85,8 @@ export const useSpaces = create<SpacesState>()(
 
       activateDomain: (domainId) => {
         const { spaces, activeId } = get();
-        // Staying put beats jumping: with several spaces of one domain, "go to
-        // view" must not yank the user to a sibling tab and its pinned target.
+        // With several spaces of one domain, "go to view" must not yank the user
+        // off the active tab and onto a sibling's pinned target.
         if (spaces.find((s) => s.id === activeId)?.domainId === domainId)
           return;
         const existing = spaces.find((s) => s.domainId === domainId);
@@ -98,8 +97,7 @@ export const useSpaces = create<SpacesState>()(
         }
       },
 
-      // Targets are referenced by id (a NATS context name), so one that is gone
-      // must be unpinned - activating it would otherwise select a ghost.
+      // A pinned target that no longer exists would activate as a ghost.
       pruneTargets: (domainId, targetIds) =>
         set((s) => {
           const alive = new Set(targetIds);

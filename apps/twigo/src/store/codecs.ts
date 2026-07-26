@@ -55,8 +55,8 @@ export const useCodecs = create<CodecsState>()(
       schemas: [],
       mappings: {},
 
-      // Re-importing an updated .proto keeps the schema's identity, so existing
-      // mappings decode with the new descriptor instead of the stale one.
+      // Re-import keeps the schema's id, so existing mappings decode with the new
+      // descriptor instead of the stale one.
       addSchema: (s) =>
         set((state) => {
           const existing = state.schemas.find((x) => x.name === s.name);
@@ -104,8 +104,8 @@ export const useCodecs = create<CodecsState>()(
           },
         })),
 
-      // Mappings are keyed by context name, so a deleted context must drop them -
-      // otherwise a later context reusing the name inherits another server's codecs.
+      // Mappings are keyed by context name; a later context reusing a deleted one's
+      // name would otherwise inherit another server's codecs.
       clearConn: (connId) =>
         set((state) => {
           if (!(connId in state.mappings)) return state;
@@ -118,8 +118,8 @@ export const useCodecs = create<CodecsState>()(
           subjectMatches(m.pattern, subject),
         );
         if (ms.length === 0) return null;
-        // Specificity, most decisive first: literal tokens, then a bounded
-        // pattern over a `>` tail, then length. Insertion order never decides.
+        // Specificity, most decisive first: literal tokens, bounded over a `>`
+        // tail, then length. Insertion order never decides.
         const score = (p: string): number[] => {
           const tokens = p.split(".");
           return [

@@ -30,9 +30,8 @@ struct StagedUpload {
 // Concurrency for per-bucket get_stream round-trips when listing object stores.
 const BUCKET_CONCURRENCY: usize = 32;
 
-/// Whether the name currently holds a live object. Anything but a definite
-/// NotFound counts as "exists", so a transient error can never authorize a
-/// destructive cleanup.
+/// Anything but a definite NotFound counts as existing, so a transient error can
+/// never authorize the cleanup in `obj_commit_upload_impl`.
 async fn object_exists(os: &async_nats::jetstream::object_store::ObjectStore, name: &str) -> bool {
     match os.info(name).await {
         Ok(i) => !i.deleted,
@@ -390,13 +389,10 @@ pub(crate) async fn obj_commit_upload_impl(
             path: s.path.display().to_string(),
             source,
         })?;
-    // `existed` was sampled when the file was staged, which can be a whole
-    // confirmation dialog ago - re-check next to the write so the destructive
-    // cleanup below can't tombstone an object created in between.
+    // `s.existed` was sampled at stage time, a confirmation dialog ago; re-check next
+    // to the write so the cleanup below can't tombstone an object created since.
     let existed = s.existed || object_exists(&os, &s.name).await;
     if let Err(e) = os.put(s.name.as_str(), &mut file).await {
-        // Only a name this upload introduced may be deleted; on replace the
-        // cleanup would destroy the pre-existing object.
         if !existed {
             let _ = os.delete(&s.name).await;
         }

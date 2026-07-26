@@ -17,8 +17,8 @@ const { publish, request } = vi.hoisted(() => ({
   request: vi.fn(),
 }));
 vi.mock("@/lib/api", async () => {
-  // Everything that touches Tauri is mocked; the error-kind predicate is pure,
-  // so the editor is tested against the real wire/no-wire decision.
+  // The error-kind predicate is pure, so the editor is tested against the real
+  // wire/no-wire decision rather than a stubbed one.
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
   return {
     publish,

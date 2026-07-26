@@ -42,8 +42,8 @@ export function ObjectTree({
   // ConfirmDialog fires onConfirm then onOpenChange(false); this flag lets the
   // dismiss handler skip cancelling the staged upload that was just committed.
   const confirmedRef = useRef(false);
-  // Unmounting with the replace prompt open (view switch, disconnect) takes the
-  // dismiss handler with it, so release the staged file here too.
+  // Unmounting with the prompt open (view switch, disconnect) skips the dismiss
+  // handler, so release the staged file here too.
   const pendingRef = useRef(false);
   useEffect(() => {
     pendingRef.current = pendingUpload !== null;

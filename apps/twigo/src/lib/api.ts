@@ -30,17 +30,15 @@ export function ipcError(e: unknown): IpcError {
   return new IpcError("unknown", typeof e === "string" ? e : String(e));
 }
 
-// Kinds a publish/request raises *before* anything leaves the process: the
-// read-only guard, no live client, an unusable payload. Every other failure -
-// flush timeout, no responders, reply timeout - happens after the message was
-// handed to the NATS client, so it did go out.
+// Kinds a publish/request raises before anything leaves the process. Every other
+// failure - flush timeout, no responders, reply timeout - happens after the NATS
+// client took the message, so it did go out.
 const PRE_WIRE_ERROR_KINDS = new Set([
   "permissions",
   "notConnected",
   "invalidInput",
 ]);
 
-/** Did a failed publish/request still put the message on the wire? */
 export function reachedTheWire(e: unknown): boolean {
   return !PRE_WIRE_ERROR_KINDS.has(ipcError(e).kind);
 }

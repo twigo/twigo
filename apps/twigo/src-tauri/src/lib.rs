@@ -14,10 +14,9 @@ pub fn run() {
 
     let builder = tauri::Builder::default();
 
-    // Every persisted store shares one file that each process holds in memory and
-    // rewrites whole; a second instance would clobber the first one's spaces,
-    // layouts, history and codec mappings. Hand the launch to the running window
-    // instead. The plugin requires being registered before any other.
+    // Persisted stores share one file that each process rewrites whole, so a second
+    // instance would clobber the first one's state. Must be registered before any
+    // other plugin.
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
         use tauri::Manager;
