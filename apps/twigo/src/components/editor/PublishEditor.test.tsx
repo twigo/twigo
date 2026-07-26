@@ -8,18 +8,27 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useConnections } from "@/store/connections";
+import { useHistory } from "@/store/history";
+import { IpcError } from "@/lib/api";
 import { PublishEditor } from "./PublishEditor";
 
 const { publish, request } = vi.hoisted(() => ({
   publish: vi.fn(),
   request: vi.fn(),
 }));
-vi.mock("@/lib/api", () => ({
-  publish,
-  request,
-  pickPayloadFile: vi.fn(() => Promise.resolve(null)),
-  syncConnReadonly: vi.fn(() => Promise.resolve()),
-}));
+vi.mock("@/lib/api", async () => {
+  // The error-kind predicate is pure, so the editor is tested against the real
+  // wire/no-wire decision rather than a stubbed one.
+  const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
+  return {
+    publish,
+    request,
+    pickPayloadFile: vi.fn(() => Promise.resolve(null)),
+    syncConnReadonly: vi.fn(() => Promise.resolve()),
+    reachedTheWire: actual.reachedTheWire,
+    IpcError: actual.IpcError,
+  };
+});
 
 function setLive(connected: boolean) {
   useConnections.setState({
@@ -62,6 +71,36 @@ describe("PublishEditor", () => {
       btoa("hello"),
       [],
     );
+  });
+
+  it("records a send that reached the wire even when it failed", async () => {
+    setLive(true);
+    useHistory.setState({ entries: [] });
+    request.mockRejectedValue(new IpcError("request", "no responders"));
+    render(
+      <PublishEditor
+        connId="c"
+        initialSubject="orders.get"
+        initialPayload="x"
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Request" }));
+
+    expect(useHistory.getState().entries).toMatchObject([
+      { connId: "c", kind: "request", subject: "orders.get" },
+    ]);
+  });
+
+  it("does not record a send that never left the process", async () => {
+    setLive(true);
+    useHistory.setState({ entries: [] });
+    publish.mockRejectedValue(new IpcError("notConnected", "not connected"));
+    render(<PublishEditor connId="c" initialSubject="s" initialPayload="x" />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Publish" }));
+
+    expect(useHistory.getState().entries).toEqual([]);
   });
 
   it("disables sending when the connection is not live", () => {

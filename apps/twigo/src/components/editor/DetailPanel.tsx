@@ -36,12 +36,39 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
+// The live stream's inspector: reads its own narrow slices so a batch flush
+// that mutates the session's items doesn't re-render the panel.
 export function DetailPanel({ streamId }: { streamId: string }) {
-  // Narrow subscriptions: re-render only when the selected message (or connId)
-  // changes, not on every batch flush that mutates the session's items.
   const msg = useStream((s) => selectedMessage(s.sessions[streamId]));
   const connId = useStream((s) => s.sessions[streamId]?.connId);
   const select = useStream((s) => s.select);
+  return (
+    <MessageInspector
+      msg={msg}
+      connId={connId}
+      onClose={() => {
+        select(streamId, null);
+      }}
+    />
+  );
+}
+
+// One inspector for every message surface - the live stream and the JetStream
+// browser - so a message reads the same wherever it came from. `actions` and
+// `fields` let a surface add what only it has (a sequence, a delete button).
+export function MessageInspector({
+  msg,
+  connId,
+  onClose,
+  actions,
+  fields,
+}: {
+  msg: StreamMessage | undefined;
+  connId: string | undefined;
+  onClose: () => void;
+  actions?: React.ReactNode;
+  fields?: React.ReactNode;
+}) {
   const [target, setTarget] = useState<DecodeTarget>({
     kind: "builtin",
     format: "json",
@@ -158,6 +185,7 @@ export function DetailPanel({ streamId }: { streamId: string }) {
                 <Braces />
               </Button>
               <span className="mx-0.5 h-4 w-px bg-border-subtle" />
+              {actions}
             </>
           )}
           <Button
@@ -165,7 +193,7 @@ export function DetailPanel({ streamId }: { streamId: string }) {
             size="icon-sm"
             aria-label="Close inspector"
             tooltip="Close inspector"
-            onClick={() => select(streamId, null)}
+            onClick={onClose}
           >
             <X />
           </Button>
@@ -180,10 +208,13 @@ export function DetailPanel({ streamId }: { streamId: string }) {
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3">
           <div className="space-y-1.5">
             <Field label="Subject" value={msg.subject} />
-            <Field
-              label="Received"
-              value={`${fmtDateTime(msg.receivedAt)} · ${fmtRelTime(msg.receivedAt)}`}
-            />
+            {fields}
+            {msg.receivedAt > 0 && (
+              <Field
+                label="Received"
+                value={`${fmtDateTime(msg.receivedAt)} · ${fmtRelTime(msg.receivedAt)}`}
+              />
+            )}
             <Field label="Size" value={fmtBytes(msg.size)} />
             {msg.reply && <Field label="Reply" value={msg.reply} />}
           </div>

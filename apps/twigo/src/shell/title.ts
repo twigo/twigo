@@ -1,8 +1,3 @@
-import { getCurrentWindow } from "@tauri-apps/api/window";
-
-const isTauri =
-  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-
 const BASE = "Twigo";
 
 /** Compose the window title from an optional suffix. The shell owns the base
@@ -12,14 +7,9 @@ export function composeTitle(suffix?: string | null): string {
   return s ? `${BASE} - ${s}` : BASE;
 }
 
-/** Set the document and (under Tauri) the native window title. */
+// Document title only: every native setTitle resets the macOS traffic lights to
+// their default position (tauri#13044) and nothing puts them back. The native
+// title is hidden under `hiddenTitle` anyway.
 export function setWindowTitle(suffix?: string | null): void {
-  const title = composeTitle(suffix);
-  if (typeof document !== "undefined") document.title = title;
-  if (!isTauri) return;
-  void getCurrentWindow()
-    .setTitle(title)
-    .catch((e: unknown) => {
-      console.error("Failed to set the window title:", e);
-    });
+  if (typeof document !== "undefined") document.title = composeTitle(suffix);
 }

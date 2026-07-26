@@ -7,7 +7,30 @@ const { monitorVarz, monitorJsz, monitorHealthz } = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/api", () => ({ monitorVarz, monitorJsz, monitorHealthz }));
 
-import { useMonitor } from "./monitor";
+import {
+  useMonitor,
+  rateSeries,
+  rates,
+  gaugeSeries,
+  TOTAL_MSGS,
+  type Sample,
+} from "./monitor";
+
+function sample(t: number, over: Partial<Sample> = {}): Sample {
+  return {
+    t,
+    inMsgs: 0,
+    outMsgs: 0,
+    inBytes: 0,
+    outBytes: 0,
+    connections: 0,
+    subscriptions: 0,
+    slowConsumers: 0,
+    mem: 0,
+    cpu: 0,
+    ...over,
+  };
+}
 
 function varz(over: Record<string, number> = {}) {
   return {
@@ -16,8 +39,10 @@ function varz(over: Record<string, number> = {}) {
     inBytes: 3,
     outBytes: 4,
     connections: 5,
+    subscriptions: 8,
     slowConsumers: 0,
     mem: 6,
+    cpu: 9,
     ...over,
   };
 }
@@ -60,6 +85,46 @@ describe("useMonitor.poll", () => {
     }
   });
 
+  it("skips a poll that lands inside the minimum sample spacing", async () => {
+    vi.useFakeTimers();
+    try {
+      monitorVarz.mockResolvedValue(varz());
+      await useMonitor.getState().poll("c", null, 2000);
+      vi.setSystemTime(Date.now() + 500);
+      await useMonitor.getState().poll("c", null, 2000);
+      expect(monitorVarz).toHaveBeenCalledTimes(1);
+
+      vi.setSystemTime(Date.now() + 2000);
+      await useMonitor.getState().poll("c", null, 2000);
+      expect(monitorVarz).toHaveBeenCalledTimes(2);
+      expect(useMonitor.getState().byConn.c?.samples).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps an hour of samples and drops what falls out of it", async () => {
+    vi.useFakeTimers();
+    try {
+      monitorVarz.mockResolvedValue(varz());
+      await useMonitor.getState().poll("c", null);
+      const first = useMonitor.getState().byConn.c?.samples[0]?.t;
+
+      vi.setSystemTime(Date.now() + 59 * 60_000);
+      await useMonitor.getState().poll("c", null);
+      expect(useMonitor.getState().byConn.c?.samples).toHaveLength(2);
+      expect(useMonitor.getState().byConn.c?.samples[0]?.t).toBe(first);
+
+      vi.setSystemTime(Date.now() + 2 * 60_000);
+      await useMonitor.getState().poll("c", null);
+      const kept = useMonitor.getState().byConn.c?.samples ?? [];
+      expect(kept).toHaveLength(2);
+      expect(kept[0]?.t).not.toBe(first);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("drops the write-back if reset() ran mid-poll (no ghost connection)", async () => {
     let resolve!: (v: unknown) => void;
     monitorVarz.mockReturnValue(
@@ -72,5 +137,40 @@ describe("useMonitor.poll", () => {
     resolve(varz());
     await p;
     expect(useMonitor.getState().byConn.c).toBeUndefined();
+  });
+});
+
+describe("series", () => {
+  it("turns cumulative counters into per-second rates", () => {
+    const s = [
+      sample(0, { inMsgs: 100 }),
+      sample(2000, { inMsgs: 300 }),
+      sample(4000, { inMsgs: 300 }),
+    ];
+    expect(rateSeries(s, TOTAL_MSGS)).toEqual([
+      { t: 2000, v: 100 },
+      { t: 4000, v: 0 },
+    ]);
+  });
+
+  it("skips a counter reset rather than charting a negative spike", () => {
+    const s = [
+      sample(0, { inMsgs: 500 }),
+      sample(1000, { inMsgs: 4 }), // server restarted
+      sample(2000, { inMsgs: 14 }),
+    ];
+    expect(rateSeries(s, TOTAL_MSGS)).toEqual([{ t: 2000, v: 10 }]);
+    expect(rates(s.slice(0, 2))).toBeNull();
+  });
+
+  it("needs two samples before there is a rate", () => {
+    expect(rateSeries([sample(0)], TOTAL_MSGS)).toEqual([]);
+    expect(rates([sample(0)])).toBeNull();
+  });
+
+  it("reads gauges straight off the samples", () => {
+    expect(gaugeSeries([sample(0, { mem: 7 })], (x) => x.mem)).toEqual([
+      { t: 0, v: 7 },
+    ]);
   });
 });

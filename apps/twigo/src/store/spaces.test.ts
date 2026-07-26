@@ -70,6 +70,51 @@ describe("spaces store", () => {
     expect(useSpaces.getState().lastView[k8sSpace.id]).toBeUndefined();
   });
 
+  it("activateDomain stays put when the active space already fits", () => {
+    const activateTarget = vi.fn();
+    clearDomains();
+    registerDomain({
+      id: "nats",
+      title: "NATS",
+      icon: Radio,
+      default: true,
+      activateTarget,
+    });
+    useSpaces.setState({
+      spaces: [
+        { id: "prod", domainId: "nats", targetId: "prod" },
+        { id: "staging", domainId: "nats", targetId: "staging" },
+      ],
+      activeId: "staging",
+      lastView: {},
+    });
+
+    useSpaces.getState().activateDomain("nats");
+
+    expect(useSpaces.getState().activeId).toBe("staging");
+    expect(activateTarget).not.toHaveBeenCalled();
+  });
+
+  it("unpins targets that no longer exist, leaving the tab and others alone", () => {
+    useSpaces.setState({
+      spaces: [
+        { id: "a", domainId: "nats", targetId: "gone", targetLabel: "Gone" },
+        { id: "b", domainId: "nats", targetId: "prod", targetLabel: "Prod" },
+        { id: "c", domainId: "kubernetes", targetId: "gone" },
+      ],
+      activeId: "a",
+      lastView: {},
+    });
+
+    useSpaces.getState().pruneTargets("nats", ["prod"]);
+
+    const spaces = useSpaces.getState().spaces;
+    expect(spaces).toHaveLength(3);
+    expect(spaces[0]).toEqual({ id: "a", domainId: "nats" });
+    expect(spaces[1]?.targetId).toBe("prod");
+    expect(spaces[2]?.targetId).toBe("gone");
+  });
+
   it("activateDomain jumps to an existing space or creates one", () => {
     useSpaces.getState().addSpace("kubernetes");
     useSpaces.getState().setActive("space-nats");

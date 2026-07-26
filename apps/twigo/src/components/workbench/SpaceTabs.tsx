@@ -3,13 +3,15 @@ import { Plus, X } from "lucide-react";
 import { cn, Popover, PopoverTrigger, PopoverContent, Kbd } from "@twigo/ui";
 import { useSpaces } from "@/store/spaces";
 import { getDomain, getDomains } from "@/shell/domains";
-import { isTypingTarget } from "@/lib/commands";
+import { isTypingTarget, fmtBinding } from "@/lib/commands";
 
 // Browser-style workspace tabs (switch: click or mod+digit; "+" adds one per
 // registered domain). Under Tauri on macOS the strip IS the titlebar
 // (titleBarStyle: Overlay): traffic lights float over its left edge, empty
 // areas drag the window (data-tauri-drag-region fires only when the event
 // target is the attributed element itself, so tab buttons stay clickable).
+// macOS centres the lights on its own 28px title bar, so this strip's h-9 is
+// paired with trafficLightPosition in tauri.conf.json - change both or neither.
 const isTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 const isMac =
@@ -89,7 +91,7 @@ export function SpaceTabs() {
             <button
               type="button"
               aria-current={active ? "page" : undefined}
-              title={i < 9 ? `⌘${i + 1}` : undefined}
+              title={i < 9 ? fmtBinding(`mod+${i + 1}`) : undefined}
               onClick={() => setActive(s.id)}
               className={cn(
                 "flex h-full items-center gap-1.5 pl-2.5 text-xs focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
@@ -211,8 +213,8 @@ export function SpaceTabs() {
         data-tauri-drag-region
         className="ml-auto hidden items-center gap-1 pr-1 text-[10px] text-muted-foreground sm:flex"
       >
-        <Kbd>⌘1</Kbd>
-        <Kbd>⌘2</Kbd>
+        <Kbd>{fmtBinding("mod+1")}</Kbd>
+        <Kbd>{fmtBinding("mod+2")}</Kbd>
         to switch
       </span>
     </div>

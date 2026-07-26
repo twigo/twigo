@@ -10,26 +10,63 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/twigo/twigo?style=flat-square" alt="License" /></a>
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/hero-stream.png" width="900" alt="A live subject stream: the subject tree with per-subject rates on the left, arriving messages in the middle, and the selected message decoded in the inspector on the right." />
+</p>
+
+|                                                                   Browse a stream                                                                    |                                                      Consumer lag over time                                                       |                                                                                Server metrics                                                                                |
+| :--------------------------------------------------------------------------------------------------------------------------------------------------: | :-------------------------------------------------------------------------------------------------------------------------------: | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
+| ![Browsing a JetStream stream: a virtualized table of stored messages beside the same inspector the live view uses.](docs/screenshots/jetstream.png) | ![A pull consumer's detail panel, with unprocessed messages charted over the last 15 minutes.](docs/screenshots/consumer-lag.png) | ![The server health tab: throughput, data rate, connections, subscriptions, memory and CPU charted over time, above the connections table.](docs/screenshots/monitoring.png) |
+
 ## Why
 
-Existing NATS GUIs are functional but the experience is dated. Twigo aims to be
-the tool you actually enjoy using: a fast, keyboard-first, well-designed client
-that imports your existing `nats` CLI contexts and gets out of your way.
+NATS has excellent command-line tooling and a couple of serviceable GUIs. The
+GUIs tend to be shaped like admin panels: a form per feature, a refresh button
+where live data belongs, no memory of what you had open yesterday.
 
-## Features
+Twigo is shaped like an IDE. Tree on the left, tabs in the middle, inspector on
+the right, and everything on the keyboard — `⇧⌘P` for the command palette, `⌘\`
+to split, `?` for the rest. It reads the contexts your `nats` CLI already has,
+so there is no second place to keep connection details in sync.
 
-- Imports your existing `nats` CLI contexts (`~/.config/nats/context/`), with a
-  configurable directory and an opt-in public demo server (`demo.nats.io`)
-- Connect / disconnect with live status; creds, token, user/password, nkey, and
-  TLS (CA, client certificate, handshake-first); read-only contexts
-- Subject explorer with live message rates
-- Live subscriptions, publish, and request/reply
-- Message viewer (JSON / text / hex) with message-to-message diff
-- JetStream: streams & consumers, plus a message browser
-- KV store browser with revision history
-- Object store browser
-- Server monitoring overview (varz / connz / jsz)
-- Command palette, native menu, light & dark themes
+## What it does
+
+**Connections.** Imports the contexts your `nats` CLI already has and writes them
+back in the same format, so the two stay in sync. Creds files, tokens,
+user/password, nkeys, TLS with a client certificate. Any context can be locked
+read-only, and Twigo then refuses every write — a production connection can't be
+fat-fingered.
+
+**Messaging.** Subjects don't announce themselves in NATS, so the explorer
+discovers them from live traffic and shows the rate on each. Subscribe, publish,
+request/reply. Messages render as JSON, text or hex, and any two can be diffed
+against each other. Everything you send is kept, ready to be sent again.
+
+**JetStream.** Streams and consumers, with a message browser that is safe to
+point at production: reading stored messages never creates a consumer and never
+moves anyone's position in the stream. Editing a stream shows a diff of exactly
+what will change before any of it is applied. Consumers can be paused and
+resumed on servers 2.11 and newer.
+
+**KV and Object Store.** Read and write both. KV keeps revision history, and a
+value that changed under you comes back as a conflict instead of quietly
+overwriting somebody else's work.
+
+**Payload codecs.** Protobuf, MessagePack and CBOR, decoded _and_ encoded. Point
+Twigo at a `.proto` file and map a subject to a message type: every message on
+that subject is readable everywhere in the app, and publishing to it encodes on
+the way out.
+
+**Responders.** Mock a service by answering a subject from a template, with the
+incoming request in scope — for when the thing you're integrating against
+doesn't exist yet.
+
+**Monitoring.** Server health from the system account, or from the HTTP
+monitoring port when that isn't available. Throughput, memory and consumer lag
+are charted over time, so you can see a trend rather than a single reading.
+
+Plus the workbench around it: a command palette, split panes, a native menu,
+per-technology tabs, and light and dark themes.
 
 ## Install
 
@@ -53,12 +90,11 @@ docker compose up -d   # local NATS with JetStream (:4222) + monitoring (:8222)
 pnpm tauri dev         # run the app
 ```
 
-Day-to-day development only needs `pnpm tauri dev`. Producing a release bundle
-(`pnpm tauri build`) signs the auto-update artifacts, so it needs the
-`TAURI_SIGNING_PRIVATE_KEY` environment variable set; the release workflow does
-this in CI.
+Day-to-day development only needs `pnpm tauri dev`. A release bundle
+(`pnpm tauri build`) also signs the auto-update artifacts, so it expects
+`TAURI_SIGNING_PRIVATE_KEY` in the environment; CI sets that during a release.
 
-To generate continuous fake traffic for testing the subject explorer:
+For something to look at in the subject explorer, there is a traffic generator:
 
 ```bash
 docker compose --profile traffic up -d   # publishes to telemetry.*, orders.*, …

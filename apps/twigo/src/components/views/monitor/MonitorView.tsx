@@ -5,27 +5,10 @@ import { fmtBytes, fmtCount } from "@twigo/utils";
 import { useConnections } from "@/store/connections";
 import { useMonitorConfig } from "@/store/monitorConfig";
 import { openServerHealth } from "@/lib/editor";
+import { useMonitorPoll } from "@/hooks/useMonitorPoll";
 import { useMonitor, rates, type Sample } from "@/store/monitor";
 import type { ViewProps } from "@/shell/views";
 import type { Varz, Jsz, Healthz } from "@/lib/api";
-
-function useMonitorPoll(
-  connId: string | null,
-  monitoringUrl: string | null,
-  intervalMs = 3000,
-) {
-  const poll = useMonitor((s) => s.poll);
-  useEffect(() => {
-    if (!connId) return;
-    const tick = () => {
-      if (document.visibilityState === "visible")
-        void poll(connId, monitoringUrl);
-    };
-    tick();
-    const id = setInterval(tick, intervalMs);
-    return () => clearInterval(id);
-  }, [connId, monitoringUrl, intervalMs, poll]);
-}
 
 type Verdict = "ok" | "warn" | "error";
 
@@ -168,7 +151,7 @@ function Dashboard({
         onClick={() => openServerHealth(connId)}
         className="mx-2 mt-1 flex w-[calc(100%-1rem)] items-center justify-center gap-1 rounded border border-border py-1 text-[11px] text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground"
       >
-        View all connections →
+        Server health & charts →
       </button>
 
       <SectionLabel>Resources</SectionLabel>
@@ -297,6 +280,14 @@ export function MonitorView({ connId }: ViewProps) {
   const data = useMonitor((s) => (connId ? s.byConn[connId] : undefined));
   useMonitorPoll(isConnected ? connId : null, monitoringUrl);
 
+  const status = data?.status ?? "idle";
+  // Held until the server answers, so the monitoring-setup flow below stays in
+  // the sidebar instead of opening a tab onto errors.
+  const ready = status === "ready";
+  useEffect(() => {
+    if (connId && ready) openServerHealth(connId);
+  }, [connId, ready]);
+
   if (!isConnected || !connId) {
     return (
       <EmptyState density="inline">
@@ -304,8 +295,6 @@ export function MonitorView({ connId }: ViewProps) {
       </EmptyState>
     );
   }
-
-  const status = data?.status ?? "idle";
 
   if (status === "unavailable") {
     return <MonitoringSetup connId={connId} currentUrl={monitoringUrl} />;

@@ -12,7 +12,9 @@ export function fmtBytes(n: number): string {
   if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
   if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
   if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${n.toString()} B`;
+  // Sizes are whole bytes, but a byte *rate* is not - and every branch above is
+  // bounded to one decimal, so this one can't spill fifteen.
+  return `${Math.round(n).toString()} B`;
 }
 
 export function fmtRtt(ms: number): string {
@@ -51,7 +53,7 @@ export function fmtIsoDateTime(iso: string): string {
 export function fmtCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return n.toString();
+  return Math.round(n).toString();
 }
 
 // Latency from nanoseconds, where 0 means "none" (not unlimited): 0 → "0",

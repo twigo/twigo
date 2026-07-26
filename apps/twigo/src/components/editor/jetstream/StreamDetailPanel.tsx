@@ -16,15 +16,15 @@ import {
   jsCreateConsumer,
   jsUpdateStream,
   jsReplaceStream,
+  jsStreamDetail,
 } from "@/lib/api";
 import { useStreamDetail } from "@/hooks/useJetStreamDetail";
 import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import { useJetStream } from "@/store/jetstream";
 import { useToasts } from "@/store/toasts";
-import { closeStreamDetail } from "@/lib/editor";
+import { closeStreamDetail, openStreamBrowse } from "@/lib/editor";
 import { Row, Section, RawJson, DetailSkeleton } from "./parts";
 import { disp, num, limitCount, limitBytes } from "./format";
-import { MessageBrowser } from "./MessageBrowser";
 import { PurgeDialog } from "./PurgeDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { CreateConsumerDialog } from "./CreateConsumerDialog";
@@ -272,6 +272,9 @@ export function StreamDetailPanel({
         <RawConfigDialog
           stream={stream}
           config={data.config}
+          fetchCurrent={async () =>
+            (await jsStreamDetail(connId, stream)).config
+          }
           onClose={() => setRawOpen(false)}
           onApply={(config) => void doReplace(config)}
         />
@@ -334,12 +337,13 @@ export function StreamDetailPanel({
             <Row label="Sealed" value={cfg.sealed ? "yes" : "no"} />
           </Section>
 
-          <MessageBrowser
-            key={`${data.firstSeq}:${data.lastSeq}:${data.messages}`}
-            connId={connId}
-            stream={stream}
-            onReplayFrom={(seq) => setConsumerOpen({ startSeq: seq })}
-          />
+          <button
+            type="button"
+            onClick={() => openStreamBrowse(connId, stream)}
+            className="flex w-full items-center justify-center gap-1 rounded border border-border py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground"
+          >
+            Browse {fmtCount(data.messages)} messages →
+          </button>
 
           <RawJson value={data.config} />
         </div>

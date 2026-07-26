@@ -14,28 +14,43 @@ import { parseRawConfig, diffRawConfig, type RawChange } from "./rawConfig";
 export function RawConfigDialog({
   stream,
   config,
+  fetchCurrent,
   onClose,
   onApply,
 }: {
   stream: string;
   config: Record<string, unknown>;
+  fetchCurrent: () => Promise<Record<string, unknown>>;
   onClose: () => void;
   onApply: (config: Record<string, unknown>) => void;
 }) {
   const [text, setText] = useState(JSON.stringify(config, null, 2));
   const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
   const [review, setReview] = useState<{
     changes: RawChange[];
     parsed: Record<string, unknown>;
   } | null>(null);
 
-  const toReview = () => {
+  const toReview = async () => {
     const parsed = parseRawConfig(text, stream);
     if (!parsed.ok) {
       setError(parsed.error);
       return;
     }
-    const changes = diffRawConfig(config, parsed.config);
+    // Apply replaces the whole config, so the diff has to be against the server as
+    // it is now - a change made since this dialog opened would silently revert.
+    setChecking(true);
+    let current: Record<string, unknown>;
+    try {
+      current = await fetchCurrent();
+    } catch (e) {
+      setError(`Could not re-read the current config: ${String(e)}`);
+      return;
+    } finally {
+      setChecking(false);
+    }
+    const changes = diffRawConfig(current, parsed.config);
     if (changes.length === 0) {
       setError("No changes.");
       return;
@@ -132,8 +147,13 @@ export function RawConfigDialog({
               <Button variant="ghost" size="sm" onClick={onClose}>
                 Cancel
               </Button>
-              <Button variant="brand" size="sm" onClick={toReview}>
-                Review changes
+              <Button
+                variant="brand"
+                size="sm"
+                disabled={checking}
+                onClick={() => void toReview()}
+              >
+                {checking ? "Checking…" : "Review changes"}
               </Button>
             </>
           )}
