@@ -44,17 +44,21 @@ const LAG_GAP_MS = 20_000;
 
 function LagTrend({ points }: { points: SeriesPoint[] }) {
   if (points.length < 2) return null;
-  // Sampling starts when the panel opens, so the axis - and the label - cover
-  // what was actually watched rather than the full window.
-  const covered = fmtDuration(sparkSpan(points, LAG_WINDOW_MS) * 1e6);
+  // Sampling starts when the panel opens, so most of the axis is empty at first
+  // - say how much of the window has actually been watched.
+  const coveredMs = sparkSpan(points, LAG_WINDOW_MS);
+  const covered = fmtDuration(coveredMs * 1e6);
   return (
     <div className="mb-2 border-b border-border pb-2">
       <div className="mb-1 flex items-baseline justify-between">
         <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
           Lag trend
         </span>
-        <span className="text-[10px] text-muted-foreground">
-          last {covered}
+        <span className="flex items-baseline gap-1.5 text-[10px] text-muted-foreground">
+          <span>last 15m</span>
+          {coveredMs < LAG_WINDOW_MS && (
+            <span className="opacity-70">{covered} sampled</span>
+          )}
         </span>
       </div>
       <Sparkline
@@ -66,7 +70,7 @@ function LagTrend({ points }: { points: SeriesPoint[] }) {
         // question - whether the backlog is growing - and from zero a lag of
         // thousands is a filled box with no shape in it.
         baseline="auto"
-        label={`Unprocessed messages, last ${covered}`}
+        label="Unprocessed messages, last 15 minutes"
         className="text-brand"
       />
     </div>

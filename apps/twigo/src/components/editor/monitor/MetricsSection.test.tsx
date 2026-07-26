@@ -40,19 +40,19 @@ describe("MetricsSection", () => {
     expect(screen.getByText("40/s")).toBeInTheDocument();
   });
 
-  it("labels the charts with the span actually sampled, not the window", () => {
+  it("keeps the axis on the window and says how much of it is real", () => {
     render(<MetricsSection samples={SAMPLES} />);
 
-    // One second of history under a 15m window: the axis covers a second, so
-    // saying "15m" anywhere would be a lie.
+    // A second of history under a 15m window: the axis stays 15m, so the line
+    // sits where it belongs in time - and the header owns up to the emptiness.
     expect(
-      screen.getByRole("img", { name: "Throughput, last 1s" }),
+      screen.getByRole("img", { name: "Throughput, last 15m" }),
     ).toBeInTheDocument();
     expect(screen.getByText("1s sampled")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("radio", { name: "1h" }));
     expect(
-      screen.getByRole("img", { name: "Throughput, last 1s" }),
+      screen.getByRole("img", { name: "Throughput, last 1h" }),
     ).toBeInTheDocument();
   });
 

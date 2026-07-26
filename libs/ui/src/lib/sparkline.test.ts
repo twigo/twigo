@@ -38,10 +38,10 @@ describe("sparkGeometry", () => {
       OPTS,
     );
 
-    // Only 50ms of history survives, so the axis covers 50ms - not the whole
-    // window with the line squeezed against the right edge.
+    // 50ms of history under a 100ms window: the axis stays 100ms and the line
+    // takes its true half, rather than being stretched across the whole width.
     expect(spanMs).toBe(50);
-    expect(line).toBe("M0,1L100,1");
+    expect(line).toBe("M50,1L100,1");
   });
 
   it("breaks the line across a sampling gap instead of bridging it", () => {
@@ -73,7 +73,7 @@ describe("sparkGeometry", () => {
     );
 
     expect(yMax).toBe(0);
-    expect(line).toBe("M0,9L100,9");
+    expect(line).toBe("M50,9L100,9");
   });
 });
 
@@ -84,12 +84,12 @@ describe("baselines", () => {
   ];
 
   it("pins a rate to zero, so an unchanging one still reads against nothing", () => {
-    expect(sparkGeometry(flat, OPTS).line).toBe("M0,1L100,1");
+    expect(sparkGeometry(flat, OPTS).line).toBe("M50,1L100,1");
   });
 
   it("draws an unchanging gauge through the middle instead of a filled block", () => {
     expect(sparkGeometry(flat, { ...OPTS, baseline: "auto" }).line).toBe(
-      "M0,5L100,5",
+      "M50,5L100,5",
     );
   });
 

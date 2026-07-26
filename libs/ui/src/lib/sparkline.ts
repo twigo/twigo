@@ -4,7 +4,9 @@ export interface SparkPoint {
 }
 
 export interface SparkOptions {
-  // The longest span to draw. A shorter history is not stretched across it.
+  // The span the axis covers, whatever the history holds. A shorter history
+  // occupies its true share of the width and leaves the rest empty, so the time
+  // scale stays fixed instead of rescaling under the reader as points arrive.
   windowMs: number;
   // Past this, a pause in sampling reads as a gap rather than a line across it.
   gapMs: number;
@@ -68,8 +70,7 @@ export function sparkGeometry(
   // an all-zero rate has to stay on the floor, because zero is what it means.
   const flat = !(hi > lo);
   const flatY = baseline === "auto" ? base - drawable / 2 : base;
-  const x = (t: number) =>
-    round(spanMs > 0 ? width - ((end - t) / spanMs) * width : width);
+  const x = (t: number) => round(width - ((end - t) / windowMs) * width);
   const y = (v: number) =>
     round(flat ? flatY : base - ((v - lo) / (hi - lo)) * drawable);
 

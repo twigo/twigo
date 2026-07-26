@@ -72,10 +72,13 @@ describe("ConsumerDetailPanel", () => {
 
     await tick();
     expect(screen.getByText("Lag trend")).toBeInTheDocument();
-    // Two polls five seconds apart: the chart says five seconds, not 15m.
     expect(
-      screen.getByRole("img", { name: "Unprocessed messages, last 5s" }),
+      screen.getByRole("img", {
+        name: "Unprocessed messages, last 15 minutes",
+      }),
     ).toBeInTheDocument();
+    // Two polls in: the header says how little of the window is real.
+    expect(screen.getByText("5s sampled")).toBeInTheDocument();
   });
 
   it("marks itself stale when live updates fail, keeping the last numbers", async () => {

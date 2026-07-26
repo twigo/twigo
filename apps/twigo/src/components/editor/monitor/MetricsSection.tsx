@@ -29,12 +29,12 @@ function ChartCard({
   def,
   samples,
   windowMs,
-  covered,
+  windowId,
 }: {
   def: ChartDef;
   samples: Sample[];
   windowMs: number;
-  covered: string;
+  windowId: WindowId;
 }) {
   const points = useMemo(() => def.series(samples), [def, samples]);
   const [hover, setHover] = useState<SeriesPoint | null>(null);
@@ -76,7 +76,7 @@ function ChartCard({
           gapMs={GAP_MS}
           height={CHART_HEIGHT}
           baseline={def.baseline}
-          label={`${def.title}, last ${covered}`}
+          label={`${def.title}, last ${windowId}`}
         />
         {hover && (
           <span
@@ -96,8 +96,8 @@ export function MetricsSection({ samples }: { samples: Sample[] }) {
   const [windowId, setWindowId] = useState<WindowId>("15m");
   const [open, setOpen] = useState(true);
   const windowMs = windowMsOf(windowId);
-  // The axis only covers what was sampled, so the label has to say so - a chart
-  // headed "1h" over four minutes of history would be a lie.
+  // The axis holds the chosen window even when the history is shorter, so say
+  // how much of it is real rather than letting the empty part read as a flatline.
   const coveredMs = sparkSpan(samples, windowMs);
   const covered = coveredMs > 0 ? fmtDuration(coveredMs * 1e6) : "0s";
   const Chevron = open ? ChevronDown : ChevronRight;
@@ -149,7 +149,7 @@ export function MetricsSection({ samples }: { samples: Sample[] }) {
                 def={def}
                 samples={samples}
                 windowMs={windowMs}
-                covered={covered}
+                windowId={windowId}
               />
             ))}
           </div>
