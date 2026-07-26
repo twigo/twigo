@@ -23,7 +23,9 @@ fn build_headers(pairs: Vec<(String, String)>) -> Option<async_nats::HeaderMap> 
         // newline can't panic the publish command.
         let key = key.replace(['\r', '\n'], " ");
         let value = value.replace(['\r', '\n'], " ");
-        headers.insert(key.as_str(), value.as_str());
+        // NATS headers are multi-value; `insert` would keep only the last row
+        // when the user repeats a key.
+        headers.append(key.as_str(), value.as_str());
         any = true;
     }
     any.then_some(headers)
@@ -195,6 +197,20 @@ mod tests {
         // A multi-line rendered responder value used to assert in async-nats.
         let h = build_headers(vec![("Nats-Service-Error".into(), "a\r\nb".into())]);
         assert!(h.is_some());
+    }
+
+    #[test]
+    fn repeated_keys_keep_every_value() {
+        let h = build_headers(vec![
+            ("Accept".into(), "one".into()),
+            ("Accept".into(), "two".into()),
+        ])
+        .unwrap();
+        let values: Vec<&str> = h
+            .get_all("Accept")
+            .map(async_nats::HeaderValue::as_str)
+            .collect();
+        assert_eq!(values, vec!["one", "two"]);
     }
 
     #[test]
