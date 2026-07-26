@@ -107,6 +107,153 @@ fn message_descriptor(
     })
 }
 
+/// A msgpack/cbor value before it is projected onto JSON. Deserializing wire
+/// bytes straight into `serde_json::Value` drops what JSON cannot hold:
+/// non-finite floats collapse to `null` and binary blobs fail the whole decode.
+enum Loose {
+    Null,
+    Bool(bool),
+    I64(i64),
+    U64(u64),
+    F64(f64),
+    Str(String),
+    Bytes(Vec<u8>),
+    Seq(Vec<Loose>),
+    Map(Vec<(Loose, Loose)>),
+}
+
+impl<'de> Deserialize<'de> for Loose {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        struct LooseVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for LooseVisitor {
+            type Value = Loose;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("any msgpack/cbor value")
+            }
+
+            fn visit_unit<E>(self) -> Result<Loose, E> {
+                Ok(Loose::Null)
+            }
+
+            fn visit_none<E>(self) -> Result<Loose, E> {
+                Ok(Loose::Null)
+            }
+
+            fn visit_some<D: serde::Deserializer<'de>>(self, d: D) -> Result<Loose, D::Error> {
+                Loose::deserialize(d)
+            }
+
+            fn visit_bool<E>(self, v: bool) -> Result<Loose, E> {
+                Ok(Loose::Bool(v))
+            }
+
+            fn visit_i64<E>(self, v: i64) -> Result<Loose, E> {
+                Ok(Loose::I64(v))
+            }
+
+            fn visit_u64<E>(self, v: u64) -> Result<Loose, E> {
+                Ok(Loose::U64(v))
+            }
+
+            fn visit_f64<E>(self, v: f64) -> Result<Loose, E> {
+                Ok(Loose::F64(v))
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Loose, E> {
+                Ok(Loose::Str(v.to_string()))
+            }
+
+            fn visit_bytes<E>(self, v: &[u8]) -> Result<Loose, E> {
+                Ok(Loose::Bytes(v.to_vec()))
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut acc: A,
+            ) -> Result<Loose, A::Error> {
+                let mut items = Vec::new();
+                while let Some(item) = acc.next_element()? {
+                    items.push(item);
+                }
+                Ok(Loose::Seq(items))
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut acc: A,
+            ) -> Result<Loose, A::Error> {
+                let mut entries = Vec::new();
+                while let Some(entry) = acc.next_entry()? {
+                    entries.push(entry);
+                }
+                Ok(Loose::Map(entries))
+            }
+        }
+
+        de.deserialize_any(LooseVisitor)
+    }
+}
+
+impl Loose {
+    fn into_json(self) -> serde_json::Value {
+        use serde_json::Value as J;
+        match self {
+            Loose::Null => J::Null,
+            Loose::Bool(b) => J::Bool(b),
+            Loose::I64(i) => J::from(i),
+            Loose::U64(u) => J::from(u),
+            // JSON has no non-finite numbers; proto3's JSON mapping (which the
+            // protobuf path already follows) spells them as strings.
+            Loose::F64(f) => serde_json::Number::from_f64(f)
+                .map_or_else(|| J::String(non_finite_name(f).to_string()), J::Number),
+            Loose::Str(s) => J::String(s),
+            Loose::Bytes(b) => J::String(encode_b64(&b)),
+            Loose::Seq(items) => J::Array(items.into_iter().map(Loose::into_json).collect()),
+            Loose::Map(entries) => J::Object(
+                entries
+                    .into_iter()
+                    .map(|(k, v)| (k.into_key(), v.into_json()))
+                    .collect(),
+            ),
+        }
+    }
+
+    // msgpack/cbor allow non-string map keys; JSON does not.
+    fn into_key(self) -> String {
+        match self {
+            Loose::Str(s) => s,
+            other => match other.into_json() {
+                serde_json::Value::String(s) => s,
+                v => v.to_string(),
+            },
+        }
+    }
+}
+
+fn non_finite_name(f: f64) -> &'static str {
+    if f.is_nan() {
+        "NaN"
+    } else if f.is_sign_positive() {
+        "Infinity"
+    } else {
+        "-Infinity"
+    }
+}
+
+// A truncated payload fails loudly on its own; extra bytes after a complete
+// value would otherwise render as a clean decode of the first value only.
+fn reject_trailing(codec: &str, read: usize, total: usize) -> error::Result<()> {
+    if read < total {
+        return Err(Error::InvalidInput(format!(
+            "{codec} decode failed: {} trailing byte(s) after the value",
+            total - read
+        )));
+    }
+    Ok(())
+}
+
 fn decode_bytes(
     codec: &str,
     bytes: &[u8],
@@ -125,10 +272,20 @@ fn decode_bytes(
             msg.serialize_with_options(serde_json::value::Serializer, &opts)
                 .map_err(|e| Error::InvalidInput(format!("protobuf serialize failed: {e}")))?
         }
-        "msgpack" => rmp_serde::from_slice(bytes)
-            .map_err(|e| Error::InvalidInput(format!("msgpack decode failed: {e}")))?,
-        "cbor" => ciborium::from_reader(bytes)
-            .map_err(|e| Error::InvalidInput(format!("cbor decode failed: {e}")))?,
+        "msgpack" => {
+            let mut de = rmp_serde::Deserializer::new(std::io::Cursor::new(bytes));
+            let value = Loose::deserialize(&mut de)
+                .map_err(|e| Error::InvalidInput(format!("msgpack decode failed: {e}")))?;
+            reject_trailing("msgpack", de.position() as usize, bytes.len())?;
+            value.into_json()
+        }
+        "cbor" => {
+            let mut cursor = std::io::Cursor::new(bytes);
+            let value: Loose = ciborium::from_reader(&mut cursor)
+                .map_err(|e| Error::InvalidInput(format!("cbor decode failed: {e}")))?;
+            reject_trailing("cbor", cursor.position() as usize, bytes.len())?;
+            value.into_json()
+        }
         other => return Err(Error::InvalidInput(format!("unknown codec '{other}'"))),
     };
     serde_json::to_string_pretty(&value)
@@ -473,6 +630,52 @@ mod tests {
         ])
         .unwrap();
         assert!(schema.message_types.contains(&"myapp.Order".to_string()));
+    }
+
+    #[test]
+    fn non_finite_floats_are_named_not_nulled() {
+        for (input, want) in [
+            (f64::NAN, r#""NaN""#),
+            (f64::INFINITY, r#""Infinity""#),
+            (f64::NEG_INFINITY, r#""-Infinity""#),
+        ] {
+            let mp = rmp_serde::to_vec(&input).unwrap();
+            assert_eq!(
+                value(&decode_bytes("msgpack", &mp, None).unwrap()),
+                value(want)
+            );
+            let mut cb = Vec::new();
+            ciborium::into_writer(&input, &mut cb).unwrap();
+            assert_eq!(
+                value(&decode_bytes("cbor", &cb, None).unwrap()),
+                value(want)
+            );
+        }
+    }
+
+    #[test]
+    fn trailing_bytes_are_rejected() {
+        let mut mp = rmp_serde::to_vec(&value(r#"{"a":1}"#)).unwrap();
+        mp.push(0xc1); // reserved marker: never part of a valid value
+        let err = decode_bytes("msgpack", &mp, None).unwrap_err();
+        assert_eq!(err.kind(), "invalidInput");
+        assert!(format!("{err}").contains("trailing"), "{err}");
+
+        let mut cb = Vec::new();
+        ciborium::into_writer(&value(r#"{"a":1}"#), &mut cb).unwrap();
+        cb.push(0xff);
+        let err = decode_bytes("cbor", &cb, None).unwrap_err();
+        assert!(format!("{err}").contains("trailing"), "{err}");
+    }
+
+    #[test]
+    fn binary_and_non_string_keys_survive_the_json_projection() {
+        // bin8 [1,2,3]
+        let out = decode_bytes("msgpack", &[0xc4, 0x03, 1, 2, 3], None).unwrap();
+        assert_eq!(value(&out), value(r#""AQID""#));
+        // fixmap { 7: true }
+        let out = decode_bytes("msgpack", &[0x81, 0x07, 0xc3], None).unwrap();
+        assert_eq!(value(&out), value(r#"{"7":true}"#));
     }
 
     #[test]
