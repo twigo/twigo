@@ -5,6 +5,10 @@ export function useStreamDetail(connId: string, stream: string) {
   return useAsyncDetail(() => jsStreamDetail(connId, stream), [connId, stream]);
 }
 
+// Lag, in-flight and redeliveries move constantly, and the lag trend needs a
+// steady sample rate - so this panel refreshes itself while it is open.
+const CONSUMER_POLL_MS = 5000;
+
 export function useConsumerDetail(
   connId: string,
   stream: string,
@@ -13,5 +17,6 @@ export function useConsumerDetail(
   return useAsyncDetail(
     () => jsConsumerDetail(connId, stream, consumer),
     [connId, stream, consumer],
+    CONSUMER_POLL_MS,
   );
 }

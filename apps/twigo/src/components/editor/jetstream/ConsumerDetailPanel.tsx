@@ -1,12 +1,20 @@
-import { useState } from "react";
-import { RefreshCw, ArrowDownToLine, Pause, Play, Trash2 } from "lucide-react";
-import { Button, EmptyState } from "@twigo/ui";
+import { useEffect, useState } from "react";
+import {
+  RefreshCw,
+  ArrowDownToLine,
+  CloudOff,
+  Pause,
+  Play,
+  Trash2,
+} from "lucide-react";
+import { Button, EmptyState, Sparkline } from "@twigo/ui";
 import { fmtCount } from "@twigo/utils";
 import { jsPauseConsumer, jsResumeConsumer, jsDeleteConsumer } from "@/lib/api";
 import { useConsumerDetail } from "@/hooks/useJetStreamDetail";
 import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import { useConnections } from "@/store/connections";
 import { useJetStream } from "@/store/jetstream";
+import { useSeries, NO_POINTS, type SeriesPoint } from "@/store/series";
 import { useToasts } from "@/store/toasts";
 import { closeConsumerDetail } from "@/lib/editor";
 import { Row, Section, RawJson, DetailSkeleton } from "./parts";
@@ -30,6 +38,32 @@ function filters(cfg: Record<string, unknown>): string {
   return "all";
 }
 
+const LAG_WINDOW_MS = 15 * 60_000;
+// Four missed polls read as a real pause in sampling, not a slow round-trip.
+const LAG_GAP_MS = 20_000;
+
+function LagTrend({ points }: { points: SeriesPoint[] }) {
+  if (points.length < 2) return null;
+  return (
+    <div className="mb-2 border-b border-border pb-2">
+      <div className="mb-1 flex items-baseline justify-between">
+        <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+          Lag trend
+        </span>
+        <span className="text-[10px] text-muted-foreground">last 15m</span>
+      </div>
+      <Sparkline
+        points={points}
+        windowMs={LAG_WINDOW_MS}
+        gapMs={LAG_GAP_MS}
+        height={40}
+        label="Unprocessed messages, last 15 minutes"
+        className="text-brand"
+      />
+    </div>
+  );
+}
+
 export function ConsumerDetailPanel({
   connId,
   stream,
@@ -39,11 +73,18 @@ export function ConsumerDetailPanel({
   stream: string;
   consumer: string;
 }) {
-  const { data, error, loading, refresh } = useConsumerDetail(
+  const { data, error, loading, staleReason, refresh } = useConsumerDetail(
     connId,
     stream,
     consumer,
   );
+  const seriesKey = `consumer:${stream}:${consumer}`;
+  const lag = useSeries((s) => s.byConn[connId]?.[seriesKey] ?? NO_POINTS);
+  // Keyed on the read, not on the number: every poll is a sample, so a lag that
+  // isn't moving draws a flat line instead of a gap.
+  useEffect(() => {
+    if (data) useSeries.getState().push(connId, seriesKey, data.numPending);
+  }, [connId, seriesKey, data]);
   const serverVersion = useConnections(
     (s) => s.connected[connId]?.serverVersion ?? "",
   );
@@ -91,6 +132,14 @@ export function ConsumerDetailPanel({
         <span className="ml-1 truncate text-[11px] text-muted-foreground">
           on {stream}
         </span>
+        {staleReason && (
+          <span
+            className="ml-1 inline-flex items-center gap-0.5 text-[11px] text-warn"
+            title={`Live updates are failing: ${staleReason}`}
+          >
+            <CloudOff className="size-3" /> stale
+          </span>
+        )}
         {data?.paused && (
           <span className="ml-1 inline-flex items-center gap-0.5 text-[11px] text-warn">
             <Pause className="size-3" /> paused
@@ -169,6 +218,7 @@ export function ConsumerDetailPanel({
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3">
           <Section title="State">
+            <LagTrend points={lag} />
             <Row
               label="Unprocessed (lag)"
               value={

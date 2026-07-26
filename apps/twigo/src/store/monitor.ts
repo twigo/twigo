@@ -8,6 +8,9 @@ import {
   type Healthz,
 } from "@/lib/api";
 import { registerConnScoped } from "@/store/connScoped";
+import type { SeriesPoint } from "@/store/series";
+
+export type { SeriesPoint };
 
 type Status = "idle" | "loading" | "ready" | "error" | "unavailable";
 
@@ -44,9 +47,18 @@ const EMPTY: MonitorConnState = {
   unavailableAt: null,
 };
 
-const MAX_SAMPLES = 90;
+// An hour of history, which is the longest window a chart offers. Bounded by
+// count as well so a faster poll interval can't grow the buffer without limit.
+const RETENTION_MS = 60 * 60_000;
+const MAX_SAMPLES = 1_500;
 // "unavailable" can be a transient timeout - back off, don't latch forever.
 const UNAVAILABLE_RETRY_MS = 30_000;
+
+function retain(samples: Sample[], next: Sample): Sample[] {
+  const cutoff = next.t - RETENTION_MS;
+  const kept = samples.filter((s) => s.t >= cutoff);
+  return [...kept.slice(-(MAX_SAMPLES - 1)), next];
+}
 
 interface MonitorStore {
   byConn: Record<string, MonitorConnState>;
@@ -107,7 +119,7 @@ export const useMonitor = create<MonitorStore>((set, get) => {
           varz,
           jsz,
           healthz,
-          samples: [...s.samples, sample].slice(-MAX_SAMPLES),
+          samples: retain(s.samples, sample),
           unavailableAt: null,
         }));
       } catch (e) {
@@ -136,20 +148,44 @@ export const useMonitor = create<MonitorStore>((set, get) => {
 
 registerConnScoped(useMonitor);
 
+// Per-second deltas of a cumulative counter, stamped at the later sample. A
+// server restart resets the counters, so a negative delta yields no point at
+// all rather than a spike the server never served.
+export function rateSeries(
+  samples: Sample[],
+  pick: (s: Sample) => number,
+): SeriesPoint[] {
+  const out: SeriesPoint[] = [];
+  for (let i = 1; i < samples.length; i++) {
+    const prev = samples[i - 1];
+    const cur = samples[i];
+    if (!prev || !cur) continue;
+    const dt = (cur.t - prev.t) / 1000;
+    const dv = pick(cur) - pick(prev);
+    if (dt <= 0 || dv < 0) continue;
+    out.push({ t: cur.t, v: dv / dt });
+  }
+  return out;
+}
+
+export function gaugeSeries(
+  samples: Sample[],
+  pick: (s: Sample) => number,
+): SeriesPoint[] {
+  return samples.map((s) => ({ t: s.t, v: pick(s) }));
+}
+
+export const TOTAL_MSGS = (s: Sample) => s.inMsgs + s.outMsgs;
+export const TOTAL_BYTES = (s: Sample) => s.inBytes + s.outBytes;
+
 // Live msgs/s + bytes/s from the last two samples; null until there are two.
-// Guards a counter reset (server restart) by treating cur<prev as no rate.
 export function rates(samples: Sample[]): {
   msgsPerSec: number;
   bytesPerSec: number;
 } | null {
-  if (samples.length < 2) return null;
-  const prev = samples[samples.length - 2];
-  const cur = samples[samples.length - 1];
-  if (!prev || !cur) return null;
-  const dt = (cur.t - prev.t) / 1000;
-  if (dt <= 0) return null;
-  const dMsgs = cur.inMsgs + cur.outMsgs - (prev.inMsgs + prev.outMsgs);
-  const dBytes = cur.inBytes + cur.outBytes - (prev.inBytes + prev.outBytes);
-  if (dMsgs < 0 || dBytes < 0) return null;
-  return { msgsPerSec: dMsgs / dt, bytesPerSec: dBytes / dt };
+  const tail = samples.slice(-2);
+  const msgs = rateSeries(tail, TOTAL_MSGS)[0];
+  const bytes = rateSeries(tail, TOTAL_BYTES)[0];
+  if (!msgs || !bytes) return null;
+  return { msgsPerSec: msgs.v, bytesPerSec: bytes.v };
 }

@@ -1,18 +1,34 @@
 import { useEffect, useState } from "react";
 import { RefreshCw, Activity, ShieldCheck, Plug } from "lucide-react";
-import { Button, EmptyState, Input, cn } from "@twigo/ui";
+import { Button, EmptyState, Input, Sparkline, cn } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
 import { useConnections } from "@/store/connections";
 import { useMonitorConfig } from "@/store/monitorConfig";
 import { openServerHealth } from "@/lib/editor";
-import { useMonitor, rates, type Sample } from "@/store/monitor";
+import {
+  useMonitor,
+  rates,
+  rateSeries,
+  gaugeSeries,
+  TOTAL_MSGS,
+  TOTAL_BYTES,
+  type Sample,
+  type SeriesPoint,
+} from "@/store/monitor";
 import type { ViewProps } from "@/shell/views";
 import type { Varz, Jsz, Healthz } from "@/lib/api";
+
+const POLL_MS = 3000;
+const SPARK_WINDOW_MS = 15 * 60_000;
+const SPARK_LABEL = "last 15m";
+// A slow or failed poll shouldn't fracture the line; a real pause in sampling
+// (the view was closed) should.
+const SPARK_GAP_MS = POLL_MS * 4;
 
 function useMonitorPoll(
   connId: string | null,
   monitoringUrl: string | null,
-  intervalMs = 3000,
+  intervalMs = POLL_MS,
 ) {
   const poll = useMonitor((s) => s.poll);
   useEffect(() => {
@@ -103,10 +119,50 @@ function UsageBar({
   );
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+function SectionLabel({
+  children,
+  hint,
+}: {
+  children: React.ReactNode;
+  hint?: string;
+}) {
   return (
-    <div className="px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-      {children}
+    <div className="flex items-baseline justify-between px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <span>{children}</span>
+      {hint && (
+        <span className="font-normal normal-case tracking-normal opacity-70">
+          {hint}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function MetricRow({
+  label,
+  value,
+  points,
+  tone,
+}: {
+  label: string;
+  value: string;
+  points: SeriesPoint[];
+  tone?: string;
+}) {
+  return (
+    <div className="flex items-center gap-2 px-2 py-1 text-xs">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <div className={cn("min-w-8 flex-1", tone ?? "text-brand")}>
+        <Sparkline
+          points={points}
+          windowMs={SPARK_WINDOW_MS}
+          gapMs={SPARK_GAP_MS}
+          label={`${label}, ${SPARK_LABEL}`}
+        />
+      </div>
+      <span className="shrink-0 font-mono tabular-nums text-foreground">
+        {value}
+      </span>
     </div>
   );
 }
@@ -147,16 +203,21 @@ function Dashboard({
       />
       {varz.cluster.name && <Row label="Cluster" value={varz.cluster.name} />}
 
-      <SectionLabel>Traffic</SectionLabel>
+      <SectionLabel hint={SPARK_LABEL}>Traffic</SectionLabel>
       <Row
         label="Connections"
         value={`${fmtCount(varz.connections)} (${fmtCount(varz.totalConnections)} total)`}
       />
-      <Row
+      <MetricRow
         label="Throughput"
         value={r ? `${fmtCount(Math.round(r.msgsPerSec))}/s` : "-"}
+        points={rateSeries(samples, TOTAL_MSGS)}
       />
-      <Row label="Data rate" value={r ? `${fmtBytes(r.bytesPerSec)}/s` : "-"} />
+      <MetricRow
+        label="Data rate"
+        value={r ? `${fmtBytes(r.bytesPerSec)}/s` : "-"}
+        points={rateSeries(samples, TOTAL_BYTES)}
+      />
       <Row label="Subscriptions" value={fmtCount(varz.subscriptions)} />
       <Row
         label="Slow consumers"
@@ -171,8 +232,13 @@ function Dashboard({
         View all connections →
       </button>
 
-      <SectionLabel>Resources</SectionLabel>
-      <Row label="Memory" value={fmtBytes(varz.mem)} />
+      <SectionLabel hint={SPARK_LABEL}>Resources</SectionLabel>
+      <MetricRow
+        label="Memory"
+        value={fmtBytes(varz.mem)}
+        points={gaugeSeries(samples, (s) => s.mem)}
+        tone="text-muted-foreground"
+      />
       <Row label="CPU" value={`${varz.cpu.toFixed(0)}%`} />
 
       {jsz && (
