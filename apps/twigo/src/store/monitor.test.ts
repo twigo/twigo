@@ -24,8 +24,10 @@ function sample(t: number, over: Partial<Sample> = {}): Sample {
     inBytes: 0,
     outBytes: 0,
     connections: 0,
+    subscriptions: 0,
     slowConsumers: 0,
     mem: 0,
+    cpu: 0,
     ...over,
   };
 }
@@ -37,8 +39,10 @@ function varz(over: Record<string, number> = {}) {
     inBytes: 3,
     outBytes: 4,
     connections: 5,
+    subscriptions: 8,
     slowConsumers: 0,
     mem: 6,
+    cpu: 9,
     ...over,
   };
 }
@@ -76,6 +80,24 @@ describe("useMonitor.poll", () => {
       await useMonitor.getState().poll("c", null);
       expect(monitorVarz).toHaveBeenCalledTimes(2);
       expect(useMonitor.getState().byConn.c?.status).toBe("ready");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("skips a poll that lands inside the minimum sample spacing", async () => {
+    vi.useFakeTimers();
+    try {
+      monitorVarz.mockResolvedValue(varz());
+      await useMonitor.getState().poll("c", null, 2000);
+      vi.setSystemTime(Date.now() + 500);
+      await useMonitor.getState().poll("c", null, 2000);
+      expect(monitorVarz).toHaveBeenCalledTimes(1);
+
+      vi.setSystemTime(Date.now() + 2000);
+      await useMonitor.getState().poll("c", null, 2000);
+      expect(monitorVarz).toHaveBeenCalledTimes(2);
+      expect(useMonitor.getState().byConn.c?.samples).toHaveLength(2);
     } finally {
       vi.useRealTimers();
     }

@@ -23,8 +23,10 @@ export interface Sample {
   inBytes: number;
   outBytes: number;
   connections: number;
+  subscriptions: number;
   slowConsumers: number;
   mem: number;
+  cpu: number;
 }
 
 interface MonitorConnState {
@@ -62,7 +64,11 @@ function retain(samples: Sample[], next: Sample): Sample[] {
 
 interface MonitorStore {
   byConn: Record<string, MonitorConnState>;
-  poll: (connId: string, monitoringUrl: string | null) => Promise<void>;
+  poll: (
+    connId: string,
+    monitoringUrl: string | null,
+    minIntervalMs?: number,
+  ) => Promise<void>;
   reset: (connId: string) => void;
 }
 
@@ -84,7 +90,7 @@ export const useMonitor = create<MonitorStore>((set, get) => {
   return {
     byConn: {},
 
-    poll: async (connId, monitoringUrl) => {
+    poll: async (connId, monitoringUrl, minIntervalMs = 0) => {
       const cur = get().byConn[connId] ?? EMPTY;
       if (
         cur.status === "unavailable" &&
@@ -92,6 +98,11 @@ export const useMonitor = create<MonitorStore>((set, get) => {
       ) {
         return;
       }
+      // Several surfaces can poll one connection (the view and the metrics tab);
+      // they share one sample series, so a second poller inside the interval
+      // would only double the request rate and skew the rates it feeds.
+      const newest = cur.samples[cur.samples.length - 1];
+      if (newest && Date.now() - newest.t < minIntervalMs) return;
       if (cur.status === "idle")
         patch(connId, (s) => ({ ...s, status: "loading" }));
       const epoch = epochOf(connId);
@@ -109,8 +120,10 @@ export const useMonitor = create<MonitorStore>((set, get) => {
           inBytes: varz.inBytes,
           outBytes: varz.outBytes,
           connections: varz.connections,
+          subscriptions: varz.subscriptions,
           slowConsumers: varz.slowConsumers,
           mem: varz.mem,
+          cpu: varz.cpu,
         };
         patch(connId, (s) => ({
           ...s,

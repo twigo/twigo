@@ -21,8 +21,12 @@ import {
 import { fmtBytes, fmtCount } from "@twigo/utils";
 import { monitorConnz, monitorCluster, type Connz, type Varz } from "@/lib/api";
 import { useMonitorConfig } from "@/store/monitorConfig";
+import { useMonitor, type Sample } from "@/store/monitor";
+import { useMonitorPoll } from "@/hooks/useMonitorPoll";
+import { MetricsSection } from "./MetricsSection";
 
 const LIMIT = 100;
+const NO_SAMPLES: Sample[] = [];
 
 interface Col {
   label: string;
@@ -43,6 +47,8 @@ const COLS: Col[] = [
 
 export function ServerHealthPanel({ connId }: { connId: string }) {
   const monitoringUrl = useMonitorConfig((s) => s.urls[connId] ?? null);
+  const samples = useMonitor((s) => s.byConn[connId]?.samples ?? NO_SAMPLES);
+  useMonitorPoll(connId, monitoringUrl);
   const [sort, setSort] = useState("pending");
   const [offset, setOffset] = useState(0);
   const [tick, setTick] = useState(0);
@@ -101,9 +107,9 @@ export function ServerHealthPanel({ connId }: { connId: string }) {
     <div className="flex h-full min-h-0 flex-col bg-editor">
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-2">
         <Activity className="size-3.5 text-brand" />
-        <span className="text-[11px] font-semibold">Connections</span>
+        <span className="text-[11px] font-semibold">Server health</span>
         <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-          {fmtCount(total)}
+          {fmtCount(total)} connections
         </span>
         <Button
           variant="ghost"
@@ -147,6 +153,8 @@ export function ServerHealthPanel({ connId }: { connId: string }) {
           })}
         </div>
       )}
+
+      <MetricsSection samples={samples} />
 
       {error ? (
         <EmptyState

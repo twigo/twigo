@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { RefreshCw, Activity, ShieldCheck, Plug } from "lucide-react";
 import { Button, EmptyState, Input, Sparkline, cn } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
 import { useConnections } from "@/store/connections";
 import { useMonitorConfig } from "@/store/monitorConfig";
 import { openServerHealth } from "@/lib/editor";
+import { useMonitorPoll, MONITOR_POLL_MS } from "@/hooks/useMonitorPoll";
 import {
   useMonitor,
   rates,
@@ -18,30 +19,11 @@ import {
 import type { ViewProps } from "@/shell/views";
 import type { Varz, Jsz, Healthz } from "@/lib/api";
 
-const POLL_MS = 3000;
 const SPARK_WINDOW_MS = 15 * 60_000;
 const SPARK_LABEL = "last 15m";
 // A slow or failed poll shouldn't fracture the line; a real pause in sampling
 // (the view was closed) should.
-const SPARK_GAP_MS = POLL_MS * 4;
-
-function useMonitorPoll(
-  connId: string | null,
-  monitoringUrl: string | null,
-  intervalMs = POLL_MS,
-) {
-  const poll = useMonitor((s) => s.poll);
-  useEffect(() => {
-    if (!connId) return;
-    const tick = () => {
-      if (document.visibilityState === "visible")
-        void poll(connId, monitoringUrl);
-    };
-    tick();
-    const id = setInterval(tick, intervalMs);
-    return () => clearInterval(id);
-  }, [connId, monitoringUrl, intervalMs, poll]);
-}
+const SPARK_GAP_MS = MONITOR_POLL_MS * 4;
 
 type Verdict = "ok" | "warn" | "error";
 
@@ -138,32 +120,42 @@ function SectionLabel({
   );
 }
 
+// The sidebar has room for a glance, not for reading a chart - so the whole row
+// opens the full-size version in a tab.
 function MetricRow({
   label,
   value,
   points,
   tone,
+  onOpen,
 }: {
   label: string;
   value: string;
   points: SeriesPoint[];
   tone?: string;
+  onOpen: () => void;
 }) {
   return (
-    <div className="flex items-center gap-2 px-2 py-1 text-xs">
+    <button
+      type="button"
+      onClick={onOpen}
+      title={`${label} — open full charts`}
+      className="flex w-full items-center gap-2 rounded-sm px-2 py-1 text-xs hover:bg-row-hover focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+    >
       <span className="shrink-0 text-muted-foreground">{label}</span>
       <div className={cn("min-w-8 flex-1", tone ?? "text-brand")}>
         <Sparkline
           points={points}
           windowMs={SPARK_WINDOW_MS}
           gapMs={SPARK_GAP_MS}
+          height={24}
           label={`${label}, ${SPARK_LABEL}`}
         />
       </div>
       <span className="shrink-0 font-mono tabular-nums text-foreground">
         {value}
       </span>
-    </div>
+    </button>
   );
 }
 
@@ -212,11 +204,13 @@ function Dashboard({
         label="Throughput"
         value={r ? `${fmtCount(Math.round(r.msgsPerSec))}/s` : "-"}
         points={rateSeries(samples, TOTAL_MSGS)}
+        onOpen={() => openServerHealth(connId)}
       />
       <MetricRow
         label="Data rate"
         value={r ? `${fmtBytes(r.bytesPerSec)}/s` : "-"}
         points={rateSeries(samples, TOTAL_BYTES)}
+        onOpen={() => openServerHealth(connId)}
       />
       <Row label="Subscriptions" value={fmtCount(varz.subscriptions)} />
       <Row
@@ -229,7 +223,7 @@ function Dashboard({
         onClick={() => openServerHealth(connId)}
         className="mx-2 mt-1 flex w-[calc(100%-1rem)] items-center justify-center gap-1 rounded border border-border py-1 text-[11px] text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground"
       >
-        View all connections →
+        Server health & charts →
       </button>
 
       <SectionLabel hint={SPARK_LABEL}>Resources</SectionLabel>
@@ -238,6 +232,7 @@ function Dashboard({
         value={fmtBytes(varz.mem)}
         points={gaugeSeries(samples, (s) => s.mem)}
         tone="text-muted-foreground"
+        onOpen={() => openServerHealth(connId)}
       />
       <Row label="CPU" value={`${varz.cpu.toFixed(0)}%`} />
 
