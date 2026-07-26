@@ -62,6 +62,10 @@ function LagTrend({ points }: { points: SeriesPoint[] }) {
         windowMs={LAG_WINDOW_MS}
         gapMs={LAG_GAP_MS}
         height={40}
+        // The number below carries the magnitude; this answers the other
+        // question - whether the backlog is growing - and from zero a lag of
+        // thousands is a filled box with no shape in it.
+        baseline="auto"
         label={`Unprocessed messages, last ${covered}`}
         className="text-brand"
       />
