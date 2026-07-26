@@ -12,24 +12,52 @@
 
 ## Why
 
-Existing NATS GUIs are functional but the experience is dated. Twigo aims to be
-the tool you actually enjoy using: a fast, keyboard-first, well-designed client
-that imports your existing `nats` CLI contexts and gets out of your way.
+NATS has excellent command-line tooling and a couple of serviceable GUIs. The
+GUIs tend to be shaped like admin panels: a form per feature, a refresh button
+where live data belongs, no memory of what you had open yesterday.
 
-## Features
+Twigo is shaped like an IDE. Tree on the left, tabs in the middle, inspector on
+the right, and everything on the keyboard — `⇧⌘P` for the command palette, `⌘\`
+to split, `?` for the rest. It reads the contexts your `nats` CLI already has,
+so there is no second place to keep connection details in sync.
 
-- Imports your existing `nats` CLI contexts (`~/.config/nats/context/`), with a
-  configurable directory and an opt-in public demo server (`demo.nats.io`)
-- Connect / disconnect with live status; creds, token, user/password, nkey, and
-  TLS (CA, client certificate, handshake-first); read-only contexts
-- Subject explorer with live message rates
-- Live subscriptions, publish, and request/reply
-- Message viewer (JSON / text / hex) with message-to-message diff
-- JetStream: streams & consumers, plus a message browser
-- KV store browser with revision history
-- Object store browser
-- Server monitoring overview (varz / connz / jsz)
-- Command palette, native menu, light & dark themes
+## What it does
+
+**Connections.** Imports `~/.config/nats/context/` and writes the same format
+back, so contexts round-trip with the CLI. Auth via creds file, token,
+user/password or nkey; TLS with a CA and client certificate, including
+handshake-first servers. Any context can be locked read-only — enforced in the
+Rust layer, not by hiding buttons in the UI.
+
+**Messaging.** The subject explorer builds a tree from live traffic and shows
+per-subject rates, since core NATS has no subject registry to ask. Subscribe,
+publish, request/reply. The viewer renders JSON, text and hex, and will diff any
+two messages against each other. Sends land in a history you can replay from.
+
+**JetStream.** Streams and consumers, with a message browser that walks
+sequences through `get_raw_message` — it never creates a consumer and never
+moves an ack floor, so browsing production is safe. Stream edits are
+read-modify-write and land behind a diff you have to confirm. Consumer
+pause/resume on servers 2.11 and newer.
+
+**KV and Object Store.** Both read and write. KV keeps revision history and
+updates through CAS, so a conflict comes back as a conflict rather than a
+silent overwrite.
+
+**Payload codecs.** Protobuf, MessagePack and CBOR, decoding _and_ encoding.
+Point it at a `.proto` and it compiles in-app; map a subject pattern to a codec
+and every viewer downstream decodes through it, while publishing encodes on the
+way out. Replayed messages keep their exact bytes.
+
+**Responders.** Answer a subject from a template to mock a service. The `{{ }}`
+expressions run in a sandboxed QuickJS instance with the request in scope.
+
+**Monitoring.** varz, connz and jsz over `$SYS`, or over the HTTP monitoring
+port when the connection isn't a system account. Throughput, memory and consumer
+lag are charted over time instead of sampled once.
+
+Plus the workbench bits: command palette with recents, split panes, native menu,
+per-technology space tabs, light and dark themes.
 
 ## Install
 
@@ -53,12 +81,11 @@ docker compose up -d   # local NATS with JetStream (:4222) + monitoring (:8222)
 pnpm tauri dev         # run the app
 ```
 
-Day-to-day development only needs `pnpm tauri dev`. Producing a release bundle
-(`pnpm tauri build`) signs the auto-update artifacts, so it needs the
-`TAURI_SIGNING_PRIVATE_KEY` environment variable set; the release workflow does
-this in CI.
+Day-to-day development only needs `pnpm tauri dev`. A release bundle
+(`pnpm tauri build`) also signs the auto-update artifacts, so it expects
+`TAURI_SIGNING_PRIVATE_KEY` in the environment; CI sets that during a release.
 
-To generate continuous fake traffic for testing the subject explorer:
+For something to look at in the subject explorer, there is a traffic generator:
 
 ```bash
 docker compose --profile traffic up -d   # publishes to telemetry.*, orders.*, …
