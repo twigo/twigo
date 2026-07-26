@@ -25,41 +25,50 @@ export interface ChartDef {
   title: string;
   series: (samples: Sample[]) => SeriesPoint[];
   format: (v: number) => string;
+  // Rates are read against zero or the chart overstates them; a gauge is read
+  // against itself, so scaling to its own range is what makes movement visible.
+  baseline: "zero" | "auto";
 }
 
 export const CHARTS: ChartDef[] = [
   {
     id: "throughput",
+    baseline: "zero" as const,
     title: "Throughput",
     series: (s) => rateSeries(s, TOTAL_MSGS),
     format: (v) => `${fmtCount(Math.round(v))}/s`,
   },
   {
     id: "dataRate",
+    baseline: "zero" as const,
     title: "Data rate",
     series: (s) => rateSeries(s, TOTAL_BYTES),
     format: (v) => `${fmtBytes(v)}/s`,
   },
   {
     id: "connections",
+    baseline: "auto" as const,
     title: "Connections",
     series: (s) => gaugeSeries(s, (x) => x.connections),
     format: fmtCount,
   },
   {
     id: "subscriptions",
+    baseline: "auto" as const,
     title: "Subscriptions",
     series: (s) => gaugeSeries(s, (x) => x.subscriptions),
     format: fmtCount,
   },
   {
     id: "memory",
+    baseline: "auto" as const,
     title: "Memory",
     series: (s) => gaugeSeries(s, (x) => x.mem),
     format: fmtBytes,
   },
   {
     id: "cpu",
+    baseline: "auto" as const,
     title: "CPU",
     series: (s) => gaugeSeries(s, (x) => x.cpu),
     format: (v) => `${v.toFixed(0)}%`,

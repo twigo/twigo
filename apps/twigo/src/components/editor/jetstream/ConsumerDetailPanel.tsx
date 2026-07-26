@@ -7,8 +7,8 @@ import {
   Play,
   Trash2,
 } from "lucide-react";
-import { Button, EmptyState, Sparkline } from "@twigo/ui";
-import { fmtCount } from "@twigo/utils";
+import { Button, EmptyState, Sparkline, sparkSpan } from "@twigo/ui";
+import { fmtCount, fmtDuration } from "@twigo/utils";
 import { jsPauseConsumer, jsResumeConsumer, jsDeleteConsumer } from "@/lib/api";
 import { useConsumerDetail } from "@/hooks/useJetStreamDetail";
 import { useIsReadOnly } from "@/hooks/useIsReadOnly";
@@ -44,20 +44,25 @@ const LAG_GAP_MS = 20_000;
 
 function LagTrend({ points }: { points: SeriesPoint[] }) {
   if (points.length < 2) return null;
+  // Sampling starts when the panel opens, so the axis - and the label - cover
+  // what was actually watched rather than the full window.
+  const covered = fmtDuration(sparkSpan(points, LAG_WINDOW_MS) * 1e6);
   return (
     <div className="mb-2 border-b border-border pb-2">
       <div className="mb-1 flex items-baseline justify-between">
         <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
           Lag trend
         </span>
-        <span className="text-[10px] text-muted-foreground">last 15m</span>
+        <span className="text-[10px] text-muted-foreground">
+          last {covered}
+        </span>
       </div>
       <Sparkline
         points={points}
         windowMs={LAG_WINDOW_MS}
         gapMs={LAG_GAP_MS}
         height={40}
-        label="Unprocessed messages, last 15 minutes"
+        label={`Unprocessed messages, last ${covered}`}
         className="text-brand"
       />
     </div>

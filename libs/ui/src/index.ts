@@ -17,6 +17,7 @@ export * from "./components/empty-state";
 export * from "./components/kbd";
 export * from "./components/skeleton";
 export * from "./components/sparkline";
+export { sparkSpan } from "./lib/sparkline";
 export type { SparkPoint } from "./lib/sparkline";
 export * from "./components/code-viewer";
 export { cn } from "./lib/cn";

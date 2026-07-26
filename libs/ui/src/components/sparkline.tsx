@@ -6,6 +6,7 @@ export function Sparkline({
   windowMs,
   gapMs,
   label,
+  baseline,
   height = 18,
   className,
 }: {
@@ -13,10 +14,16 @@ export function Sparkline({
   windowMs: number;
   gapMs: number;
   label: string;
+  baseline?: "zero" | "auto";
   height?: number;
   className?: string;
 }) {
-  const { line, area } = sparkGeometry(points, { windowMs, gapMs, height });
+  const { line, area } = sparkGeometry(points, {
+    windowMs,
+    gapMs,
+    height,
+    baseline,
+  });
 
   // Hold the row's height before the first samples land, so nothing shifts.
   if (!line) {

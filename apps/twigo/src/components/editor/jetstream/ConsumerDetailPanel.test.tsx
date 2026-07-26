@@ -72,10 +72,9 @@ describe("ConsumerDetailPanel", () => {
 
     await tick();
     expect(screen.getByText("Lag trend")).toBeInTheDocument();
+    // Two polls five seconds apart: the chart says five seconds, not 15m.
     expect(
-      screen.getByRole("img", {
-        name: "Unprocessed messages, last 15 minutes",
-      }),
+      screen.getByRole("img", { name: "Unprocessed messages, last 5s" }),
     ).toBeInTheDocument();
   });
 

@@ -33,23 +33,26 @@ describe("MetricsSection", () => {
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
 
-  it("charts every metric once there are samples, labelled with the window", () => {
+  it("charts every metric once there are samples", () => {
     render(<MetricsSection samples={SAMPLES} />);
 
     expect(screen.getAllByRole("img")).toHaveLength(6);
-    expect(
-      screen.getByRole("img", { name: "Throughput, last 15m" }),
-    ).toBeInTheDocument();
     expect(screen.getByText("40/s")).toBeInTheDocument();
   });
 
-  it("re-labels the charts when the window changes", () => {
+  it("labels the charts with the span actually sampled, not the window", () => {
     render(<MetricsSection samples={SAMPLES} />);
 
-    fireEvent.click(screen.getByRole("radio", { name: "1h" }));
-
+    // One second of history under a 15m window: the axis covers a second, so
+    // saying "15m" anywhere would be a lie.
     expect(
-      screen.getByRole("img", { name: "Throughput, last 1h" }),
+      screen.getByRole("img", { name: "Throughput, last 1s" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("1s sampled")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "1h" }));
+    expect(
+      screen.getByRole("img", { name: "Throughput, last 1s" }),
     ).toBeInTheDocument();
   });
 

@@ -1,7 +1,13 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { Sparkline, ToggleGroup, ToggleGroupItem, cn } from "@twigo/ui";
-import { fmtTime } from "@twigo/utils";
+import {
+  Sparkline,
+  ToggleGroup,
+  ToggleGroupItem,
+  sparkSpan,
+  cn,
+} from "@twigo/ui";
+import { fmtTime, fmtDuration } from "@twigo/utils";
 import { MONITOR_POLL_MS } from "@/hooks/useMonitorPoll";
 import type { Sample, SeriesPoint } from "@/store/monitor";
 import {
@@ -23,12 +29,12 @@ function ChartCard({
   def,
   samples,
   windowMs,
-  windowId,
+  covered,
 }: {
   def: ChartDef;
   samples: Sample[];
   windowMs: number;
-  windowId: WindowId;
+  covered: string;
 }) {
   const points = useMemo(() => def.series(samples), [def, samples]);
   const [hover, setHover] = useState<SeriesPoint | null>(null);
@@ -69,7 +75,8 @@ function ChartCard({
           windowMs={windowMs}
           gapMs={GAP_MS}
           height={CHART_HEIGHT}
-          label={`${def.title}, last ${windowId}`}
+          baseline={def.baseline}
+          label={`${def.title}, last ${covered}`}
         />
         {hover && (
           <span
@@ -89,6 +96,10 @@ export function MetricsSection({ samples }: { samples: Sample[] }) {
   const [windowId, setWindowId] = useState<WindowId>("15m");
   const [open, setOpen] = useState(true);
   const windowMs = windowMsOf(windowId);
+  // The axis only covers what was sampled, so the label has to say so - a chart
+  // headed "1h" over four minutes of history would be a lie.
+  const coveredMs = sparkSpan(samples, windowMs);
+  const covered = coveredMs > 0 ? fmtDuration(coveredMs * 1e6) : "0s";
   const Chevron = open ? ChevronDown : ChevronRight;
 
   return (
@@ -103,6 +114,11 @@ export function MetricsSection({ samples }: { samples: Sample[] }) {
           <Chevron className="size-3" />
           Metrics
         </button>
+        {open && coveredMs < windowMs && (
+          <span className="text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
+            {covered} sampled
+          </span>
+        )}
         <ToggleGroup
           type="single"
           value={windowId}
@@ -133,7 +149,7 @@ export function MetricsSection({ samples }: { samples: Sample[] }) {
                 def={def}
                 samples={samples}
                 windowMs={windowMs}
-                windowId={windowId}
+                covered={covered}
               />
             ))}
           </div>

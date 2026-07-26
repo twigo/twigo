@@ -1,11 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { sparkGeometry } from "./sparkline";
+import { sparkGeometry, sparkSpan } from "./sparkline";
 
 const OPTS = { windowMs: 100, gapMs: 60, height: 10 };
 
 describe("sparkGeometry", () => {
   it("has nothing to draw without points", () => {
-    expect(sparkGeometry([], OPTS)).toEqual({ line: "", area: "", yMax: 0 });
+    expect(sparkGeometry([], OPTS)).toEqual({
+      line: "",
+      area: "",
+      yMax: 0,
+      spanMs: 0,
+    });
   });
 
   it("anchors the newest sample at the right edge and scales from zero", () => {
@@ -24,7 +29,7 @@ describe("sparkGeometry", () => {
   });
 
   it("drops samples that fall out of the window", () => {
-    const { line } = sparkGeometry(
+    const { line, spanMs } = sparkGeometry(
       [
         { t: 500, v: 99 },
         { t: 950, v: 1 },
@@ -33,7 +38,10 @@ describe("sparkGeometry", () => {
       OPTS,
     );
 
-    expect(line).toBe("M50,1L100,1");
+    // Only 50ms of history survives, so the axis covers 50ms - not the whole
+    // window with the line squeezed against the right edge.
+    expect(spanMs).toBe(50);
+    expect(line).toBe("M0,1L100,1");
   });
 
   it("breaks the line across a sampling gap instead of bridging it", () => {
@@ -65,6 +73,47 @@ describe("sparkGeometry", () => {
     );
 
     expect(yMax).toBe(0);
-    expect(line).toBe("M50,9L100,9");
+    expect(line).toBe("M0,9L100,9");
+  });
+});
+
+describe("baselines", () => {
+  const flat = [
+    { t: 950, v: 6 },
+    { t: 1000, v: 6 },
+  ];
+
+  it("pins a rate to zero, so an unchanging one still reads against nothing", () => {
+    expect(sparkGeometry(flat, OPTS).line).toBe("M0,1L100,1");
+  });
+
+  it("draws an unchanging gauge through the middle instead of a filled block", () => {
+    expect(sparkGeometry(flat, { ...OPTS, baseline: "auto" }).line).toBe(
+      "M0,5L100,5",
+    );
+  });
+
+  it("scales a gauge to its own range, so small movement is visible", () => {
+    const { line } = sparkGeometry(
+      [
+        { t: 900, v: 100 },
+        { t: 950, v: 101 },
+        { t: 1000, v: 102 },
+      ],
+      { ...OPTS, baseline: "auto" },
+    );
+
+    // 100 sits on the floor and 102 at the top; against zero all three would
+    // have been the same pixel.
+    expect(line).toBe("M0,9L50,5L100,1");
+  });
+});
+
+describe("sparkSpan", () => {
+  it("is the history until it reaches the window, then the window", () => {
+    expect(sparkSpan([], 100)).toBe(0);
+    expect(sparkSpan([{ t: 1000 }], 100)).toBe(0);
+    expect(sparkSpan([{ t: 970 }, { t: 1000 }], 100)).toBe(30);
+    expect(sparkSpan([{ t: 500 }, { t: 900 }, { t: 1000 }], 100)).toBe(100);
   });
 });
