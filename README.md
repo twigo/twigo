@@ -31,41 +31,42 @@ so there is no second place to keep connection details in sync.
 
 ## What it does
 
-**Connections.** Imports `~/.config/nats/context/` and writes the same format
-back, so contexts round-trip with the CLI. Auth via creds file, token,
-user/password or nkey; TLS with a CA and client certificate, including
-handshake-first servers. Any context can be locked read-only — enforced in the
-Rust layer, not by hiding buttons in the UI.
+**Connections.** Imports the contexts your `nats` CLI already has and writes them
+back in the same format, so the two stay in sync. Creds files, tokens,
+user/password, nkeys, TLS with a client certificate. Any context can be locked
+read-only, and Twigo then refuses every write — a production connection can't be
+fat-fingered.
 
-**Messaging.** The subject explorer builds a tree from live traffic and shows
-per-subject rates, since core NATS has no subject registry to ask. Subscribe,
-publish, request/reply. The viewer renders JSON, text and hex, and will diff any
-two messages against each other. Sends land in a history you can replay from.
+**Messaging.** Subjects don't announce themselves in NATS, so the explorer
+discovers them from live traffic and shows the rate on each. Subscribe, publish,
+request/reply. Messages render as JSON, text or hex, and any two can be diffed
+against each other. Everything you send is kept, ready to be sent again.
 
-**JetStream.** Streams and consumers, with a message browser that walks
-sequences through `get_raw_message` — it never creates a consumer and never
-moves an ack floor, so browsing production is safe. Stream edits are
-read-modify-write and land behind a diff you have to confirm. Consumer
-pause/resume on servers 2.11 and newer.
+**JetStream.** Streams and consumers, with a message browser that is safe to
+point at production: reading stored messages never creates a consumer and never
+moves anyone's position in the stream. Editing a stream shows a diff of exactly
+what will change before any of it is applied. Consumers can be paused and
+resumed on servers 2.11 and newer.
 
-**KV and Object Store.** Both read and write. KV keeps revision history and
-updates through CAS, so a conflict comes back as a conflict rather than a
-silent overwrite.
+**KV and Object Store.** Read and write both. KV keeps revision history, and a
+value that changed under you comes back as a conflict instead of quietly
+overwriting somebody else's work.
 
-**Payload codecs.** Protobuf, MessagePack and CBOR, decoding _and_ encoding.
-Point it at a `.proto` and it compiles in-app; map a subject pattern to a codec
-and every viewer downstream decodes through it, while publishing encodes on the
-way out. Replayed messages keep their exact bytes.
+**Payload codecs.** Protobuf, MessagePack and CBOR, decoded _and_ encoded. Point
+Twigo at a `.proto` file and map a subject to a message type: every message on
+that subject is readable everywhere in the app, and publishing to it encodes on
+the way out.
 
-**Responders.** Answer a subject from a template to mock a service. The `{{ }}`
-expressions run in a sandboxed QuickJS instance with the request in scope.
+**Responders.** Mock a service by answering a subject from a template, with the
+incoming request in scope — for when the thing you're integrating against
+doesn't exist yet.
 
-**Monitoring.** varz, connz and jsz over `$SYS`, or over the HTTP monitoring
-port when the connection isn't a system account. Throughput, memory and consumer
-lag are charted over time instead of sampled once.
+**Monitoring.** Server health from the system account, or from the HTTP
+monitoring port when that isn't available. Throughput, memory and consumer lag
+are charted over time, so you can see a trend rather than a single reading.
 
-Plus the workbench bits: command palette with recents, split panes, native menu,
-per-technology space tabs, light and dark themes.
+Plus the workbench around it: a command palette, split panes, a native menu,
+per-technology tabs, and light and dark themes.
 
 ## Install
 
