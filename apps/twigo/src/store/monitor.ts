@@ -98,9 +98,8 @@ export const useMonitor = create<MonitorStore>((set, get) => {
       ) {
         return;
       }
-      // Several surfaces can poll one connection (the view and the metrics tab);
-      // they share one sample series, so a second poller inside the interval
-      // would only double the request rate and skew the rates it feeds.
+      // The view and the metrics tab share one series, so a second poller inside
+      // the interval would double the request rate and skew the rates it feeds.
       const newest = cur.samples[cur.samples.length - 1];
       if (newest && Date.now() - newest.t < minIntervalMs) return;
       if (cur.status === "idle")
@@ -162,8 +161,7 @@ export const useMonitor = create<MonitorStore>((set, get) => {
 registerConnScoped(useMonitor);
 
 // Per-second deltas of a cumulative counter, stamped at the later sample. A
-// server restart resets the counters, so a negative delta yields no point at
-// all rather than a spike the server never served.
+// server restart resets the counters, so a negative delta yields no point.
 export function rateSeries(
   samples: Sample[],
   pick: (s: Sample) => number,

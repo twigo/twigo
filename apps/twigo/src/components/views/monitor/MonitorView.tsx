@@ -281,10 +281,8 @@ export function MonitorView({ connId }: ViewProps) {
   useMonitorPoll(isConnected ? connId : null, monitoringUrl);
 
   const status = data?.status ?? "idle";
-  // Opening Monitoring opens the charts: this panel is the summary, the tab is
-  // where a trend is actually readable. Held until the server answers, so the
-  // monitoring-setup flow stays here instead of opening onto errors. Closing
-  // the tab is respected - this only fires when the view (re)opens.
+  // Held until the server answers, so the monitoring-setup flow below stays in
+  // the sidebar instead of opening a tab onto errors.
   const ready = status === "ready";
   useEffect(() => {
     if (connId && ready) openServerHealth(connId);

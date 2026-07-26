@@ -15,7 +15,7 @@ import {
   type WindowId,
 } from "./metrics";
 
-// A pause in sampling (the tab was closed) breaks the line; a slow poll doesn't.
+// Four missed polls, not one slow one.
 const GAP_MS = MONITOR_POLL_MS * 4;
 const CHART_HEIGHT = 48;
 

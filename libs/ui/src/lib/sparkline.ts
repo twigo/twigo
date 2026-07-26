@@ -4,10 +4,9 @@ export interface SparkPoint {
 }
 
 export interface SparkOptions {
-  // Time span the chart covers, ending at the newest point.
+  // Ends at the newest point.
   windowMs: number;
-  // Break the line where consecutive samples are further apart than this, so a
-  // pause in sampling reads as a gap instead of a straight line across it.
+  // Past this, a pause in sampling reads as a gap rather than a line across it.
   gapMs: number;
   height: number;
   width?: number;

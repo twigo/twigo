@@ -2,9 +2,7 @@ import { useEffect } from "react";
 import { useMonitor } from "@/store/monitor";
 
 export const MONITOR_POLL_MS = 3000;
-// A floor on the sample spacing, not a lock: the monitor view and the metrics
-// tab both drive sampling into one shared series, and a poll landing right
-// behind another's would only double the request rate for no extra detail.
+// A floor on the sample spacing, not a lock - see the dedupe in the store.
 const MIN_SAMPLE_MS = MONITOR_POLL_MS * 0.75;
 
 export function useMonitorPoll(

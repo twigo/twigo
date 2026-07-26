@@ -6,9 +6,9 @@ export interface SeriesPoint {
   v: number;
 }
 
-// Rolling history of a polled number, keyed by connection and a caller-chosen
-// id, so a detail panel grows a trend line without a store of its own. Memory
-// only - a chart restored from disk would span a window nothing sampled.
+// Rolling history of a polled number, so a detail panel grows a trend line
+// without a store of its own. Never persisted - a chart restored from disk
+// would span a window nothing sampled.
 const RETENTION_MS = 30 * 60_000;
 const MAX_POINTS = 720;
 

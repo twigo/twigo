@@ -24,8 +24,7 @@ describe("setWindowTitle", () => {
     setWindowTitle("prod-eu");
     expect(document.title).toBe("Twigo - prod-eu");
 
-    // Setting the native title resets the macOS traffic lights, so this must
-    // never reach for the window API again.
+    // Setting the native title resets the macOS traffic lights.
     expect(getCurrentWindow).not.toHaveBeenCalled();
   });
 });

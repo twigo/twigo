@@ -1,9 +1,6 @@
 import { cn } from "../lib/cn";
 import { sparkGeometry, type SparkPoint } from "../lib/sparkline";
 
-// A trend line for one metric, drawn in the current text colour so a caller
-// tints it by tone. Stretches to the width it is given (preserveAspectRatio
-// none) and keeps a constant stroke while doing so.
 export function Sparkline({
   points,
   windowMs,

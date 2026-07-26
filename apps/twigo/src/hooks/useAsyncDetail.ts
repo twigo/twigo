@@ -53,9 +53,8 @@ export function useAsyncDetail<T>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, reloadKey]);
 
-  // A background refresh never flips `loading` (the panel would flicker its
-  // spinner every tick) and never replaces good data with a transient failure -
-  // it marks the panel stale until a poll succeeds again.
+  // Never flips `loading` (the spinner would flicker every tick) and never
+  // drops good data for a transient failure - it marks the panel stale instead.
   useEffect(() => {
     if (!pollMs) return;
     let cancelled = false;
