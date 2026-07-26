@@ -17,6 +17,7 @@ import { useResponder } from "@/store/responder";
 import { useReadOnly } from "@/store/readonly";
 import { useMonitorConfig } from "@/store/monitorConfig";
 import { useCodecs } from "@/store/codecs";
+import { useSpaces } from "@/store/spaces";
 import { resetConnScopedStores } from "@/store/connScoped";
 import { useToasts } from "@/store/toasts";
 
@@ -112,6 +113,7 @@ export const useConnections = create<ConnectionsState>()(
         const names = contexts.map((c) => c.name);
         useWorkspace.getState().prune(names);
         useResponder.getState().pruneConns(names);
+        useSpaces.getState().pruneTargets("nats", names);
 
         const selected = contexts.find((c) => c.selected)?.name ?? null;
         const remembered = useWorkspace.getState().activeContext;

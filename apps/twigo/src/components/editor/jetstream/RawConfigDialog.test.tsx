@@ -25,11 +25,13 @@ describe("RawConfigDialog", () => {
   it("reviews against the server's current config, not the opened snapshot", async () => {
     // The stream gained a republish block while the dialog sat open; applying
     // the edited text would drop it, so the review has to show that.
-    open(async () => ({
-      name: "ORDERS",
-      max_msgs: 10,
-      republish: { src: ">", dest: "mirror.>" },
-    }));
+    open(() =>
+      Promise.resolve({
+        name: "ORDERS",
+        max_msgs: 10,
+        republish: { src: ">", dest: "mirror.>" },
+      }),
+    );
 
     await userEvent.click(
       screen.getByRole("button", { name: "Review changes" }),
@@ -52,7 +54,7 @@ describe("RawConfigDialog", () => {
   });
 
   it("reports no changes when the server still matches the text", async () => {
-    open(async () => ({ name: "ORDERS", max_msgs: 10 }));
+    open(() => Promise.resolve({ name: "ORDERS", max_msgs: 10 }));
 
     await userEvent.click(
       screen.getByRole("button", { name: "Review changes" }),

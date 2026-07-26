@@ -78,7 +78,11 @@ describe("PublishEditor", () => {
     useHistory.setState({ entries: [] });
     request.mockRejectedValue(new IpcError("request", "no responders"));
     render(
-      <PublishEditor connId="c" initialSubject="orders.get" initialPayload="x" />,
+      <PublishEditor
+        connId="c"
+        initialSubject="orders.get"
+        initialPayload="x"
+      />,
     );
 
     await userEvent.click(screen.getByRole("button", { name: "Request" }));
