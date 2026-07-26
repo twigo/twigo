@@ -72,7 +72,7 @@ describe("MonitorView", () => {
   afterEach(cleanup);
 
   it("opens the charts tab once the server answers", async () => {
-    render(<MonitorView connId="c" />);
+    render(<MonitorView connId="c" filter="" />);
     await flush();
 
     expect(screen.getByText("Healthy")).toBeInTheDocument();
@@ -80,7 +80,7 @@ describe("MonitorView", () => {
   });
 
   it("summarises without charting - the tab owns the trends", async () => {
-    render(<MonitorView connId="c" />);
+    render(<MonitorView connId="c" filter="" />);
     await flush();
 
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
@@ -90,7 +90,7 @@ describe("MonitorView", () => {
   it("stays on the setup flow instead of opening a tab onto errors", async () => {
     mocks.monitorVarz.mockRejectedValue(new Error("no responders"));
 
-    render(<MonitorView connId="c" />);
+    render(<MonitorView connId="c" filter="" />);
     await flush();
 
     expect(screen.getByText("Monitoring off")).toBeInTheDocument();
