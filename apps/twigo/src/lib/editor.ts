@@ -43,7 +43,6 @@ function responderEditorId(connId: string, key: string): string {
   return `responder:${encodeURIComponent(connId)}:${encodeURIComponent(key)}`;
 }
 
-/** Open a subject stream in the editor area, reusing an existing tab. */
 export async function openStream(connId: string, subject: string) {
   if (!hasEditorApi()) return; // never subscribe without a UI surface to host the tab
   const id = streamEditorId(connId, subject);
@@ -61,7 +60,6 @@ export async function openStream(connId: string, subject: string) {
 // (e.g. republishing a different message into an already-open Publish tab).
 let publishSeed = 0;
 
-/** Open a publish/request tab for a connection, optionally prefilling subject, payload & headers. */
 export function openPublish(
   connId: string,
   subject?: string,
@@ -90,7 +88,6 @@ export function openPublish(
 
 let responderSeed = 0;
 
-/** Open an auto-responder/mock tab, optionally pre-targeting a subject. */
 export function openResponder(connId: string, subject?: string) {
   const seeded = subject?.trim() ? subject : `new-${(responderSeed += 1)}`;
   const id = responderEditorId(connId, seeded);
@@ -111,7 +108,6 @@ export function openResponderTab(id: string, connId: string, subject: string) {
   });
 }
 
-/** Open a server-info tab for a connection. */
 export function openServerInfo(connId: string) {
   open("server", {
     id: serverEditorId(connId),
@@ -132,7 +128,6 @@ function jsConsumerEditorId(
   return `jsconsumer:${encodeURIComponent(connId)}:${encodeURIComponent(stream)}:${encodeURIComponent(consumer)}`;
 }
 
-/** Open a JetStream stream detail tab, reusing an existing tab. */
 export function openStreamDetail(connId: string, stream: string) {
   open("jsstream", {
     id: jsStreamEditorId(connId, stream),
@@ -141,7 +136,6 @@ export function openStreamDetail(connId: string, stream: string) {
   });
 }
 
-/** Open a JetStream consumer detail tab, reusing an existing tab. */
 export function openConsumerDetail(
   connId: string,
   stream: string,
@@ -154,7 +148,6 @@ export function openConsumerDetail(
   });
 }
 
-/** Close a stream/consumer detail tab (e.g. after the entity is deleted). */
 export function closeStreamDetail(connId: string, stream: string) {
   closePanel(jsStreamEditorId(connId, stream));
 }
@@ -171,7 +164,6 @@ function kvEntryEditorId(connId: string, bucket: string, key: string): string {
   return `kventry:${encodeURIComponent(connId)}:${encodeURIComponent(bucket)}:${encodeURIComponent(key)}`;
 }
 
-/** Open a KV entry detail tab, reusing an existing tab. */
 export function openKvEntry(connId: string, bucket: string, key: string) {
   open("kventry", {
     id: kvEntryEditorId(connId, bucket, key),
@@ -192,7 +184,6 @@ function objEntryEditorId(
   return `objentry:${encodeURIComponent(connId)}:${encodeURIComponent(bucket)}:${encodeURIComponent(name)}`;
 }
 
-/** Open an Object Store object detail tab, reusing an existing tab. */
 export function openObjectEntry(connId: string, bucket: string, name: string) {
   open("objentry", {
     id: objEntryEditorId(connId, bucket, name),
@@ -209,7 +200,6 @@ function serviceEditorId(connId: string, name: string, id: string): string {
   return `service:${encodeURIComponent(connId)}:${encodeURIComponent(name)}:${encodeURIComponent(id)}`;
 }
 
-/** Open a micro service instance detail tab, reusing an existing tab. */
 export function openService(connId: string, name: string, id: string) {
   open("service", {
     id: serviceEditorId(connId, name, id),
@@ -218,7 +208,6 @@ export function openService(connId: string, name: string, id: string) {
   });
 }
 
-/** Open the wide Server-health tab (connections table) for a connection. */
 export function openServerHealth(connId: string) {
   open("serverhealth", {
     id: `serverhealth:${encodeURIComponent(connId)}`,
@@ -227,7 +216,6 @@ export function openServerHealth(connId: string) {
   });
 }
 
-/** Tear down a connection's editors + live sessions when it drops. */
 export function closeEditorsForConn(connId: string) {
   withReplacingLayout(() => {
     // Responders and streams are tab-independent (they persist across context
