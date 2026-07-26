@@ -44,6 +44,7 @@ interface CodecsState {
   removeSchema: (id: string) => void;
   addMapping: (connId: string, m: Omit<Mapping, "id">) => void;
   removeMapping: (connId: string, id: string) => void;
+  clearConn: (connId: string) => void;
   resolve: (connId: string, subject: string) => Mapping | null;
   schemaById: (id: string | undefined) => Schema | undefined;
 }
@@ -54,10 +55,19 @@ export const useCodecs = create<CodecsState>()(
       schemas: [],
       mappings: {},
 
+      // Re-import keeps the schema's id, so existing mappings decode with the new
+      // descriptor instead of the stale one.
       addSchema: (s) =>
-        set((state) => ({
-          schemas: [...state.schemas, { ...s, id: crypto.randomUUID() }],
-        })),
+        set((state) => {
+          const existing = state.schemas.find((x) => x.name === s.name);
+          return {
+            schemas: existing
+              ? state.schemas.map((x) =>
+                  x.id === existing.id ? { ...s, id: existing.id } : x,
+                )
+              : [...state.schemas, { ...s, id: crypto.randomUUID() }],
+          };
+        }),
 
       removeSchema: (id) =>
         set((state) => ({
@@ -94,15 +104,40 @@ export const useCodecs = create<CodecsState>()(
           },
         })),
 
+      // Mappings are keyed by context name; a later context reusing a deleted one's
+      // name would otherwise inherit another server's codecs.
+      clearConn: (connId) =>
+        set((state) => {
+          if (!(connId in state.mappings)) return state;
+          const { [connId]: _dropped, ...rest } = state.mappings;
+          return { mappings: rest };
+        }),
+
       resolve: (connId, subject) => {
         const ms = (get().mappings[connId] ?? []).filter((m) =>
           subjectMatches(m.pattern, subject),
         );
         if (ms.length === 0) return null;
-        const literals = (p: string) =>
-          p.split(".").filter((t) => t !== "*" && t !== ">").length;
+        // Specificity, most decisive first: literal tokens, bounded over a `>`
+        // tail, then length. Insertion order never decides.
+        const score = (p: string): number[] => {
+          const tokens = p.split(".");
+          return [
+            tokens.filter((t) => t !== "*" && t !== ">").length,
+            tokens.includes(">") ? 0 : 1,
+            tokens.length,
+          ];
+        };
+        const narrower = (a: number[], b: number[]) => {
+          for (let i = 0; i < a.length; i++) {
+            const x = a[i] ?? 0;
+            const y = b[i] ?? 0;
+            if (x !== y) return x > y;
+          }
+          return false;
+        };
         return ms.reduce((best, m) =>
-          literals(m.pattern) > literals(best.pattern) ? m : best,
+          narrower(score(m.pattern), score(best.pattern)) ? m : best,
         );
       },
 

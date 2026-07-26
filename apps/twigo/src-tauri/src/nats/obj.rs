@@ -30,6 +30,15 @@ struct StagedUpload {
 // Concurrency for per-bucket get_stream round-trips when listing object stores.
 const BUCKET_CONCURRENCY: usize = 32;
 
+/// Anything but a definite NotFound counts as existing, so a transient error can
+/// never authorize the cleanup in `obj_commit_upload_impl`.
+async fn object_exists(os: &async_nats::jetstream::object_store::ObjectStore, name: &str) -> bool {
+    match os.info(name).await {
+        Ok(i) => !i.deleted,
+        Err(e) => e.kind() != async_nats::jetstream::object_store::InfoErrorKind::NotFound,
+    }
+}
+
 async fn store(
     conns: &ConnState,
     conn_id: &str,
@@ -380,9 +389,11 @@ pub(crate) async fn obj_commit_upload_impl(
             path: s.path.display().to_string(),
             source,
         })?;
+    // `s.existed` was sampled at stage time, a confirmation dialog ago; re-check next
+    // to the write so the cleanup below can't tombstone an object created since.
+    let existed = s.existed || object_exists(&os, &s.name).await;
     if let Err(e) = os.put(s.name.as_str(), &mut file).await {
-        // On replace, deleting would tombstone the pre-existing object.
-        if !s.existed {
+        if !existed {
             let _ = os.delete(&s.name).await;
         }
         return Err(js_err(e));

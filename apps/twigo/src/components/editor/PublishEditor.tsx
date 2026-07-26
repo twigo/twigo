@@ -22,6 +22,7 @@ import {
   publish,
   request,
   pickPayloadFile,
+  reachedTheWire,
   type IncomingMessage,
   type PickedPayload,
 } from "@/lib/api";
@@ -133,20 +134,29 @@ export function PublishEditor({
     );
   }
 
+  function recordSend(kind: "publish" | "request", payloadB64: string) {
+    useHistory.getState().record({
+      connId,
+      kind,
+      subject: subject.trim(),
+      payloadB64,
+      headers: cleanHeaders(),
+    });
+  }
+
   async function doPublish() {
     setBusy("publish");
     setReply(null);
     setSent(false);
     try {
       const w = await resolveWire();
-      await publish(connId, subject.trim(), w, cleanHeaders());
-      useHistory.getState().record({
-        connId,
-        kind: "publish",
-        subject: subject.trim(),
-        payloadB64: w,
-        headers: cleanHeaders(),
-      });
+      try {
+        await publish(connId, subject.trim(), w, cleanHeaders());
+      } catch (e) {
+        if (reachedTheWire(e)) recordSend("publish", w);
+        throw e;
+      }
+      recordSend("publish", w);
       setSent(true);
       // Reset the flash window on overlapping sends; the unmount effect clears
       // a pending timer so we never setState after the editor closes.
@@ -169,20 +179,14 @@ export function PublishEditor({
     const t0 = performance.now();
     try {
       const w = await resolveWire();
-      const msg = await request(
-        connId,
-        subject.trim(),
-        w,
-        null,
-        cleanHeaders(),
-      );
-      useHistory.getState().record({
-        connId,
-        kind: "request",
-        subject: subject.trim(),
-        payloadB64: w,
-        headers: cleanHeaders(),
-      });
+      let msg;
+      try {
+        msg = await request(connId, subject.trim(), w, null, cleanHeaders());
+      } catch (e) {
+        if (reachedTheWire(e)) recordSend("request", w);
+        throw e;
+      }
+      recordSend("request", w);
       setReply({ kind: "msg", msg, ms: Math.round(performance.now() - t0) });
     } catch (e) {
       setReply({ kind: "error", error: String(e) });

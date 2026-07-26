@@ -30,6 +30,19 @@ export function ipcError(e: unknown): IpcError {
   return new IpcError("unknown", typeof e === "string" ? e : String(e));
 }
 
+// Kinds a publish/request raises before anything leaves the process. Every other
+// failure - flush timeout, no responders, reply timeout - happens after the NATS
+// client took the message, so it did go out.
+const PRE_WIRE_ERROR_KINDS = new Set([
+  "permissions",
+  "notConnected",
+  "invalidInput",
+]);
+
+export function reachedTheWire(e: unknown): boolean {
+  return !PRE_WIRE_ERROR_KINDS.has(ipcError(e).kind);
+}
+
 // Every command goes through here, so a rejected invoke surfaces as a typed
 // IpcError instead of a raw { kind, message } object.
 function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {

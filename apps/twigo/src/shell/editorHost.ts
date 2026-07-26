@@ -84,12 +84,10 @@ export function listPanels(): PanelInfo[] {
   return (api?.panels ?? []).map((p) => ({ id: p.id, params: p.params }));
 }
 
-/** Close a panel by id, if it is open. */
 export function closePanel(id: string): void {
   api?.getPanel(id)?.api.close();
 }
 
-// --- Pane management (split / focus / reset) --------------------------------
 // Dockview suppresses its add/remove-panel events during a programmatic move
 // (the `_moving` lock), so moving a panel between groups never trips
 // EditorArea's onDidRemovePanel teardown - live sessions survive.
@@ -101,12 +99,10 @@ export function canSplitActiveEditor(): boolean {
   return !!active && active.group.panels.length > 1;
 }
 
-/** Number of editor groups (panes) currently in the layout. */
 export function editorGroupCount(): number {
   return api?.groups.length ?? 0;
 }
 
-/** Move the active tab into a new pane beside its group. */
 export function splitActiveEditor(direction: "right" | "below"): void {
   const active = api?.activePanel;
   if (!api || !active) return;
@@ -114,7 +110,6 @@ export function splitActiveEditor(direction: "right" | "below"): void {
   active.api.moveTo({ group });
 }
 
-/** Cycle keyboard focus to the next editor group. */
 export function focusNextEditorGroup(): void {
   api?.moveToNext({ includePanel: false });
 }

@@ -26,6 +26,47 @@ describe("validPattern", () => {
 describe("useCodecs", () => {
   beforeEach(() => useCodecs.setState({ schemas: [], mappings: {} }));
 
+  it("prefers a bounded pattern over a > tail regardless of insert order", () => {
+    const add = useCodecs.getState().addMapping;
+    add("c", { pattern: "orders.>", codec: "cbor" });
+    add("c", { pattern: "orders.*", codec: "msgpack" });
+
+    expect(useCodecs.getState().resolve("c", "orders.created")?.codec).toBe(
+      "msgpack",
+    );
+    expect(useCodecs.getState().resolve("c", "orders.eu.created")?.codec).toBe(
+      "cbor",
+    );
+  });
+
+  it("re-imports a schema in place so mappings keep decoding", () => {
+    const add = useCodecs.getState().addSchema;
+    add({ name: "orders", descriptorSetB64: "v1", messageTypes: ["A"] });
+    const id = useCodecs.getState().schemas[0]!.id;
+    useCodecs
+      .getState()
+      .addMapping("c", { pattern: "a.>", codec: "protobuf", schemaId: id });
+
+    add({ name: "orders", descriptorSetB64: "v2", messageTypes: ["A", "B"] });
+
+    expect(useCodecs.getState().schemas).toEqual([
+      { id, name: "orders", descriptorSetB64: "v2", messageTypes: ["A", "B"] },
+    ]);
+    expect(useCodecs.getState().schemaById(id)?.descriptorSetB64).toBe("v2");
+  });
+
+  it("drops a deleted context's mappings without touching other contexts", () => {
+    const add = useCodecs.getState().addMapping;
+    add("gone", { pattern: "a.>", codec: "cbor" });
+    add("kept", { pattern: "b.>", codec: "msgpack" });
+
+    useCodecs.getState().clearConn("gone");
+
+    expect(useCodecs.getState().mappings.gone).toBeUndefined();
+    expect(useCodecs.getState().mappings.kept).toHaveLength(1);
+    expect(useCodecs.getState().resolve("gone", "a.x")).toBeNull();
+  });
+
   it("removes a schema and its mappings together", () => {
     useCodecs.getState().addSchema({
       name: "s",
