@@ -2,6 +2,40 @@
 
 All notable changes to Twigo are documented here. This file is generated from
 Conventional Commits by [git-cliff](https://git-cliff.org).
+## [0.1.0-beta3] - 2026-07-26
+
+### Features
+- In-app connection create/edit/delete (#49)
+- NATS micro ($SRV) services view with detail tabs (#57)
+- Multi-technology workbench foundation - domain registry, space tabs & overlay titlebar (#58)
+- Analysis-driven hardening sweep - enforced read-only, payload types, replay & sent history (#59)
+- Payload codecs - protobuf/msgpack/cbor decode & encode with subject mappings (#63)
+- Charts over time, unified message surfaces, and a defect sweep (#69)
+  - Six server metrics charted over a 5m/15m/1h window with a hover readout, and
+    a consumer's unprocessed backlog drawn as a trend.
+  - Browsing a stream opens the same table and inspector a live subscription
+    uses, inheriting diff-against-pinned and republish, and still never
+    disturbing a consumer's position in the stream.
+  - Two data-loss fixes: a stream edit is read-modify-write behind a diff you
+    confirm, and cleanup after a failed object upload can no longer delete an
+    object created in the meantime.
+  - A second launch no longer clobbers the first one's spaces, layouts, history
+    and codec mappings.
+  - MessagePack and CBOR decode faithfully - non-finite numbers named rather
+    than nulled, binary kept, trailing bytes an error. Multi-file `.proto`
+    imports survive a comment above the `import` line.
+  - A repeated header key keeps every value, and a request that reached the wire
+    before timing out is recorded in history.
+
+### Bug Fixes
+- Reliability batch - command timeouts, typed CAS conflict, load-after-teardown race (#52)
+- Repair main after dockview 7 + prettier bumps (#53)
+- Pre-beta hardening across correctness, security, perf & reliability (#55)
+
+### Performance
+- Virtualize trees, faster bucket lists, shared VirtualTree (#54)
+- Coalesce subscription delivery + trim hot-path re-renders and memory (#56)
+
 
 ## [0.1.0-beta1] - 2026-06-15
 
