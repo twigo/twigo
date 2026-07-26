@@ -52,6 +52,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      # macos-latest is arm64 now, so the Intel build is a cross-compile. The
+      # toolchain action was asked for both targets and installed only the host
+      # one, which surfaced as a failed release rather than a failed check - so
+      # add them explicitly and print what is actually there.
+      - name: Ensure the macOS targets are installed
+        if: matrix.os == 'macos'
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          rustup target list --installed
+
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/twigo/src-tauri
