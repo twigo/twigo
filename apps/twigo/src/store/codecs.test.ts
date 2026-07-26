@@ -26,6 +26,20 @@ describe("validPattern", () => {
 describe("useCodecs", () => {
   beforeEach(() => useCodecs.setState({ schemas: [], mappings: {} }));
 
+  it("prefers a bounded pattern over a > tail regardless of insert order", () => {
+    const add = useCodecs.getState().addMapping;
+    add("c", { pattern: "orders.>", codec: "cbor" });
+    add("c", { pattern: "orders.*", codec: "msgpack" });
+
+    expect(useCodecs.getState().resolve("c", "orders.created")?.codec).toBe(
+      "msgpack",
+    );
+    // Deeper subjects only the > pattern can match still resolve to it.
+    expect(useCodecs.getState().resolve("c", "orders.eu.created")?.codec).toBe(
+      "cbor",
+    );
+  });
+
   it("re-imports a schema in place so mappings keep decoding", () => {
     const add = useCodecs.getState().addSchema;
     add({ name: "orders", descriptorSetB64: "v1", messageTypes: ["A"] });

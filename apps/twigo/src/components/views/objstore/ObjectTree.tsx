@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, Box, File, Loader2, Trash2, Upload } from "lucide-react";
 import { cn } from "@twigo/ui";
 import { fmtBytes, fmtCount } from "@twigo/utils";
@@ -42,6 +42,18 @@ export function ObjectTree({
   // ConfirmDialog fires onConfirm then onOpenChange(false); this flag lets the
   // dismiss handler skip cancelling the staged upload that was just committed.
   const confirmedRef = useRef(false);
+  // Unmounting with the replace prompt open (view switch, disconnect) takes the
+  // dismiss handler with it, so release the staged file here too.
+  const pendingRef = useRef(false);
+  useEffect(() => {
+    pendingRef.current = pendingUpload !== null;
+  }, [pendingUpload]);
+  useEffect(
+    () => () => {
+      if (pendingRef.current) void objCancelUpload();
+    },
+    [],
+  );
 
   const commitUpload = async (bkt: string) => {
     setUploadingBucket(bkt);

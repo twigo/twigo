@@ -118,10 +118,26 @@ export const useCodecs = create<CodecsState>()(
           subjectMatches(m.pattern, subject),
         );
         if (ms.length === 0) return null;
-        const literals = (p: string) =>
-          p.split(".").filter((t) => t !== "*" && t !== ">").length;
+        // Specificity, most decisive first: literal tokens, then a bounded
+        // pattern over a `>` tail, then length. Insertion order never decides.
+        const score = (p: string): number[] => {
+          const tokens = p.split(".");
+          return [
+            tokens.filter((t) => t !== "*" && t !== ">").length,
+            tokens.includes(">") ? 0 : 1,
+            tokens.length,
+          ];
+        };
+        const narrower = (a: number[], b: number[]) => {
+          for (let i = 0; i < a.length; i++) {
+            const x = a[i] ?? 0;
+            const y = b[i] ?? 0;
+            if (x !== y) return x > y;
+          }
+          return false;
+        };
         return ms.reduce((best, m) =>
-          literals(m.pattern) > literals(best.pattern) ? m : best,
+          narrower(score(m.pattern), score(best.pattern)) ? m : best,
         );
       },
 
