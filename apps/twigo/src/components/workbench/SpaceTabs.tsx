@@ -10,6 +10,9 @@ import { isTypingTarget, fmtBinding } from "@/lib/commands";
 // (titleBarStyle: Overlay): traffic lights float over its left edge, empty
 // areas drag the window (data-tauri-drag-region fires only when the event
 // target is the attributed element itself, so tab buttons stay clickable).
+// macOS parks the lights for its own 28px title bar, so the strip's h-9 (36px)
+// is paired with trafficLightPosition in tauri.conf.json - changing one without
+// the other leaves them off-centre.
 const isTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 const isMac =
