@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { Allotment } from "allotment";
 import { Layers, RefreshCw, Loader2, Trash2, History } from "lucide-react";
 import { Button, EmptyState, cn } from "@twigo/ui";
 import { decodePreview, type StreamMessage } from "@twigo/utils";
@@ -16,6 +15,7 @@ import { useJetStream } from "@/store/jetstream";
 import { useToasts } from "@/store/toasts";
 import { MessageTable } from "../MessageTable";
 import { MessageInspector } from "../DetailPanel";
+import { InspectorSplit } from "../InspectorSplit";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { CreateConsumerDialog } from "./CreateConsumerDialog";
 
@@ -216,8 +216,10 @@ export function StreamBrowsePanel({
               : `No messages match “${filter.trim()}”.`}
         </EmptyState>
       ) : (
-        <Allotment className="min-h-0 flex-1" proportionalLayout={false}>
-          <Allotment.Pane minSize={320}>
+        <InspectorSplit
+          inspectorVisible
+          defaultWidth={420}
+          main={
             <div ref={setScrollEl} className="h-full overflow-auto">
               <MessageTable
                 items={shown}
@@ -239,8 +241,8 @@ export function StreamBrowsePanel({
                 </div>
               )}
             </div>
-          </Allotment.Pane>
-          <Allotment.Pane preferredSize={420} minSize={260}>
+          }
+          inspector={
             <MessageInspector
               msg={selectedRow}
               connId={connId}
@@ -281,8 +283,8 @@ export function StreamBrowsePanel({
                 )
               }
             />
-          </Allotment.Pane>
-        </Allotment>
+          }
+        />
       )}
 
       {selected && (

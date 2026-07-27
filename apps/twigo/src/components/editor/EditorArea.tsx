@@ -54,6 +54,7 @@ export function EditorArea() {
   // Resolved at render (after registerNatsModule ran in main.tsx); stable after.
   const Watermark = getWatermark() ?? EmptyWatermark;
   const apiRef = useRef<DockviewApi | null>(null);
+  const hostRef = useRef<HTMLDivElement | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
@@ -124,6 +125,33 @@ export function EditorArea() {
     subscribeActiveStream(api);
   }, []);
 
+  // Dockview's own auto-resize dispatches through requestAnimationFrame, so its
+  // grid lands a frame behind the sash and tab content visibly trails the drag.
+  // Laying out straight from the observer keeps it in the frame that caused it.
+  useEffect(() => {
+    const el = hostRef.current;
+    if (!el) return;
+    let lastW = -1;
+    let lastH = -1;
+    const ro = new ResizeObserver(([entry]) => {
+      const api = apiRef.current;
+      // A hidden element measures zero; propagating that would collapse the grid.
+      if (!api || !entry || !el.offsetParent) return;
+      const width = Math.round(entry.contentRect.width);
+      const height = Math.round(entry.contentRect.height);
+      // Rounded and deduped: a fractional devicePixelRatio otherwise re-fires
+      // layout against itself.
+      if (width === lastW && height === lastH) return;
+      lastW = width;
+      lastH = height;
+      api.layout(width, height);
+    });
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+    };
+  }, []);
+
   // Swap the editor layout when the active connection changes (tabs are
   // per-context), and wake the focused restored stream as connections come up.
   // Selector subscriptions so this only runs on the two transitions that matter
@@ -188,16 +216,19 @@ export function EditorArea() {
   }, []);
 
   return (
-    <DockviewReact
-      className="h-full"
-      theme={theme}
-      dndStrategy="pointer"
-      disableFloatingGroups
-      watermarkComponent={Watermark}
-      rightHeaderActionsComponent={NewTabButton}
-      onReady={onReady}
-      components={editorComponents}
-      tabComponents={editorTabComponents}
-    />
+    <div ref={hostRef} className="h-full">
+      <DockviewReact
+        className="h-full"
+        theme={theme}
+        dndStrategy="pointer"
+        disableFloatingGroups
+        disableAutoResizing
+        watermarkComponent={Watermark}
+        rightHeaderActionsComponent={NewTabButton}
+        onReady={onReady}
+        components={editorComponents}
+        tabComponents={editorTabComponents}
+      />
+    </div>
   );
 }
