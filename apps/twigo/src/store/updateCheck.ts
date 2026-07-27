@@ -2,15 +2,13 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { createPersistStorage } from "@/lib/persist-storage";
 
+// Persisted because the quiet check runs once per launch: a per-session counter
+// could never reach a threshold.
 interface UpdateCheckState {
-  // Counted across launches, not within a session: the quiet check runs once
-  // per start, so a per-session counter could never reach a threshold.
   failures: number;
   lastError: string | null;
   recordSuccess: () => void;
-  /** Returns the new consecutive-failure count. */
   recordFailure: (message: string) => number;
-  /** Zero the counter after warning, so the warning repeats every N failures. */
   snooze: () => void;
 }
 

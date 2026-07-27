@@ -83,7 +83,6 @@ describe("checkForUpdates", () => {
     expect(t?.kind).toBe("warning");
     expect(t?.message).toMatch(/keep failing/i);
     expect(t?.action?.label).toMatch(/check again/i);
-    // Counter reset so the warning repeats every N failures, not every launch.
     expect(useUpdateCheck.getState().failures).toBe(0);
   });
 

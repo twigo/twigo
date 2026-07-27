@@ -5,9 +5,8 @@ import { useUpdateCheck } from "@/store/updateCheck";
 
 const UPDATE_KEY = "app:update";
 const CHECK_FAILED_KEY = "app:update-check-failed";
-// The quiet check runs once per launch, so this counts launches. A single
-// failure is ordinary (started offline); a run of them means the update channel
-// itself is broken, which is otherwise invisible until someone reports it.
+// One failed check is ordinary (started offline); a run of them means the update
+// channel itself is broken, which is otherwise invisible until someone reports it.
 const FAILURE_LIMIT = 3;
 
 function inTauri(): boolean {
@@ -28,9 +27,8 @@ async function install(update: Update): Promise<void> {
   }
 }
 
-// Check GitHub Releases for a newer signed build. `silent` (the launch check)
-// stays quiet about *finding nothing*, never about failing to look: a check
-// that errors is always recorded and eventually surfaced.
+// `silent` suppresses "nothing new", never a failure to look: an errored check
+// is always recorded, and surfaced once the failures add up.
 export async function checkForUpdates({ silent = false } = {}): Promise<void> {
   if (!inTauri()) return;
   const toasts = useToasts.getState();
