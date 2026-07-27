@@ -10,6 +10,7 @@ import { useZoom } from "@/store/zoom";
 import { useCommandHistory } from "@/store/commandHistory";
 import { useHistory } from "@/store/history";
 import { useCodecs } from "@/store/codecs";
+import { useUpdateCheck } from "@/store/updateCheck";
 
 interface Hydratable {
   persist: {
@@ -20,7 +21,9 @@ interface Hydratable {
 
 // useReadOnly gates writes, so it must load before the first interaction (else a
 // locked connection looks writable for a microtask at launch); useMonitorConfig
-// likewise so a saved monitoring URL isn't briefly treated as missing.
+// likewise so a saved monitoring URL isn't briefly treated as missing;
+// useUpdateCheck because the launch check fires on mount and would otherwise
+// race its own cross-launch failure counter back to zero.
 const STORES: Hydratable[] = [
   useUi,
   useSettings,
@@ -33,6 +36,7 @@ const STORES: Hydratable[] = [
   useCommandHistory,
   useHistory,
   useCodecs,
+  useUpdateCheck,
 ];
 
 export function useStoresHydrated(stores: Hydratable[]): boolean {
