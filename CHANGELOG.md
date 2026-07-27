@@ -2,6 +2,17 @@
 
 All notable changes to Twigo are documented here. This file is generated from
 Conventional Commits by [git-cliff](https://git-cliff.org).
+## [0.1.0-beta4] - 2026-07-27
+
+### Bug Fixes
+- Restore the Intel macOS build and stop update checks failing in silence (#70)
+  - Intel Macs have a build again - beta3 shipped Apple silicon only, so the
+    download page offered them nothing.
+  - A failed update check no longer disappears. Failures are logged and counted
+    across launches, and a run of them says so instead of leaving the app
+    quietly stranded on an old version.
+
+
 ## [0.1.0-beta3] - 2026-07-26
 
 ### Features

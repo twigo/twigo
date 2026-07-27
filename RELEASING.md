@@ -44,6 +44,20 @@ Then: review the draft (artifacts attached, notes read well) and **Publish**.
 Tag with a pre-release suffix and it ships as a GitHub pre-release
 automatically: `git tag v0.1.0-beta1`.
 
+**Then clear that flag by hand before anyone can update.** The updater endpoint
+is `/releases/latest/download/latest.json`, and GitHub excludes pre-releases from
+`/releases/latest`, so a release left flagged is invisible to every installed
+build - silently, with no error anywhere. That is what happened from beta1 to
+beta3. After publishing:
+
+```bash
+gh release edit v0.1.0-beta4 --prerelease=false --latest
+```
+
+`--latest` is refused while the release is still a pre-release, so both flags
+have to move in that one command. The permanent fix is to serve `latest.json`
+from twigo.io instead, which makes the GitHub "latest" pointer irrelevant.
+
 ## Notes
 
 - **Versions are never edited by hand** - the tag is the source of truth; the
