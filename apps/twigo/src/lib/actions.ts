@@ -1,11 +1,8 @@
-import { useConnections } from "@/store/connections";
+import { useConnections, selectFirstLive } from "@/store/connections";
 import { openPublish, openResponder } from "@/lib/editor";
 
 function liveTarget(): string | undefined {
-  const { activeContext, connected } = useConnections.getState();
-  if (activeContext && connected[activeContext]?.connected)
-    return activeContext;
-  return Object.values(connected).find((i) => i.connected)?.name;
+  return selectFirstLive(useConnections.getState());
 }
 
 export function newPublish() {

@@ -13,7 +13,11 @@ import {
   SelectItem,
 } from "@twigo/ui";
 import { decodeText, tryPrettyJson, fmtBytes } from "@twigo/utils";
-import { useConnections } from "@/store/connections";
+import {
+  useConnections,
+  selectIsLive,
+  selectMaxPayload,
+} from "@/store/connections";
 import { useHistory } from "@/store/history";
 import { useCodecs } from "@/store/codecs";
 import { useIsReadOnly } from "@/hooks/useIsReadOnly";
@@ -60,10 +64,8 @@ export function PublishEditor({
   initialPayloadB64?: string;
   initialHeaders?: [string, string][];
 }) {
-  const live = useConnections((s) => s.connected[connId]?.connected === true);
-  const maxPayload = useConnections(
-    (s) => s.connected[connId]?.maxPayload ?? 1024 * 1024,
-  );
+  const live = useConnections(selectIsLive(connId));
+  const maxPayload = useConnections(selectMaxPayload(connId, 1024 * 1024));
   const readOnly = useIsReadOnly(connId);
   const [subject, setSubject] = useState(initialSubject);
   const [mode, setMode] = useState<PayloadMode>(

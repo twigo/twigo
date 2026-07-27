@@ -2,7 +2,11 @@ import { useEffect, useState } from "react";
 import { RefreshCw, ChevronsDownUp, Database, Plus } from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
 import { kvCreateBucket } from "@/lib/api";
-import { useConnections } from "@/store/connections";
+import {
+  useConnections,
+  selectIsLive,
+  selectHasJetStream,
+} from "@/store/connections";
 import { useKv } from "@/store/kv";
 import { useToasts } from "@/store/toasts";
 import { useIsReadOnly } from "@/hooks/useIsReadOnly";
@@ -12,10 +16,8 @@ import { KvTree } from "./KvTree";
 import { CreateBucketDialog } from "@/components/editor/kv/CreateBucketDialog";
 
 export function KvView({ filter, connId }: ViewProps) {
-  const isConnected = useConnections((s) => !!(connId && s.connected[connId]));
-  const jsEnabled = useConnections((s) =>
-    connId ? (s.connected[connId]?.jetstream ?? false) : false,
-  );
+  const isConnected = useConnections(selectIsLive(connId));
+  const jsEnabled = useConnections(selectHasJetStream(connId));
   const data = useKv((s) => (connId ? s.byConn[connId] : undefined));
   const load = useKv((s) => s.load);
   const collapseAll = useKv((s) => s.collapseAll);

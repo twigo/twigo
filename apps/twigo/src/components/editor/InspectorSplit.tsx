@@ -2,16 +2,9 @@ import { useRef, useState } from "react";
 import { cn } from "@twigo/ui";
 import { clampInspectorWidth, KEY_STEP } from "./inspectorWidth";
 
-/**
- * Main content plus a right inspector of a fixed pixel width, split by a drag
- * handle.
- *
- * Deliberately flex and not a split view: the only rule is "the inspector keeps
- * its width, the main pane takes the rest", which CSS applies on its own. A
- * layout algorithm has to recompute both panes whenever the window or the
- * sidebar moves, and allotment's non-proportional path does that in two passes
- * that disagree - which showed up as the boundary twitching mid-drag.
- */
+// Flex rather than a split view: "the inspector keeps its width, the main pane
+// takes the rest" is a rule CSS applies on its own, with nothing to recompute
+// when the window or the sidebar moves.
 export function InspectorSplit({
   main,
   inspector,
@@ -73,8 +66,8 @@ export function InspectorSplit({
               dragging && "bg-brand",
             )}
           />
-          {/* Percentage cap, so a narrow window squeezes the inspector instead
-              of starving the table - without measuring anything. */}
+          {/* Squeezes the inspector on a narrow window instead of starving the
+              table, without measuring anything. */}
           <div
             style={{ width, maxWidth: "70%" }}
             className={cn("shrink-0", dragging && "select-none")}

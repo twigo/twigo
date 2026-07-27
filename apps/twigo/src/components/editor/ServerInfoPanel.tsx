@@ -2,6 +2,7 @@ import { RefreshCw, Loader2, Server, Check, Minus } from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
 import { fmtBytes, fmtRtt } from "@twigo/utils";
 import { useServerInfo } from "@/hooks/useServerInfo";
+import { useConnections } from "@/store/connections";
 import { Row, Section } from "@/components/editor/jetstream/parts";
 
 function Bool({ value }: { value: boolean }) {
@@ -18,6 +19,7 @@ function Bool({ value }: { value: boolean }) {
 
 export function ServerInfoPanel({ connId }: { connId: string }) {
   const { data, error, loading, refresh } = useServerInfo(connId);
+  const rtt = useConnections((s) => s.rtt[connId]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-editor">
@@ -26,9 +28,9 @@ export function ServerInfoPanel({ connId }: { connId: string }) {
         <span className="ml-1 truncate text-[11px] font-semibold">
           {connId}
         </span>
-        {data && (
+        {rtt !== undefined && (
           <span className="ml-1 text-[11px] tabular-nums text-muted-foreground">
-            RTT {fmtRtt(data.rttMs)}
+            RTT {fmtRtt(rtt)}
           </span>
         )}
         <Button

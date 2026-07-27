@@ -49,12 +49,12 @@ function ctx(name: string, selected = false): ContextSummary {
 function info(name = "a"): ConnInfo {
   return {
     name,
-    serverName: "s",
-    serverVersion: "2",
-    rttMs: 0,
-    jetstream: false,
-    maxPayload: 0,
-    connected: true,
+    server: {
+      serverName: "s",
+      serverVersion: "2",
+      jetstream: false,
+      maxPayload: 0,
+    },
   };
 }
 
@@ -140,10 +140,10 @@ describe("connections active-context persistence", () => {
 
   it("marks a connection reconnecting on a disconnected event", () => {
     useConnections.setState({
-      connected: { a: { ...info(), connected: true } },
+      connected: { a: info() },
     });
     useConnections.getState().onEvent("a", "disconnected");
-    expect(useConnections.getState().connected.a?.connected).toBe(false);
+    expect(useConnections.getState().connected.a?.server).toBeNull();
   });
 
   it("drops a connection on a closed event", () => {
@@ -183,7 +183,7 @@ describe("connections link toasts", () => {
 
   it("warns only once a drop outlasts the grace window", () => {
     useConnections.setState({
-      connected: { a: { ...info(), connected: true } },
+      connected: { a: info() },
     });
     useConnections.getState().onEvent("a", "disconnected");
     expect(pushMock).not.toHaveBeenCalled(); // deferred, not immediate
@@ -197,7 +197,7 @@ describe("connections link toasts", () => {
 
   it("stays silent for a transient blip that self-heals", () => {
     useConnections.setState({
-      connected: { a: { ...info(), connected: true } },
+      connected: { a: info() },
     });
     useConnections.getState().onEvent("a", "disconnected");
     useConnections.getState().onEvent("a", "connected"); // back within grace
@@ -207,7 +207,7 @@ describe("connections link toasts", () => {
 
   it("announces recovery only after an outage was shown", () => {
     useConnections.setState({
-      connected: { a: { ...info(), connected: true } },
+      connected: { a: info() },
     });
     useConnections.getState().onEvent("a", "disconnected");
     vi.advanceTimersByTime(GRACE); // outage announced
@@ -222,7 +222,7 @@ describe("connections link toasts", () => {
 
   it("stays silent when the user is the one disconnecting", async () => {
     useConnections.setState({
-      connected: { a: { ...info(), connected: true } },
+      connected: { a: info() },
     });
     disconnect.mockResolvedValue(undefined);
     const pending = useConnections.getState().disconnect("a");

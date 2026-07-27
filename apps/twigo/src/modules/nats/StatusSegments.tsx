@@ -44,7 +44,10 @@ export function NatsConnectionStatus() {
   const readOnly = useReadOnly((s) =>
     activeContext ? (s.byConn[activeContext] ?? false) : false,
   );
-  const { active, rate } = useThroughput(info?.connected ? info.name : null);
+  const rtt = useConnections((s) =>
+    activeContext ? s.rtt[activeContext] : undefined,
+  );
+  const { active, rate } = useThroughput(info?.server ? info.name : null);
 
   const lockChip = readOnly && (
     <span
@@ -56,7 +59,7 @@ export function NatsConnectionStatus() {
     </span>
   );
 
-  if (info && !info.connected) {
+  if (info && !info.server) {
     return (
       <>
         <span className="px-1">
@@ -66,7 +69,7 @@ export function NatsConnectionStatus() {
       </>
     );
   }
-  if (info) {
+  if (info?.server) {
     return (
       <>
         <button
@@ -79,11 +82,13 @@ export function NatsConnectionStatus() {
           {info.name} · connected
         </button>
         {lockChip}
-        <span className="flex items-center gap-1 px-1.5 opacity-90">
-          <Gauge className="size-3.5" />
-          RTT <span className="tabular-nums">{fmtRtt(info.rttMs)}</span>
-        </span>
-        {info.jetstream ? (
+        {rtt !== undefined && (
+          <span className="flex items-center gap-1 px-1.5 opacity-90">
+            <Gauge className="size-3.5" />
+            RTT <span className="tabular-nums">{fmtRtt(rtt)}</span>
+          </span>
+        )}
+        {info.server.jetstream ? (
           <button
             type="button"
             onClick={() =>

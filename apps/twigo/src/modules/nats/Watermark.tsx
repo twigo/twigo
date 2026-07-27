@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Radio, Send, Search, Plus } from "lucide-react";
 import { EmptyState, Kbd } from "@twigo/ui";
-import { useConnections } from "@/store/connections";
+import { useConnections, selectAnyLive } from "@/store/connections";
 import { useSettings } from "@/store/settings";
 import { usePalette } from "@/store/palette";
 import { openSettings } from "@/shell/editorHost";
@@ -17,9 +17,7 @@ export function NatsWatermark() {
   const noContexts = useConnections(
     (s) => s.status === "ready" && s.contexts.length === 0,
   );
-  const hasLive = useConnections((s) =>
-    Object.values(s.connected).some((i) => i.connected),
-  );
+  const hasLive = useConnections(selectAnyLive);
 
   const tryDemo = () => {
     useSettings.getState().setIncludeDemo(true);

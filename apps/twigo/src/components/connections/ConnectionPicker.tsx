@@ -21,7 +21,7 @@ import {
 import { useConnections } from "@/store/connections";
 import { useReadOnly } from "@/store/readonly";
 import { openServerInfo } from "@/lib/editor";
-import type { ContextSummary } from "@/lib/api";
+import { type ContextSummary } from "@/lib/api";
 import { StatusGlyph } from "./StatusGlyph";
 
 const SEARCH_THRESHOLD = 7;
@@ -127,7 +127,11 @@ export function ConnectionPicker({
           // the actually-reached server).
           <span
             className="min-w-0 max-w-[40%] truncate font-mono text-[11px] text-muted-foreground"
-            title={info ? `${c.url} · server: ${info.serverName}` : c.url}
+            title={
+              info?.server
+                ? `${c.url} · server: ${info.server.serverName}`
+                : c.url
+            }
           >
             {c.url.replace(/^\w+:\/\//, "")}
           </span>
@@ -179,7 +183,7 @@ export function ConnectionPicker({
             <span className="flex items-center gap-0.5 opacity-0 group-data-[selected=true]:opacity-100">
               <ActionButton
                 label="Server info"
-                disabled={!info.connected}
+                disabled={!info.server}
                 onClick={() => {
                   setActive(c.name);
                   openServerInfo(c.name);

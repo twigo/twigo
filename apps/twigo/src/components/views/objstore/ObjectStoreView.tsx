@@ -2,7 +2,11 @@ import { useEffect, useState } from "react";
 import { RefreshCw, ChevronsDownUp, Box, Plus } from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
 import { objCreateBucket } from "@/lib/api";
-import { useConnections } from "@/store/connections";
+import {
+  useConnections,
+  selectIsLive,
+  selectHasJetStream,
+} from "@/store/connections";
 import { useObjStore } from "@/store/objstore";
 import { useToasts } from "@/store/toasts";
 import { useIsReadOnly } from "@/hooks/useIsReadOnly";
@@ -12,10 +16,8 @@ import { ObjectTree } from "./ObjectTree";
 import { CreateObjBucketDialog } from "@/components/editor/objstore/CreateObjBucketDialog";
 
 export function ObjectStoreView({ filter, connId }: ViewProps) {
-  const isConnected = useConnections((s) => !!(connId && s.connected[connId]));
-  const jsEnabled = useConnections((s) =>
-    connId ? (s.connected[connId]?.jetstream ?? false) : false,
-  );
+  const isConnected = useConnections(selectIsLive(connId));
+  const jsEnabled = useConnections(selectHasJetStream(connId));
   const data = useObjStore((s) => (connId ? s.byConn[connId] : undefined));
   const load = useObjStore((s) => s.load);
   const collapseAll = useObjStore((s) => s.collapseAll);

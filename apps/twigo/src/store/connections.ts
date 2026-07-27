@@ -5,6 +5,7 @@ import {
   connect as apiConnect,
   disconnect as apiDisconnect,
   connInfo as apiConnInfo,
+  connRtt as apiConnRtt,
   deleteContext as apiDeleteContext,
   syncConnReadonly,
   ipcError,
@@ -66,12 +67,14 @@ function teardown(conn: string) {
   useConnections.getState().editorTeardown(conn);
 }
 
-interface ConnectionsState {
+export interface ConnectionsState {
   contexts: ContextSummary[];
   status: LoadState;
   error: string | null;
   activeContext: string | null;
   connected: Record<string, ConnInfo>;
+  // A missing entry means "not measured"; any number would be a claim.
+  rtt: Record<string, number>;
   connecting: Record<string, boolean>;
   connError: Record<string, string>;
   // While a connection is dropped, the live backoff state for its next retry.
@@ -80,6 +83,8 @@ interface ConnectionsState {
     { attempt: number; delayMs: number; at: number }
   >;
   load: () => Promise<void>;
+  /** Take a round-trip sample; leaves the entry absent if it fails. */
+  measureRtt: (name: string) => Promise<void>;
   setActive: (name: string) => void;
   connect: (name: string) => Promise<void>;
   disconnect: (name: string) => Promise<void>;
@@ -97,11 +102,28 @@ export const useConnections = create<ConnectionsState>()(
     error: null,
     activeContext: null,
     connected: {},
+    rtt: {},
     connecting: {},
     connError: {},
     reconnecting: {},
     editorTeardown: () => undefined,
     setEditorTeardown: (fn) => set({ editorTeardown: fn }),
+
+    measureRtt: async (name) => {
+      try {
+        const ms = await apiConnRtt(name);
+        set((s) => (s.connected[name] ? { rtt: { ...s.rtt, [name]: ms } } : s));
+      } catch (e) {
+        // No toast - the link is fine, there is just no sample - but never
+        // silent either: on a restricted account this is the only way to learn
+        // the probe was refused rather than the server being instant.
+        console.error(`[rtt] ${name}`, e);
+        set((s) => {
+          const { [name]: _gone, ...rtt } = s.rtt;
+          return { rtt };
+        });
+      }
+    },
 
     load: async () => {
       set({ status: "loading", error: null });
@@ -151,6 +173,7 @@ export const useConnections = create<ConnectionsState>()(
           connecting: { ...s.connecting, [name]: false },
         }));
         useWorkspace.getState().setConnected(name, true);
+        void get().measureRtt(name);
       } catch (e) {
         const err = ipcError(e);
         // Branch on the typed kind for an actionable hint on the common failure.
@@ -235,17 +258,25 @@ export const useConnections = create<ConnectionsState>()(
               : s,
           );
         });
+        void get().measureRtt(conn);
       } else if (kind === "disconnected") {
         const cur = get().connected[conn];
         if (cur) {
-          set((s) => ({
-            connected: { ...s.connected, [conn]: { ...cur, connected: false } },
-          }));
+          set((s) => {
+            const { [conn]: _rtt, ...rtt } = s.rtt;
+            return {
+              connected: {
+                ...s.connected,
+                [conn]: { name: conn, server: null },
+              },
+              rtt,
+            };
+          });
         }
         // Defer the toast past the grace window: a quick auto-reconnect should be
         // invisible. Arm once per outage, skip repeats and user-led disconnects.
         const watch =
-          cur?.connected === true &&
+          !!cur?.server &&
           !closing.has(conn) &&
           !dropTimers.has(conn) &&
           !announced.has(conn);
@@ -253,7 +284,7 @@ export const useConnections = create<ConnectionsState>()(
           const timer = setTimeout(() => {
             dropTimers.delete(conn);
             const down = get().connected[conn];
-            if (down && !down.connected && !closing.has(conn)) {
+            if (down && !down.server && !closing.has(conn)) {
               announced.add(conn);
               useToasts
                 .getState()
@@ -327,3 +358,34 @@ useReadOnly.subscribe((s) => {
     }),
   );
 });
+
+// Derived questions the UI keeps asking, answered once. Every one of these was
+// re-expressed in three or four components, which is how "has an entry" and
+// "has a live link" drifted apart in the first place.
+export const selectIsLive =
+  (id: string | null | undefined) => (s: ConnectionsState) =>
+    !!(id && s.connected[id]?.server);
+
+export const selectHasJetStream =
+  (id: string | null | undefined) => (s: ConnectionsState) =>
+    !!(id && s.connected[id]?.server?.jetstream);
+
+export const selectMaxPayload =
+  (id: string, fallback: number) => (s: ConnectionsState) =>
+    s.connected[id]?.server?.maxPayload ?? fallback;
+
+export const selectServerVersion = (id: string) => (s: ConnectionsState) =>
+  s.connected[id]?.server?.serverVersion ?? "";
+
+export const selectLiveCount = (s: ConnectionsState) =>
+  Object.values(s.connected).filter((i) => i.server).length;
+
+export const selectAnyLive = (s: ConnectionsState) =>
+  Object.values(s.connected).some((i) => i.server);
+
+/** Name of a live connection: the active one if it qualifies, else any. */
+export const selectFirstLive = (s: ConnectionsState): string | undefined => {
+  const active = s.activeContext;
+  if (active && s.connected[active]?.server) return active;
+  return Object.values(s.connected).find((i) => i.server)?.name;
+};

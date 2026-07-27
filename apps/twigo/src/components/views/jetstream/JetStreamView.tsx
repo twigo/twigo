@@ -3,7 +3,11 @@ import { RefreshCw, ChevronsDownUp, Layers, Plus } from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
 import { jsCreateStream } from "@/lib/api";
 import { useIsReadOnly } from "@/hooks/useIsReadOnly";
-import { useConnections } from "@/store/connections";
+import {
+  useConnections,
+  selectIsLive,
+  selectHasJetStream,
+} from "@/store/connections";
 import { useJetStream } from "@/store/jetstream";
 import { useToasts } from "@/store/toasts";
 import type { ViewProps } from "@/shell/views";
@@ -12,10 +16,8 @@ import { StreamTree } from "./StreamTree";
 import { StreamFormDialog } from "@/components/editor/jetstream/StreamFormDialog";
 
 export function JetStreamView({ filter, connId }: ViewProps) {
-  const isConnected = useConnections((s) => !!(connId && s.connected[connId]));
-  const jsEnabled = useConnections((s) =>
-    connId ? (s.connected[connId]?.jetstream ?? false) : false,
-  );
+  const isConnected = useConnections(selectIsLive(connId));
+  const jsEnabled = useConnections(selectHasJetStream(connId));
   const data = useJetStream((s) => (connId ? s.byConn[connId] : undefined));
   const load = useJetStream((s) => s.load);
   const collapseAll = useJetStream((s) => s.collapseAll);

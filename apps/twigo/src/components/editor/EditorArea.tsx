@@ -10,7 +10,7 @@ import {
 import "dockview-react/dist/styles/dockview.css";
 import { useUi } from "@/store/ui";
 import { useStream } from "@/store/stream";
-import { useConnections } from "@/store/connections";
+import { useConnections, selectIsLive } from "@/store/connections";
 import { useWorkspace } from "@/store/workspace";
 import {
   setEditorApi,
@@ -45,7 +45,7 @@ function subscribeActiveStream(api: DockviewApi) {
   };
   if (p.type !== "stream" || !p.connId || !p.subject) return;
   if (useStream.getState().sessions[panel.id]) return; // already live
-  if (!useConnections.getState().connected[p.connId]?.connected) return; // not up
+  if (!selectIsLive(p.connId)(useConnections.getState())) return; // not up
   void openStream(p.connId, p.subject);
 }
 
@@ -125,9 +125,8 @@ export function EditorArea() {
     subscribeActiveStream(api);
   }, []);
 
-  // Dockview's own auto-resize dispatches through requestAnimationFrame, so its
-  // grid lands a frame behind the sash and tab content visibly trails the drag.
-  // Laying out straight from the observer keeps it in the frame that caused it.
+  // Dockview's auto-resize dispatches through requestAnimationFrame, landing a
+  // frame behind the sash; laying out straight from the observer does not.
   useEffect(() => {
     const el = hostRef.current;
     if (!el) return;
@@ -135,12 +134,12 @@ export function EditorArea() {
     let lastH = -1;
     const ro = new ResizeObserver(([entry]) => {
       const api = apiRef.current;
-      // A hidden element measures zero; propagating that would collapse the grid.
+      // A hidden element measures zero, which would collapse the grid.
       if (!api || !entry || !el.offsetParent) return;
+      // Rounded and deduped, or a fractional devicePixelRatio re-fires layout
+      // against itself.
       const width = Math.round(entry.contentRect.width);
       const height = Math.round(entry.contentRect.height);
-      // Rounded and deduped: a fractional devicePixelRatio otherwise re-fires
-      // layout against itself.
       if (width === lastW && height === lastH) return;
       lastW = width;
       lastH = height;
@@ -186,7 +185,7 @@ export function EditorArea() {
     const unsubUp = useConnections.subscribe(
       (s) => {
         const c = s.activeContext;
-        return c ? (s.connected[c]?.connected ?? false) : false;
+        return selectIsLive(c)(s);
       },
       (up) => {
         const api = apiRef.current;

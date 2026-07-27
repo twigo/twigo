@@ -3,7 +3,12 @@ import {
   registerCommandProvider,
   type Command,
 } from "@/lib/commands";
-import { useConnections } from "@/store/connections";
+import {
+  useConnections,
+  selectAnyLive,
+  selectHasJetStream,
+} from "@/store/connections";
+
 import { useReadOnly } from "@/store/readonly";
 import { useJetStream } from "@/store/jetstream";
 import { useKv } from "@/store/kv";
@@ -17,14 +22,13 @@ import {
 } from "@/lib/editor";
 import { useUi } from "@/store/ui";
 
-const hasLive = () =>
-  Object.values(useConnections.getState().connected).some((i) => i.connected);
+const hasLive = () => selectAnyLive(useConnections.getState());
 
 // JetStream-backed features (streams, KV, object store) need a live connection
 // whose server has JetStream enabled.
 const jsEnabled = () => {
-  const { activeContext, connected } = useConnections.getState();
-  return !!(activeContext && connected[activeContext]?.jetstream);
+  const s = useConnections.getState();
+  return selectHasJetStream(s.activeContext)(s);
 };
 
 const activeConn = () => useConnections.getState().activeContext;

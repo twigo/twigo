@@ -66,12 +66,12 @@ describe("SubjectsView sorting", () => {
       connected: {
         [CONN]: {
           name: CONN,
-          serverName: "s",
-          serverVersion: "2.14.2",
-          rttMs: 0,
-          jetstream: false,
-          maxPayload: 0,
-          connected: true,
+          server: {
+            serverName: "s",
+            serverVersion: "2.14.2",
+            jetstream: false,
+            maxPayload: 0,
+          },
         },
       },
     });
