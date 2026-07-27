@@ -9,7 +9,8 @@ import { checkForUpdates } from "@/lib/updater";
 
 function Workbench() {
   useNatsRuntime();
-  // Quiet launch check: only surfaces a toast if an update is available.
+  // Quiet launch check: surfaces a toast for an available update, or for a run
+  // of failed checks - never for "nothing new".
   useEffect(() => {
     void checkForUpdates({ silent: true });
   }, []);
