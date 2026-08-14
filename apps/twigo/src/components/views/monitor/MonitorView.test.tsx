@@ -43,12 +43,12 @@ function live() {
     connected: {
       c: {
         name: "c",
-        serverName: "nats-1",
-        serverVersion: "2.14.0",
-        rttMs: 0,
-        jetstream: false,
-        maxPayload: 0,
-        connected: true,
+        server: {
+          serverName: "nats-1",
+          serverVersion: "2.14.0",
+          jetstream: false,
+          maxPayload: 0,
+        },
       },
     },
   });

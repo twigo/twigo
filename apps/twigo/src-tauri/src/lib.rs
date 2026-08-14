@@ -56,6 +56,7 @@ pub fn run() {
             nats::connection::connect,
             nats::connection::disconnect,
             nats::connection::list_connections,
+            nats::connection::conn_rtt,
             nats::connection::server_info,
             nats::connection::conn_info,
             nats::connection::conn_sync_readonly,

@@ -22,20 +22,36 @@ interface BuildNode {
   children: Map<string, BuildNode>;
 }
 
-function toSorted(level: Map<string, BuildNode>): SubjectNode[] {
-  return [...level.values()]
+export type SubjectSort = "name" | "rate" | "count";
+
+function toSorted(
+  level: Map<string, BuildNode>,
+  sort: SubjectSort,
+): SubjectNode[] {
+  const nodes = [...level.values()]
     .map((b) => ({
       token: b.token,
       path: b.path,
       count: b.count,
       rate: b.rate,
-      children: toSorted(b.children),
+      children: toSorted(b.children, sort),
     }))
     .sort((a, b) => a.token.localeCompare(b.token));
+  if (sort === "name") return nodes;
+  // Stable, so the alphabetical order above survives as the tiebreak - most
+  // subjects share a value (usually zero) and would otherwise shuffle.
+  return nodes.sort((a, b) => b[sort] - a[sort]);
 }
 
-/** Aggregate flat subject stats into a token tree; each node sums its descendants. */
-export function buildSubjectTree(stats: SubjectStat[]): SubjectNode[] {
+/**
+ * Aggregate flat subject stats into a token tree; each node sums its
+ * descendants. Sorting by a metric ranks every level, so the busiest branch
+ * leads to the busiest leaf.
+ */
+export function buildSubjectTree(
+  stats: SubjectStat[],
+  sort: SubjectSort = "name",
+): SubjectNode[] {
   const roots = new Map<string, BuildNode>();
   for (const stat of stats) {
     const tokens = stat.subject.split(".");
@@ -53,5 +69,5 @@ export function buildSubjectTree(stats: SubjectStat[]): SubjectNode[] {
       level = node.children;
     }
   }
-  return toSorted(roots);
+  return toSorted(roots, sort);
 }

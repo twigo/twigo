@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use futures_util::StreamExt;
+
 use serde::Serialize;
 use tauri::{AppHandle, State};
 use tokio::sync::Mutex;
@@ -47,18 +49,23 @@ pub async fn conn_sync_readonly(
     Ok(())
 }
 
+/// What the server states about itself, known only once the link is up.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerFacts {
+    server_name: String,
+    server_version: String,
+    jetstream: bool,
+    max_payload: usize,
+}
+
+/// The facts sit behind one Option instead of next to a `connected` flag, so
+/// there is no shape in which they are readable but meaningless.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnInfo {
     name: String,
-    server_name: String,
-    server_version: String,
-    rtt_ms: f64,
-    jetstream: bool,
-    max_payload: usize,
-    // False while the client is still (re)connecting in the background - the
-    // server info/rtt above are placeholders until a real link is up.
-    connected: bool,
+    server: Option<ServerFacts>,
 }
 
 #[derive(Serialize, Clone)]
@@ -83,10 +90,9 @@ pub struct ServerDetails {
     cluster: Option<String>,
     domain: Option<String>,
     connect_urls: Vec<String>,
-    rtt_ms: f64,
 }
 
-fn server_details(name: String, info: &async_nats::ServerInfo, rtt_ms: f64) -> ServerDetails {
+fn server_details(name: String, info: &async_nats::ServerInfo) -> ServerDetails {
     ServerDetails {
         name,
         server_id: info.server_id.clone(),
@@ -107,7 +113,6 @@ fn server_details(name: String, info: &async_nats::ServerInfo, rtt_ms: f64) -> S
         cluster: info.cluster.clone(),
         domain: info.domain.clone(),
         connect_urls: info.connect_urls.clone(),
-        rtt_ms,
     }
 }
 
@@ -154,29 +159,51 @@ fn non_empty(value: &Option<String>) -> Option<&str> {
     value.as_deref().map(str::trim).filter(|s| !s.is_empty())
 }
 
-// RTT via flush timing, bounded so a still-reconnecting client (server down at
-// launch under retry_on_initial_connect) can't hang the command. A successful
-// flush also doubles as the "is the link actually up" signal: Some(rtt) means
-// connected, None means still (re)connecting.
-async fn measure_rtt(client: &async_nats::Client) -> Option<f64> {
+const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+// A flush completes once the write buffer reaches the socket, which cannot
+// happen mid-reconnect - hence liveness, not latency. Bounded so a server that
+// is down at launch (retry_on_initial_connect) can't hang the command.
+async fn link_is_up(client: &async_nats::Client) -> bool {
+    matches!(
+        tokio::time::timeout(PROBE_TIMEOUT, client.flush()).await,
+        Ok(Ok(()))
+    )
+}
+
+// async-nats has no rtt()/ping(), and its flush() never leaves the socket
+// (unlike nats.go) - timing that reports ~0 against any server. So: subscribe
+// to the probe subject, publish to it, and time our own message coming back.
+// SUB is written before PUB on the same stream, so the server registers the
+// subscription first. An earlier no-responders probe was defeated by any
+// wildcard interest anywhere on the server - a `nats sub ">"`, or Twigo's own
+// subject watch - since interest suppresses the 503 and the request just waits.
+async fn measure_rtt(client: &async_nats::Client, subject: String) -> error::Result<f64> {
+    let mut sub = client.subscribe(subject.clone()).await?;
     let started = std::time::Instant::now();
-    match tokio::time::timeout(std::time::Duration::from_secs(2), client.flush()).await {
-        Ok(Ok(())) => Some(started.elapsed().as_secs_f64() * 1000.0),
-        _ => None,
+    client.publish(subject, Vec::new().into()).await?;
+    client.flush().await?;
+    match tokio::time::timeout(PROBE_TIMEOUT, sub.next()).await {
+        Ok(Some(_)) => Ok(started.elapsed().as_secs_f64() * 1000.0),
+        _ => Err(Error::Timeout(
+            "round-trip probe got no echo within 2s".into(),
+        )),
     }
 }
 
 async fn build_conn_info(name: String, client: &async_nats::Client) -> ConnInfo {
-    let rtt = measure_rtt(client).await;
-    let server = client.server_info();
+    if !link_is_up(client).await {
+        return ConnInfo { name, server: None };
+    }
+    let info = client.server_info();
     ConnInfo {
         name,
-        server_name: server.server_name.clone(),
-        server_version: server.version.clone(),
-        rtt_ms: rtt.unwrap_or(0.0),
-        jetstream: server.jetstream,
-        max_payload: server.max_payload,
-        connected: rtt.is_some(),
+        server: Some(ServerFacts {
+            server_name: info.server_name.clone(),
+            server_version: info.version.clone(),
+            jetstream: info.jetstream,
+            max_payload: info.max_payload,
+        }),
     }
 }
 
@@ -390,13 +417,10 @@ pub(crate) async fn connect_impl<E: Emit>(
     let client = opts.connect(url.clone()).await?;
     let info = build_conn_info(name.clone(), &client).await;
 
-    tracing::info!(
-        conn = %name,
-        url = %url,
-        server = %info.server_name,
-        connected = info.connected,
-        "connect"
-    );
+    match &info.server {
+        Some(s) => tracing::info!(conn = %name, url = %url, server = %s.server_name, "connect"),
+        None => tracing::info!(conn = %name, url = %url, "connect - link not up yet"),
+    }
     // Reconnecting the same name: tear down the previous connection's tasks so
     // the old client/socket closes instead of leaking behind the new one. Hold
     // the clients lock across teardown + insert so a concurrent reconnect of the
@@ -458,6 +482,38 @@ pub(crate) async fn list_connections_impl(state: &ConnState) -> error::Result<Ve
     Ok(state.clients.lock().await.keys().cloned().collect())
 }
 
+/// Round trip in milliseconds. Not part of [`ConnInfo`]: that holds facts fixed
+/// at CONNECT, this is a sample that ages and can fail on its own. The frontend
+/// sampler owns the probe subject so one link session reuses one subject - a
+/// fresh subject per tick would litter the subject tree under a ">" watch.
+#[tauri::command]
+pub async fn conn_rtt(
+    state: State<'_, ConnState>,
+    name: String,
+    probe: String,
+) -> error::Result<f64> {
+    conn_rtt_impl(&state, name, probe).await
+}
+
+pub(crate) async fn conn_rtt_impl(
+    state: &ConnState,
+    name: String,
+    probe: String,
+) -> error::Result<f64> {
+    // Inbox-only, or this command becomes an arbitrary-publish primitive that
+    // sidesteps the read-only gate (SEC-4).
+    if !probe.starts_with("_INBOX.") {
+        return Err(Error::InvalidInput(
+            "rtt probe subject must live under _INBOX.".into(),
+        ));
+    }
+    let client = state
+        .client(&name)
+        .await
+        .ok_or_else(|| Error::NotConnected(name))?;
+    measure_rtt(&client, probe).await
+}
+
 #[tauri::command]
 pub async fn server_info(
     state: State<'_, ConnState>,
@@ -476,8 +532,7 @@ pub(crate) async fn server_info_impl(
         .ok_or_else(|| Error::NotConnected(name.clone()))?;
 
     let info = client.server_info();
-    let rtt_ms = measure_rtt(&client).await.unwrap_or(0.0);
-    Ok(server_details(name, &info, rtt_ms))
+    Ok(server_details(name, &info))
 }
 
 #[cfg(test)]
@@ -498,6 +553,22 @@ mod tests {
             file,
             selected: false,
         }
+    }
+
+    #[tokio::test]
+    async fn rtt_probe_rejects_a_subject_outside_the_inbox_space() {
+        let err = conn_rtt_impl(&ConnState::default(), "a".into(), "orders.create".into())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn rtt_probe_requires_a_live_client() {
+        let err = conn_rtt_impl(&ConnState::default(), "a".into(), "_INBOX.rtt.x".into())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::NotConnected(_)));
     }
 
     #[tokio::test]
@@ -731,7 +802,7 @@ mod tests {
             max_payload: 1_048_576,
             ..Default::default()
         };
-        let d = server_details("prod-eu".into(), &info, 1.5);
+        let d = server_details("prod-eu".into(), &info);
         assert_eq!(d.name, "prod-eu");
         assert_eq!(d.server_name, "twigo-dev");
         assert_eq!(d.version, "2.10.0");
@@ -739,6 +810,5 @@ mod tests {
         assert_eq!(d.port, 4222);
         assert!(d.jetstream);
         assert_eq!(d.max_payload, 1_048_576);
-        assert_eq!(d.rtt_ms, 1.5);
     }
 }

@@ -36,12 +36,12 @@ function setLive(connected: boolean) {
       ? {
           c: {
             name: "c",
-            serverName: "s",
-            serverVersion: "2",
-            rttMs: 0,
-            jetstream: false,
-            maxPayload: 0,
-            connected: true,
+            server: {
+              serverName: "s",
+              serverVersion: "2",
+              jetstream: false,
+              maxPayload: 0,
+            },
           },
         }
       : {},

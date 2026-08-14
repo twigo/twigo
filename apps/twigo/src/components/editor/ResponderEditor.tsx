@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Play, Square, Plus, X, Trash2 } from "lucide-react";
 import { Button, Input, Label, CodeViewer, cn } from "@twigo/ui";
 import { fmtTime } from "@twigo/utils";
-import { useConnections } from "@/store/connections";
+import { useConnections, selectIsLive } from "@/store/connections";
 import { useIsReadOnly } from "@/hooks/useIsReadOnly";
 import {
   useResponder,
@@ -125,10 +125,7 @@ export function ResponderEditor({
   }, [id, connId, initialSubject]);
 
   const session = useResponder((s) => s.byConn[connId]?.[id]);
-  const live = useConnections(
-    (s) =>
-      session !== undefined && s.connected[session.connId]?.connected === true,
-  );
+  const live = useConnections(selectIsLive(session?.connId));
   const readOnly = useIsReadOnly(connId);
   const [preview, setPreview] = useState<RenderResult | null>(null);
 

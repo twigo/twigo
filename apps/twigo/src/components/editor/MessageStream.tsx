@@ -1,5 +1,4 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { Allotment } from "allotment";
 import { Pause, Play, Trash2, ArrowDown, Radio, Search } from "lucide-react";
 import { Button, EmptyState } from "@twigo/ui";
 import { fmtCount } from "@twigo/utils";
@@ -8,6 +7,7 @@ import { useUi } from "@/store/ui";
 import { messageMatches } from "@/lib/messageFilter";
 import { MessageTable } from "./MessageTable";
 import { DetailPanel } from "./DetailPanel";
+import { InspectorSplit } from "./InspectorSplit";
 
 export function computeUnread(
   atBottom: boolean,
@@ -177,8 +177,11 @@ export function MessageStream({ streamId }: { streamId: string }) {
           No messages match “{filter.trim()}”.
         </EmptyState>
       ) : (
-        <Allotment className="min-h-0 flex-1" proportionalLayout={false}>
-          <Allotment.Pane minSize={320}>
+        <InspectorSplit
+          inspectorVisible={inspectorVisible}
+          defaultWidth={380}
+          inspector={<DetailPanel streamId={streamId} />}
+          main={
             <div className="relative h-full">
               <div
                 ref={attachScroll}
@@ -214,15 +217,8 @@ export function MessageStream({ streamId }: { streamId: string }) {
                 </button>
               )}
             </div>
-          </Allotment.Pane>
-          <Allotment.Pane
-            visible={inspectorVisible}
-            preferredSize={380}
-            minSize={260}
-          >
-            <DetailPanel streamId={streamId} />
-          </Allotment.Pane>
-        </Allotment>
+          }
+        />
       )}
     </div>
   );

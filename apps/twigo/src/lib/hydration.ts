@@ -11,6 +11,7 @@ import { useCommandHistory } from "@/store/commandHistory";
 import { useHistory } from "@/store/history";
 import { useCodecs } from "@/store/codecs";
 import { useUpdateCheck } from "@/store/updateCheck";
+import { useSubjects } from "@/store/subjects";
 
 interface Hydratable {
   persist: {
@@ -37,6 +38,7 @@ const STORES: Hydratable[] = [
   useHistory,
   useCodecs,
   useUpdateCheck,
+  useSubjects,
 ];
 
 export function useStoresHydrated(stores: Hydratable[]): boolean {

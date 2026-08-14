@@ -12,7 +12,7 @@ import { fmtCount, fmtDuration } from "@twigo/utils";
 import { jsPauseConsumer, jsResumeConsumer, jsDeleteConsumer } from "@/lib/api";
 import { useConsumerDetail } from "@/hooks/useJetStreamDetail";
 import { useIsReadOnly } from "@/hooks/useIsReadOnly";
-import { useConnections } from "@/store/connections";
+import { useConnections, selectServerVersion } from "@/store/connections";
 import { useJetStream } from "@/store/jetstream";
 import { useSeries, NO_POINTS, type SeriesPoint } from "@/store/series";
 import { useToasts } from "@/store/toasts";
@@ -98,9 +98,7 @@ export function ConsumerDetailPanel({
   useEffect(() => {
     if (data) useSeries.getState().push(connId, seriesKey, data.numPending);
   }, [connId, seriesKey, data]);
-  const serverVersion = useConnections(
-    (s) => s.connected[connId]?.serverVersion ?? "",
-  );
+  const serverVersion = useConnections(selectServerVersion(connId));
   const readOnly = useIsReadOnly(connId);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const cfg = data?.config ?? {};

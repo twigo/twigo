@@ -10,7 +10,7 @@ import {
 import "dockview-react/dist/styles/dockview.css";
 import { useUi } from "@/store/ui";
 import { useStream } from "@/store/stream";
-import { useConnections } from "@/store/connections";
+import { useConnections, selectIsLive } from "@/store/connections";
 import { useWorkspace } from "@/store/workspace";
 import {
   setEditorApi,
@@ -45,7 +45,7 @@ function subscribeActiveStream(api: DockviewApi) {
   };
   if (p.type !== "stream" || !p.connId || !p.subject) return;
   if (useStream.getState().sessions[panel.id]) return; // already live
-  if (!useConnections.getState().connected[p.connId]?.connected) return; // not up
+  if (!selectIsLive(p.connId)(useConnections.getState())) return; // not up
   void openStream(p.connId, p.subject);
 }
 
@@ -54,6 +54,7 @@ export function EditorArea() {
   // Resolved at render (after registerNatsModule ran in main.tsx); stable after.
   const Watermark = getWatermark() ?? EmptyWatermark;
   const apiRef = useRef<DockviewApi | null>(null);
+  const hostRef = useRef<HTMLDivElement | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
@@ -124,6 +125,32 @@ export function EditorArea() {
     subscribeActiveStream(api);
   }, []);
 
+  // Dockview's auto-resize dispatches through requestAnimationFrame, landing a
+  // frame behind the sash; laying out straight from the observer does not.
+  useEffect(() => {
+    const el = hostRef.current;
+    if (!el) return;
+    let lastW = -1;
+    let lastH = -1;
+    const ro = new ResizeObserver(([entry]) => {
+      const api = apiRef.current;
+      // A hidden element measures zero, which would collapse the grid.
+      if (!api || !entry || !el.offsetParent) return;
+      // Rounded and deduped, or a fractional devicePixelRatio re-fires layout
+      // against itself.
+      const width = Math.round(entry.contentRect.width);
+      const height = Math.round(entry.contentRect.height);
+      if (width === lastW && height === lastH) return;
+      lastW = width;
+      lastH = height;
+      api.layout(width, height);
+    });
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+    };
+  }, []);
+
   // Swap the editor layout when the active connection changes (tabs are
   // per-context), and wake the focused restored stream as connections come up.
   // Selector subscriptions so this only runs on the two transitions that matter
@@ -158,7 +185,7 @@ export function EditorArea() {
     const unsubUp = useConnections.subscribe(
       (s) => {
         const c = s.activeContext;
-        return c ? (s.connected[c]?.connected ?? false) : false;
+        return selectIsLive(c)(s);
       },
       (up) => {
         const api = apiRef.current;
@@ -188,16 +215,19 @@ export function EditorArea() {
   }, []);
 
   return (
-    <DockviewReact
-      className="h-full"
-      theme={theme}
-      dndStrategy="pointer"
-      disableFloatingGroups
-      watermarkComponent={Watermark}
-      rightHeaderActionsComponent={NewTabButton}
-      onReady={onReady}
-      components={editorComponents}
-      tabComponents={editorTabComponents}
-    />
+    <div ref={hostRef} className="h-full">
+      <DockviewReact
+        className="h-full"
+        theme={theme}
+        dndStrategy="pointer"
+        disableFloatingGroups
+        disableAutoResizing
+        watermarkComponent={Watermark}
+        rightHeaderActionsComponent={NewTabButton}
+        onReady={onReady}
+        components={editorComponents}
+        tabComponents={editorTabComponents}
+      />
+    </div>
   );
 }

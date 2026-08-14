@@ -9,7 +9,11 @@ vi.mock("@/store/connections", async () => {
     connected: {},
     load: vi.fn(() => Promise.resolve()),
   }));
-  return { useConnections };
+  return {
+    useConnections,
+    selectAnyLive: (st: { connected: Record<string, unknown> }) =>
+      Object.keys(st.connected).length > 0,
+  };
 });
 vi.mock("@/components/connections/ConnectionForm", async () => {
   const React = await import("react");

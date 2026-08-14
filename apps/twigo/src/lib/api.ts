@@ -88,14 +88,19 @@ export interface ContextSummary {
   selected: boolean;
 }
 
-export interface ConnInfo {
-  name: string;
+/** What the server states about itself, known only once the link is up. */
+export interface ServerFacts {
   serverName: string;
   serverVersion: string;
-  rttMs: number;
   jetstream: boolean;
   maxPayload: number;
-  connected: boolean;
+}
+
+// The facts sit behind one nullable field instead of next to a `connected`
+// flag, so there is no shape in which they are readable but meaningless.
+export interface ConnInfo {
+  name: string;
+  server: ServerFacts | null;
 }
 
 export interface NatsEvent {
@@ -183,6 +188,11 @@ export function connInfo(name: string): Promise<ConnInfo> {
   return call<ConnInfo>("conn_info", { name });
 }
 
+/** Round trip in ms; rejects when it could not be measured. */
+export function connRtt(name: string, probe: string): Promise<number> {
+  return call<number>("conn_rtt", { name, probe });
+}
+
 export interface ServerDetails {
   name: string;
   serverId: string;
@@ -203,7 +213,6 @@ export interface ServerDetails {
   cluster: string | null;
   domain: string | null;
   connectUrls: string[];
-  rttMs: number;
 }
 
 export function serverInfo(name: string): Promise<ServerDetails> {

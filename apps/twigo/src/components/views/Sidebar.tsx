@@ -46,11 +46,6 @@ export function Sidebar() {
         <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           {title}
         </span>
-        {domainId === "nats" && activeContext && (
-          <span className="truncate font-mono text-[11px] text-foreground/60">
-            · {activeContext}
-          </span>
-        )}
       </div>
       <div className="px-2 pb-1.5">
         <div className="flex items-center gap-1.5 rounded-md border border-input bg-background px-2 py-1">

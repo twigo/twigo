@@ -1,6 +1,14 @@
 import { Circle, Loader2 } from "lucide-react";
 import { cn } from "@twigo/ui";
-import type { ConnInfo } from "@/lib/api";
+import { type ConnInfo } from "@/lib/api";
+import { linkState, type LinkState } from "./linkState";
+
+const GLYPH: Record<Exclude<LinkState, "dialling">, string> = {
+  live: "fill-ok text-ok",
+  reconnecting: "animate-pulse fill-warn text-warn",
+  failed: "fill-error text-error",
+  offline: "fill-muted-foreground/40 text-muted-foreground/40",
+};
 
 export function StatusGlyph({
   info,
@@ -11,26 +19,11 @@ export function StatusGlyph({
   connecting?: boolean;
   error?: boolean;
 }) {
-  if (connecting) {
+  const state = linkState(info, !!connecting, !!error);
+  if (state === "dialling") {
     return (
       <Loader2 className="size-2.5 shrink-0 animate-spin text-muted-foreground" />
     );
   }
-  const isLive = info?.connected === true;
-  const isConnected = !!info;
-  return (
-    <Circle
-      aria-hidden
-      className={cn(
-        "size-2 shrink-0",
-        isLive
-          ? "fill-ok text-ok"
-          : isConnected
-            ? "animate-pulse fill-warn text-warn"
-            : error
-              ? "fill-error text-error"
-              : "fill-muted-foreground/40 text-muted-foreground/40",
-      )}
-    />
-  );
+  return <Circle aria-hidden className={cn("size-2 shrink-0", GLYPH[state])} />;
 }

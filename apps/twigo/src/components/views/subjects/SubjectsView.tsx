@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { Square } from "lucide-react";
-import { Button } from "@twigo/ui";
+import { Button, ToggleGroup, ToggleGroupItem } from "@twigo/ui";
 import { useConnections } from "@/store/connections";
 import { useSubjects } from "@/store/subjects";
-import { buildSubjectTree } from "@twigo/utils";
+import { buildSubjectTree, type SubjectSort } from "@twigo/utils";
 import { openStream } from "@/lib/editor";
 import type { ViewProps } from "@/shell/views";
 import { SubjectTree } from "./SubjectTree";
@@ -17,6 +17,12 @@ function Hint({ children }: { children: React.ReactNode }) {
   );
 }
 
+const SORTS: { id: SubjectSort; label: string; hint: string }[] = [
+  { id: "name", label: "A→Z", hint: "Sort subjects alphabetically" },
+  { id: "rate", label: "rate", hint: "Busiest right now first" },
+  { id: "count", label: "msgs", hint: "Most messages seen first" },
+];
+
 export function SubjectsView({ filter, connId }: ViewProps) {
   const isConnected = useConnections((s) => !!(connId && s.connected[connId]));
   const data = useSubjects((s) => (connId ? s.byConn[connId] : undefined));
@@ -25,6 +31,8 @@ export function SubjectsView({ filter, connId }: ViewProps) {
   );
   const startWatch = useSubjects((s) => s.startWatch);
   const stopWatch = useSubjects((s) => s.stopWatch);
+  const sort = useSubjects((s) => s.sort);
+  const setSort = useSubjects((s) => s.setSort);
 
   const tree = useMemo(() => {
     const stats = data?.stats ?? [];
@@ -32,8 +40,8 @@ export function SubjectsView({ filter, connId }: ViewProps) {
     const filtered = f
       ? stats.filter((s) => s.subject.toLowerCase().includes(f))
       : stats;
-    return buildSubjectTree(filtered);
-  }, [data?.stats, filter]);
+    return buildSubjectTree(filtered, sort);
+  }, [data?.stats, filter, sort]);
 
   if (!isConnected || !connId) {
     return <Hint>Connect to a server to explore subjects.</Hint>;
@@ -60,6 +68,22 @@ export function SubjectsView({ filter, connId }: ViewProps) {
           <Square />
           Stop
         </Button>
+      </div>
+      <div className="flex items-center gap-2 px-2 pb-1.5">
+        <ToggleGroup
+          type="single"
+          value={sort}
+          onValueChange={(v) => {
+            if (v) setSort(v as SubjectSort);
+          }}
+          aria-label="Sort subjects"
+        >
+          {SORTS.map((s) => (
+            <ToggleGroupItem key={s.id} value={s.id} title={s.hint}>
+              {s.label}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
       </div>
       {tree.length === 0 ? (
         <Hint>

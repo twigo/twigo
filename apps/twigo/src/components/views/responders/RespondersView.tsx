@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Play, Plus, Square, Trash2 } from "lucide-react";
 import { cn } from "@twigo/ui";
-import { useConnections } from "@/store/connections";
+import { useConnections, selectIsLive } from "@/store/connections";
 import { useReadOnly } from "@/store/readonly";
 import { useResponder } from "@/store/responder";
 import { openResponder, openResponderTab } from "@/lib/editor";
@@ -37,9 +37,7 @@ function IconButton({
 
 export function RespondersView({ filter, connId }: ViewProps) {
   const conns = useResponder((s) => (connId ? s.byConn[connId] : undefined));
-  const live = useConnections(
-    (s) => !!(connId && s.connected[connId]?.connected),
-  );
+  const live = useConnections(selectIsLive(connId));
   const locks = useReadOnly((s) => s.byConn);
   const list = Object.values(conns ?? {})
     .filter((s) =>

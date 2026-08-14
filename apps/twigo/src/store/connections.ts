@@ -5,6 +5,7 @@ import {
   connect as apiConnect,
   disconnect as apiDisconnect,
   connInfo as apiConnInfo,
+  connRtt as apiConnRtt,
   deleteContext as apiDeleteContext,
   syncConnReadonly,
   ipcError,
@@ -56,6 +57,75 @@ function clearLinkWatch(conn: string) {
   slowConsumerAt.delete(conn);
 }
 
+// ── RTT sampling ─────────────────────────────────────────────────────────
+// One owner: started when a link comes up, stopped on every way a link dies.
+// Both connect() and the "connected" event call start - the event can be missed
+// during session restore (listeners register async), and connect() is absent on
+// a mid-session reconnect - so start is idempotent to keep one probe per link.
+const RTT_INTERVAL_MS = 10_000;
+// A refused probe stays refused (e.g. no publish permission on _INBOX.>);
+// give up for this link session instead of timing out every tick forever.
+const RTT_FAILURE_LIMIT = 3;
+
+const rttTimers = new Map<string, ReturnType<typeof setInterval>>();
+// Bumped on every stop, so a probe that was in flight when the link cycled
+// cannot write a stale sample into the next session.
+const rttEpoch = new Map<string, number>();
+
+function stopRttSampling(conn: string) {
+  rttEpoch.set(conn, (rttEpoch.get(conn) ?? 0) + 1);
+  const t = rttTimers.get(conn);
+  if (t !== undefined) clearInterval(t);
+  rttTimers.delete(conn);
+  useConnections.setState((s) => {
+    const { [conn]: _gone, ...rtt } = s.rtt;
+    return { rtt };
+  });
+}
+
+function startRttSampling(conn: string) {
+  if (rttTimers.has(conn)) return;
+  const epoch = rttEpoch.get(conn) ?? 0;
+  // One probe subject per link session: a fresh one per tick would litter the
+  // subject tree of anyone watching ">" with a new _INBOX entry every 10s.
+  const probe = `_INBOX.rtt.${crypto.randomUUID()}`;
+  let failures = 0;
+  const sample = async () => {
+    try {
+      const ms = await apiConnRtt(conn, probe);
+      if (rttEpoch.get(conn) !== epoch) return;
+      failures = 0;
+      useConnections.setState((s) => {
+        const prev = s.rtt[conn];
+        // Light smoothing so the chip reads as a level, not a ticker.
+        const next = prev === undefined ? ms : prev + 0.5 * (ms - prev);
+        return { rtt: { ...s.rtt, [conn]: next } };
+      });
+    } catch (e) {
+      if (rttEpoch.get(conn) !== epoch) return;
+      failures += 1;
+      useConnections.setState((s) => {
+        const { [conn]: _gone, ...rtt } = s.rtt;
+        return { rtt };
+      });
+      if (failures >= RTT_FAILURE_LIMIT) {
+        console.error(
+          `[rtt] ${conn}: giving up after ${String(failures)} failed probes`,
+          e,
+        );
+        const t = rttTimers.get(conn);
+        if (t !== undefined) clearInterval(t);
+        rttTimers.delete(conn);
+      }
+    }
+  };
+  rttTimers.set(
+    conn,
+    setInterval(() => void sample(), RTT_INTERVAL_MS),
+  );
+  void sample();
+}
+
 function teardown(conn: string) {
   // Every per-connection domain store (subjects, JetStream, KV, Object Store,
   // monitor) self-registers in connScoped, so a new domain joins teardown
@@ -66,12 +136,14 @@ function teardown(conn: string) {
   useConnections.getState().editorTeardown(conn);
 }
 
-interface ConnectionsState {
+export interface ConnectionsState {
   contexts: ContextSummary[];
   status: LoadState;
   error: string | null;
   activeContext: string | null;
   connected: Record<string, ConnInfo>;
+  // A missing entry means "not measured"; any number would be a claim.
+  rtt: Record<string, number>;
   connecting: Record<string, boolean>;
   connError: Record<string, string>;
   // While a connection is dropped, the live backoff state for its next retry.
@@ -97,6 +169,7 @@ export const useConnections = create<ConnectionsState>()(
     error: null,
     activeContext: null,
     connected: {},
+    rtt: {},
     connecting: {},
     connError: {},
     reconnecting: {},
@@ -151,6 +224,7 @@ export const useConnections = create<ConnectionsState>()(
           connecting: { ...s.connecting, [name]: false },
         }));
         useWorkspace.getState().setConnected(name, true);
+        startRttSampling(name);
       } catch (e) {
         const err = ipcError(e);
         // Branch on the typed kind for an actionable hint on the common failure.
@@ -173,6 +247,7 @@ export const useConnections = create<ConnectionsState>()(
     disconnect: async (name) => {
       closing.add(name);
       clearLinkWatch(name);
+      stopRttSampling(name);
       try {
         await apiDisconnect(name);
         teardown(name);
@@ -235,17 +310,19 @@ export const useConnections = create<ConnectionsState>()(
               : s,
           );
         });
+        startRttSampling(conn);
       } else if (kind === "disconnected") {
+        stopRttSampling(conn);
         const cur = get().connected[conn];
         if (cur) {
           set((s) => ({
-            connected: { ...s.connected, [conn]: { ...cur, connected: false } },
+            connected: { ...s.connected, [conn]: { name: conn, server: null } },
           }));
         }
         // Defer the toast past the grace window: a quick auto-reconnect should be
         // invisible. Arm once per outage, skip repeats and user-led disconnects.
         const watch =
-          cur?.connected === true &&
+          !!cur?.server &&
           !closing.has(conn) &&
           !dropTimers.has(conn) &&
           !announced.has(conn);
@@ -253,7 +330,7 @@ export const useConnections = create<ConnectionsState>()(
           const timer = setTimeout(() => {
             dropTimers.delete(conn);
             const down = get().connected[conn];
-            if (down && !down.connected && !closing.has(conn)) {
+            if (down && !down.server && !closing.has(conn)) {
               announced.add(conn);
               useToasts
                 .getState()
@@ -266,6 +343,7 @@ export const useConnections = create<ConnectionsState>()(
         }
       } else if (kind === "closed") {
         clearLinkWatch(conn);
+        stopRttSampling(conn);
         teardown(conn);
         set((s) => {
           const { [conn]: _removed, ...connected } = s.connected;
@@ -327,3 +405,34 @@ useReadOnly.subscribe((s) => {
     }),
   );
 });
+
+// Derived questions the UI keeps asking, answered once. Every one of these was
+// re-expressed in three or four components, which is how "has an entry" and
+// "has a live link" drifted apart in the first place.
+export const selectIsLive =
+  (id: string | null | undefined) => (s: ConnectionsState) =>
+    !!(id && s.connected[id]?.server);
+
+export const selectHasJetStream =
+  (id: string | null | undefined) => (s: ConnectionsState) =>
+    !!(id && s.connected[id]?.server?.jetstream);
+
+export const selectMaxPayload =
+  (id: string, fallback: number) => (s: ConnectionsState) =>
+    s.connected[id]?.server?.maxPayload ?? fallback;
+
+export const selectServerVersion = (id: string) => (s: ConnectionsState) =>
+  s.connected[id]?.server?.serverVersion ?? "";
+
+export const selectLiveCount = (s: ConnectionsState) =>
+  Object.values(s.connected).filter((i) => i.server).length;
+
+export const selectAnyLive = (s: ConnectionsState) =>
+  Object.values(s.connected).some((i) => i.server);
+
+/** Name of a live connection: the active one if it qualifies, else any. */
+export const selectFirstLive = (s: ConnectionsState): string | undefined => {
+  const active = s.activeContext;
+  if (active && s.connected[active]?.server) return active;
+  return Object.values(s.connected).find((i) => i.server)?.name;
+};

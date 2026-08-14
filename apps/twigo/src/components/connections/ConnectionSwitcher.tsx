@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChevronsUpDown, Lock } from "lucide-react";
 import { Popover, PopoverTrigger, PopoverContent } from "@twigo/ui";
-import { useConnections } from "@/store/connections";
+import { useConnections, selectLiveCount } from "@/store/connections";
 import { useReadOnly } from "@/store/readonly";
 import { StatusGlyph } from "./StatusGlyph";
 import { ConnectionPicker } from "./ConnectionPicker";
@@ -25,9 +25,7 @@ export function ConnectionSwitcher() {
   const error = useConnections((s) =>
     activeContext ? !!s.connError[activeContext] : false,
   );
-  const liveCount = useConnections(
-    (s) => Object.values(s.connected).filter((i) => i.connected).length,
-  );
+  const liveCount = useConnections(selectLiveCount);
 
   return (
     <div className="px-2 pb-1 pt-2">

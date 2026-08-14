@@ -26,12 +26,12 @@ function ctx(name: string): ContextSummary {
 function info(name: string): ConnInfo {
   return {
     name,
-    serverName: "s",
-    serverVersion: "2",
-    rttMs: 1,
-    jetstream: false,
-    maxPayload: 0,
-    connected: true,
+    server: {
+      serverName: "s",
+      serverVersion: "2",
+      jetstream: false,
+      maxPayload: 0,
+    },
   };
 }
 

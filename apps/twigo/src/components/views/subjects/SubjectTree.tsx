@@ -9,7 +9,7 @@ import {
   ContextMenuContent,
   ContextMenuItem,
 } from "@twigo/ui";
-import { type SubjectNode } from "@twigo/utils";
+import { type SubjectNode, fmtCount } from "@twigo/utils";
 import { useStream } from "@/store/stream";
 import { useFlash } from "@/hooks/useFlash";
 import { openPublish, openResponder } from "@/lib/editor";
@@ -72,7 +72,10 @@ export function navAction(
 
 function formatRate(rate: number): string {
   if (rate >= 10) return Math.round(rate).toString();
-  if (rate > 0) return rate.toFixed(1);
+  // Anything alive but slower than a tenth would round to "0.0" and read as
+  // silent, which is the one thing this column has to distinguish.
+  if (rate >= 0.1) return rate.toFixed(1);
+  if (rate > 0) return "<0.1";
   return "0";
 }
 
@@ -251,6 +254,9 @@ function SubjectRow({
             >
               <span className="flex-1 truncate font-mono text-xs">
                 {node.token}
+              </span>
+              <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground/70">
+                {fmtCount(node.count)}
               </span>
               <span
                 className={cn(

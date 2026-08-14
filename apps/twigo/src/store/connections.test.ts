@@ -6,6 +6,7 @@ const {
   connect,
   disconnect,
   connInfo,
+  connRtt,
   deleteContext,
   syncConnReadonly,
   pushMock,
@@ -14,6 +15,7 @@ const {
   connect: vi.fn(),
   disconnect: vi.fn(),
   connInfo: vi.fn(),
+  connRtt: vi.fn((_name: string, _probe: string) => Promise.resolve(1)),
   deleteContext: vi.fn(),
   syncConnReadonly: vi.fn(() => Promise.resolve()),
   pushMock: vi.fn(),
@@ -23,6 +25,7 @@ vi.mock("@/lib/api", () => ({
   connect,
   disconnect,
   connInfo,
+  connRtt,
   deleteContext,
   syncConnReadonly,
 }));
@@ -49,12 +52,12 @@ function ctx(name: string, selected = false): ContextSummary {
 function info(name = "a"): ConnInfo {
   return {
     name,
-    serverName: "s",
-    serverVersion: "2",
-    rttMs: 0,
-    jetstream: false,
-    maxPayload: 0,
-    connected: true,
+    server: {
+      serverName: "s",
+      serverVersion: "2",
+      jetstream: false,
+      maxPayload: 0,
+    },
   };
 }
 
@@ -140,10 +143,10 @@ describe("connections active-context persistence", () => {
 
   it("marks a connection reconnecting on a disconnected event", () => {
     useConnections.setState({
-      connected: { a: { ...info(), connected: true } },
+      connected: { a: info() },
     });
     useConnections.getState().onEvent("a", "disconnected");
-    expect(useConnections.getState().connected.a?.connected).toBe(false);
+    expect(useConnections.getState().connected.a?.server).toBeNull();
   });
 
   it("drops a connection on a closed event", () => {
@@ -183,7 +186,7 @@ describe("connections link toasts", () => {
 
   it("warns only once a drop outlasts the grace window", () => {
     useConnections.setState({
-      connected: { a: { ...info(), connected: true } },
+      connected: { a: info() },
     });
     useConnections.getState().onEvent("a", "disconnected");
     expect(pushMock).not.toHaveBeenCalled(); // deferred, not immediate
@@ -197,7 +200,7 @@ describe("connections link toasts", () => {
 
   it("stays silent for a transient blip that self-heals", () => {
     useConnections.setState({
-      connected: { a: { ...info(), connected: true } },
+      connected: { a: info() },
     });
     useConnections.getState().onEvent("a", "disconnected");
     useConnections.getState().onEvent("a", "connected"); // back within grace
@@ -207,7 +210,7 @@ describe("connections link toasts", () => {
 
   it("announces recovery only after an outage was shown", () => {
     useConnections.setState({
-      connected: { a: { ...info(), connected: true } },
+      connected: { a: info() },
     });
     useConnections.getState().onEvent("a", "disconnected");
     vi.advanceTimersByTime(GRACE); // outage announced
@@ -222,7 +225,7 @@ describe("connections link toasts", () => {
 
   it("stays silent when the user is the one disconnecting", async () => {
     useConnections.setState({
-      connected: { a: { ...info(), connected: true } },
+      connected: { a: info() },
     });
     disconnect.mockResolvedValue(undefined);
     const pending = useConnections.getState().disconnect("a");
@@ -260,5 +263,125 @@ describe("read-only mirror (SEC-4)", () => {
     });
     expect(syncConnReadonly).toHaveBeenNthCalledWith(1, ["prod"]);
     expect(syncConnReadonly).toHaveBeenNthCalledWith(2, []);
+  });
+});
+
+describe("rtt sampling", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    connRtt.mockReset();
+    connInfo.mockReset();
+    connInfo.mockResolvedValue(info("a"));
+    disconnect.mockResolvedValue(undefined);
+    useConnections.setState({ connected: { a: info() }, rtt: {} });
+  });
+  afterEach(() => {
+    useConnections.getState().onEvent("a", "disconnected");
+    vi.useRealTimers();
+  });
+
+  it("takes a first sample as soon as the link is up", async () => {
+    connRtt.mockResolvedValue(1.4);
+    useConnections.getState().onEvent("a", "connected");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(useConnections.getState().rtt.a).toBe(1.4);
+  });
+
+  it("probes an inbox subject and keeps it for the whole link session", async () => {
+    connRtt.mockResolvedValue(1);
+    useConnections.getState().onEvent("a", "connected");
+    await vi.advanceTimersByTimeAsync(10_000);
+    const subjects = connRtt.mock.calls.map((c) => c[1]);
+    expect(subjects.length).toBeGreaterThan(1);
+    expect(new Set(subjects).size).toBe(1);
+    expect(subjects[0]).toMatch(/^_INBOX\.rtt\./);
+  });
+
+  it("keeps sampling on an interval, smoothing toward the newest value", async () => {
+    connRtt.mockResolvedValueOnce(1).mockResolvedValueOnce(3);
+    useConnections.getState().onEvent("a", "connected");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(useConnections.getState().rtt.a).toBe(1);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(useConnections.getState().rtt.a).toBe(2);
+  });
+
+  it("runs one sampler no matter how many times the link-up paths fire", async () => {
+    connRtt.mockResolvedValue(1);
+    useConnections.getState().onEvent("a", "connected");
+    useConnections.getState().onEvent("a", "connected");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(connRtt).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops sampling and clears the value when the link drops", async () => {
+    connRtt.mockResolvedValue(1);
+    useConnections.getState().onEvent("a", "connected");
+    await vi.advanceTimersByTimeAsync(0);
+    useConnections.getState().onEvent("a", "disconnected");
+    expect(useConnections.getState().rtt.a).toBeUndefined();
+    connRtt.mockClear();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(connRtt).not.toHaveBeenCalled();
+  });
+
+  it("clears the value on a deliberate disconnect", async () => {
+    connRtt.mockResolvedValue(1);
+    useConnections.getState().onEvent("a", "connected");
+    await vi.advanceTimersByTimeAsync(0);
+    await useConnections.getState().disconnect("a");
+    expect(useConnections.getState().rtt.a).toBeUndefined();
+    connRtt.mockClear();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(connRtt).not.toHaveBeenCalled();
+  });
+
+  it("discards a probe that resolves after the link cycled", async () => {
+    let resolveProbe!: (ms: number) => void;
+    connRtt.mockImplementationOnce(
+      () =>
+        new Promise<number>((resolve) => {
+          resolveProbe = resolve;
+        }),
+    );
+    useConnections.getState().onEvent("a", "connected");
+    useConnections.getState().onEvent("a", "disconnected");
+    resolveProbe(9);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(useConnections.getState().rtt.a).toBeUndefined();
+  });
+
+  it("gives up after repeated failures instead of probing forever", async () => {
+    connRtt.mockRejectedValue(new Error("Permissions Violation for Publish"));
+    const errSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    useConnections.getState().onEvent("a", "connected");
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(errSpy).toHaveBeenCalledTimes(1);
+    connRtt.mockClear();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(connRtt).not.toHaveBeenCalled();
+    expect(useConnections.getState().rtt.a).toBeUndefined();
+    errSpy.mockRestore();
+  });
+
+  it("a fresh link after giving up starts probing again", async () => {
+    connRtt.mockRejectedValue(new Error("nope"));
+    const errSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    useConnections.getState().onEvent("a", "connected");
+    await vi.advanceTimersByTimeAsync(20_000);
+    useConnections.getState().onEvent("a", "disconnected");
+
+    connRtt.mockReset();
+    connRtt.mockResolvedValue(2);
+    useConnections.getState().onEvent("a", "connected");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(useConnections.getState().rtt.a).toBe(2);
+    errSpy.mockRestore();
   });
 });
