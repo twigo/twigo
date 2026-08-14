@@ -15,7 +15,7 @@ const {
   connect: vi.fn(),
   disconnect: vi.fn(),
   connInfo: vi.fn(),
-  connRtt: vi.fn(() => Promise.resolve(1)),
+  connRtt: vi.fn((_name: string, _probe: string) => Promise.resolve(1)),
   deleteContext: vi.fn(),
   syncConnReadonly: vi.fn(() => Promise.resolve()),
   pushMock: vi.fn(),
@@ -285,6 +285,16 @@ describe("rtt sampling", () => {
     useConnections.getState().onEvent("a", "connected");
     await vi.advanceTimersByTimeAsync(0);
     expect(useConnections.getState().rtt.a).toBe(1.4);
+  });
+
+  it("probes an inbox subject and keeps it for the whole link session", async () => {
+    connRtt.mockResolvedValue(1);
+    useConnections.getState().onEvent("a", "connected");
+    await vi.advanceTimersByTimeAsync(10_000);
+    const subjects = connRtt.mock.calls.map((c) => c[1]);
+    expect(subjects.length).toBeGreaterThan(1);
+    expect(new Set(subjects).size).toBe(1);
+    expect(subjects[0]).toMatch(/^_INBOX\.rtt\./);
   });
 
   it("keeps sampling on an interval, smoothing toward the newest value", async () => {

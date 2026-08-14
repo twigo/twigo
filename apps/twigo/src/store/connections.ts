@@ -86,10 +86,13 @@ function stopRttSampling(conn: string) {
 function startRttSampling(conn: string) {
   if (rttTimers.has(conn)) return;
   const epoch = rttEpoch.get(conn) ?? 0;
+  // One probe subject per link session: a fresh one per tick would litter the
+  // subject tree of anyone watching ">" with a new _INBOX entry every 10s.
+  const probe = `_INBOX.rtt.${crypto.randomUUID()}`;
   let failures = 0;
   const sample = async () => {
     try {
-      const ms = await apiConnRtt(conn);
+      const ms = await apiConnRtt(conn, probe);
       if (rttEpoch.get(conn) !== epoch) return;
       failures = 0;
       useConnections.setState((s) => {

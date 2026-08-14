@@ -189,8 +189,8 @@ export function connInfo(name: string): Promise<ConnInfo> {
 }
 
 /** Round trip in ms; rejects when it could not be measured. */
-export function connRtt(name: string): Promise<number> {
-  return call<number>("conn_rtt", { name });
+export function connRtt(name: string, probe: string): Promise<number> {
+  return call<number>("conn_rtt", { name, probe });
 }
 
 export interface ServerDetails {

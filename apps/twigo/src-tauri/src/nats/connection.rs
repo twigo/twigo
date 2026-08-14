@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use futures_util::StreamExt;
+
 use serde::Serialize;
 use tauri::{AppHandle, State};
 use tokio::sync::Mutex;
@@ -170,22 +172,21 @@ async fn link_is_up(client: &async_nats::Client) -> bool {
 }
 
 // async-nats has no rtt()/ping(), and its flush() never leaves the socket
-// (unlike nats.go) - timing that reports ~0 against any server. Requesting a
-// fresh inbox nobody answers gets a no-responders reply, which is a real hop.
-// Fails on an account that denies publishing to _INBOX.>: there is no
-// permission-free round trip in this client, so the RTT stays unknown.
-async fn measure_rtt(client: &async_nats::Client) -> error::Result<f64> {
-    let subject = client.new_inbox();
+// (unlike nats.go) - timing that reports ~0 against any server. So: subscribe
+// to the probe subject, publish to it, and time our own message coming back.
+// SUB is written before PUB on the same stream, so the server registers the
+// subscription first. An earlier no-responders probe was defeated by any
+// wildcard interest anywhere on the server - a `nats sub ">"`, or Twigo's own
+// subject watch - since interest suppresses the 503 and the request just waits.
+async fn measure_rtt(client: &async_nats::Client, subject: String) -> error::Result<f64> {
+    let mut sub = client.subscribe(subject.clone()).await?;
     let started = std::time::Instant::now();
-    let elapsed = || started.elapsed().as_secs_f64() * 1000.0;
-    match tokio::time::timeout(PROBE_TIMEOUT, client.request(subject, Vec::new().into())).await {
-        Ok(Ok(_)) => Ok(elapsed()),
-        Ok(Err(e)) if e.kind() == async_nats::client::RequestErrorKind::NoResponders => {
-            Ok(elapsed())
-        }
-        Ok(Err(e)) => Err(e.into()),
-        Err(_) => Err(Error::Timeout(
-            "round-trip probe got no reply within 2s".into(),
+    client.publish(subject, Vec::new().into()).await?;
+    client.flush().await?;
+    match tokio::time::timeout(PROBE_TIMEOUT, sub.next()).await {
+        Ok(Some(_)) => Ok(started.elapsed().as_secs_f64() * 1000.0),
+        _ => Err(Error::Timeout(
+            "round-trip probe got no echo within 2s".into(),
         )),
     }
 }
@@ -482,18 +483,35 @@ pub(crate) async fn list_connections_impl(state: &ConnState) -> error::Result<Ve
 }
 
 /// Round trip in milliseconds. Not part of [`ConnInfo`]: that holds facts fixed
-/// at CONNECT, this is a sample that ages and can fail on its own.
+/// at CONNECT, this is a sample that ages and can fail on its own. The frontend
+/// sampler owns the probe subject so one link session reuses one subject - a
+/// fresh subject per tick would litter the subject tree under a ">" watch.
 #[tauri::command]
-pub async fn conn_rtt(state: State<'_, ConnState>, name: String) -> error::Result<f64> {
-    conn_rtt_impl(&state, name).await
+pub async fn conn_rtt(
+    state: State<'_, ConnState>,
+    name: String,
+    probe: String,
+) -> error::Result<f64> {
+    conn_rtt_impl(&state, name, probe).await
 }
 
-pub(crate) async fn conn_rtt_impl(state: &ConnState, name: String) -> error::Result<f64> {
+pub(crate) async fn conn_rtt_impl(
+    state: &ConnState,
+    name: String,
+    probe: String,
+) -> error::Result<f64> {
+    // Inbox-only, or this command becomes an arbitrary-publish primitive that
+    // sidesteps the read-only gate (SEC-4).
+    if !probe.starts_with("_INBOX.") {
+        return Err(Error::InvalidInput(
+            "rtt probe subject must live under _INBOX.".into(),
+        ));
+    }
     let client = state
         .client(&name)
         .await
         .ok_or_else(|| Error::NotConnected(name))?;
-    measure_rtt(&client).await
+    measure_rtt(&client, probe).await
 }
 
 #[tauri::command]
@@ -535,6 +553,22 @@ mod tests {
             file,
             selected: false,
         }
+    }
+
+    #[tokio::test]
+    async fn rtt_probe_rejects_a_subject_outside_the_inbox_space() {
+        let err = conn_rtt_impl(&ConnState::default(), "a".into(), "orders.create".into())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn rtt_probe_requires_a_live_client() {
+        let err = conn_rtt_impl(&ConnState::default(), "a".into(), "_INBOX.rtt.x".into())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::NotConnected(_)));
     }
 
     #[tokio::test]
