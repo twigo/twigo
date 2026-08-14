@@ -172,18 +172,21 @@ async fn link_is_up(client: &async_nats::Client) -> bool {
 // async-nats has no rtt()/ping(), and its flush() never leaves the socket
 // (unlike nats.go) - timing that reports ~0 against any server. Requesting a
 // fresh inbox nobody answers gets a no-responders reply, which is a real hop.
-// Returns None on an account that denies publishing to _INBOX.>: there is no
+// Fails on an account that denies publishing to _INBOX.>: there is no
 // permission-free round trip in this client, so the RTT stays unknown.
-async fn measure_rtt(client: &async_nats::Client) -> Option<f64> {
+async fn measure_rtt(client: &async_nats::Client) -> error::Result<f64> {
     let subject = client.new_inbox();
     let started = std::time::Instant::now();
     let elapsed = || started.elapsed().as_secs_f64() * 1000.0;
     match tokio::time::timeout(PROBE_TIMEOUT, client.request(subject, Vec::new().into())).await {
-        Ok(Ok(_)) => Some(elapsed()),
+        Ok(Ok(_)) => Ok(elapsed()),
         Ok(Err(e)) if e.kind() == async_nats::client::RequestErrorKind::NoResponders => {
-            Some(elapsed())
+            Ok(elapsed())
         }
-        _ => None,
+        Ok(Err(e)) => Err(e.into()),
+        Err(_) => Err(Error::Timeout(
+            "round-trip probe got no reply within 2s".into(),
+        )),
     }
 }
 
@@ -482,13 +485,15 @@ pub(crate) async fn list_connections_impl(state: &ConnState) -> error::Result<Ve
 /// at CONNECT, this is a sample that ages and can fail on its own.
 #[tauri::command]
 pub async fn conn_rtt(state: State<'_, ConnState>, name: String) -> error::Result<f64> {
+    conn_rtt_impl(&state, name).await
+}
+
+pub(crate) async fn conn_rtt_impl(state: &ConnState, name: String) -> error::Result<f64> {
     let client = state
         .client(&name)
         .await
-        .ok_or_else(|| Error::NotConnected(name.clone()))?;
-    measure_rtt(&client)
-        .await
-        .ok_or_else(|| Error::Timeout(format!("could not measure the round trip to '{name}'")))
+        .ok_or_else(|| Error::NotConnected(name))?;
+    measure_rtt(&client).await
 }
 
 #[tauri::command]

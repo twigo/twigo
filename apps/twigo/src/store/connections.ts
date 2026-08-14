@@ -57,6 +57,72 @@ function clearLinkWatch(conn: string) {
   slowConsumerAt.delete(conn);
 }
 
+// ── RTT sampling ─────────────────────────────────────────────────────────
+// One owner: started when a link comes up, stopped on every way a link dies.
+// Both connect() and the "connected" event call start - the event can be missed
+// during session restore (listeners register async), and connect() is absent on
+// a mid-session reconnect - so start is idempotent to keep one probe per link.
+const RTT_INTERVAL_MS = 10_000;
+// A refused probe stays refused (e.g. no publish permission on _INBOX.>);
+// give up for this link session instead of timing out every tick forever.
+const RTT_FAILURE_LIMIT = 3;
+
+const rttTimers = new Map<string, ReturnType<typeof setInterval>>();
+// Bumped on every stop, so a probe that was in flight when the link cycled
+// cannot write a stale sample into the next session.
+const rttEpoch = new Map<string, number>();
+
+function stopRttSampling(conn: string) {
+  rttEpoch.set(conn, (rttEpoch.get(conn) ?? 0) + 1);
+  const t = rttTimers.get(conn);
+  if (t !== undefined) clearInterval(t);
+  rttTimers.delete(conn);
+  useConnections.setState((s) => {
+    const { [conn]: _gone, ...rtt } = s.rtt;
+    return { rtt };
+  });
+}
+
+function startRttSampling(conn: string) {
+  if (rttTimers.has(conn)) return;
+  const epoch = rttEpoch.get(conn) ?? 0;
+  let failures = 0;
+  const sample = async () => {
+    try {
+      const ms = await apiConnRtt(conn);
+      if (rttEpoch.get(conn) !== epoch) return;
+      failures = 0;
+      useConnections.setState((s) => {
+        const prev = s.rtt[conn];
+        // Light smoothing so the chip reads as a level, not a ticker.
+        const next = prev === undefined ? ms : prev + 0.5 * (ms - prev);
+        return { rtt: { ...s.rtt, [conn]: next } };
+      });
+    } catch (e) {
+      if (rttEpoch.get(conn) !== epoch) return;
+      failures += 1;
+      useConnections.setState((s) => {
+        const { [conn]: _gone, ...rtt } = s.rtt;
+        return { rtt };
+      });
+      if (failures >= RTT_FAILURE_LIMIT) {
+        console.error(
+          `[rtt] ${conn}: giving up after ${String(failures)} failed probes`,
+          e,
+        );
+        const t = rttTimers.get(conn);
+        if (t !== undefined) clearInterval(t);
+        rttTimers.delete(conn);
+      }
+    }
+  };
+  rttTimers.set(
+    conn,
+    setInterval(() => void sample(), RTT_INTERVAL_MS),
+  );
+  void sample();
+}
+
 function teardown(conn: string) {
   // Every per-connection domain store (subjects, JetStream, KV, Object Store,
   // monitor) self-registers in connScoped, so a new domain joins teardown
@@ -83,8 +149,6 @@ export interface ConnectionsState {
     { attempt: number; delayMs: number; at: number }
   >;
   load: () => Promise<void>;
-  /** Take a round-trip sample; leaves the entry absent if it fails. */
-  measureRtt: (name: string) => Promise<void>;
   setActive: (name: string) => void;
   connect: (name: string) => Promise<void>;
   disconnect: (name: string) => Promise<void>;
@@ -108,22 +172,6 @@ export const useConnections = create<ConnectionsState>()(
     reconnecting: {},
     editorTeardown: () => undefined,
     setEditorTeardown: (fn) => set({ editorTeardown: fn }),
-
-    measureRtt: async (name) => {
-      try {
-        const ms = await apiConnRtt(name);
-        set((s) => (s.connected[name] ? { rtt: { ...s.rtt, [name]: ms } } : s));
-      } catch (e) {
-        // No toast - the link is fine, there is just no sample - but never
-        // silent either: on a restricted account this is the only way to learn
-        // the probe was refused rather than the server being instant.
-        console.error(`[rtt] ${name}`, e);
-        set((s) => {
-          const { [name]: _gone, ...rtt } = s.rtt;
-          return { rtt };
-        });
-      }
-    },
 
     load: async () => {
       set({ status: "loading", error: null });
@@ -173,7 +221,7 @@ export const useConnections = create<ConnectionsState>()(
           connecting: { ...s.connecting, [name]: false },
         }));
         useWorkspace.getState().setConnected(name, true);
-        void get().measureRtt(name);
+        startRttSampling(name);
       } catch (e) {
         const err = ipcError(e);
         // Branch on the typed kind for an actionable hint on the common failure.
@@ -196,6 +244,7 @@ export const useConnections = create<ConnectionsState>()(
     disconnect: async (name) => {
       closing.add(name);
       clearLinkWatch(name);
+      stopRttSampling(name);
       try {
         await apiDisconnect(name);
         teardown(name);
@@ -258,20 +307,14 @@ export const useConnections = create<ConnectionsState>()(
               : s,
           );
         });
-        void get().measureRtt(conn);
+        startRttSampling(conn);
       } else if (kind === "disconnected") {
+        stopRttSampling(conn);
         const cur = get().connected[conn];
         if (cur) {
-          set((s) => {
-            const { [conn]: _rtt, ...rtt } = s.rtt;
-            return {
-              connected: {
-                ...s.connected,
-                [conn]: { name: conn, server: null },
-              },
-              rtt,
-            };
-          });
+          set((s) => ({
+            connected: { ...s.connected, [conn]: { name: conn, server: null } },
+          }));
         }
         // Defer the toast past the grace window: a quick auto-reconnect should be
         // invisible. Arm once per outage, skip repeats and user-led disconnects.
@@ -297,6 +340,7 @@ export const useConnections = create<ConnectionsState>()(
         }
       } else if (kind === "closed") {
         clearLinkWatch(conn);
+        stopRttSampling(conn);
         teardown(conn);
         set((s) => {
           const { [conn]: _removed, ...connected } = s.connected;
