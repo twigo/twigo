@@ -8,7 +8,7 @@ on:
       - rust-toolchain.toml
       - crates/twigo-cache/**
       - crates/twigo-kube/**
-      - bench/*.sh
+      - bench/cluster.sh
       - .github/workflows/kubernetes.yml
   push:
     branches: [main]
@@ -39,7 +39,7 @@ jobs:
           shared-key: kubernetes
       - run: cargo test -p twigo-cache -p twigo-kube --no-run
 
-  table:
+  live:
     if: github.event_name != 'push'
     name: Live tests on ${{ matrix.kubernetes }}
     strategy:
@@ -59,6 +59,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: kubernetes
+          save-if: false
       - run: cargo test -p twigo-cache -p twigo-kube --no-run
       - name: Start a kind cluster with kwok
         env:
