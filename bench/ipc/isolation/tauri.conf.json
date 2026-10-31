@@ -15,7 +15,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' twigo-ext:; img-src 'self' asset: data: blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost",
+      "csp": "default-src 'self'; img-src 'self' asset: data: blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost; frame-src 'self' twigo-ext:",
       "pattern": {
         "use": "isolation",
         "options": {
