@@ -15,3 +15,5 @@ tauri-build.workspace = true
 tauri.workspace = true
 tauri-plugin-single-instance.workspace = true
 tauri-plugin-window-state.workspace = true
+twigo-ipc.workspace = true
+twigo-keyboard.workspace = true

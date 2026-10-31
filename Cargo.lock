@@ -5021,6 +5021,8 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-single-instance",
  "tauri-plugin-window-state",
+ "twigo-ipc",
+ "twigo-keyboard",
 ]
 
 [[package]]
