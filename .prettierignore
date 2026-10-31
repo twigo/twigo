@@ -1,2 +1,3 @@
 pnpm-lock.yaml
 crates/*/tests/fixtures
+packages/protocol/src/generated.ts
