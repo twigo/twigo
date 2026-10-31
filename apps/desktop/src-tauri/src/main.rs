@@ -9,9 +9,13 @@ fn main() {
         // other plugin touches shared state, such as the window-state file.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
+                let shown = window
+                    .unminimize()
+                    .and_then(|()| window.show())
+                    .and_then(|()| window.set_focus());
+                if let Err(error) = shown {
+                    eprintln!("could not bring the running window forward: {error}");
+                }
             }
         }))
         .plugin(tauri_plugin_window_state::Builder::default().build())
