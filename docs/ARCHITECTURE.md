@@ -1298,7 +1298,7 @@ Versions: kube 4.2.0, k8s-openapi 0.28, Tauri 2.12.5, wasmtime 50, Kubernetes 1.
   - Server-side apply: https://kubernetes.io/docs/reference/using-api/server-side-apply/
   - Feature gates (WatchList, WebSocket gates): https://kubernetes.io/docs/reference/command-line-tools-reference/feature-gates/
   - Kubeconfig exec risk: https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/
-  - `kubectl diff`: https://github.com/kubernetes/kubernetes/blob/master/staging/src/k8s.io/kubectl/pkg/cmd/diff/diff.go
+  - `kubectl diff`: https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/kubectl/pkg/cmd/diff/diff.go
 - Tauri:
   - Events vs channels: https://v2.tauri.app/develop/calling-frontend/
   - Capabilities: https://v2.tauri.app/security/capabilities/
@@ -1321,4 +1321,4 @@ Versions: kube 4.2.0, k8s-openapi 0.28, Tauri 2.12.5, wasmtime 50, Kubernetes 1.
 - Aptakube: https://github.com/aptakube/aptakube/issues/499, /575, /384; context extension: https://aptakube.com/docs/context-extension
 - srelens (macOS memory measurement): https://github.com/srelens/srelens/blob/dev/docs/PERFORMANCE.md
 - MCP security: https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http, https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/, https://ai.meta.com/blog/practical-ai-agent-security/
-- Kubernetes MCP server (a reference for its toolsets and read-only mode): https://github.com/containers/kubernetes-mcp-server/blob/main/docs/configuration.md
+- Kubernetes MCP server (a reference for its toolsets and read-only mode): https://github.com/containers/kubernetes-mcp-server/blob/v0.1.1/docs/configuration.md
