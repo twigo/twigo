@@ -2,11 +2,11 @@
 
 Twigo is an open-source desktop IDE for Kubernetes: native, fast and keyboard-first.
 It aims to match Lens feature for feature without its login wall, its weight or its slowness on large clusters.
-This document fixes the architecture before any code is written.
+This document fixes the architecture; the M0 spikes in `docs/spikes/` correct it wherever they measured otherwise.
 
-- Status: draft for review, 2026-10-31
+- Status: M0 in progress, steps 1 to 4 done, 2026-10-31
 - Stack: Tauri 2 (2.12.x), Rust with kube-rs (4.2.x, k8s-openapi 0.28), React 19 + TypeScript, Tailwind 4, shadcn/ui, pnpm monorepo
-- Reference code: the NATS IDE in `../legacy/`, outside this repository (github.com/twigo/twigo at `6ee327f`), kept only until this repository replaces it
+- Reference code: the retired NATS IDE at `6ee327f`, whose history survives only in a local checkout; section 1 maps what carries over
 
 ## 0. Context
 
@@ -23,7 +23,7 @@ This document fixes the architecture before any code is written.
 | D7  | Lists come from server-side Table watches (`as=Table`, `includeObject=Metadata`). Metadata-only watchers serve only as indexes (namespaces, owners, CRDs). The full object is fetched when it is opened.                           | **This replaces the brief's "metadata-only watchers for lists"**: `PartialObjectMetadata` has no Ready, Status, Restarts or Node. Section 3. |
 | D8  | Good design is a requirement. The legacy design language (tokens, density, restraint) carries over.                                                                                                                                | Section 4.9.                                                                                                                                 |
 | D9  | Licence: Apache-2.0.                                                                                                                                                                                                               | A patent grant for contributors and extension authors, and the CNCF default. `LICENSE` sits at the repository root.                          |
-| D10 | Bundle identifier `io.twigo.ide`. The repository and its releases live at github.com/twigo/twigo once the legacy repository is removed.                                                                                            | A new updater key; the endpoint stays that repository's `latest.json`. Section 1.                                                            |
+| D10 | Bundle identifier `io.twigo.ide`. The repository and its releases live at github.com/twigo/twigo, which replaced the legacy repository.                                                                                            | A new updater key; the endpoint stays that repository's `latest.json`. Section 1.                                                            |
 | D11 | Extension manifests are `extension.json`, checked against a published JSON Schema.                                                                                                                                                 | Validation and completion in any editor. Section 5.4.                                                                                        |
 | D12 | Kubernetes 1.33 and later. 1.32 left upstream support on 2026-02-28 and will be out of date by the time Twigo ships; older releases come back only if users ask.                                                                   | The test matrix runs from 1.33 to the newest release kind ships. Section 3.2.                                                                |
 
@@ -309,6 +309,8 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
     If it fails, the connection is retired and every upstream re-watches, as on wake.
   - On wake from sleep or a network change (OS notifications), the cluster's HTTP/2 connection is retired and every upstream re-watches.
     Retiring poisons the connection: the pool keeps a dead connection that still looks open, and every actor's client holds a clone of that pool, so rebuilding one client would not reach the others.
+  - After every client rebuild and every new connection, one request goes out before any watch opens.
+    A cold client opens one TCP and TLS connection per concurrent first request and keeps only the first that negotiates `h2` ([HTTP/2 spike](spikes/http2.md)).
   - Views show `stale` while this happens.
 - **Initial list.**
   - Streaming lists (`sendInitialEvents=true`) on 1.34 and later.
@@ -474,7 +476,8 @@ The bench also replays the cases that broke other clients:
 - all namespaces on 30k pods;
 - a ConfigMap with 2,000 keys;
 - 25 contexts whose exec plugins time out;
-- an API-server restart during a watch.
+- an API-server restart during a watch;
+- packet loss on the one HTTP/2 connection, for head-of-line blocking, which loopback cannot show ([HTTP/2 spike](spikes/http2.md)).
 
 ## 4. Workbench and UI model
 
@@ -1296,7 +1299,7 @@ Facts were checked on 2026-10-31 against sources or docs.
 Versions: kube 4.2.0, k8s-openapi 0.28, Tauri 2.12.5, wasmtime 50, Kubernetes 1.37.
 
 - kube-rs:
-  - https://github.com/kube-rs/kube (HTTP/1.1 only: `kube-client/Cargo.toml`; exec auth: `kube-client/src/client/auth/mod.rs`; WebSocket protocols: `kube-client/src/client/upgrade.rs`)
+  - https://github.com/kube-rs/kube/tree/4.2.0 (HTTP/1.1 only: `kube-client/Cargo.toml`; exec auth: `kube-client/src/client/auth/mod.rs`; WebSocket protocols: `kube-client/src/client/upgrade.rs`)
   - https://docs.rs/kube/4.2.0/kube/runtime/watcher/struct.Config.html
 - Kubernetes:
   - Table fetches: https://kubernetes.io/docs/reference/using-api/api-concepts/#table-fetches
@@ -1309,21 +1312,21 @@ Versions: kube 4.2.0, k8s-openapi 0.28, Tauri 2.12.5, wasmtime 50, Kubernetes 1.
   - Capabilities: https://v2.tauri.app/security/capabilities/
   - Isolation pattern: https://v2.tauri.app/concept/inter-process-communication/isolation/
 - VS Code:
-  - Source: https://github.com/microsoft/vscode/tree/main/src/vs (`platform/commands`, `platform/actions`, `platform/contextkey`, `platform/keybinding`, `platform/quickinput`, `services/editor/common/editorResolverService.ts`, `platform/shell/node/shellEnv.ts`)
+  - Source: https://github.com/microsoft/vscode/tree/1.144.0/src/vs (`platform/commands`, `platform/actions`, `platform/contextkey`, `platform/keybinding`, `platform/quickinput`, `workbench/services/editor/common/editorResolverService.ts`, `platform/shell/node/shellEnv.ts`)
   - Extension runtime security: https://code.visualstudio.com/docs/configure/extensions/extension-runtime-security
-- Zed: https://zed.dev/docs/extensions/capabilities, https://github.com/zed-industries/zed/tree/main/crates/extension_api/wit
+- Zed: https://zed.dev/docs/extensions/capabilities, https://github.com/zed-industries/zed/tree/v1.26.2/crates/extension_api/wit
 - Lens:
   - Licensing and login: https://docs.lenshq.io/faq/subscription-and-licensing/
   - Login wall: https://github.com/lensapp/lens/issues/5444
   - Exec plugin PATH: https://github.com/lensapp/lens/issues/7956
   - Extensions in 2026.10: https://docs.lenshq.io/release-notes/lens-k8s-ide/lens-2026-10-51501/
-- Freelens: https://github.com/freelensapp/freelens (v2.0.0 notes; `kube-object.store.ts`, `cluster-frame-handler.ts`, `compute-unix-shell-environment.injectable.ts`)
+- Freelens: https://github.com/freelensapp/freelens/tree/v2.0.0 (release notes; `kube-object.store.ts`, `cluster-frame-handler.ts`, `compute-unix-shell-environment.injectable.ts`)
 - Headlamp:
-  - https://github.com/kubernetes-sigs/headlamp (`docs/development/architecture.md`, `app/electron/runCmd.ts`)
+  - https://github.com/kubernetes-sigs/headlamp/tree/v0.46.0 (`docs/development/architecture.md`, `app/electron/runCmd.ts`)
   - Exec plugins at first launch: https://github.com/kubernetes-sigs/headlamp/issues/7879
-- k9s: https://github.com/derailed/k9s (`internal/watch/factory.go`, `internal/config/plugin.go`, `internal/view/env.go`)
-- JET Pilot: https://github.com/unxsist/jet-pilot (`src-tauri/src/watch/`, `src-tauri/src/auth/`, `src-tauri/src/env_import.rs`, `src-tauri/src/port_forward/`)
+- k9s: https://github.com/derailed/k9s/tree/v0.51.0 (`internal/watch/factory.go`, `internal/config/plugin.go`, `internal/view/env.go`)
+- JET Pilot: https://github.com/unxsist/jet-pilot/tree/v2.2.3 (`src-tauri/src/watch/`, `src-tauri/src/auth/`, `src-tauri/src/env_import.rs`, `src-tauri/src/port_forward/`)
 - Aptakube: https://github.com/aptakube/aptakube/issues/499, /575, /384; context extension: https://aptakube.com/docs/context-extension
-- srelens (macOS memory measurement): https://github.com/srelens/srelens/blob/dev/docs/PERFORMANCE.md
+- srelens (macOS memory measurement): https://github.com/srelens/srelens/blob/2194e83ec53e/docs/PERFORMANCE.md
 - MCP security: https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http, https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/, https://ai.meta.com/blog/practical-ai-agent-security/
 - Kubernetes MCP server (a reference for its toolsets and read-only mode): https://github.com/containers/kubernetes-mcp-server/blob/v0.1.1/docs/configuration.md
