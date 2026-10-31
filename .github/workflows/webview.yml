@@ -11,6 +11,9 @@ on:
   push:
     branches: [main]
     paths: *paths
+  # WebKitGTK comes from the runner image, which changes without a PR here.
+  schedule:
+    - cron: "0 6 * * 1"
   workflow_dispatch:
 
 concurrency:
