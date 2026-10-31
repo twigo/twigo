@@ -1,3 +1,13 @@
+---
+paths:
+  - "apps/**"
+  - "bench/**"
+  - "crates/**"
+  - "extensions/**"
+  - "packages/**"
+  - ".github/**"
+---
+
 # Code
 
 - Write the correct solution, never a workaround: no hacks, no shims around a fixable bug, no silenced errors, warnings or lints ([decision](../../docs/decisions/code-quality.md)).
