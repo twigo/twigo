@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   INITIAL_SNAPSHOT,
   ListView,
@@ -18,20 +24,19 @@ const never = () => () => undefined;
 /**
  * Subscribes while mounted. A new query means a new subscription; until its
  * first batch the previous one stays on screen, so a sort does not blank the
- * table. `window` is the range the table shows, handed to each new view.
+ * table. The window always goes to the newest subscription.
  */
-export function useListView(
-  backend: Backend,
-  query: ListQuery,
-  window: { readonly current: readonly [number, number] },
-) {
+export function useListView(backend: Backend, query: ListQuery) {
   const key = JSON.stringify(query);
   const [live, setLive] = useState<Live>();
   const shownOnce = useRef(false);
+  const window = useRef<readonly [number, number]>([0, 40]);
+  const newest = useRef<ListView>(undefined);
 
   useEffect(() => {
     const view = new ListView(backend, JSON.parse(key) as ListQuery);
     const flash = new FlashTracker();
+    newest.current = view;
     view.setWindow(...window.current);
     let shown = !shownOnce.current;
     const record = view.subscribe(() => {
@@ -49,11 +54,16 @@ export function useListView(
       record();
       view.close();
     };
-  }, [backend, key, window]);
+  }, [backend, key]);
+
+  const setWindow = useCallback((start: number, end: number) => {
+    window.current = [start, end];
+    newest.current?.setWindow(start, end);
+  }, []);
 
   const snapshot = useSyncExternalStore(
     live?.view.subscribe ?? never,
     live?.view.getSnapshot ?? idle,
   );
-  return { snapshot, view: live?.view, flash: live?.flash };
+  return { snapshot, flash: live?.flash, setWindow };
 }

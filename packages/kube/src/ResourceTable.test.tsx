@@ -14,6 +14,8 @@ import {
   test,
   vi,
 } from "vitest";
+import { StrictMode } from "react";
+import type { Backend, ListBatch } from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import { PODS } from "./kinds";
 import { ResourceTable } from "./ResourceTable";
@@ -125,4 +127,127 @@ test.each([
 ] as const)("%s is named in the header", async (scenario, label) => {
   await show(scenario);
   expect(screen.getByText(label)).toBeTruthy();
+});
+
+test("a scroll during a resubscribe reaches the new subscription before it shows", async () => {
+  await show("ready");
+  fireEvent.click(header("Ready"));
+  const grid = screen.getByRole("grid");
+  grid.scrollTop = 3000 * 26;
+  fireEvent.scroll(grid);
+  for (let i = 0; i < 10; i++) {
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    act(() => {
+      vi.advanceTimersToNextFrame();
+    });
+    if (header("Ready").getAttribute("aria-sort") === "ascending") break;
+  }
+  expect(header("Ready").getAttribute("aria-sort")).toBe("ascending");
+  const rows = screen.getAllByRole("row").slice(1);
+  expect(rows.length).toBeGreaterThan(10);
+  expect(
+    rows.filter((row) => row.querySelector("[role=gridcell]") === null),
+  ).toEqual([]);
+});
+
+test("under StrictMode the table subscribes once and shows rows", async () => {
+  const backend = createMockBackend("ready");
+  const subscribe = vi.spyOn(backend, "subscribe");
+  const invoke = vi.spyOn(backend, "invoke");
+  render(
+    <StrictMode>
+      <ResourceTable
+        backend={backend}
+        space="prod-eu"
+        gvr={PODS}
+        title="Pods"
+      />
+    </StrictMode>,
+  );
+  await settle();
+  const unsubscribes = invoke.mock.calls.filter(
+    ([command]) => command === "list_unsubscribe",
+  );
+  expect(subscribe.mock.calls.length - unsubscribes.length).toBe(1);
+  expect(screen.getAllByRole("gridcell").length).toBeGreaterThan(10);
+});
+
+function scriptedBackend() {
+  let send: ((batch: ListBatch) => void) | undefined;
+  const backend: Backend = {
+    invoke: () => Promise.resolve(null),
+    subscribe(_command, _request, onMessage) {
+      send = onMessage;
+      return Promise.resolve(1);
+    },
+  };
+  return { backend, send: (batch: ListBatch) => send?.(batch) };
+}
+
+const IDS = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"];
+
+function batch(
+  seq: number,
+  restarts: Record<string, string>,
+  first = false,
+): ListBatch {
+  return {
+    seq,
+    total: IDS.length,
+    columns: first
+      ? [
+          { name: "Name", kind: "string", priority: 0 },
+          { name: "Restarts", kind: "string", priority: 0 },
+        ]
+      : null,
+    window: first ? { start: 0, ids: IDS } : null,
+    upserts: Object.entries(restarts).map(([id, value]) => ({
+      id,
+      created: null,
+      cells: [id, value],
+    })),
+    status: { state: "ready" },
+  };
+}
+
+test("a changed cell flashes through the next batch, and a storm flashes nothing", async () => {
+  const script = scriptedBackend();
+  render(
+    <ResourceTable
+      backend={script.backend}
+      space="s"
+      gvr={PODS}
+      title="Pods"
+    />,
+  );
+  await settle(1);
+  const restarts = (id: string) =>
+    screen
+      .getByText(id)
+      .closest("[role=row]")
+      ?.querySelectorAll("[role=gridcell] > span")[1];
+  const send = async (b: ListBatch) => {
+    act(() => {
+      script.send(b);
+    });
+    await settle(1);
+  };
+
+  await send(batch(1, Object.fromEntries(IDS.map((id) => [id, "0"])), true));
+  expect(restarts("a")?.className).not.toContain("animate-flash");
+
+  await send(batch(2, { a: "1" }));
+  const flashing = restarts("a");
+  expect(flashing?.className).toContain("animate-flash");
+
+  await send(batch(3, {}));
+  expect(restarts("a")).toBe(flashing);
+  expect(restarts("a")?.className).toContain("animate-flash");
+
+  await send(batch(4, Object.fromEntries(IDS.slice(1).map((id) => [id, "2"]))));
+  expect(
+    IDS.slice(1).filter((id) =>
+      restarts(id)?.className.includes("animate-flash"),
+    ),
+  ).toEqual([]);
 });

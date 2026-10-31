@@ -60,12 +60,14 @@ function ResourceList({
 }: Props & { onRetry: () => void }) {
   const [sort, setSort] = useState<Sort | null>(null);
   const [selected, setSelected] = useState<RowId>();
-  const windowRef = useRef<readonly [number, number]>([0, 40]);
-  const { snapshot, view, flash } = useListView(
-    backend,
-    { space, gvr, namespaces: [], labelSelector: null, text: null, sort },
-    windowRef,
-  );
+  const { snapshot, flash, setWindow } = useListView(backend, {
+    space,
+    gvr,
+    namespaces: [],
+    labelSelector: null,
+    text: null,
+    sort,
+  });
   const now = useNow(1000);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { status } = snapshot;
@@ -87,9 +89,8 @@ function ResourceList({
 
   useEffect(() => {
     const screen = Math.max(last - first + 1, 40);
-    windowRef.current = [Math.max(0, first - screen), last + 1 + screen];
-    view?.setWindow(...windowRef.current);
-  }, [view, first, last]);
+    setWindow(Math.max(0, first - screen), last + 1 + screen);
+  }, [setWindow, first, last]);
 
   const Icon = kindIcon(gvr);
   const template = columns.map(width).join(" ");
@@ -110,11 +111,12 @@ function ResourceList({
         <div
           ref={scrollRef}
           role="grid"
-          aria-rowcount={snapshot.total}
+          aria-rowcount={snapshot.total + 1}
           className="min-h-0 flex-1 overflow-auto"
         >
           <div
             role="row"
+            aria-rowindex={1}
             className="sticky top-0 z-10 grid h-7 items-center border-b border-border-subtle bg-editor text-xs text-muted-foreground"
             style={{ gridTemplateColumns: template }}
           >
@@ -148,7 +150,7 @@ function ResourceList({
                   <div
                     key={row?.id ?? `pending-${String(item.index)}`}
                     role="row"
-                    aria-rowindex={item.index + 1}
+                    aria-rowindex={item.index + 2}
                     aria-selected={row !== undefined && row.id === selected}
                     onClick={() => {
                       setSelected(row?.id);
