@@ -1,4 +1,4 @@
-import type { Column, Space } from "../generated";
+import type { Column, Context, Space } from "../generated";
 
 export const SPACES: Space[] = [
   {
@@ -22,12 +22,22 @@ export const SPACES: Space[] = [
   },
 ];
 
+/** The catalog: the contexts of the spaces, plus one that has no space yet. */
+export const CONTEXTS: Context[] = [
+  { name: "prod-eu", color: "red" },
+  { name: "staging", color: "orange" },
+  { name: "dev", color: "green" },
+  { name: "qa", color: null },
+  { name: "kind-local", color: null },
+];
+
 /** Pods per context; dev has none, to show the empty state. */
 export const POD_COUNT: Readonly<Record<string, number>> = {
   "prod-eu": 5000,
   staging: 800,
   dev: 0,
   qa: 120,
+  "kind-local": 40,
 };
 
 /** The columns kube-apiserver sends for pods (crates/twigo-cache/tests/fixtures/pods-list.json). */

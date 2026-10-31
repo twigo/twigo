@@ -4,8 +4,8 @@ use std::fmt::Write;
 use ts_rs::{Config, TS, TypeVisitor};
 
 use crate::command::{
-    Command, KeyboardLayoutWatch, ListAck, ListSetWindow, ListSubscribe, ListUnsubscribe,
-    SpacesList,
+    Command, ContextsList, KeyboardLayoutWatch, ListAck, ListSetWindow, ListSubscribe,
+    ListUnsubscribe, SpaceOpen, SpacesList, StateGet, StateSet,
 };
 
 /// The TypeScript module of `packages/protocol`: every type the commands
@@ -17,11 +17,15 @@ pub fn typescript() -> String {
         commands: String::new(),
     };
     module.command::<SpacesList>();
+    module.command::<ContextsList>();
+    module.command::<SpaceOpen>();
     module.command::<ListSubscribe>();
     module.command::<ListSetWindow>();
     module.command::<ListAck>();
     module.command::<ListUnsubscribe>();
     module.command::<KeyboardLayoutWatch>();
+    module.command::<StateGet>();
+    module.command::<StateSet>();
 
     let mut out = String::from(
         "// Generated from crates/twigo-ipc: TWIGO_UPDATE_TYPESCRIPT=1 cargo test -p twigo-ipc --test typescript\n",

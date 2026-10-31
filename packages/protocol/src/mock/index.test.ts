@@ -197,3 +197,47 @@ test("label selectors are refused, since the mock cannot match labels", async ()
   await vi.advanceTimersByTimeAsync(0);
   await rejected;
 });
+
+async function call<T>(pending: Promise<T>): Promise<T> {
+  await vi.advanceTimersByTimeAsync(0);
+  return pending;
+}
+
+test("opening a context without a space creates its space once", async () => {
+  const backend = createMockBackend();
+  const before = await call(backend.invoke("spaces_list", null));
+  const space = await call(backend.invoke("space_open", "kind-local"));
+  expect(space).toEqual({
+    id: "kind-local",
+    name: "kind-local",
+    contexts: [{ name: "kind-local", color: null }],
+  });
+  const again = await call(backend.invoke("space_open", "kind-local"));
+  expect(again).toBe(space);
+  const after = await call(backend.invoke("spaces_list", null));
+  expect(after).toHaveLength(before.length + 1);
+});
+
+test("opening a context that has a space returns that space", async () => {
+  const backend = createMockBackend();
+  const space = await call(backend.invoke("space_open", "staging"));
+  expect(space.id).toBe("staging");
+});
+
+test("opening an unknown context fails with notFound", async () => {
+  const backend = createMockBackend();
+  const failed = backend
+    .invoke("space_open", "nowhere")
+    .catch((e: unknown) => e);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(await failed).toMatchObject({ kind: "notFound" });
+});
+
+test("state reads back what was stored, and null before", async () => {
+  const backend = createMockBackend();
+  expect(await call(backend.invoke("state_get", "space/prod-eu"))).toBeNull();
+  await call(
+    backend.invoke("state_set", { key: "space/prod-eu", value: "{}" }),
+  );
+  expect(await call(backend.invoke("state_get", "space/prod-eu"))).toBe("{}");
+});

@@ -119,6 +119,13 @@ column: string, descending: boolean, };
  */
 export type Space = { id: string, name: string, contexts: Array<Context>, };
 
+/**
+ * UI state that is not settings (ARCHITECTURE 4.8): a space's layout, the
+ * command history. The value is JSON the webview writes and reads back;
+ * the core stores it without looking inside.
+ */
+export type StateEntry = { key: string, value: string, };
+
 export type SubscriptionId = number;
 
 /**
@@ -130,9 +137,13 @@ export type Window = { start: number, ids: Array<RowId>, };
 
 export type Commands = {
   spaces_list: { request: null; response: Array<Space>; message: null };
+  contexts_list: { request: null; response: Array<Context>; message: null };
+  space_open: { request: string; response: Space; message: null };
   list_subscribe: { request: ListQuery; response: SubscriptionId; message: ListBatch };
   list_set_window: { request: SetWindow; response: null; message: null };
   list_ack: { request: Ack; response: null; message: null };
   list_unsubscribe: { request: SubscriptionId; response: null; message: null };
   keyboard_layout_watch: { request: null; response: KeyboardLayout; message: KeyboardLayout };
+  state_get: { request: string; response: string | null; message: null };
+  state_set: { request: StateEntry; response: null; message: null };
 };

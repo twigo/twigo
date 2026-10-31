@@ -15,7 +15,7 @@ import type {
   ViewState,
 } from "../generated";
 import { Cluster, podRow, type Pod } from "./cluster";
-import { POD_COUNT, SPACES } from "./fixtures";
+import { CONTEXTS, POD_COUNT, SPACES } from "./fixtures";
 import { checkQuery, podColumns, runQuery } from "./query";
 
 /** `live` connects, syncs and then changes pods every second; any other value pins that state. */
@@ -45,6 +45,8 @@ export function createMockBackend(scenario: MockScenario = "live"): Backend {
   const now = Date.now();
   const clusters = new Map<string, Cluster>();
   const subscriptions = new Map<number, Subscription>();
+  const spaces = [...SPACES];
+  const state = new Map<string, string>();
   let nextId = 1;
   let churn: ReturnType<typeof setInterval> | undefined;
 
@@ -66,7 +68,25 @@ export function createMockBackend(scenario: MockScenario = "live"): Backend {
   const plain: {
     [C in PlainCommand]: (request: RequestOf<C>) => ResponseOf<C>;
   } = {
-    spaces_list: () => SPACES,
+    spaces_list: () => [...spaces],
+    contexts_list: () => CONTEXTS,
+    space_open: (name) => {
+      const context = CONTEXTS.find((candidate) => candidate.name === name);
+      if (!context) throw new IpcError("notFound", `no context ${name}`);
+      const open = spaces.find(
+        (space) =>
+          space.contexts.length === 1 && space.contexts[0]?.name === name,
+      );
+      if (open) return open;
+      const space = { id: name, name, contexts: [context] };
+      spaces.push(space);
+      return space;
+    },
+    state_get: (key) => state.get(key) ?? null,
+    state_set: ({ key, value }) => {
+      state.set(key, value);
+      return null;
+    },
     list_set_window: ({ id, start, end }) => {
       subscription(id).setWindow(start, end);
       return null;
@@ -93,7 +113,7 @@ export function createMockBackend(scenario: MockScenario = "live"): Backend {
     ) => ResponseOf<C>;
   } = {
     list_subscribe: (query, onMessage) => {
-      const space = SPACES.find((candidate) => candidate.id === query.space);
+      const space = spaces.find((candidate) => candidate.id === query.space);
       if (!space) throw new IpcError("notFound", `no space ${query.space}`);
       const columns = podColumns(space.contexts.length, query);
       checkQuery(query, columns);

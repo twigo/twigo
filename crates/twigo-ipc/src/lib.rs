@@ -6,6 +6,7 @@ mod error;
 mod keyboard;
 mod list;
 mod space;
+mod state;
 mod typescript;
 
 pub use error::{ErrorKind, IpcError};
@@ -15,4 +16,5 @@ pub use list::{
     SubscriptionId, ViewState, Window,
 };
 pub use space::{Context, ContextColor, Space};
+pub use state::StateEntry;
 pub use typescript::typescript;

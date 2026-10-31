@@ -4,7 +4,10 @@
 
 use ts_rs::TS;
 
-use crate::{Ack, KeyboardLayout, ListBatch, ListQuery, SetWindow, Space, SubscriptionId};
+use crate::{
+    Ack, Context, KeyboardLayout, ListBatch, ListQuery, SetWindow, Space, StateEntry,
+    SubscriptionId,
+};
 
 pub trait Command {
     const NAME: &'static str;
@@ -20,6 +23,27 @@ impl Command for SpacesList {
     const NAME: &'static str = "spaces_list";
     type Request = ();
     type Response = Vec<Space>;
+    type Message = ();
+}
+
+/// Every context the catalog knows, with or without a space.
+pub struct ContextsList;
+
+impl Command for ContextsList {
+    const NAME: &'static str = "contexts_list";
+    type Request = ();
+    type Response = Vec<Context>;
+    type Message = ();
+}
+
+/// The one-context space of a context, created if it has none (ARCHITECTURE 4.2).
+pub struct SpaceOpen;
+
+impl Command for SpaceOpen {
+    const NAME: &'static str = "space_open";
+    /// The context's name.
+    type Request = String;
+    type Response = Space;
     type Message = ();
 }
 
@@ -67,4 +91,23 @@ impl Command for KeyboardLayoutWatch {
     type Request = ();
     type Response = KeyboardLayout;
     type Message = KeyboardLayout;
+}
+
+/// A stored value, by key; none if nothing was stored.
+pub struct StateGet;
+
+impl Command for StateGet {
+    const NAME: &'static str = "state_get";
+    type Request = String;
+    type Response = Option<String>;
+    type Message = ();
+}
+
+pub struct StateSet;
+
+impl Command for StateSet {
+    const NAME: &'static str = "state_set";
+    type Request = StateEntry;
+    type Response = ();
+    type Message = ();
 }
