@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Usage: bench/test-matrix.sh [1.33 1.34 ...]
 #
-# Runs the live Table tests on a fresh kind cluster per Kubernetes version,
+# Runs the live tests on a fresh kind cluster per Kubernetes version,
 # 1.33 to 1.37 by default, and deletes each cluster afterwards.
 set -euo pipefail
 
@@ -19,7 +19,7 @@ for version in "${versions[@]}"; do
   name="matrix-${version/./}"
   kubeconfig=$(bench/cluster.sh up "$name" "$version" | tail -1)
   status=0
-  TWIGO_TEST_KUBECONFIG="$kubeconfig" cargo test -p twigo-cache --test table_live -- --ignored || status=$?
+  TWIGO_TEST_KUBECONFIG="$kubeconfig" cargo test -p twigo-cache -p twigo-kube -- --ignored || status=$?
   bench/cluster.sh down "$name"
   name=
   echo "Kubernetes $version: $([ $status -eq 0 ] && echo passed || echo FAILED)"
