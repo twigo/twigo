@@ -44,6 +44,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: webview
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Probe every IPC path from a sandboxed frame
         env:
           TWIGO_BENCH_DIR: ${{ runner.temp }}/bench
