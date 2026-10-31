@@ -5,9 +5,9 @@ over one HTTP/2 connection, while exec, attach and port-forward use a separate
 HTTP/1.1 pool? See the first risk in 7.3 and the budgets in 3.2.
 
 **Answer: yes.** Fifty Table watches share one TCP connection instead of 51,
-and GET latency does not change. Exec cannot use that connection and keeps
-kube's HTTP/1.1 client. The new limit to plan for is the server's 100
-streams per connection.
+and GET latency does not change. Exec cannot use that connection and goes
+over a separate HTTP/1.1 client. The new limit to plan for is the server's
+100 streams per connection.
 
 - Clients: `crates/twigo-kube/src/client.rs`.
 - Measurement: `crates/twigo-kube/examples/http2.rs`.
@@ -148,7 +148,7 @@ concurrent first request.
 - `lsof`, which takes tens of milliseconds per run, cannot see such short
   connections, so the example does not try.
 - M1 sends one request before it opens watches: after every client rebuild
-  and every new connection (GOAWAY, poisoning).
+  and every new connection (GOAWAY, a failed ping, poisoning).
 
 ## The stream limit
 

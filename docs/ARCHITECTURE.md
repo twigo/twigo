@@ -309,7 +309,8 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
     own budget (default 64), counted in the same place below every actor. A
     session's permit outlives the `101` response, which
     `hyper::upgrade::on` drops: the upgraded stream holds it, and so does
-    the policy proxy's splice.
+    the policy proxy's splice. A proxied upgrade over the budget gets the
+    proxy's `429` instead of waiting (6.4).
   - A proxy or server that answers HTTP/1.1 turns every stream back into a
     connection; the budgets stay the same. Benchmarks tune each of them.
   - When the watch budget is full, the least recently used idle upstreams are
@@ -503,7 +504,7 @@ plus a sort on the UI thread after every batch.
 
 Each upstream reports one of:
 
-- `queued` (waiting for a stream or session slot, 3.2)
+- `queued` (waiting for a stream slot, 3.2)
 - `connecting`
 - `syncing` (with a progress count)
 - `ready`
@@ -1283,9 +1284,10 @@ building one client. Twigo therefore owns credentials:
     contexts: after untrusted content, their writes, exec-class requests and
     Secret reads go to the broker one call at a time.
   - The proxy has its own cap on concurrent streams per context (default
-    16, 3.2). Over the cap it answers `429` with `Retry-After`, because
-    client-go retries a 429 only when that header is present. It never
-    queues requests and never evicts the UI's upstreams (3.2).
+    16, 3.2). Over the cap, or for an upgrade while the session budget is
+    full, it answers `429` with `Retry-After`, because client-go retries a
+    429 only when that header is present. It never queues requests and
+    never evicts the UI's upstreams (3.2).
 - **What the proxy does not cover.** It guards against accidents, not
   against a determined process.
   - Any process running as the user can still read `~/.kube/config` or pass
