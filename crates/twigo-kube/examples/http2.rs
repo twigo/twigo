@@ -1,15 +1,16 @@
 //! TCP connections and GET latency under 50 Table watches, over kube's default
 //! HTTP/1.1 client and over the HTTP/2 api client, on the pods of one
-//! namespace (`bench/pods.sh`); then the api client at the server's stream
-//! limit.
+//! namespace (`bench/pods.sh`); then 50 watches opened at once on a cold api
+//! client, and the api client at the server's stream limit.
 //!
 //! TWIGO_TEST_KUBECONFIG=… cargo run --release -p twigo-kube --example http2 [namespace]
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use futures::AsyncBufReadExt;
+use futures::future::join_all;
 use http::Request;
 use k8s_openapi::api::apps::v1::Deployment;
 use kube::api::{Patch, PatchParams};
@@ -22,8 +23,9 @@ use twigo_cache::table::request::{self, WatchFrom};
 use twigo_kube::client::Clients;
 
 const WATCHES: usize = 50;
-const SAMPLES: usize = 200;
 const STREAM_LIMIT: usize = 100;
+const REPLICAS: i32 = 5000;
+const WINDOW: Duration = Duration::from_secs(10);
 
 struct Watches {
     tasks: Vec<JoinHandle<()>>,
@@ -31,37 +33,46 @@ struct Watches {
     bytes: Arc<AtomicU64>,
 }
 
+async fn resource_version(client: &Client, path: &str) -> Box<str> {
+    let body = client
+        .request_text(request::list(path, 1, None))
+        .await
+        .unwrap();
+    TableDecoder::new()
+        .decode_list(body.as_bytes())
+        .unwrap()
+        .resource_version
+}
+
 impl Watches {
-    async fn open(client: &Client, path: &str, count: usize) -> Self {
-        let body = client
-            .request_text(request::list(path, 1, None))
-            .await
-            .unwrap();
-        let version = TableDecoder::new()
-            .decode_list(body.as_bytes())
-            .unwrap()
-            .resource_version;
+    async fn open(client: &Client, path: &str, version: &str, count: usize) -> Self {
+        let streams = join_all((0..count).map(|_| {
+            let watch = request::watch(path, WatchFrom::ResourceVersion(version), 600);
+            client.request_stream(watch)
+        }))
+        .await;
         let events = Arc::new(AtomicU64::new(0));
         let bytes = Arc::new(AtomicU64::new(0));
-        let mut tasks = Vec::new();
-        for _ in 0..count {
-            let watch = request::watch(path, WatchFrom::ResourceVersion(&version), 600);
-            let mut stream = Box::pin(client.request_stream(watch).await.unwrap());
-            let (events, bytes) = (events.clone(), bytes.clone());
-            tasks.push(tokio::spawn(async move {
-                let mut line = Vec::new();
-                loop {
-                    line.clear();
-                    match stream.read_until(b'\n', &mut line).await {
-                        Ok(0) | Err(_) => break,
-                        Ok(read) => {
-                            events.fetch_add(1, Ordering::Relaxed);
-                            bytes.fetch_add(read as u64, Ordering::Relaxed);
+        let tasks = streams
+            .into_iter()
+            .map(|stream| {
+                let mut stream = Box::pin(stream.unwrap());
+                let (events, bytes) = (events.clone(), bytes.clone());
+                tokio::spawn(async move {
+                    let mut line = Vec::new();
+                    loop {
+                        line.clear();
+                        match stream.read_until(b'\n', &mut line).await {
+                            Ok(0) | Err(_) => break,
+                            Ok(read) => {
+                                events.fetch_add(1, Ordering::Relaxed);
+                                bytes.fetch_add(read as u64, Ordering::Relaxed);
+                            }
                         }
                     }
-                }
-            }));
-        }
+                })
+            })
+            .collect();
         Watches {
             tasks,
             events,
@@ -69,14 +80,15 @@ impl Watches {
         }
     }
 
-    fn close(self) -> (u64, u64) {
+    fn events(&self) -> u64 {
+        self.events.load(Ordering::Relaxed)
+    }
+
+    fn close(self) -> u64 {
         for task in &self.tasks {
             task.abort();
         }
-        (
-            self.events.load(Ordering::Relaxed),
-            self.bytes.load(Ordering::Relaxed),
-        )
+        self.bytes.load(Ordering::Relaxed)
     }
 }
 
@@ -87,7 +99,7 @@ fn connections(port: u16) -> usize {
             "-a",
             "-p",
             &std::process::id().to_string(),
-            &format!("-iTCP@127.0.0.1:{port}"),
+            &format!("-iTCP:{port}"),
             "-sTCP:ESTABLISHED",
             "-Fn",
         ])
@@ -107,6 +119,7 @@ async fn get(client: &Client, path: &str) {
 }
 
 struct Latency {
+    samples: usize,
     p50: f64,
     p95: f64,
     p99: f64,
@@ -114,8 +127,9 @@ struct Latency {
 }
 
 async fn latency(client: &Client, path: &str) -> Latency {
-    let mut samples = Vec::with_capacity(SAMPLES);
-    for _ in 0..SAMPLES {
+    let mut samples = Vec::new();
+    let end = Instant::now() + WINDOW;
+    while Instant::now() < end {
         let start = Instant::now();
         get(client, path).await;
         samples.push(start.elapsed().as_secs_f64() * 1000.0);
@@ -123,6 +137,7 @@ async fn latency(client: &Client, path: &str) -> Latency {
     samples.sort_by(f64::total_cmp);
     let at = |q: f64| samples[((samples.len() - 1) as f64 * q) as usize];
     Latency {
+        samples: samples.len(),
         p50: at(0.50),
         p95: at(0.95),
         p99: at(0.99),
@@ -138,10 +153,27 @@ async fn scale(client: &Client, namespace: &str, replicas: i32) {
         .unwrap();
 }
 
+async fn settle(client: &Client, namespace: &str) {
+    scale(client, namespace, REPLICAS).await;
+    let deployments = Api::<Deployment>::namespaced(client.clone(), namespace);
+    loop {
+        let status = deployments
+            .get("bench")
+            .await
+            .unwrap()
+            .status
+            .unwrap_or_default();
+        if status.replicas == Some(REPLICAS) && status.available_replicas == Some(REPLICAS) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
 fn churn(client: Client, namespace: String) -> JoinHandle<()> {
     tokio::spawn(async move {
         loop {
-            for replicas in [4750, 5000] {
+            for replicas in [REPLICAS - 250, REPLICAS] {
                 scale(&client, &namespace, replicas).await;
                 tokio::time::sleep(Duration::from_secs(3)).await;
             }
@@ -149,11 +181,58 @@ fn churn(client: Client, namespace: String) -> JoinHandle<()> {
     })
 }
 
-fn row(name: &str, connections: usize, latency: &Latency) {
+fn row(name: &str, connections: usize, latency: &Latency, note: &str) {
     println!(
-        "| {name} | {connections} | {:.1} | {:.1} | {:.1} | {:.1} |",
-        latency.p50, latency.p95, latency.p99, latency.max
+        "| {name} | {connections} | {} | {:.1} | {:.1} | {:.1} | {:.1} | {note} |",
+        latency.samples, latency.p50, latency.p95, latency.p99, latency.max
     );
+}
+
+async fn phase(name: &str, config: &Config, namespace: &str, port: u16) {
+    let clients = Clients::new(config.clone()).unwrap();
+    let client = if name == "HTTP/2" {
+        clients.api
+    } else {
+        clients.sessions
+    };
+    let collection = format!("/api/v1/namespaces/{namespace}/pods");
+
+    let idle = latency(&client, &collection).await;
+    row(&format!("{name}, no watches"), connections(port), &idle, "");
+
+    let version = resource_version(&client, &collection).await;
+    let watches = Watches::open(&client, &collection, &version, WATCHES).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let quiet = latency(&client, &collection).await;
+    row(
+        &format!("{name}, quiet watches"),
+        connections(port),
+        &quiet,
+        "",
+    );
+
+    let generator = churn(client.clone(), namespace.to_owned());
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let before = watches.events();
+    let busy = latency(&client, &collection).await;
+    let during = watches.events() - before;
+    let held = connections(port);
+    generator.abort();
+    row(
+        &format!("{name}, watches under churn"),
+        held,
+        &busy,
+        &format!("{during} events in the window"),
+    );
+
+    settle(&client, namespace).await;
+    let bytes = watches.close();
+    println!(
+        "| {name}: the watches read {:.0} MiB in all | | | | | | | |",
+        bytes as f64 / (1024.0 * 1024.0)
+    );
+    drop(client);
+    tokio::time::sleep(Duration::from_secs(2)).await;
 }
 
 #[tokio::main]
@@ -173,46 +252,52 @@ async fn main() {
     let port = config.cluster_url.port_u16().expect("an explicit API port");
     let collection = format!("/api/v1/namespaces/{namespace}/pods");
 
-    println!("{WATCHES} Table watches on {collection}, {SAMPLES} GETs per row");
+    println!(
+        "{WATCHES} Table watches on {collection}; sequential GETs for {} s per row",
+        WINDOW.as_secs()
+    );
     println!();
-    println!("| Client, state | TCP connections | GET p50 ms | p95 | p99 | max |");
-    println!("| --- | --- | --- | --- | --- | --- |");
-    for name in ["HTTP/1.1", "HTTP/2"] {
-        let clients = Clients::new(config.clone()).unwrap();
-        let client = if name == "HTTP/2" {
-            clients.api
-        } else {
-            clients.sessions
-        };
-        let idle = latency(&client, &collection).await;
-        row(&format!("{name}, no watches"), connections(port), &idle);
-
-        let watches = Watches::open(&client, &collection, WATCHES).await;
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        let quiet = latency(&client, &collection).await;
-        row(&format!("{name}, quiet watches"), connections(port), &quiet);
-
-        let generator = churn(client.clone(), namespace.clone());
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        let busy = latency(&client, &collection).await;
-        let during = connections(port);
-        generator.abort();
-        row(&format!("{name}, watches under churn"), during, &busy);
-        scale(&client, &namespace, 5000).await;
-
-        let (events, bytes) = watches.close();
-        println!(
-            "| {name}: the watches read {events} events, {:.0} MiB | | | | | |",
-            bytes as f64 / (1024.0 * 1024.0)
-        );
-        drop(client);
-        tokio::time::sleep(Duration::from_secs(2)).await;
+    println!("| Client, state | TCP connections | GETs | p50 ms | p95 | p99 | max | |");
+    println!("| --- | --- | --- | --- | --- | --- | --- | --- |");
+    for name in ["HTTP/1.1", "HTTP/2", "HTTP/2", "HTTP/1.1"] {
+        phase(name, &config, &namespace, port).await;
     }
 
     println!();
+    let version = {
+        let warm = Clients::new(config.clone()).unwrap().api;
+        resource_version(&warm, &collection).await
+    };
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let api = Clients::new(config.clone()).unwrap().api;
+    let peak = Arc::new(AtomicUsize::new(0));
+    let sampling = Arc::new(AtomicBool::new(true));
+    let sampler = {
+        let (peak, sampling) = (peak.clone(), sampling.clone());
+        std::thread::spawn(move || {
+            while sampling.load(Ordering::Relaxed) {
+                peak.fetch_max(connections(port), Ordering::Relaxed);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        })
+    };
+    let watches = Watches::open(&api, &collection, &version, WATCHES).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    sampling.store(false, Ordering::Relaxed);
+    sampler.join().unwrap();
+    println!(
+        "HTTP/2, {WATCHES} watches opened at once on a cold client: at most {} TCP connections while opening, {} after.",
+        peak.load(Ordering::Relaxed),
+        connections(port)
+    );
+    watches.close();
+    drop(api);
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
     for count in [STREAM_LIMIT - 1, STREAM_LIMIT] {
         let api = Clients::new(config.clone()).unwrap().api;
-        let watches = Watches::open(&api, &collection, count).await;
+        let version = resource_version(&api, &collection).await;
+        let watches = Watches::open(&api, &collection, &version, count).await;
         tokio::time::sleep(Duration::from_secs(1)).await;
         let answered = tokio::time::timeout(Duration::from_secs(10), get(&api, &collection)).await;
         println!(
