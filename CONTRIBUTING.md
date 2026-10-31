@@ -7,7 +7,8 @@ Thanks for your interest in improving Twigo!
 You need:
 
 - Rust through rustup: `rust-toolchain.toml` pins the version;
-- Node.js 26 (`.nvmrc`) and pnpm 12 (`packageManager` in `package.json`);
+- pnpm 12 (`packageManager` in `package.json`). It downloads the Node.js
+  version that `devEngines.runtime` pins and runs every script with it;
 - on Linux, the
   [Tauri system libraries](https://v2.tauri.app/start/prerequisites/#linux).
 
