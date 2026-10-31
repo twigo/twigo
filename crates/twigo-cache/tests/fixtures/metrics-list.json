@@ -1,0 +1,59 @@
+{
+  "kind": "PodMetricsList",
+  "apiVersion": "metrics.k8s.io/v1beta1",
+  "metadata": {
+    "resourceVersion": "7"
+  },
+  "items": [
+    {
+      "kind": "PodMetrics",
+      "apiVersion": "metrics.k8s.io/v1beta1",
+      "metadata": {
+        "name": "p1",
+        "namespace": "probe",
+        "uid": "0b6f2a1e-0000-4000-8000-000000000001",
+        "resourceVersion": "5",
+        "creationTimestamp": "2026-10-31T11:00:00Z",
+        "labels": {
+          "app": "probe"
+        }
+      },
+      "timestamp": "2026-10-31T11:20:00Z",
+      "window": "15s",
+      "containers": [
+        {
+          "name": "app",
+          "usage": {
+            "cpu": "1m",
+            "memory": "2Mi"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "PodMetrics",
+      "apiVersion": "metrics.k8s.io/v1beta1",
+      "metadata": {
+        "name": "p2",
+        "namespace": "probe",
+        "uid": "0b6f2a1e-0000-4000-8000-000000000002",
+        "resourceVersion": "6",
+        "creationTimestamp": "2026-10-31T11:00:00Z",
+        "labels": {
+          "app": "probe"
+        }
+      },
+      "timestamp": "2026-10-31T11:20:00Z",
+      "window": "15s",
+      "containers": [
+        {
+          "name": "app",
+          "usage": {
+            "cpu": "1m",
+            "memory": "2Mi"
+          }
+        }
+      ]
+    }
+  ]
+}

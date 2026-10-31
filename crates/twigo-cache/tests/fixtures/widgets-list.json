@@ -1,0 +1,155 @@
+{
+  "kind": "Table",
+  "apiVersion": "meta.k8s.io/v1",
+  "metadata": {
+    "resourceVersion": "1170"
+  },
+  "columnDefinitions": [
+    {
+      "name": "Name",
+      "type": "string",
+      "format": "name",
+      "description": "Name must be unique within a namespace. Is required when creating resources, although some resources may allow a client to request the generation of an appropriate name automatically. Name is primarily intended for creation idempotence and configuration definition. Cannot be updated. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names#names",
+      "priority": 0
+    },
+    {
+      "name": "Size",
+      "type": "string",
+      "format": "",
+      "description": "Custom resource definition column (in JSONPath format): .spec.size",
+      "priority": 0
+    },
+    {
+      "name": "Replicas",
+      "type": "integer",
+      "format": "",
+      "description": "Custom resource definition column (in JSONPath format): .spec.replicas",
+      "priority": 0
+    },
+    {
+      "name": "Ratio",
+      "type": "number",
+      "format": "",
+      "description": "Custom resource definition column (in JSONPath format): .spec.ratio",
+      "priority": 1
+    },
+    {
+      "name": "Enabled",
+      "type": "boolean",
+      "format": "",
+      "description": "Custom resource definition column (in JSONPath format): .spec.enabled",
+      "priority": 0
+    },
+    {
+      "name": "Since",
+      "type": "date",
+      "format": "",
+      "description": "Custom resource definition column (in JSONPath format): .spec.since",
+      "priority": 0
+    },
+    {
+      "name": "Age",
+      "type": "date",
+      "format": "",
+      "description": "Custom resource definition column (in JSONPath format): .metadata.creationTimestamp",
+      "priority": 0
+    }
+  ],
+  "rows": [
+    {
+      "cells": [
+        "empty",
+        null,
+        null,
+        null,
+        null,
+        null,
+        "0s"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "empty",
+          "namespace": "probe",
+          "uid": "811579b6-74d0-4e54-ab20-6ac898048726",
+          "resourceVersion": "1170",
+          "generation": 1,
+          "creationTimestamp": "2026-10-31T11:41:32Z",
+          "annotations": {
+            "kubectl.kubernetes.io/last-applied-configuration": "{\"apiVersion\":\"test.twigo.io/v1\",\"kind\":\"Widget\",\"metadata\":{\"annotations\":{},\"name\":\"empty\",\"namespace\":\"probe\"},\"spec\":{}}\n"
+          },
+          "managedFields": [
+            {
+              "manager": "kubectl-client-side-apply",
+              "operation": "Update",
+              "apiVersion": "test.twigo.io/v1",
+              "time": "2026-10-31T11:41:32Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:metadata": {
+                  "f:annotations": {
+                    ".": {},
+                    "f:kubectl.kubernetes.io/last-applied-configuration": {}
+                  }
+                },
+                "f:spec": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "full",
+        "large",
+        3,
+        0.5,
+        true,
+        "303d",
+        "0s"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "full",
+          "namespace": "probe",
+          "uid": "a9419fa4-df06-4380-979d-b5039d6acb0b",
+          "resourceVersion": "1169",
+          "generation": 1,
+          "creationTimestamp": "2026-10-31T11:41:32Z",
+          "annotations": {
+            "kubectl.kubernetes.io/last-applied-configuration": "{\"apiVersion\":\"test.twigo.io/v1\",\"kind\":\"Widget\",\"metadata\":{\"annotations\":{},\"name\":\"full\",\"namespace\":\"probe\"},\"spec\":{\"enabled\":true,\"ratio\":0.5,\"replicas\":3,\"since\":\"2026-01-01T00:00:00Z\",\"size\":\"large\"}}\n"
+          },
+          "managedFields": [
+            {
+              "manager": "kubectl-client-side-apply",
+              "operation": "Update",
+              "apiVersion": "test.twigo.io/v1",
+              "time": "2026-10-31T11:41:32Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:metadata": {
+                  "f:annotations": {
+                    ".": {},
+                    "f:kubectl.kubernetes.io/last-applied-configuration": {}
+                  }
+                },
+                "f:spec": {
+                  ".": {},
+                  "f:enabled": {},
+                  "f:ratio": {},
+                  "f:replicas": {},
+                  "f:since": {},
+                  "f:size": {}
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
