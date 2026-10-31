@@ -1,0 +1,15 @@
+[package]
+name = "twigo-bench-ipc"
+description = "The IPC bench: the isolation pattern's cost and a sandboxed frame's reach"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+tauri.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }

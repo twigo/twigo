@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Probe frame</title>
+  </head>
+  <body>
+    <script>
+      "use strict";
+
+      // A tier-2 frame turned hostile: it tries every IPC path it can name.
+      // Each request carries its own probe source, so Rust's counts show which
+      // path, if any, ran a command.
+      (async () => {
+        const attempts = [];
+        const record = (path, outcome, detail) =>
+          attempts.push({ path, outcome, detail });
+
+        const invokeMessage = (source, key) =>
+          JSON.stringify({
+            cmd: "probe",
+            callback: 1,
+            error: 2,
+            payload: { source },
+            options: {},
+            ...(key === undefined ? {} : { __TAURI_INVOKE_KEY__: key }),
+          });
+
+        record("window.__TAURI_INTERNALS__", typeof window.__TAURI_INTERNALS__);
+        record("window.__TAURI__", typeof window.__TAURI__);
+        if (window.__TAURI_INTERNALS__) {
+          window.__TAURI_INTERNALS__.invoke("probe", {
+            source: "frame:own-internals",
+          });
+        }
+
+        try {
+          const internals = window.parent.__TAURI_INTERNALS__;
+          record("parent.__TAURI_INTERNALS__", typeof internals);
+          internals?.invoke("probe", { source: "frame:parent-internals" });
+        } catch (error) {
+          record("parent.__TAURI_INTERNALS__", "threw", String(error));
+        }
+
+        if (window.ipc) {
+          window.ipc.postMessage(invokeMessage("frame:window-ipc", "guess"));
+          record("window.ipc.postMessage", "sent");
+        } else {
+          record("window.ipc.postMessage", "absent");
+        }
+
+        const handler = window.webkit?.messageHandlers?.ipc;
+        if (handler) {
+          handler.postMessage(
+            invokeMessage("frame:webkit-handler-wrong-key", "guess"),
+          );
+          handler.postMessage(
+            invokeMessage("frame:webkit-handler-empty-key", ""),
+          );
+          handler.postMessage(invokeMessage("frame:webkit-handler-no-key"));
+          record(
+            "webkit.messageHandlers.ipc.postMessage",
+            "sent",
+            "wrong, empty and no invoke key",
+          );
+        } else {
+          record("webkit.messageHandlers.ipc.postMessage", "absent");
+        }
+
+        for (const [path, key] of [
+          ["ipc:// fetch, wrong key", "guess"],
+          ["ipc:// fetch, no key", undefined],
+        ]) {
+          const headers = {
+            "Content-Type": "application/json",
+            "Tauri-Callback": "1",
+            "Tauri-Error": "2",
+          };
+          if (key !== undefined) headers["Tauri-Invoke-Key"] = key;
+          try {
+            const source =
+              key === undefined
+                ? "frame:ipc-fetch-no-key"
+                : "frame:ipc-fetch-wrong-key";
+            const response = await fetch("ipc://localhost/probe", {
+              method: "POST",
+              headers,
+              body: JSON.stringify({ source }),
+            });
+            record(
+              path,
+              "answered",
+              `${response.status} ${await response.text()}`,
+            );
+          } catch (error) {
+            record(path, "threw", String(error));
+          }
+        }
+
+        // Tauri's window listens to postMessage only under the isolation
+        // pattern, and forwards messages shaped like the isolation frame's.
+        window.parent.postMessage(
+          {
+            cmd: "probe",
+            callback: 1,
+            error: 2,
+            payload: { source: "frame:parent-message" },
+          },
+          "*",
+        );
+        const plaintext = new TextEncoder().encode(
+          JSON.stringify({ source: "frame:forged-isolation-message" }),
+        );
+        window.parent.postMessage(
+          {
+            cmd: "probe",
+            callback: 1,
+            error: 2,
+            payload: {
+              contentType: "application/json",
+              nonce: Array(12).fill(0),
+              payload: Array.from(plaintext),
+            },
+          },
+          "*",
+        );
+        record(
+          "parent.postMessage",
+          "sent",
+          "an invoke message and a forged isolation message",
+        );
+
+        // The isolation frame, when there is one, is a sibling: it encrypts
+        // whatever reaches it from the window's origin.
+        for (let i = 0; i < window.parent.frames.length; i++) {
+          window.parent.frames[i].postMessage(
+            {
+              cmd: "probe",
+              callback: 1,
+              error: 2,
+              payload: { source: "frame:sibling-frame" },
+            },
+            "*",
+          );
+        }
+        record(
+          "parent.frames[i].postMessage",
+          "sent",
+          `${window.parent.frames.length} frames`,
+        );
+
+        window.parent.postMessage(
+          { type: "twigo-probe-report", attempts },
+          "*",
+        );
+      })();
+    </script>
+  </body>
+</html>

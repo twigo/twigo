@@ -4,6 +4,7 @@ dist
 *.log
 /target
 /apps/desktop/src-tauri/gen/schemas
+/bench/ipc/*/gen/schemas
 .DS_Store
 .idea
 .vscode/*
