@@ -7,10 +7,9 @@ Thanks for your interest in improving Twigo!
 You need:
 
 - Rust through rustup: `rust-toolchain.toml` pins the version;
-- pnpm 12 (`packageManager` in `package.json`). It downloads the Node.js
-  version that `devEngines.runtime` pins and runs every script with it;
-- on Linux, the
-  [Tauri system libraries](https://v2.tauri.app/start/prerequisites/#linux).
+- pnpm 12 (`packageManager` in `package.json`).
+  It downloads the Node.js version that `devEngines.runtime` pins and runs every script with it;
+- on Linux, the [Tauri system libraries](https://v2.tauri.app/start/prerequisites/#linux).
 
 ```bash
 pnpm install
@@ -33,22 +32,17 @@ CI runs the same checks on every pull request.
 
 ## Conventions
 
-- **Correct code, no workarounds**: fix the cause; a temporary measure needs
-  the maintainer's approval and an `@todo` at the site. Keep code modular,
-  easy to extend and no more complex than the problem. Leave nothing your
-  change made obsolete, and bring what it touches into line with these
-  rules ([decision](docs/decisions/code-quality.md)).
+- **Correct code, no workarounds**: fix the cause; a temporary measure needs the maintainer's approval and an `@todo` at the site.
+  Keep code modular, easy to extend and no more complex than the problem.
+  Leave nothing your change made obsolete, and bring what it touches into line with these rules ([decision](docs/decisions/code-quality.md)).
 - **Comments are minimal**: explain a non-obvious _why_, not _what_.
-- **Commits** follow [Conventional Commits](https://www.conventionalcommits.org)
-  (`feat:`, `fix:`, `chore:`, `docs:`, `style:`, `refactor:`, `test:`).
-- **Accessibility**: interactive elements must be keyboard-reachable and
-  labelled; prefer real semantic elements over click handlers on `<div>`.
+- **Markdown** has one sentence per line, with no breaks inside a sentence ([decision](docs/decisions/markdown-lines.md)).
+- **Commits** follow [Conventional Commits](https://www.conventionalcommits.org) (`feat:`, `fix:`, `chore:`, `docs:`, `style:`, `refactor:`, `test:`).
+- **Accessibility**: interactive elements must be keyboard-reachable and labelled; prefer real semantic elements over click handlers on `<div>`.
 - Match the style of the surrounding code.
 
 ## Workflow
 
-1. Branch off `main` as `<type>/<topic>`, where the type is the Conventional
-   Commit type of the PR title: `feat/space-tabs`, `fix/drag-region`,
-   `chore/bump-tauri` ([decision](docs/decisions/branch-names.md)).
+1. Branch off `main` as `<type>/<topic>`, where the type is the Conventional Commit type of the PR title: `feat/space-tabs`, `fix/drag-region`, `chore/bump-tauri` ([decision](docs/decisions/branch-names.md)).
 2. Keep PRs focused; describe what and why.
 3. PRs are squash-merged into `main`.
