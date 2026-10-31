@@ -9,7 +9,7 @@ on:
       - crates/twigo-cache/**
       - crates/twigo-kube/**
       - crates/twigo-policy/**
-      - bench/**
+      - bench/*.sh
       - .github/workflows/kubernetes.yml
   push:
     branches: [main]

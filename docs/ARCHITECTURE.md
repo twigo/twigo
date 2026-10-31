@@ -193,6 +193,7 @@ twigo/
 │  └─ utils/
 ├─ extensions/                first-party extensions built on the public API (fixture + dogfood)
 ├─ bench/                     kind/kwok cluster scripts, churn generator, perf harness
+│  └─ ipc/                    IPC bench: the isolation pattern's cost, the tier-2 frame probe
 └─ docs/
 ```
 
@@ -402,6 +403,7 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
   - Memory stays bounded by the number of rows, and a slow frame merges updates instead of queueing them.
 - Delivery pauses while the window is hidden or minimised.
   The next flush carries everything that changed in between.
+- On macOS a Channel with this flow control carries 5,300 batches of 2 KB or 460 of 1 MB a second, and 20 subscriptions flushing on the same tick see 3.9 ms at p95 from send to ack ([isolation spike](spikes/tauri-isolation.md)).
 - Rows are serialized once in Rust.
   The frontend uses the browser's native `JSON.parse`.
   Terminal and exec bytes go as raw binary (`ArrayBuffer`).
@@ -1200,12 +1202,15 @@ Destructive actions (delete, drain, scale to 0) use dry-run where the API suppor
   An XSS in the webview would reach every cluster.
 - **Tauri.**
   Capabilities are scoped per window label, and commands are allowlisted through `AppManifest::commands`.
-  The isolation pattern is evaluated in M0 and adopted if its cost on invoke stays within the IPC budget.
+  The isolation pattern stays off: its hook would repeat checks that Rust makes at the boundary, page scripts can call commands without required arguments past it, and its frame's scheme changes with every build, so the app would have to add it to `frame-src` at startup ([isolation spike](spikes/tauri-isolation.md)).
 - **Secrets in the webview.**
   Tokens, certificates and Secret values never reach it, except for a Secret value the user explicitly reveals.
 - **Tier-2 frames.**
   - They get an opaque origin and cannot read Tauri's per-run invoke key.
-  - Tauri documents that on Linux it cannot tell an iframe's IPC request from the window's, so the M0 spike must prove on WebKitGTK that a sandboxed frame cannot invoke anything (7.3).
+    The key is all that keeps them out: WebKit gives them the page's message handler, and Tauri cannot tell their requests from the window's on Linux, nor from the app's on either platform.
+  - The M0 spike showed on WebKitGTK and macOS that such a frame invokes nothing, and CI repeats the probe on every Tauri and wry update and weekly ([isolation spike](spikes/tauri-isolation.md)).
+  - No frame gets `allow-same-origin`, and the host relays only data, from messages whose `event.source` is that extension's frame.
+  - The page's CSP lists `twigo-ext:` in `frame-src`; Windows serves custom schemes as `http://<scheme>.localhost` (`https://` with `useHttpsScheme`) and needs that form.
 - **Releases.**
   - Signed updater artifacts (minisign, new key).
   - macOS notarization; Linux AppImage, deb and rpm.
@@ -1232,7 +1237,7 @@ Destructive actions (delete, drain, scale to 0) use dry-run where the API suppor
 
 ### 7.2 Later (rough order)
 
-1. **Windows** (D2): WebView2, Authenticode signing, the registry environment, `CREATE_NO_WINDOW` for exec plugins.
+1. **Windows** (D2): WebView2, Authenticode signing, the registry environment, `CREATE_NO_WINDOW` for exec plugins, and the tier-2 frame probe of `bench/ipc` on WebView2.
 2. **More resources and sessions:**
    - multi-context spaces with merged tables;
    - workload logs (stern-style);
@@ -1258,7 +1263,7 @@ Destructive actions (delete, drain, scale to 0) use dry-run where the API suppor
 | WebKit and WebKitGTK performance (virtualized tables, Monaco, WebGL context loss)                                               | Linux feels slower than macOS                                             | The budgets run on Linux CI too. DOM fallback for xterm; Monaco loads lazily.                                                                                                                                                                                                                                                                                |
 | Component-model maturity (WASI 0.3 async is new; jco output is large; TinyGo limits)                                            | Extension authoring friction                                              | The host drives async through imports; the Rust SDK comes first; TS SDK after the API freeze; the Segla extension proves the model before it opens.                                                                                                                                                                                                          |
 | Exec auth diversity: device code, browser, Teleport, Pinniped, SSO chains                                                       | "Can't connect" in the first minute                                       | A test matrix with EKS, GKE, AKS, kubelogin (all modes), oidc-login and Segla; interactive classification; a visible sign-in panel.                                                                                                                                                                                                                          |
-| Sandboxed-frame IPC isolation on Linux                                                                                          | A malicious tier-2 frame invokes commands                                 | An M0 spike proves the frame cannot reach the invoke key; until then, tier 2 stays off on Linux.                                                                                                                                                                                                                                                             |
+| Sandboxed-frame IPC isolation on Linux                                                                                          | A malicious tier-2 frame invokes commands                                 | The M0 spike showed that a sandboxed frame invokes nothing on WebKitGTK and macOS, and CI repeats it on every Tauri and wry update ([isolation spike](spikes/tauri-isolation.md)); frames never get `allow-same-origin`, and the relay passes only data.                                                                                                     |
 | Prompt injection through cluster text; approval fatigue                                                                         | An agent causes a write                                                   | Read-only MCP in the MVP; the rule of two; approvals in Twigo's UI with a diff; audit.                                                                                                                                                                                                                                                                       |
 | Scope: chasing Lens's list feature by feature                                                                                   | A late, shallow MVP                                                       | The MVP list above is the contract. Everything else waits for v1.x.                                                                                                                                                                                                                                                                                          |
 | Extension API churn after third parties adopt it                                                                                | Broken extensions (the Lens history)                                      | `0.x` stays private until 1.0; versioned WIT with every old binding kept; the fixture extension in CI.                                                                                                                                                                                                                                                       |

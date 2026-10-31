@@ -1,6 +1,12 @@
 [workspace]
 resolver = "3"
-members = ["apps/desktop/src-tauri", "crates/*"]
+members = [
+    "apps/desktop/src-tauri",
+    "bench/ipc",
+    "bench/ipc/brownfield",
+    "bench/ipc/isolation",
+    "crates/*",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +17,7 @@ repository = "https://github.com/twigo/twigo"
 publish = false
 
 [workspace.dependencies]
+twigo-bench-ipc = { path = "bench/ipc" }
 twigo-cache = { path = "crates/twigo-cache" }
 twigo-core = { path = "crates/twigo-core" }
 twigo-env = { path = "crates/twigo-env" }
