@@ -48,7 +48,7 @@ fn pod_list_keeps_typed_columns_and_metadata() {
     let row = &page.rows[0];
     assert_eq!(row.meta.name.as_ref(), "p1");
     assert_eq!(row.meta.namespace.as_deref(), Some("probe"));
-    assert_eq!(row.meta.uid.len(), 36);
+    assert_eq!(row.meta.uid.as_deref().map(str::len), Some(36));
     assert_eq!(
         row.meta.labels.as_ref(),
         [("app".into(), "probe".into())] as [(Box<str>, Box<str>); 1]
@@ -108,7 +108,7 @@ fn watch_columns_come_once_per_connection() {
 }
 
 #[test]
-fn a_reconnect_reuses_the_columns_it_already_has() {
+fn headless_rows_use_the_columns_already_kept() {
     let fixture = include_str!("fixtures/pods-watch.jsonl");
     let mut decoder = TableDecoder::new();
     decoder
@@ -241,20 +241,20 @@ fn a_raw_object_falls_back_to_name_and_age() {
 }
 
 #[test]
-fn an_api_without_table_gets_metadata_columns() {
+fn a_server_without_table_gets_metadata_columns() {
     let mut decoder = TableDecoder::new();
     let page = decoder
-        .decode_list(include_bytes!("fixtures/metrics-list.json"))
+        .decode_list(include_bytes!("fixtures/raw-list.json"))
         .unwrap();
     assert_eq!(names(decoder.columns().unwrap()), ["Name", "Age"]);
     assert_eq!(page.resource_version.as_ref(), "7");
     assert_eq!(page.rows.len(), 2);
     assert_eq!(
         page.rows[0].cells.as_ref(),
-        [Cell::Text("p1".into()), Cell::Age]
+        [Cell::Text("t1".into()), Cell::Age]
     );
 
-    let events: Vec<Event> = lines(include_str!("fixtures/metrics-watch.jsonl"))
+    let events: Vec<Event> = lines(include_str!("fixtures/raw-watch.jsonl"))
         .map(|line| decoder.decode_event(line).unwrap())
         .collect();
     assert!(matches!(&events[0], Event::Upsert(row) if &*row.meta.resource_version == "8"));
@@ -272,8 +272,7 @@ fn server_columns_replace_the_metadata_fallback() {
     let mut decoder = TableDecoder::new();
     decoder
         .decode_event(
-            include_bytes!("fixtures/metrics-watch.jsonl")
-                .split(|b| *b == b'\n')
+            lines(include_str!("fixtures/raw-watch.jsonl"))
                 .next()
                 .unwrap(),
         )
@@ -283,6 +282,126 @@ fn server_columns_replace_the_metadata_fallback() {
         .decode_list(include_bytes!("fixtures/pods-list.json"))
         .unwrap();
     assert_eq!(decoder.columns().unwrap().len(), 9);
+}
+
+#[test]
+fn headless_rows_after_raw_objects_need_a_reconnect() {
+    let mut decoder = TableDecoder::new();
+    decoder
+        .decode_event(
+            lines(include_str!("fixtures/raw-watch.jsonl"))
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+    let headless = lines(include_str!("fixtures/pods-watch.jsonl"))
+        .nth(1)
+        .unwrap();
+    assert!(matches!(
+        decoder.decode_event(headless),
+        Err(DecodeError::NoColumns)
+    ));
+}
+
+#[test]
+fn metrics_server_rows_have_no_uid() {
+    let mut decoder = TableDecoder::new();
+    let page = decoder
+        .decode_list(include_bytes!("fixtures/metrics-table.json"))
+        .unwrap();
+    assert_eq!(
+        names(decoder.columns().unwrap()),
+        ["Name", "cpu", "memory", "Window"]
+    );
+    let row = &page.rows[0];
+    assert_eq!(row.meta.name.as_ref(), "p1");
+    assert_eq!(row.meta.uid, None);
+    assert_eq!(row.meta.resource_version.as_ref(), "");
+    assert_eq!(row.cells[1], Cell::Text("1m".into()));
+}
+
+#[test]
+fn component_statuses_have_no_uid() {
+    let page = TableDecoder::new()
+        .decode_list(include_bytes!("fixtures/componentstatuses-list.json"))
+        .unwrap();
+    assert_eq!(page.rows.len(), 3);
+    assert!(page.rows.iter().all(|row| row.meta.uid.is_none()));
+}
+
+#[test]
+fn an_empty_table_may_send_null() {
+    let mut decoder = TableDecoder::new();
+    let page = decoder
+        .decode_list(include_bytes!("fixtures/metrics-empty.json"))
+        .unwrap();
+    assert!(page.rows.is_empty());
+    assert!(decoder.columns().is_none());
+}
+
+fn table(columns: &str, rows: &str) -> String {
+    format!(
+        r#"{{"kind":"Table","apiVersion":"meta.k8s.io/v1","metadata":{{"resourceVersion":"1"}},"columnDefinitions":{columns},"rows":{rows}}}"#
+    )
+}
+
+const OBJECT: &str = r#"{"kind":"PartialObjectMetadata","apiVersion":"meta.k8s.io/v1","metadata":{"name":"w","uid":"u","resourceVersion":"1"}}"#;
+
+#[test]
+fn an_integral_number_stays_a_number() {
+    let body = table(
+        r#"[{"name":"Name","type":"string","format":"name"},{"name":"Ratio","type":"number"}]"#,
+        &format!(r#"[{{"cells":["w",1],"object":{OBJECT}}}]"#),
+    );
+    let page = TableDecoder::new().decode_list(body.as_bytes()).unwrap();
+    assert_eq!(page.rows[0].cells[1], Cell::Number(1.0));
+}
+
+#[test]
+fn an_age_column_is_found_under_any_capitalisation() {
+    let body = table(
+        r#"[{"name":"Name","type":"string","format":"name"},{"name":"AGE","type":"date","description":"Provider age"}]"#,
+        &format!(r#"[{{"cells":["w","5m"],"object":{OBJECT}}}]"#),
+    );
+    let mut decoder = TableDecoder::new();
+    let page = decoder.decode_list(body.as_bytes()).unwrap();
+    assert_eq!(decoder.columns().unwrap()[1].kind, ColumnKind::Age);
+    assert_eq!(page.rows[0].cells[1], Cell::Age);
+}
+
+#[test]
+fn cell_and_row_counts_are_checked() {
+    let columns =
+        r#"[{"name":"Name","type":"string","format":"name"},{"name":"Ready","type":"string"}]"#;
+    let short = table(
+        columns,
+        &format!(r#"[{{"cells":["w"],"object":{OBJECT}}}]"#),
+    );
+    assert!(matches!(
+        TableDecoder::new().decode_list(short.as_bytes()),
+        Err(DecodeError::CellCount {
+            expected: 2,
+            found: 1
+        })
+    ));
+
+    let rows = format!(
+        r#"[{{"cells":["a","1/1"],"object":{OBJECT}}},{{"cells":["b","1/1"],"object":{OBJECT}}}]"#
+    );
+    let event = format!(r#"{{"type":"ADDED","object":{}}}"#, table(columns, &rows));
+    assert!(matches!(
+        TableDecoder::new().decode_event(event.as_bytes()),
+        Err(DecodeError::RowCount(2))
+    ));
+}
+
+#[test]
+fn a_bookmark_needs_a_resource_version() {
+    let event = r#"{"type":"BOOKMARK","object":{"kind":"Thing","apiVersion":"example.com/v1","metadata":{}}}"#;
+    assert!(matches!(
+        TableDecoder::new().decode_event(event.as_bytes()),
+        Err(DecodeError::Missing("metadata.resourceVersion"))
+    ));
 }
 
 #[test]

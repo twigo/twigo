@@ -1,15 +1,14 @@
 use http::header::ACCEPT;
 use http::{Request, header::HeaderValue};
 
-/// The plain JSON fallback lets an aggregated API without Table support answer
+/// The plain JSON fallback lets a server that does not implement Table answer
 /// with raw objects instead of 406.
 pub const ACCEPT_TABLE: &str = "application/json;as=Table;v=v1;g=meta.k8s.io, application/json";
 
 pub enum WatchFrom<'a> {
     ResourceVersion(&'a str),
     /// A streaming list, ended by a bookmark annotated
-    /// `k8s.io/initial-events-end`. Its events are Tables only from 1.34: 1.32
-    /// sends raw objects, 1.33 rejects it.
+    /// `k8s.io/initial-events-end`. 1.33 rejects it: its WatchList gate is off.
     InitialEvents,
 }
 

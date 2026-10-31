@@ -1,0 +1,2 @@
+{"type":"MODIFIED","object":{"kind":"Thing","apiVersion":"example.com/v1","metadata":{"name":"t1","namespace":"probe","uid":"0b6f2a1e-0000-4000-8000-000000000001","resourceVersion":"8","creationTimestamp":"2026-10-31T11:00:00Z","labels":{"app":"probe"}},"spec":{},"rows":"not a table","items":7}}
+{"type":"BOOKMARK","object":{"kind":"Thing","apiVersion":"example.com/v1","metadata":{"resourceVersion":"9"}}}

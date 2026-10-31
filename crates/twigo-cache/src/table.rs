@@ -52,7 +52,9 @@ pub type Labels = Box<[(Box<str>, Box<str>)]>;
 pub struct Meta {
     pub name: Box<str>,
     pub namespace: Option<Box<str>>,
-    pub uid: Box<str>,
+    /// None for objects the server builds without one, such as ComponentStatus
+    /// and metrics-server's metrics.
+    pub uid: Option<Box<str>>,
     pub resource_version: Box<str>,
     pub labels: Labels,
     pub owners: Box<[Owner]>,
@@ -191,12 +193,17 @@ impl TableDecoder {
                     return Err(DecodeError::RowCount(0));
                 };
                 match event.kind {
-                    EventKind::Bookmark => Ok(Event::Bookmark {
-                        resource_version: table.metadata.resource_version.unwrap_or_default(),
-                        initial_events_end: row
-                            .object
-                            .is_some_and(|object| object.metadata.initial_events_end),
-                    }),
+                    EventKind::Bookmark => {
+                        let metadata = row.object.unwrap_or_default().metadata;
+                        Ok(Event::Bookmark {
+                            resource_version: non_empty(
+                                metadata
+                                    .resource_version
+                                    .or(table.metadata.resource_version),
+                            )?,
+                            initial_events_end: metadata.initial_events_end,
+                        })
+                    }
                     EventKind::Added | EventKind::Modified => {
                         self.table_row(row).map(Event::Upsert)
                     }
@@ -208,7 +215,7 @@ impl TableDecoder {
                 let object: RawObject = serde_json::from_slice(body)?;
                 match event.kind {
                     EventKind::Bookmark => Ok(Event::Bookmark {
-                        resource_version: object.metadata.resource_version.unwrap_or_default(),
+                        resource_version: non_empty(object.metadata.resource_version)?,
                         initial_events_end: object.metadata.initial_events_end,
                     }),
                     EventKind::Added | EventKind::Modified => {
@@ -233,7 +240,11 @@ impl TableDecoder {
     }
 
     fn table_row(&self, row: RawRow) -> Result<Row, DecodeError> {
-        let columns = self.columns.as_deref().ok_or(DecodeError::NoColumns)?;
+        let columns = self
+            .columns
+            .as_deref()
+            .filter(|_| !self.synthetic)
+            .ok_or(DecodeError::NoColumns)?;
         if row.cells.len() != columns.len() {
             return Err(DecodeError::CellCount {
                 expected: columns.len(),
@@ -242,8 +253,11 @@ impl TableDecoder {
         }
         let mut cells = row.cells;
         for (cell, column) in cells.iter_mut().zip(columns) {
-            if column.kind == ColumnKind::Age {
-                *cell = Cell::Age;
+            match (column.kind, &*cell) {
+                (ColumnKind::Age, _) => *cell = Cell::Age,
+                // Go prints a float64 without a fraction as an integer.
+                (ColumnKind::Number, &Cell::Int(value)) => *cell = Cell::Number(value as f64),
+                _ => {}
             }
         }
         let object = row.object.ok_or(DecodeError::Missing("object"))?;
@@ -271,6 +285,12 @@ impl TableDecoder {
             .collect();
         Ok(Row { meta, cells })
     }
+}
+
+fn non_empty(resource_version: Option<Box<str>>) -> Result<Box<str>, DecodeError> {
+    resource_version
+        .filter(|version| !version.is_empty())
+        .ok_or(DecodeError::Missing("metadata.resourceVersion"))
 }
 
 fn metadata_columns() -> Arc<[Column]> {
@@ -337,7 +357,7 @@ struct TableObject {
     metadata: ListMeta,
     #[serde(default)]
     column_definitions: Option<Vec<RawColumn>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable")]
     rows: Vec<RawRow>,
 }
 
@@ -345,11 +365,11 @@ struct TableObject {
 struct RawList {
     #[serde(default)]
     metadata: ListMeta,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable")]
     items: Vec<RawObject>,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 struct RawObject {
     #[serde(default)]
     metadata: RawMeta,
@@ -388,11 +408,10 @@ struct RawColumn {
 
 impl From<RawColumn> for Column {
     fn from(raw: RawColumn) -> Self {
-        // Built-in printers describe Age with creationTimestamp's field doc; a
-        // CRD's Age column is a printer column on its JSONPath.
-        let age = &*raw.name == "Age"
-            && (raw.description.starts_with("CreationTimestamp")
-                || raw.description.ends_with(".metadata.creationTimestamp"));
+        // Built-in printers type Age as a string described by creationTimestamp's
+        // field doc; CRDs type it as a date, under any capitalisation.
+        let age = raw.name.eq_ignore_ascii_case("age")
+            && (&*raw.kind == "date" || raw.description.starts_with("CreationTimestamp"));
         let kind = match &*raw.kind {
             _ if age => ColumnKind::Age,
             "string" => ColumnKind::String,
@@ -429,7 +448,7 @@ struct RawMeta {
     resource_version: Option<Box<str>>,
     #[serde(default, deserialize_with = "labels")]
     labels: Labels,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable")]
     owner_references: Vec<RawOwner>,
     #[serde(default, deserialize_with = "timestamp")]
     creation_timestamp: Option<Timestamp>,
@@ -446,7 +465,7 @@ impl RawMeta {
         Ok(Meta {
             name: self.name.ok_or(DecodeError::Missing("metadata.name"))?,
             namespace: self.namespace,
-            uid: self.uid.ok_or(DecodeError::Missing("metadata.uid"))?,
+            uid: self.uid,
             resource_version: self.resource_version.unwrap_or_default(),
             labels: self.labels,
             owners: self.owner_references.into_iter().map(Owner::from).collect(),
@@ -527,6 +546,15 @@ impl<'de> Deserialize<'de> for Cell {
 
         deserializer.deserialize_any(CellVisitor)
     }
+}
+
+/// Go encodes a nil slice as `null`.
+fn nullable<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::deserialize(deserializer)?.unwrap_or_default())
 }
 
 fn labels<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Labels, D::Error> {
