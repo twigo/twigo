@@ -303,10 +303,13 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
     upstream re-watches.
   - Views show `stale` while this happens.
 - **Initial list.**
-  - Streaming lists (`sendInitialEvents=true`) on servers where the WatchList
-    gate is on: 1.32, then 1.34 and later. The gate is off in 1.33, and
-    kube-rs has no fallback.
-  - Otherwise a paginated list followed by a watch from its
+  - Streaming lists (`sendInitialEvents=true`) for Table upstreams on 1.34
+    and later. On 1.32 the server refuses Table for streaming lists and
+    answers with raw objects through the JSON fallback, and it turns every
+    watch from `resourceVersion` "" or "0" with bookmarks into a streaming
+    list ([Table decoder spike](spikes/table-decoder.md)). The WatchList gate
+    is off in 1.33, and kube-rs has no fallback.
+  - Otherwise a paginated list followed by a watch from its exact
     `resourceVersion`.
   - The capability is probed once per cluster and cached.
 - **Backoff.** UI-friendly: 0.5–5 s with jitter, reset on every event.
@@ -321,23 +324,35 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
 | **Metadata** | `Api<PartialObjectMeta<K>>` + `watcher`, with managedFields cleared                                                                                                                     | Indexes: namespaces (for the picker), CRDs and APIServices (discovery invalidation), and owner references for the "Related" tab. |
 | **Object**   | `GET` + `watch` with `fieldSelector=metadata.name=…`                                                                                                                                    | An open editor: live YAML, overview, conflict detection.                                                                         |
 
-Table watch details that the decoder must handle (from the apiserver
-`handlers/response.go` and the API concepts docs):
+Table details that the decoder handles, checked on kind clusters from 1.32
+to 1.37 ([Table decoder spike](spikes/table-decoder.md)):
 
-- `columnDefinitions` arrive only in the first event of each connection. The
-  hub keeps them per upstream and reapplies them after a reconnect.
-- Every watch event carries a Table with exactly one row.
+- `columnDefinitions` arrive only in the first object of each response:
+  every list page, and the first event of each watch connection, a BOOKMARK
+  included. The decoder keeps them per upstream, across pages and
+  reconnects.
+- Every watch event carries a Table with exactly one row. A BOOKMARK is a
+  Table too: one row of placeholder cells whose object holds only the
+  `resourceVersion`. It never becomes a row.
 - `row.object` is a `PartialObjectMetadata` and still includes managedFields.
-  The serde struct for rows ignores that field, so it is never allocated.
-- If table conversion fails, the server sends the raw object. The decoder
-  falls back to the metadata columns (Name, Namespace, Age).
+  The serde struct for rows names neither managedFields nor annotation
+  values, so they are never allocated.
+- If table conversion fails, the server sends the raw object, and when that
+  was a connection's first event, no definitions follow on it. A raw object
+  becomes a row with its Name and Age cells and empty others. Rows with no
+  definitions known fail to decode, and the hub reconnects.
+- Cells follow their JSON type, not the column's declared type: ConfigMap
+  Data is declared `string` and sent as an integer.
 - Column `priority` 0 is the default view; higher priorities appear only in
   the wide view (k9s `ctrl-w`).
-- Age cells and CRD `date` columns are strings frozen when encoded. Rust
-  recomputes Age from `creationTimestamp`. Other date columns refresh on
-  every modify event.
+- Age cells and CRD `date` columns are strings frozen when encoded ("5m").
+  Rust recomputes Age from `creationTimestamp`. An Age column is the one
+  named Age that prints `creationTimestamp`, built in or as a CRD printer
+  column. Other date columns refresh on every modify event.
 - Aggregated APIs that do not implement Table (some `metrics.k8s.io`
-  servers, for example) fall back to the metadata columns.
+  servers, for example) answer through the JSON fallback with raw objects.
+  Those get the metadata columns, Name and Age; the namespace comes from
+  meta-lite, as for every kind.
 
 **Custom columns.** Users (k9s `views.yaml` style) or extensions can define
 JSONPath columns for a GVK. For that GVK only, the upstream switches to a
@@ -345,18 +360,19 @@ _projection_ watch: Rust watches full objects, evaluates the JSONPaths,
 keeps meta-lite plus the cells, and drops the object. The memory cost stays
 at row level and the CPU cost is paid only for kinds that need it.
 
-Measured memory for 5,000 synthetic Pods of 7.4 KB, counting allocator,
-requested bytes:
+Memory for 5,000 pods on kind 1.37 with kwok (`bench/pods.sh`), counting
+allocator, requested bytes ([Table decoder spike](spikes/table-decoder.md)):
 
-| Representation                                 | 5k objects |
-| ---------------------------------------------- | ---------- |
-| Full Pod                                       | 262 MiB    |
-| Pod without managedFields                      | 122 MiB    |
-| `PartialObjectMeta<Pod>`                       | 150 MiB    |
-| `PartialObjectMeta<Pod>` without managedFields | 11 MiB     |
+| Representation                                 | 5k pods |
+| ---------------------------------------------- | ------- |
+| Full Pod                                       | 137 MiB |
+| Pod without managedFields                      | 85 MiB  |
+| `PartialObjectMeta<Pod>`                       | 60 MiB  |
+| `PartialObjectMeta<Pod>` without managedFields | 7.4 MiB |
+| Table row                                      | 3.4 MiB |
 
-Table rows are expected to sit near the last line. The benchmark (3.8) must
-confirm this.
+A Table row takes about 700 bytes, half of a `PartialObjectMeta<Pod>`
+without managedFields.
 
 ### 3.4 Query views: Rust sorts, filters and windows
 
