@@ -48,6 +48,9 @@ struct Probes(Mutex<HashMap<String, u32>>);
 #[derive(Default)]
 struct Acks(Mutex<HashMap<u32, mpsc::UnboundedSender<u64>>>);
 
+/// Paced streams tick on one grid counted from here, so that they all flush on the same tick.
+struct Epoch(Instant);
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StreamStats {
@@ -77,13 +80,17 @@ async fn stream(
     interval_ms: u64,
     channel: Channel<InvokeResponseBody>,
     acks: State<'_, Acks>,
+    epoch: State<'_, Epoch>,
 ) -> Result<StreamStats, String> {
     let (tx, mut rx) = mpsc::unbounded_channel();
     acks.0.lock().expect("acks lock").insert(id, tx);
 
     let rows = rows(bytes);
     let mut ticker = (interval_ms > 0).then(|| {
-        let mut ticker = tokio::time::interval(Duration::from_millis(interval_ms));
+        let period = Duration::from_millis(interval_ms);
+        let ticks = epoch.0.elapsed().as_nanos() / period.as_nanos() + 1;
+        let first = epoch.0 + period * u32::try_from(ticks).expect("fewer than 2^32 ticks");
+        let mut ticker = tokio::time::interval_at(first.into(), period);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
         ticker
     });
@@ -222,6 +229,7 @@ pub fn run(context: tauri::Context) {
         .manage(bench_mode)
         .manage(Probes::default())
         .manage(Acks::default())
+        .manage(Epoch(Instant::now()))
         .register_uri_scheme_protocol("twigo-ext", |_ctx, request| {
             ext_protocol(request.uri().path())
         })
