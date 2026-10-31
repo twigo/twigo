@@ -93,14 +93,16 @@ export function createMockBackend(scenario: MockScenario = "live"): Backend {
     ) => ResponseOf<C>;
   } = {
     list_subscribe: (query, onMessage) => {
-      checkQuery(query);
       const space = SPACES.find((candidate) => candidate.id === query.space);
       if (!space) throw new IpcError("notFound", `no space ${query.space}`);
+      const columns = podColumns(space.contexts.length, query);
+      checkQuery(query, columns);
       const id = nextId++;
       subscriptions.set(
         id,
         new Subscription(
           query,
+          columns,
           space.contexts.map((context) => cluster(context.name)),
           scenario,
           onMessage,
@@ -195,13 +197,14 @@ class Subscription {
 
   constructor(
     query: ListQuery,
+    columns: Column[],
     clusters: readonly Cluster[],
     scenario: MockScenario,
     onMessage: (batch: ListBatch) => void,
   ) {
     this.#query = query;
     this.#clusters = clusters;
-    this.#columns = podColumns(clusters.length, query);
+    this.#columns = columns;
     this.#onMessage = onMessage;
     if (scenario === "live" && clusters.every((c) => c.synced)) {
       this.#status = { state: "ready" };

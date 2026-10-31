@@ -165,6 +165,25 @@ test("pinned states keep or drop rows as Rust does", async () => {
   }
 });
 
+test("text matches the shown columns only", async () => {
+  const hidden = await open("ready", query({ text: "<none>" }));
+  expect(hidden.batches[0]?.total).toBe(0);
+});
+
+test("an unknown sort column is refused at subscribe", async () => {
+  const backend = createMockBackend();
+  const pending = backend.subscribe(
+    "list_subscribe",
+    query({ sort: { column: "Bogus", descending: false } }),
+    () => undefined,
+  );
+  const rejected = expect(pending).rejects.toMatchObject({
+    kind: "invalidInput",
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  await rejected;
+});
+
 test("label selectors are refused, since the mock cannot match labels", async () => {
   const backend = createMockBackend();
   const pending = backend.subscribe(

@@ -21,7 +21,7 @@ export function podColumns(contexts: number, query: ListQuery): Column[] {
   ];
 }
 
-export function checkQuery(query: ListQuery): void {
+export function checkQuery(query: ListQuery, columns: readonly Column[]): void {
   if (
     query.gvr.group !== "" ||
     query.gvr.version !== "v1" ||
@@ -38,9 +38,15 @@ export function checkQuery(query: ListQuery): void {
       "the mock backend does not filter by label",
     );
   }
+  if (
+    query.sort &&
+    !columns.some((column) => column.name === query.sort?.column)
+  ) {
+    throw new IpcError("invalidInput", `no column ${query.sort.column}`);
+  }
 }
 
-/** Filters and sorts as Rust's query view does (ARCHITECTURE 3.4). */
+/** Filters on the shown columns and sorts, as Rust's query view does (ARCHITECTURE 3.4). */
 export function runQuery(
   pods: readonly Pod[],
   query: ListQuery,
@@ -49,6 +55,9 @@ export function runQuery(
   const withContext = columns[0]?.name === "Context";
   const withNamespace = columns.some((column) => column.name === "Namespace");
   const cells = (pod: Pod) => podCells(pod, withContext, withNamespace);
+  const shown = columns.flatMap((column, i) =>
+    column.priority === 0 ? [i] : [],
+  );
   const namespaces = new Set(query.namespaces);
   const text = query.text?.trim().toLowerCase() ?? "";
   const negate = text.startsWith("!");
@@ -56,14 +65,15 @@ export function runQuery(
   const matches = pods.filter((pod) => {
     if (namespaces.size > 0 && !namespaces.has(pod.namespace)) return false;
     if (needle === "") return true;
-    const hit = cells(pod).some(
-      (cell) => typeof cell === "string" && cell.toLowerCase().includes(needle),
-    );
+    const row = cells(pod);
+    const hit = shown.some((i) => {
+      const cell = row[i];
+      return typeof cell === "string" && cell.toLowerCase().includes(needle);
+    });
     return hit !== negate;
   });
   const sort = query.sort ?? { column: "Name", descending: false };
   const index = columns.findIndex((column) => column.name === sort.column);
-  if (index < 0) throw new IpcError("invalidInput", `no column ${sort.column}`);
   const age = columns[index]?.kind === "age";
   const keyed = matches.map((pod) => ({ pod, key: cells(pod)[index] }));
   keyed.sort((a, b) => {
