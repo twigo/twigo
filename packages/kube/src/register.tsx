@@ -6,6 +6,11 @@ import { Inspector } from "./Inspector";
 import { ListIcon } from "./KindIcon";
 import { ListEditor, type ListServices } from "./ListEditor";
 import { Lists } from "./lists";
+import {
+  listProvider,
+  namespaceProvider,
+  resourceProvider,
+} from "./quickaccess";
 import { Selection } from "./selection";
 import { LIST_SCHEME, parseListUri } from "./uri";
 
@@ -16,7 +21,24 @@ export function registerKube(workbench: Workbench): void {
     lists: new Lists(),
     selection: new Selection(),
   };
-  const { views, editors, commands, keybindings } = workbench;
+  const { views, editors, commands, keybindings, quickAccess } = workbench;
+
+  quickAccess.register(listProvider(workbench, services.discovery));
+  quickAccess.register(namespaceProvider(workbench));
+  quickAccess.register(resourceProvider(workbench, services.selection));
+  for (const { id, title, prefix } of [
+    { id: "k8s.list.open", title: "Open Resource List…", prefix: ":" },
+    { id: "k8s.namespace.select", title: "Select Namespace…", prefix: "ns " },
+  ]) {
+    commands.register({
+      id,
+      title,
+      category: "Kubernetes",
+      run: () => {
+        quickAccess.show(prefix);
+      },
+    });
+  }
 
   views.registerContainer({
     id: "kube.explorer",
