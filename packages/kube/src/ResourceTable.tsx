@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ArrowDown,
@@ -24,11 +24,18 @@ import type { FlashTracker } from "./flash";
 import { kindIcon } from "./kinds";
 import { cellTone } from "./tones";
 import { useListView } from "./useListView";
+import { useNow } from "./useNow";
 
 const ROW_HEIGHT = 26;
 
 /** States in which Rust sends rows; the loading states show skeletons. */
 const SHOWS_ROWS = new Set<ViewState["state"]>(["ready", "relisting", "stale"]);
+
+/** What keyboard commands do to the focused table. */
+export interface ListController {
+  move(delta: number): void;
+  moveToEdge(edge: "first" | "last"): void;
+}
 
 interface Props {
   backend: Backend;
@@ -36,6 +43,14 @@ interface Props {
   gvr: Gvr;
   /** Plural, as the explorer names the kind: "Pods". */
   title: string;
+  /** Empty or absent for every namespace the space covers. */
+  namespaces?: readonly string[];
+  text?: string;
+  labelSelector?: string;
+  /** The selected row, as it changes; undefined once nothing is selected. */
+  onSelect?: (row: Row | undefined, columns: readonly Column[]) => void;
+  /** Registers the focusable grid while it is mounted, for context keys and commands. */
+  register?: (grid: HTMLElement, list: ListController) => () => void;
 }
 
 export function ResourceTable(props: Props) {
@@ -56,6 +71,11 @@ function ResourceList({
   space,
   gvr,
   title,
+  namespaces = [],
+  text,
+  labelSelector,
+  onSelect,
+  register,
   onRetry,
 }: Props & { onRetry: () => void }) {
   const [sort, setSort] = useState<Sort | null>(null);
@@ -63,13 +83,13 @@ function ResourceList({
   const { snapshot, flash, setWindow } = useListView(backend, {
     space,
     gvr,
-    namespaces: [],
-    labelSelector: null,
-    text: null,
+    namespaces: [...namespaces],
+    labelSelector: labelSelector ?? null,
+    text: text ?? null,
     sort,
   });
   const now = useNow(1000);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [grid, setGrid] = useState<HTMLDivElement | null>(null);
   const { status } = snapshot;
   const showsRows = SHOWS_ROWS.has(status.state);
   const columns = snapshot.columns
@@ -78,7 +98,7 @@ function ResourceList({
 
   const virtualizer = useVirtualizer({
     count: showsRows ? snapshot.total : 0,
-    getScrollElement: () => scrollRef.current,
+    getScrollElement: () => grid,
     estimateSize: () => ROW_HEIGHT,
     overscan: 8,
     initialRect: { width: 0, height: 600 },
@@ -91,6 +111,51 @@ function ResourceList({
     const screen = Math.max(last - first + 1, 40);
     setWindow(Math.max(0, first - screen), last + 1 + screen);
   }, [setWindow, first, last]);
+
+  // A keyboard move can land outside the window; it selects once the row arrives.
+  const [wanted, setWanted] = useState<number>();
+  const wantedRow = wanted === undefined ? undefined : rowAt(snapshot, wanted);
+  useEffect(() => {
+    if (wantedRow) {
+      setSelected(wantedRow.id);
+      setWanted(undefined);
+    }
+  }, [wantedRow]);
+
+  const latest = useRef({ snapshot, selected });
+  useEffect(() => {
+    latest.current = { snapshot, selected };
+  });
+  const controller = useMemo<ListController>(() => {
+    const go = (index: number) => {
+      const { total } = latest.current.snapshot;
+      if (total === 0) return;
+      const target = Math.min(Math.max(index, 0), total - 1);
+      virtualizer.scrollToIndex(target);
+      setWanted(target);
+    };
+    return {
+      move(delta) {
+        const { snapshot: shown, selected: id } = latest.current;
+        const at = id === undefined ? -1 : indexOf(shown, id);
+        go(at < 0 ? shown.start : at + delta);
+      },
+      moveToEdge(edge) {
+        go(edge === "first" ? 0 : latest.current.snapshot.total - 1);
+      },
+    };
+  }, [virtualizer]);
+
+  useEffect(() => {
+    if (!grid || !register) return;
+    return register(grid, controller);
+  }, [grid, register, controller]);
+
+  const selectedRow =
+    selected === undefined ? undefined : snapshot.rows.get(selected);
+  useEffect(() => {
+    if (selectedRow) onSelect?.(selectedRow, snapshot.columns);
+  }, [onSelect, selectedRow, snapshot.columns]);
 
   const Icon = kindIcon(gvr);
   const template = columns.map(width).join(" ");
@@ -109,10 +174,12 @@ function ResourceList({
       </header>
       {problem(status, title, onRetry) ?? (
         <div
-          ref={scrollRef}
+          ref={setGrid}
           role="grid"
+          tabIndex={0}
+          aria-label={title}
           aria-rowcount={snapshot.total + 1}
-          className="min-h-0 flex-1 overflow-auto"
+          className="group min-h-0 flex-1 overflow-auto outline-none"
         >
           <div
             role="row"
@@ -157,7 +224,9 @@ function ResourceList({
                     }}
                     className={cn(
                       "absolute inset-x-0 grid items-center border-b border-border-micro tabular-nums hover:bg-row-hover",
-                      row !== undefined && row.id === selected && "bg-selected",
+                      row !== undefined &&
+                        row.id === selected &&
+                        "bg-selected-unfocused group-focus:bg-selected",
                     )}
                     style={{
                       top: item.start,
@@ -190,6 +259,11 @@ function ResourceList({
       )}
     </section>
   );
+}
+
+function indexOf(snapshot: ListSnapshot, id: RowId): number {
+  const at = snapshot.ids.indexOf(id);
+  return at < 0 ? -1 : snapshot.start + at;
 }
 
 function rowAt(snapshot: ListSnapshot, index: number): Row | undefined {
@@ -422,17 +496,4 @@ function problem(
     default:
       return null;
   }
-}
-
-function useNow(ms: number): number {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setNow(Date.now());
-    }, ms);
-    return () => {
-      clearInterval(timer);
-    };
-  }, [ms]);
-  return now;
 }
