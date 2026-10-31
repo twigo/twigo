@@ -42,6 +42,7 @@ impl Clients {
 fn multiplexed(config: &Config) -> Result<Client, Error> {
     let mut http = HttpConnector::new();
     http.enforce_http(false);
+    http.set_connect_timeout(config.connect_timeout);
     let mut https = HttpsConnectorBuilder::new()
         .with_tls_config(config.rustls_client_config()?)
         .https_or_http();
@@ -52,9 +53,13 @@ fn multiplexed(config: &Config) -> Result<Client, Error> {
     }
     let mut connector = TimeoutConnector::new(https.enable_all_versions().wrap_connector(http));
     connector.set_connect_timeout(config.connect_timeout);
-    connector.set_read_timeout(config.read_timeout);
     connector.set_write_timeout(config.write_timeout);
+    // No read timeout: it would time the whole multiplexed connection, so a
+    // quiet cluster would cut every watch.
     let client = hyper_util::client::legacy::Client::builder(TokioExecutor::new())
+        // hyper-util expires a shared HTTP/2 entry that saw no new request for
+        // the idle timeout, even while its streams run, and opens another.
+        .pool_idle_timeout(None)
         .build::<_, Body>(connector);
     let service = ServiceBuilder::new()
         .layer(config.base_uri_layer())
