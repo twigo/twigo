@@ -23,7 +23,7 @@ Two questions, from 6.7 and 7.3:
 ## The bench
 
 - tauri-build fails unless the `isolation` features of `tauri` and `tauri-build` in `Cargo.toml` match the config's pattern ([manifest.rs](https://github.com/tauri-apps/tauri/blob/tauri-build-v2.7.4/crates/tauri-build/src/manifest.rs#L30-L58)), so each pattern is a crate of its own.
-- The page, `web/bench.js`, runs what `TWIGO_BENCH_IPC` asks for: `cost`, `frames` or both.
+- The page, `web/bench.js`, runs what `TWIGO_BENCH_IPC` asks for: `cost` or `frames`.
   It ends with `report`, which prints one JSON line and exits non-zero when a check fails.
 - Both apps set the CSP that 6.7 plans for Twigo: the app's own, plus `frame-src 'self' twigo-ext:`.
   The isolation app adds its isolation frame's scheme to `frame-src` at startup ([below](#the-isolation-pattern-and-frame-src)).
@@ -46,12 +46,14 @@ Two questions, from 6.7 and 7.3:
   - the control, same-origin with `sandbox="allow-scripts allow-same-origin"`, invokes `probe` through `parent.__TAURI_INTERNALS__`;
   - the probe, `twigo-ext://probe/probe.html` with `sandbox="allow-scripts"`, comes from a custom scheme like 5.3's tier-2 frames, but without a CSP of its own, so that only Tauri stands in its way.
     It tries every path in the table below, each request with a probe source of its own.
-- A second after the probe reports, the window invokes `probe` itself.
+    A request without a body carries no source, so it calls `probe_without_body`, which counts as `frame:no-body`.
+- A second after the probe reports, the window invokes `probe` itself, then checks the hook ([below](#decision-brownfield)).
 - Rust counts `probe` calls per source.
   A run fails unless the control and the window ran it once each and no `frame:` source ran it at all.
   The control shows that a frame which gets through is counted.
-- Both failures were seen on purpose on 2026-10-31 (macOS, brownfield):
+- The failures were seen on purpose on 2026-10-31 (macOS, brownfield):
   - with the control's source renamed `frame:control`, the run exits 1 and names that source;
+  - with the control also sending `probe_without_body` through `parent.__TAURI_INTERNALS__.postMessage` without a payload, the run exits 1 and names `frame:no-body`;
   - with the probe served same-origin under `allow-same-origin`, its `parent.__TAURI_INTERNALS__` call runs `probe`, and the run exits 1 when the probe's report does not come within 10 s.
     The report never comes because Tauri drops a request whose key is wrong without an answer ([webview/mod.rs](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.5/crates/tauri/src/webview/mod.rs#L2009-L2025)), and the probe's `ipc://` fetch with a guessed key, now from a valid origin, waits forever.
 
@@ -113,9 +115,10 @@ For Twigo it adds little and costs something:
 - A static CSP cannot name its frame, so the app has to add the frame's scheme to `frame-src` at startup ([below](#the-isolation-pattern-and-frame-src)).
 - A 64 KB invoke costs 5.5 ms more, and the hook's frame cannot load ES modules (Tauri's docs).
 - The hook does not see everything.
-  A page script can call `window.__TAURI_INTERNALS__.postMessage` without a payload ([ipc-protocol.js](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.5/crates/tauri/scripts/ipc-protocol.js#L88-L90)): the request goes out with the real key, a valid origin and no body, and Rust decrypts only a body that is there ([protocol.rs](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.5/crates/tauri/src/ipc/protocol.rs#L449), [L463](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.5/crates/tauri/src/ipc/protocol.rs#L463)).
-  A command without arguments then runs past the hook.
-  From source, not run.
+  A page script can call `window.__TAURI_INTERNALS__.postMessage` without a payload ([ipc-protocol.js](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.5/crates/tauri/scripts/ipc-protocol.js#L88-L90)).
+  The request goes out with the real key and no body, since `JSON.stringify(undefined)` gives none ([process-ipc-message-fn.js](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.5/crates/tauri/scripts/process-ipc-message-fn.js#L17-L44), [ipc-protocol.js](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.5/crates/tauri/scripts/ipc-protocol.js#L29-L41)), and Rust decrypts only a body that is there ([protocol.rs](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.5/crates/tauri/src/ipc/protocol.rs#L449), [L463](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.5/crates/tauri/src/ipc/protocol.rs#L463)).
+  So a command without required arguments runs past the hook; an `Option` argument arrives as `None` ([command.rs](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.5/crates/tauri/src/ipc/command.rs#L146-L157)).
+  Measured on both platforms in every frames run: the bench's hook refuses `bypass`, and under isolation `invoke("bypass")` gets no answer while the payload-less `postMessage` runs it.
 - It opens a route of its own: the window forwards every isolation-shaped message, from any frame, to Rust with its invoke key ([ipc.js](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.5/crates/tauri/scripts/ipc.js#L187-L209)).
   AES-GCM rejects a forged one, but a tier-2 frame gains a way into Rust's decryption that brownfield does not offer.
 
@@ -128,7 +131,7 @@ Runs on 2026-10-31, both patterns each:
 
 - macOS: `bench/ipc/run.sh frames 2`, WebKit of macOS 27.0, two runs per pattern;
 - WebKitGTK: `bench/ipc/linux.sh frames 2`, WebKitGTK 2.52.6 on Ubuntu 24.04.5 (aarch64) under Xvfb, in Docker Desktop on the same Mac, two runs per pattern;
-- CI: the `Webview` workflow on PR #9, WebKitGTK 2.52.6 on GitHub's ubuntu-24.04 (x86_64) under Xvfb, one run per pattern ([run 41232206764](https://github.com/twigo/twigo/actions/runs/41232206764)).
+- CI: the `Webview` workflow on PR #9, WebKitGTK 2.52.6 on GitHub's ubuntu-24.04 (x86_64) under Xvfb, one run per pattern ([run 41233393248](https://github.com/twigo/twigo/actions/runs/41233393248)).
 
 In every run the control and the window ran `probe` once each, and no `frame:` source ran it.
 
@@ -178,3 +181,22 @@ Tauri serves the isolation frame from `isolation-<uuid>://localhost`, with a UUI
 - A static CSP cannot name a scheme that changes with every build, but the app can read it before it runs.
   `Context::pattern()` returns the pattern with its `schema` ([lib.rs](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.5/crates/tauri/src/lib.rs#L494-L498), [pattern.rs](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.5/crates/tauri/src/pattern.rs#L22-L27)), and Tauri builds the page's CSP from the runtime config on every asset request ([manager/mod.rs](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.5/crates/tauri/src/manager/mod.rs#L361-L373)), from `devCsp` in dev builds when it is set.
   `bench/ipc/isolation/src/main.rs` adds the scheme to `frame-src` before `run`, and the isolation runs above passed that way.
+
+## Changes to the architecture
+
+- 3.5: what a Channel carries with acknowledgements, from the table above.
+- 6.7: the isolation pattern stays off, with the reasons of the decision; a tier-2 frame is kept out by the invoke key alone, under the conditions [above](#what-keeps-a-frame-out); Windows needs the `http(s)://<scheme>.localhost` form of `twigo-ext:`.
+- 7.2: the frame probe joins the Windows work.
+- 7.3: tier 2 may ship on Linux, and CI repeats the probe.
+- 2.2: `bench/ipc`.
+
+## Reproducing
+
+```bash
+export TWIGO_BENCH_DIR=$(mktemp -d)
+bench/ipc/run.sh cost 5      # macOS, release builds; opens a window per run
+bench/ipc/run.sh frames 2    # macOS
+bench/ipc/linux.sh frames 2  # WebKitGTK in Docker
+```
+
+Each run leaves `<mode>-<pattern>-<run>.json` and `.log` in `$TWIGO_BENCH_DIR/ipc`.

@@ -193,6 +193,7 @@ twigo/
 │  └─ utils/
 ├─ extensions/                first-party extensions built on the public API (fixture + dogfood)
 ├─ bench/                     kind/kwok cluster scripts, churn generator, perf harness
+│  └─ ipc/                    IPC bench: the isolation pattern's cost, the tier-2 frame probe
 └─ docs/
 ```
 
@@ -1201,7 +1202,7 @@ Destructive actions (delete, drain, scale to 0) use dry-run where the API suppor
   An XSS in the webview would reach every cluster.
 - **Tauri.**
   Capabilities are scoped per window label, and commands are allowlisted through `AppManifest::commands`.
-  The isolation pattern stays off: its hook would repeat checks that Rust makes at the boundary, page scripts can call commands without arguments past it, and its frame's scheme changes with every build, so the app would have to add it to `frame-src` at startup ([isolation spike](spikes/tauri-isolation.md)).
+  The isolation pattern stays off: its hook would repeat checks that Rust makes at the boundary, page scripts can call commands without required arguments past it, and its frame's scheme changes with every build, so the app would have to add it to `frame-src` at startup ([isolation spike](spikes/tauri-isolation.md)).
 - **Secrets in the webview.**
   Tokens, certificates and Secret values never reach it, except for a Secret value the user explicitly reveals.
 - **Tier-2 frames.**
@@ -1209,7 +1210,7 @@ Destructive actions (delete, drain, scale to 0) use dry-run where the API suppor
     The key is all that keeps them out: WebKit gives them the page's message handler, and Tauri cannot tell their requests from the window's on Linux, nor from the app's on either platform.
   - The M0 spike showed on WebKitGTK and macOS that such a frame invokes nothing, and CI repeats the probe on every Tauri and wry update and weekly ([isolation spike](spikes/tauri-isolation.md)).
   - No frame gets `allow-same-origin`, and the host relays only data, from messages whose `event.source` is that extension's frame.
-  - The page's CSP lists `twigo-ext:` in `frame-src`; Windows serves custom schemes as `http://<scheme>.localhost` and needs that form.
+  - The page's CSP lists `twigo-ext:` in `frame-src`; Windows serves custom schemes as `http://<scheme>.localhost` (`https://` with `useHttpsScheme`) and needs that form.
 - **Releases.**
   - Signed updater artifacts (minisign, new key).
   - macOS notarization; Linux AppImage, deb and rpm.
@@ -1236,7 +1237,7 @@ Destructive actions (delete, drain, scale to 0) use dry-run where the API suppor
 
 ### 7.2 Later (rough order)
 
-1. **Windows** (D2): WebView2, Authenticode signing, the registry environment, `CREATE_NO_WINDOW` for exec plugins.
+1. **Windows** (D2): WebView2, Authenticode signing, the registry environment, `CREATE_NO_WINDOW` for exec plugins, and the tier-2 frame probe of `bench/ipc` on WebView2.
 2. **More resources and sessions:**
    - multi-context spaces with merged tables;
    - workload logs (stern-style);
