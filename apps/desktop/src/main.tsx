@@ -1,8 +1,10 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { isTauri } from "@tauri-apps/api/core";
-import { tauriBackend, type Backend } from "@twigo/protocol";
-import { App } from "./App";
+import { registerKube } from "@twigo/kube";
+import { tauriBackend, toIpcError, type Backend } from "@twigo/protocol";
+import { createWorkbench, platformOf, WorkbenchView } from "@twigo/workbench";
+import { StartupFailure } from "./App";
 import "./index.css";
 
 const root = document.getElementById("root");
@@ -21,10 +23,18 @@ async function browserBackend(): Promise<Backend> {
   return createMockBackend(MOCK_SCENARIOS.find((s) => s === asked));
 }
 
-const backend = isTauri() ? tauriBackend : await browserBackend();
+async function start() {
+  const backend = isTauri() ? tauriBackend : await browserBackend();
+  const workbench = await createWorkbench(
+    backend,
+    platformOf(navigator.userAgent),
+  );
+  registerKube(workbench);
+  return <WorkbenchView workbench={workbench} />;
+}
 
-createRoot(root).render(
-  <StrictMode>
-    <App backend={backend} />
-  </StrictMode>,
-);
+const view = await start().catch((error: unknown) => (
+  <StartupFailure message={toIpcError(error).message} />
+));
+
+createRoot(root).render(<StrictMode>{view}</StrictMode>);
