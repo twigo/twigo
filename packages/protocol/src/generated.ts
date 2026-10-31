@@ -50,7 +50,9 @@ withAltGr: string, withShiftAltGr: string, };
  */
 export type KeyboardLayout = { 
 /**
- * The OS's name for the layout, such as `com.apple.keylayout.Ukrainian`.
+ * The OS's name for the layout: the input source ID on macOS, such as
+ * `com.apple.keylayout.Ukrainian`, the XKB layout name on Linux, such as
+ * `Ukrainian`, and the keyboard layout handle (HKL) in hex on Windows.
  */
 id: string, 
 /**

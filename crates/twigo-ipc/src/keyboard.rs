@@ -8,7 +8,9 @@ use ts_rs::TS;
 /// layout from Rust.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct KeyboardLayout {
-    /// The OS's name for the layout, such as `com.apple.keylayout.Ukrainian`.
+    /// The OS's name for the layout: the input source ID on macOS, such as
+    /// `com.apple.keylayout.Ukrainian`, the XKB layout name on Linux, such as
+    /// `Ukrainian`, and the keyboard layout handle (HKL) in hex on Windows.
     pub id: String,
     /// The writing-system keys, by `KeyboardEvent.code` (`KeyA`, `Slash`).
     pub keys: BTreeMap<String, KeyMapping>,
