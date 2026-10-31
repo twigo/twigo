@@ -20,6 +20,7 @@ export type {
   KeyMapping,
   ListBatch,
   ListQuery,
+  Resource,
   Row,
   RowId,
   Sort,

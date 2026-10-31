@@ -5,7 +5,7 @@
 use ts_rs::TS;
 
 use crate::{
-    Ack, Context, KeyboardLayout, ListBatch, ListQuery, SetWindow, Space, StateEntry,
+    Ack, Context, KeyboardLayout, ListBatch, ListQuery, Resource, SetWindow, Space, StateEntry,
     SubscriptionId,
 };
 
@@ -44,6 +44,26 @@ impl Command for SpaceOpen {
     /// The context's name.
     type Request = String;
     type Response = Space;
+    type Message = ();
+}
+
+/// The resources a space serves, by its id.
+pub struct ResourcesList;
+
+impl Command for ResourcesList {
+    const NAME: &'static str = "resources_list";
+    type Request = String;
+    type Response = Vec<Resource>;
+    type Message = ();
+}
+
+/// The namespaces of a space, by its id, from the namespace index (D7).
+pub struct NamespacesList;
+
+impl Command for NamespacesList {
+    const NAME: &'static str = "namespaces_list";
+    type Request = String;
+    type Response = Vec<String>;
     type Message = ();
 }
 

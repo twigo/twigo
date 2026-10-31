@@ -1,0 +1,886 @@
+[
+  {
+    "gvr": {
+      "group": "",
+      "version": "v1",
+      "resource": "configmaps"
+    },
+    "kind": "ConfigMap",
+    "singular": "configmap",
+    "shortNames": [
+      "cm"
+    ],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "",
+      "version": "v1",
+      "resource": "endpoints"
+    },
+    "kind": "Endpoints",
+    "singular": "endpoints",
+    "shortNames": [
+      "ep"
+    ],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "",
+      "version": "v1",
+      "resource": "events"
+    },
+    "kind": "Event",
+    "singular": "event",
+    "shortNames": [
+      "ev"
+    ],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "",
+      "version": "v1",
+      "resource": "limitranges"
+    },
+    "kind": "LimitRange",
+    "singular": "limitrange",
+    "shortNames": [
+      "limits"
+    ],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "",
+      "version": "v1",
+      "resource": "namespaces"
+    },
+    "kind": "Namespace",
+    "singular": "namespace",
+    "shortNames": [
+      "ns"
+    ],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "",
+      "version": "v1",
+      "resource": "nodes"
+    },
+    "kind": "Node",
+    "singular": "node",
+    "shortNames": [
+      "no"
+    ],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "",
+      "version": "v1",
+      "resource": "persistentvolumeclaims"
+    },
+    "kind": "PersistentVolumeClaim",
+    "singular": "persistentvolumeclaim",
+    "shortNames": [
+      "pvc"
+    ],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "",
+      "version": "v1",
+      "resource": "persistentvolumes"
+    },
+    "kind": "PersistentVolume",
+    "singular": "persistentvolume",
+    "shortNames": [
+      "pv"
+    ],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "",
+      "version": "v1",
+      "resource": "pods"
+    },
+    "kind": "Pod",
+    "singular": "pod",
+    "shortNames": [
+      "po"
+    ],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "",
+      "version": "v1",
+      "resource": "podtemplates"
+    },
+    "kind": "PodTemplate",
+    "singular": "podtemplate",
+    "shortNames": [],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "",
+      "version": "v1",
+      "resource": "replicationcontrollers"
+    },
+    "kind": "ReplicationController",
+    "singular": "replicationcontroller",
+    "shortNames": [
+      "rc"
+    ],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "",
+      "version": "v1",
+      "resource": "resourcequotas"
+    },
+    "kind": "ResourceQuota",
+    "singular": "resourcequota",
+    "shortNames": [
+      "quota"
+    ],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "",
+      "version": "v1",
+      "resource": "secrets"
+    },
+    "kind": "Secret",
+    "singular": "secret",
+    "shortNames": [],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "",
+      "version": "v1",
+      "resource": "serviceaccounts"
+    },
+    "kind": "ServiceAccount",
+    "singular": "serviceaccount",
+    "shortNames": [
+      "sa"
+    ],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "",
+      "version": "v1",
+      "resource": "services"
+    },
+    "kind": "Service",
+    "singular": "service",
+    "shortNames": [
+      "svc"
+    ],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "apiregistration.k8s.io",
+      "version": "v1",
+      "resource": "apiservices"
+    },
+    "kind": "APIService",
+    "singular": "apiservice",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "apps",
+      "version": "v1",
+      "resource": "controllerrevisions"
+    },
+    "kind": "ControllerRevision",
+    "singular": "controllerrevision",
+    "shortNames": [],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "apps",
+      "version": "v1",
+      "resource": "daemonsets"
+    },
+    "kind": "DaemonSet",
+    "singular": "daemonset",
+    "shortNames": [
+      "ds"
+    ],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "apps",
+      "version": "v1",
+      "resource": "deployments"
+    },
+    "kind": "Deployment",
+    "singular": "deployment",
+    "shortNames": [
+      "deploy"
+    ],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "apps",
+      "version": "v1",
+      "resource": "replicasets"
+    },
+    "kind": "ReplicaSet",
+    "singular": "replicaset",
+    "shortNames": [
+      "rs"
+    ],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "apps",
+      "version": "v1",
+      "resource": "statefulsets"
+    },
+    "kind": "StatefulSet",
+    "singular": "statefulset",
+    "shortNames": [
+      "sts"
+    ],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "events.k8s.io",
+      "version": "v1",
+      "resource": "events"
+    },
+    "kind": "Event",
+    "singular": "event",
+    "shortNames": [
+      "ev"
+    ],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "autoscaling",
+      "version": "v2",
+      "resource": "horizontalpodautoscalers"
+    },
+    "kind": "HorizontalPodAutoscaler",
+    "singular": "horizontalpodautoscaler",
+    "shortNames": [
+      "hpa"
+    ],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "batch",
+      "version": "v1",
+      "resource": "cronjobs"
+    },
+    "kind": "CronJob",
+    "singular": "cronjob",
+    "shortNames": [
+      "cj"
+    ],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "batch",
+      "version": "v1",
+      "resource": "jobs"
+    },
+    "kind": "Job",
+    "singular": "job",
+    "shortNames": [],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "certificates.k8s.io",
+      "version": "v1",
+      "resource": "certificatesigningrequests"
+    },
+    "kind": "CertificateSigningRequest",
+    "singular": "certificatesigningrequest",
+    "shortNames": [
+      "csr"
+    ],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "certificates.k8s.io",
+      "version": "v1",
+      "resource": "clustertrustbundles"
+    },
+    "kind": "ClusterTrustBundle",
+    "singular": "clustertrustbundle",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "certificates.k8s.io",
+      "version": "v1",
+      "resource": "podcertificaterequests"
+    },
+    "kind": "PodCertificateRequest",
+    "singular": "podcertificaterequest",
+    "shortNames": [],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "networking.k8s.io",
+      "version": "v1",
+      "resource": "ingressclasses"
+    },
+    "kind": "IngressClass",
+    "singular": "ingressclass",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "networking.k8s.io",
+      "version": "v1",
+      "resource": "ingresses"
+    },
+    "kind": "Ingress",
+    "singular": "ingress",
+    "shortNames": [
+      "ing"
+    ],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "networking.k8s.io",
+      "version": "v1",
+      "resource": "ipaddresses"
+    },
+    "kind": "IPAddress",
+    "singular": "ipaddress",
+    "shortNames": [
+      "ip"
+    ],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "networking.k8s.io",
+      "version": "v1",
+      "resource": "networkpolicies"
+    },
+    "kind": "NetworkPolicy",
+    "singular": "networkpolicy",
+    "shortNames": [
+      "netpol"
+    ],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "networking.k8s.io",
+      "version": "v1",
+      "resource": "servicecidrs"
+    },
+    "kind": "ServiceCIDR",
+    "singular": "servicecidr",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "policy",
+      "version": "v1",
+      "resource": "poddisruptionbudgets"
+    },
+    "kind": "PodDisruptionBudget",
+    "singular": "poddisruptionbudget",
+    "shortNames": [
+      "pdb"
+    ],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "rbac.authorization.k8s.io",
+      "version": "v1",
+      "resource": "clusterrolebindings"
+    },
+    "kind": "ClusterRoleBinding",
+    "singular": "clusterrolebinding",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "rbac.authorization.k8s.io",
+      "version": "v1",
+      "resource": "clusterroles"
+    },
+    "kind": "ClusterRole",
+    "singular": "clusterrole",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "rbac.authorization.k8s.io",
+      "version": "v1",
+      "resource": "rolebindings"
+    },
+    "kind": "RoleBinding",
+    "singular": "rolebinding",
+    "shortNames": [],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "rbac.authorization.k8s.io",
+      "version": "v1",
+      "resource": "roles"
+    },
+    "kind": "Role",
+    "singular": "role",
+    "shortNames": [],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "storage.k8s.io",
+      "version": "v1",
+      "resource": "csidrivers"
+    },
+    "kind": "CSIDriver",
+    "singular": "csidriver",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "storage.k8s.io",
+      "version": "v1",
+      "resource": "csinodes"
+    },
+    "kind": "CSINode",
+    "singular": "csinode",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "storage.k8s.io",
+      "version": "v1",
+      "resource": "csistoragecapacities"
+    },
+    "kind": "CSIStorageCapacity",
+    "singular": "csistoragecapacity",
+    "shortNames": [],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "storage.k8s.io",
+      "version": "v1",
+      "resource": "storageclasses"
+    },
+    "kind": "StorageClass",
+    "singular": "storageclass",
+    "shortNames": [
+      "sc"
+    ],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "storage.k8s.io",
+      "version": "v1",
+      "resource": "volumeattachments"
+    },
+    "kind": "VolumeAttachment",
+    "singular": "volumeattachment",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "storage.k8s.io",
+      "version": "v1",
+      "resource": "volumeattributesclasses"
+    },
+    "kind": "VolumeAttributesClass",
+    "singular": "volumeattributesclass",
+    "shortNames": [
+      "vac"
+    ],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "admissionregistration.k8s.io",
+      "version": "v1",
+      "resource": "mutatingadmissionpolicies"
+    },
+    "kind": "MutatingAdmissionPolicy",
+    "singular": "mutatingadmissionpolicy",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "admissionregistration.k8s.io",
+      "version": "v1",
+      "resource": "mutatingadmissionpolicybindings"
+    },
+    "kind": "MutatingAdmissionPolicyBinding",
+    "singular": "mutatingadmissionpolicybinding",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "admissionregistration.k8s.io",
+      "version": "v1",
+      "resource": "mutatingwebhookconfigurations"
+    },
+    "kind": "MutatingWebhookConfiguration",
+    "singular": "mutatingwebhookconfiguration",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "admissionregistration.k8s.io",
+      "version": "v1",
+      "resource": "validatingadmissionpolicies"
+    },
+    "kind": "ValidatingAdmissionPolicy",
+    "singular": "validatingadmissionpolicy",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "admissionregistration.k8s.io",
+      "version": "v1",
+      "resource": "validatingadmissionpolicybindings"
+    },
+    "kind": "ValidatingAdmissionPolicyBinding",
+    "singular": "validatingadmissionpolicybinding",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "admissionregistration.k8s.io",
+      "version": "v1",
+      "resource": "validatingwebhookconfigurations"
+    },
+    "kind": "ValidatingWebhookConfiguration",
+    "singular": "validatingwebhookconfiguration",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "apiextensions.k8s.io",
+      "version": "v1",
+      "resource": "customresourcedefinitions"
+    },
+    "kind": "CustomResourceDefinition",
+    "singular": "customresourcedefinition",
+    "shortNames": [
+      "crd",
+      "crds"
+    ],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "scheduling.k8s.io",
+      "version": "v1",
+      "resource": "priorityclasses"
+    },
+    "kind": "PriorityClass",
+    "singular": "priorityclass",
+    "shortNames": [
+      "pc"
+    ],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "coordination.k8s.io",
+      "version": "v1",
+      "resource": "leases"
+    },
+    "kind": "Lease",
+    "singular": "lease",
+    "shortNames": [],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "node.k8s.io",
+      "version": "v1",
+      "resource": "runtimeclasses"
+    },
+    "kind": "RuntimeClass",
+    "singular": "runtimeclass",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "discovery.k8s.io",
+      "version": "v1",
+      "resource": "endpointslices"
+    },
+    "kind": "EndpointSlice",
+    "singular": "endpointslice",
+    "shortNames": [],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "resource.k8s.io",
+      "version": "v1",
+      "resource": "deviceclasses"
+    },
+    "kind": "DeviceClass",
+    "singular": "deviceclass",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "resource.k8s.io",
+      "version": "v1",
+      "resource": "devicetaintrules"
+    },
+    "kind": "DeviceTaintRule",
+    "singular": "devicetaintrule",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "resource.k8s.io",
+      "version": "v1",
+      "resource": "resourceclaims"
+    },
+    "kind": "ResourceClaim",
+    "singular": "resourceclaim",
+    "shortNames": [],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "resource.k8s.io",
+      "version": "v1",
+      "resource": "resourceclaimtemplates"
+    },
+    "kind": "ResourceClaimTemplate",
+    "singular": "resourceclaimtemplate",
+    "shortNames": [],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "resource.k8s.io",
+      "version": "v1",
+      "resource": "resourceslices"
+    },
+    "kind": "ResourceSlice",
+    "singular": "resourceslice",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "flowcontrol.apiserver.k8s.io",
+      "version": "v1",
+      "resource": "flowschemas"
+    },
+    "kind": "FlowSchema",
+    "singular": "flowschema",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "flowcontrol.apiserver.k8s.io",
+      "version": "v1",
+      "resource": "prioritylevelconfigurations"
+    },
+    "kind": "PriorityLevelConfiguration",
+    "singular": "prioritylevelconfiguration",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "storagemigration.k8s.io",
+      "version": "v1",
+      "resource": "storageversionmigrations"
+    },
+    "kind": "StorageVersionMigration",
+    "singular": "storageversionmigration",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "kwok.x-k8s.io",
+      "version": "v1alpha1",
+      "resource": "attaches"
+    },
+    "kind": "Attach",
+    "singular": "attach",
+    "shortNames": [],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "kwok.x-k8s.io",
+      "version": "v1alpha1",
+      "resource": "clusterattaches"
+    },
+    "kind": "ClusterAttach",
+    "singular": "clusterattach",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "kwok.x-k8s.io",
+      "version": "v1alpha1",
+      "resource": "clusterlogs"
+    },
+    "kind": "ClusterLogs",
+    "singular": "clusterlogs",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "kwok.x-k8s.io",
+      "version": "v1alpha1",
+      "resource": "clusterportforwards"
+    },
+    "kind": "ClusterPortForward",
+    "singular": "clusterportforward",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "kwok.x-k8s.io",
+      "version": "v1alpha1",
+      "resource": "clusterresourceusages"
+    },
+    "kind": "ClusterResourceUsage",
+    "singular": "clusterresourceusage",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "kwok.x-k8s.io",
+      "version": "v1alpha1",
+      "resource": "logs"
+    },
+    "kind": "Logs",
+    "singular": "logs",
+    "shortNames": [],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "kwok.x-k8s.io",
+      "version": "v1alpha1",
+      "resource": "metrics"
+    },
+    "kind": "Metric",
+    "singular": "metric",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "kwok.x-k8s.io",
+      "version": "v1alpha1",
+      "resource": "portforwards"
+    },
+    "kind": "PortForward",
+    "singular": "portforward",
+    "shortNames": [],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "kwok.x-k8s.io",
+      "version": "v1alpha1",
+      "resource": "clusterexecs"
+    },
+    "kind": "ClusterExec",
+    "singular": "clusterexec",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "kwok.x-k8s.io",
+      "version": "v1alpha1",
+      "resource": "execs"
+    },
+    "kind": "Exec",
+    "singular": "exec",
+    "shortNames": [],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "kwok.x-k8s.io",
+      "version": "v1alpha1",
+      "resource": "resourceusages"
+    },
+    "kind": "ResourceUsage",
+    "singular": "resourceusage",
+    "shortNames": [],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "kwok.x-k8s.io",
+      "version": "v1alpha1",
+      "resource": "stages"
+    },
+    "kind": "Stage",
+    "singular": "stage",
+    "shortNames": [],
+    "namespaced": false
+  }
+]

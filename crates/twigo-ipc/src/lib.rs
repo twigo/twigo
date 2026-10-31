@@ -2,6 +2,7 @@
 //! gets its TypeScript types from these, through [`typescript`].
 
 pub mod command;
+mod discovery;
 mod error;
 mod keyboard;
 mod list;
@@ -9,6 +10,7 @@ mod space;
 mod state;
 mod typescript;
 
+pub use discovery::Resource;
 pub use error::{ErrorKind, IpcError};
 pub use keyboard::{KeyMapping, KeyboardLayout};
 pub use list::{

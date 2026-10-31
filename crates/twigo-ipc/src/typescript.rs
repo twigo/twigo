@@ -5,7 +5,7 @@ use ts_rs::{Config, TS, TypeVisitor};
 
 use crate::command::{
     Command, ContextsList, KeyboardLayoutWatch, ListAck, ListSetWindow, ListSubscribe,
-    ListUnsubscribe, SpaceOpen, SpacesList, StateGet, StateSet,
+    ListUnsubscribe, NamespacesList, ResourcesList, SpaceOpen, SpacesList, StateGet, StateSet,
 };
 
 /// The TypeScript module of `packages/protocol`: every type the commands
@@ -19,6 +19,8 @@ pub fn typescript() -> String {
     module.command::<SpacesList>();
     module.command::<ContextsList>();
     module.command::<SpaceOpen>();
+    module.command::<ResourcesList>();
+    module.command::<NamespacesList>();
     module.command::<ListSubscribe>();
     module.command::<ListSetWindow>();
     module.command::<ListAck>();

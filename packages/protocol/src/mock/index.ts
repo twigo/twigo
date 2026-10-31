@@ -15,7 +15,8 @@ import type {
   ViewState,
 } from "../generated";
 import { Cluster, podRow, type Pod } from "./cluster";
-import { CONTEXTS, POD_COUNT, SPACES } from "./fixtures";
+import { CONTEXTS, NAMESPACES, POD_COUNT, SPACES } from "./fixtures";
+import RESOURCES from "./resources.json";
 import { checkQuery, podColumns, runQuery } from "./query";
 
 /** `live` connects, syncs and then changes pods every second; any other value pins that state. */
@@ -59,6 +60,12 @@ export function createMockBackend(scenario: MockScenario = "live"): Backend {
     return found;
   };
 
+  const space = (id: string) => {
+    const found = spaces.find((candidate) => candidate.id === id);
+    if (!found) throw new IpcError("notFound", `no space ${id}`);
+    return found;
+  };
+
   const subscription = (id: number) => {
     const found = subscriptions.get(id);
     if (!found) throw new IpcError("notFound", `no subscription ${id}`);
@@ -74,13 +81,22 @@ export function createMockBackend(scenario: MockScenario = "live"): Backend {
       const context = CONTEXTS.find((candidate) => candidate.name === name);
       if (!context) throw new IpcError("notFound", `no context ${name}`);
       const open = spaces.find(
-        (space) =>
-          space.contexts.length === 1 && space.contexts[0]?.name === name,
+        (candidate) =>
+          candidate.contexts.length === 1 &&
+          candidate.contexts[0]?.name === name,
       );
       if (open) return open;
-      const space = { id: name, name, contexts: [context] };
-      spaces.push(space);
-      return space;
+      const created = { id: name, name, contexts: [context] };
+      spaces.push(created);
+      return created;
+    },
+    resources_list: (id) => {
+      space(id);
+      return RESOURCES;
+    },
+    namespaces_list: (id) => {
+      space(id);
+      return [...NAMESPACES].sort();
     },
     state_get: (key) => state.get(key) ?? null,
     state_set: ({ key, value }) => {
@@ -113,9 +129,8 @@ export function createMockBackend(scenario: MockScenario = "live"): Backend {
     ) => ResponseOf<C>;
   } = {
     list_subscribe: (query, onMessage) => {
-      const space = spaces.find((candidate) => candidate.id === query.space);
-      if (!space) throw new IpcError("notFound", `no space ${query.space}`);
-      const columns = podColumns(space.contexts.length, query);
+      const listed = space(query.space);
+      const columns = podColumns(listed.contexts.length, query);
       checkQuery(query, columns);
       const id = nextId++;
       subscriptions.set(
@@ -123,7 +138,7 @@ export function createMockBackend(scenario: MockScenario = "live"): Backend {
         new Subscription(
           query,
           columns,
-          space.contexts.map((context) => cluster(context.name)),
+          listed.contexts.map((context) => cluster(context.name)),
           scenario,
           onMessage,
         ),

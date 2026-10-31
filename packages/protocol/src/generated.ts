@@ -87,6 +87,12 @@ export type ListQuery = { space: string, gvr: Gvr,
  */
 namespaces: Array<string>, labelSelector: string | null, text: string | null, sort: Sort | null, };
 
+/**
+ * A resource the space's clusters serve, from discovery: what the explorer
+ * lists and what `:` in quick access resolves names against (ARCHITECTURE 4.5).
+ */
+export type Resource = { gvr: Gvr, kind: string, singular: string, shortNames: Array<string>, namespaced: boolean, };
+
 export type Row = { id: RowId, 
 /**
  * RFC 3339; the webview renders Age columns from it.
@@ -139,6 +145,8 @@ export type Commands = {
   spaces_list: { request: null; response: Array<Space>; message: null };
   contexts_list: { request: null; response: Array<Context>; message: null };
   space_open: { request: string; response: Space; message: null };
+  resources_list: { request: string; response: Array<Resource>; message: null };
+  namespaces_list: { request: string; response: Array<string>; message: null };
   list_subscribe: { request: ListQuery; response: SubscriptionId; message: ListBatch };
   list_set_window: { request: SetWindow; response: null; message: null };
   list_ack: { request: Ack; response: null; message: null };
