@@ -36,6 +36,7 @@ CI runs the same checks on every pull request.
   Keep code modular, easy to extend and no more complex than the problem.
   Leave nothing your change made obsolete, and bring what it touches into line with these rules ([decision](docs/decisions/code-quality.md)).
 - **Comments are minimal**: explain a non-obvious _why_, not _what_.
+- **Evidence**: a claim about a library or upstream behaviour cites the source at a tag, and every number names the run that produced it ([decision](docs/decisions/evidence.md)).
 - **Markdown** has one sentence per line, with no breaks inside a sentence ([decision](docs/decisions/markdown-lines.md)).
 - **Commits** follow [Conventional Commits](https://www.conventionalcommits.org) (`feat:`, `fix:`, `chore:`, `docs:`, `style:`, `refactor:`, `test:`).
 - **Accessibility**: interactive elements must be keyboard-reachable and labelled; prefer real semantic elements over click handlers on `<div>`.
