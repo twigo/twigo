@@ -102,6 +102,9 @@
             "guess",
             forgedEnvelope("frame:ipc-fetch-envelope"),
           ],
+          // An empty body skips decryption under isolation.
+          ["ipc:// fetch, empty body, wrong key", "guess", undefined],
+          ["ipc:// fetch, empty body, no key", undefined, undefined],
         ]) {
           const headers = {
             "Content-Type": "application/json",
@@ -113,7 +116,7 @@
             const response = await fetch("ipc://localhost/probe", {
               method: "POST",
               headers,
-              body: JSON.stringify(body),
+              body: body === undefined ? undefined : JSON.stringify(body),
             });
             record(
               path,
