@@ -21,15 +21,18 @@ pub enum Error {
     Kube(#[from] kube::Error),
     #[error("invalid tls-server-name: {0}")]
     ServerName(#[from] InvalidDnsNameError),
-    #[error("proxy-url is not supported yet")]
+    #[error("a proxy (kubeconfig proxy-url or HTTPS_PROXY) is not supported yet")]
     Proxy,
 }
 
 impl Clients {
     pub fn new(config: Config) -> Result<Self, Error> {
+        let api = multiplexed(&config)?;
+        let sessions = Client::try_from(config)?;
         Ok(Clients {
-            api: multiplexed(&config)?,
-            sessions: Client::try_from(config)?,
+            // Only kube's builder can read an exec plugin certificate's expiry.
+            api: api.with_valid_until(*sessions.valid_until()),
+            sessions,
         })
     }
 }
@@ -40,6 +43,7 @@ fn multiplexed(config: &Config) -> Result<Client, Error> {
     }
     let mut http = HttpConnector::new();
     http.enforce_http(false);
+    http.set_connect_timeout(config.connect_timeout);
     let mut https = HttpsConnectorBuilder::new()
         .with_tls_config(config.rustls_client_config()?)
         .https_or_http();
