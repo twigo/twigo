@@ -1,1 +1,1 @@
-export {};
+export { humanDuration } from "./duration";
