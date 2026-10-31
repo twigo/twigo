@@ -66,16 +66,19 @@
   --border-subtle: oklch(0 0 0 / 4%);
   --border-micro: oklch(0 0 0 / 2.5%);
 
-  /* Editor pane = the content surface; on light it stays white like the canvas. */
+  /* Islands (JetBrains 2025.3, VS Code 2026): the parts are cards on the
+     shell; the title bar, the space rail, the gaps and the status bar are
+     shell. On light the cards are white and the shell a cool grey. */
+  --shell: oklch(0.945 0.004 245);
   --editor: oklch(1 0 0);
 
-  --sidebar: oklch(0.977 0.003 242);
+  --sidebar: oklch(1 0 0);
   --sidebar-foreground: oklch(0.18 0.008 248);
   --sidebar-border: oklch(0.917 0.006 242);
-  --panel: oklch(0.977 0.003 242);
-  /* Brand-ink bar: deeper than raw brand so it anchors instead of shouting. */
-  --statusbar: oklch(0.45 0.09 248);
-  --statusbar-foreground: oklch(0.97 0.012 245);
+  --panel: oklch(1 0 0);
+  /* The status bar is shell with quiet text; colour is the cluster's. */
+  --statusbar: var(--shell);
+  --statusbar-foreground: oklch(0.45 0.01 248);
 
   --ok: oklch(0.62 0.14 150);
   --warn: oklch(0.72 0.15 75);
@@ -107,15 +110,16 @@
   --brand-foreground: oklch(0.15 0.03 250);
 
   /* Deep-ocean neutrals (trace of brand hue; flat-gray darks read cheap).
-     Depth comes from a luminance ramp - the focused EDITOR is the darkest
-     surface and chrome steps lighter outward, no shadows on docked chrome:
-     editor 0.135 < canvas 0.15 < sidebar/panel 0.188 < card 0.215 < popover 0.235. */
-  --editor: oklch(0.135 0.006 245);
-  --background: oklch(0.15 0.006 245);
+     Content is darkest and the shell around it lighter, in steps big enough
+     to read, as JetBrains Islands does: cards 0.195 < card 0.215 < shell
+     0.255 < popover 0.275. */
+  --shell: oklch(0.255 0.007 245);
+  --editor: oklch(0.195 0.006 245);
+  --background: oklch(0.195 0.006 245);
   --foreground: oklch(0.93 0.005 240);
   --card: oklch(0.215 0.008 245);
   --card-foreground: oklch(0.93 0.005 240);
-  --popover: oklch(0.235 0.009 245);
+  --popover: oklch(0.275 0.009 245);
   --popover-foreground: oklch(0.93 0.005 240);
   --primary: oklch(0.93 0.005 240);
   --primary-foreground: oklch(0.2 0.008 245);
@@ -142,13 +146,12 @@
   --border-subtle: oklch(0.93 0.02 240 / 5%);
   --border-micro: oklch(0.93 0.02 240 / 2.5%);
 
-  --sidebar: oklch(0.188 0.007 245);
+  --sidebar: oklch(0.195 0.006 245);
   --sidebar-foreground: oklch(0.93 0.005 240);
   --sidebar-border: oklch(0.93 0.02 240 / 8%);
-  --panel: oklch(0.188 0.007 245);
-  /* Ink, not neon: the bar sits a step above the canvas with brand undertone. */
-  --statusbar: oklch(0.3 0.05 248);
-  --statusbar-foreground: oklch(0.9 0.025 245);
+  --panel: oklch(0.195 0.006 245);
+  --statusbar: var(--shell);
+  --statusbar-foreground: oklch(0.7 0.01 242);
 
   --ok: oklch(0.72 0.15 150);
   --warn: oklch(0.78 0.15 75);
@@ -196,6 +199,7 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-editor: var(--editor);
+  --color-shell: var(--shell);
   --color-row-hover: var(--row-hover);
   --color-row-active: var(--row-active);
   --color-selected: var(--selected);
@@ -229,6 +233,9 @@
   --shadow-sm: var(--shadow-sm);
   --shadow-md: var(--shadow-md);
   --shadow-lg: var(--shadow-lg);
+
+  /* Two weights, as VS Code and JetBrains use: 400, and 600 for emphasis. */
+  --font-weight-medium: 600;
 
   --font-sans:
     "Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system,

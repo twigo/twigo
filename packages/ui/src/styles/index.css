@@ -28,17 +28,6 @@
     user-select: none;
   }
 
-  /* UI labels sit between regular and medium (510): emphasis without heaviness.
-     Tailwind's font-medium maps to it via the variable axis. */
-  .font-medium,
-  .font-semibold,
-  button,
-  th {
-    font-variation-settings: "wght" 510;
-  }
-  .font-semibold {
-    font-variation-settings: "wght" 590;
-  }
   .tabular-nums {
     font-feature-settings:
       "cv01" 1,
