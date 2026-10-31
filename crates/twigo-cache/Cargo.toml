@@ -1,0 +1,9 @@
+[package]
+name = "twigo-cache"
+description = "Watch hub: upstream watches, row stores, query views, batching"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true

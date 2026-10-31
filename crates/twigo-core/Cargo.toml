@@ -1,0 +1,17 @@
+[package]
+name = "twigo-core"
+description = "App services: spaces, settings layers, catalog, command bus, approvals"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+twigo-kube.workspace = true
+twigo-cache.workspace = true
+twigo-sessions.workspace = true
+twigo-ext-host.workspace = true
+twigo-mcp.workspace = true
+twigo-env.workspace = true

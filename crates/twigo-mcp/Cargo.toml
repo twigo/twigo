@@ -1,0 +1,12 @@
+[package]
+name = "twigo-mcp"
+description = "MCP server and the twigo mcp stdio shim"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+twigo-ipc.workspace = true
