@@ -1,7 +1,8 @@
 //! TCP connections and GET latency under 50 Table watches, over kube's default
 //! HTTP/1.1 client and over the HTTP/2 api client, on the pods of one
-//! namespace (`bench/pods.sh`); then the api client at the server's stream
-//! limit.
+//! namespace (`bench/pods.sh`); before that, an api client that streams
+//! watches but sends no request for 100 s; after it, the api client at the
+//! server's stream limit.
 //!
 //! TWIGO_TEST_KUBECONFIG=… cargo run --release -p twigo-kube --example http2 [namespace]
 
@@ -26,6 +27,7 @@ const WATCHES: usize = 50;
 const STREAM_LIMIT: usize = 100;
 const REPLICAS: i32 = 5000;
 const WINDOW: Duration = Duration::from_secs(10);
+const IDLE: Duration = Duration::from_secs(100);
 
 struct Watches {
     tasks: Vec<JoinHandle<()>>,
@@ -264,6 +266,21 @@ async fn main() {
         WINDOW.as_secs()
     );
     println!();
+    let api = Clients::new(config.clone()).unwrap().api;
+    let version = resource_version(&api, &collection).await;
+    let watches = Watches::open(&api, &collection, &version, 10).await;
+    tokio::time::sleep(IDLE).await;
+    get(&api, &collection).await;
+    println!(
+        "HTTP/2, 10 watches and no request for {} s, then a GET: {} TCP connection(s).",
+        IDLE.as_secs(),
+        connections(port)
+    );
+    watches.close();
+    drop(api);
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    println!();
+
     println!("| Client, state | TCP connections | GETs | p50 ms | p95 | p99 | max | |");
     println!("| --- | --- | --- | --- | --- | --- | --- | --- |");
     for name in ["HTTP/1.1", "HTTP/2", "HTTP/2", "HTTP/1.1"] {
@@ -274,7 +291,10 @@ async fn main() {
     for count in [STREAM_LIMIT - 1, STREAM_LIMIT] {
         let api = Clients::new(config.clone()).unwrap().api;
         let version = resource_version(&api, &collection).await;
-        let watches = Watches::open(&api, &collection, &version, count).await;
+        let opening = Watches::open(&api, &collection, &version, count);
+        let watches = tokio::time::timeout(Duration::from_secs(30), opening)
+            .await
+            .expect("the watches open within 30 s");
         tokio::time::sleep(Duration::from_secs(1)).await;
         let answered = tokio::time::timeout(Duration::from_secs(10), get(&api, &collection)).await;
         println!(
