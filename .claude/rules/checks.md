@@ -9,8 +9,10 @@
 - Live tests against kind, one release: `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/test-matrix.sh 1.37`.
   Without an argument it runs every supported release.
 - A cluster to keep: `kubeconfig=$(bench/cluster.sh up <name> 1.37 | tail -1)`, then `TWIGO_TEST_KUBECONFIG=$kubeconfig cargo test -p twigo-cache -p twigo-kube -- --ignored`, and `bench/cluster.sh down <name>` when done.
+- The IPC bench: `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/ipc/run.sh frames` or `bench/ipc/run.sh cost 3` on macOS, and `bench/ipc/linux.sh frames` for WebKitGTK in Docker.
+  Each run opens a window and exits by itself.
 - Before a push, run only the checks the change affects.
-  CI runs the rest, and the live tests on every release when `twigo-cache`, `twigo-kube`, `twigo-policy`, `bench/` or the Cargo files change.
+  CI runs the rest, the live tests on every release when `twigo-cache`, `twigo-kube`, `twigo-policy`, the `bench/*.sh` scripts or the Cargo files change, and the frame probe on WebKitGTK when `bench/ipc` or the Cargo files change.
 
 ## Gotchas
 
@@ -23,5 +25,8 @@
 - k8s-openapi moves only together with kube: kube 4.2 requires `^0.28`.
   Dependabot bumps both in its `kube` group; a group PR that carries only k8s-openapi cannot build until a kube release requires that version.
 - A test that counts connections with `lsof` gets a test binary of its own, because `lsof` counts the whole process.
+- tauri-build fails unless the `isolation` features in `Cargo.toml` match the config's pattern, so each pattern of the IPC bench is a crate of its own: `bench/ipc/brownfield` and `bench/ipc/isolation`.
+- Under the isolation pattern a `frame-src` must list the isolation frame's scheme, or every invoke waits forever.
+  Tauri names it `isolation-<uuid>` anew on every build and adds it to `default-src` only, so `bench/ipc/isolation/src/main.rs` adds it to `frame-src` at startup from `Context::pattern()`.
 - Files under `crates/*/tests/fixtures` are recorded server responses: never reformat or edit them by hand.
 - `bench/` scripts run on macOS's bash 3.2: no associative arrays, and no `$(…)` inside a command's arguments where its failure must stop the script.
