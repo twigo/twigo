@@ -1,0 +1,72 @@
+import type { Column, Space } from "../generated";
+
+export const SPACES: Space[] = [
+  {
+    id: "prod-eu",
+    name: "prod-eu",
+    contexts: [{ name: "prod-eu", color: "red" }],
+  },
+  {
+    id: "staging",
+    name: "staging",
+    contexts: [{ name: "staging", color: "orange" }],
+  },
+  { id: "dev", name: "dev", contexts: [{ name: "dev", color: "green" }] },
+  {
+    id: "dev+qa",
+    name: "dev+qa",
+    contexts: [
+      { name: "dev", color: "green" },
+      { name: "qa", color: null },
+    ],
+  },
+];
+
+/** Pods per context; dev has none, to show the empty state. */
+export const POD_COUNT: Readonly<Record<string, number>> = {
+  "prod-eu": 5000,
+  staging: 800,
+  dev: 0,
+  qa: 120,
+};
+
+/** The columns kube-apiserver sends for pods (crates/twigo-cache/tests/fixtures/pods-list.json). */
+export const POD_COLUMNS: readonly Column[] = [
+  { name: "Name", kind: "string", priority: 0 },
+  { name: "Ready", kind: "string", priority: 0 },
+  { name: "Status", kind: "string", priority: 0 },
+  { name: "Restarts", kind: "string", priority: 0 },
+  { name: "Age", kind: "age", priority: 0 },
+  { name: "IP", kind: "string", priority: 1 },
+  { name: "Node", kind: "string", priority: 1 },
+  { name: "Nominated Node", kind: "string", priority: 1 },
+  { name: "Readiness Gates", kind: "string", priority: 1 },
+];
+
+export const NAMESPACES = [
+  "payments",
+  "checkout",
+  "search",
+  "ledger",
+  "notify",
+  "platform",
+  "monitoring",
+  "ingress-nginx",
+  "auth",
+  "batch",
+  "default",
+  "kube-system",
+];
+
+export const WORKLOADS = [
+  "api",
+  "worker",
+  "gateway",
+  "billing",
+  "indexer",
+  "scheduler",
+  "web",
+  "sync",
+  "exporter",
+  "controller",
+];
