@@ -4,7 +4,7 @@ Decided 2026-10-31.
 
 ## Decision
 
-- A branch is named `<type>/<topic>`: `feat/scaffold`, `fix/drag-region`, `chore/bump-tauri`.
+- A branch is named `<type>/<topic>`: `feat/scaffold`, `fix/drag-region`, `build/bump-tauri`.
 - `<type>` is the type of the PR title, one of the Conventional Commit types that `pr-title.yml` accepts: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
 - `<topic>` is a few lowercase words joined by hyphens.
 

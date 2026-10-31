@@ -38,12 +38,12 @@ CI runs the same checks on every pull request.
 - **Comments are minimal**: explain a non-obvious _why_, not _what_.
 - **Evidence**: a claim about a library or upstream behaviour cites the source at a tag, and every number names the run that produced it ([decision](docs/decisions/evidence.md)).
 - **Markdown** has one sentence per line, with no breaks inside a sentence ([decision](docs/decisions/markdown-lines.md)).
-- **Commits** follow [Conventional Commits](https://www.conventionalcommits.org) (`feat:`, `fix:`, `chore:`, `docs:`, `style:`, `refactor:`, `test:`).
+- **Commits** follow [Conventional Commits](https://www.conventionalcommits.org), with the types that `pr-title.yml` accepts ([decision](docs/decisions/branch-names.md)).
 - **Accessibility**: interactive elements must be keyboard-reachable and labelled; prefer real semantic elements over click handlers on `<div>`.
 - Match the style of the surrounding code.
 
 ## Workflow
 
-1. Branch off `main` as `<type>/<topic>`, where the type is the Conventional Commit type of the PR title: `feat/space-tabs`, `fix/drag-region`, `chore/bump-tauri` ([decision](docs/decisions/branch-names.md)).
+1. Branch off `main` as `<type>/<topic>`, where the type is the Conventional Commit type of the PR title: `feat/space-tabs`, `fix/drag-region`, `build/bump-tauri` ([decision](docs/decisions/branch-names.md)).
 2. Keep PRs focused; describe what and why.
 3. PRs are squash-merged into `main`.
