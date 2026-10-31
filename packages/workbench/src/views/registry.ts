@@ -13,6 +13,12 @@ export type Location = "sidebar" | "panel" | "secondary";
 
 export const LOCATIONS: readonly Location[] = ["sidebar", "panel", "secondary"];
 
+export const LOCATION_TITLES: Readonly<Record<Location, string>> = {
+  sidebar: "Primary Side Bar",
+  panel: "Panel",
+  secondary: "Secondary Side Bar",
+};
+
 export interface ViewContainer {
   readonly id: string;
   readonly title: string;

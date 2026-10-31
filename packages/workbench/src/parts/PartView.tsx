@@ -3,15 +3,9 @@ import { ChevronDown, ChevronRight, PanelsTopLeft } from "lucide-react";
 import { Button, cn, EmptyState } from "@twigo/ui";
 import type { Lookup } from "../contextkey/when";
 import { useChanges, useWorkbench } from "../react";
-import type { Location, View } from "../views/registry";
+import { LOCATION_TITLES, type Location, type View } from "../views/registry";
 import { activeContainer } from "./activeContainer";
 import { PanelBoundary } from "./PanelBoundary";
-
-const LABEL: Readonly<Record<Location, string>> = {
-  sidebar: "Primary Side Bar",
-  panel: "Panel",
-  secondary: "Secondary Side Bar",
-};
 
 /** A side bar or the panel: a header with its containers, then the active one's views. */
 export function PartView({ location }: { location: Location }) {
@@ -31,7 +25,7 @@ export function PartView({ location }: { location: Location }) {
 
   return (
     <section
-      aria-label={LABEL[location]}
+      aria-label={LOCATION_TITLES[location]}
       className={cn(
         "flex h-full min-h-0 flex-col",
         location === "panel" ? "bg-panel" : "bg-sidebar",

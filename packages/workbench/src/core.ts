@@ -1,6 +1,12 @@
 import type { Workbench } from "./services";
 import type { KeybindingRule } from "./keybindings/resolver";
-import type { Location } from "./views/registry";
+import {
+  commandsProvider,
+  helpProvider,
+  spacesProvider,
+  symbolsProvider,
+} from "./quickaccess/providers";
+import { LOCATION_TITLES, LOCATIONS, type Location } from "./views/registry";
 import { ChordItem, NamespacesItem, SpaceItem } from "./parts/StatusItems";
 
 const TOGGLES: readonly {
@@ -31,8 +37,94 @@ const TOGGLES: readonly {
 
 /** The workbench's own commands, keys and status-bar items, through the same registries as any feature. */
 export function registerCore(workbench: Workbench): void {
-  const { commands, keybindings, spaces, editors, views } = workbench;
+  const { commands, keybindings, spaces, editors, views, quickAccess } =
+    workbench;
   const rules: KeybindingRule[] = [];
+
+  for (const provider of [
+    commandsProvider(workbench),
+    helpProvider(workbench),
+    spacesProvider(workbench),
+    symbolsProvider(workbench),
+  ]) {
+    quickAccess.register(provider);
+  }
+  const openers: readonly {
+    id: string;
+    title: string;
+    prefix: string;
+    key?: string;
+  }[] = [
+    {
+      id: "workbench.action.quickOpen",
+      title: "Go to Resource…",
+      prefix: "",
+      key: "mod+p",
+    },
+    {
+      id: "workbench.action.showCommands",
+      title: "Show All Commands",
+      prefix: ">",
+      key: "mod+shift+p",
+    },
+    {
+      id: "workbench.action.quickOpenHelp",
+      title: "Quick Access Help",
+      prefix: "?",
+    },
+    {
+      id: "workbench.action.switchSpace",
+      title: "Switch Space…",
+      prefix: "ctx ",
+    },
+    {
+      id: "workbench.action.gotoSymbol",
+      title: "Go to Symbol in Editor…",
+      prefix: "@",
+      key: "mod+shift+o",
+    },
+  ];
+  for (const { id, title, prefix, key } of openers) {
+    commands.register({
+      id,
+      title,
+      category: "Go",
+      run: () => {
+        quickAccess.show(prefix);
+      },
+    });
+    if (key) rules.push({ key, command: id });
+  }
+  commands.register({
+    id: "workbench.action.moveView",
+    title: "Move View…",
+    category: "View",
+    run: async () => {
+      const view = await quickAccess.pick(
+        "Pick a view to move",
+        views
+          .allViews()
+          .map((candidate) => ({ id: candidate.id, label: candidate.title })),
+      );
+      const space = spaces.active;
+      if (!view || !space) return;
+      const target = await quickAccess.pick(
+        `Move ${view.label} to`,
+        LOCATIONS.flatMap((location) =>
+          views.containers(location).map((container) => ({
+            id: container.id,
+            label: container.title,
+            description: LOCATION_TITLES[location],
+          })),
+        ),
+      );
+      if (!target) return;
+      spaces.update(space.id, (state) => ({
+        ...state,
+        placement: { ...state.placement, [view.id]: target.id },
+      }));
+    },
+  });
 
   for (const { location, id, title, key } of TOGGLES) {
     commands.register({

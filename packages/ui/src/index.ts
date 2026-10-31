@@ -23,3 +23,4 @@ export type { SparkPoint } from "./lib/sparkline";
 export { cn } from "./lib/cn";
 export * from "./components/toast";
 export * from "./components/notify";
+export { commandScore } from "./lib/score";

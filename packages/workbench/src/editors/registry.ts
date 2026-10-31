@@ -22,6 +22,13 @@ export interface EditorProvider {
   readonly component: ComponentType<EditorProps>;
 }
 
+/** A place in an editor that `@` in quick access goes to, such as a YAML key. */
+export interface EditorSymbol {
+  readonly label: string;
+  readonly detail?: string;
+  reveal(): void;
+}
+
 /** What a dockview panel of an editor carries; it is also what a layout saves. */
 export interface EditorParams {
   readonly uri: string;
@@ -40,6 +47,7 @@ export const EDITOR_TAB = "editor-tab";
 export class Editors {
   readonly changes = new Changes();
   readonly #providers = new Set<EditorProvider>();
+  readonly #symbols = new Map<string, readonly EditorSymbol[]>();
   #api: DockviewApi | undefined;
   #active: string | undefined;
 
@@ -123,6 +131,18 @@ export class Editors {
     const params = panel && paramsOf(panel);
     if (!panel || !params?.preview) return;
     panel.api.updateParameters({ ...params, preview: false });
+  }
+
+  /** An editor publishes its symbols while it shows them. */
+  publishSymbols(uri: string, symbols: readonly EditorSymbol[]): () => void {
+    this.#symbols.set(uri, symbols);
+    return () => {
+      if (this.#symbols.get(uri) === symbols) this.#symbols.delete(uri);
+    };
+  }
+
+  symbols(uri: string): readonly EditorSymbol[] {
+    return this.#symbols.get(uri) ?? [];
   }
 
   /** Renames an open editor's tab, once the editor knows a better title. */

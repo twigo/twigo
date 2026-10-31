@@ -83,13 +83,14 @@ export class Spaces {
   }
 
   /** The one-context space of a context, created if needed, becomes active. */
-  async open(context: string): Promise<void> {
+  async open(context: string): Promise<Space> {
     const space = await this.backend.invoke("space_open", context);
     if (!this.#list.some((candidate) => candidate.id === space.id)) {
       await this.#restore(space.id);
       this.#setList([...this.#list, space]);
     }
     this.select(space.id);
+    return space;
   }
 
   state(id: string): SpaceState {

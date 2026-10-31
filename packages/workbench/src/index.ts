@@ -8,6 +8,11 @@ export { platformOf } from "./keybindings/platform";
 export type { KeybindingRule } from "./keybindings/resolver";
 export { Changes } from "./changes";
 export { useChanges, useWorkbench } from "./react";
+export type {
+  QuickAccessContext,
+  QuickAccessProvider,
+  QuickPickItem,
+} from "./quickaccess/registry";
 export { createWorkbench, Workbench } from "./services";
 export type {
   Location,

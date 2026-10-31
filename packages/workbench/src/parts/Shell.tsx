@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Allotment } from "allotment";
 import { Toaster } from "@twigo/ui";
+import { QuickAccessWidget } from "../quickaccess/QuickAccessWidget";
 import { useChanges, useWorkbench } from "../react";
 import type { Location } from "../views/registry";
 import { ActivityBar } from "./ActivityBar";
@@ -94,6 +95,7 @@ export function Shell() {
         </Allotment>
       </div>
       <StatusBar />
+      <QuickAccessWidget />
       <Toaster />
     </div>
   );

@@ -7,6 +7,7 @@ import { ContextKeys } from "./contextkey/service";
 import { Editors } from "./editors/registry";
 import type { Platform } from "./keybindings/chord";
 import { Keybindings } from "./keybindings/service";
+import { QuickAccess } from "./quickaccess/registry";
 import { Spaces } from "./spaces/store";
 import { Views } from "./views/registry";
 import { registerCore } from "./core";
@@ -23,6 +24,7 @@ export class Workbench {
   readonly menus = new Menus();
   readonly views = new Views();
   readonly editors = new Editors(this.keys);
+  readonly quickAccess = new QuickAccess(this.keys);
   readonly keybindings: Keybindings;
   readonly spaces: Spaces;
 
