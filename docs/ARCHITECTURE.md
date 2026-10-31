@@ -181,7 +181,7 @@ twigo/
 │  ├─ twigo-sessions/         logs, exec/attach, port-forward manager, pty terminal
 │  ├─ twigo-policy/           read-only modes, authorize(), policy proxy, approvals, audit log, redaction
 │  ├─ twigo-env/              login-shell environment resolution
-│  ├─ twigo-ipc/              protocol types (serde) + TS codegen; channel framing
+│  ├─ twigo-ipc/              protocol types (serde) + TS codegen (ts-rs); channel framing
 │  ├─ twigo-ext-host/         wasmtime host, manifests, capability enforcement, registry client
 │  ├─ twigo-ext-api/          WIT package `twigo:extension` (versioned dirs) + Rust guest SDK
 │  ├─ twigo-mcp/              MCP server + `twigo mcp` stdio shim
@@ -243,7 +243,7 @@ QueryView  (per subscription: namespaces, label filter, text filter, sort, windo
   │ window diff
   ▼
 Batcher   coalesce by uid · flush ≤ 50 ms · one unacked batch · paused while hidden
-  │ Channel (JSON): { seq, total, window:{start, ids}, upserts, removes, status }
+  │ Channel (JSON): { seq, total, columns?, window?:{start, ids}, upserts, status }
   ▼
 View store (frontend)   Map<id, Row> + version, read via useSyncExternalStore
   ▼
@@ -524,6 +524,8 @@ The layout per space is persisted (dockview `toJSON` plus part sizes and visibil
   The selected space uses legacy's selected-tab chip (`--tab-selected-bg`, `--tab-selected-border`).
   A locked context shows 🔒 on its tab.
   An optional user-chosen dot from the context's metadata (5.5) is the only extra colour.
+  It is a filled 8 px dot before the name, from six tokens: red, orange, yellow, green, blue and purple.
+  A space with several contexts shows none.
 - Every editor in a space belongs to that space's contexts.
   Opening another cluster's object means switching spaces or running **Compare with…**, which opens a diff editor against an object picked from any context and says so in its title.
 - A multi-context space ("dev+qa") gets merged tables with a Context column.
@@ -566,13 +568,14 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 
 ### 4.4 Resource tables and the keyboard
 
-- Columns come from the Table `columnDefinitions` (priority 0 by default, wide on toggle), plus Context, CPU and memory when available.
+- Columns come from the Table `columnDefinitions` (priority 0 by default, wide on toggle), plus Context, CPU and memory when available, and Namespace unless the query names one namespace.
   Column presets are kept per GVR.
 - Focus model: arrows or `j`/`k` move, Enter opens, Space marks, ⇧Space marks a range, `/` filters, Esc clears.
 - Single-key verbs work only when a table is focused (context key `listFocus`): `l` logs, `s` shell, `e` edit YAML, `d` describe/overview, `y` copy YAML, `f` port-forward, `⇧J` jump to owner, `⌫` delete (with confirmation).
   These are ordinary commands with keybindings, so users can remap them.
-- Changed cells flash briefly.
-  This is a setting, since the right default is a design question (4.9).
+- Changed cells flash briefly: the cell's background starts at the `--flash` tint and fades out over 1 s.
+  A batch that changes more than 8 rows flashes nothing, so a rollout does not strobe the table.
+  The flash is a setting, on by default.
 
 ### 4.5 Quick access (the command palette)
 
@@ -708,10 +711,11 @@ It moves into `packages/ui` unchanged and gets extended for the new views.
   - Tokens only: a lint rule rejects raw colour literals outside `packages/ui`.
   - The `packages/protocol` mock backend runs the whole workbench in a browser on fixtures: 5k-pod lists, every state.
     Every visual change is reviewed there with before and after screenshots.
-- **Open design questions** for the owner during M0:
-  - the flash on changed cells;
-  - what the context dot looks like;
-  - icons for the Kubernetes kinds (Lucide plus a small custom set).
+- **Settled with the owner** on 2026-10-31, from variants on live tokens:
+  - the flash on changed cells is the cell's background tint (4.4);
+  - the context dot is a filled dot before the name (4.2);
+  - Kubernetes kinds use Lucide icons only, mapped by resource in `packages/kube`.
+    Custom resources get one generic icon.
 
 ## 5. Commands, keybindings and extensions
 
@@ -1308,11 +1312,6 @@ Destructive actions (delete, drain, scale to 0) use dry-run where the API suppor
   Policy and the policy proxy, the dry-run diff and apply, actions, exec, port-forward, terminal, metrics, Helm read.
 - **M3, MVP beta.**
   MCP server, extension tiers 0 and 1 with the Segla extension, settings UI, keybindings editor, auto-update, signing, documentation.
-
-### 7.5 Open items for the owner
-
-- **Design.**
-  Questions from 4.9, settled during M0: the flash on changed cells, the context dot, kind icons.
 
 ## Appendix: references
 

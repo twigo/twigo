@@ -6,6 +6,8 @@
 - One Rust test: `cargo test -p twigo-cache --test table_fixtures <name>`.
 - Frontend: `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r test`, `pnpm format:check`; one package: `pnpm --filter @twigo/workbench test`.
 - The app: `pnpm tauri dev`; the CI build is `pnpm tauri build --debug --no-bundle`.
+- The UI on the mock backend: `pnpm --filter @twigo/desktop dev`, then http://localhost:1420/ in a browser; `?scenario=forbidden` pins a view state (`MOCK_SCENARIOS` in `packages/protocol/src/mock`).
+- The TypeScript of the IPC types: `TWIGO_UPDATE_TYPESCRIPT=1 cargo test -p twigo-ipc --test typescript`.
 - Live tests against kind, one release: `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/test-matrix.sh 1.37`.
   Without an argument it runs every supported release.
 - A cluster to keep: `export TWIGO_BENCH_DIR=$(mktemp -d)`, `kubeconfig=$(bench/cluster.sh up <name> 1.37 | tail -1)`, then `TWIGO_TEST_KUBECONFIG=$kubeconfig cargo test -p twigo-cache -p twigo-kube -- --ignored`, and `bench/cluster.sh down <name>` with the same `TWIGO_BENCH_DIR` when done.
@@ -29,4 +31,7 @@
 - Under the isolation pattern a `frame-src` must list the isolation frame's scheme, or every invoke waits forever.
   Tauri names it `isolation-<uuid>` anew on every build and adds it to `default-src` only, so `bench/ipc/isolation/src/main.rs` adds it to `frame-src` at startup from `Context::pattern()`.
 - Files under `crates/*/tests/fixtures` are recorded server responses: never reformat or edit them by hand.
+- Tailwind scans `packages/` through `@source "../../../packages"` in `apps/desktop/src/index.css`.
+  A glob such as `packages/*/src` there generated no utilities from the packages (Tailwind 4.3.3, 2026-10-31).
+- eslint-plugin-react-hooks warns that `useVirtualizer` cannot be memoized by React Compiler; the app does not run the compiler, so the warning stays visible rather than silenced.
 - `bench/` scripts run on macOS's bash 3.2: no associative arrays, and no `$(…)` inside a command's arguments where its failure must stop the script.

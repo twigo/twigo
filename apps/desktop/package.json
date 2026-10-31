@@ -11,12 +11,17 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.12.4",
     "@twigo/kube": "workspace:*",
+    "@twigo/protocol": "workspace:*",
+    "@twigo/ui": "workspace:*",
     "@twigo/workbench": "workspace:*",
+    "lucide-react": "^1.65.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "^2.12.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

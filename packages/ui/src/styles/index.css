@@ -1,0 +1,106 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/inter";
+@import "./theme.css";
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-background font-sans text-foreground;
+    font-size: 13px;
+    line-height: 1.45;
+    /* Inter's alternate glyphs (cv01 single-story a, ss03) - the typeface
+       reads generic without them. tnum keeps metric columns from jittering. */
+    font-feature-settings:
+      "cv01" 1,
+      "ss03" 1;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+    /* WKWebView (Tauri) needs the prefix; without it a tab drag selects text. */
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* UI labels sit between regular and medium (510): emphasis without heaviness.
+     Tailwind's font-medium maps to it via the variable axis. */
+  .font-medium,
+  .font-semibold,
+  button,
+  th {
+    font-variation-settings: "wght" 510;
+  }
+  .font-semibold {
+    font-variation-settings: "wght" 590;
+  }
+  .tabular-nums {
+    font-feature-settings:
+      "cv01" 1,
+      "ss03" 1,
+      "tnum" 1;
+  }
+
+  /* Native <button> doesn't show the pointer cursor and Tailwind's reset
+     doesn't add it. Interactive controls should show the hand. Radix triggers
+     (Select/Tooltip/Toggle/RadioGroup) render <button>, so they're covered too;
+     the role selectors catch clickable non-button elements (tree rows, cmdk
+     items, menu items, the radio labels). Disabled controls keep the default. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="treeitem"],
+  [role="option"]:not([aria-disabled="true"]),
+  [role="menuitem"]:not([aria-disabled="true"]),
+  [role="tab"],
+  summary,
+  label[for] {
+    cursor: pointer;
+  }
+
+  /* Respect reduced-motion: collapse (not zero, so transitionend still fires). */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  /* IDE-style scrollbars: thin, overlay, brighten on hover. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--foreground) 22%, transparent)
+      transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    /* Neutral grey thumb: no brand hue, calmer than a tinted foreground. */
+    background-color: oklch(0.5 0 0 / 28%);
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: oklch(0.5 0 0 / 42%);
+    background-clip: padding-box;
+  }
+
+  /* lucide's default 2px stroke reads heavy at our icon sizes; 1.75 is lighter. */
+  svg.lucide {
+    stroke-width: 1.75px;
+  }
+}

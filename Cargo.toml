@@ -41,3 +41,4 @@ tauri-plugin-window-state = "2.5.0"
 thiserror = "2.0.21"
 tokio = "1.54.1"
 tower = { version = "0.5.3", features = ["util"] }
+ts-rs = "12.0.1"
