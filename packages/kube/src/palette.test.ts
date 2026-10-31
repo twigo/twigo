@@ -2,11 +2,9 @@ import { expect, test, vi } from "vitest";
 import { testWorkbench } from "@twigo/workbench/testing";
 import { registerKube } from "./register";
 
-/** M0 step 6: every registered command appears in the palette and can be bound to a key. */
-async function everything() {
+async function withEveryEnablement() {
   const workbench = await testWorkbench();
   registerKube(workbench);
-  // A context in which every enablement holds.
   workbench.keys.set("listFocus", true);
   workbench.keys.set("editor.type", "kube.list");
   workbench.keys.set("space.count", 9);
@@ -14,7 +12,7 @@ async function everything() {
 }
 
 test("every registered command appears in the palette", async () => {
-  const workbench = await everything();
+  const workbench = await withEveryEnablement();
   const resolved = workbench.quickAccess.resolve(">");
   const shown = await resolved?.provider.items("", {
     lookup: workbench.keys.lookup(document.body),
@@ -25,7 +23,7 @@ test("every registered command appears in the palette", async () => {
 });
 
 test("every registered command runs from a key the user binds to it", async () => {
-  const workbench = await everything();
+  const workbench = await withEveryEnablement();
   const ids = workbench.commands.all().map((command) => command.id);
   const keys = Array.from({ length: 36 }, (_, index) => index.toString(36));
   expect(ids.length).toBeLessThanOrEqual(keys.length);

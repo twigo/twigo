@@ -5,8 +5,7 @@ import { KeyboardMapper, type Press } from "./mapper";
 import { platformOf } from "./platform";
 import { Resolver, validate, type Source } from "./resolver";
 
-/** Without keys every character takes its US position. */
-const US = new KeyboardMapper({ id: "us", keys: {} }, "mac");
+const US_BY_DEFAULT = new KeyboardMapper({ id: "us", keys: {} }, "mac");
 
 const LIST: Record<string, ContextValue> = { listFocus: true };
 
@@ -21,7 +20,7 @@ function press(code: string, modifiers = ""): Press {
 }
 
 function resolver(...sources: Source[]) {
-  return new Resolver(sources, US);
+  return new Resolver(sources, US_BY_DEFAULT);
 }
 
 function resolve(
@@ -210,7 +209,7 @@ describe("platforms", () => {
       weight: "core",
       rules: [{ key: "ctrl+shift+p", mac: "cmd+shift+p", command: "palette" }],
     };
-    const mac = new Resolver([rules], US);
+    const mac = new Resolver([rules], US_BY_DEFAULT);
     const linux = new Resolver(
       [rules],
       new KeyboardMapper({ id: "us", keys: {} }, "linux"),

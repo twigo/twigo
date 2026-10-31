@@ -27,24 +27,19 @@ function mapped(layout: string, keys: string, platform: Platform = "mac") {
 }
 
 test.each([
-  // A letter follows its character on Latin layouts…
   ["german", "mod+z", "KeyY", false, "⌘Z"],
   ["german", "mod+y", "KeyZ", false, "⌘Y"],
   ["french", "mod+a", "KeyQ", false, "⌘A"],
   ["french", "mod+q", "KeyA", false, "⌘Q"],
   ["dvorak", "mod+k", "KeyV", false, "⌘K"],
   ["dvorak", "mod+t", "KeyK", false, "⌘T"],
-  // …and keeps its US position on Ukrainian, labelled with the Latin letter.
   ["ukrainian", "mod+k", "KeyK", false, "⌘K"],
   ["ukrainian", "mod+shift+p", "KeyP", true, "⇧⌘P"],
-  // A digit keeps its position, though AZERTY types it with Shift.
   ["french", "mod+1", "Digit1", false, "⌘1"],
-  // Punctuation follows the key that types it, adding Shift where needed.
   ["german", "mod+/", "Digit7", true, "⇧⌘7"],
   ["dvorak", "mod+/", "BracketLeft", false, "⌘/"],
   ["us", "shift+/", "Slash", true, "⇧/"],
   ["us", "?", "Slash", true, "⇧/"],
-  // Named keys sit where they sit.
   ["french", "mod+enter", "Enter", false, "⌘↩"],
 ])("%s: %s → %s", (layout, keys, code, shift, label) => {
   expect(mapped(layout, keys)).toEqual({ code, shift, label });
