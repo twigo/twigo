@@ -7,7 +7,7 @@ Decided 2026-10-31.
 - Prose in Markdown has one sentence per line, with no breaks inside a sentence.
 - A list item starts on its marker's line; its next sentences follow on their own lines, indented to the item's text.
 - A bold lead such as `**Decision.**` counts as a sentence.
-- Headings, tables and code blocks stay as they are.
+- Headings, tables, code blocks, front matter and link definitions stay as they are.
 - Prettier keeps this as written (`proseWrap` stays `preserve`).
 
 ## Why
