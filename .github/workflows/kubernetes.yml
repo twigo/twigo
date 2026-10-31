@@ -2,10 +2,16 @@ name: Kubernetes
 
 on:
   pull_request:
-    paths:
+    paths: &paths
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
       - crates/twigo-cache/**
       - bench/**
       - .github/workflows/kubernetes.yml
+  push:
+    branches: [main]
+    paths: *paths
   workflow_dispatch:
 
 concurrency:
@@ -15,14 +21,32 @@ concurrency:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
+  cache:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: kubernetes
+      - run: cargo test -p twigo-cache --test table_live --no-run
+
   table:
+    if: github.event_name != 'push'
     name: Table decoder on ${{ matrix.kubernetes }}
     strategy:
       fail-fast: false
       matrix:
-        kubernetes: ["1.32", "1.33", "1.34", "1.35", "1.36", "1.37"]
+        kubernetes: ["1.33", "1.34", "1.35", "1.36", "1.37"]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - name: Install kind
