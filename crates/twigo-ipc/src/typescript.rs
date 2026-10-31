@@ -3,7 +3,10 @@ use std::fmt::Write;
 
 use ts_rs::{Config, TS, TypeVisitor};
 
-use crate::command::{Command, ListAck, ListSetWindow, ListSubscribe, ListUnsubscribe, SpacesList};
+use crate::command::{
+    Command, KeyboardLayoutWatch, ListAck, ListSetWindow, ListSubscribe, ListUnsubscribe,
+    SpacesList,
+};
 
 /// The TypeScript module of `packages/protocol`: every type the commands
 /// reach, and the `Commands` table that types its invoke client.
@@ -18,6 +21,7 @@ pub fn typescript() -> String {
     module.command::<ListSetWindow>();
     module.command::<ListAck>();
     module.command::<ListUnsubscribe>();
+    module.command::<KeyboardLayoutWatch>();
 
     let mut out = String::from(
         "// Generated from crates/twigo-ipc: TWIGO_UPDATE_TYPESCRIPT=1 cargo test -p twigo-ipc --test typescript\n",

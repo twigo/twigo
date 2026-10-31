@@ -3,11 +3,13 @@
 
 pub mod command;
 mod error;
+mod keyboard;
 mod list;
 mod space;
 mod typescript;
 
 pub use error::{ErrorKind, IpcError};
+pub use keyboard::{KeyMapping, KeyboardLayout};
 pub use list::{
     Ack, Cell, Column, ColumnKind, Gvr, ListBatch, ListQuery, Row, RowId, SetWindow, Sort,
     SubscriptionId, ViewState, Window,

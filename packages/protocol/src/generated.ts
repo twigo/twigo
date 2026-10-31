@@ -35,6 +35,30 @@ group: string, version: string, resource: string, };
 export type IpcError = { kind: ErrorKind, message: string, };
 
 /**
+ * The characters one key types; empty where it types none.
+ */
+export type KeyMapping = { value: string, withShift: string, 
+/**
+ * With Option on macOS.
+ */
+withAltGr: string, withShiftAltGr: string, };
+
+/**
+ * What each key of the active keyboard layout types (ARCHITECTURE 5.2).
+ * WebKit has no Keyboard Map API, so the keybinding service learns the
+ * layout from Rust.
+ */
+export type KeyboardLayout = { 
+/**
+ * The OS's name for the layout, such as `com.apple.keylayout.Ukrainian`.
+ */
+id: string, 
+/**
+ * The writing-system keys, by `KeyboardEvent.code` (`KeyA`, `Slash`).
+ */
+keys: { [key in string]: KeyMapping }, };
+
+/**
  * One flush of a subscription. Rust sends the next batch only after the
  * webview acknowledged this one's `seq`, and coalesces changes meanwhile.
  */
@@ -110,4 +134,5 @@ export type Commands = {
   list_set_window: { request: SetWindow; response: null; message: null };
   list_ack: { request: Ack; response: null; message: null };
   list_unsubscribe: { request: SubscriptionId; response: null; message: null };
+  keyboard_layout_watch: { request: null; response: KeyboardLayout; message: KeyboardLayout };
 };

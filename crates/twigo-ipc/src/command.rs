@@ -4,7 +4,7 @@
 
 use ts_rs::TS;
 
-use crate::{Ack, ListBatch, ListQuery, SetWindow, Space, SubscriptionId};
+use crate::{Ack, KeyboardLayout, ListBatch, ListQuery, SetWindow, Space, SubscriptionId};
 
 pub trait Command {
     const NAME: &'static str;
@@ -57,4 +57,14 @@ impl Command for ListUnsubscribe {
     type Request = SubscriptionId;
     type Response = ();
     type Message = ();
+}
+
+/// Answers with the active keyboard layout, then sends it again on every change.
+pub struct KeyboardLayoutWatch;
+
+impl Command for KeyboardLayoutWatch {
+    const NAME: &'static str = "keyboard_layout_watch";
+    type Request = ();
+    type Response = KeyboardLayout;
+    type Message = KeyboardLayout;
 }
