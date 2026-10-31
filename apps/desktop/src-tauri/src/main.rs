@@ -19,9 +19,6 @@ fn main() {
             }
         }))
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
         .run(tauri::generate_context!())
         .expect("error while running Twigo");
 }
