@@ -21,6 +21,7 @@
 - Kubernetes clients come only from `twigo_kube::client::Clients`: `api` speaks HTTP/2, `sessions` HTTP/1.1 for exec, attach and port-forward.
   Never `Config::infer()`, `~/.kube/config` or the current context: tests and examples read `TWIGO_TEST_KUBECONFIG` and refuse contexts other than `kind-*` and `kwok-*`.
 - k8s-openapi moves only together with kube: kube 4.2 requires `^0.28`.
+  Dependabot bumps both in its `kube` group; a group PR that carries only k8s-openapi cannot build until a kube release requires that version.
 - A test that counts connections with `lsof` gets a test binary of its own, because `lsof` counts the whole process.
 - Files under `crates/*/tests/fixtures` are recorded server responses: never reformat or edit them by hand.
 - `bench/` scripts run on macOS's bash 3.2: no associative arrays, and no `$(…)` inside a command's arguments where its failure must stop the script.
