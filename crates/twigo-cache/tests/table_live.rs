@@ -131,6 +131,8 @@ async fn pods_list_and_watch() {
     let names: Vec<&str> = columns.iter().map(|column| &*column.name).collect();
     assert_eq!(names, POD_COLUMNS);
     assert_eq!(columns[4].kind, ColumnKind::Age);
+    let priorities: Vec<i32> = columns.iter().map(|column| column.priority).collect();
+    assert_eq!(priorities, [0, 0, 0, 0, 0, 1, 1, 1, 1]);
     assert_eq!(page.rows.len(), 2);
     assert!(
         page.rows
@@ -214,8 +216,15 @@ async fn streaming_lists_depend_on_the_release() {
 
     let request = request::watch(&path, WatchFrom::InitialEvents, 60);
     if minor == 33 {
-        let rejected = client.request_stream(request).await;
-        assert!(rejected.is_err(), "1.33 ships WatchList off");
+        let Err(kube::Error::Api(status)) = client.request_stream(request).await else {
+            panic!("1.33 ships WatchList off and must reject a streaming list");
+        };
+        assert_eq!(status.code, 422);
+        assert!(
+            status.message.contains("sendInitialEvents"),
+            "{}",
+            status.message
+        );
         delete_namespace(&client, &ns).await;
         return;
     }
@@ -225,23 +234,14 @@ async fn streaming_lists_depend_on_the_release() {
     let first = watch.next().await.unwrap();
     let row = upsert(decoder.decode_event(&first).unwrap());
     assert_eq!(&*row.meta.name, "p1");
+    assert!(has_columns(&first));
     let names: Vec<&str> = decoder
         .columns()
         .unwrap()
         .iter()
         .map(|column| &*column.name)
         .collect();
-    if minor == 32 {
-        assert!(!has_columns(&first));
-        assert_eq!(
-            names,
-            ["Name", "Age"],
-            "1.32 answers a streaming list with raw objects"
-        );
-    } else {
-        assert!(has_columns(&first));
-        assert_eq!(names, POD_COLUMNS);
-    }
+    assert_eq!(names, POD_COLUMNS);
     loop {
         let line = watch.next().await.expect("the initial-events-end bookmark");
         if let Event::Bookmark {
@@ -296,11 +296,13 @@ async fn crd_printer_columns() {
         }
     }))
     .unwrap();
-    match crds.create(&PostParams::default(), &crd).await {
-        Ok(_) => {}
-        Err(kube::Error::Api(status)) if status.code == 409 => {}
-        Err(error) => panic!("creating the CRD: {error}"),
-    }
+    crds.patch(
+        "widgets.test.twigo.io",
+        &PatchParams::apply("twigo-tests").force(),
+        &Patch::Apply(&crd),
+    )
+    .await
+    .unwrap();
     let established = kube::runtime::wait::await_condition(
         crds.clone(),
         "widgets.test.twigo.io",
@@ -312,12 +314,16 @@ async fn crd_printer_columns() {
         .unwrap();
 
     let ns = namespace(&client, "widgets").await;
+    let ten_days_ago =
+        jiff::Timestamp::from_second(jiff::Timestamp::now().as_second() - 10 * 86_400)
+            .unwrap()
+            .to_string();
     let resource = ApiResource::from_gvk(&GroupVersionKind::gvk("test.twigo.io", "v1", "Widget"));
     let widgets = Api::<DynamicObject>::namespaced_with(client.clone(), &ns, &resource);
     for (name, spec) in [
         (
             "full",
-            json!({ "size": "large", "replicas": 3, "ratio": 0.5, "enabled": true, "since": "2026-01-01T00:00:00Z" }),
+            json!({ "size": "large", "replicas": 3, "ratio": 0.5, "enabled": true, "since": ten_days_ago }),
         ),
         ("empty", json!({})),
     ] {
@@ -368,7 +374,7 @@ async fn crd_printer_columns() {
     assert_eq!(full.cells[2], Cell::Int(3));
     assert_eq!(full.cells[3], Cell::Number(0.5));
     assert_eq!(full.cells[4], Cell::Bool(true));
-    assert!(matches!(&full.cells[5], Cell::Text(since) if since.ends_with('d')));
+    assert_eq!(full.cells[5], Cell::Text("10d".into()));
     assert_eq!(full.cells[6], Cell::Age);
     let empty = page
         .rows
