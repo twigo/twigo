@@ -1,7 +1,7 @@
 import { MousePointerClick } from "lucide-react";
 import { EmptyState } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
-import { useChanges } from "@twigo/workbench";
+import { useChanges, useWorkbench } from "@twigo/workbench";
 import { KindIcon } from "./KindIcon";
 import type { Selection } from "./selection";
 import { useNow } from "./useNow";
@@ -11,9 +11,12 @@ import { useNow } from "./useNow";
  * object (ARCHITECTURE 4.3).
  */
 export function Inspector({ selection }: { selection: Selection }) {
+  const { spaces } = useWorkbench();
   useChanges(selection.changes);
+  useChanges(spaces.changes);
   const now = useNow(1000);
-  const selected = selection.current;
+  const space = spaces.active;
+  const selected = space && selection.get(space.id);
   if (!selected) {
     return (
       <EmptyState

@@ -10,20 +10,20 @@ export interface Selected {
 }
 
 /**
- * The row the Inspector shows (ARCHITECTURE 4.3): the last one selected in
- * any table, without fetching the object.
+ * The row the Inspector shows (ARCHITECTURE 4.3): per space, the last one
+ * selected in any of its tables, without fetching the object.
  */
 export class Selection {
   readonly changes = new Changes();
-  #current: Selected | undefined;
+  readonly #spaces = new Map<string, Selected>();
 
-  get current(): Selected | undefined {
-    return this.#current;
+  get(space: string): Selected | undefined {
+    return this.#spaces.get(space);
   }
 
-  set(selected: Selected | undefined): void {
-    if (selected === this.#current) return;
-    this.#current = selected;
+  set(selected: Selected): void {
+    if (this.#spaces.get(selected.space) === selected) return;
+    this.#spaces.set(selected.space, selected);
     this.changes.emit();
   }
 }

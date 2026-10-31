@@ -48,7 +48,10 @@ export function registerKube(workbench: Workbench): void {
   editors.register({
     id: "kube.list",
     scheme: LIST_SCHEME,
-    title: (uri) => parseListUri(uri.href)?.gvr.resource ?? uri.href,
+    title: (uri) => {
+      const resource = parseListUri(uri.href)?.gvr.resource ?? uri.href;
+      return resource.charAt(0).toUpperCase() + resource.slice(1);
+    },
     icon: ListIcon,
     component: ({ uri }) => <ListEditor uri={uri} services={services} />,
   });

@@ -47,8 +47,10 @@ interface Props {
   namespaces?: readonly string[];
   text?: string;
   labelSelector?: string;
-  /** The selected row, as it changes; undefined once nothing is selected. */
-  onSelect?: (row: Row | undefined, columns: readonly Column[]) => void;
+  /** The row selected when the table mounts, such as the one it had before. */
+  initialSelected?: RowId;
+  /** The selected row, whenever it changes or its data does. */
+  onSelect?: (row: Row, columns: readonly Column[]) => void;
   /** Registers the focusable grid while it is mounted, for context keys and commands. */
   register?: (grid: HTMLElement, list: ListController) => () => void;
 }
@@ -74,12 +76,13 @@ function ResourceList({
   namespaces = [],
   text,
   labelSelector,
+  initialSelected,
   onSelect,
   register,
   onRetry,
 }: Props & { onRetry: () => void }) {
   const [sort, setSort] = useState<Sort | null>(null);
-  const [selected, setSelected] = useState<RowId>();
+  const [selected, setSelected] = useState(initialSelected);
   const { snapshot, flash, setWindow } = useListView(backend, {
     space,
     gvr,

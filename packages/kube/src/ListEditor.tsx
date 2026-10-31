@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import type { Column, Row } from "@twigo/protocol";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { sameGvr, useResources, type Discovery } from "./discovery";
@@ -22,7 +22,7 @@ export function ListEditor({
   uri,
   services,
 }: EditorProps & { services: ListServices }) {
-  const { backend, keys, spaces } = useWorkbench();
+  const { backend, keys, spaces, editors } = useWorkbench();
   useChanges(spaces.changes);
   const input = useMemo(() => parseListUri(uri), [uri]);
   const resources = useResources(services.discovery, input?.space ?? "");
@@ -31,6 +31,12 @@ export function ListEditor({
       ? resources.value.find((candidate) => sameGvr(candidate.gvr, input.gvr))
       : undefined;
   const { lists, selection } = services;
+  const title = resource
+    ? pluralTitle(resource.kind, resource.gvr.resource)
+    : undefined;
+  useEffect(() => {
+    if (title) editors.setTitle(uri, title);
+  }, [editors, uri, title]);
 
   const register = useCallback(
     (grid: HTMLElement, list: ListController) => {
@@ -51,8 +57,8 @@ export function ListEditor({
   );
 
   const onSelect = useCallback(
-    (row: Row | undefined, columns: readonly Column[]) => {
-      if (!input || !row) return;
+    (row: Row, columns: readonly Column[]) => {
+      if (!input) return;
       selection.set({
         space: input.space,
         gvr: input.gvr,
@@ -66,19 +72,21 @@ export function ListEditor({
 
   if (!input) return null;
   const namespaces = input.namespaces ?? spaces.state(input.space).namespaces;
+  const remembered = selection.get(input.space);
   return (
     <ResourceTable
       backend={backend}
       space={input.space}
       gvr={input.gvr}
-      title={
-        resource
-          ? pluralTitle(resource.kind, resource.gvr.resource)
-          : input.gvr.resource
-      }
+      title={title ?? input.gvr.resource}
       namespaces={namespaces}
       text={input.text}
       labelSelector={input.labels}
+      initialSelected={
+        remembered && sameGvr(remembered.gvr, input.gvr)
+          ? remembered.row.id
+          : undefined
+      }
       onSelect={onSelect}
       register={register}
     />

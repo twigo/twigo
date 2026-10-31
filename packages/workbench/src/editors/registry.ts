@@ -125,6 +125,11 @@ export class Editors {
     panel.api.updateParameters({ ...params, preview: false });
   }
 
+  /** Renames an open editor's tab, once the editor knows a better title. */
+  setTitle(uri: string, title: string): void {
+    this.#api?.getPanel(uri)?.api.setTitle(title);
+  }
+
   close(uri: string): void {
     this.#api?.getPanel(uri)?.api.close();
   }
