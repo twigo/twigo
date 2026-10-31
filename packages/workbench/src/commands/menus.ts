@@ -58,16 +58,15 @@ export class Menus {
     };
   }
 
-  /** Every item, whatever its `when`, for menus that cannot re-evaluate (the native menu). */
-  all(menu: MenuId): readonly MenuItem[] {
-    return [...(this.#menus.get(menu) ?? [])].map((entry) => entry.item);
-  }
-
-  /** The items whose `when` holds, in groups, each group sorted by order. */
-  groups(menu: MenuId, lookup: Lookup): MenuItem[][] {
+  /**
+   * The items whose `when` holds, in groups, each group sorted by order.
+   * Without a lookup every item counts, for the native menu, which cannot
+   * follow the focus.
+   */
+  groups(menu: MenuId, lookup?: Lookup): MenuItem[][] {
     const groups = new Map<string, MenuItem[]>();
     for (const { item, when } of this.#menus.get(menu) ?? []) {
-      if (when && !evaluate(when, lookup)) continue;
+      if (lookup && when && !evaluate(when, lookup)) continue;
       const name = item.group ?? "";
       groups.set(name, [...(groups.get(name) ?? []), item]);
     }

@@ -1,5 +1,10 @@
 export type { Command, CommandDescriptor } from "./commands/registry";
 export type { MenuId, MenuItem } from "./commands/menus";
+export {
+  nativeMenus,
+  type NativeMenu,
+  type NativeMenuItem,
+} from "./commands/nativeMenu";
 export type { Scope } from "./contextkey/service";
 export type { ContextValue } from "./contextkey/when";
 export type { EditorProps, EditorProvider } from "./editors/registry";

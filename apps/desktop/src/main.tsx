@@ -5,6 +5,7 @@ import { registerKube } from "@twigo/kube";
 import { tauriBackend, toIpcError, type Backend } from "@twigo/protocol";
 import { createWorkbench, platformOf, WorkbenchView } from "@twigo/workbench";
 import { StartupFailure } from "./App";
+import { installNativeMenu } from "./nativeMenu";
 import "./index.css";
 
 const root = document.getElementById("root");
@@ -33,6 +34,7 @@ async function start() {
     platformOf(navigator.userAgent),
   );
   registerKube(workbench);
+  if (isTauri() && workbench.platform === "mac") installNativeMenu(workbench);
   return <WorkbenchView workbench={workbench} />;
 }
 

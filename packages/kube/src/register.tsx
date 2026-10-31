@@ -26,10 +26,10 @@ export function registerKube(workbench: Workbench): void {
   quickAccess.register(listProvider(workbench, services.discovery));
   quickAccess.register(namespaceProvider(workbench));
   quickAccess.register(resourceProvider(workbench, services.selection));
-  for (const { id, title, prefix } of [
+  [
     { id: "k8s.list.open", title: "Open Resource List…", prefix: ":" },
     { id: "k8s.namespace.select", title: "Select Namespace…", prefix: "ns " },
-  ]) {
+  ].forEach(({ id, title, prefix }, order) => {
     commands.register({
       id,
       title,
@@ -38,7 +38,12 @@ export function registerKube(workbench: Workbench): void {
         quickAccess.show(prefix);
       },
     });
-  }
+    workbench.menus.append("menubar/go", {
+      command: id,
+      group: "3_kubernetes",
+      order,
+    });
+  });
 
   views.registerContainer({
     id: "kube.explorer",

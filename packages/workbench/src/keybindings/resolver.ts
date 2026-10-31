@@ -4,7 +4,7 @@ import {
   type Lookup,
   type When,
 } from "../contextkey/when";
-import { parseKeys, type Platform } from "./chord";
+import { parseKeys, type Chord, type Platform } from "./chord";
 import { isBare, pressId, type KeyboardMapper, type Press } from "./mapper";
 
 /** Lowest first: a later source overrides an earlier one (ARCHITECTURE 5.2). */
@@ -32,6 +32,8 @@ export interface KeybindingRemoval {
 
 export interface Binding {
   readonly presses: readonly [Press, ...Press[]];
+  /** The rule's chords before the layout, as a native menu names them. */
+  readonly chords: readonly [Chord, ...Chord[]];
   /** The presses as `pressId` gives them. */
   readonly ids: readonly string[];
   readonly command: string;
@@ -78,15 +80,23 @@ export class Resolver {
             removals.push({ removal: rule });
             continue;
           }
-          const presses = pressesOf(rule.key, mapper);
+          const presses = pressesOf(
+            parseKeys(rule.key, mapper.platform),
+            mapper,
+          );
           if (presses)
             removals.push({ removal: rule, presses: presses.map(pressId) });
           continue;
         }
-        const presses = pressesOf(platformKey(rule, mapper.platform), mapper);
+        const chords = parseKeys(
+          platformKey(rule, mapper.platform),
+          mapper.platform,
+        );
+        const presses = pressesOf(chords, mapper);
         if (!presses) continue;
         bindings.push({
           presses,
+          chords,
           ids: presses.map(pressId),
           command: rule.command,
           args: rule.args,
@@ -157,12 +167,10 @@ function platformKey(rule: KeybindingRule, platform: Platform): string {
 
 /** Undefined where the layout has no key for a character of the binding. */
 function pressesOf(
-  key: string,
+  chords: readonly [Chord, ...Chord[]],
   mapper: KeyboardMapper,
 ): readonly [Press, ...Press[]] | undefined {
-  const [first, ...rest] = parseKeys(key, mapper.platform).map((chord) =>
-    mapper.press(chord),
-  );
+  const [first, ...rest] = chords.map((chord) => mapper.press(chord));
   const mapped = rest.filter((press) => press !== undefined);
   if (!first || mapped.length !== rest.length) return undefined;
   return [first, ...mapped];

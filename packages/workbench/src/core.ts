@@ -1,4 +1,5 @@
 import type { Workbench } from "./services";
+import type { MenuId } from "./commands/menus";
 import type { KeybindingRule } from "./keybindings/resolver";
 import {
   commandsProvider,
@@ -37,7 +38,7 @@ const TOGGLES: readonly {
 
 /** The workbench's own commands, keys and status-bar items, through the same registries as any feature. */
 export function registerCore(workbench: Workbench): void {
-  const { commands, keybindings, spaces, editors, views, quickAccess } =
+  const { commands, keybindings, spaces, editors, views, quickAccess, menus } =
     workbench;
   const rules: KeybindingRule[] = [];
 
@@ -209,6 +210,45 @@ export function registerCore(workbench: Workbench): void {
   }
 
   keybindings.register("core", rules);
+
+  const menubar: readonly [MenuId, string, readonly string[]][] = [
+    ["menubar/file", "1_editor", ["workbench.action.closeActiveEditor"]],
+    ["menubar/view", "1_parts", TOGGLES.map(({ id }) => id)],
+    ["menubar/view", "2_views", ["workbench.action.moveView"]],
+    [
+      "menubar/view",
+      "3_editor",
+      [
+        "workbench.action.keepEditor",
+        "workbench.action.moveEditorToRightGroup",
+        "workbench.action.moveEditorToBelowGroup",
+      ],
+    ],
+    [
+      "menubar/go",
+      "1_quick",
+      [
+        "workbench.action.quickOpen",
+        "workbench.action.showCommands",
+        "workbench.action.gotoSymbol",
+      ],
+    ],
+    ["menubar/go", "2_space", ["workbench.action.switchSpace"]],
+    [
+      "menubar/window",
+      "1_spaces",
+      Array.from(
+        { length: 9 },
+        (_, index) => `workbench.action.selectSpace${String(index + 1)}`,
+      ),
+    ],
+    ["menubar/help", "1_help", ["workbench.action.quickOpenHelp"]],
+  ];
+  for (const [menu, group, ids] of menubar) {
+    ids.forEach((command, order) => {
+      menus.append(menu, { command, group, order });
+    });
+  }
 
   views.registerStatusBarItem({
     id: "workbench.space",
