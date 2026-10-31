@@ -1286,10 +1286,10 @@ building one client. Twigo therefore owns credentials:
   - The proxy has its own cap on concurrent streams per context (default
     16, 3.2). Over the cap it answers `429` with `Retry-After`, because
     client-go retries a 429 only when that header is present. An upgrade
-    while the session budget is full gets a `429` too; client-go never
-    retries exec, attach or port-forward, so kubectl fails with that
-    message. The proxy never queues requests and never evicts the UI's
-    upstreams (3.2).
+    while the session budget is full gets a `429` too, but client-go never
+    waits for an upgrade: kubectl falls back once from WebSocket to SPDY,
+    gets the same `429` and fails with its body. The proxy never queues
+    requests and never evicts the UI's upstreams (3.2).
 - **What the proxy does not cover.** It guards against accidents, not
   against a determined process.
   - Any process running as the user can still read `~/.kube/config` or pass
