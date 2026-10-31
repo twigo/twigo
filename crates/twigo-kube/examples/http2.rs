@@ -1,12 +1,12 @@
 //! TCP connections and GET latency under 50 Table watches, over kube's default
 //! HTTP/1.1 client and over the HTTP/2 api client, on the pods of one
-//! namespace (`bench/pods.sh`); then 50 watches opened at once on a cold api
-//! client, and the api client at the server's stream limit.
+//! namespace (`bench/pods.sh`); then the api client at the server's stream
+//! limit.
 //!
 //! TWIGO_TEST_KUBECONFIG=… cargo run --release -p twigo-kube --example http2 [namespace]
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use futures::AsyncBufReadExt;
@@ -84,6 +84,10 @@ impl Watches {
         self.events.load(Ordering::Relaxed)
     }
 
+    fn ended(&self) -> usize {
+        self.tasks.iter().filter(|task| task.is_finished()).count()
+    }
+
     fn close(self) -> u64 {
         for task in &self.tasks {
             task.abort();
@@ -156,26 +160,26 @@ async fn scale(client: &Client, namespace: &str, replicas: i32) {
 async fn settle(client: &Client, namespace: &str) {
     scale(client, namespace, REPLICAS).await;
     let deployments = Api::<Deployment>::namespaced(client.clone(), namespace);
-    loop {
-        let status = deployments
-            .get("bench")
-            .await
-            .unwrap()
-            .status
-            .unwrap_or_default();
-        if status.replicas == Some(REPLICAS) && status.available_replicas == Some(REPLICAS) {
+    for _ in 0..300 {
+        let deployment = deployments.get("bench").await.unwrap();
+        let status = deployment.status.unwrap_or_default();
+        if status.observed_generation == deployment.metadata.generation
+            && status.replicas == Some(REPLICAS)
+            && status.available_replicas == Some(REPLICAS)
+        {
             return;
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
+    panic!("the Deployment did not settle at {REPLICAS} pods within 5 minutes");
 }
 
 fn churn(client: Client, namespace: String) -> JoinHandle<()> {
     tokio::spawn(async move {
         loop {
-            for replicas in [REPLICAS - 250, REPLICAS] {
+            for replicas in [REPLICAS - 100, REPLICAS] {
                 scale(&client, &namespace, replicas).await;
-                tokio::time::sleep(Duration::from_secs(3)).await;
+                tokio::time::sleep(Duration::from_secs(1)).await;
             }
         }
     })
@@ -222,7 +226,10 @@ async fn phase(name: &str, config: &Config, namespace: &str, port: u16) {
         &format!("{name}, watches under churn"),
         held,
         &busy,
-        &format!("{during} events in the window"),
+        &format!(
+            "{during} events in the window; {} of {WATCHES} watches ended",
+            watches.ended()
+        ),
     );
 
     settle(&client, namespace).await;
@@ -264,36 +271,6 @@ async fn main() {
     }
 
     println!();
-    let version = {
-        let warm = Clients::new(config.clone()).unwrap().api;
-        resource_version(&warm, &collection).await
-    };
-    tokio::time::sleep(Duration::from_secs(2)).await;
-    let api = Clients::new(config.clone()).unwrap().api;
-    let peak = Arc::new(AtomicUsize::new(0));
-    let sampling = Arc::new(AtomicBool::new(true));
-    let sampler = {
-        let (peak, sampling) = (peak.clone(), sampling.clone());
-        std::thread::spawn(move || {
-            while sampling.load(Ordering::Relaxed) {
-                peak.fetch_max(connections(port), Ordering::Relaxed);
-                std::thread::sleep(Duration::from_millis(5));
-            }
-        })
-    };
-    let watches = Watches::open(&api, &collection, &version, WATCHES).await;
-    tokio::time::sleep(Duration::from_secs(2)).await;
-    sampling.store(false, Ordering::Relaxed);
-    sampler.join().unwrap();
-    println!(
-        "HTTP/2, {WATCHES} watches opened at once on a cold client: at most {} TCP connections while opening, {} after.",
-        peak.load(Ordering::Relaxed),
-        connections(port)
-    );
-    watches.close();
-    drop(api);
-    tokio::time::sleep(Duration::from_secs(2)).await;
-
     for count in [STREAM_LIMIT - 1, STREAM_LIMIT] {
         let api = Clients::new(config.clone()).unwrap().api;
         let version = resource_version(&api, &collection).await;
