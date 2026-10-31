@@ -41,12 +41,19 @@ streams per connection.
     and cut every watch of a quiet cluster. 3.2's request timeout is a tower
     layer per request instead.
   - **The pool** never expires the connection (`pool_idle_timeout(None)`).
-    hyper-util refreshes a shared HTTP/2 entry only when a request checks it
-    out. After 90 s without one, it expires the entry while the watches
-    still stream on it, and the next request opens a second connection.
-    Measured: 10 watches, no request for 100 s, then a GET held 2 TCP
-    connections with the default and 1 with the fix. The server's GOAWAY
-    and the rules of 3.2 retire connections instead.
+    - hyper-util refreshes a shared HTTP/2 entry only when a request checks
+      it out. After 90 s without one, it expires the entry while the watches
+      still stream on it, and the next request opens a second connection.
+    - Measured: 10 watches, no request for 100 s, then a GET. With the line
+      reverted to the default, that held 2 TCP connections; with it, 1.
+    - Closed connections and those that got a GOAWAY still leave the pool,
+      at their next checkout.
+    - Two costs remain, and M1 handles both:
+      - A request sent while the server's own 90 s idle GOAWAY is in flight
+        fails, and hyper does not retry it. M1 retries once any request
+        whose stream ended with the server's GOAWAY.
+      - Pings skip a connection without streams by default, so a dead idle
+        connection would meet the next request. M1 pings while idle too.
 
 - **`sessions`** is kube's default client, for exec, attach and
   port-forward. It is built first: only kube's builder can read the expiry
@@ -70,8 +77,8 @@ kube's exec auth.
 `Clients` holds finished `kube::Client`s, which take no further layer. For
 the per-actor policy layers of 6.4, M1's `Clients` keeps the two hyper-util
 clients and builds each actor's kube clients over them. A hyper-util clone
-shares its pool. kube's `ClientBuilder`, by contrast, builds a new pool on
-every call.
+shares its pool. kube's `ClientBuilder::try_from`, by contrast, builds a new
+pool on every call, so M1 builds the HTTP/1.1 client by hand too.
 
 ## Measurements
 
@@ -114,11 +121,14 @@ Over the three runs and all twelve phases:
   both protocols, so it comes from the environment.
 - HTTP/1.1 held 51 connections, 50 for the watches and 1 for the GETs, and
   52 or 53 while the churn's patches ran next to the GETs.
-- The API server logged no forced watcher close.
+- The API server closed no watcher for being slow: on the third run's
+  cluster, which also served the idle checks and saw 1.67 million pod watch
+  events, `apiserver_terminated_watchers_total` had no series. The
+  counter's vector appears only after its first increment.
 - An earlier method churned 250 pods every 3 s and had no counter for ended
   watches. One of its windows read 60,750 events instead of 112,500. That is
   1,215 per watch, an equal share, so the window most likely caught fewer
-  finished scale steps; no watch ended.
+  finished scale steps rather than ended watches. That method cannot tell.
 
 On a local cluster HTTP/2 costs nothing in latency. What it saves is one TCP
 and TLS connection per watch, on the client, on the API server, and on
@@ -156,18 +166,24 @@ concurrent first request.
   without counting streams. It queues the request instead of opening a
   second connection, and it exposes neither the server's limit nor the
   wait.
-- So Twigo counts streams itself, once per context, at the bottom of the
-  `api` stack and below every actor's policy layer. The watch hub, commands,
-  discovery, MCP tools, extensions and the policy proxy all pass through
-  that counter.
-- Its budgets are:
-  - watches, default 24;
-  - followed logs, default 32;
-  - the policy proxy's streams, default 16;
-  - requests, the 28 left.
-- A stream over its budget waits in the counter, which is what shows
-  `queued`. A per-request timeout backs this up against a server with a
-  lower limit.
+- So Twigo counts streams itself:
+  - **One counter per context.** It is a single state that every actor
+    shares, below every actor's policy layer. The watch hub, commands,
+    discovery, MCP tools, extensions and the policy proxy all pass it.
+  - **Permits.** A stream takes a permit for its class inside the call, and
+    the permit moves into the response body. It lives until the stream ends,
+    not until the headers arrive, as with tower's `ConcurrencyLimit`.
+  - **Budgets:**
+    - watches, default 24;
+    - followed logs, default 32;
+    - the policy proxy's streams, default 16;
+    - requests, the 28 left, at most 20 of them for actors other than the
+      UI.
+- A watch, log or request over its budget waits in the counter, which is
+  what shows `queued`. The proxy's class answers `429` instead, as 6.4
+  specifies.
+- Timeouts start when the counter admits a stream. A per-request timeout
+  backs the counter up against a server with a lower limit.
 
 ## Exec, attach and port-forward
 
@@ -185,22 +201,26 @@ concurrent first request.
 
 - **A dead connection stalls everything.** One TCP connection now carries
   every watch of a cluster.
-  - **Pings.** HTTP/2 keep-alive pings close a dead connection. In
-    hyper-util they need `.timer(TokioTimer::new())` on the builder as well
-    as `http2_keep_alive_interval`.
+  - **Pings** close a dead connection, while idle too. In hyper-util they
+    need `.timer(TokioTimer::new())` on the builder as well as
+    `http2_keep_alive_interval` and `http2_keep_alive_while_idle`.
   - **Wake and network change.** After sleep or a network change, hyper-util
     can still report the pooled connection open
     ([client.rs](https://github.com/hyperium/hyper-util/blob/v0.1.21/src/client/legacy/client.rs#L854)).
-    A re-watch on it would wait until TCP gives up, minutes later, so 3.2
-    retires the connection then. It can rebuild the cluster's `api` client,
-    which drops its pool, or poison the connection through
-    `capture_connection`, which keeps the client: hyper-util's `is_open`
-    checks for poisoning. M1 picks one.
+    A re-watch on it would wait until TCP gives up, minutes later. So 3.2
+    retires the connection then, and every upstream re-watches.
+    - Retiring means poisoning, through `capture_connection`; hyper-util's
+      `is_open` checks for it.
+    - Rebuilding the client would not do: every actor's kube client holds a
+      clone of the pool and would stay on the dead connection.
   - **Idle timer.** It fires when one upstream is quiet, often on a healthy
-    connection. So it re-watches only that upstream, and retires the
-    connection only if a probe request fails too. Retiring a live
-    connection would move later streams to a second one, which is what the
-    budgets avoid.
+    connection.
+    - A probe request goes over the connection first. If it answers, only
+      that upstream re-watches.
+    - If it fails, the connection is retired and every upstream re-watches,
+      as on wake.
+    - Retiring a live connection would cost a new handshake, and the old
+      connection would linger until its streams end.
 - **Flow control.** hyper releases window as a stream's body is read. Its
   defaults are 2 MiB per stream and 5 MiB per connection, so one unread
   stream cannot stall the others, but three could. The hub reads every
@@ -217,25 +237,28 @@ concurrent first request.
 - Exec, attach and port-forward go through `sessions`, one HTTP/1.1
   connection each.
 - One stream counter per context, below every actor, with the budgets
-  above. Sessions keep their own budget of 64 connections.
+  above. Sessions keep their own budget of 64 connections, counted in the
+  same place.
 - M1 builds the production connector on `Clients`:
   - shared hyper-util clients for the actors;
   - proxies (6.3);
-  - TCP keepalive and keep-alive pings;
-  - retiring the connection on wake, and after a failed probe;
+  - TCP keepalive, and keep-alive pings while idle too;
+  - one retry after a server GOAWAY;
+  - poisoning on wake, on a network change, and after a failed probe;
   - the stream counter and the request timeout;
   - one warming request per new connection;
   - the openssl fallback.
 
 ## Changes to the architecture
 
-- 3.2: one HTTP/2 connection per cluster. One stream counter per context
-  with the budgets above, and the request timeout. Among the
-  dead-connection rules: keep-alive pings, retiring the connection on wake,
-  and a probe before the idle timer retires one.
-- 6.2 and 6.4: two clients per context. Every actor's kube clients carry
-  its policy layer over the context's shared hyper-util clients. Upgrades
-  go through `sessions`. The proxy's stream cap is 16.
+- 3.2: one HTTP/2 connection per cluster. One stream counter per context,
+  shared by every actor, with the budgets above, and the request timeout.
+  Among the dead-connection rules: pings while idle, a retry after GOAWAY,
+  poisoning on wake and network change, and a probe before the idle timer
+  retires anything.
+- 6.2 and 6.4: two shared hyper-util clients per context. Every actor's kube
+  clients carry its policy layer over them and over the stream counter.
+  Upgrades go through the HTTP/1.1 client. The proxy's stream cap is 16.
 - 6.3: which client carries what.
 - 7.3: the HTTP/1.1 risk is replaced by the risks of one connection.
 
@@ -252,7 +275,8 @@ The live tests run on every supported release:
   with a 400 upgrade through `api`.
 
 The last two need a kubelet, so they refuse kwok clusters. The idle-pool
-check takes 100 s, so it lives in the example, not in CI.
+check takes 100 s, so it lives in the example, not in CI; the comment at
+`pool_idle_timeout(None)` says why the line must stay.
 
 ## Reproducing
 
@@ -262,7 +286,7 @@ kubeconfig=$(bench/cluster.sh up h2 1.37 | tail -1)
 bench/pods.sh "$kubeconfig" 5000
 TWIGO_TEST_KUBECONFIG=$kubeconfig \
   cargo run --release -p twigo-kube --example http2
-kubectl --kubeconfig "$kubeconfig" -n kube-system \
-  logs kube-apiserver-twigo-h2-control-plane | grep -c -i forcing
+kubectl --kubeconfig "$kubeconfig" get --raw /metrics \
+  | grep apiserver_terminated_watchers_total   # no output: none closed
 bench/cluster.sh down h2
 ```
