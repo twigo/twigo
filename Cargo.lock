@@ -5044,6 +5044,7 @@ dependencies = [
  "futures",
  "http",
  "hyper-rustls",
+ "hyper-timeout",
  "hyper-util",
  "k8s-openapi",
  "kube",

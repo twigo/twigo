@@ -1,4 +1,5 @@
 use hyper_rustls::{FixedServerNameResolver, HttpsConnectorBuilder};
+use hyper_timeout::TimeoutConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use kube::client::{Body, ConfigExt};
@@ -21,29 +22,26 @@ pub enum Error {
     Kube(#[from] kube::Error),
     #[error("invalid tls-server-name: {0}")]
     ServerName(#[from] InvalidDnsNameError),
-    #[error("a proxy (kubeconfig proxy-url or HTTPS_PROXY) is not supported yet")]
+    #[error("a proxy (kubeconfig proxy-url, HTTPS_PROXY or https_proxy) is not supported yet")]
     Proxy,
 }
 
 impl Clients {
     pub fn new(config: Config) -> Result<Self, Error> {
-        let api = multiplexed(&config)?;
-        let sessions = Client::try_from(config)?;
-        Ok(Clients {
-            // Only kube's builder can read an exec plugin certificate's expiry.
-            api: api.with_valid_until(*sessions.valid_until()),
-            sessions,
-        })
+        if config.proxy_url.is_some() {
+            return Err(Error::Proxy);
+        }
+        // Only kube's builder can read an exec plugin certificate's expiry.
+        // Built first, it reads the older of the two certificates.
+        let sessions = Client::try_from(config.clone())?;
+        let api = multiplexed(&config)?.with_valid_until(*sessions.valid_until());
+        Ok(Clients { api, sessions })
     }
 }
 
 fn multiplexed(config: &Config) -> Result<Client, Error> {
-    if config.proxy_url.is_some() {
-        return Err(Error::Proxy);
-    }
     let mut http = HttpConnector::new();
     http.enforce_http(false);
-    http.set_connect_timeout(config.connect_timeout);
     let mut https = HttpsConnectorBuilder::new()
         .with_tls_config(config.rustls_client_config()?)
         .https_or_http();
@@ -52,7 +50,10 @@ fn multiplexed(config: &Config) -> Result<Client, Error> {
             ServerName::try_from(name.clone())?,
         ));
     }
-    let connector = https.enable_all_versions().wrap_connector(http);
+    let mut connector = TimeoutConnector::new(https.enable_all_versions().wrap_connector(http));
+    connector.set_connect_timeout(config.connect_timeout);
+    connector.set_read_timeout(config.read_timeout);
+    connector.set_write_timeout(config.write_timeout);
     let client = hyper_util::client::legacy::Client::builder(TokioExecutor::new())
         .build::<_, Body>(connector);
     let service = ServiceBuilder::new()
