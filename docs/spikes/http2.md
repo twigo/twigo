@@ -126,9 +126,9 @@ Over the three runs and all twelve phases:
   events, `apiserver_terminated_watchers_total` had no series. The
   counter's vector appears only after its first increment.
 - An earlier method churned 250 pods every 3 s and had no counter for ended
-  watches. One of its windows read 60,750 events instead of 112,500. That is
-  1,215 per watch, an equal share, so the window most likely caught fewer
-  finished scale steps rather than ended watches. That method cannot tell.
+  watches. One of its windows read 60,750 events instead of 112,500. That
+  is the full count of 27 watches, or 1.62 steps for all 50; that method
+  cannot tell which.
 
 On a local cluster HTTP/2 costs nothing in latency. What it saves is one TCP
 and TLS connection per watch, on the client, on the API server, and on
@@ -148,7 +148,7 @@ concurrent first request.
 - `lsof`, which takes tens of milliseconds per run, cannot see such short
   connections, so the example does not try.
 - M1 sends one request before it opens watches: after every client rebuild
-  and every new connection (GOAWAY, idle close).
+  and every new connection (GOAWAY, poisoning).
 
 ## The stream limit
 
@@ -238,7 +238,9 @@ concurrent first request.
   connection each.
 - One stream counter per context, below every actor, with the budgets
   above. Sessions keep their own budget of 64 connections, counted in the
-  same place.
+  same place. A session's permit lives with its upgraded stream, since
+  `hyper::upgrade::on` drops the `101` response that would otherwise hold
+  it.
 - M1 builds the production connector on `Clients`:
   - shared hyper-util clients for the actors;
   - proxies (6.3);
@@ -259,7 +261,8 @@ concurrent first request.
 - 6.2 and 6.4: two shared hyper-util clients per context. Every actor's kube
   clients carry its policy layer over them and over the stream counter.
   Upgrades go through the HTTP/1.1 client. The proxy's stream cap is 16.
-- 6.3: which client carries what.
+- 6.3: which client carries what, and the fingerprint rebuild covers every
+  actor.
 - 7.3: the HTTP/1.1 risk is replaced by the risks of one connection.
 
 ## Tests
