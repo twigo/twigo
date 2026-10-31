@@ -16,7 +16,7 @@ usage() {
 mode=$1
 runs=${2:-1}
 case "$runs" in
-  '' | *[!0-9]* | 0) usage ;;
+  '' | *[!0-9]* | 0*) usage ;;
 esac
 case "$mode" in
   cost) profile=release ;;
