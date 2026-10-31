@@ -1,12 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import { Allotment } from "allotment";
 import { Toaster } from "@twigo/ui";
 import { QuickAccessWidget } from "../quickaccess/QuickAccessWidget";
 import { useChanges, useWorkbench } from "../react";
 import type { Location } from "../views/registry";
-import { ActivityBar } from "./ActivityBar";
 import { EditorArea } from "./EditorArea";
 import { PartView } from "./PartView";
+import { SpaceRail } from "./SpaceRail";
 import { StatusBar } from "./StatusBar";
 import { TitleBar } from "./TitleBar";
 
@@ -50,10 +50,10 @@ export function Shell() {
     };
 
   return (
-    <div className="twigo-workbench flex h-full flex-col">
+    <div className="twigo-workbench flex h-full flex-col bg-shell">
       <TitleBar />
       <div className="flex min-h-0 flex-1">
-        <ActivityBar />
+        <SpaceRail />
         <Allotment
           key={space?.id}
           className="min-w-0 flex-1"
@@ -65,7 +65,9 @@ export function Shell() {
             preferredSize={size("sidebar")}
             visible={parts?.sidebar.visible ?? false}
           >
-            <PartView location="sidebar" />
+            <Island>
+              <PartView location="sidebar" />
+            </Island>
           </Allotment.Pane>
           <Allotment.Pane minSize={320}>
             <Allotment
@@ -74,14 +76,18 @@ export function Shell() {
               onDragEnd={remember([undefined, "panel"])}
             >
               <Allotment.Pane minSize={120}>
-                <EditorArea />
+                <Island>
+                  <EditorArea />
+                </Island>
               </Allotment.Pane>
               <Allotment.Pane
                 minSize={80}
                 preferredSize={size("panel")}
                 visible={parts?.panel.visible ?? false}
               >
-                <PartView location="panel" />
+                <Island>
+                  <PartView location="panel" />
+                </Island>
               </Allotment.Pane>
             </Allotment>
           </Allotment.Pane>
@@ -90,13 +96,29 @@ export function Shell() {
             preferredSize={size("secondary")}
             visible={parts?.secondary.visible ?? false}
           >
-            <PartView location="secondary" />
+            <Island>
+              <PartView location="secondary" />
+            </Island>
           </Allotment.Pane>
         </Allotment>
       </div>
       <StatusBar />
       <QuickAccessWidget />
       <Toaster />
+    </div>
+  );
+}
+
+/**
+ * A part as a card on the shell, JetBrains Islands and VS Code 2026's
+ * floating panels: half of the 6 px gap on each side of every pane.
+ */
+function Island({ children }: { children: ReactNode }) {
+  return (
+    <div className="h-full p-[3px]">
+      <div className="h-full overflow-hidden rounded-lg border border-border bg-editor">
+        {children}
+      </div>
     </div>
   );
 }

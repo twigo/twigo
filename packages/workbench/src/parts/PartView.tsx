@@ -33,7 +33,7 @@ export function PartView({ location }: { location: Location }) {
     >
       <header className="flex h-9 shrink-0 items-center gap-1 px-3">
         {location === "sidebar" || containers.length < 2 ? (
-          <h2 className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+          <h2 className="text-xs font-medium text-muted-foreground">
             {container?.title}
           </h2>
         ) : (
@@ -52,7 +52,7 @@ export function PartView({ location }: { location: Location }) {
                   }
                 }}
                 className={cn(
-                  "h-6 rounded px-1.5 text-[11px] font-semibold tracking-wide uppercase transition-colors",
+                  "h-6 rounded px-1.5 text-xs font-medium transition-colors",
                   candidate.id === container?.id
                     ? "text-foreground"
                     : "text-muted-foreground hover:text-foreground",
@@ -120,7 +120,7 @@ function ViewSection({ view, lookup }: { view: View; lookup: Lookup }) {
           onClick={() => {
             setOpen(!open);
           }}
-          className="h-6 flex-1 justify-start gap-1 rounded-none px-1 text-[11px] font-semibold tracking-wide uppercase"
+          className="h-6 flex-1 justify-start gap-1 rounded-none px-1 text-xs font-medium"
         >
           <Chevron className="size-3.5" />
           {view.title}

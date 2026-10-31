@@ -1,43 +1,74 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import { inWorkbench, testWorkbench } from "../testing";
 import { TitleBar } from "./TitleBar";
 
 afterEach(cleanup);
 
-test("the title bar drags the window", async () => {
+async function mounted() {
   const workbench = await testWorkbench();
-  const { container } = render(<TitleBar />, {
-    wrapper: inWorkbench(workbench),
-  });
+  const view = render(<TitleBar />, { wrapper: inWorkbench(workbench) });
+  return { workbench, ...view };
+}
+
+test("the title bar drags the window", async () => {
+  const { container } = await mounted();
   expect(
     container.querySelector("header[data-tauri-drag-region]"),
   ).not.toBeNull();
 });
 
-test("only a single-context space with a colour shows a dot", async () => {
-  const workbench = await testWorkbench();
-  render(<TitleBar />, { wrapper: inWorkbench(workbench) });
-  const dots = (name: string) =>
-    [...screen.getByRole("tab", { name }).querySelectorAll("[data-color]")].map(
-      (dot) => dot.getAttribute("data-color"),
-    );
-  expect(dots("prod-eu")).toEqual(["red"]);
-  expect(dots("dev+qa")).toEqual([]);
+test("the breadcrumb names the space and its scope and opens their pickers", async () => {
+  const { workbench } = await mounted();
+  const space = screen.getByRole("button", { name: "Switch space" });
+  expect(space.textContent).toBe("prod-eu");
+  expect(space.querySelector("[data-color]")?.getAttribute("data-color")).toBe(
+    "red",
+  );
+  expect(
+    screen.getByRole("button", { name: "Select namespace" }).textContent,
+  ).toBe("All namespaces");
+  fireEvent.click(space);
+  expect(workbench.quickAccess.session?.value).toBe("ctx ");
+  act(() => {
+    workbench.quickAccess.hide();
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Select namespace" }));
+  expect(workbench.quickAccess.session?.value).toBe("ns ");
 });
 
-test("a click selects the space and moves the context keys", async () => {
-  const workbench = await testWorkbench();
-  render(<TitleBar />, { wrapper: inWorkbench(workbench) });
+test("the breadcrumb follows the space and its namespace scope", async () => {
+  const { workbench } = await mounted();
+  act(() => {
+    workbench.spaces.select("dev+qa");
+    workbench.spaces.update("dev+qa", (state) => ({
+      ...state,
+      namespaces: ["payments"],
+    }));
+  });
+  const space = screen.getByRole("button", { name: "Switch space" });
+  expect(space.textContent).toBe("dev + qa");
+  expect(space.querySelector("[data-color]")).toBeNull();
   expect(
-    screen.getByRole("tab", { name: "prod-eu" }).getAttribute("aria-selected"),
-  ).toBe("true");
-  fireEvent.click(screen.getByRole("tab", { name: "dev+qa" }));
-  expect(
-    screen.getByRole("tab", { name: "dev+qa" }).getAttribute("aria-selected"),
-  ).toBe("true");
-  const lookup = workbench.keys.lookup(null);
-  expect(lookup("space.contexts")).toEqual(["dev", "qa"]);
-  expect(lookup("space.multiContext")).toBe(true);
-  expect(lookup("context.name")).toBeUndefined();
+    screen.getByRole("button", { name: "Select namespace" }).textContent,
+  ).toBe("payments");
+});
+
+test("the search opens quick access and the toggles show and hide the parts", async () => {
+  const { workbench } = await mounted();
+  fireEvent.click(screen.getByRole("button", { name: /Search prod-eu/ }));
+  expect(workbench.quickAccess.session?.value).toBe("");
+  const panel = screen.getByRole("button", { name: "Toggle Panel" });
+  expect(panel.getAttribute("aria-pressed")).toBe("false");
+  await act(async () => {
+    fireEvent.click(panel);
+    await Promise.resolve();
+  });
+  expect(workbench.spaces.state("prod-eu").parts.panel.visible).toBe(true);
 });

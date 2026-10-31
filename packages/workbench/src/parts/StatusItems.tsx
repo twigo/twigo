@@ -1,14 +1,16 @@
 import { useChanges, useWorkbench } from "../react";
-import { SpaceDot } from "./TitleBar";
+import { ContextDot } from "@twigo/ui";
+import { onlyColor } from "./spaceBadge";
 
 export function SpaceItem() {
   const { spaces } = useWorkbench();
   useChanges(spaces.changes);
   const space = spaces.active;
   if (!space) return null;
+  const color = onlyColor(space);
   return (
     <span className="flex items-center gap-1.5">
-      <SpaceDot space={space} />
+      {color && <ContextDot color={color} />}
       {space.contexts.map((context) => context.name).join(" + ")}
     </span>
   );
