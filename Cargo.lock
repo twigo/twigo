@@ -5090,8 +5090,6 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-single-instance",
  "tauri-plugin-window-state",
- "twigo-core",
- "twigo-ipc",
 ]
 
 [[package]]
@@ -5143,14 +5141,6 @@ dependencies = [
 [[package]]
 name = "twigo-core"
 version = "0.1.0"
-dependencies = [
- "twigo-cache",
- "twigo-env",
- "twigo-ext-host",
- "twigo-kube",
- "twigo-mcp",
- "twigo-sessions",
-]
 
 [[package]]
 name = "twigo-env"
@@ -5189,15 +5179,11 @@ dependencies = [
  "tokio",
  "tower",
  "twigo-cache",
- "twigo-policy",
 ]
 
 [[package]]
 name = "twigo-mcp"
 version = "0.1.0"
-dependencies = [
- "twigo-ipc",
-]
 
 [[package]]
 name = "twigo-policy"

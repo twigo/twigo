@@ -12,7 +12,7 @@
 - The IPC bench: `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/ipc/run.sh frames` or `bench/ipc/run.sh cost 3` on macOS, and `bench/ipc/linux.sh frames` for WebKitGTK in Docker.
   Each run opens a window and exits by itself.
 - Before a push, run only the checks the change affects.
-  CI runs the rest, the live tests on every release when `twigo-cache`, `twigo-kube`, `twigo-policy`, the `bench/*.sh` scripts or the Cargo files change, and the frame probe on WebKitGTK when `bench/ipc` or the Cargo files change.
+  CI runs the rest, the live tests on every release when `twigo-cache`, `twigo-kube`, the `bench/*.sh` scripts or the Cargo files change, and the frame probe on WebKitGTK when `bench/ipc` or the Cargo files change.
 
 ## Gotchas
 

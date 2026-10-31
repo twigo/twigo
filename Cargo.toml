@@ -19,16 +19,7 @@ publish = false
 [workspace.dependencies]
 twigo-bench-ipc = { path = "bench/ipc" }
 twigo-cache = { path = "crates/twigo-cache" }
-twigo-core = { path = "crates/twigo-core" }
-twigo-env = { path = "crates/twigo-env" }
-twigo-ext-api = { path = "crates/twigo-ext-api" }
-twigo-ext-host = { path = "crates/twigo-ext-host" }
-twigo-helm = { path = "crates/twigo-helm" }
-twigo-ipc = { path = "crates/twigo-ipc" }
 twigo-kube = { path = "crates/twigo-kube" }
-twigo-mcp = { path = "crates/twigo-mcp" }
-twigo-policy = { path = "crates/twigo-policy" }
-twigo-sessions = { path = "crates/twigo-sessions" }
 
 dhat = "0.3.3"
 form_urlencoded = "1.2.2"

@@ -17,7 +17,6 @@ kube = { workspace = true, features = ["ws"] }
 rustls.workspace = true
 thiserror.workspace = true
 tower.workspace = true
-twigo-policy.workspace = true
 
 [dev-dependencies]
 futures.workspace = true

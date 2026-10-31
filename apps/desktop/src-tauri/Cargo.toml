@@ -18,5 +18,3 @@ tauri-plugin-opener.workspace = true
 tauri-plugin-process.workspace = true
 tauri-plugin-single-instance.workspace = true
 tauri-plugin-window-state.workspace = true
-twigo-core.workspace = true
-twigo-ipc.workspace = true
