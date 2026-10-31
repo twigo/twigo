@@ -14,9 +14,13 @@ if (!kubeconfig) {
 
 const get = (path) =>
   JSON.parse(
-    execFileSync("kubectl", ["--kubeconfig", kubeconfig, "get", "--raw", path], {
-      encoding: "utf8",
-    }),
+    execFileSync(
+      "kubectl",
+      ["--kubeconfig", kubeconfig, "get", "--raw", path],
+      {
+        encoding: "utf8",
+      },
+    ),
   );
 
 const versions = [
@@ -31,7 +35,10 @@ const versions = [
 const resources = versions.flatMap(({ group, version, path }) =>
   get(path)
     .resources.filter(
-      (r) => !r.name.includes("/") && r.verbs.includes("list") && r.verbs.includes("watch"),
+      (r) =>
+        !r.name.includes("/") &&
+        r.verbs.includes("list") &&
+        r.verbs.includes("watch"),
     )
     .map((r) => ({
       gvr: { group, version, resource: r.name },
