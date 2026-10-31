@@ -32,7 +32,7 @@ export function PartView({ location }: { location: Location }) {
       )}
     >
       <header className="flex h-9 shrink-0 items-center gap-1 px-3">
-        {location === "sidebar" || containers.length < 2 ? (
+        {containers.length < 2 ? (
           <h2 className="text-xs font-medium text-muted-foreground">
             {container?.title}
           </h2>
