@@ -102,10 +102,12 @@
             "guess",
             forgedEnvelope("frame:ipc-fetch-envelope"),
           ],
-          // An empty body skips decryption under isolation.
+          // An empty body skips decryption under isolation. It carries no
+          // source either, so these call a command that stands for one.
           ["ipc:// fetch, empty body, wrong key", "guess", undefined],
           ["ipc:// fetch, empty body, no key", undefined, undefined],
         ]) {
+          const command = body === undefined ? "probe_without_body" : "probe";
           const headers = {
             "Content-Type": "application/json",
             "Tauri-Callback": "1",
@@ -113,7 +115,7 @@
           };
           if (key !== undefined) headers["Tauri-Invoke-Key"] = key;
           try {
-            const response = await fetch("ipc://localhost/probe", {
+            const response = await fetch(`ipc://localhost/${command}`, {
               method: "POST",
               headers,
               body: body === undefined ? undefined : JSON.stringify(body),

@@ -1,6 +1,6 @@
 //! The IPC bench of M0 step 4 (docs/spikes/tauri-isolation.md), shared by the `brownfield` and `isolation` apps.
 //!
-//! `TWIGO_BENCH_IPC` picks what the page runs: `cost`, `frames` or `all` (the default).
+//! `TWIGO_BENCH_IPC` picks what the page runs: `cost` or `frames`.
 //! The page ends with `report`, which prints one JSON line and exits non-zero on a failed check.
 
 use std::collections::HashMap;
@@ -22,22 +22,14 @@ const PROBE_HTML: &[u8] = include_bytes!("../frame/probe.html");
 enum Mode {
     Cost,
     Frames,
-    All,
 }
 
 impl Mode {
     fn from_env() -> Result<Self, String> {
-        match std::env::var("TWIGO_BENCH_IPC") {
-            Err(std::env::VarError::NotPresent) => Ok(Self::All),
-            Ok(mode) => match mode.as_str() {
-                "cost" => Ok(Self::Cost),
-                "frames" => Ok(Self::Frames),
-                "all" => Ok(Self::All),
-                _ => Err(format!(
-                    "TWIGO_BENCH_IPC is {mode:?}; use cost, frames or all"
-                )),
-            },
-            Err(error) => Err(format!("TWIGO_BENCH_IPC: {error}")),
+        match std::env::var("TWIGO_BENCH_IPC").as_deref() {
+            Ok("cost") => Ok(Self::Cost),
+            Ok("frames") => Ok(Self::Frames),
+            _ => Err("set TWIGO_BENCH_IPC to cost or frames".to_owned()),
         }
     }
 }
@@ -156,6 +148,22 @@ fn ack(stream: u32, seq: u64, acks: State<'_, Acks>) -> Result<(), String> {
 
 #[tauri::command]
 fn probe(source: String, probes: State<'_, Probes>) {
+    count(&probes, source);
+}
+
+/// What the probe frame's requests without a body call: they carry no source, so the command stands for one.
+#[tauri::command]
+fn probe_without_body(probes: State<'_, Probes>) {
+    count(&probes, "frame:no-body".to_owned());
+}
+
+/// The bench's isolation hook refuses this command, so a call that runs under isolation went past the hook.
+#[tauri::command]
+fn bypass(probes: State<'_, Probes>) {
+    count(&probes, "bypass".to_owned());
+}
+
+fn count(probes: &Probes, source: String) {
     *probes
         .0
         .lock()
@@ -174,7 +182,7 @@ fn report(
     let probes = probes.0.lock().expect("probes lock").clone();
     let mut failures = Vec::new();
 
-    if *mode != Mode::Cost {
+    if *mode == Mode::Frames {
         for (source, count) in probes
             .iter()
             .filter(|(source, _)| source.starts_with("frame:"))
@@ -234,7 +242,15 @@ pub fn run(context: tauri::Context) {
             ext_protocol(request.uri().path())
         })
         .invoke_handler(tauri::generate_handler![
-            mode, echo, stream, ack, probe, report, fail
+            mode,
+            echo,
+            stream,
+            ack,
+            probe,
+            probe_without_body,
+            bypass,
+            report,
+            fail
         ])
         .run(context)
         .expect("error while running the IPC bench");

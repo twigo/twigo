@@ -53,6 +53,7 @@ const FRAME_REPORT_TIMEOUT_MS = 10_000;
 // Lets requests the probe frame sent without waiting for an answer land in Rust
 // before the probe counts are read.
 const SETTLE_MS = 1000;
+const BYPASS_TIMEOUT_MS = 1000;
 
 function status(text) {
   document.getElementById("status").textContent = text;
@@ -200,6 +201,33 @@ async function probeFrames() {
   return { control, probe };
 }
 
+// Under isolation the hook refuses `bypass`: an invoke dies in the hook's
+// frame, while a payload-less `__TAURI_INTERNALS__.postMessage` never reaches
+// that frame.
+async function checkHookBypass() {
+  const timeout = () => sleep(BYPASS_TIMEOUT_MS).then(() => "no answer");
+  const viaInvoke = await Promise.race([
+    invoke("bypass").then(() => "answered"),
+    timeout(),
+  ]);
+  const internals = window.__TAURI_INTERNALS__;
+  const viaPostMessage = await Promise.race([
+    new Promise((resolve) => {
+      const callback = internals.transformCallback(
+        () => resolve("answered"),
+        true,
+      );
+      const error = internals.transformCallback(
+        (e) => resolve(`rejected: ${e}`),
+        true,
+      );
+      internals.postMessage({ cmd: "bypass", callback, error });
+    }),
+    timeout(),
+  ]);
+  return { viaInvoke, viaPostMessage };
+}
+
 function fail(error) {
   invoke("fail", { message: `${error}\n${error?.stack ?? ""}` });
 }
@@ -212,8 +240,11 @@ async function main() {
     userAgent: navigator.userAgent,
     clockResolutionMs: clockResolutionMs(),
   };
-  if (mode !== "frames") results.cost = await measureCost();
-  if (mode !== "cost") results.frames = await probeFrames();
+  if (mode === "cost") results.cost = await measureCost();
+  if (mode === "frames") {
+    results.frames = await probeFrames();
+    results.hookBypass = await checkHookBypass();
+  }
   status("done");
   await invoke("report", { results });
 }
