@@ -217,10 +217,12 @@ and channels into calls on `twigo-core`.
 | `packages/workbench` | Layout parts, contribution registries, command, menu, keybinding and context-key services, quick access, notifications, settings UI, spaces UI, editor service                | `ui`, `protocol`              |
 | `packages/kube`      | Every Kubernetes view and editor; registers into the workbench registries                                                                                                     | `ui`, `workbench`, `protocol` |
 | `packages/protocol`  | Generated request and response types, a channel client with seq/ack, and a **mock backend** that runs the UI in a plain browser on fixtures (design reviews, component tests) | —                             |
+| `packages/utils`     | Pure helpers without React or IPC, such as formatters                                                                                                                         | —                             |
 | `apps/desktop/src`   | Bootstraps the workbench and registers `kube`                                                                                                                                 | all                           |
 
-The ESLint boundary rule from legacy is extended: `workbench` must not import
-`kube`. The workbench only learns about Kubernetes through registries.
+Every package may import `utils`. The ESLint boundary rule from legacy now
+enforces the whole table; above all, `workbench` must not import `kube`. The
+workbench only learns about Kubernetes through registries.
 
 ## 3. Data flow: watchers → cache → batching → UI store
 
