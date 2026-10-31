@@ -278,30 +278,65 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
 - **Label selectors** are applied in Rust, because labels are in the row
   metadata. Field selectors always go to the server as their own upstream:
   row metadata does not carry the fields they match.
-- **Per-cluster budgets.** kube-rs speaks HTTP/1.1 only: hyper is built with
-  `http1` alone, as checked in `kube-client/Cargo.toml` at 4.2. Every watch,
-  log stream, exec session and port-forward connection is therefore its own
-  TCP + TLS connection.
-  - Two budgets per cluster: watches (default 24) and sessions, meaning logs,
-    exec and port-forward connections (default 64). Benchmarks tune both.
+- **One HTTP/2 connection per cluster.** kube-rs's default client speaks
+  HTTP/1.1 only: hyper is built with `http1` alone, as checked in
+  `kube-client/Cargo.toml` at 4.2. So each context has two shared hyper-util
+  clients of Twigo's own: an HTTP/2 one for requests, watches and followed
+  logs, and an HTTP/1.1 one for exec, attach and port-forward, whose
+  WebSocket upgrade fails over HTTP/2 with 400. Every actor's kube clients
+  sit over them (6.2, 6.4, [HTTP/2 spike](spikes/http2.md)).
+- **Per-cluster budgets.**
+  - kube-apiserver allows 100 concurrent streams per connection by default.
+    A request beyond that waits for a free stream, and hyper opens no second
+    connection. It reports neither the server's limit nor the wait.
+  - So one stream counter per context, a single state shared by every actor,
+    sits below the per-actor policy layers (6.4). The hub, commands,
+    discovery, MCP tools, extensions and the policy proxy all pass it. A
+    stream takes a permit for its class when it starts and keeps it in its
+    response body until the stream ends.
+  - The classes and their defaults:
+    - watches, 24;
+    - followed logs, 32;
+    - the policy proxy's streams, 16;
+    - requests, the 28 left. Actors other than the UI may hold at most 20
+      of them, so an agent's lists cannot starve the UI.
+  - A watch, log or request over its budget waits in the counter and shows
+    `queued`. The proxy's class refuses instead, with the `429` of 6.4.
+  - Timeouts start when the counter admits a stream. A per-request timeout,
+    a tower layer rather than a socket read timeout, backs the counter up
+    against a server with a lower limit.
+  - Sessions, meaning exec, attach and port-forward connections, have their
+    own budget (default 64), counted in the same place below every actor. A
+    session's permit outlives the `101` response, which
+    `hyper::upgrade::on` drops: the upgraded stream holds it, and so does
+    the policy proxy's splice. A proxied upgrade over the budget gets the
+    proxy's `429` instead of waiting (6.4).
+  - A proxy or server that answers HTTP/1.1 turns every stream back into a
+    connection; the budgets stay the same. Benchmarks tune each of them.
   - When the watch budget is full, the least recently used idle upstreams are
     evicted. When nothing is idle, the new subscription waits in the state
     `queued` and its view says why.
-  - When the session budget is full, a new log stream, exec session or
-    port-forward connection waits in `queued` the same way. Its tab says
+  - When the log or session budget is full, a new log stream, exec session
+    or port-forward connection waits in `queued` the same way. Its tab says
     why, and the status bar lists open sessions so the user can close some.
   - Nothing fails silently.
-  - HTTP/2 is a risk item to measure (7.3). kube's `ClientBuilder` accepts
-    any tower service, so watches and requests could share one HTTP/2
-    connection. Exec, attach and port-forward need an HTTP/1.1 Upgrade, so
-    they keep a separate HTTP/1.1 pool either way.
 - **Dead connections.** kube 4.0 removed the global read timeout, and a watch
   can stall silently after sleep or a network change.
   - Every watch sets `timeoutSeconds` and uses TCP keepalive.
-  - An idle timer expects an event or a bookmark every couple of minutes and
-    reconnects when none arrives.
-  - On wake from sleep or a network change (OS notifications), every
-    upstream re-watches.
+  - The HTTP/2 connection sends keep-alive pings, while idle too, since one
+    dead connection now stalls every watch of the cluster. A failed ping
+    closes it.
+  - A request whose stream ends with the server's GOAWAY is retried once:
+    the server never processed it.
+  - An idle timer expects an event or a bookmark every couple of minutes.
+    When it fires, a probe request goes over the shared connection first.
+    If the probe answers, only that upstream re-watches. If it fails, the
+    connection is retired and every upstream re-watches, as on wake.
+  - On wake from sleep or a network change (OS notifications), the cluster's
+    HTTP/2 connection is retired and every upstream re-watches. Retiring
+    poisons the connection: the pool keeps a dead connection that still
+    looks open, and every actor's client holds a clone of that pool, so
+    rebuilding one client would not reach the others.
   - Views show `stale` while this happens.
 - **Initial list.**
   - Streaming lists (`sendInitialEvents=true`) on 1.34 and later. The
@@ -469,7 +504,7 @@ plus a sort on the UI thread after every batch.
 
 Each upstream reports one of:
 
-- `queued` (waiting for a connection slot, 3.2)
+- `queued` (waiting for a stream slot, 3.2)
 - `connecting`
 - `syncing` (with a progress count)
 - `ready`
@@ -636,7 +671,7 @@ commands, not prefixes.
   - On EOF the stream reopens with `sinceTime` set to the last timestamp
     and drops duplicates.
   - Logs aggregated across a workload's pods, stern-style, come in v1.x.
-    Watch the connection budget (3.2).
+    Watch the log budget (3.2).
 - **Exec and attach.** xterm.js 6 with the WebGL addon. It falls back to the
   DOM renderer on context loss, which happens on WebKitGTK. WebGL is disposed
   on hidden tabs. kube-rs `AttachedProcess` (version 4.0 or later fixes the
@@ -660,7 +695,7 @@ commands, not prefixes.
   - Each TCP connection is its own WebSocket and counts against the session
     budget. If browsers or connection pools exhaust it, Twigo implements the
     SPDY-over-WebSocket tunnel that kubectl has used since 1.31 to multiplex
-    connections (7.3).
+    connections.
   - Later: defaults from annotations (k9s `k9scli.io/port-forwards`), and a
     `kubectl port-forward` fallback, run through the policy proxy, for
     proxies that refuse WebSocket upgrades.
@@ -1100,9 +1135,11 @@ blocking `Command::output()` and no timeout, verified in
 device codes disappear. In our probe it ran the plugin three times while
 building one client. Twigo therefore owns credentials:
 
-- **Clients.** Built with kube's `ClientBuilder` and its layers (base URI,
-  TLS connector, our auth layer). The exec block is stripped from the config
-  first.
+- **Clients.** Each context has two shared hyper-util clients: an HTTP/2 one
+  for requests, watches and logs, and an HTTP/1.1 one for exec, attach and
+  port-forward (3.2). Every actor's kube clients are built over them with
+  kube's base URI and header layers and our auth layer, and carry the
+  credential's expiry. The exec block is stripped from the config first.
 - **The credential runner.**
   - Uses `tokio::process` with the shell environment, null stdin and its own
     process group, and caps stdout at 1 MiB.
@@ -1117,8 +1154,8 @@ building one client. Twigo therefore owns credentials:
   - They are classified up front. Nothing in the background ever runs one.
   - The user starts them, and their stderr streams into a sign-in panel that
     shows device codes and URLs (redacted in logs).
-  - After sign-in, Twigo rebuilds the client and restarts the watches that
-    were unauthorized.
+  - After sign-in, Twigo rebuilds the context's clients for every actor, as
+    in 6.3, and restarts the watches that were unauthorized.
 - **Lazy.** Credentials are resolved only when a space activates, never for
   all contexts at startup. Headlamp #7879 is the failure this avoids.
 - **Kubeconfig trust**, adapted from VS Code's workspace trust.
@@ -1151,10 +1188,12 @@ building one client. Twigo therefore owns credentials:
   - Corporate proxies are where Lens failed.
 - When the kubeconfig changes, Twigo fingerprints each context from its
   context, cluster and user entries plus the files they reference. It
-  rebuilds only the clients whose fingerprint changed and restarts their
-  upstreams.
+  rebuilds only the clients whose fingerprint changed, for every actor at
+  once, since each actor's kube clients hold the context's shared pools
+  (6.4), and restarts their upstreams.
 - Exec, attach and port-forward use kube-rs WebSockets (`v5.channel.k8s.io`,
-  falling back to `v4`; there is no SPDY). RBAC needs `create` on
+  falling back to `v4`; there is no SPDY) over the HTTP/1.1 client; requests,
+  watches and logs share the HTTP/2 connection (3.2). RBAC needs `create` on
   `pods/exec`, `pods/attach` and `pods/portforward` for WebSocket upgrades
   from 1.35. The action is offered only after a cached access review.
 
@@ -1162,7 +1201,7 @@ building one client. Twigo therefore owns credentials:
 
 **One gate, in Rust, below every caller.**
 
-- The policy check is a tower layer inside every per-context kube `Client`.
+- The policy check is a tower layer in every actor's kube clients (3.2).
   The UI, extensions (via `host-kube`) and the MCP server have no other way
   to reach a cluster, so they cannot get around it. `host-http` refuses any
   host and port that belongs to a catalog API server.
@@ -1206,8 +1245,12 @@ building one client. Twigo therefore owns credentials:
   HTTP level a scale is one PATCH and a drain is many requests.
 
 - **Actors.** Each actor (the UI, an extension, an MCP client, an agent
-  session) gets its own `Client` sharing the context's connector, so the
-  layer knows who is asking without per-call plumbing.
+  session) gets its own two kube clients, which carry its policy layer over
+  the context's two shared hyper-util clients and the context's stream
+  counter (3.2).
+  A hyper-util client clone shares its pool, so every actor uses the same
+  HTTP/2 connection, and the layer knows who is asking without per-call
+  plumbing.
 - **Child processes go through a policy proxy.** `helm` for release
   actions, kubectl in actions, the `kubectl port-forward` fallback, agent
   sessions and terminals of every context that is not `read-write` get a
@@ -1215,10 +1258,10 @@ building one client. Twigo therefore owns credentials:
   - It points at a loopback endpoint in the core, with a bearer token per
     process and context. Each token maps to a context, an actor and,
     optionally, a pre-approval.
-  - Ordinary requests and watches go through the same per-context client
-    and policy layer.
+  - Ordinary requests and watches go through the same per-context clients,
+    stream counter and policy layer.
   - Upgrade requests are checked by the same classes, then forwarded with
-    the actor's `Client::send` and spliced with `hyper::upgrade::on`, which
+    the actor's HTTP/1.1 client and spliced with `hyper::upgrade::on`, which
     is all kube's own `connect` does (`kube-client/src/client/mod.rs`). The
     raw upgraded stream passes through whatever the protocol: WebSocket,
     SPDY, or SPDY over WebSocket. Auth, the 401 refresh, the proxy connector
@@ -1240,10 +1283,14 @@ building one client. Twigo therefore owns credentials:
   - For agents, the Rule of Two (6.6) also applies in `read-write`
     contexts: after untrusted content, their writes, exec-class requests and
     Secret reads go to the broker one call at a time.
-  - The proxy has its own cap on concurrent streams per context. Over the
-    cap it answers `429` with `Retry-After`, because client-go retries a 429
-    only when that header is present. It never queues requests and never
-    evicts the UI's upstreams (3.2).
+  - The proxy has its own cap on concurrent streams per context (default
+    16, 3.2). Over the cap it answers `429` with `Retry-After`, because
+    client-go retries a 429 only when that header is present. An upgrade
+    while the session budget is full gets a `429` too, but client-go never
+    waits for an upgrade: `kubectl exec`, `attach` and `port-forward` fail
+    with it, and `kubectl run -it` and `debug -it` fall back to printing
+    logs. The proxy never queues requests and never evicts the UI's
+    upstreams (3.2).
 - **What the proxy does not cover.** It guards against accidents, not
   against a determined process.
   - Any process running as the user can still read `~/.kube/config` or pass
@@ -1461,19 +1508,19 @@ JetBrains).
 
 ### 7.3 Key risks
 
-| Risk                                                                                                                            | Impact                                       | Mitigation                                                                                                                                                                                                                                                |
-| ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| kube-rs is HTTP/1.1: one TCP + TLS connection per watch, log or exec                                                            | Connection storms on big views and many logs | Separate watch and session budgets with LRU eviction and a visible `queued` state (3.2). M0 spike: an HTTP/2 pool for requests and watches next to an HTTP/1.1 pool for upgrades; the port-forward tunnel if connection pools exhaust the session budget. |
-| Table watch edge cases: columns only in the first event, conversion fallbacks, aggregated APIs without Table, frozen date cells | Wrong or missing columns                     | Decoder conformance tests against kind 1.33 to 1.37 plus aggregated API fixtures; fall back to metadata columns.                                                                                                                                          |
-| WebKit and WebKitGTK performance (virtualized tables, Monaco, WebGL context loss)                                               | Linux feels slower than macOS                | The budgets run on Linux CI too. DOM fallback for xterm; Monaco loads lazily.                                                                                                                                                                             |
-| Component-model maturity (WASI 0.3 async is new; jco output is large; TinyGo limits)                                            | Extension authoring friction                 | The host drives async through imports; the Rust SDK comes first; TS SDK after the API freeze; the Segla extension proves the model before it opens.                                                                                                       |
-| Exec auth diversity: device code, browser, Teleport, Pinniped, SSO chains                                                       | "Can't connect" in the first minute          | A test matrix with EKS, GKE, AKS, kubelogin (all modes), oidc-login and Segla; interactive classification; a visible sign-in panel.                                                                                                                       |
-| Sandboxed-frame IPC isolation on Linux                                                                                          | A malicious tier-2 frame invokes commands    | An M0 spike proves the frame cannot reach the invoke key; until then, tier 2 stays off on Linux.                                                                                                                                                          |
-| Prompt injection through cluster text; approval fatigue                                                                         | An agent causes a write                      | Read-only MCP in the MVP; the rule of two; approvals in Twigo's UI with a diff; audit.                                                                                                                                                                    |
-| Scope: chasing Lens's list feature by feature                                                                                   | A late, shallow MVP                          | The MVP list above is the contract. Everything else waits for v1.x.                                                                                                                                                                                       |
-| Extension API churn after third parties adopt it                                                                                | Broken extensions (the Lens history)         | `0.x` stays private until 1.0; versioned WIT with every old binding kept; the fixture extension in CI.                                                                                                                                                    |
-| Corporate networks: proxies, `NO_PROXY`, SOCKS bastions                                                                         | Works at home, fails at work                 | No local proxy in the UI path; our connector honours `NO_PROXY` and the OS proxy settings (6.3); a proxy matrix in integration tests.                                                                                                                     |
-| Measuring memory wrongly on macOS                                                                                               | False confidence                             | The bench counts the WebKit processes (3.8).                                                                                                                                                                                                              |
+| Risk                                                                                                                            | Impact                                                                    | Mitigation                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| One HTTP/2 connection carries every request, watch and log of a cluster                                                         | A dead or slow connection stalls them all; streams wait once 100 are open | Keep-alive pings; the connection is retired on wake, on a network change and when a probe fails; one stream counter per context, below every actor, keeps watches, logs, proxied streams and requests within budgets that add up to the default limit of 100, and shows `queued`; the hub reads every stream at once (3.2, [HTTP/2 spike](spikes/http2.md)). |
+| Table watch edge cases: columns only in the first event, conversion fallbacks, aggregated APIs without Table, frozen date cells | Wrong or missing columns                                                  | Decoder conformance tests against kind 1.33 to 1.37 plus aggregated API fixtures; fall back to metadata columns.                                                                                                                                                                                                                                             |
+| WebKit and WebKitGTK performance (virtualized tables, Monaco, WebGL context loss)                                               | Linux feels slower than macOS                                             | The budgets run on Linux CI too. DOM fallback for xterm; Monaco loads lazily.                                                                                                                                                                                                                                                                                |
+| Component-model maturity (WASI 0.3 async is new; jco output is large; TinyGo limits)                                            | Extension authoring friction                                              | The host drives async through imports; the Rust SDK comes first; TS SDK after the API freeze; the Segla extension proves the model before it opens.                                                                                                                                                                                                          |
+| Exec auth diversity: device code, browser, Teleport, Pinniped, SSO chains                                                       | "Can't connect" in the first minute                                       | A test matrix with EKS, GKE, AKS, kubelogin (all modes), oidc-login and Segla; interactive classification; a visible sign-in panel.                                                                                                                                                                                                                          |
+| Sandboxed-frame IPC isolation on Linux                                                                                          | A malicious tier-2 frame invokes commands                                 | An M0 spike proves the frame cannot reach the invoke key; until then, tier 2 stays off on Linux.                                                                                                                                                                                                                                                             |
+| Prompt injection through cluster text; approval fatigue                                                                         | An agent causes a write                                                   | Read-only MCP in the MVP; the rule of two; approvals in Twigo's UI with a diff; audit.                                                                                                                                                                                                                                                                       |
+| Scope: chasing Lens's list feature by feature                                                                                   | A late, shallow MVP                                                       | The MVP list above is the contract. Everything else waits for v1.x.                                                                                                                                                                                                                                                                                          |
+| Extension API churn after third parties adopt it                                                                                | Broken extensions (the Lens history)                                      | `0.x` stays private until 1.0; versioned WIT with every old binding kept; the fixture extension in CI.                                                                                                                                                                                                                                                       |
+| Corporate networks: proxies, `NO_PROXY`, SOCKS bastions                                                                         | Works at home, fails at work                                              | No local proxy in the UI path; our connector honours `NO_PROXY` and the OS proxy settings (6.3); a proxy matrix in integration tests.                                                                                                                                                                                                                        |
+| Measuring memory wrongly on macOS                                                                                               | False confidence                                                          | The bench counts the WebKit processes (3.8).                                                                                                                                                                                                                                                                                                                 |
 
 ### 7.4 Milestones
 

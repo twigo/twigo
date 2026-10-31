@@ -7,6 +7,8 @@ on:
       - Cargo.lock
       - rust-toolchain.toml
       - crates/twigo-cache/**
+      - crates/twigo-kube/**
+      - crates/twigo-policy/**
       - bench/**
       - .github/workflows/kubernetes.yml
   push:
@@ -36,11 +38,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: kubernetes
-      - run: cargo test -p twigo-cache --test table_live --no-run
+      - run: cargo test -p twigo-cache -p twigo-kube --no-run
 
   table:
     if: github.event_name != 'push'
-    name: Table decoder on ${{ matrix.kubernetes }}
+    name: Live tests on ${{ matrix.kubernetes }}
     strategy:
       fail-fast: false
       matrix:
@@ -58,11 +60,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: kubernetes
-      - run: cargo test -p twigo-cache --test table_live --no-run
+      - run: cargo test -p twigo-cache -p twigo-kube --no-run
       - name: Start a kind cluster with kwok
         env:
           TWIGO_BENCH_DIR: ${{ runner.temp }}/bench
         run: |
           kubeconfig=$(bench/cluster.sh up ci ${{ matrix.kubernetes }} | tail -1)
           echo "TWIGO_TEST_KUBECONFIG=$kubeconfig" >> "$GITHUB_ENV"
-      - run: cargo test -p twigo-cache --test table_live -- --ignored
+      - run: cargo test -p twigo-cache -p twigo-kube -- --ignored
