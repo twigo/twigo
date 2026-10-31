@@ -1,0 +1,48 @@
+# Contributing to Twigo
+
+Thanks for your interest in improving Twigo!
+
+## Development setup
+
+You need:
+
+- Rust through rustup: `rust-toolchain.toml` pins the version;
+- Node.js 26 (`.nvmrc`) and pnpm 12 (`packageManager` in `package.json`);
+- on Linux, the
+  [Tauri system libraries](https://v2.tauri.app/start/prerequisites/#linux).
+
+```bash
+pnpm install
+pnpm tauri dev
+```
+
+## Before opening a PR
+
+```bash
+pnpm format:check   # Prettier (use `pnpm format` to fix)
+pnpm typecheck      # TypeScript
+pnpm lint           # ESLint, including the package boundaries
+pnpm test           # frontend tests
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
+
+CI runs the same checks on every pull request.
+
+## Conventions
+
+- **Comments are minimal**: explain a non-obvious _why_, not _what_.
+- **Commits** follow [Conventional Commits](https://www.conventionalcommits.org)
+  (`feat:`, `fix:`, `chore:`, `docs:`, `style:`, `refactor:`, `test:`).
+- **Accessibility**: interactive elements must be keyboard-reachable and
+  labelled; prefer real semantic elements over click handlers on `<div>`.
+- Match the style of the surrounding code.
+
+## Workflow
+
+1. Branch off `main` as `<type>/<topic>`, where the type is the Conventional
+   Commit type of the PR title: `feat/space-tabs`, `fix/drag-region`,
+   `chore/bump-tauri` ([decision](docs/decisions/branch-names.md)).
+2. Keep PRs focused; describe what and why.
+3. PRs are squash-merged into `main`.
