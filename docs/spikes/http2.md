@@ -30,12 +30,23 @@ streams per connection.
   ([config_ext.rs](https://github.com/kube-rs/kube/blob/4.2.0/kube-client/src/client/config_ext.rs#L426-L447)),
   and its hyper is built with `http1` alone. kube-apiserver answers `h2`
   unless it runs with HTTP/2 disabled.
-  - TLS comes from kube's own `rustls_client_config` and server-name
+  - **TLS** comes from kube's own `rustls_client_config` and server-name
     resolver. Verification, CA reloading, `tls-server-name` and client
     certificates therefore match kube's stack.
-  - The connector sits in hyper-timeout's `TimeoutConnector`, as in kube,
-    with kube's timeouts: 30 s to connect, TLS included; 295 s to write; no
-    read timeout.
+  - **Timeouts.** The connector sits in hyper-timeout's `TimeoutConnector`,
+    as in kube: 30 s to connect, TLS included, and 295 s for one stalled
+    write. The `HttpConnector` underneath also gets the 30 s, which it
+    splits between a host's addresses. There is deliberately no read
+    timeout: on a multiplexed connection it would time the whole connection
+    and cut every watch of a quiet cluster. 3.2's request timeout is a tower
+    layer per request instead.
+  - **The pool** never expires the connection (`pool_idle_timeout(None)`).
+    hyper-util refreshes a shared HTTP/2 entry only when a request checks it
+    out. After 90 s without one, it expires the entry while the watches
+    still stream on it, and the next request opens a second connection.
+    Measured: 10 watches, no request for 100 s, then a GET held 2 TCP
+    connections with the default and 1 with the fix. The server's GOAWAY
+    and the rules of 3.2 retire connections instead.
 
 - **`sessions`** is kube's default client, for exec, attach and
   port-forward. It is built first: only kube's builder can read the expiry
@@ -56,13 +67,19 @@ for both. Building `Clients` runs an exec plugin five times, three for
 `sessions` and two for `api`, until the credential runner of 6.2 replaces
 kube's exec auth.
 
+`Clients` holds finished `kube::Client`s, which take no further layer. For
+the per-actor policy layers of 6.4, M1's `Clients` keeps the two hyper-util
+clients and builds each actor's kube clients over them. A hyper-util clone
+shares its pool. kube's `ClientBuilder`, by contrast, builds a new pool on
+every call.
+
 ## Measurements
 
-`examples/http2.rs` ran twice on kind 1.37 (macOS, Docker Desktop) against
-5,000 kwok pods in namespace `bench`.
+`examples/http2.rs` ran three times on kind 1.37 (macOS, Docker Desktop)
+against 5,000 kwok pods in namespace `bench`.
 
 - 50 Table watches on that namespace's pods.
-- Sequential `GET …/pods?limit=1` for 10 s per state, 9,300 to 13,300 of
+- Sequential `GET …/pods?limit=1` for 10 s per state, 9,000 to 13,300 of
   them.
 - TCP connections to the API server counted with `lsof -iTCP:<port>
 -sTCP:ESTABLISHED` on the process itself.
@@ -85,21 +102,23 @@ The first HTTP/1.1 and first HTTP/2 phases of the second run:
 | HTTP/2, 50 quiet watches         | 1               | 13,275 | 0.7    | 0.9 | 1.7 | 88.3  |
 | HTTP/2, 50 watches under churn   | 1               | 10,137 | 0.7    | 1.2 | 7.5 | 102.1 |
 
-Over both runs and all eight phases:
+Over the three runs and all twelve phases:
 
 - p50 was 0.7 ms everywhere.
-- Under churn, p95 was 1.2 to 1.5 ms over HTTP/1.1 and 1.1 to 1.2 ms over
-  HTTP/2. p99 was 7.3 to 8.8 ms and 7.5 to 9.2 ms.
+- Under churn:
+  - p95 was 1.2 to 1.9 ms over HTTP/1.1 and 1.1 to 1.3 ms over HTTP/2;
+  - p99 was 7.3 to 10.4 ms over HTTP/1.1 and 7.5 to 9.2 ms over HTTP/2.
 - Between the bursts most GETs run on an idle server, so p50 cannot differ.
   The signal is in p95 and p99, and they match.
-- The maximum was 87 to 110 ms in every state, without watches too, and for
+- The maximum was 78 to 110 ms in every state, without watches too, and for
   both protocols, so it comes from the environment.
-- HTTP/1.1 held 51 connections, one per watch, and 52 while the churn's
-  patches ran next to the GETs.
+- HTTP/1.1 held 51 connections, 50 for the watches and 1 for the GETs, and
+  52 or 53 while the churn's patches ran next to the GETs.
+- The API server logged no forced watcher close.
 - An earlier method churned 250 pods every 3 s and had no counter for ended
-  watches. One of its windows read 60,750 events instead of 112,500, which
-  it could not explain. With the counter, no watch ended in eight windows,
-  and the API server logged no forced watcher close.
+  watches. One of its windows read 60,750 events instead of 112,500. That is
+  1,215 per watch, an equal share, so the window most likely caught fewer
+  finished scale steps; no watch ended.
 
 On a local cluster HTTP/2 costs nothing in latency. What it saves is one TCP
 and TLS connection per watch, on the client, on the API server, and on
@@ -110,8 +129,9 @@ bench of step 7.
 **Cold start.** A cold `api` client opens one TCP and TLS connection per
 concurrent first request.
 
-- hyper-util's default `Ver::Auto` takes no connecting lock, and it decides
-  for HTTP/2 only after ALPN
+- hyper-util's default `Ver::Auto` takes no connecting lock
+  ([pool.rs](https://github.com/hyperium/hyper-util/blob/v0.1.21/src/client/legacy/pool.rs#L174-L198)).
+- It decides for HTTP/2 only after ALPN
   ([client.rs](https://github.com/hyperium/hyper-util/blob/v0.1.21/src/client/legacy/client.rs#L496-L535)).
 - So 50 watches opened at once start 50 handshakes, and 49 are dropped once
   the first one negotiates `h2`.
@@ -136,13 +156,18 @@ concurrent first request.
   without counting streams. It queues the request instead of opening a
   second connection, and it exposes neither the server's limit nor the
   wait.
-- So the hub counts streams itself:
-  - long-lived streams, watches and followed logs, have budgets well below
-    100;
-  - concurrent requests are limited to the streams those budgets leave,
-    44 by default. Requests beyond that wait in the hub's own queue, which
-    is what shows `queued`;
-  - a request timeout backs this up against a lower server limit.
+- So Twigo counts streams itself, once per context, at the bottom of the
+  `api` stack and below every actor's policy layer. The watch hub, commands,
+  discovery, MCP tools, extensions and the policy proxy all pass through
+  that counter.
+- Its budgets are:
+  - watches, default 24;
+  - followed logs, default 32;
+  - the policy proxy's streams, default 16;
+  - requests, the 28 left.
+- A stream over its budget waits in the counter, which is what shows
+  `queued`. A per-request timeout backs this up against a server with a
+  lower limit.
 
 ## Exec, attach and port-forward
 
@@ -160,21 +185,22 @@ concurrent first request.
 
 - **A dead connection stalls everything.** One TCP connection now carries
   every watch of a cluster.
-  - After sleep or a network change, hyper-util still reports the pooled
-    connection open
-    ([client.rs](https://github.com/hyperium/hyper-util/blob/v0.1.21/src/client/legacy/client.rs#L854)),
-    so a re-watch on it would wait until TCP gives up, minutes later.
-  - On the idle timer and on wake, 3.2 therefore retires the connection.
-  - Two ways exist:
-    - rebuild the cluster's `api` client, which drops its pool;
-    - poison the connection through `capture_connection`, which keeps the
-      client. hyper-util's `is_open` checks for poisoning.
-
-    M1 picks one.
-
-  - HTTP/2 keep-alive pings time out before the idle timer fires. In
+  - **Pings.** HTTP/2 keep-alive pings close a dead connection. In
     hyper-util they need `.timer(TokioTimer::new())` on the builder as well
     as `http2_keep_alive_interval`.
+  - **Wake and network change.** After sleep or a network change, hyper-util
+    can still report the pooled connection open
+    ([client.rs](https://github.com/hyperium/hyper-util/blob/v0.1.21/src/client/legacy/client.rs#L854)).
+    A re-watch on it would wait until TCP gives up, minutes later, so 3.2
+    retires the connection then. It can rebuild the cluster's `api` client,
+    which drops its pool, or poison the connection through
+    `capture_connection`, which keeps the client: hyper-util's `is_open`
+    checks for poisoning. M1 picks one.
+  - **Idle timer.** It fires when one upstream is quiet, often on a healthy
+    connection. So it re-watches only that upstream, and retires the
+    connection only if a probe request fails too. Retiring a live
+    connection would move later streams to a second one, which is what the
+    budgets avoid.
 - **Flow control.** hyper releases window as a stream's body is read. Its
   defaults are 2 MiB per stream and 5 MiB per connection, so one unread
   stream cannot stall the others, but three could. The hub reads every
@@ -190,26 +216,26 @@ concurrent first request.
   connection per cluster.
 - Exec, attach and port-forward go through `sessions`, one HTTP/1.1
   connection each.
-- Budgets per cluster:
-  - watches, default 24;
-  - followed logs, default 32;
-  - concurrent requests, the 44 streams left;
-  - sessions, default 64.
+- One stream counter per context, below every actor, with the budgets
+  above. Sessions keep their own budget of 64 connections.
 - M1 builds the production connector on `Clients`:
+  - shared hyper-util clients for the actors;
   - proxies (6.3);
   - TCP keepalive and keep-alive pings;
-  - retiring the connection on idle and wake;
-  - the request limit and timeout;
+  - retiring the connection on wake, and after a failed probe;
+  - the stream counter and the request timeout;
   - one warming request per new connection;
   - the openssl fallback.
 
 ## Changes to the architecture
 
-- 3.2: one HTTP/2 connection per cluster. The budgets above, the stream
-  limit and the request limit. Among the dead-connection rules, keep-alive
-  pings and retiring the connection.
-- 6.2 and 6.4: two clients per context, both with the policy layer; actors
-  share the context's clients; upgrades go through `sessions`.
+- 3.2: one HTTP/2 connection per cluster. One stream counter per context
+  with the budgets above, and the request timeout. Among the
+  dead-connection rules: keep-alive pings, retiring the connection on wake,
+  and a probe before the idle timer retires one.
+- 6.2 and 6.4: two clients per context. Every actor's kube clients carry
+  its policy layer over the context's shared hyper-util clients. Upgrades
+  go through `sessions`. The proxy's stream cap is 16.
 - 6.3: which client carries what.
 - 7.3: the HTTP/1.1 risk is replaced by the risks of one connection.
 
@@ -225,7 +251,8 @@ The live tests run on every supported release:
 - `exec_needs_the_sessions_client`: exec works through `sessions` and fails
   with a 400 upgrade through `api`.
 
-The last two need a kubelet, so they refuse kwok clusters.
+The last two need a kubelet, so they refuse kwok clusters. The idle-pool
+check takes 100 s, so it lives in the example, not in CI.
 
 ## Reproducing
 
@@ -235,5 +262,7 @@ kubeconfig=$(bench/cluster.sh up h2 1.37 | tail -1)
 bench/pods.sh "$kubeconfig" 5000
 TWIGO_TEST_KUBECONFIG=$kubeconfig \
   cargo run --release -p twigo-kube --example http2
+kubectl --kubeconfig "$kubeconfig" -n kube-system \
+  logs kube-apiserver-twigo-h2-control-plane | grep -c -i forcing
 bench/cluster.sh down h2
 ```
