@@ -22,3 +22,4 @@ futures.workspace = true
 k8s-openapi.workspace = true
 kube = { workspace = true, features = ["runtime"] }
 tokio.workspace = true
+twigo-kube.workspace = true
