@@ -133,6 +133,7 @@ Everything NATS-specific goes.
 ```
 ┌──────────────────────────── twigo (one OS process, tokio) ────────────────────────────┐
 │ apps/desktop: Tauri shell: windows, native menu, plugins, IPC registration            │
+│ twigo-keyboard  active keyboard layout map · layout changes (TIS, xkbcommon, TSF)     │
 │                                                                                       │
 │ twigo-core      spaces · settings · catalog · command bus · approval broker · state   │
 │  ├─ twigo-kube      kubeconfig source · client factory · credential runner            │
@@ -182,6 +183,7 @@ twigo/
 │  ├─ twigo-policy/           read-only modes, authorize(), policy proxy, approvals, audit log, redaction
 │  ├─ twigo-env/              login-shell environment resolution
 │  ├─ twigo-ipc/              protocol types (serde) + TS codegen (ts-rs); channel framing
+│  ├─ twigo-keyboard/         active keyboard layout and its changes, from TIS, xkbcommon and ToUnicodeEx
 │  ├─ twigo-ext-host/         wasmtime host, manifests, capability enforcement, registry client
 │  ├─ twigo-ext-api/          WIT package `twigo:extension` (versioned dirs) + Rust guest SDK
 │  ├─ twigo-mcp/              MCP server + `twigo mcp` stdio shim
@@ -204,6 +206,8 @@ Why these crates:
   Integration tests run the real crates against kind and kwok clusters.
 - `twigo mcp` reuses the IPC types.
 - `twigo-policy` sits under everything that can reach a cluster.
+- `twigo-keyboard` keeps the OS's keyboard APIs out of `apps/desktop`.
+  It needs no Tauri, and its tests read named layouts without a window.
 
 `apps/desktop/src-tauri` holds no domain logic.
 It translates Tauri commands and channels into calls on `twigo-core`.
@@ -775,7 +779,15 @@ interface CommandDescriptor {
   - In the user's `keybindings.json`, `"-command"` removes a binding.
   - Chords are supported (⌘K ⌘S), as are per-platform variants (`mac`, `linux`, `win`).
 - **Dispatch** happens on `KeyboardEvent.code`, mapped through the active keyboard layout.
-  - WebKit has no Keyboard Map API, so Rust supplies the layout map: TIS/UCKeyTranslate on macOS, xkbcommon on Linux, `ToUnicodeEx` on Windows.
+  - WebKit has no Keyboard Map API, so `twigo-keyboard` supplies what each writing-system key types, plain, with Shift, AltGr (Option on macOS) and both, and `keyboard_layout_watch` sends every change.
+    - macOS: TIS names the layout and `UCKeyTranslate` reads its keys; the distributed notification `kTISNotifySelectedKeyboardInputSourceChanged` reports a switch.
+    - Linux: xkbcommon reads the keys of the active layout, the XKB group.
+      GDK 3 shows the group only on key events, and on X11 signals nothing when only the group changes.
+      So on X11 the keymap comes from the X server through xkbcommon-x11 and XKB events on a connection of the crate's own, since the server keeps one keyboard state for all clients.
+      On Wayland only the focused client hears the group, so a `wl_keyboard` of GDK's own connection receives the keymap and the group, as Firefox keeps one.
+    - Windows: `ToUnicodeEx` reads the keys of the UI thread's layout, and a TSF profile activation sink reports a switch, as VS Code's native-keymap does.
+    - TIS, GDK and Windows' per-thread input language answer only on the UI thread, so the watch starts there and keeps the latest layout for any thread to read.
+    - A dead key maps to the character it shows alone: `^` for French `BracketLeft`.
   - The keybinding service maps bindings as VS Code's keyboard mappers do.
     Letter shortcuts follow the character on Latin layouts (QWERTZ, AZERTY, Dvorak) and fall back to the US key position on non-Latin layouts such as Ukrainian.
   - Labels show what is printed on the key.
