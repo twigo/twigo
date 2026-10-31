@@ -55,7 +55,8 @@ Checked against the apiserver source at v1.37.0 unless a release is named, and a
     Its installer refuses a lister without a TableConvertor ([installer.go](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/installer.go#L483-L487)), and metrics-server implements one ([pod.go](https://github.com/kubernetes-sigs/metrics-server/blob/v0.9.1/pkg/api/pod.go#L141-L158)).
     A server built otherwise may ignore `as=Table`; the Accept header's `application/json` fallback then brings raw lists and objects, which get the metadata columns, Name and Age (fixtures `raw-list.json`, `raw-watch.jsonl`).
 11. **Rows may lack a uid and a resourceVersion.**
-    ComponentStatus objects carry only a name (recorded in `componentstatuses-list.json`), and metrics-server builds its metrics from name, namespace, labels and creationTimestamp ([pod.go](https://github.com/kubernetes-sigs/metrics-server/blob/v0.9.1/pkg/storage/pod.go#L86-L91)). `Meta::uid` is optional; the row store keys such rows by namespace and name.
+    ComponentStatus objects carry only a name (recorded in `componentstatuses-list.json`), and metrics-server builds its metrics from name, namespace, labels and creationTimestamp ([pod.go](https://github.com/kubernetes-sigs/metrics-server/blob/v0.9.1/pkg/storage/pod.go#L86-L91)).
+    `Meta::uid` is optional; the row store keys such rows by namespace and name.
 12. **An empty Table may send `rows: null`.**
     Go encodes a nil slice as `null`, and the default table convertor and metrics-server leave `Rows` nil for an empty collection; metrics-server then sends no column definitions either ([table.go](https://github.com/kubernetes-sigs/metrics-server/blob/v0.9.1/pkg/api/table.go#L26-L74)).
     The decoder reads `null` as empty wherever Go may write it.
@@ -101,6 +102,7 @@ A dhat counting allocator measures requested bytes retained after decoding:
 - A row costs half of a `PartialObjectMeta<Pod>` without managedFields: it keeps meta-lite and the cells, and none of the other metadata.
 - Decoding the 5,000 rows allocated 12.7 MiB in all, little more than the responses themselves.
 - A second run after the review fixes gave the same rows, and object representations within 0.2 MiB of these.
+- Three runs on 2026-10-31 with the HTTP/2 `api` client of `Clients`, which the example now uses, gave the same rows and the same 12.7 MiB, and object representations within 0.3 MiB of these.
 - The numbers that 3.3 quoted before this spike came from synthetic 7.4 KB Pods, so their absolute values differ; the order is the same.
 
 ## Changes to the architecture

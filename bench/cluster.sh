@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Usage: bench/cluster.sh up|down <name> [kubernetes minor, default 1.37]
 #
-# A kind cluster with kwok and its fake nodes. The kubeconfig lives in
-# $TWIGO_BENCH_DIR/<name>/kubeconfig, never in ~/.kube/config, and every
-# kubectl call passes it explicitly.
+# A kind cluster with kwok and its fake nodes, $TWIGO_BENCH_NODES of them
+# (default 10). The kubeconfig lives in $TWIGO_BENCH_DIR/<name>/kubeconfig,
+# never in ~/.kube/config, and every kubectl call passes it explicitly.
 set -euo pipefail
 
 KWOK_VERSION=v0.8.0
@@ -30,7 +30,7 @@ action=$1
 name=$2
 version=${3:-1.37}
 [[ "$name" =~ ^[a-z0-9-]+$ ]] || { echo "invalid cluster name: $name" >&2; exit 2; }
-dir="${TWIGO_BENCH_DIR:-${TMPDIR:-/tmp}/twigo-bench}/$name"
+dir="${TWIGO_BENCH_DIR:?set TWIGO_BENCH_DIR to a temporary directory}/$name"
 kubeconfig="$dir/kubeconfig"
 cluster="twigo-$name"
 k() { kubectl --kubeconfig "$kubeconfig" "$@"; }

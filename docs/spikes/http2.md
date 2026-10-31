@@ -23,7 +23,9 @@ The new limit to plan for is the server's 100 streams per connection.
   - auth, including exec plugins and token refresh;
   - extra headers, such as impersonation.
 
-  Under them sits a hyper-util client whose rustls connector offers both `h2` and `http/1.1` over ALPN. kube's builder offers only `http/1.1` ([config_ext.rs](https://github.com/kube-rs/kube/blob/4.2.0/kube-client/src/client/config_ext.rs#L426-L447)), and its hyper is built with `http1` alone. kube-apiserver answers `h2` unless it runs with HTTP/2 disabled.
+  Under them sits a hyper-util client whose rustls connector offers both `h2` and `http/1.1` over ALPN.
+  kube's builder offers only `http/1.1` ([config_ext.rs](https://github.com/kube-rs/kube/blob/4.2.0/kube-client/src/client/config_ext.rs#L426-L447)), and its hyper is built with `http1` alone.
+  kube-apiserver answers `h2` unless it runs with HTTP/2 disabled.
   - **TLS** comes from kube's own `rustls_client_config` and server-name resolver.
     Verification, CA reloading, `tls-server-name` and client certificates therefore match kube's stack.
   - **Timeouts.**
@@ -44,12 +46,15 @@ The new limit to plan for is the server's 100 streams per connection.
         M1 pings while idle too.
 
 - **`sessions`** is kube's default client, for exec, attach and port-forward.
-  It is built first: only kube's builder can read the expiry of an exec plugin's certificate. `api` copies it (`valid_until`), so the copy is the older of the two certificates' expiries.
+  It is built first: only kube's builder can read the expiry of an exec plugin's certificate.
+  `api` copies it (`valid_until`), so the copy is the older of the two certificates' expiries.
 
 What `api` lacks next to kube's default stack:
 
 - the retry and tracing layers;
-- proxies. kube fills `proxy_url` from the kubeconfig or from `HTTPS_PROXY`/`https_proxy`, and `Clients::new` refuses any of them for now. kube's own stack carries proxies only with its `http-proxy` and `socks5` features, which this build does not enable either.
+- proxies.
+  kube fills `proxy_url` from the kubeconfig or from `HTTPS_PROXY`/`https_proxy`, and `Clients::new` refuses any of them for now.
+  kube's own stack carries proxies only with its `http-proxy` and `socks5` features, which this build does not enable either.
   The connector of 6.3 brings proxies, with `NO_PROXY` and the OS settings.
 
 Neither client sets TCP keepalive or HTTP/2 keep-alive pings yet; 3.2 asks for both.
@@ -57,7 +62,8 @@ Building `Clients` runs an exec plugin five times, three for `sessions` and two 
 
 `Clients` holds finished `kube::Client`s, which take no further layer.
 For the per-actor policy layers of 6.4, M1's `Clients` keeps the two hyper-util clients and builds each actor's kube clients over them.
-A hyper-util clone shares its pool. kube's `ClientBuilder::try_from`, by contrast, builds a new pool on every call, so M1 builds the HTTP/1.1 client by hand too.
+A hyper-util clone shares its pool.
+kube's `ClientBuilder::try_from`, by contrast, builds a new pool on every call, so M1 builds the HTTP/1.1 client by hand too.
 
 ## Measurements
 
@@ -118,8 +124,8 @@ A cold `api` client opens one TCP and TLS connection per concurrent first reques
 - kube-apiserver allows 100 concurrent streams per HTTP/2 connection unless `--http2-max-streams-per-connection` is set ([secure_serving.go](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/server/secure_serving.go#L191-L199)).
   Its flag defaults to 0 ([serving.go](https://github.com/kubernetes/kubernetes/blob/v1.37.0/pkg/kubeapiserver/options/serving.go#L27-L38)).
   The 1,000 of `RecommendedOptions` applies only to kube-apiserver's own connections to aggregated servers.
-- Measured, in the example and in `requests_wait_for_a_free_stream`: with 99 open watches a GET goes through.
-  With 100, it waits more than 10 s, then goes through once one watch closes, all on one TCP connection.
+- Measured in `requests_wait_for_a_free_stream`, on every release in CI: with 100 open watches a GET still waits after 5 s.
+  Once one watch closes, it goes through over HTTP/2, all on one TCP connection.
 - hyper-util hands out the shared HTTP/2 connection whenever it is open, without counting streams.
   It queues the request instead of opening a second connection, and it exposes neither the server's limit nor the wait.
 - So Twigo counts streams itself:
@@ -142,7 +148,8 @@ A cold `api` client opens one TCP and TLS connection per concurrent first reques
 ## Exec, attach and port-forward
 
 - Exec through `sessions` returns the command's output (`echo ok`).
-- Through `api`, the same call fails with `UpgradeConnection(ProtocolSwitch(400))`. hyper drops the `Connection` and `Upgrade` headers from HTTP/2 requests, which HTTP/2 forbids.
+- Through `api`, the same call fails with `UpgradeConnection(ProtocolSwitch(400))`.
+  hyper drops the `Connection` and `Upgrade` headers from HTTP/2 requests, which HTTP/2 forbids.
   The API server sees a plain GET on the exec endpoint and rejects it.
 - Attach and port-forward go through the same `Client::connect`, so they need `sessions` too.
 - Followed logs are a plain streaming GET.
@@ -166,7 +173,8 @@ A cold `api` client opens one TCP and TLS connection per concurrent first reques
       If it answers, only that upstream re-watches.
     - If it fails, the connection is retired and every upstream re-watches, as on wake.
     - Retiring a live connection would cost a new handshake, and the old connection would linger until its streams end.
-- **Flow control.** hyper releases window as a stream's body is read.
+- **Flow control.**
+  hyper releases window as a stream's body is read.
   Its defaults are 2 MiB per stream and 5 MiB per connection, so one unread stream cannot stall the others, but three could.
   The hub reads every stream as it arrives and coalesces in memory, so backpressure never reaches the socket.
 - **Proxies that terminate TLS** may negotiate HTTP/1.1.
@@ -207,7 +215,8 @@ A cold `api` client opens one TCP and TLS connection per concurrent first reques
 The live tests run on every supported release:
 
 - `the_api_client_speaks_http2`: `api` answers HTTP/2, `sessions` HTTP/1.1.
-- `requests_wait_for_a_free_stream`: 100 watches hold one connection, and a GET waits until one of them closes. `lsof` counts the whole process, so this test has a binary of its own.
+- `requests_wait_for_a_free_stream`: 100 watches hold one connection, and a GET waits until one of them closes.
+  `lsof` counts the whole process, so this test has a binary of its own.
 - `logs_follow_over_http2`: a followed log answers HTTP/2 over `api`.
 - `exec_needs_the_sessions_client`: exec works through `sessions` and fails with a 400 upgrade through `api`.
 

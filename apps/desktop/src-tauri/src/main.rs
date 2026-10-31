@@ -9,15 +9,16 @@ fn main() {
         // other plugin touches shared state, such as the window-state file.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
+                let shown = window
+                    .unminimize()
+                    .and_then(|()| window.show())
+                    .and_then(|()| window.set_focus());
+                if let Err(error) = shown {
+                    eprintln!("could not bring the running window forward: {error}");
+                }
             }
         }))
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
         .run(tauri::generate_context!())
         .expect("error while running Twigo");
 }

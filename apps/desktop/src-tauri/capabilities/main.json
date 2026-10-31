@@ -3,5 +3,9 @@
   "identifier": "main",
   "description": "The main window",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-start-dragging"]
+  "permissions": [
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize",
+    "core:webview:allow-internal-toggle-devtools"
+  ]
 }

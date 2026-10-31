@@ -13,6 +13,7 @@ use kube::{Api, Client, Config};
 use serde_json::json;
 use twigo_cache::table::request::{self, WatchFrom};
 use twigo_cache::table::{Cell, ColumnKind, Event, Row, TableDecoder};
+use twigo_kube::client::Clients;
 
 const POD_COLUMNS: [&str; 9] = [
     "Name",
@@ -38,7 +39,7 @@ async fn client() -> Client {
     let config = Config::from_custom_kubeconfig(kubeconfig, &KubeConfigOptions::default())
         .await
         .unwrap();
-    Client::try_from(config).unwrap()
+    Clients::new(config).unwrap().api
 }
 
 async fn minor_version(client: &Client) -> u32 {

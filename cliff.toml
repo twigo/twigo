@@ -40,7 +40,7 @@ commit_parsers = [
   { message = "^docs?", group = "<!-- 4 -->Documentation" },
   { message = "^style", group = "<!-- 5 -->Styling" },
   { message = "^test", group = "<!-- 6 -->Testing" },
-  { message = "^chore\\(deps", skip = true },
+  { message = "^(build|chore|ci)\\(deps", skip = true },
   { message = "^chore|^ci|^build", group = "<!-- 7 -->Miscellaneous" },
   { message = "^revert", group = "<!-- 8 -->Reverted" },
   { message = ".*", group = "<!-- 9 -->Other" },

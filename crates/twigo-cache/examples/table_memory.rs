@@ -6,8 +6,9 @@
 use k8s_openapi::api::core::v1::Pod;
 use kube::api::ListParams;
 use kube::config::{KubeConfigOptions, Kubeconfig};
-use kube::{Api, Client, Config};
+use kube::{Api, Config};
 use twigo_cache::table::{Row, TableDecoder, request};
+use twigo_kube::client::Clients;
 
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
@@ -37,7 +38,7 @@ async fn main() {
     let config = Config::from_custom_kubeconfig(kubeconfig, &KubeConfigOptions::default())
         .await
         .unwrap();
-    let client = Client::try_from(config).unwrap();
+    let client = Clients::new(config).unwrap().api;
 
     let collection = format!("/api/v1/namespaces/{namespace}/pods");
     let mut bodies = Vec::new();

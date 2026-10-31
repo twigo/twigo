@@ -1,6 +1,2 @@
-**/dist
-**/node_modules
 pnpm-lock.yaml
-target
-apps/desktop/src-tauri/gen
 crates/*/tests/fixtures

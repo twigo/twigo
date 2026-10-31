@@ -2,11 +2,11 @@
 
 Twigo is an open-source desktop IDE for Kubernetes: native, fast and keyboard-first.
 It aims to match Lens feature for feature without its login wall, its weight or its slowness on large clusters.
-This document fixes the architecture before any code is written.
+This document fixes the architecture; the M0 spikes in `docs/spikes/` correct it wherever they measured otherwise.
 
-- Status: draft for review, 2026-10-31
+- Status: M0 in progress, steps 1 to 4 done, 2026-10-31
 - Stack: Tauri 2 (2.12.x), Rust with kube-rs (4.2.x, k8s-openapi 0.28), React 19 + TypeScript, Tailwind 4, shadcn/ui, pnpm monorepo
-- Reference code: the NATS IDE in `../legacy/`, outside this repository (github.com/twigo/twigo at `6ee327f`), kept only until this repository replaces it
+- Reference code: the retired NATS IDE at `6ee327f`, whose history survives only in a local checkout; section 1 maps what carries over
 
 ## 0. Context
 
@@ -23,7 +23,7 @@ This document fixes the architecture before any code is written.
 | D7  | Lists come from server-side Table watches (`as=Table`, `includeObject=Metadata`). Metadata-only watchers serve only as indexes (namespaces, owners, CRDs). The full object is fetched when it is opened.                           | **This replaces the brief's "metadata-only watchers for lists"**: `PartialObjectMetadata` has no Ready, Status, Restarts or Node. Section 3. |
 | D8  | Good design is a requirement. The legacy design language (tokens, density, restraint) carries over.                                                                                                                                | Section 4.9.                                                                                                                                 |
 | D9  | Licence: Apache-2.0.                                                                                                                                                                                                               | A patent grant for contributors and extension authors, and the CNCF default. `LICENSE` sits at the repository root.                          |
-| D10 | Bundle identifier `io.twigo.ide`. The repository and its releases live at github.com/twigo/twigo once the legacy repository is removed.                                                                                            | A new updater key; the endpoint stays that repository's `latest.json`. Section 1.                                                            |
+| D10 | Bundle identifier `io.twigo.ide`. The repository and its releases live at github.com/twigo/twigo, which replaced the legacy repository.                                                                                            | A new updater key; the endpoint stays that repository's `latest.json`. Section 1.                                                            |
 | D11 | Extension manifests are `extension.json`, checked against a published JSON Schema.                                                                                                                                                 | Validation and completion in any editor. Section 5.4.                                                                                        |
 | D12 | Kubernetes 1.33 and later. 1.32 left upstream support on 2026-02-28 and will be out of date by the time Twigo ships; older releases come back only if users ask.                                                                   | The test matrix runs from 1.33 to the newest release kind ships. Section 3.2.                                                                |
 
@@ -89,7 +89,7 @@ Everything NATS-specific goes.
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Monorepo tooling: `pnpm-workspace.yaml`, `tsconfig.base.json`, `eslint.config.js` (incl. the boundary rule), Prettier, husky + commitlint, `cliff.toml`, Dependabot, `.github/workflows/ci.yml` and `pr-title.yml`, issue/PR templates, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT | root                                    | The boundary rule changes its target: the workbench must not import `packages/kube`.                                                                                                                                                                                                            |
 | `.github/workflows/release.yml`, `RELEASING.md`, `apps/twigo/scripts/set-version.mjs`                                                                                                                                                                                           | root, `apps/desktop/scripts`            | The tauri-action matrix (macOS arm64 and x64, Linux on ubuntu-22.04), notarization secrets, updater signing, a draft release with `latest.json`. **Use the bundle identifier `io.twigo.ide` and a new updater key (D10)**, so the two apps share no app-data directory or single-instance lock. |
-| Tauri plugin set (`src-tauri/src/lib.rs`): single-instance (registered first), window-state, updater, process, opener, dialog                                                                                                                                                   | `apps/desktop/src-tauri`                | Window chrome stays: `titleBarStyle: Overlay`, `trafficLightPosition`, and the strict CSP.                                                                                                                                                                                                      |
+| Tauri plugin set (`src-tauri/src/lib.rs`): single-instance (registered first) and window-state now; updater, process, opener and dialog with the features that call them                                                                                                        | `apps/desktop/src-tauri`                | Window chrome stays: `titleBarStyle: Overlay`, `trafficLightPosition`, and the strict CSP.                                                                                                                                                                                                      |
 | `libs/ui` (shadcn components, `theme.css` tokens, sparkline, `cn`)                                                                                                                                                                                                              | `packages/ui`                           | It is the base of the design system (4.9). `code-viewer` (CodeMirror) is replaced by Monaco.                                                                                                                                                                                                    |
 | `apps/twigo/src/index.css`: typography (Inter `cv01`/`ss03`, weights 510/590, 13 px base, tabular numbers) and the dockview tab skin (selected-tab chip, no underline)                                                                                                          | `packages/ui`, `packages/workbench`     | The rest of the design language (4.9).                                                                                                                                                                                                                                                          |
 | Toaster + `store/toasts.ts`, `ErrorBoundary`, `PanelBoundary`, `store/zoom.ts`, `store/commandHistory.ts`, `lib/updater.ts` + `store/updateCheck.ts`, `shell/menu.ts` (native menu built from commands), `lib/appVersion.ts`                                                    | `packages/workbench`                    | `menu.ts` changes: it is built from the menu registry (5.1), not a hand-written list.                                                                                                                                                                                                           |
@@ -117,7 +117,8 @@ Everything NATS-specific goes.
 ### Drop
 
 - The NATS domain: `src-tauri/src/nats/*`, `src/modules/nats`, every NATS view, editor and store (subjects, stream, jetstream, kv, objstore, monitor, services, responder, codecs, series), `libs/utils` subject-tree and message helpers.
-- NATS dependencies: async-nats, protox, prost, prost-reflect, rmp-serde, ciborium. reqwest stays: the extension host's `host-http` needs a client.
+- NATS dependencies: async-nats, protox, prost, prost-reflect, rmp-serde, ciborium.
+  reqwest stays: the extension host's `host-http` needs a client.
 - QuickJS-WASM and the `'wasm-unsafe-eval'` CSP entry.
   Extension code runs in wasmtime in Rust, not in the webview.
 - CodeMirror.
@@ -268,7 +269,8 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
     The context's default namespace is preselected.
 - **Label selectors** are applied in Rust, because labels are in the row metadata.
   Field selectors always go to the server as their own upstream: row metadata does not carry the fields they match.
-- **One HTTP/2 connection per cluster.** kube-rs's default client speaks HTTP/1.1 only: hyper is built with `http1` alone, as checked in `kube-client/Cargo.toml` at 4.2.
+- **One HTTP/2 connection per cluster.**
+  kube-rs's default client speaks HTTP/1.1 only: hyper is built with `http1` alone, as checked in `kube-client/Cargo.toml` at 4.2.
   So each context has two shared hyper-util clients of Twigo's own: an HTTP/2 one for requests, watches and followed logs, and an HTTP/1.1 one for exec, attach and port-forward, whose WebSocket upgrade fails over HTTP/2 with 400.
   Every actor's kube clients sit over them (6.2, 6.4, [HTTP/2 spike](spikes/http2.md)).
 - **Per-cluster budgets.**
@@ -298,7 +300,8 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   - When the log or session budget is full, a new log stream, exec session or port-forward connection waits in `queued` the same way.
     Its tab says why, and the status bar lists open sessions so the user can close some.
   - Nothing fails silently.
-- **Dead connections.** kube 4.0 removed the global read timeout, and a watch can stall silently after sleep or a network change.
+- **Dead connections.**
+  kube 4.0 removed the global read timeout, and a watch can stall silently after sleep or a network change.
   - Every watch sets `timeoutSeconds` and uses TCP keepalive.
   - The HTTP/2 connection sends keep-alive pings, while idle too, since one dead connection now stalls every watch of the cluster.
     A failed ping closes it.
@@ -309,6 +312,8 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
     If it fails, the connection is retired and every upstream re-watches, as on wake.
   - On wake from sleep or a network change (OS notifications), the cluster's HTTP/2 connection is retired and every upstream re-watches.
     Retiring poisons the connection: the pool keeps a dead connection that still looks open, and every actor's client holds a clone of that pool, so rebuilding one client would not reach the others.
+  - After every client rebuild and every new connection, one request goes out before any watch opens.
+    A cold client opens one TCP and TLS connection per concurrent first request and keeps only the first that negotiates `h2` ([HTTP/2 spike](spikes/http2.md)).
   - Views show `stale` while this happens.
 - **Initial list.**
   - Streaming lists (`sendInitialEvents=true`) on 1.34 and later.
@@ -316,7 +321,8 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   - Otherwise a paginated list followed by a watch from its exact `resourceVersion`.
   - The capability is probed once per cluster and cached.
 - **Backoff.**
-  UI-friendly: 0.5–5 s with jitter, reset on every event. kube-runtime's default of 0.8–30 s leaves lists stale for a long time after an API-server restart.
+  UI-friendly: 0.5–5 s with jitter, reset on every event.
+  kube-runtime's default of 0.8–30 s leaves lists stale for a long time after an API-server restart.
 
 ### 3.3 Three upstream kinds
 
@@ -377,7 +383,8 @@ The webview then sends `setWindow(start, end)` as the user scrolls, covering the
   - Cells carry their column type, but many core columns are formatted strings: Pod Ready `1/2`, Restarts `3 (5m ago)`, Age.
   - Rust derives sort keys: known formats are parsed (ratios, leading counts, durations, Age from `creationTimestamp`), and other strings sort naturally.
 - A change set updates the index in O(log n) per row and computes what changed **inside the window**.
-- Text filter: substring or fuzzy match on name plus the visible columns. `/!` negates; a regex can be given explicitly, k9s style.
+- Text filter: substring or fuzzy match on name plus the visible columns.
+  `/!` negates; a regex can be given explicitly, k9s style.
 - Multi-context spaces: the query view merges the upstreams of several contexts and adds a Context column.
   Row identity is `context/namespace/name`.
 - Selections and bulk actions refer to row IDs, so "select all 5,000" never ships 5,000 rows.
@@ -410,7 +417,8 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
 
 ### 3.6 Opening an object, and what is never pre-fetched
 
-- **Opening an object.** `GET` the full object, then start an Object upstream for live changes.
+- **Opening an object.**
+  `GET` the full object, then start an Object upstream for live changes.
   - managedFields stay on the Rust side: they serve conflict display and are hidden in the editor.
   - Secrets keep their values in Rust.
     Only keys and sizes are sent, until the user explicitly reveals a value.
@@ -469,12 +477,13 @@ CI checks them on a kwok cluster, which simulates nodes and pods without kubelet
 
 The memory numbers count WebKit's `com.apple.WebKit.*` processes.
 They are children of launchd, not of the app, so measuring per process under-reports a Tauri app by about half.
-The bench also replays the cases that broke other clients:
+The bench also replays the cases that broke other clients, and one that loopback cannot show:
 
 - all namespaces on 30k pods;
 - a ConfigMap with 2,000 keys;
 - 25 contexts whose exec plugins time out;
-- an API-server restart during a watch.
+- an API-server restart during a watch;
+- packet loss on the one HTTP/2 connection, for head-of-line blocking ([HTTP/2 spike](spikes/http2.md)).
 
 ## 4. Workbench and UI model
 
@@ -591,9 +600,11 @@ Extensions add commands, not prefixes.
   - On EOF the stream reopens with `sinceTime` set to the last timestamp and drops duplicates.
   - Logs aggregated across a workload's pods, stern-style, come in v1.x.
     Watch the log budget (3.2).
-- **Exec and attach.** xterm.js 6 with the WebGL addon.
+- **Exec and attach.**
+  xterm.js 6 with the WebGL addon.
   It falls back to the DOM renderer on context loss, which happens on WebKitGTK.
-  WebGL is disposed on hidden tabs. kube-rs `AttachedProcess` (version 4.0 or later fixes the task leak and the join deadlock) handles resize.
+  WebGL is disposed on hidden tabs.
+  kube-rs `AttachedProcess` (version 4.0 or later fixes the task leak and the join deadlock) handles resize.
   The shell is detected by trying `bash`, then `sh`.
 - **Port-forward manager.**
   A target is a Pod, a Service or a workload.
@@ -612,14 +623,17 @@ Extensions add commands, not prefixes.
 - **Integrated terminal.**
   A local pty with the login-shell environment.
   - The terminal is pinned to the space's context without touching the user's kubeconfig.
-  - **Terminals of `read-write` contexts from the user's kubeconfig** use the user's real credentials. `KUBECONFIG` is a tiny Twigo file holding only `current-context: <ctx>`, followed by the user's own files, so kubectl takes the first file's current context.
+  - **Terminals of `read-write` contexts from the user's kubeconfig** use the user's real credentials.
+    `KUBECONFIG` is a tiny Twigo file holding only `current-context: <ctx>`, followed by the user's own files, so kubectl takes the first file's current context.
     Such a terminal reaches every context with real credentials, read-only ones included, as any terminal app would.
   - **Terminals of every other context**, including one temporarily unlocked, get only a generated policy-proxy kubeconfig (6.4).
     So do terminals of contexts that come from a provider, whatever their mode, because those have no kubeconfig entry to point at.
-    It holds one proxy entry per catalog context, each with its own token and that context's mode, and none of the user's files. `--context`, k9s `:ctx` or `config use-context` therefore cannot reach real credentials by accident.
+    It holds one proxy entry per catalog context, each with its own token and that context's mode, and none of the user's files.
+    `--context`, k9s `:ctx` or `config use-context` therefore cannot reach real credentials by accident.
     The proxy follows the current mode, so a relock applies to terminals that are already open.
     A write from a `guarded` terminal raises a Twigo approval.
-  - The tab shows which kind of terminal it is. `terminal.usePolicyProxy` turns the proxy on for `read-write` contexts too.
+  - The tab shows which kind of terminal it is.
+    `terminal.usePolicyProxy` turns the proxy on for `read-write` contexts too.
     The policy file can force it on for any context, and settings cannot turn that off.
   - kubectl and most tools write new entries (for example from `aws eks update-kubeconfig`) to the first file in `KUBECONFIG`, which is Twigo's.
     Twigo watches that file and offers to move new entries into the user's kubeconfig.
@@ -646,7 +660,8 @@ Progress shows in the status bar, or in a notification when the operation needs 
 - **Policy** is an admin-managed file, `/Library/Application Support/Twigo/policy.json` or `/etc/twigo/policy.json`, and later MDM.
   It locks values: for example "contexts matching `prod-*` are read-only", "extensions only from these registries", "MCP off".
 - Settings are files the user can edit in the app (with a schema) or through the generated settings UI.
-  Changes are picked up live. `keybindings.json` works the same way.
+  Changes are picked up live.
+  `keybindings.json` works the same way.
 - **State** that is not settings stays in the app store: layouts, recent items, command history, dismissed hints.
 - **What is skipped from VS Code, and why:**
   - Workspace and folder layers: spaces take their place.
@@ -890,9 +905,11 @@ Contributions imply their activation events, as VS Code ≥ 1.74 does; `*` is fo
 
 **Actions** keep k9s's format and fix its injection flaw:
 
-- Values pass as positional arguments (`sh -c '<script>' sh "$1" "$2"`). kubectl templates are split into arguments before rendering.
+- Values pass as positional arguments (`sh -c '<script>' sh "$1" "$2"`).
+  kubectl templates are split into arguments before rendering.
 - They run as tier-3 processes after consent.
-  Their `KUBECONFIG` is the policy proxy's, so their cluster access obeys the context's mode. `mutates: true` hides an action in read-only contexts.
+  Their `KUBECONFIG` is the policy proxy's, so their cluster access obeys the context's mode.
+  `mutates: true` hides an action in read-only contexts.
 - An importer reads an existing k9s `plugins.yaml` and maps its variables onto safe arguments (v1.x).
 
 ### 5.5 Catalog and the "Create cluster" provider
@@ -959,7 +976,8 @@ That is why `aws`, `gke-gcloud-auth-plugin` and `kubelogin` "are not found" in L
   - If re-executing the binary fails, Twigo falls back to `/usr/bin/env -0`.
 - **The result** is an `Arc<ShellEnv>` applied to every child process: exec plugins, terminals, tier-3 processes, agents.
   Twigo never calls `set_var` on its own process; that is unsafe once threads exist.
-- **The core reads `KUBECONFIG` and the proxy variables from `ShellEnv` explicitly**, in the catalog and in the connector. kube-rs reads them from the process environment, which on a Dock launch is launchd's.
+- **The core reads `KUBECONFIG` and the proxy variables from `ShellEnv` explicitly**, in the catalog and in the connector.
+  kube-rs reads them from the process environment, which on a Dock launch is launchd's.
 - **`--dump-env` and `twigo mcp` are handled in `main()` before the Tauri builder**, so the single-instance plugin does not swallow them.
 - **Ordering.**
   Connecting to a cluster waits for the environment.
@@ -1026,7 +1044,8 @@ Twigo therefore owns credentials:
 **One gate, in Rust, below every caller.**
 
 - The policy check is a tower layer in every actor's kube clients (3.2).
-  The UI, extensions (via `host-kube`) and the MCP server have no other way to reach a cluster, so they cannot get around it. `host-http` refuses any host and port that belongs to a catalog API server.
+  The UI, extensions (via `host-kube`) and the MCP server have no other way to reach a cluster, so they cannot get around it.
+  `host-http` refuses any host and port that belongs to a catalog API server.
 - `authorize(context, verb, resource, subresource, namespace, name, actor)` runs before the request leaves the process.
 - The frontend only displays the lock.
   Legacy kept the lock in a frontend store synced to Rust, and that model is reversed.
@@ -1036,7 +1055,8 @@ Twigo therefore owns credentials:
   - dry-run: any write with `dryRun=All`;
   - write: every other POST, PUT, PATCH, DELETE;
   - secret-read: GET, LIST or WATCH of `secrets` whose `Accept` header allows a full-object response.
-    Only `PartialObjectMetadata`, or a Table with `includeObject` `None` or `Metadata` and no plain JSON fallback, escapes it. `includeObject=Object` (kubectl `--sort-by` sends it) counts.
+    Only `PartialObjectMetadata`, or a Table with `includeObject` `None` or `Metadata` and no plain JSON fallback, escapes it.
+    `includeObject=Object` (kubectl `--sort-by` sends it) counts.
     This is deliberately conservative: a plain `kubectl get secrets` through the proxy counts too.
     The class is decided by actor, not by mode:
     - the UI, which masks values until the user reveals them;
@@ -1054,7 +1074,8 @@ Twigo therefore owns credentials:
 - **Actors.**
   Each actor (the UI, an extension, an MCP client, an agent session) gets its own two kube clients, which carry its policy layer over the context's two shared hyper-util clients and the context's stream counter (3.2).
   A hyper-util client clone shares its pool, so every actor uses the same HTTP/2 connection, and the layer knows who is asking without per-call plumbing.
-- **Child processes go through a policy proxy.** `helm` for release actions, kubectl in actions, the `kubectl port-forward` fallback, agent sessions and terminals of every context that is not `read-write` get a generated kubeconfig.
+- **Child processes go through a policy proxy.**
+  `helm` for release actions, kubectl in actions, the `kubectl port-forward` fallback, agent sessions and terminals of every context that is not `read-write` get a generated kubeconfig.
   Provider contexts always use it in terminals (4.6).
   - It points at a loopback endpoint in the core, with a bearer token per process and context.
     Each token maps to a context, an actor and, optionally, a pre-approval.
@@ -1135,8 +1156,10 @@ Destructive actions (delete, drain, scale to 0) use dry-run where the API suppor
   A Streamable HTTP endpoint is optional: `127.0.0.1:<random>/mcp` with a per-client pairing token and Origin and Host checks; it never binds `0.0.0.0`.
 - **Setup.**
   A "Connect an agent" command shows a one-click snippet for Claude Code, Cursor and VS Code.
-- **Grants per client and context.** `none` (the default), `read`, or `read + approved writes`.
-  A context's policy mode caps the grant, so read-only contexts are always `read` at most. `read` includes dry-run.
+- **Grants per client and context.**
+  `none` (the default), `read`, or `read + approved writes`.
+  A context's policy mode caps the grant, so read-only contexts are always `read` at most.
+  `read` includes dry-run.
   Enforcement is by request class in the policy layer, not by hiding tools.
 - **Sessions.**
   MCP's 2026-07-28 revision has no protocol-level session, so Twigo defines one: the lifetime of one `twigo mcp` shim process, or a pairing token with a TTL on HTTP.
@@ -1196,7 +1219,8 @@ Destructive actions (delete, drain, scale to 0) use dry-run where the API suppor
 ### 6.7 Webview and supply chain
 
 - **CSP.**
-  Strict, no remote URLs. `worker-src 'self' blob:` is allowed for Monaco's workers.
+  Strict, no remote URLs.
+  `worker-src 'self' blob:` is allowed for Monaco's workers.
 - **Rendering.**
   Cluster data is rendered as text, never as HTML, so an annotation cannot inject markup.
   An XSS in the webview would reach every cluster.
@@ -1296,7 +1320,7 @@ Facts were checked on 2026-10-31 against sources or docs.
 Versions: kube 4.2.0, k8s-openapi 0.28, Tauri 2.12.5, wasmtime 50, Kubernetes 1.37.
 
 - kube-rs:
-  - https://github.com/kube-rs/kube (HTTP/1.1 only: `kube-client/Cargo.toml`; exec auth: `kube-client/src/client/auth/mod.rs`; WebSocket protocols: `kube-client/src/client/upgrade.rs`)
+  - https://github.com/kube-rs/kube/tree/4.2.0 (HTTP/1.1 only: `kube-client/Cargo.toml`; exec auth: `kube-client/src/client/auth/mod.rs`; WebSocket protocols: `kube-client/src/client/upgrade.rs`)
   - https://docs.rs/kube/4.2.0/kube/runtime/watcher/struct.Config.html
 - Kubernetes:
   - Table fetches: https://kubernetes.io/docs/reference/using-api/api-concepts/#table-fetches
@@ -1309,21 +1333,21 @@ Versions: kube 4.2.0, k8s-openapi 0.28, Tauri 2.12.5, wasmtime 50, Kubernetes 1.
   - Capabilities: https://v2.tauri.app/security/capabilities/
   - Isolation pattern: https://v2.tauri.app/concept/inter-process-communication/isolation/
 - VS Code:
-  - Source: https://github.com/microsoft/vscode/tree/main/src/vs (`platform/commands`, `platform/actions`, `platform/contextkey`, `platform/keybinding`, `platform/quickinput`, `services/editor/common/editorResolverService.ts`, `platform/shell/node/shellEnv.ts`)
+  - Source: https://github.com/microsoft/vscode/tree/1.144.0/src/vs (`platform/commands`, `platform/actions`, `platform/contextkey`, `platform/keybinding`, `platform/quickinput`, `workbench/services/editor/common/editorResolverService.ts`, `platform/shell/node/shellEnv.ts`)
   - Extension runtime security: https://code.visualstudio.com/docs/configure/extensions/extension-runtime-security
-- Zed: https://zed.dev/docs/extensions/capabilities, https://github.com/zed-industries/zed/tree/main/crates/extension_api/wit
+- Zed: https://zed.dev/docs/extensions/capabilities, https://github.com/zed-industries/zed/tree/v1.26.2/crates/extension_api/wit
 - Lens:
   - Licensing and login: https://docs.lenshq.io/faq/subscription-and-licensing/
   - Login wall: https://github.com/lensapp/lens/issues/5444
   - Exec plugin PATH: https://github.com/lensapp/lens/issues/7956
   - Extensions in 2026.10: https://docs.lenshq.io/release-notes/lens-k8s-ide/lens-2026-10-51501/
-- Freelens: https://github.com/freelensapp/freelens (v2.0.0 notes; `kube-object.store.ts`, `cluster-frame-handler.ts`, `compute-unix-shell-environment.injectable.ts`)
+- Freelens: https://github.com/freelensapp/freelens/tree/v2.0.0 (release notes; `kube-object.store.ts`, `cluster-frame-handler.ts`, `compute-unix-shell-environment.injectable.ts`)
 - Headlamp:
-  - https://github.com/kubernetes-sigs/headlamp (`docs/development/architecture.md`, `app/electron/runCmd.ts`)
+  - https://github.com/kubernetes-sigs/headlamp/tree/v0.46.0 (`docs/development/architecture.md`, `app/electron/runCmd.ts`)
   - Exec plugins at first launch: https://github.com/kubernetes-sigs/headlamp/issues/7879
-- k9s: https://github.com/derailed/k9s (`internal/watch/factory.go`, `internal/config/plugin.go`, `internal/view/env.go`)
-- JET Pilot: https://github.com/unxsist/jet-pilot (`src-tauri/src/watch/`, `src-tauri/src/auth/`, `src-tauri/src/env_import.rs`, `src-tauri/src/port_forward/`)
+- k9s: https://github.com/derailed/k9s/tree/v0.51.0 (`internal/watch/factory.go`, `internal/config/plugin.go`, `internal/view/env.go`)
+- JET Pilot: https://github.com/unxsist/jet-pilot/tree/v2.2.3 (`src-tauri/src/watch/`, `src-tauri/src/auth/`, `src-tauri/src/env_import.rs`, `src-tauri/src/port_forward/`)
 - Aptakube: https://github.com/aptakube/aptakube/issues/499, /575, /384; context extension: https://aptakube.com/docs/context-extension
-- srelens (macOS memory measurement): https://github.com/srelens/srelens/blob/dev/docs/PERFORMANCE.md
+- srelens (macOS memory measurement): https://github.com/srelens/srelens/blob/2194e83ec53e/docs/PERFORMANCE.md
 - MCP security: https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http, https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/, https://ai.meta.com/blog/practical-ai-agent-security/
 - Kubernetes MCP server (a reference for its toolsets and read-only mode): https://github.com/containers/kubernetes-mcp-server/blob/v0.1.1/docs/configuration.md
