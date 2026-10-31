@@ -35,8 +35,9 @@ CI runs the same checks on every pull request.
 
 - **Correct code, no workarounds**: fix the cause; a temporary measure needs
   the maintainer's approval and an `@todo` at the site. Keep code modular,
-  easy to extend and no more complex than the problem
-  ([decision](docs/decisions/code-quality.md)).
+  easy to extend and no more complex than the problem. Leave nothing your
+  change made obsolete, and bring what it touches into line with these
+  rules ([decision](docs/decisions/code-quality.md)).
 - **Comments are minimal**: explain a non-obvious _why_, not _what_.
 - **Commits** follow [Conventional Commits](https://www.conventionalcommits.org)
   (`feat:`, `fix:`, `chore:`, `docs:`, `style:`, `refactor:`, `test:`).

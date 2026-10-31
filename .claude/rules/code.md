@@ -15,3 +15,7 @@
 - Do not overengineer: no abstraction for one caller, no option nobody asked
   for, no handling for cases that cannot happen. Validate at the boundary;
   trust internal invariants.
+- Leave nothing legacy. If a change makes code, tests, docs or config
+  obsolete, remove or update them in the same PR. If something the change
+  touches breaks these rules, bring it into line in the same PR, as its own
+  commit.

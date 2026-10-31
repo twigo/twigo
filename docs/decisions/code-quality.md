@@ -27,9 +27,16 @@ Decided 2026-10-31.
     handled; one that cannot is not written.
   - Inputs from outside are validated at the boundary, and the code inside
     trusts its own invariants.
+- **Nothing is left legacy.**
+  - When a change makes code, tests, docs or config obsolete, the same PR
+    removes or updates them.
+  - Anything the change touches that breaks these rules is brought into
+    line in the same PR, as its own commit.
+  - The codebase stays in one style, not in layers of old and new.
 
 ## Why
 
 Twigo is open source and will outlive any one change. A workaround is
 untested behaviour that the next change has to discover. An abstraction or
-an edge case that never occurs is code everyone reads and nobody needs.
+an edge case that never occurs is code everyone reads and nobody needs. Old
+code left next to new code teaches the next contributor the wrong pattern.
