@@ -81,12 +81,20 @@ async fn requests_wait_for_a_free_stream() {
     let (api, port) = api().await;
     let ns = namespace(&api, "streams").await;
     let path = format!("/api/v1/namespaces/{ns}/pods");
-    let mut watches = Vec::new();
-    for _ in 0..100 {
-        let watch = request::watch(&path, WatchFrom::ResourceVersion("0"), 120);
-        watches.push(api.request_stream(watch).await.unwrap());
-    }
-    assert_eq!(connections(port), 1, "one connection for 100 watches");
+    let opened = tokio::time::timeout(Duration::from_secs(30), async {
+        let mut watches = Vec::new();
+        for _ in 0..100 {
+            let watch = request::watch(&path, WatchFrom::ResourceVersion("0"), 120);
+            watches.push(api.request_stream(watch).await.unwrap());
+        }
+        watches
+    });
+    let mut watches = opened.await.expect("100 watches open within 30 s");
+    assert_eq!(
+        connections(port),
+        1,
+        "one connection for 100 watches; lsof counts the whole process, so this binary holds one test"
+    );
     let blocked = tokio::time::timeout(Duration::from_secs(5), version(&api)).await;
     assert!(blocked.is_err(), "the server's 100 streams are all in use");
 
