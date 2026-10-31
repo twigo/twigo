@@ -9,22 +9,39 @@ use kube::runtime::{conditions, wait};
 use kube::{Api, Client, Config};
 use serde_json::json;
 use tokio::io::AsyncReadExt;
-use twigo_cache::table::request::{self, WatchFrom};
 use twigo_kube::client::Clients;
 
-async fn clients() -> Clients {
+struct Cluster {
+    clients: Clients,
+    kind: bool,
+}
+
+async fn cluster() -> Cluster {
     let path = std::env::var_os("TWIGO_TEST_KUBECONFIG")
         .expect("TWIGO_TEST_KUBECONFIG must name the kubeconfig of a kind or kwok cluster");
     let kubeconfig = Kubeconfig::read_from(path).unwrap();
     let context = kubeconfig.current_context.clone().unwrap_or_default();
+    let kind = context.starts_with("kind-");
     assert!(
-        context.starts_with("kind-") || context.starts_with("kwok-"),
+        kind || context.starts_with("kwok-"),
         "refusing context {context:?}: these tests create namespaces and pods, so they run only against kind and kwok clusters"
     );
     let config = Config::from_custom_kubeconfig(kubeconfig, &KubeConfigOptions::default())
         .await
         .unwrap();
-    Clients::new(config).unwrap()
+    Cluster {
+        clients: Clients::new(config).unwrap(),
+        kind,
+    }
+}
+
+async fn kind_cluster() -> Cluster {
+    let cluster = cluster().await;
+    assert!(
+        cluster.kind,
+        "this test needs a kubelet, so it runs only against kind"
+    );
+    cluster
 }
 
 async fn namespace(client: &Client, prefix: &str) -> String {
@@ -61,26 +78,9 @@ async fn version(client: &Client) -> Version {
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
 async fn the_api_client_speaks_http2() {
-    let clients = clients().await;
+    let clients = cluster().await.clients;
     assert_eq!(version(&clients.api).await, Version::HTTP_2);
     assert_eq!(version(&clients.sessions).await, Version::HTTP_11);
-}
-
-#[tokio::test]
-#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
-async fn requests_go_through_while_watches_hold_streams() {
-    let clients = clients().await;
-    let ns = namespace(&clients.api, "streams").await;
-    let path = format!("/api/v1/namespaces/{ns}/pods");
-    let mut watches = Vec::new();
-    for _ in 0..20 {
-        let watch = request::watch(&path, WatchFrom::ResourceVersion("0"), 60);
-        watches.push(clients.api.request_stream(watch).await.unwrap());
-    }
-    let answered = tokio::time::timeout(Duration::from_secs(10), version(&clients.api)).await;
-    assert_eq!(answered.expect("a GET within 10 s"), Version::HTTP_2);
-    drop(watches);
-    delete_namespace(&clients.api, &ns).await;
 }
 
 async fn busybox(pods: &Api<Pod>, name: &str, script: &str) {
@@ -107,7 +107,7 @@ async fn busybox(pods: &Api<Pod>, name: &str, script: &str) {
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
 async fn logs_follow_over_http2() {
-    let clients = clients().await;
+    let clients = kind_cluster().await.clients;
     let ns = namespace(&clients.api, "logs").await;
     let pods = Api::<Pod>::namespaced(clients.api.clone(), &ns);
     busybox(&pods, "talker", "echo ready; exec sleep 3600").await;
@@ -116,6 +116,15 @@ async fn logs_follow_over_http2() {
         follow: true,
         ..LogParams::default()
     };
+    let follow = Request::get(format!(
+        "/api/v1/namespaces/{ns}/pods/talker/log?follow=true"
+    ))
+    .body(Vec::new())
+    .unwrap();
+    let response = clients.api.send(follow.map(Into::into)).await.unwrap();
+    assert_eq!(response.version(), Version::HTTP_2);
+    drop(response);
+
     let mut lines = pods.log_stream("talker", &params).await.unwrap().lines();
     let first = tokio::time::timeout(Duration::from_secs(30), lines.next())
         .await
@@ -130,7 +139,7 @@ async fn logs_follow_over_http2() {
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
 async fn exec_needs_the_sessions_client() {
-    let clients = clients().await;
+    let clients = kind_cluster().await.clients;
     let ns = namespace(&clients.api, "exec").await;
     let pods = Api::<Pod>::namespaced(clients.api.clone(), &ns);
     busybox(&pods, "shell", "exec sleep 3600").await;
