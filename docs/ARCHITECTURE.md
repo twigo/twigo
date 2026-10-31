@@ -4,7 +4,7 @@ Twigo is an open-source desktop IDE for Kubernetes: native, fast and keyboard-fi
 It aims to match Lens feature for feature without its login wall, its weight or its slowness on large clusters.
 This document fixes the architecture; the M0 spikes in `docs/spikes/` correct it wherever they measured otherwise.
 
-- Status: M0 in progress, steps 1 to 4 done, 2026-10-31
+- Status: M0 in progress, steps 1 to 5 done, step 6 in review, 2026-11-01
 - Stack: Tauri 2 (2.12.x), Rust with kube-rs (4.2.x, k8s-openapi 0.28), React 19 + TypeScript, Tailwind 4, shadcn/ui, pnpm monorepo
 - Reference code: the retired NATS IDE at `6ee327f`, whose history survives only in a local checkout; section 1 maps what carries over
 
@@ -12,20 +12,20 @@ This document fixes the architecture; the M0 spikes in `docs/spikes/` correct it
 
 ### 0.1 Decisions taken with the owner (2026-10-31)
 
-| #   | Decision                                                                                                                                                                                                                           | Consequence                                                                                                                                  |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1  | Kubernetes only. The NATS IDE is retired; NATS may come back as an extension.                                                                                                                                                      | One app in the monorepo, so there is no multi-domain shell. A NATS extension would later be the first real test of the API.                  |
-| D2  | The first public release ships on macOS and Linux. Windows follows directly after.                                                                                                                                                 | Every design choice must work on WebView2. Only CI, signing and the test matrix for Windows are deferred.                                    |
-| D3  | The extension ecosystem is open to third parties.                                                                                                                                                                                  | Isolation, capability grants, signing and a versioned API are needed from the first version of the API.                                      |
-| D4  | Extension logic runs as WASM components inside the Rust core (wasmtime + WIT). The core renders declarative UI. Sandboxed iframes cover views that cannot be declared.                                                             | Credentials never leave Rust. Extensions keep running when the webview reloads. Section 5.3.                                                 |
-| D5  | The core is an MCP server first (MVP). An agent panel over ACP that runs existing agents (Claude Code, Codex, Gemini CLI) comes later. Twigo has no LLM client of its own and needs no model keys.                                 | One policy layer covers the UI, extensions and agents. Section 6.6.                                                                          |
-| D6  | One space per cluster. Space tabs in the title bar each hold one context, or a group of contexts for multi-cluster tables, with their own explorer, editors and layout. Comparing across spaces takes an explicit Compare command. | The window chrome always says which cluster you are in. Section 4.2.                                                                         |
-| D7  | Lists come from server-side Table watches (`as=Table`, `includeObject=Metadata`). Metadata-only watchers serve only as indexes (namespaces, owners, CRDs). The full object is fetched when it is opened.                           | **This replaces the brief's "metadata-only watchers for lists"**: `PartialObjectMetadata` has no Ready, Status, Restarts or Node. Section 3. |
-| D8  | Good design is a requirement. The legacy design language (tokens, density, restraint) carries over.                                                                                                                                | Section 4.9.                                                                                                                                 |
-| D9  | Licence: Apache-2.0.                                                                                                                                                                                                               | A patent grant for contributors and extension authors, and the CNCF default. `LICENSE` sits at the repository root.                          |
-| D10 | Bundle identifier `io.twigo.ide`. The repository and its releases live at github.com/twigo/twigo, which replaced the legacy repository.                                                                                            | A new updater key; the endpoint stays that repository's `latest.json`. Section 1.                                                            |
-| D11 | Extension manifests are `extension.json`, checked against a published JSON Schema.                                                                                                                                                 | Validation and completion in any editor. Section 5.4.                                                                                        |
-| D12 | Kubernetes 1.33 and later. 1.32 left upstream support on 2026-02-28 and will be out of date by the time Twigo ships; older releases come back only if users ask.                                                                   | The test matrix runs from 1.33 to the newest release kind ships. Section 3.2.                                                                |
+| #   | Decision                                                                                                                                                                                                                                                     | Consequence                                                                                                                                  |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | Kubernetes only. The NATS IDE is retired; NATS may come back as an extension.                                                                                                                                                                                | One app in the monorepo, so there is no multi-domain shell. A NATS extension would later be the first real test of the API.                  |
+| D2  | The first public release ships on macOS and Linux. Windows follows directly after.                                                                                                                                                                           | Every design choice must work on WebView2. Only CI, signing and the test matrix for Windows are deferred.                                    |
+| D3  | The extension ecosystem is open to third parties.                                                                                                                                                                                                            | Isolation, capability grants, signing and a versioned API are needed from the first version of the API.                                      |
+| D4  | Extension logic runs as WASM components inside the Rust core (wasmtime + WIT). The core renders declarative UI. Sandboxed iframes cover views that cannot be declared.                                                                                       | Credentials never leave Rust. Extensions keep running when the webview reloads. Section 5.3.                                                 |
+| D5  | The core is an MCP server first (MVP). An agent panel over ACP that runs existing agents (Claude Code, Codex, Gemini CLI) comes later. Twigo has no LLM client of its own and needs no model keys.                                                           | One policy layer covers the UI, extensions and agents. Section 6.6.                                                                          |
+| D6  | One space per cluster. A rail of space tiles at the left, as Lens's hotbar, each holds one context, or a group of contexts for multi-cluster tables, with their own explorer, editors and layout. Comparing across spaces takes an explicit Compare command. | The title bar's breadcrumb always says which cluster and namespace you are in. Section 4.2.                                                  |
+| D7  | Lists come from server-side Table watches (`as=Table`, `includeObject=Metadata`). Metadata-only watchers serve only as indexes (namespaces, owners, CRDs). The full object is fetched when it is opened.                                                     | **This replaces the brief's "metadata-only watchers for lists"**: `PartialObjectMetadata` has no Ready, Status, Restarts or Node. Section 3. |
+| D8  | Good design is a requirement. The legacy design language (tokens, density, restraint) carries over.                                                                                                                                                          | Section 4.9.                                                                                                                                 |
+| D9  | Licence: Apache-2.0.                                                                                                                                                                                                                                         | A patent grant for contributors and extension authors, and the CNCF default. `LICENSE` sits at the repository root.                          |
+| D10 | Bundle identifier `io.twigo.ide`. The repository and its releases live at github.com/twigo/twigo, which replaced the legacy repository.                                                                                                                      | A new updater key; the endpoint stays that repository's `latest.json`. Section 1.                                                            |
+| D11 | Extension manifests are `extension.json`, checked against a published JSON Schema.                                                                                                                                                                           | Validation and completion in any editor. Section 5.4.                                                                                        |
+| D12 | Kubernetes 1.33 and later. 1.32 left upstream support on 2026-02-28 and will be out of date by the time Twigo ships; older releases come back only if users ask.                                                                                             | The test matrix runs from 1.33 to the newest release kind ships. Section 3.2.                                                                |
 
 ### 0.2 Principles
 
@@ -494,30 +494,31 @@ The bench also replays the cases that broke other clients, and one that loopback
 ### 4.1 Parts (VS Code layout)
 
 ```
-┌ ● prod-eu 🔒 │ staging │ dev+qa │ + ───────────────────────── title bar: space tabs ┐
-├────┬──────────────┬───────────────────────────────────────┬───────────────────────┤
-│ ▣  │ EXPLORER     │ ⎈ pod/api-7f9 │ deploy/api │ logs api │ INSPECTOR            │
-│ ⌕  │ ▾ Workloads  │                                       │ (secondary side bar) │
-│ ⇄  │   Pods  2.1k │   editor groups (dockview grid)       │ details of the       │
-│ ⎔  │   Deploym.   │   preview tabs · splits · drag        │ selection; later     │
-│ ⚙  │ ▸ Network    │                                       │ the agent panel      │
-│    │ ▸ CRDs       ├───────────────────────────────────────┤                      │
-│    │              │ PANEL: Terminal · Events · Output · Agent activity           │
-├────┴──────────────┴──────────────────────────────────────────────────────────────┤
+┌ ●●● ● prod-eu 🔒 ▾ › payments ▾      ⌕ Search prod-eu      ◧ ▭ ◨ ── title bar ─┐
+├━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ strip: context colour ┤
+│ PE │╭ Explorer ───╮╭ ⎈ pod/api-7f9 │ deploy/api ─────────╮╭ Inspector ─────────╮│
+│ ST ││ ▾ Workloads ││                                      ││ details of the     ││
+│ DQ ││   Pods  2.1k││   editor groups (dockview grid)      ││ selection; later   ││
+│ +  ││   Deploym.  ││   preview tabs · splits · drag       ││ the agent panel    ││
+│    ││ ▸ Network   │╰──────────────────────────────────────╯│                    ││
+│    ││ ▸ CRDs      │╭ Terminal · Events · Output · Agent ─╮ │                    ││
+│    │╰─────────────╯╰─────────────────────────────────────╯ ╰────────────────────╯│
+├────┴─────────────────────────────────────────────────────────────────────────────┤
 │ prod-eu · ns: payments · READ-ONLY · ⇄ 3 forwards · syncing 2/9     status bar   │
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-| Part               | Holds                                                                                                 |
-| ------------------ | ----------------------------------------------------------------------------------------------------- |
-| Title bar          | Space tabs (D6), drag region. Native traffic lights on macOS, as in legacy.                           |
-| Activity bar       | View containers: Explorer, Port forwards, Helm, Extensions, plus containers contributed by extensions |
-| Primary side bar   | Views of the active container: resource tree, namespace scope, saved filters                          |
-| Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups                       |
-| Panel              | Terminal (pty), cluster Events stream, Output (Twigo logs per channel), Agent activity (audit, 6.6)   |
-| Secondary side bar | Inspector (details of the selected row without opening it); the ACP agent panel later                 |
-| Status bar         | Context, namespace, policy mode, port-forward items, sync state, extension items                      |
+| Part               | Holds                                                                                                                                                        |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Title bar          | Breadcrumb of the space and its namespace scope, search that opens quick access, part toggles; drag region; native traffic lights on macOS                   |
+| Space rail         | Tiles of the open spaces (D6, Lens's hotbar), ⌘1..9 by position, a button that opens any context                                                             |
+| Primary side bar   | View containers as tabs in its header (Explorer, Port forwards, Helm, Extensions and contributed ones); the active one's views: resource tree, saved filters |
+| Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups                                                                              |
+| Panel              | Terminal (pty), cluster Events stream, Output (Twigo logs per channel), Agent activity (audit, 6.6)                                                          |
+| Secondary side bar | Inspector (details of the selected row without opening it); the ACP agent panel later                                                                        |
+| Status bar         | Context, namespace, policy mode, port-forward items, sync state, extension items                                                                             |
 
+The parts are islands: cards on the shell with 6 px gaps, as JetBrains Islands and VS Code's 2026 layout ([research](research/workbench-chrome.md)).
 Views are descriptors (ID, title, container, `when`, provider), so the user can move a view to another container, VS Code style.
 The layout per space is persisted (dockview `toJSON` plus part sizes and visibility).
 
@@ -525,10 +526,10 @@ The layout per space is persisted (dockview `toJSON` plus part sizes and visibil
 
 - A space has an ID, a list of contexts (one or more), a namespace scope and a persisted layout: open inputs, explorer state, view placement.
 - Switching spaces moves the whole workbench: explorer, editors, status bar, policy badge.
-  The selected space uses legacy's selected-tab chip (`--tab-selected-bg`, `--tab-selected-border`).
-  A locked context shows 🔒 on its tab.
-  An optional user-chosen dot from the context's metadata (5.5) is the only extra colour.
-  It is a filled 8 px dot before the name, from six tokens: red, orange, yellow, green, blue and purple.
+  The rail shows a tile per open space: two letters on the tint of its context's colour, the active one ringed and marked, a lock badge on a locked context.
+  The title bar's breadcrumb names the active space and its namespace scope and opens their pickers.
+  An optional user-chosen colour from the context's metadata (5.5) is the only extra colour, from six tokens: red, orange, yellow, green, blue and purple.
+  It tints the tile, puts a filled 8 px dot before the name in the breadcrumb, and draws a 2 px strip under the title bar.
   A space with several contexts shows none.
 - Every editor in a space belongs to that space's contexts.
   Opening another cluster's object means switching spaces or running **Compare with…**, which opens a diff editor against an object picked from any context and says so in its title.
@@ -536,7 +537,7 @@ The layout per space is persisted (dockview `toJSON` plus part sizes and visibil
   Its editors still each carry one context, shown as a chip on the tab.
 - A space connects lazily on its first activation.
   A background space's sessions (port-forwards, exec, logs) survive; its list subscriptions linger, then stop (3.2).
-- Shortcuts: ⌘1..9 selects a space, `ctx ` in quick access switches or creates one, ⌘⇧N opens a space in a new window.
+- Shortcuts: ⌘1..9 selects a space by its place in the rail; the rail's button and `ctx ` in quick access switch to a space or open one for any context; ⌘⇧N opens a space in a new window.
 
 ### 4.3 Editor model
 
@@ -685,15 +686,17 @@ It moves into `packages/ui` unchanged and gets extended for the new views.
     Changing that pair re-skins the app.
   - Neutrals are tinted with the brand hue.
     Light-mode content surfaces stay white.
-    Dark mode has a surface ladder: editor 0.135, background 0.15, side bars 0.188, card 0.215, popover 0.235.
+    Dark mode has a surface ladder: the parts (editor, side bars, panel) 0.195, card 0.215, the shell 0.255, popover 0.275; content is darkest, as JetBrains Islands does.
   - Hover and selection are alpha overlays, so they work on any surface.
   - A two-layer focus ring.
   - Hairline borders in alpha tiers.
-  - The status bar uses brand ink: deep, never neon.
+  - The status bar is shell with quiet text; colour is left for the cluster.
 - **Type.**
-  - Inter Variable with `cv01` and `ss03`; tabular numbers for every metric column.
-  - Labels at weight 510, headings at 590.
-  - 13 px base, dense rows.
+  - Inter Variable with `cv01` and `ss03`, or the system UI font: chosen on live variants; tabular numbers for every metric column.
+  - Two weights, 400 and 600, as VS Code and JetBrains; 13 px base, 12 px secondary, 11 px labels; sentence case, no capitals.
+  - Dense rows: 22 px in trees, 24 px in tables.
+- **Surfaces.**
+  The parts are islands on the shell (4.1), and editor tabs connect to their editor: the active tab takes the editor's surface.
 - **Motion.**
   An instant-in, gentle-out ladder (`--dur-instant` 100 ms to `--dur-slow` 300 ms).
   Anything bound to a key is instant.
@@ -720,6 +723,10 @@ It moves into `packages/ui` unchanged and gets extended for the new views.
   - the context dot is a filled dot before the name (4.2);
   - Kubernetes kinds use Lucide icons only, mapped by resource in `packages/kube`.
     Custom resources get one generic icon.
+- **Settled with the owner** on 2026-11-01, after [research](research/workbench-chrome.md) into Kubernetes clients, IDEs and tools with many targets:
+  - a rail of space tiles replaces the space tabs and the activity bar (4.2);
+  - the title bar is a breadcrumb, a search and the part toggles;
+  - islands, connected tabs, two weights and sentence case.
 
 ## 5. Commands, keybindings and extensions
 
