@@ -48,7 +48,7 @@ const boundaries = Object.entries(MAY_IMPORT).flatMap(([pkg, allowed]) => {
 });
 
 export default defineConfig(
-  globalIgnores(["**/dist", "target", "apps/desktop/src-tauri"]),
+  globalIgnores(["**/dist", "target"]),
   {
     files: ["**/*.{ts,tsx}"],
     extends: [
@@ -69,11 +69,7 @@ export default defineConfig(
       "react-refresh": reactRefresh,
     },
     settings: {
-      "import-x/resolver-next": [
-        createTypeScriptImportResolver({
-          project: ["apps/*/tsconfig.json", "packages/*/tsconfig.json"],
-        }),
-      ],
+      "import-x/resolver-next": [createTypeScriptImportResolver()],
     },
     rules: {
       "import-x/no-cycle": ["error", { ignoreExternal: true }],
