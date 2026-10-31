@@ -29,7 +29,6 @@ body:
       label: Operating system
       options:
         - macOS
-        - Windows
         - Linux
     validations:
       required: true
