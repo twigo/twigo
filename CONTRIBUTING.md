@@ -28,7 +28,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-CI runs the same checks on every pull request.
+CI runs the same checks on every pull request; the Rust checks skip a change to Markdown alone.
 
 ## Conventions
 

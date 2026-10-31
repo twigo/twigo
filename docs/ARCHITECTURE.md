@@ -477,13 +477,13 @@ CI checks them on a kwok cluster, which simulates nodes and pods without kubelet
 
 The memory numbers count WebKit's `com.apple.WebKit.*` processes.
 They are children of launchd, not of the app, so measuring per process under-reports a Tauri app by about half.
-The bench also replays the cases that broke other clients:
+The bench also replays the cases that broke other clients, and one that loopback cannot show:
 
 - all namespaces on 30k pods;
 - a ConfigMap with 2,000 keys;
 - 25 contexts whose exec plugins time out;
 - an API-server restart during a watch;
-- packet loss on the one HTTP/2 connection, for head-of-line blocking, which loopback cannot show ([HTTP/2 spike](spikes/http2.md)).
+- packet loss on the one HTTP/2 connection, for head-of-line blocking ([HTTP/2 spike](spikes/http2.md)).
 
 ## 4. Workbench and UI model
 

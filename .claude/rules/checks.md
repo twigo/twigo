@@ -8,7 +8,7 @@
 - The app: `pnpm tauri dev`; the CI build is `pnpm tauri build --debug --no-bundle`.
 - Live tests against kind, one release: `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/test-matrix.sh 1.37`.
   Without an argument it runs every supported release.
-- A cluster to keep: `kubeconfig=$(bench/cluster.sh up <name> 1.37 | tail -1)`, then `TWIGO_TEST_KUBECONFIG=$kubeconfig cargo test -p twigo-cache -p twigo-kube -- --ignored`, and `bench/cluster.sh down <name>` when done.
+- A cluster to keep: `export TWIGO_BENCH_DIR=$(mktemp -d)`, `kubeconfig=$(bench/cluster.sh up <name> 1.37 | tail -1)`, then `TWIGO_TEST_KUBECONFIG=$kubeconfig cargo test -p twigo-cache -p twigo-kube -- --ignored`, and `bench/cluster.sh down <name>` with the same `TWIGO_BENCH_DIR` when done.
 - The IPC bench: `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/ipc/run.sh frames` or `bench/ipc/run.sh cost 3` on macOS, and `bench/ipc/linux.sh frames` for WebKitGTK in Docker.
   Each run opens a window and exits by itself.
 - Before a push, run only the checks the change affects.
