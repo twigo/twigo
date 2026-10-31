@@ -8,6 +8,7 @@ on:
       - rust-toolchain.toml
       - crates/twigo-cache/**
       - crates/twigo-kube/**
+      - crates/twigo-policy/**
       - bench/**
       - .github/workflows/kubernetes.yml
   push:
