@@ -290,7 +290,8 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
     A request beyond that waits for a free stream, and hyper opens no second
     connection. Long-lived streams therefore get budgets well below the
     limit: watches (default 24) and followed logs (default 32). The rest is
-    left for requests.
+    left for requests, which carry a timeout and show `queued` while they
+    wait for a stream.
   - Sessions, meaning exec, attach and port-forward connections, have their
     own budget (default 64).
   - A proxy or server that answers HTTP/1.1 turns every stream back into a
@@ -305,8 +306,11 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
 - **Dead connections.** kube 4.0 removed the global read timeout, and a watch
   can stall silently after sleep or a network change.
   - Every watch sets `timeoutSeconds` and uses TCP keepalive.
-  - The HTTP/2 connection sends keep-alive pings, since one dead connection
-    now stalls every watch of the cluster.
+  - The HTTP/2 connection sends keep-alive pings that time out before the
+    idle timer, since one dead connection now stalls every watch of the
+    cluster.
+  - The idle timer and the wake handler rebuild the cluster's HTTP/2 client:
+    its pool keeps a dead connection that still looks open.
   - An idle timer expects an event or a bookmark every couple of minutes and
     reconnects when none arrives.
   - On wake from sleep or a network change (OS notifications), every
@@ -1109,9 +1113,11 @@ blocking `Command::output()` and no timeout, verified in
 device codes disappear. In our probe it ran the plugin three times while
 building one client. Twigo therefore owns credentials:
 
-- **Clients.** Built with kube's `ClientBuilder` and its layers (base URI,
-  TLS connector, our auth layer). The exec block is stripped from the config
-  first.
+- **Clients.** Two per context (3.2): requests, watches and logs go through
+  kube's `Client::new` over its base URI and header layers, our auth layer
+  and an HTTP/2 connector; exec, attach and port-forward go through kube's
+  `ClientBuilder` over HTTP/1.1. Both carry the credential's expiry. The
+  exec block is stripped from the config first.
 - **The credential runner.**
   - Uses `tokio::process` with the shell environment, null stdin and its own
     process group, and caps stdout at 1 MiB.
@@ -1172,7 +1178,8 @@ building one client. Twigo therefore owns credentials:
 
 **One gate, in Rust, below every caller.**
 
-- The policy check is a tower layer inside every per-context kube `Client`.
+- The policy check is a tower layer inside both per-context kube clients
+  (3.2).
   The UI, extensions (via `host-kube`) and the MCP server have no other way
   to reach a cluster, so they cannot get around it. `host-http` refuses any
   host and port that belongs to a catalog API server.
@@ -1228,7 +1235,7 @@ building one client. Twigo therefore owns credentials:
   - Ordinary requests and watches go through the same per-context client
     and policy layer.
   - Upgrade requests are checked by the same classes, then forwarded with
-    the actor's `Client::send` and spliced with `hyper::upgrade::on`, which
+    the actor's HTTP/1.1 client and spliced with `hyper::upgrade::on`, which
     is all kube's own `connect` does (`kube-client/src/client/mod.rs`). The
     raw upgraded stream passes through whatever the protocol: WebSocket,
     SPDY, or SPDY over WebSocket. Auth, the 401 refresh, the proxy connector
@@ -1471,19 +1478,19 @@ JetBrains).
 
 ### 7.3 Key risks
 
-| Risk                                                                                                                            | Impact                                                                             | Mitigation                                                                                                                                                                                                                                                         |
-| ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| One HTTP/2 connection carries every request, watch and log of a cluster                                                         | A dead or slow connection stalls them all; requests wait once 100 streams are open | HTTP/2 keep-alive pings detect a dead connection; long-lived streams stay within budgets below the server's stream limit; the hub reads every stream at once, so one view cannot hold the connection's flow-control window (3.2, [HTTP/2 spike](spikes/http2.md)). |
-| Table watch edge cases: columns only in the first event, conversion fallbacks, aggregated APIs without Table, frozen date cells | Wrong or missing columns                                                           | Decoder conformance tests against kind 1.33 to 1.37 plus aggregated API fixtures; fall back to metadata columns.                                                                                                                                                   |
-| WebKit and WebKitGTK performance (virtualized tables, Monaco, WebGL context loss)                                               | Linux feels slower than macOS                                                      | The budgets run on Linux CI too. DOM fallback for xterm; Monaco loads lazily.                                                                                                                                                                                      |
-| Component-model maturity (WASI 0.3 async is new; jco output is large; TinyGo limits)                                            | Extension authoring friction                                                       | The host drives async through imports; the Rust SDK comes first; TS SDK after the API freeze; the Segla extension proves the model before it opens.                                                                                                                |
-| Exec auth diversity: device code, browser, Teleport, Pinniped, SSO chains                                                       | "Can't connect" in the first minute                                                | A test matrix with EKS, GKE, AKS, kubelogin (all modes), oidc-login and Segla; interactive classification; a visible sign-in panel.                                                                                                                                |
-| Sandboxed-frame IPC isolation on Linux                                                                                          | A malicious tier-2 frame invokes commands                                          | An M0 spike proves the frame cannot reach the invoke key; until then, tier 2 stays off on Linux.                                                                                                                                                                   |
-| Prompt injection through cluster text; approval fatigue                                                                         | An agent causes a write                                                            | Read-only MCP in the MVP; the rule of two; approvals in Twigo's UI with a diff; audit.                                                                                                                                                                             |
-| Scope: chasing Lens's list feature by feature                                                                                   | A late, shallow MVP                                                                | The MVP list above is the contract. Everything else waits for v1.x.                                                                                                                                                                                                |
-| Extension API churn after third parties adopt it                                                                                | Broken extensions (the Lens history)                                               | `0.x` stays private until 1.0; versioned WIT with every old binding kept; the fixture extension in CI.                                                                                                                                                             |
-| Corporate networks: proxies, `NO_PROXY`, SOCKS bastions                                                                         | Works at home, fails at work                                                       | No local proxy in the UI path; our connector honours `NO_PROXY` and the OS proxy settings (6.3); a proxy matrix in integration tests.                                                                                                                              |
-| Measuring memory wrongly on macOS                                                                                               | False confidence                                                                   | The bench counts the WebKit processes (3.8).                                                                                                                                                                                                                       |
+| Risk                                                                                                                            | Impact                                                                             | Mitigation                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| One HTTP/2 connection carries every request, watch and log of a cluster                                                         | A dead or slow connection stalls them all; requests wait once 100 streams are open | Keep-alive pings, and the idle timer and wake handler rebuild the client; long-lived streams stay within budgets below the server's stream limit, and requests time out into `queued`; the hub reads every stream at once (3.2, [HTTP/2 spike](spikes/http2.md)). |
+| Table watch edge cases: columns only in the first event, conversion fallbacks, aggregated APIs without Table, frozen date cells | Wrong or missing columns                                                           | Decoder conformance tests against kind 1.33 to 1.37 plus aggregated API fixtures; fall back to metadata columns.                                                                                                                                                  |
+| WebKit and WebKitGTK performance (virtualized tables, Monaco, WebGL context loss)                                               | Linux feels slower than macOS                                                      | The budgets run on Linux CI too. DOM fallback for xterm; Monaco loads lazily.                                                                                                                                                                                     |
+| Component-model maturity (WASI 0.3 async is new; jco output is large; TinyGo limits)                                            | Extension authoring friction                                                       | The host drives async through imports; the Rust SDK comes first; TS SDK after the API freeze; the Segla extension proves the model before it opens.                                                                                                               |
+| Exec auth diversity: device code, browser, Teleport, Pinniped, SSO chains                                                       | "Can't connect" in the first minute                                                | A test matrix with EKS, GKE, AKS, kubelogin (all modes), oidc-login and Segla; interactive classification; a visible sign-in panel.                                                                                                                               |
+| Sandboxed-frame IPC isolation on Linux                                                                                          | A malicious tier-2 frame invokes commands                                          | An M0 spike proves the frame cannot reach the invoke key; until then, tier 2 stays off on Linux.                                                                                                                                                                  |
+| Prompt injection through cluster text; approval fatigue                                                                         | An agent causes a write                                                            | Read-only MCP in the MVP; the rule of two; approvals in Twigo's UI with a diff; audit.                                                                                                                                                                            |
+| Scope: chasing Lens's list feature by feature                                                                                   | A late, shallow MVP                                                                | The MVP list above is the contract. Everything else waits for v1.x.                                                                                                                                                                                               |
+| Extension API churn after third parties adopt it                                                                                | Broken extensions (the Lens history)                                               | `0.x` stays private until 1.0; versioned WIT with every old binding kept; the fixture extension in CI.                                                                                                                                                            |
+| Corporate networks: proxies, `NO_PROXY`, SOCKS bastions                                                                         | Works at home, fails at work                                                       | No local proxy in the UI path; our connector honours `NO_PROXY` and the OS proxy settings (6.3); a proxy matrix in integration tests.                                                                                                                             |
+| Measuring memory wrongly on macOS                                                                                               | False confidence                                                                   | The bench counts the WebKit processes (3.8).                                                                                                                                                                                                                      |
 
 ### 7.4 Milestones
 
