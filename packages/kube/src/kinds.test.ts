@@ -27,8 +27,11 @@ test("recorded discovery fills Lens's sections, then custom groups", () => {
     "Storage",
     "Access Control",
     "Cluster",
-    "kwok.x-k8s.io",
+    "Custom Resources",
   ]);
+  expect(result[result.length - 1]?.groups.map((group) => group.title)).toEqual(
+    ["kwok.x-k8s.io"],
+  );
   expect(result[0]?.items.map((item) => item.gvr.resource)).toEqual([
     "pods",
     "deployments",

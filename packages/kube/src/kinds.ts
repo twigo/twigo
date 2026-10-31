@@ -151,12 +151,14 @@ const SECTIONS: readonly { title: string; resources: readonly string[] }[] = [
 export interface Section<T> {
   readonly title: string;
   readonly items: readonly T[];
+  /** Custom resources come in one section, a group per API group, as in Lens. */
+  readonly groups: readonly Section<T>[];
 }
 
 /**
- * The explorer's sections: the built-in ones in Lens's order, then custom
- * resources by group. Other built-in resources stay out of the tree; quick
- * access still opens them.
+ * The explorer's sections: the built-in ones in Lens's order, then Custom
+ * Resources by API group. Other built-in resources stay out of the tree;
+ * quick access still opens them.
  */
 export function sections<T extends { readonly gvr: Gvr }>(
   resources: readonly T[],
@@ -170,6 +172,7 @@ export function sections<T extends { readonly gvr: Gvr }>(
   const builtIn = SECTIONS.map(({ title, resources: keys }) => ({
     title,
     items: keys.flatMap((key) => byKey.get(key) ?? []),
+    groups: [],
   }));
   const custom = new Map<string, T[]>();
   for (const resource of resources) {
@@ -179,12 +182,15 @@ export function sections<T extends { readonly gvr: Gvr }>(
       resource,
     ]);
   }
+  const groups = [...custom.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([group, items]) => ({ title: group, items, groups: [] }));
   return [
-    ...builtIn,
-    ...[...custom.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([group, items]) => ({ title: group, items })),
-  ].filter((section) => section.items.length > 0);
+    ...builtIn.filter((section) => section.items.length > 0),
+    ...(groups.length > 0
+      ? [{ title: "Custom Resources", items: [], groups }]
+      : []),
+  ];
 }
 
 /**

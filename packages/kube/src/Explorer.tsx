@@ -6,7 +6,7 @@ import { cn, EmptyState, Skeleton } from "@twigo/ui";
 import { useChanges, useWorkbench } from "@twigo/workbench";
 import { useResources, type Discovery } from "./discovery";
 import { KindIcon } from "./KindIcon";
-import { pluralTitle, sections } from "./kinds";
+import { pluralTitle, sections, type Section } from "./kinds";
 import { listUri } from "./uri";
 
 /**
@@ -57,8 +57,8 @@ function SpaceExplorer({
         <ExplorerSection
           key={section.title}
           space={space}
-          title={section.title}
-          items={section.items}
+          section={section}
+          depth={0}
         />
       ))}
     </div>
@@ -67,15 +67,16 @@ function SpaceExplorer({
 
 function ExplorerSection({
   space,
-  title,
-  items,
+  section,
+  depth,
 }: {
   space: string;
-  title: string;
-  items: readonly Resource[];
+  section: Section<Resource>;
+  depth: number;
 }) {
   const { editors } = useWorkbench();
   useChanges(editors.changes);
+  const { title, items, groups } = section;
   const [open, setOpen] = useState(title === "Workloads");
   const Chevron = open ? ChevronDown : ChevronRight;
   return (
@@ -85,13 +86,22 @@ function ExplorerSection({
         onClick={() => {
           setOpen(!open);
         }}
-        className="flex h-[22px] w-full items-center gap-1 px-2 text-left text-[13px] font-medium hover:bg-row-hover"
+        style={{ paddingLeft: 8 + depth * 16 }}
+        className="flex h-[22px] w-full items-center gap-1 pr-2 text-left text-[13px] font-medium hover:bg-row-hover"
       >
         <Chevron className="size-3.5 shrink-0 text-muted-foreground" />
         {title}
       </button>
       {open && (
         <div role="group">
+          {groups.map((group) => (
+            <ExplorerSection
+              key={group.title}
+              space={space}
+              section={group}
+              depth={depth + 1}
+            />
+          ))}
           {items.map((resource) => {
             const uri = listUri({ space, gvr: resource.gvr });
             return (
@@ -106,8 +116,9 @@ function ExplorerSection({
                 onDoubleClick={() => {
                   editors.open(uri);
                 }}
+                style={{ paddingLeft: 28 + depth * 16 }}
                 className={cn(
-                  "flex h-[22px] w-full items-center gap-1.5 pr-2 pl-7 text-left text-[13px] hover:bg-row-hover",
+                  "flex h-[22px] w-full items-center gap-1.5 pr-2 text-left text-[13px] hover:bg-row-hover",
                   editors.active === uri && "bg-selected-unfocused",
                 )}
               >
