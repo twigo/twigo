@@ -49,7 +49,7 @@ Two questions, from 6.7 and 7.3:
     A request without a body carries no source, so it calls `probe_without_body`, which counts as `frame:no-body`; the two such requests share that source, and their answers in the report tell them apart.
 - A second after the probe reports, the window invokes `probe` itself, then checks the hook ([below](#decision-brownfield)).
 - Rust counts `probe` calls per source.
-  A run fails unless the control and the window ran it once each and no `frame:` source ran it at all.
+  A run fails unless the control and the window ran it once each, no `frame:` source ran it at all, and the hook check gives its pattern's answers ([below](#decision-brownfield)).
   The control shows that a frame which gets through is counted.
 - The failures were seen on purpose on 2026-10-31 on macOS, brownfield unless named:
   - with the control's source renamed `frame:control`, the run exits 1 and names that source;
@@ -132,7 +132,7 @@ Runs on 2026-10-31, both patterns each:
 
 - macOS: `bench/ipc/run.sh frames 2`, WebKit of macOS 27.0, two runs per pattern;
 - WebKitGTK: `bench/ipc/linux.sh frames 2`, WebKitGTK 2.52.6 on Ubuntu 24.04.5 (aarch64) under Xvfb, in Docker Desktop on the same Mac, two runs per pattern;
-- CI: the `Webview` workflow on PR #9, WebKitGTK 2.52.6 on GitHub's ubuntu-24.04 (x86_64) under Xvfb, one run per pattern ([run 41233393248](https://github.com/twigo/twigo/actions/runs/41233393248)).
+- CI: the `Webview` workflow on PR #9, WebKitGTK 2.52.6 on GitHub's ubuntu-24.04 (x86_64) under Xvfb, one run per pattern ([run 41235234365](https://github.com/twigo/twigo/actions/runs/41235234365)).
 
 In every run the control and the window ran `probe` once each, and no `frame:` source ran it.
 
@@ -197,7 +197,8 @@ Tauri serves the isolation frame from `isolation-<uuid>://localhost`, with a UUI
 export TWIGO_BENCH_DIR=$(mktemp -d)
 bench/ipc/run.sh cost 5      # macOS, release builds; opens a window per run
 bench/ipc/run.sh frames 2    # macOS
-TWIGO_BENCH_DIR=$(mktemp -d) bench/ipc/linux.sh frames 2  # WebKitGTK in Docker, results apart
+linux=$(mktemp -d)
+TWIGO_BENCH_DIR=$linux bench/ipc/linux.sh frames 2  # WebKitGTK in Docker
 ```
 
-Each run leaves `<mode>-<pattern>-<run>.json` and `.log` in `$TWIGO_BENCH_DIR/ipc`.
+Each run leaves `<mode>-<pattern>-<run>.json` and `.log` in `$TWIGO_BENCH_DIR/ipc`, the Linux runs in `$linux/ipc`.
