@@ -118,8 +118,8 @@ A cold `api` client opens one TCP and TLS connection per concurrent first reques
 - kube-apiserver allows 100 concurrent streams per HTTP/2 connection unless `--http2-max-streams-per-connection` is set ([secure_serving.go](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/server/secure_serving.go#L191-L199)).
   Its flag defaults to 0 ([serving.go](https://github.com/kubernetes/kubernetes/blob/v1.37.0/pkg/kubeapiserver/options/serving.go#L27-L38)).
   The 1,000 of `RecommendedOptions` applies only to kube-apiserver's own connections to aggregated servers.
-- Measured, in the example and in `requests_wait_for_a_free_stream`: with 99 open watches a GET goes through.
-  With 100, it waits more than 10 s, then goes through once one watch closes, all on one TCP connection.
+- Measured in `requests_wait_for_a_free_stream`, on every release in CI: with 100 open watches a GET still waits after 5 s.
+  Once one watch closes, it goes through over HTTP/2, all on one TCP connection.
 - hyper-util hands out the shared HTTP/2 connection whenever it is open, without counting streams.
   It queues the request instead of opening a second connection, and it exposes neither the server's limit nor the wait.
 - So Twigo counts streams itself:
