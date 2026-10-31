@@ -21,3 +21,5 @@ export * from "./components/sparkline";
 export { sparkSpan } from "./lib/sparkline";
 export type { SparkPoint } from "./lib/sparkline";
 export { cn } from "./lib/cn";
+export * from "./components/toast";
+export * from "./components/notify";
