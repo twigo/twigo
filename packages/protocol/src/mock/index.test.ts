@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { ListBatch, ListQuery } from "../generated";
+import type { KeyboardLayout, ListBatch, ListQuery } from "../generated";
 import { createMockBackend, type MockScenario } from "./index";
 
 function query(rest: Partial<ListQuery> = {}): ListQuery {
@@ -61,6 +61,22 @@ test("lists the spaces with their context colours", async () => {
     ["dev", "green"],
     ["dev+qa", "green"],
   ]);
+});
+
+test("answers with the chosen keyboard layout, US by default, and never changes it", async () => {
+  const typed = async (backend: ReturnType<typeof createMockBackend>) => {
+    const changes: KeyboardLayout[] = [];
+    const layout = backend.subscribe("keyboard_layout_watch", null, (l) =>
+      changes.push(l),
+    );
+    await vi.advanceTimersByTimeAsync(5000);
+    return { keyQ: (await layout).keys.KeyQ?.value, changes };
+  };
+  expect(await typed(createMockBackend())).toEqual({ keyQ: "q", changes: [] });
+  expect(await typed(createMockBackend("live", "french"))).toEqual({
+    keyQ: "a",
+    changes: [],
+  });
 });
 
 test("a live subscription connects, syncs and becomes ready with 5k pods; the next one starts ready", async () => {

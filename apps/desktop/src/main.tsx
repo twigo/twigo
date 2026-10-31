@@ -17,10 +17,13 @@ applyTheme();
 dark.addEventListener("change", applyTheme);
 
 async function browserBackend(): Promise<Backend> {
-  const { createMockBackend, MOCK_SCENARIOS } =
+  const { createMockBackend, MOCK_LAYOUTS, MOCK_SCENARIOS } =
     await import("@twigo/protocol/mock");
-  const asked = new URLSearchParams(location.search).get("scenario");
-  return createMockBackend(MOCK_SCENARIOS.find((s) => s === asked));
+  const asked = new URLSearchParams(location.search);
+  return createMockBackend(
+    MOCK_SCENARIOS.find((s) => s === asked.get("scenario")),
+    MOCK_LAYOUTS.find((l) => l === asked.get("layout")),
+  );
 }
 
 async function start() {

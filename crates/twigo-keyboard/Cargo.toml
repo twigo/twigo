@@ -28,6 +28,9 @@ xkbcommon.workspace = true
 windows.workspace = true
 windows-core.workspace = true
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 gtk.workspace = true
 x11rb.workspace = true

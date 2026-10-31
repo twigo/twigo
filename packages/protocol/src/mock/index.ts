@@ -9,6 +9,7 @@ import type {
 import { IpcError } from "../error";
 import type {
   Column,
+  KeyboardLayout,
   ListBatch,
   ListQuery,
   RowId,
@@ -16,6 +17,11 @@ import type {
 } from "../generated";
 import { Cluster, podRow, type Pod } from "./cluster";
 import { CONTEXTS, NAMESPACES, POD_COUNT, SPACES } from "./fixtures";
+import dvorak from "./layouts/dvorak.json";
+import french from "./layouts/french.json";
+import german from "./layouts/german.json";
+import ukrainian from "./layouts/ukrainian.json";
+import us from "./layouts/us.json";
 import RESOURCES from "./resources.json";
 import { checkQuery, podColumns, runQuery } from "./query";
 
@@ -35,14 +41,37 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "error",
 ];
 
+/** Keyboard layouts recorded on macOS by `cargo run -p twigo-keyboard --example record`. */
+export const MOCK_LAYOUTS = [
+  "us",
+  "ukrainian",
+  "german",
+  "french",
+  "dvorak",
+] as const;
+
+export type MockLayout = (typeof MOCK_LAYOUTS)[number];
+
+const LAYOUTS: Readonly<Record<MockLayout, KeyboardLayout>> = {
+  us,
+  ukrainian,
+  german,
+  french,
+  dvorak,
+};
+
 const FLUSH_MS = 50;
 const CHURN_MS = 1000;
 
 /**
- * Runs the UI in a plain browser on fixtures (ARCHITECTURE 2.3): spaces, and
- * pods behind a query view with the same windowing and flow control as Rust.
+ * Runs the UI in a plain browser on fixtures (ARCHITECTURE 2.3): spaces,
+ * pods behind a query view with the same windowing and flow control as Rust,
+ * and a keyboard layout that never changes.
  */
-export function createMockBackend(scenario: MockScenario = "live"): Backend {
+export function createMockBackend(
+  scenario: MockScenario = "live",
+  layout: MockLayout = "us",
+): Backend {
   const now = Date.now();
   const clusters = new Map<string, Cluster>();
   const subscriptions = new Map<number, Subscription>();
@@ -160,6 +189,7 @@ export function createMockBackend(scenario: MockScenario = "live"): Backend {
       }
       return id;
     },
+    keyboard_layout_watch: () => LAYOUTS[layout],
   };
 
   return {

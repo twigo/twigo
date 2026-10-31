@@ -5107,6 +5107,7 @@ dependencies = [
  "gtk",
  "objc2",
  "objc2-core-foundation",
+ "serde_json",
  "thiserror 2.0.21",
  "twigo-ipc",
  "wayland-sys",
