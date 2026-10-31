@@ -52,13 +52,20 @@ const boundaries = Object.entries(MAY_IMPORT).flatMap(([pkg, allowed]) => {
 
 const TOKENS_ONLY =
   "Use a token from packages/ui instead of a raw colour (docs/ARCHITECTURE.md, 4.9).";
+const HEX = "#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})\\b";
 const COLOUR_FUNCTION = "rgba?|hsla?|hwb|lab|lch|oklab|oklch|color";
+const NAMED = Object.keys(colorNames).join("|");
 const PALETTE = Object.keys(tailwindColors)
   .filter((name) => !["inherit", "current", "transparent"].includes(name))
   .join("|");
 const UTILITY =
   "bg|text|border(-[trblxyse])?|outline|ring(-offset)?|fill|stroke|from|via|to|decoration|divide|accent|caret|shadow|placeholder";
-const RAW_IN_TEXT = `/#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})\\b|\\b(${COLOUR_FUNCTION})\\(|\\b(${UTILITY})-(${PALETTE})\\b/i`;
+const PALETTE_UTILITY = `\\b(${UTILITY})-(${PALETTE})\\b`;
+// A hex colour only where a colour must be: the whole string or a Tailwind
+// arbitrary value, so "issue #123" passes.
+const RAW_IN_TEXT = `/^\\s*${HEX}\\s*$|[[:]${HEX}|\\b(${COLOUR_FUNCTION})\\(|${PALETTE_UTILITY}|\\[(color:)?(${NAMED})\\]/i`;
+const COLOUR_PROPERTY =
+  "color|background|backgroundColor|borderColor|outlineColor|fill|stroke|caretColor|accentColor|textDecorationColor";
 
 const tokensOnly = [
   {
@@ -70,6 +77,10 @@ const tokensOnly = [
         { selector: `Literal[value=${RAW_IN_TEXT}]`, message: TOKENS_ONLY },
         {
           selector: `TemplateElement[value.raw=${RAW_IN_TEXT}]`,
+          message: TOKENS_ONLY,
+        },
+        {
+          selector: `JSXAttribute[name.name="style"] Property[key.name=/^(${COLOUR_PROPERTY})$/] > Literal[value=/^(${NAMED})$/i]`,
           message: TOKENS_ONLY,
         },
       ],
@@ -90,7 +101,16 @@ const tokensOnly = [
           message: TOKENS_ONLY,
         },
         {
-          selector: `Declaration Identifier[name=/^(${Object.keys(colorNames).join("|")})$/i]`,
+          selector: `Declaration Identifier[name=/^(${NAMED})$/i]`,
+          message: TOKENS_ONLY,
+        },
+        {
+          // css-tree leaves a custom property's value unparsed.
+          selector: `Declaration[property=/^--/] > Raw[value=/${HEX}|\\b(${COLOUR_FUNCTION})\\(|\\b(${NAMED})\\b/i]`,
+          message: TOKENS_ONLY,
+        },
+        {
+          selector: `Atrule[name=apply] Identifier[name=/${PALETTE_UTILITY}/i]`,
           message: TOKENS_ONLY,
         },
       ],

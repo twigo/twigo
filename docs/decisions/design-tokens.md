@@ -6,8 +6,8 @@ Decided 2026-10-31, in step 5 of M0 (ARCHITECTURE 4.9).
 
 - `packages/ui/src/styles/theme.css` holds every colour, for light and dark, and maps it into Tailwind under `@theme inline`.
 - Outside `packages/ui`, ESLint rejects raw colours:
-  - in TypeScript strings: hex colours, colour functions such as `oklch()`, and Tailwind palette utilities such as `bg-red-500`;
-  - in CSS: hex colours, colour functions and named colours.
+  - in TypeScript: colour functions such as `oklch()`, Tailwind palette utilities such as `bg-red-500`, named colours in arbitrary values such as `bg-[red]` and in JSX `style` colour properties, and hex colours where a colour must be, the whole string or an arbitrary value, so `issue #123` passes;
+  - in CSS: hex colours, colour functions and named colours, also in custom properties, and palette utilities in `@apply`.
 - `var(--token)` and `color-mix()` over tokens stay allowed.
 - A new colour is a new token, with both themes, in `theme.css`.
 
