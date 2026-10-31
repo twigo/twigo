@@ -11,6 +11,7 @@ use serde::Serialize;
 use serde_json::json;
 use tauri::http::{Response, StatusCode, header::CONTENT_TYPE};
 use tauri::ipc::{Channel, InvokeResponseBody};
+use tauri::utils::config::PatternKind;
 use tauri::{AppHandle, State};
 use tokio::sync::mpsc;
 use tokio::time::MissedTickBehavior;
@@ -187,15 +188,29 @@ fn report(
             .iter()
             .filter(|(source, _)| source.starts_with("frame:"))
         {
-            failures.push(format!(
-                "the probe frame ran `probe` {count} times through {source}"
-            ));
+            failures.push(format!("a probe command ran {count} times as {source}"));
         }
         if probes.get("control") != Some(&1) {
             failures.push("the same-origin control frame did not run `probe` once".to_owned());
         }
         if probes.get("main") != Some(&1) {
             failures.push("the window did not run `probe` once".to_owned());
+        }
+
+        // Under isolation the hook refuses `bypass`, so only the payload-less call runs it.
+        let (via_invoke, runs) = match app.config().app.security.pattern {
+            PatternKind::Brownfield => ("answered", 2),
+            PatternKind::Isolation { .. } => ("no answer", 1),
+        };
+        let bypass = &results["hookBypass"];
+        if bypass["viaInvoke"] != via_invoke
+            || bypass["viaPostMessage"] != "answered"
+            || probes.get("bypass") != Some(&runs)
+        {
+            failures.push(format!(
+                "the hook check expected invoke {via_invoke:?}, postMessage \"answered\" and {runs} runs of `bypass`, and got {bypass} with {:?} runs",
+                probes.get("bypass")
+            ));
         }
     }
 
