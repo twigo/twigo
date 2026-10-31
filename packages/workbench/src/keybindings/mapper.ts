@@ -125,6 +125,7 @@ export class KeyboardMapper {
       }
     }
     for (const [char, position] of typed) {
+      // Digits keep their US position; uppercase letters are never looked up.
       if (/^[a-z]$|^[^0-9A-Z]$/.test(char)) this.#byChar.set(char, position);
     }
   }
@@ -134,9 +135,7 @@ export class KeyboardMapper {
     const { ctrl, alt, meta } = chord;
     const named = NAMED_KEYS[chord.key];
     if (named) return { code: named, ctrl, shift: chord.shift, alt, meta };
-    const position = /^[0-9]$/.test(chord.key)
-      ? { code: `Digit${chord.key}`, shift: false }
-      : this.#byChar.get(chord.key);
+    const position = this.#byChar.get(chord.key);
     if (!position) return undefined;
     return {
       code: position.code,
