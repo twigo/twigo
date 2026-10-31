@@ -1,0 +1,68 @@
+name: Kubernetes
+
+on:
+  pull_request:
+    paths: &paths
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - crates/twigo-cache/**
+      - bench/**
+      - .github/workflows/kubernetes.yml
+  push:
+    branches: [main]
+    paths: *paths
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  cache:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: kubernetes
+      - run: cargo test -p twigo-cache --test table_live --no-run
+
+  table:
+    if: github.event_name != 'push'
+    name: Table decoder on ${{ matrix.kubernetes }}
+    strategy:
+      fail-fast: false
+      matrix:
+        kubernetes: ["1.33", "1.34", "1.35", "1.36", "1.37"]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install kind
+        run: |
+          curl -fsSLo kind https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64
+          echo "aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d  kind" | sha256sum -c
+          sudo install kind /usr/local/bin/kind
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: kubernetes
+      - run: cargo test -p twigo-cache --test table_live --no-run
+      - name: Start a kind cluster with kwok
+        env:
+          TWIGO_BENCH_DIR: ${{ runner.temp }}/bench
+        run: |
+          kubeconfig=$(bench/cluster.sh up ci ${{ matrix.kubernetes }} | tail -1)
+          echo "TWIGO_TEST_KUBECONFIG=$kubeconfig" >> "$GITHUB_ENV"
+      - run: cargo test -p twigo-cache --test table_live -- --ignored
