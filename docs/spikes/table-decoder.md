@@ -101,6 +101,7 @@ A dhat counting allocator measures requested bytes retained after decoding:
 - A row costs half of a `PartialObjectMeta<Pod>` without managedFields: it keeps meta-lite and the cells, and none of the other metadata.
 - Decoding the 5,000 rows allocated 12.7 MiB in all, little more than the responses themselves.
 - A second run after the review fixes gave the same rows, and object representations within 0.2 MiB of these.
+- Three runs on 2026-10-31 with the HTTP/2 `api` client of `Clients`, which the example now uses, gave the same rows and the same 12.7 MiB, and object representations within 0.3 MiB of these.
 - The numbers that 3.3 quoted before this spike came from synthetic 7.4 KB Pods, so their absolute values differ; the order is the same.
 
 ## Changes to the architecture
