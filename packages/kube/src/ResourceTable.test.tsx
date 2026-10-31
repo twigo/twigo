@@ -71,7 +71,7 @@ const header = (name: string) => screen.getByRole("columnheader", { name });
 
 test("rows from the window render with the server's priority-0 columns", async () => {
   await show("ready");
-  expect(screen.getByText("5,000")).toBeTruthy();
+  expect(screen.getByText("5,000 pods")).toBeTruthy();
   const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
   expect(headers).toEqual([
     "Name",

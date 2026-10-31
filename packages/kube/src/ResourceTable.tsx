@@ -26,7 +26,7 @@ import { cellTone } from "./tones";
 import { useListView } from "./useListView";
 import { useNow } from "./useNow";
 
-const ROW_HEIGHT = 26;
+const ROW_HEIGHT = 24;
 
 /** States in which Rust sends rows; the loading states show skeletons. */
 const SHOWS_ROWS = new Set<ViewState["state"]>(["ready", "relisting", "stale"]);
@@ -165,12 +165,10 @@ function ResourceList({
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-editor">
-      <header className="flex h-9 shrink-0 items-center gap-2 border-b border-border-subtle px-3">
-        <Icon className="size-4 text-muted-foreground" />
-        <h2 className="font-medium">{title}</h2>
+      <header className="flex h-7 shrink-0 items-center gap-2 border-b border-border-subtle px-3 text-xs text-muted-foreground">
         {showsRows && (
-          <span className="text-muted-foreground tabular-nums">
-            {snapshot.total.toLocaleString("en")}
+          <span className="tabular-nums">
+            {snapshot.total.toLocaleString("en")} {title.toLowerCase()}
           </span>
         )}
         <StateBadge status={status} />
@@ -320,7 +318,7 @@ function HeaderCell({
         onSort({ column: column.name, descending: active && !sort.descending });
       }}
       className={cn(
-        "flex h-full items-center gap-1 px-2 text-left font-medium hover:text-foreground",
+        "flex h-full items-center gap-1 px-2 text-left hover:text-foreground",
         alignEnd(column) && "flex-row-reverse text-right",
         active && "text-foreground",
       )}
