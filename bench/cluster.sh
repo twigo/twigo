@@ -10,13 +10,12 @@ KWOK_VERSION=v0.8.0
 NODES=${TWIGO_BENCH_NODES:-10}
 
 usage() {
-  echo "usage: $0 up|down <name> [1.32-1.37]" >&2
+  echo "usage: $0 up|down <name> [1.33-1.37]" >&2
   exit 2
 }
 
 node_image() {
   case "$1" in
-    1.32) echo "kindest/node:v1.32.11@sha256:5fc52d52a7b9574015299724bd68f183702956aa4a2116ae75a63cb574b35af8" ;;
     1.33) echo "kindest/node:v1.33.12@sha256:3f5c8443c620245e4d355cfe09e96a91ead32ceaa569d3f1ca9edf0cb2fe2ff4" ;;
     1.34) echo "kindest/node:v1.34.11@sha256:44e222ee2132dab25ff87301682f89eb82c7880ea3a1bf543bfe9708fd08d67d" ;;
     1.35) echo "kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0" ;;
@@ -30,6 +29,7 @@ node_image() {
 action=$1
 name=$2
 version=${3:-1.37}
+[[ "$name" =~ ^[a-z0-9-]+$ ]] || { echo "invalid cluster name: $name" >&2; exit 2; }
 dir="${TWIGO_BENCH_DIR:-${TMPDIR:-/tmp}/twigo-bench}/$name"
 kubeconfig="$dir/kubeconfig"
 cluster="twigo-$name"
@@ -37,6 +37,7 @@ k() { kubectl --kubeconfig "$kubeconfig" "$@"; }
 
 case "$action" in
   up)
+    image=$(node_image "$version")
     mkdir -p "$dir"
     cat > "$dir/kind.yaml" <<YAML
 kind: Cluster
@@ -63,7 +64,7 @@ nodes:
             - { name: kube-api-qps, value: "500" }
             - { name: kube-api-burst, value: "1000" }
 YAML
-    kind create cluster --name "$cluster" --image "$(node_image "$version")" \
+    kind create cluster --name "$cluster" --image "$image" \
       --config "$dir/kind.yaml" --kubeconfig "$kubeconfig" --wait 180s
     k apply -f "https://github.com/kubernetes-sigs/kwok/releases/download/$KWOK_VERSION/kwok.yaml"
     k apply -f "https://github.com/kubernetes-sigs/kwok/releases/download/$KWOK_VERSION/stage-fast.yaml"
