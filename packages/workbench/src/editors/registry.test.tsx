@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import { testWorkbench } from "../testing";
@@ -13,7 +14,11 @@ async function mounted() {
     title: (uri) => uri.host,
     component: ({ uri }) => <p>body of {uri}</p>,
   });
-  render(<WorkbenchView workbench={workbench} />);
+  render(
+    <StrictMode>
+      <WorkbenchView workbench={workbench} />
+    </StrictMode>,
+  );
   const tabs = () =>
     [...document.querySelectorAll(".dv-tab")].map((tab) => ({
       title: tab.textContent,

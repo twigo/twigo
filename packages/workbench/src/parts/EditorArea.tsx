@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   DockviewReact,
   themeLight,
+  type DockviewApi,
   type DockviewReadyEvent,
   type DockviewTheme,
   type IDockviewPanelHeaderProps,
@@ -45,25 +46,10 @@ export function EditorArea() {
 
 function SpaceEditors({ space }: { space: string }) {
   const workbench = useWorkbench();
-  const detach = useRef<() => void>(undefined);
+  const [api, setApi] = useState<DockviewApi>();
 
-  useEffect(
-    () => () => {
-      detach.current?.();
-    },
-    [],
-  );
-
-  const onReady = ({ api }: DockviewReadyEvent) => {
-    const saved = workbench.spaces.state(space).editors;
-    if (saved) {
-      try {
-        api.fromJSON(saved);
-      } catch (error) {
-        api.clear();
-        workbench.report(error);
-      }
-    }
+  useEffect(() => {
+    if (!api) return;
     const save = () => {
       workbench.spaces.update(space, (state) => ({
         ...state,
@@ -71,15 +57,28 @@ function SpaceEditors({ space }: { space: string }) {
       }));
     };
     const changes = api.onDidLayoutChange(save);
-    const attached = workbench.editors.attach(api);
+    const detach = workbench.editors.attach(api);
     // Dockview reports layout changes a microtask late (its AsapEvent), so
     // the layout is saved once more as the space goes away, after the
     // listener stops, so nothing the teardown reports can overwrite it.
-    detach.current = () => {
+    return () => {
       changes.dispose();
       save();
-      attached();
+      detach();
     };
+  }, [api, space, workbench]);
+
+  const onReady = ({ api: ready }: DockviewReadyEvent) => {
+    const saved = workbench.spaces.state(space).editors;
+    if (saved) {
+      try {
+        ready.fromJSON(saved);
+      } catch (error) {
+        ready.clear();
+        workbench.report(error);
+      }
+    }
+    setApi(ready);
   };
 
   return (
