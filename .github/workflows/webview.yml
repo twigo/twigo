@@ -1,0 +1,56 @@
+name: Webview
+
+on:
+  pull_request:
+    paths: &paths
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - bench/ipc/**
+      - .github/workflows/webview.yml
+  push:
+    branches: [main]
+    paths: *paths
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  frames:
+    name: Sandboxed frames on WebKitGTK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install WebKitGTK and Xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            xvfb
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: webview
+      - name: Probe every IPC path from a sandboxed frame
+        env:
+          TWIGO_BENCH_DIR: ${{ runner.temp }}/bench
+        run: xvfb-run -a bench/ipc/run.sh frames
+      - name: Show the reports
+        if: always()
+        run: |
+          shopt -s nullglob
+          for f in "$RUNNER_TEMP"/bench/ipc/*.json; do
+            echo "::group::$(basename "$f")"
+            cat "$f"
+            echo "::endgroup::"
+          done
