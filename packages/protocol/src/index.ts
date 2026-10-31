@@ -16,6 +16,8 @@ export type {
   ContextColor,
   ErrorKind,
   Gvr,
+  KeyboardLayout,
+  KeyMapping,
   ListBatch,
   ListQuery,
   Row,

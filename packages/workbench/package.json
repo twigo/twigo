@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "@twigo/protocol": "workspace:*",
-    "@twigo/ui": "workspace:*"
+    "@twigo/ui": "workspace:*",
+    "lucide-react": "^1.65.0"
   },
   "peerDependencies": {
     "react": "^19.3.1"

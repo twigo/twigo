@@ -1,0 +1,106 @@
+import {
+  evaluate,
+  parseWhen,
+  type Lookup,
+  type When,
+} from "../contextkey/when";
+
+/** The menus of ARCHITECTURE 5.1, plus the native menu bar's submenus. */
+export type MenuId =
+  | "commandPalette"
+  | "resource/context"
+  | "resource/title"
+  | "view/title"
+  | "view/item"
+  | "editor/title"
+  | "space/context"
+  | "statusBar"
+  | "explorer/kind"
+  | "menubar/file"
+  | "menubar/edit"
+  | "menubar/view"
+  | "menubar/go"
+  | "menubar/window"
+  | "menubar/help";
+
+export interface MenuItem {
+  readonly command: string;
+  /** Items group by name, `navigation` first, then alphabetically. */
+  readonly group?: string;
+  readonly order?: number;
+  readonly when?: string;
+}
+
+interface Entry {
+  readonly item: MenuItem;
+  readonly when: When | undefined;
+}
+
+/** Menus are data that point at commands, as VS Code's MenuRegistry. */
+export class Menus {
+  readonly #menus = new Map<MenuId, Set<Entry>>();
+  readonly #listeners = new Set<() => void>();
+
+  append(menu: MenuId, item: MenuItem): () => void {
+    const entry = {
+      item,
+      when: item.when === undefined ? undefined : parseWhen(item.when),
+    };
+    const entries = this.#menus.get(menu) ?? new Set();
+    entries.add(entry);
+    this.#menus.set(menu, entries);
+    this.#changed();
+    return () => {
+      entries.delete(entry);
+      this.#changed();
+    };
+  }
+
+  /** Every item, whatever its `when`, for menus that cannot re-evaluate (the native menu). */
+  all(menu: MenuId): readonly MenuItem[] {
+    return [...(this.#menus.get(menu) ?? [])].map((entry) => entry.item);
+  }
+
+  /** The items whose `when` holds, in groups, each group sorted by order. */
+  groups(menu: MenuId, lookup: Lookup): MenuItem[][] {
+    const groups = new Map<string, MenuItem[]>();
+    for (const { item, when } of this.#menus.get(menu) ?? []) {
+      if (when && !evaluate(when, lookup)) continue;
+      const name = item.group ?? "";
+      groups.set(name, [...(groups.get(name) ?? []), item]);
+    }
+    return [...groups.entries()]
+      .sort(([a], [b]) => groupRank(a) - groupRank(b) || a.localeCompare(b))
+      .map(([, items]) =>
+        items.sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+      );
+  }
+
+  /**
+   * Whether the item of `command` in `menu`, if there is one, lets it show;
+   * the palette lists every command unless its `commandPalette` item hides it.
+   */
+  shows(menu: MenuId, command: string, lookup: Lookup): boolean {
+    const entries = [...(this.#menus.get(menu) ?? [])].filter(
+      (entry) => entry.item.command === command,
+    );
+    return (
+      entries.length === 0 ||
+      entries.some((entry) => !entry.when || evaluate(entry.when, lookup))
+    );
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+
+  #changed() {
+    for (const listener of this.#listeners) listener();
+  }
+}
+
+function groupRank(group: string): number {
+  if (group === "navigation") return 0;
+  return group === "" ? 2 : 1;
+}

@@ -395,6 +395,9 @@ importers:
       '@twigo/ui':
         specifier: workspace:*
         version: link:../ui
+      lucide-react:
+        specifier: ^1.65.0
+        version: 1.65.0(@types/react@19.3.0)(react@19.3.1)
     devDependencies:
       '@testing-library/react':
         specifier: ^16.3.3
