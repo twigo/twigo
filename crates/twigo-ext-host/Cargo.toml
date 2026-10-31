@@ -1,0 +1,9 @@
+[package]
+name = "twigo-ext-host"
+description = "Wasmtime host, manifests, capability enforcement, registry client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true

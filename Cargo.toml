@@ -1,0 +1,32 @@
+[workspace]
+resolver = "3"
+members = ["apps/desktop/src-tauri", "crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "Apache-2.0"
+repository = "https://github.com/twigo/twigo"
+publish = false
+
+[workspace.dependencies]
+twigo-cache = { path = "crates/twigo-cache" }
+twigo-core = { path = "crates/twigo-core" }
+twigo-env = { path = "crates/twigo-env" }
+twigo-ext-api = { path = "crates/twigo-ext-api" }
+twigo-ext-host = { path = "crates/twigo-ext-host" }
+twigo-helm = { path = "crates/twigo-helm" }
+twigo-ipc = { path = "crates/twigo-ipc" }
+twigo-kube = { path = "crates/twigo-kube" }
+twigo-mcp = { path = "crates/twigo-mcp" }
+twigo-policy = { path = "crates/twigo-policy" }
+twigo-sessions = { path = "crates/twigo-sessions" }
+
+tauri = "2.12.5"
+tauri-build = "2.7.4"
+tauri-plugin-dialog = "2.8.4"
+tauri-plugin-opener = "2.7.2"
+tauri-plugin-process = "2.4.0"
+tauri-plugin-single-instance = "2.5.5"
+tauri-plugin-window-state = "2.5.0"
