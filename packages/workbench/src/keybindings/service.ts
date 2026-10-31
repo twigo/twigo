@@ -1,4 +1,5 @@
 import type { KeyboardLayout } from "@twigo/protocol";
+import { Changes } from "../changes";
 import type { Commands } from "../commands/registry";
 import type { ContextKeys } from "../contextkey/service";
 import type { Platform } from "./chord";
@@ -19,7 +20,7 @@ import {
  */
 export class Keybindings {
   readonly #sources = new Set<Source>();
-  readonly #listeners = new Set<() => void>();
+  readonly changes = new Changes();
   #mapper: KeyboardMapper;
   #resolver: Resolver | undefined;
   #pending: readonly Press[] = [];
@@ -97,11 +98,6 @@ export class Keybindings {
     return presses.map((press) => this.#mapper.label(press)).join(" ");
   }
 
-  subscribe(listener: () => void): () => void {
-    this.#listeners.add(listener);
-    return () => this.#listeners.delete(listener);
-  }
-
   #resolve(): Resolver {
     this.#resolver ??= new Resolver([...this.#sources], this.#mapper);
     return this.#resolver;
@@ -109,11 +105,11 @@ export class Keybindings {
 
   #setPending(pending: readonly Press[]) {
     this.#pending = pending;
-    for (const listener of this.#listeners) listener();
+    this.changes.emit();
   }
 
   #changed() {
     this.#resolver = undefined;
-    for (const listener of this.#listeners) listener();
+    this.changes.emit();
   }
 }

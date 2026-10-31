@@ -1,3 +1,4 @@
+import { Changes } from "../changes";
 import type { ContextValue, Lookup } from "./when";
 
 export interface Scope {
@@ -14,8 +15,7 @@ export interface Scope {
 export class ContextKeys {
   readonly #global = new Map<string, ContextValue>();
   readonly #scopes = new WeakMap<Element, Map<string, ContextValue>>();
-  readonly #listeners = new Set<() => void>();
-  #version = 0;
+  readonly changes = new Changes();
 
   set(key: string, value: ContextValue | undefined): void {
     this.#write(this.#global, key, value);
@@ -33,7 +33,7 @@ export class ContextKeys {
       },
       dispose: () => {
         this.#scopes.delete(element);
-        this.#changed();
+        this.changes.emit();
       },
     };
   }
@@ -55,16 +55,6 @@ export class ContextKeys {
     };
   }
 
-  /** Bumps on every change, for `useSyncExternalStore`. */
-  get version(): number {
-    return this.#version;
-  }
-
-  subscribe(listener: () => void): () => void {
-    this.#listeners.add(listener);
-    return () => this.#listeners.delete(listener);
-  }
-
   #write(
     values: Map<string, ContextValue>,
     key: string,
@@ -73,12 +63,7 @@ export class ContextKeys {
     if (values.get(key) === value) return;
     if (value === undefined) values.delete(key);
     else values.set(key, value);
-    this.#changed();
-  }
-
-  #changed() {
-    this.#version++;
-    for (const listener of this.#listeners) listener();
+    this.changes.emit();
   }
 }
 

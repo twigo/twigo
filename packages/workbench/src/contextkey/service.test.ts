@@ -84,15 +84,15 @@ test("changes notify subscribers and bump the version", () => {
   const keys = new ContextKeys();
   const { list } = tree();
   let calls = 0;
-  const unsubscribe = keys.subscribe(() => calls++);
-  const before = keys.version;
+  const unsubscribe = keys.changes.subscribe(() => calls++);
+  const before = keys.changes.version;
   keys.set("platform", "mac");
   keys.set("platform", "mac");
   const scope = keys.scope(list);
   scope.set("listFocus", true);
   scope.dispose();
   expect(calls).toBe(3);
-  expect(keys.version).toBe(before + 3);
+  expect(keys.changes.version).toBe(before + 3);
   unsubscribe();
   keys.set("platform", "linux");
   expect(calls).toBe(3);

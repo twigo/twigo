@@ -1,4 +1,5 @@
 import type { LucideIcon } from "lucide-react";
+import { Changes } from "../changes";
 import {
   evaluate,
   parseWhen,
@@ -30,7 +31,7 @@ interface Entry {
 /** One namespace for every command, as VS Code's CommandsRegistry. */
 export class Commands {
   readonly #entries = new Map<string, Entry>();
-  readonly #listeners = new Set<() => void>();
+  readonly changes = new Changes();
   #all: CommandDescriptor[] | undefined;
 
   constructor(
@@ -90,13 +91,8 @@ export class Commands {
     return true;
   }
 
-  subscribe(listener: () => void): () => void {
-    this.#listeners.add(listener);
-    return () => this.#listeners.delete(listener);
-  }
-
   #changed() {
     this.#all = undefined;
-    for (const listener of this.#listeners) listener();
+    this.changes.emit();
   }
 }

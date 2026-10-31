@@ -5,6 +5,8 @@ import {
   type When,
 } from "../contextkey/when";
 
+import { Changes } from "../changes";
+
 /** The menus of ARCHITECTURE 5.1, plus the native menu bar's submenus. */
 export type MenuId =
   | "commandPalette"
@@ -39,7 +41,7 @@ interface Entry {
 /** Menus are data that point at commands, as VS Code's MenuRegistry. */
 export class Menus {
   readonly #menus = new Map<MenuId, Set<Entry>>();
-  readonly #listeners = new Set<() => void>();
+  readonly changes = new Changes();
 
   append(menu: MenuId, item: MenuItem): () => void {
     const entry = {
@@ -49,10 +51,10 @@ export class Menus {
     const entries = this.#menus.get(menu) ?? new Set();
     entries.add(entry);
     this.#menus.set(menu, entries);
-    this.#changed();
+    this.changes.emit();
     return () => {
       entries.delete(entry);
-      this.#changed();
+      this.changes.emit();
     };
   }
 
@@ -88,15 +90,6 @@ export class Menus {
       entries.length === 0 ||
       entries.some((entry) => !entry.when || evaluate(entry.when, lookup))
     );
-  }
-
-  subscribe(listener: () => void): () => void {
-    this.#listeners.add(listener);
-    return () => this.#listeners.delete(listener);
-  }
-
-  #changed() {
-    for (const listener of this.#listeners) listener();
   }
 }
 

@@ -59,7 +59,7 @@ test("a command without a palette item shows in the palette", () => {
 test("removing an item notifies and drops it", () => {
   const menus = new Menus();
   const listener = vi.fn();
-  menus.subscribe(listener);
+  menus.changes.subscribe(listener);
   const remove = menus.append("statusBar", { command: "x" });
   remove();
   expect(menus.groups("statusBar", lookup({}))).toEqual([]);

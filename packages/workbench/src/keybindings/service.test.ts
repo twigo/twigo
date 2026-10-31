@@ -88,7 +88,7 @@ test("an unbound key passes through", () => {
 test("a chord waits, shows as pending, then runs", async () => {
   const { keybindings, ran } = setup();
   const changes = vi.fn();
-  keybindings.subscribe(changes);
+  keybindings.changes.subscribe(changes);
   const first = new KeyboardEvent("keydown", {
     code: "KeyK",
     metaKey: true,
