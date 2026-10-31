@@ -49,7 +49,7 @@ Two questions, from 6.7 and 7.3:
     A request without a body carries no source, so it calls `probe_without_body`, which counts as `frame:no-body`; the two such requests share that source, and their answers in the report tell them apart.
 - A second after the probe reports, the window invokes `probe` itself, then checks the hook ([below](#decision-brownfield)).
 - Rust counts `probe` calls per source.
-  A run fails unless the control and the window ran it once each, no `frame:` source ran it at all, and the hook check gives its pattern's answers ([below](#decision-brownfield)).
+  A run fails unless the control and the window ran it once each, no `frame:` source ran it at all, and the hook check gives its pattern's answers and counts: under brownfield both calls run `bypass`, under isolation only the payload-less one does ([below](#decision-brownfield)).
   The control shows that a frame which gets through is counted.
 - The failures were seen on purpose on 2026-10-31 on macOS, brownfield unless named:
   - with the control's source renamed `frame:control`, the run exits 1 and names that source;
