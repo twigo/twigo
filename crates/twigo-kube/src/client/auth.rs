@@ -1,7 +1,7 @@
-//! A plugin's credential on each request (ARCHITECTURE 6.2): its token as
-//! the bearer, its certificate offered at the next handshake, and on a 401
-//! one new run and one retry. client-go only refreshes for the next request
-//! (`plugin/pkg/client/auth/exec/exec.go`, `RoundTrip`).
+//! The credential Twigo gets on each request (ARCHITECTURE 6.2): its token
+//! as the bearer, a plugin's certificate offered at the next handshake, and
+//! on a 401 one new credential and one retry. client-go only refreshes for
+//! the next request (`plugin/pkg/client/auth/exec/exec.go`, `RoundTrip`).
 
 use std::future::Future;
 use std::pin::Pin;
@@ -17,32 +17,32 @@ use tower::{BoxError, Layer, Service, ServiceExt};
 use super::connections::Connections;
 use super::identity::Identity;
 use super::retry::copy;
-use crate::credentials::{Credential, Source};
+use crate::credentials::{Credential, Provider};
 
 #[derive(Clone)]
-pub struct ExecLayer {
-    source: Arc<Source>,
+pub struct AuthLayer {
+    provider: Provider,
     identity: Arc<Identity>,
     /// Retired when the certificate changes, as client-go closes the
     /// connections the old one opened.
     connections: Option<Connections>,
 }
 
-impl ExecLayer {
+impl AuthLayer {
     pub fn new(
-        source: Arc<Source>,
+        provider: Provider,
         identity: Arc<Identity>,
         connections: Option<Connections>,
     ) -> Self {
         Self {
-            source,
+            provider,
             identity,
             connections,
         }
     }
 
     async fn authorize<B>(&self, request: &mut Request<B>) -> Result<Arc<Credential>, BoxError> {
-        let credential = self.source.credential().await?;
+        let credential = self.provider.credential().await?;
         if let Some(token) = &credential.token {
             let mut value = HeaderValue::try_from(format!("Bearer {}", token.expose_secret()))?;
             value.set_sensitive(true);
@@ -57,11 +57,11 @@ impl ExecLayer {
     }
 }
 
-impl<S> Layer<S> for ExecLayer {
-    type Service = ExecAuth<S>;
+impl<S> Layer<S> for AuthLayer {
+    type Service = Auth<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        ExecAuth {
+        Auth {
             layer: self.clone(),
             inner,
         }
@@ -69,12 +69,12 @@ impl<S> Layer<S> for ExecLayer {
 }
 
 #[derive(Clone)]
-pub struct ExecAuth<S> {
-    layer: ExecLayer,
+pub struct Auth<S> {
+    layer: AuthLayer,
     inner: S,
 }
 
-impl<S, R> Service<Request<Body>> for ExecAuth<S>
+impl<S, R> Service<Request<Body>> for Auth<S>
 where
     S: Service<Request<Body>, Response = Response<R>> + Clone + Send + 'static,
     S::Future: Send,
@@ -101,7 +101,7 @@ where
             if response.status() != StatusCode::UNAUTHORIZED {
                 return Ok(response);
             }
-            layer.source.reject(&used);
+            layer.provider.reject(&used);
             let Some(mut again) = again else {
                 return Ok(response);
             };

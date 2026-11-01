@@ -17,7 +17,7 @@ const MARGIN: SignedDuration = SignedDuration::from_secs(60);
 pub struct Credential {
     pub(crate) token: Option<SecretString>,
     pub(crate) identity: Option<Identity>,
-    expires: Option<Timestamp>,
+    pub(super) expires: Option<Timestamp>,
 }
 
 /// A client certificate chain and its key, in DER.
@@ -35,6 +35,10 @@ impl std::fmt::Debug for Identity {
 }
 
 impl Credential {
+    pub fn token(&self) -> Option<&SecretString> {
+        self.token.as_ref()
+    }
+
     pub fn expires(&self) -> Option<Timestamp> {
         self.expires
     }

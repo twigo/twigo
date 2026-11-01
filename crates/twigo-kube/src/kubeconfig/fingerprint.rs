@@ -21,7 +21,7 @@ impl Fingerprint {
         let mut hasher = DefaultHasher::new();
         entry(&mut hasher, context);
         entry(&mut hasher, &cluster);
-        entry(&mut hasher, &user);
+        entry(&mut hasher, &without_oidc_tokens(user));
         let cluster = cluster.and_then(|named| named.cluster.as_ref());
         let user = user.and_then(|named| named.auth_info.as_ref());
         let files = [
@@ -47,4 +47,20 @@ impl Fingerprint {
 fn entry(hasher: &mut DefaultHasher, entry: &impl Serialize) {
     let value = serde_json::to_value(entry).expect("a kubeconfig entry serializes to JSON");
     value.to_string().hash(hasher);
+}
+
+/// The user entry without its oidc tokens, which Twigo refreshes and writes
+/// back itself: a new token changes nothing about the connection.
+fn without_oidc_tokens(user: Option<&NamedAuthInfo>) -> Option<NamedAuthInfo> {
+    let mut user = user?.clone();
+    if let Some(provider) = user
+        .auth_info
+        .as_mut()
+        .and_then(|info| info.auth_provider.as_mut())
+        .filter(|provider| provider.name == "oidc")
+    {
+        provider.config.remove("id-token");
+        provider.config.remove("refresh-token");
+    }
+    Some(user)
 }

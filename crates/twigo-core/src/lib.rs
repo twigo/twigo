@@ -17,7 +17,7 @@ use tokio::sync::watch;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{ClusterVersion, IpcError};
 use twigo_kube::client::{Clients, ProxyEnv};
-use twigo_kube::credentials::{ExecError, Registry, Source, Timeouts};
+use twigo_kube::credentials::{ExecError, OidcError, Provider, Registry, Source, Timeouts};
 use twigo_kube::kubeconfig;
 use twigo_netmon::Event;
 
@@ -47,6 +47,8 @@ pub enum ClientsError {
     NoContext(String),
     #[error("the context {0:?}: {1}")]
     Invalid(String, #[source] ExecError),
+    #[error("the context {0:?}: {1}")]
+    Oidc(String, #[source] OidcError),
     #[error("Twigo runs {1} for the context {0:?} only once you trust it")]
     Untrusted(String, String),
     #[error("the context {0:?} has no credential plugin")]
@@ -88,7 +90,7 @@ impl Core {
         let Some(found) = contexts.find(context) else {
             return Err(ClientsError::NoContext(context.to_owned()));
         };
-        let plugin = self.plugin(found)?;
+        let provider = self.provider(found)?;
         let env = self
             .proxy_env
             .subscribe()
@@ -98,9 +100,23 @@ impl Core {
             .clone()
             .expect("waited for");
         self.connections
-            .clients(found, &env, plugin)
+            .clients(found, &env, provider)
             .await
             .map_err(|error| ClientsError::Connect(context.to_owned(), Box::new(error)))
+    }
+
+    /// Where the context's credential comes from when Twigo gets it: its
+    /// exec plugin, once the person trusts it, or its oidc provider.
+    fn provider(&self, context: &kubeconfig::Context) -> Result<Option<Provider>, ClientsError> {
+        if let Some(oidc) = context.entries.oidc() {
+            let oidc = oidc.map_err(|error| ClientsError::Oidc(context.name.clone(), error))?;
+            return Ok(Some(Provider::Oidc(self.credentials.oidc(
+                oidc.origin,
+                &oidc.user,
+                oidc.entry,
+            ))));
+        }
+        Ok(self.plugin(context)?.map(Provider::Exec))
     }
 
     /// The context's exec plugin, once the person trusts it.

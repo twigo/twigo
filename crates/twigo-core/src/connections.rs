@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use kube::Config;
 use kube::config::{KubeConfigOptions, KubeconfigError};
 use twigo_kube::client::{self, Clients, Options, ProxyEnv, ProxyError, proxy_for};
-use twigo_kube::credentials::Source;
+use twigo_kube::credentials::Provider;
 use twigo_kube::kubeconfig::{self, Fingerprint};
 
 #[derive(Default)]
@@ -49,12 +49,13 @@ pub enum Error {
 }
 
 impl Connections {
-    /// `plugin` is the context's exec plugin, which its fingerprint covers.
+    /// `provider` is where the context's credential comes from, which its
+    /// fingerprint covers.
     pub async fn clients(
         &self,
         context: &kubeconfig::Context,
         env: &ProxyEnv,
-        plugin: Option<Arc<Source>>,
+        provider: Option<Provider>,
     ) -> Result<Arc<Clients>, Error> {
         let slot = {
             let mut contexts = self.contexts.lock().expect("connections lock");
@@ -77,7 +78,7 @@ impl Connections {
             &config,
             Options {
                 proxy,
-                exec: plugin,
+                provider,
                 ..Options::default()
             },
         )?);

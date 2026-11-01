@@ -407,3 +407,60 @@ contexts:
     assert_eq!(context(&catalog, "kind-b").entries.proxy_url(), None);
     assert_ne!(*a, context(&catalog, "kind-b").entries);
 }
+
+const OIDC: &str = "
+users:
+- name: dev
+  user:
+    auth-provider:
+      name: oidc
+      config: { idp-issuer-url: 'https://id.example', client-id: twigo, id-token: ID, refresh-token: RT }
+contexts:
+- name: kind-oidc
+  context: { cluster: c, user: dev }
+clusters:
+- name: c
+  cluster: { server: 'https://c:6443' }
+";
+
+#[test]
+fn a_user_entry_knows_the_first_file_that_names_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = write(dir.path(), "first", OIDC);
+    let second = write(
+        dir.path(),
+        "second",
+        &OIDC.replace("https://id.example", "https://other.example"),
+    );
+    let catalog = kubectl(&[&first, &second]).load();
+    let oidc = context(&catalog, "kind-oidc")
+        .entries
+        .oidc()
+        .unwrap()
+        .unwrap();
+    assert_eq!(oidc.origin.as_deref(), Some(first.as_path()));
+    assert_eq!(oidc.user, "dev");
+}
+
+#[test]
+fn refreshed_oidc_tokens_leave_the_fingerprint_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = write(dir.path(), "config", OIDC);
+    let fingerprint = || context(&kubectl(&[&file]).load(), "kind-oidc").fingerprint;
+    let before = fingerprint();
+    write(
+        dir.path(),
+        "config",
+        &OIDC.replace(
+            "id-token: ID, refresh-token: RT",
+            "id-token: ID2, refresh-token: RT2",
+        ),
+    );
+    assert_eq!(fingerprint(), before);
+    write(
+        dir.path(),
+        "config",
+        &OIDC.replace("client-id: twigo", "client-id: other"),
+    );
+    assert_ne!(fingerprint(), before, "the provider itself changed");
+}

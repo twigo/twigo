@@ -6,6 +6,7 @@ mod connections;
 mod counter;
 mod dial;
 mod identity;
+pub(crate) mod idp;
 mod proxy;
 mod retry;
 
@@ -29,14 +30,14 @@ pub use connections::Connections;
 pub use counter::{Budgets, Class, Slots, Usage};
 pub use proxy::{Proxy, ProxyEnv, ProxyError, proxy_for};
 
-use auth::ExecLayer;
+use auth::AuthLayer;
 use connections::{ConnectionsLayer, Tracked};
 use counter::{Counter, CounterLayer};
 use dial::Dialer;
 use identity::Identity;
 use retry::RetryLayer;
 
-use crate::credentials::Source;
+use crate::credentials::Provider;
 
 /// client-go's: its dialer's keepalive (`transport/cache.go`) and its
 /// HTTP/2 health check (`ReadIdleTimeout` and `PingTimeout` in
@@ -82,30 +83,28 @@ pub struct Options {
     /// From [`proxy_for`]: `config.proxy_url` is not read, since kube fills
     /// it from Twigo's own environment.
     pub proxy: Option<Proxy>,
-    /// The user entry's exec plugin, which Twigo runs instead of kube
-    /// (ARCHITECTURE 6.2): `config.auth_info.exec` is not read.
-    pub exec: Option<Arc<Source>>,
+    /// The user entry's exec plugin or oidc provider, whose credential
+    /// Twigo gets instead of kube (ARCHITECTURE 6.2): `config.auth_info`'s
+    /// `exec` is never read, nor its `auth-provider` with one.
+    pub provider: Option<Provider>,
 }
 
 impl Clients {
     pub fn new(config: &Config, options: Options) -> Result<Self, Error> {
-        let config = &without_plugins(config)?;
+        let config = &without_plugins(config, options.provider.is_some())?;
         let proxy = options.proxy.as_ref();
         let counter = Counter::new(options.budgets);
         let connections = Connections::default();
-        let identity = options.exec.as_ref().map(|_| Arc::new(Identity::default()));
-        let exec = |connections: Option<&Connections>| {
-            options
-                .exec
-                .as_ref()
-                .zip(identity.as_ref())
-                .map(|(source, identity)| {
-                    ExecLayer::new(
-                        Arc::clone(source),
-                        Arc::clone(identity),
-                        connections.cloned(),
-                    )
-                })
+        let identity = Arc::new(Identity::default());
+        let offered = matches!(options.provider, Some(Provider::Exec(_))).then_some(&identity);
+        let auth = |connections: Option<&Connections>| {
+            options.provider.as_ref().map(|provider| {
+                AuthLayer::new(
+                    provider.clone(),
+                    Arc::clone(&identity),
+                    connections.cloned(),
+                )
+            })
         };
 
         let mut builder = hyper_util::client::legacy::Client::builder(TokioExecutor::new());
@@ -119,13 +118,13 @@ impl Clients {
             .http2_keep_alive_timeout(PING_TIMEOUT)
             .http2_keep_alive_while_idle(true);
         let api = builder.build::<_, Body>(Tracked::new(
-            connector(config, Alpn::Both, proxy, identity.as_ref())?,
+            connector(config, Alpn::Both, proxy, offered)?,
             connections.clone(),
         ));
         let api = ServiceBuilder::new()
             .layer(config.base_uri_layer())
             .option_layer(config.auth_layer()?)
-            .option_layer(exec(Some(&connections)))
+            .option_layer(auth(Some(&connections)))
             .layer(config.extra_headers_layer()?)
             .layer(CounterLayer(counter.clone()))
             .layer(TimeoutLayer::new(REQUEST_TIMEOUT))
@@ -134,11 +133,11 @@ impl Clients {
             .service(api);
 
         let sessions = hyper_util::client::legacy::Client::builder(TokioExecutor::new())
-            .build::<_, Body>(connector(config, Alpn::Http1, proxy, identity.as_ref())?);
+            .build::<_, Body>(connector(config, Alpn::Http1, proxy, offered)?);
 
         Ok(Clients {
             api: Client::new(api, config.default_namespace.clone()),
-            sessions: kube_client(config, sessions, exec(None))?,
+            sessions: kube_client(config, sessions, auth(None))?,
             counter,
             connections,
         })
@@ -153,11 +152,12 @@ impl Clients {
     }
 }
 
-/// The config without what would make kube start a process: the exec
-/// plugin, which Twigo runs itself, and the gcp auth provider's `cmd-path`,
-/// refused with the azure one as client-go refuses both since they were
-/// removed (`plugin/pkg/client/auth/gcp/gcp_stub.go`, `azure/azure_stub.go`).
-fn without_plugins(config: &Config) -> Result<Config, Error> {
+/// The config without what kube would get credentials from itself: the
+/// exec plugin, which Twigo runs, the auth provider when Twigo gets its
+/// credential, and the gcp one's `cmd-path`, refused with the azure one as
+/// client-go refuses both since they were removed
+/// (`plugin/pkg/client/auth/gcp/gcp_stub.go`, `azure/azure_stub.go`).
+fn without_plugins(config: &Config, provided: bool) -> Result<Config, Error> {
     match config
         .auth_info
         .auth_provider
@@ -170,13 +170,16 @@ fn without_plugins(config: &Config) -> Result<Config, Error> {
     }
     let mut config = config.clone();
     config.auth_info.exec = None;
+    if provided {
+        config.auth_info.auth_provider = None;
+    }
     Ok(config)
 }
 
 fn kube_client<C>(
     config: &Config,
     client: hyper_util::client::legacy::Client<C, Body>,
-    exec: Option<ExecLayer>,
+    auth: Option<AuthLayer>,
 ) -> Result<Client, Error>
 where
     C: Connect + Clone + Send + Sync + 'static,
@@ -184,7 +187,7 @@ where
     let service = ServiceBuilder::new()
         .layer(config.base_uri_layer())
         .option_layer(config.auth_layer()?)
-        .option_layer(exec)
+        .option_layer(auth)
         .layer(config.extra_headers_layer()?)
         .map_err(BoxError::from)
         .service(client);

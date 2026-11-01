@@ -1,7 +1,7 @@
 //! How the core's errors reach the webview (`IpcError`).
 
 use twigo_ipc::{ErrorKind, IpcError};
-use twigo_kube::credentials::{CredentialError, RunError};
+use twigo_kube::credentials::{CredentialError, OidcError, RunError};
 
 use crate::ClientsError;
 
@@ -9,7 +9,7 @@ impl From<&ClientsError> for IpcError {
     fn from(error: &ClientsError) -> Self {
         let kind = match error {
             ClientsError::NoContext(_) | ClientsError::NoPlugin(_) => ErrorKind::NotFound,
-            ClientsError::Invalid(..) => ErrorKind::InvalidInput,
+            ClientsError::Invalid(..) | ClientsError::Oidc(..) => ErrorKind::InvalidInput,
             ClientsError::Untrusted(..) => ErrorKind::Unauthorized,
             ClientsError::Connect(..) => ErrorKind::Unavailable,
         };
@@ -39,6 +39,7 @@ pub(crate) fn request(error: &kube::Error) -> IpcError {
             CredentialError::Run(RunError::Timeout { .. }) => ErrorKind::Timeout,
             _ => ErrorKind::Unauthorized,
         },
+        kube::Error::Service(error) if oidc(&**error) => ErrorKind::Unauthorized,
         kube::Error::Service(error) if elapsed(&**error) => ErrorKind::Timeout,
         kube::Error::Service(_) | kube::Error::HyperError(_) => ErrorKind::Unavailable,
         _ => ErrorKind::Internal,
@@ -59,6 +60,18 @@ fn credential<'a>(error: &'a (dyn std::error::Error + 'static)) -> Option<&'a Cr
         source = error.source();
     }
     None
+}
+
+/// Whether the oidc refresh failed.
+fn oidc(error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut source = Some(error);
+    while let Some(error) = source {
+        if error.is::<OidcError>() {
+            return true;
+        }
+        source = error.source();
+    }
+    false
 }
 
 /// Whether the client's request timeout ended it.

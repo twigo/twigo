@@ -23,7 +23,7 @@ use tokio::sync::watch;
 use tokio_rustls::TlsAcceptor;
 use twigo_env::ShellEnv;
 use twigo_kube::client::{Clients, Options};
-use twigo_kube::credentials::{Exec, Registry, Timeouts};
+use twigo_kube::credentials::{Exec, Provider, Registry, Timeouts};
 
 /// What the server saw of one request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -304,7 +304,7 @@ fn clients(server: &Server, exec: Exec) -> Clients {
     Clients::new(
         &config,
         Options {
-            exec: Some(registry.source(exec)),
+            provider: Some(Provider::Exec(registry.source(exec))),
             ..Options::default()
         },
     )

@@ -10,10 +10,12 @@ publish.workspace = true
 
 [dependencies]
 base64.workspace = true
+bytes.workspace = true
 form_urlencoded.workspace = true
 h2.workspace = true
 http.workspace = true
 http-body.workspace = true
+http-body-util.workspace = true
 hyper.workspace = true
 hyper-rustls.workspace = true
 hyper-timeout.workspace = true
@@ -35,6 +37,7 @@ tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "s
 tower.workspace = true
 twigo-env.workspace = true
 twigo-ipc.workspace = true
+yaml-edit.workspace = true
 
 [dev-dependencies]
 bytes.workspace = true

@@ -14,7 +14,10 @@ use jiff::Timestamp;
 use tokio::sync::{oneshot, watch};
 use twigo_env::ShellEnv;
 
+use std::path::PathBuf;
+
 use super::exec::{Exec, Mode};
+use super::oidc::{Oidc, OidcEntry};
 use super::output::Credential;
 use super::run::{self, RunError};
 
@@ -46,6 +49,7 @@ impl Default for Timeouts {
 /// same plugin share it.
 pub struct Registry {
     sources: Mutex<HashMap<String, Weak<Source>>>,
+    oidc: Mutex<HashMap<String, Weak<Oidc>>>,
     shared: Shared,
 }
 
@@ -67,6 +71,7 @@ impl Registry {
     ) -> Self {
         Self {
             sources: Mutex::default(),
+            oidc: Mutex::default(),
             shared: Shared {
                 env,
                 focused,
@@ -83,6 +88,25 @@ impl Registry {
         }
         sources.retain(|_, source| source.strong_count() > 0);
         let source = Arc::new(Source::new(exec, self.shared.clone()));
+        sources.insert(key, Arc::downgrade(&source));
+        source
+    }
+
+    /// The `auth-provider: oidc` of `user`, from its file of origin
+    /// `origin`, which its refreshed tokens go back to.
+    pub fn oidc(&self, origin: Option<PathBuf>, user: &str, entry: OidcEntry) -> Arc<Oidc> {
+        let key = entry.key(origin.as_deref(), user);
+        let mut sources = self.oidc.lock().expect("registry lock");
+        if let Some(source) = sources.get(&key).and_then(Weak::upgrade) {
+            return source;
+        }
+        sources.retain(|_, source| source.strong_count() > 0);
+        let source = Arc::new(Oidc::new(
+            origin,
+            user.to_owned(),
+            entry,
+            self.shared.env.clone(),
+        ));
         sources.insert(key, Arc::downgrade(&source));
         source
     }
