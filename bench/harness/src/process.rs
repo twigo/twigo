@@ -36,6 +36,7 @@ pub struct Sample {
     pub other_webkit: Vec<Process>,
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub fn attribute(processes: Vec<Process>, app: i32, at_ms: f64) -> Result<Sample, String> {
     let mut found = None;
     let (mut webkit, mut other_webkit) = (Vec::new(), Vec::new());

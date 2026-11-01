@@ -17,7 +17,6 @@ mod stats;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 const USAGE: &str =
     "usage: twigo-bench churn [--kubeconfig PATH] [--rate N] [--seconds S] --log FILE
@@ -74,6 +73,8 @@ fn churn(args: &[String]) -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 fn sample(args: &[String]) -> Result<(), String> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     let [pid] = args else {
         return Err(USAGE.to_owned());
     };
