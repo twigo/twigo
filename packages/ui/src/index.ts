@@ -15,7 +15,6 @@ export * from "./components/command";
 export * from "./components/dialog";
 export * from "./components/empty-state";
 export * from "./components/kbd";
-export * from "./components/context-dot";
 export * from "./components/skeleton";
 export * from "./components/sparkline";
 export { sparkSpan } from "./lib/sparkline";

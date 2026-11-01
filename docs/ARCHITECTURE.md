@@ -720,7 +720,7 @@ It moves into `packages/ui` unchanged and gets extended for the new views.
     Every visual change is reviewed there with before and after screenshots.
 - **Settled with the owner** on 2026-10-31, from variants on live tokens:
   - the flash on changed cells is the cell's background tint (4.4);
-  - the context dot is a filled dot before the name (4.2);
+  - the context dot is a filled dot before the name (4.2), dropped on 2026-11-01: the colour now tints the rail tile and the title bar;
   - Kubernetes kinds use Lucide icons only, mapped by resource in `packages/kube`.
     Custom resources get one generic icon.
 - **Settled with the owner** on 2026-11-01, after [research](research/workbench-chrome.md) into Kubernetes clients, IDEs and tools with many targets:
