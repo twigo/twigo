@@ -24,6 +24,7 @@ import { cn, EmptyState, Skeleton } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import type { FlashTracker } from "./flash";
 import { kindIcon } from "./kinds";
+import { alignsEnd, cellParts, quietColumn } from "./columns";
 import { cellTone, statusColumn } from "./tones";
 import { useListView } from "./useListView";
 import { useNow } from "./useNow";
@@ -196,9 +197,15 @@ function ResourceList({
   const widthOf = (column: Column) =>
     widths[column.name] ?? defaultWidth(column);
   const Icon = kindIcon(gvr);
+  // Columns share the free width in proportion to their widths, except
+  // those the user sized; a filler takes it once every column is sized.
+  const flexes = (column: Column) => widths[column.name] === undefined;
   const template = [
-    ...columns.map((column) => `${String(widthOf(column))}px`),
-    "minmax(0, 1fr)",
+    ...columns.map((column) => {
+      const px = String(widthOf(column));
+      return flexes(column) ? `minmax(${px}px, ${px}fr)` : `${px}px`;
+    }),
+    ...(columns.some(flexes) ? [] : ["minmax(0, 1fr)"]),
   ].join(" ");
   const total = columns.reduce((sum, column) => sum + widthOf(column), 0);
 
@@ -216,13 +223,14 @@ function ResourceList({
           <div
             role="row"
             aria-rowindex={1}
-            className="sticky top-0 z-10 grid h-7 items-center border-b border-border bg-editor text-xs text-muted-foreground"
+            className="group/header sticky top-0 z-10 grid h-7 items-center border-b border-border bg-editor text-xs text-muted-foreground"
             style={{ gridTemplateColumns: template, minWidth: total }}
           >
             {columns.map((column) => (
               <HeaderCell
                 key={column.name}
                 column={column}
+                end={alignsEnd(gvr, column)}
                 width={widthOf(column)}
                 sort={sort}
                 onSort={setSort}
@@ -327,22 +335,16 @@ function defaultWidth(column: Column): number {
   return WIDTHS[column.name] ?? 140;
 }
 
-function alignEnd(column: Column): boolean {
-  return (
-    column.kind === "age" ||
-    column.kind === "integer" ||
-    column.kind === "number"
-  );
-}
-
 function HeaderCell({
   column,
+  end,
   width,
   sort,
   onSort,
   onResize,
 }: {
   column: IndexedColumn;
+  end: boolean;
   width: number;
   sort: Sort | null;
   onSort: (sort: Sort) => void;
@@ -351,9 +353,10 @@ function HeaderCell({
   const active = sort?.column === column.name;
   const Arrow = active && sort.descending ? ArrowDown : ArrowUp;
   return (
-    <div className="relative h-full border-r border-border-subtle">
+    <div className="relative h-full border-r border-transparent group-hover/header:border-border-subtle">
       <SortButton
         column={column}
+        end={end}
         active={active}
         sort={sort}
         onSort={onSort}
@@ -367,9 +370,14 @@ function HeaderCell({
           event.preventDefault();
           const start = event.clientX;
           const target = event.currentTarget;
+          // A flexing column is wider than its width on screen.
+          const from = Math.max(
+            width,
+            target.parentElement?.getBoundingClientRect().width ?? 0,
+          );
           target.setPointerCapture(event.pointerId);
           const move = (next: PointerEvent) => {
-            onResize(Math.max(MIN_WIDTH, width + next.clientX - start));
+            onResize(Math.max(MIN_WIDTH, from + next.clientX - start));
           };
           target.addEventListener("pointermove", move);
           target.addEventListener(
@@ -388,12 +396,14 @@ function HeaderCell({
 
 function SortButton({
   column,
+  end,
   active,
   sort,
   onSort,
   Arrow,
 }: {
   column: IndexedColumn;
+  end: boolean;
   active: boolean;
   sort: Sort | null;
   onSort: (sort: Sort) => void;
@@ -414,7 +424,7 @@ function SortButton({
       }}
       className={cn(
         "flex h-full w-full items-center gap-1 px-2 text-left hover:text-foreground",
-        alignEnd(column) && "flex-row-reverse text-right",
+        end && "flex-row-reverse text-right",
         active && "text-foreground",
       )}
     >
@@ -439,14 +449,16 @@ function DataCell({
 }) {
   const text = cellText(row.cells[column.index] ?? null, column, row, now);
   const tone = cellTone(gvr, column.name, text);
+  const status = column.name === statusColumn(gvr);
+  const parts = cellParts(gvr, column.name, text);
   const since = flash?.since(row.id, column.index);
   return (
     <div
       role="gridcell"
       className={cn(
         "truncate px-2",
-        alignEnd(column) && "text-right",
-        column.kind === "age" && "text-muted-foreground",
+        alignsEnd(gvr, column) && "text-right",
+        (quietColumn(column) || parts.quiet) && "text-muted-foreground",
         text === "<none>" && "text-muted-foreground-2",
       )}
     >
@@ -456,9 +468,10 @@ function DataCell({
           "-mx-1 rounded-sm px-1",
           since !== undefined && "animate-flash",
           tone === "error" && "text-error",
+          tone === "warn" && !status && "text-warn",
         )}
       >
-        {tone && (
+        {tone && status && (
           <span
             aria-hidden
             className={cn(
@@ -467,7 +480,10 @@ function DataCell({
             )}
           />
         )}
-        {text}
+        {parts.text}
+        {parts.rest && (
+          <span className="text-muted-foreground">{parts.rest}</span>
+        )}
       </span>
     </div>
   );

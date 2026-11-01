@@ -269,15 +269,21 @@ test("a changed cell flashes through the next batch, and a storm flashes nothing
   ).toEqual([]);
 });
 
-test("dragging a header's edge resizes its column", async () => {
+test("columns share the free width until dragging an edge sizes one", async () => {
   await show("ready");
   const row = () => screen.getAllByRole("row")[0];
-  expect(row()?.style.gridTemplateColumns.startsWith("280px ")).toBe(true);
+  expect(
+    row()?.style.gridTemplateColumns.startsWith(
+      "minmax(280px, 280fr) minmax(140px, 140fr) ",
+    ),
+  ).toBe(true);
   const edge = screen.getByRole("separator", { name: "Resize Name" });
   fireEvent.pointerDown(edge, { clientX: 300, pointerId: 1 });
   fireEvent.pointerMove(edge, { clientX: 400, pointerId: 1 });
   fireEvent.pointerUp(edge, { pointerId: 1 });
-  expect(row()?.style.gridTemplateColumns.startsWith("380px ")).toBe(true);
+  expect(
+    row()?.style.gridTemplateColumns.startsWith("380px minmax(140px, 140fr) "),
+  ).toBe(true);
   fireEvent.pointerDown(edge, { clientX: 400, pointerId: 1 });
   fireEvent.pointerMove(edge, { clientX: -1000, pointerId: 1 });
   expect(row()?.style.gridTemplateColumns.startsWith("48px ")).toBe(true);
