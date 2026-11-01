@@ -9,17 +9,30 @@ import {
   Kbd,
 } from "@twigo/ui";
 import { toIpcError } from "@twigo/protocol";
+import { PanelBoundary } from "../parts/PanelBoundary";
 import { useChanges, useWorkbench } from "../react";
 import { filtered } from "./providers";
 import type { QuickPickItem, Session } from "./registry";
 
 /** The quick-access input at the top of the window (ARCHITECTURE 4.5). */
 export function QuickAccessWidget() {
-  const { quickAccess } = useWorkbench();
+  const workbench = useWorkbench();
+  const { quickAccess } = workbench;
   useChanges(quickAccess.changes);
   const { session } = quickAccess;
   if (!session) return null;
-  return <Open session={session} />;
+  return (
+    <PanelBoundary
+      label="Quick access"
+      fallback={() => null}
+      onCrash={(error) => {
+        quickAccess.hide();
+        workbench.report(error, "Quick access crashed");
+      }}
+    >
+      <Open session={session} />
+    </PanelBoundary>
+  );
 }
 
 type Loaded =

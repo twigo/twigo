@@ -1,5 +1,6 @@
 import { useChanges, useWorkbench } from "../react";
 import type { Alignment } from "../views/registry";
+import { PanelBoundary, PartCrash } from "./PanelBoundary";
 
 /** Items that features contribute, ordered by priority on each side (ARCHITECTURE 4.1). */
 export function StatusBar() {
@@ -19,7 +20,21 @@ function Side({ alignment }: { alignment: Alignment }) {
     <div className="flex min-w-0 items-center gap-3">
       {views.statusBarItems(alignment, keys.lookup(null)).map((item) => {
         const Component = item.component;
-        return <Component key={item.id} />;
+        return (
+          <PanelBoundary
+            key={item.id}
+            label={item.id}
+            fallback={(crash) => (
+              <PartCrash
+                crash={crash}
+                iconOnly
+                className="text-statusbar-foreground"
+              />
+            )}
+          >
+            <Component />
+          </PanelBoundary>
+        );
       })}
     </div>
   );
