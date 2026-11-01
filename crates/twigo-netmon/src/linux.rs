@@ -3,6 +3,8 @@
 //! address and route groups for the network, which need no privilege
 //! (netlink(7)).
 
+use std::io;
+
 use futures::StreamExt;
 use netlink_sys::{AsyncSocket, AsyncSocketExt, SocketAddr, TokioSocket, protocols::NETLINK_ROUTE};
 use tokio::sync::mpsc::UnboundedSender;
@@ -78,11 +80,25 @@ pub(crate) async fn wakes(
     Ok(())
 }
 
-async fn changes(events: &UnboundedSender<Event>) -> std::io::Result<()> {
+async fn changes(events: &UnboundedSender<Event>) -> io::Result<()> {
+    follow(subscribe()?, events).await
+}
+
+fn subscribe() -> io::Result<TokioSocket> {
     let mut socket = TokioSocket::new(NETLINK_ROUTE)?;
     socket.socket_mut().bind(&SocketAddr::new(0, GROUPS))?;
+    Ok(socket)
+}
+
+async fn follow(socket: TokioSocket, events: &UnboundedSender<Event>) -> io::Result<()> {
     loop {
-        socket.recv_from_full().await?;
+        match socket.recv_from_full().await {
+            Ok(_) => {}
+            // The kernel dropped messages that overflowed the socket's
+            // buffer (netlink(7)), so what changed is unknown.
+            Err(error) if error.raw_os_error() == Some(libc::ENOBUFS) => {}
+            Err(error) => return Err(error),
+        }
         if events.send(Event::NetworkChanged).is_err() {
             return Ok(());
         }
@@ -179,6 +195,33 @@ mod tests {
         ip(&["link", "del", "twigo0"]);
         assert_eq!(
             event.expect("a network change").unwrap(),
+            Event::NetworkChanged
+        );
+    }
+
+    /// Overflows the smallest receive buffer with a hundred addresses
+    /// before reading, then adds one more.
+    #[tokio::test]
+    #[ignore = "needs CAP_NET_ADMIN"]
+    async fn changes_go_on_after_the_buffer_overflowed() {
+        let ip = |args: &[&str]| assert!(Command::new("ip").args(args).status().unwrap().success());
+        let socket = subscribe().unwrap();
+        socket.socket_ref().set_rx_buf_sz(0).unwrap();
+        ip(&["link", "add", "twigo1", "type", "dummy"]);
+        for n in 1..=100 {
+            ip(&["addr", "add", &format!("10.98.0.{n}/32"), "dev", "twigo1"]);
+        }
+        let (events, mut received) = mpsc::unbounded_channel();
+        tokio::spawn(async move { follow(socket, &events).await.unwrap() });
+        while let Ok(Some(_)) =
+            tokio::time::timeout(Duration::from_millis(300), received.recv()).await
+        {}
+
+        ip(&["addr", "add", "10.98.1.1/32", "dev", "twigo1"]);
+        let event = tokio::time::timeout(Duration::from_secs(5), received.recv()).await;
+        ip(&["link", "del", "twigo1"]);
+        assert_eq!(
+            event.expect("a change after the overflow").unwrap(),
             Event::NetworkChanged
         );
     }

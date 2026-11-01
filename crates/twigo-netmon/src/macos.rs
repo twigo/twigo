@@ -1,8 +1,9 @@
 //! IOKit's system power notifications for wake, as Chromium's and Firefox's
 //! power monitors use them, and SystemConfiguration's dynamic store for the
 //! network: its global IPv4 and IPv6 state, which names the primary
-//! interface, and each service's addresses. Both deliver on a dispatch
-//! queue of their own, away from the main thread that tao owns.
+//! interface, and the addresses of each service and of each interface,
+//! since a tunnel such as wg-quick's utun has no service. Both deliver on a
+//! dispatch queue of their own, away from the main thread that tao owns.
 
 use std::ffi::c_void;
 use std::ptr::{self, NonNull};
@@ -21,7 +22,10 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::Event;
 
 const KEYS: [&str; 2] = ["State:/Network/Global/IPv4", "State:/Network/Global/IPv6"];
-const PATTERNS: [&str; 1] = ["State:/Network/Service/[^/]+/IPv[46]"];
+const PATTERNS: [&str; 2] = [
+    "State:/Network/Service/[^/]+/IPv[46]",
+    "State:/Network/Interface/[^/]+/IPv[46]",
+];
 
 pub struct Listeners {
     power: Option<Power>,
