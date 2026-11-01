@@ -6,7 +6,7 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use k8s_openapi::api::core::v1::Pod;
 use kube::api::{ListParams, Patch, PatchParams};
@@ -14,8 +14,8 @@ use kube::config::{KubeConfigOptions, Kubeconfig};
 use kube::{Api, Config};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tokio::sync::{Semaphore, mpsc};
-use tokio::time::MissedTickBehavior;
+use tokio::sync::mpsc;
+use tokio::time::{Instant, MissedTickBehavior};
 use twigo_kube::client::Clients;
 
 use crate::stats::Spread;
@@ -24,6 +24,8 @@ const NAMESPACE: &str = "bench";
 const SELECTOR: &str = "app=bench";
 const CONTAINER: &str = "app";
 const IN_FLIGHT: usize = 64;
+/// The API client has no read timeout, so a patch the server never answers would hold its pod.
+const PATCH_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct Options {
     pub kubeconfig: PathBuf,
@@ -85,7 +87,7 @@ fn unix_ms() -> f64 {
         * 1000.0
 }
 
-async fn pods(api: &Api<Pod>) -> Result<Vec<(String, i32)>, kube::Error> {
+async fn pods(api: &Api<Pod>) -> Result<Vec<(Arc<str>, i32)>, kube::Error> {
     let mut pods = Vec::new();
     let mut params = ListParams::default().labels(SELECTOR).limit(500);
     loop {
@@ -98,7 +100,7 @@ async fn pods(api: &Api<Pod>) -> Result<Vec<(String, i32)>, kube::Error> {
                 .and_then(|statuses| statuses.into_iter().find(|s| s.name == CONTAINER))
                 .map(|status| status.restart_count);
             if let Some(restarts) = restarts {
-                pods.push((name, restarts));
+                pods.push((name.into(), restarts));
             }
         }
         match page.metadata.continue_ {
@@ -122,27 +124,62 @@ pub async fn run(options: Options) -> Result<Summary, String> {
     let client = Clients::new(config).map_err(|e| e.to_string())?.api;
     let api: Api<Pod> = Api::namespaced(client, NAMESPACE);
 
-    let mut pods = pods(&api).await.map_err(|e| e.to_string())?;
+    let pods = pods(&api).await.map_err(|e| e.to_string())?;
     if pods.is_empty() {
         return Err(format!(
             "no running pods match {SELECTOR} in {NAMESPACE}: run bench/pods.sh first"
         ));
     }
-    let names: Arc<[Arc<str>]> = pods.iter().map(|(name, _)| name.as_str().into()).collect();
     let mut log = BufWriter::new(File::create(&options.log).map_err(|e| e.to_string())?);
+    let stop = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    let patch = move |name: Arc<str>, restarts: i32| {
+        let api = api.clone();
+        async move {
+            let patch = Patch::Json::<()>(restart_patch(restarts));
+            api.patch_status(&name, &PatchParams::default(), &patch)
+                .await
+                .map(drop)
+                .map_err(|error| error.to_string())
+        }
+    };
+    let summary = churn(pods, options.rate, options.seconds, stop, patch, &mut log).await?;
+    log.flush().map_err(|e| e.to_string())?;
+    Ok(summary)
+}
 
+/// Patches random pods at `rate` a second, at most `IN_FLIGHT` at once and never two for one
+/// pod, until `seconds` pass or `stop` resolves; then logs the answers of the patches in flight.
+async fn churn<P, F>(
+    pods: Vec<(Arc<str>, i32)>,
+    rate: f64,
+    seconds: Option<f64>,
+    stop: impl Future<Output = ()>,
+    patch: P,
+    log: &mut impl Write,
+) -> Result<Summary, String>
+where
+    P: Fn(Arc<str>, i32) -> F,
+    F: Future<Output = Result<(), String>> + Send + 'static,
+{
+    let (names, mut restarts): (Vec<Arc<str>>, Vec<i32>) = pods.into_iter().unzip();
+    let bound = IN_FLIGHT.min(names.len());
     let (done, mut answers) = mpsc::unbounded_channel::<Answer>();
-    let permits = Arc::new(Semaphore::new(IN_FLIGHT));
     let mut in_flight = HashSet::new();
-    let mut ticker = tokio::time::interval(Duration::from_secs_f64(1.0 / options.rate));
+    let mut ticker = tokio::time::interval(Duration::from_secs_f64(1.0 / rate));
     ticker.set_missed_tick_behavior(MissedTickBehavior::Burst);
-    let deadline = options.seconds.map(Duration::from_secs_f64);
-    let stop = tokio::signal::ctrl_c();
-    tokio::pin!(stop);
+    let deadline = async {
+        match seconds {
+            Some(seconds) => tokio::time::sleep(Duration::from_secs_f64(seconds)).await,
+            None => std::future::pending().await,
+        }
+    };
+    tokio::pin!(stop, deadline);
 
     let start = Instant::now();
     let (mut changes, mut errors, mut latencies) = (0, 0, Vec::new());
-    let mut record = |log: &mut BufWriter<File>, answer: Answer| {
+    let mut record = |answer: Answer| {
         let Answer {
             index,
             restarts,
@@ -170,29 +207,29 @@ pub async fn run(options: Options) -> Result<Summary, String> {
 
     loop {
         tokio::select! {
-            _ = &mut stop => break,
+            biased;
+            () = &mut stop => break,
+            () = &mut deadline => break,
             Some(answer) = answers.recv() => {
-                in_flight.remove(&record(&mut log, answer)?);
+                in_flight.remove(&record(answer)?);
             }
-            _ = ticker.tick() => {
-                if deadline.is_some_and(|deadline| start.elapsed() >= deadline) {
-                    break;
-                }
-                let permit = permits.clone().acquire_owned().await.expect("an open semaphore");
+            _ = ticker.tick(), if in_flight.len() < bound => {
                 let index = loop {
-                    let index = fastrand::usize(..pods.len());
+                    let index = fastrand::usize(..names.len());
                     if in_flight.insert(index) {
                         break index;
                     }
                 };
-                pods[index].1 += 1;
-                let restarts = pods[index].1;
-                let (api, done, name) = (api.clone(), done.clone(), names[index].clone());
+                restarts[index] += 1;
+                let restarts = restarts[index];
+                let call = patch(names[index].clone(), restarts);
+                let done = done.clone();
                 tokio::spawn(async move {
                     let sent = unix_ms();
-                    let patch = Patch::Json::<()>(restart_patch(restarts));
-                    let result = api.patch_status(&name, &PatchParams::default(), &patch).await;
-                    let error = result.err().map(|error| error.to_string());
+                    let error = match tokio::time::timeout(PATCH_TIMEOUT, call).await {
+                        Ok(result) => result.err(),
+                        Err(_) => Some(format!("no answer within {} s", PATCH_TIMEOUT.as_secs())),
+                    };
                     let _ = done.send(Answer {
                         index,
                         restarts,
@@ -200,7 +237,6 @@ pub async fn run(options: Options) -> Result<Summary, String> {
                         answered: unix_ms(),
                         error,
                     });
-                    drop(permit);
                 });
             }
         }
@@ -208,12 +244,11 @@ pub async fn run(options: Options) -> Result<Summary, String> {
     let seconds = start.elapsed().as_secs_f64();
     drop(done);
     while let Some(answer) = answers.recv().await {
-        record(&mut log, answer)?;
+        record(answer)?;
     }
-    log.flush().map_err(|e| e.to_string())?;
     Ok(Summary {
-        pods: pods.len(),
-        rate: options.rate,
+        pods: names.len(),
+        rate,
         seconds,
         changes,
         errors,
@@ -233,6 +268,8 @@ pub fn kubeconfig(explicit: Option<&Path>) -> Result<PathBuf, String> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use super::*;
 
     #[test]
@@ -256,5 +293,190 @@ mod tests {
             "status": { "containerStatuses": [{ "name": "sidecar", "restartCount": 3 }] }
         });
         assert!(json_patch::patch(&mut other, &restart_patch(4)).is_err());
+    }
+
+    #[tokio::test]
+    async fn run_refuses_a_prod_context_before_connecting() {
+        let dir = std::env::temp_dir().join(format!("twigo-bench-refuses-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let kubeconfig = dir.join("kubeconfig");
+        std::fs::write(
+            &kubeconfig,
+            "apiVersion: v1
+kind: Config
+current-context: prod-eu
+clusters:
+- name: prod-eu
+  cluster:
+    server: https://127.0.0.1:1
+contexts:
+- name: prod-eu
+  context:
+    cluster: prod-eu
+    user: prod-eu
+users:
+- name: prod-eu
+  user:
+    token: secret
+",
+        )
+        .unwrap();
+        let log = dir.join("churn.jsonl");
+
+        let result = run(Options {
+            kubeconfig,
+            rate: 100.0,
+            seconds: Some(1.0),
+            log: log.clone(),
+        })
+        .await;
+
+        assert_eq!(
+            result.err().as_deref(),
+            Some(r#"refusing context "prod-eu": only kind and kwok clusters"#)
+        );
+        assert!(!log.exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn names(count: usize) -> Vec<(Arc<str>, i32)> {
+        (0..count).map(|i| (format!("pod-{i}").into(), 0)).collect()
+    }
+
+    fn lines(log: &[u8]) -> Vec<serde_json::Value> {
+        log.split(|byte| *byte == b'\n')
+            .filter(|line| !line.is_empty())
+            .map(|line| serde_json::from_slice(line).unwrap())
+            .collect()
+    }
+
+    #[derive(Default)]
+    struct Calls {
+        open: HashSet<Arc<str>>,
+        overlaps: usize,
+        most_open: usize,
+        made: usize,
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn never_two_patches_in_flight_for_one_pod() {
+        let calls = Arc::new(Mutex::new(Calls::default()));
+        let patch = {
+            let calls = calls.clone();
+            move |name: Arc<str>, _| {
+                let calls = calls.clone();
+                async move {
+                    {
+                        let mut calls = calls.lock().unwrap();
+                        calls.made += 1;
+                        if !calls.open.insert(name.clone()) {
+                            calls.overlaps += 1;
+                        }
+                        calls.most_open = calls.most_open.max(calls.open.len());
+                    }
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                    calls.lock().unwrap().open.remove(&name);
+                    Ok(())
+                }
+            }
+        };
+        let mut log = Vec::new();
+
+        let summary = churn(
+            names(3),
+            1000.0,
+            Some(1.0),
+            std::future::pending(),
+            patch,
+            &mut log,
+        )
+        .await
+        .unwrap();
+
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.overlaps, 0);
+        assert_eq!(calls.most_open, 3);
+        assert!(calls.made > 100);
+        assert_eq!((summary.changes, summary.errors), (calls.made, 0));
+        assert_eq!(lines(&log).len(), calls.made);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_deadline_ends_a_run_whose_patches_go_unanswered() {
+        let mut log = Vec::new();
+
+        let summary = churn(
+            names(100),
+            100.0,
+            Some(2.0),
+            std::future::pending(),
+            |_, _| std::future::pending(),
+            &mut log,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(summary.seconds, 2.0);
+        assert_eq!((summary.changes, summary.errors), (0, IN_FLIGHT));
+        let lines = lines(&log);
+        assert_eq!(lines.len(), IN_FLIGHT);
+        assert!(
+            lines
+                .iter()
+                .all(|line| line["error"] == "no answer within 10 s")
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stop_ends_a_run_waiting_on_its_only_pod() {
+        let mut log = Vec::new();
+
+        let summary = churn(
+            names(1),
+            100.0,
+            None,
+            tokio::time::sleep(Duration::from_millis(500)),
+            |_, _| std::future::pending(),
+            &mut log,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(summary.seconds, 0.5);
+        assert_eq!((summary.changes, summary.errors), (0, 1));
+        assert_eq!(lines(&log)[0]["pod"], "pod-0");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stop_logs_the_answers_of_the_patches_in_flight() {
+        let made = Arc::new(Mutex::new(0));
+        let patch = {
+            let made = made.clone();
+            move |_, _| {
+                let made = made.clone();
+                async move {
+                    *made.lock().unwrap() += 1;
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    Ok(())
+                }
+            }
+        };
+        let mut log = Vec::new();
+
+        let summary = churn(
+            names(1000),
+            100.0,
+            None,
+            tokio::time::sleep(Duration::from_secs(1)),
+            patch,
+            &mut log,
+        )
+        .await
+        .unwrap();
+
+        let made = *made.lock().unwrap();
+        assert!(made > 90);
+        assert_eq!((summary.changes, summary.errors), (made, 0));
+        assert_eq!(lines(&log).len(), made);
     }
 }

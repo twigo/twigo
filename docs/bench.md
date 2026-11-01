@@ -78,6 +78,8 @@ Limits:
 
 `twigo-bench churn [--kubeconfig PATH] [--rate 100] [--seconds S] --log FILE` bumps the restart count of random pods of `bench/bench` through the status subresource: a JSON patch that tests that the first container is `app` and replaces its `restartCount`.
 It paces patches on a fixed interval, catching up after a slow tick, with at most 64 in flight and never two for one pod, until `--seconds` pass or SIGINT.
+At that bound, or once every pod has a patch in flight, it waits for an answer, still watching for the deadline and SIGINT; the API client has no read timeout, so a patch unanswered after 10 s is logged as an error.
+On stop it logs the answers of the patches still in flight.
 Each change is a JSON line with the pod, the new count, and when it was sent and answered, in Unix milliseconds, for M1 to join with the webview's paints; the summary goes to stdout.
 The client comes from `twigo_kube::client::Clients`, the kubeconfig from `--kubeconfig` or `TWIGO_TEST_KUBECONFIG`, and contexts other than `kind-*` and `kwok-*` are refused.
 
