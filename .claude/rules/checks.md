@@ -10,10 +10,11 @@
 - The TypeScript of the IPC types: `TWIGO_UPDATE_TYPESCRIPT=1 cargo test -p twigo-ipc --test typescript`.
 - The mock's keyboard layouts: `cargo run -p twigo-keyboard --example record` on a Mac reads installed layouts without selecting them and rewrites `packages/protocol/src/mock/layouts`.
 - twigo-keyboard on Linux: `crates/twigo-keyboard/linux/run.sh` runs its tests in Docker, the live X11 test under Xvfb and the live Wayland test under a headless sway included; given a command, such as `cargo clippy -p twigo-keyboard --all-targets -- -D warnings`, it runs that instead.
+- twigo-netmon on Linux: `crates/twigo-netmon/linux.sh` runs its tests in Docker, the ignored ones included; CI runs the netlink one as root in a network namespace of its own.
 - twigo-keyboard on Windows: after `rustup target add x86_64-pc-windows-msvc`, `cargo clippy -p twigo-keyboard --target x86_64-pc-windows-msvc --all-targets -- -D warnings` checks the code; nothing runs it yet (D2).
 - Live tests against kind, one release: `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/test-matrix.sh 1.37`.
   Without an argument it runs every supported release.
-- A cluster to keep: `export TWIGO_BENCH_DIR=$(mktemp -d)`, `kubeconfig=$(bench/cluster.sh up <name> 1.37 | tail -1)`, then `TWIGO_TEST_KUBECONFIG=$kubeconfig cargo test -p twigo-cache -p twigo-kube -- --ignored`, and `bench/cluster.sh down <name>` with the same `TWIGO_BENCH_DIR` when done.
+- A cluster to keep: `export TWIGO_BENCH_DIR=$(mktemp -d)`, `kubeconfig=$(bench/cluster.sh up <name> 1.37 | tail -1)`, then `TWIGO_TEST_KUBECONFIG=$kubeconfig cargo test -p twigo-cache -p twigo-kube -p twigo-core -- --ignored`, and `bench/cluster.sh down <name>` with the same `TWIGO_BENCH_DIR` when done.
 - The IPC bench: `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/ipc/run.sh frames` or `bench/ipc/run.sh cost 3` on macOS, and `bench/ipc/linux.sh frames` for WebKitGTK in Docker.
   Each run opens a window and exits by itself.
 - The bench harness ([bench](../../docs/bench.md)): `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/harness.sh` on macOS with the screen unlocked; it creates and deletes its cluster, or takes the kubeconfig of one that `bench/pods.sh` scaled to 5000.
@@ -22,7 +23,7 @@
 - State across ⌘Q and a restart, on macOS with the screen unlocked: `bench/restart.sh <kind kubeconfig>` after the debug build; it runs the app with a temporary `HOME` and presses keys through System Events, which needs the terminal's Accessibility permission.
 - The churn generator alone: `cargo run --release -p twigo-bench -- churn --kubeconfig <path> --rate 100 --seconds 60 --log churn.jsonl`.
 - Before a push, run only the checks the change affects.
-  CI runs the rest, the live tests on every release when `twigo-cache`, `twigo-kube`, `bench/cluster.sh` or the Cargo files change, and the frame probe on WebKitGTK when `bench/ipc` or the Cargo files change.
+  CI runs the rest, the live tests on every release when `twigo-cache`, `twigo-kube`, `twigo-core`, `bench/cluster.sh` or the Cargo files change, and the frame probe on WebKitGTK when `bench/ipc` or the Cargo files change.
 
 ## Gotchas
 
@@ -33,6 +34,7 @@
 - The app reads the kubeconfigs kubectl reads, the user's real clusters among them, unless `TWIGO_KUBECONFIG` names one file: in debug and bench builds only that file's `kind-*` and `kwok-*` contexts count, so development and tests always set it.
   With a `HOME` of its own the app also keeps its state and window position apart, since Tauri finds the app-data directory through `HOME`.
 - Kubernetes clients come only from `twigo_kube::client::Clients`: `api` speaks HTTP/2, `sessions` HTTP/1.1 for exec, attach and port-forward.
+  `api` counts its streams, 24 watches at most by default, so a test or tool that opens more raises `Options::budgets`, or its watches wait.
   Never `Config::infer()`, `~/.kube/config` or the current context: tests and examples read `TWIGO_TEST_KUBECONFIG` and refuse contexts other than `kind-*` and `kwok-*`.
 - k8s-openapi moves only together with kube: kube 4.2 requires `^0.28`.
   Dependabot bumps both in its `kube` group; a group PR that carries only k8s-openapi cannot build until a kube release requires that version.
