@@ -3,7 +3,7 @@
 //! WKWebView runs its pages, networking and GPU work in `com.apple.WebKit.*` XPC services, which
 //! launchd starts as its own children, so they are not the app's children and Safari's, Mail's
 //! and other apps' run beside them. macOS records the process responsible for each one, the app
-//! that asked for it, and Activity Monitor groups processes by it. The sampler reads it through
+//! that asked for it, and the sampler reads it through
 //! `responsibility_get_pid_responsible_for_pid`, an undocumented libsystem function.
 //!
 //! A process started from a terminal inherits the terminal as its responsible process, and so
