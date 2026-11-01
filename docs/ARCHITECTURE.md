@@ -696,7 +696,6 @@ It moves into `packages/ui` unchanged and gets extended for the new views.
   - Dense rows: 22 px in trees and tables; icons 16 px, Lucide's 1.5 stroke drawing 1 px lines.
 - **Surfaces.**
   Flat parts split by hairlines (4.1), and editor tabs connect to their editor: the active tab takes the editor's surface.
-  On macOS the chrome lets the system's sidebar material show through, as Finder's and Xcode's does; the editor stays opaque.
   Table columns resize from their header's edge.
 - **Motion.**
   An instant-in, gentle-out ladder (`--dur-instant` 100 ms to `--dur-slow` 300 ms).
