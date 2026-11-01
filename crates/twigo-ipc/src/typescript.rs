@@ -5,8 +5,8 @@ use ts_rs::{Config, TS, TypeVisitor};
 
 use crate::command::{
     ClusterVersionGet, Command, ContextsList, KeyboardLayoutWatch, ListAck, ListSetWindow,
-    ListSubscribe, ListUnsubscribe, NamespacesList, ResourcesList, SpaceOpen, SpacesList, StateGet,
-    StateSet,
+    ListSubscribe, ListUnsubscribe, NamespacesList, ResourcesList, ShellEnvironmentRetry,
+    ShellEnvironmentWatch, SpaceOpen, SpacesList, StateGet, StateSet,
 };
 
 /// The TypeScript module of `packages/protocol`: every type the commands
@@ -30,6 +30,8 @@ pub fn typescript() -> String {
     module.command::<KeyboardLayoutWatch>();
     module.command::<StateGet>();
     module.command::<StateSet>();
+    module.command::<ShellEnvironmentWatch>();
+    module.command::<ShellEnvironmentRetry>();
 
     let mut out = String::from(
         "// Generated from crates/twigo-ipc: TWIGO_UPDATE_TYPESCRIPT=1 cargo test -p twigo-ipc --test typescript\n",

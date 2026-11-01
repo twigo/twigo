@@ -14,6 +14,7 @@ import type {
   ListBatch,
   ListQuery,
   RowId,
+  ShellEnvironment,
   ViewState,
 } from "../generated";
 import { Cluster, podCells, podRow, type Pod } from "./cluster";
@@ -27,10 +28,14 @@ import RESOURCES from "./resources.json";
 import { checkQuery, podColumns, runQuery } from "./query";
 
 /** `live` connects, syncs and then changes pods every second; any other value pins that state. */
-export type MockScenario = "live" | ViewState["state"];
+type ListScenario = "live" | ViewState["state"];
+
+/** A list scenario, or `shellTimeout`: live lists while the login shell's environment timed out. */
+export type MockScenario = ListScenario | "shellTimeout";
 
 export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "live",
+  "shellTimeout",
   "queued",
   "connecting",
   "syncing",
@@ -61,6 +66,15 @@ const LAYOUTS: Readonly<Record<MockLayout, KeyboardLayout>> = {
   dvorak,
 };
 
+/** What twigo-env reported for a `.zshrc` of `echo "Loading nvm…"; sleep 60` (2026-11-01). */
+const SHELL_TIMEOUT: ShellEnvironment = {
+  state: "failed",
+  shell: "/bin/zsh",
+  reason: "did not answer in 10 s",
+  output: "Loading nvm…\n",
+};
+
+const RETRY_MS = 1500;
 const FLUSH_MS = 50;
 const CHURN_MS = 1000;
 const RATE_TICK_MS = 100;
@@ -80,6 +94,15 @@ export function createMockBackend(
   changesPerSecond?: number,
 ): Backend {
   const now = Date.now();
+  const lists: ListScenario = scenario === "shellTimeout" ? "live" : scenario;
+  const resolved: ShellEnvironment =
+    scenario === "shellTimeout" ? SHELL_TIMEOUT : { state: "resolved" };
+  let environment = resolved;
+  const environmentWatchers = new Set<(next: ShellEnvironment) => void>();
+  const setEnvironment = (next: ShellEnvironment) => {
+    environment = next;
+    for (const watcher of environmentWatchers) watcher(next);
+  };
   const clusters = new Map<string, Cluster>();
   const subscriptions = new Map<number, Subscription>();
   const spaces = [...SPACES];
@@ -138,6 +161,14 @@ export function createMockBackend(
     namespaces_list: (id) => {
       space(id);
       return [...NAMESPACES].sort();
+    },
+    shell_environment_retry: () => {
+      if (environment.state !== "failed") return null;
+      setEnvironment({ state: "resolving" });
+      setTimeout(() => {
+        setEnvironment(resolved);
+      }, RETRY_MS);
+      return null;
     },
     state_get: (key) => state.get(key) ?? null,
     state_set: ({ key, value }) => {
@@ -203,11 +234,11 @@ export function createMockBackend(
           query,
           columns,
           listed.contexts.map((context) => cluster(context.name)),
-          scenario,
+          lists,
           onMessage,
         ),
       );
-      if (scenario === "live" && churn === undefined) {
+      if (lists === "live" && churn === undefined) {
         churn =
           changesPerSecond === undefined
             ? demoChurn()
@@ -216,6 +247,10 @@ export function createMockBackend(
       return id;
     },
     keyboard_layout_watch: () => LAYOUTS[layout],
+    shell_environment_watch: (_request, onMessage) => {
+      environmentWatchers.add(onMessage);
+      return environment;
+    },
   };
 
   return {
@@ -245,7 +280,7 @@ function settle<T>(run: () => T): Promise<T> {
   });
 }
 
-const PINNED: Readonly<Record<Exclude<MockScenario, "live">, ViewState>> = {
+const PINNED: Readonly<Record<Exclude<ListScenario, "live">, ViewState>> = {
   queued: { state: "queued" },
   connecting: { state: "connecting" },
   syncing: { state: "syncing", loaded: 1850 },
@@ -291,7 +326,7 @@ class Subscription {
     query: ListQuery,
     columns: Column[],
     clusters: readonly Cluster[],
-    scenario: MockScenario,
+    scenario: ListScenario,
     onMessage: (batch: ListBatch) => void,
   ) {
     this.#query = query;

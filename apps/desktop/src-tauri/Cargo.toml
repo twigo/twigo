@@ -20,5 +20,6 @@ serde_json = { workspace = true, optional = true }
 tauri.workspace = true
 tauri-plugin-single-instance.workspace = true
 tauri-plugin-window-state.workspace = true
+twigo-env.workspace = true
 twigo-ipc.workspace = true
 twigo-keyboard.workspace = true

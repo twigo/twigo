@@ -3,6 +3,7 @@
 
 pub mod command;
 mod discovery;
+mod environment;
 mod error;
 mod keyboard;
 mod list;
@@ -11,6 +12,7 @@ mod state;
 mod typescript;
 
 pub use discovery::{ClusterVersion, Resource};
+pub use environment::ShellEnvironment;
 pub use error::{ErrorKind, IpcError};
 pub use keyboard::{KeyMapping, KeyboardLayout};
 pub use list::{

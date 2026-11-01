@@ -26,6 +26,7 @@ export type {
   Resource,
   Row,
   RowId,
+  ShellEnvironment,
   Sort,
   Space,
   SubscriptionId,

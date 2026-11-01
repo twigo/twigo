@@ -5,6 +5,7 @@ import { Menus } from "./commands/menus";
 import { Commands } from "./commands/registry";
 import { ContextKeys } from "./contextkey/service";
 import { Editors } from "./editors/registry";
+import { ShellEnvironmentStatus } from "./environment";
 import type { Platform } from "./keybindings/chord";
 import { Keybindings } from "./keybindings/service";
 import { QuickAccess } from "./quickaccess/registry";
@@ -27,6 +28,7 @@ export class Workbench {
   readonly quickAccess = new QuickAccess(this.keys);
   readonly keybindings: Keybindings;
   readonly spaces: Spaces;
+  readonly shellEnvironment: ShellEnvironmentStatus;
 
   constructor(
     readonly backend: Backend,
@@ -43,6 +45,7 @@ export class Workbench {
     this.spaces = new Spaces(backend, this.keys, (error) => {
       this.report(error);
     });
+    this.shellEnvironment = new ShellEnvironmentStatus(backend, this.keys);
   }
 
   /** Shows a failure the user did not ask to see but must know about. */
@@ -76,6 +79,10 @@ export async function createWorkbench(
   const workbench = new Workbench(backend, platform, target.early ?? layout);
   target.workbench = workbench;
   registerCore(workbench);
+  // Nothing waits for it: the status bar shows the environment when it comes.
+  workbench.shellEnvironment.watch().catch((error: unknown) => {
+    workbench.report(error);
+  });
   await workbench.spaces.load();
   return workbench;
 }
