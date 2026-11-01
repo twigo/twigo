@@ -88,7 +88,7 @@ pub struct Run {
 pub struct Inputs {
     pub run: Run,
     pub webview: Webview,
-    pub memory: Sample,
+    pub memory: Vec<Sample>,
     pub idle: (Sample, Sample),
     pub hidden: Option<Hidden>,
     pub churn: Option<Churn>,
@@ -108,12 +108,24 @@ fn read_optional<T: DeserializeOwned>(dir: &Path, name: &str) -> Result<Option<T
     }
 }
 
+/// `memory-1.json`, `memory-2.json` and on, as many as the harness took.
+fn read_memory(dir: &Path) -> Result<Vec<Sample>, String> {
+    let mut samples = Vec::new();
+    while let Some(sample) = read_optional(dir, &format!("memory-{}.json", samples.len() + 1))? {
+        samples.push(sample);
+    }
+    if samples.is_empty() {
+        return Err(format!("{}: no memory-1.json", dir.display()));
+    }
+    Ok(samples)
+}
+
 impl Inputs {
     pub fn read(dir: &Path) -> Result<Self, String> {
         Ok(Inputs {
             run: read(dir, "run.json")?,
             webview: read(dir, "webview.json")?,
-            memory: read(dir, "memory.json")?,
+            memory: read_memory(dir)?,
             idle: (read(dir, "idle-start.json")?, read(dir, "idle-end.json")?),
             hidden: read_optional(dir, "hidden.json")?,
             churn: read_optional(dir, "churn.json")?,
@@ -206,6 +218,11 @@ pub fn cpu_percent(start: &Sample, end: &Sample) -> f64 {
 
 fn mb(bytes: u64) -> f64 {
     bytes as f64 / MB
+}
+
+fn median_mb(samples: &[Sample], bytes: impl Fn(&Sample) -> u64) -> f64 {
+    let values: Vec<f64> = samples.iter().map(|s| mb(bytes(s))).collect();
+    percentile(&values, 50.0).unwrap_or(0.0)
 }
 
 pub fn fps(frame_ms: &[f64]) -> f64 {
@@ -313,28 +330,37 @@ pub fn build(inputs: Inputs) -> Report {
         ),
     });
 
-    let core = mb(memory.app.rss);
+    let first = &memory[0];
+    let core = median_mb(&memory, |s| s.app.rss);
     rows.push(Row {
         metric: "Core RSS with the pod list open".into(),
         value: Some(format!("{core:.0} MB")),
         target: format!("< {CORE_RSS_MB:.0} MB"),
         status: judge.status(core < CORE_RSS_MB),
         measured: format!(
-            "resident size of {} (pid {}) under churn; M0's core holds no watch cache yet, and the list lives in the webview's mock",
-            memory.app.name, memory.app.pid
+            "resident size of {} (pid {}) under churn, the median of {} samples; M0's core holds no watch cache yet, and the list lives in the webview's mock",
+            first.app.name,
+            first.app.pid,
+            memory.len()
         ),
     });
 
-    let webkit = mb(memory.webkit.iter().map(|p| p.footprint).sum());
-    let webkit_rss = mb(memory.webkit.iter().map(|p| p.rss).sum());
-    let names: Vec<String> = memory
+    let webkit = median_mb(&memory, |s| s.webkit.iter().map(|p| p.footprint).sum());
+    let webkit_rss = median_mb(&memory, |s| s.webkit.iter().map(|p| p.rss).sum());
+    let names: Vec<String> = first
         .webkit
         .iter()
         .map(|p| {
+            let footprint = median_mb(&memory, |s| {
+                s.webkit
+                    .iter()
+                    .filter(|q| q.name == p.name)
+                    .map(|q| q.footprint)
+                    .sum()
+            });
             format!(
-                "{} {:.0} MB",
+                "{} {footprint:.0} MB",
                 p.name.trim_start_matches(crate::process::WEBKIT_PREFIX),
-                mb(p.footprint)
             )
         })
         .collect();
@@ -344,9 +370,10 @@ pub fn build(inputs: Inputs) -> Report {
         target: format!("< {WEBVIEW_MB:.0} MB"),
         status: judge.status(webkit < WEBVIEW_MB),
         measured: format!(
-            "physical footprint of the WebKit processes the app is responsible for ({}), under churn; their RSS adds up to {webkit_rss:.0} MB; {} other WebKit processes left out; the webview holds the mock's {} pods, which Rust holds from M1",
+            "physical footprint of the WebKit processes the app is responsible for ({}), under churn, the median of {} samples; their RSS adds up to {webkit_rss:.0} MB; {} other WebKit processes left out; the webview holds the mock's {} pods, which Rust holds from M1",
             names.join(", "),
-            memory.other_webkit.len(),
+            memory.len(),
+            first.other_webkit.len(),
             webview.rows,
         ),
     });
@@ -491,7 +518,7 @@ mod tests {
                     timed_out: 0,
                 },
             },
-            memory: sample(0.0, 0, webkit(0)),
+            memory: vec![sample(0.0, 0, webkit(0))],
             idle: (
                 sample(0.0, 1_000, webkit(1_000)),
                 sample(10_000.0, 1_000 + idle_ns, webkit(1_000)),
@@ -548,6 +575,42 @@ mod tests {
                 "Scroll and sort: sort",
                 "Idle CPU, 100 changes/s, window hidden"
             ]
+        );
+    }
+
+    #[test]
+    fn memory_is_the_median_of_its_samples() {
+        let mut all = inputs("mock", 20.0, 16.7, 1_000_000);
+        all.memory = [(100, 300), (500, 100), (200, 200)]
+            .into_iter()
+            .map(|(content, core)| {
+                let mut s = sample(
+                    0.0,
+                    0,
+                    vec![
+                        process(
+                            701,
+                            "com.apple.WebKit.WebContent",
+                            1,
+                            content * 1_000_000,
+                            0,
+                        ),
+                        process(702, "com.apple.WebKit.GPU", 1, 10 * 1_000_000, 0),
+                    ],
+                );
+                s.app.rss = core * 1_000_000;
+                s
+            })
+            .collect();
+        let report = build(all);
+        assert_eq!(report.rows[6].value.as_deref(), Some("200 MB"));
+        assert_eq!(report.rows[7].value.as_deref(), Some("210 MB"));
+        assert!(
+            report.rows[7]
+                .measured
+                .contains("WebContent 200 MB, GPU 10 MB"),
+            "{}",
+            report.rows[7].measured
         );
     }
 

@@ -12,6 +12,8 @@ set -euo pipefail
 PODS=5000
 RATE=100
 SETTLE=10
+MEMORY_SAMPLES=5
+MEMORY_EVERY=2
 IDLE_SETTLE=5
 IDLE_SAMPLE=30
 
@@ -145,7 +147,11 @@ wait_for() {
 echo "app running; the window must stay on screen until it hides itself" >&2
 wait_for steady.json 180
 sleep "$SETTLE"
-"$tool" sample "$app" >"$out/memory.json"
+for n in $(seq 1 "$MEMORY_SAMPLES"); do
+  [ "$n" -eq 1 ] || sleep "$MEMORY_EVERY"
+  no_failure
+  "$tool" sample "$app" >"$out/memory-$n.json"
+done
 wait_for idle.json 180
 sleep "$IDLE_SETTLE"
 "$tool" sample "$app" >"$out/idle-start.json"
