@@ -1,8 +1,11 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { isTauri } from "@tauri-apps/api/core";
-import { tauriBackend, type Backend } from "@twigo/protocol";
-import { App } from "./App";
+import { registerKube } from "@twigo/kube";
+import { tauriBackend, toIpcError, type Backend } from "@twigo/protocol";
+import { createWorkbench, platformOf, WorkbenchView } from "@twigo/workbench";
+import { StartupFailure } from "./App";
+import { installNativeMenu } from "./nativeMenu";
 import "./index.css";
 
 const root = document.getElementById("root");
@@ -15,16 +18,28 @@ applyTheme();
 dark.addEventListener("change", applyTheme);
 
 async function browserBackend(): Promise<Backend> {
-  const { createMockBackend, MOCK_SCENARIOS } =
+  const { createMockBackend, MOCK_LAYOUTS, MOCK_SCENARIOS } =
     await import("@twigo/protocol/mock");
-  const asked = new URLSearchParams(location.search).get("scenario");
-  return createMockBackend(MOCK_SCENARIOS.find((s) => s === asked));
+  const asked = new URLSearchParams(location.search);
+  return createMockBackend(
+    MOCK_SCENARIOS.find((s) => s === asked.get("scenario")),
+    MOCK_LAYOUTS.find((l) => l === asked.get("layout")),
+  );
 }
 
-const backend = isTauri() ? tauriBackend : await browserBackend();
+async function start() {
+  const backend = isTauri() ? tauriBackend : await browserBackend();
+  const workbench = await createWorkbench(
+    backend,
+    platformOf(navigator.userAgent),
+  );
+  registerKube(workbench);
+  if (isTauri() && workbench.platform === "mac") installNativeMenu(workbench);
+  return <WorkbenchView workbench={workbench} />;
+}
 
-createRoot(root).render(
-  <StrictMode>
-    <App backend={backend} />
-  </StrictMode>,
-);
+const view = await start().catch((error: unknown) => (
+  <StartupFailure message={toIpcError(error).message} />
+));
+
+createRoot(root).render(<StrictMode>{view}</StrictMode>);

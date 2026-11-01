@@ -15,10 +15,16 @@ import {
   vi,
 } from "vitest";
 import { StrictMode } from "react";
-import type { Backend, ListBatch } from "@twigo/protocol";
+import type {
+  Backend,
+  GroupCount,
+  ListBatch,
+  ViewState,
+} from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import { PODS } from "./kinds";
-import { ResourceTable } from "./ResourceTable";
+import { stateLabel } from "./listStatus";
+import { ResourceTable, type ListController } from "./ResourceTable";
 
 beforeAll(() => {
   Object.defineProperty(HTMLElement.prototype, "clientHeight", {
@@ -56,22 +62,31 @@ async function settle(steps = 6) {
 }
 
 async function show(scenario: MockScenario, space = "prod-eu") {
+  const onStatus =
+    vi.fn<
+      (total: number, status: ViewState, groups: readonly GroupCount[]) => void
+    >();
   render(
     <ResourceTable
       backend={createMockBackend(scenario)}
       space={space}
       gvr={PODS}
       title="Pods"
+      onStatus={onStatus}
     />,
   );
   await settle();
+  return onStatus;
 }
 
 const header = (name: string) => screen.getByRole("columnheader", { name });
 
 test("rows from the window render with the server's priority-0 columns", async () => {
-  await show("ready");
-  expect(screen.getByText("5,000")).toBeTruthy();
+  const onStatus = await show("ready");
+  const [total, status, groups] = onStatus.mock.lastCall ?? [];
+  expect([total, status]).toEqual([5000, { state: "ready" }]);
+  expect(groups?.reduce((sum, group) => sum + group.count, 0)).toBe(5000);
+  expect(groups?.[0]?.value).toBe("Running");
   const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
   expect(headers).toEqual([
     "Name",
@@ -80,6 +95,7 @@ test("rows from the window render with the server's priority-0 columns", async (
     "Status",
     "Restarts",
     "Age",
+    "",
   ]);
   expect(screen.getAllByRole("row").length).toBeGreaterThan(10);
 });
@@ -124,9 +140,10 @@ test.each([
   ["syncing", "Loading · 1,850"],
   ["relisting", "Relisting…"],
   ["stale", "No updates · reconnecting"],
-] as const)("%s is named in the header", async (scenario, label) => {
-  await show(scenario);
-  expect(screen.getByText(label)).toBeTruthy();
+] as const)("%s is reported and named", async (scenario, label) => {
+  const onStatus = await show(scenario);
+  const [, status] = onStatus.mock.lastCall ?? [];
+  expect(status && stateLabel(status)).toBe(label);
 });
 
 test("a scroll during a resubscribe reaches the new subscription before it shows", async () => {
@@ -207,6 +224,7 @@ function batch(
       cells: [id, value],
     })),
     status: { state: "ready" },
+    groups: null,
   };
 }
 
@@ -250,4 +268,121 @@ test("a changed cell flashes through the next batch, and a storm flashes nothing
       restarts(id)?.className.includes("animate-flash"),
     ),
   ).toEqual([]);
+});
+
+test("columns share the free width until dragging an edge sizes one", async () => {
+  await show("ready");
+  const row = () => screen.getAllByRole("row")[0];
+  expect(
+    row()?.style.gridTemplateColumns.startsWith(
+      "minmax(280px, 280fr) minmax(140px, 140fr) ",
+    ),
+  ).toBe(true);
+  const edge = screen.getByRole("separator", { name: "Resize Name" });
+  fireEvent.pointerDown(edge, { clientX: 300, pointerId: 1 });
+  fireEvent.pointerMove(edge, { clientX: 400, pointerId: 1 });
+  fireEvent.pointerUp(edge, { pointerId: 1 });
+  expect(
+    row()?.style.gridTemplateColumns.startsWith("380px minmax(140px, 140fr) "),
+  ).toBe(true);
+  fireEvent.pointerDown(edge, { clientX: 400, pointerId: 1 });
+  fireEvent.pointerMove(edge, { clientX: -1000, pointerId: 1 });
+  expect(row()?.style.gridTemplateColumns.startsWith("48px ")).toBe(true);
+});
+
+test("filters that match nothing say so and offer to clear them", async () => {
+  const onClearFilters = vi.fn();
+  render(
+    <ResourceTable
+      backend={createMockBackend("ready")}
+      space="prod-eu"
+      gvr={PODS}
+      title="Pods"
+      text="no-such-pod"
+      onClearFilters={onClearFilters}
+    />,
+  );
+  await settle();
+  expect(screen.getByText("No matching pods")).toBeTruthy();
+  expect(screen.queryByText("No pods")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+  expect(onClearFilters).toHaveBeenCalledTimes(1);
+});
+
+test("j moves on from the selected row after it scrolled out of the window", async () => {
+  let controller: ListController | undefined;
+  render(
+    <ResourceTable
+      backend={createMockBackend("ready")}
+      space="prod-eu"
+      gvr={PODS}
+      title="Pods"
+      register={(_, list) => {
+        controller = list;
+        return () => undefined;
+      }}
+    />,
+  );
+  await settle();
+  fireEvent.click(screen.getAllByRole("row")[1] ?? document.body);
+  const grid = screen.getByRole("grid");
+  grid.scrollTop = 3000 * 26;
+  fireEvent.scroll(grid);
+  await settle();
+  act(() => {
+    controller?.move(1);
+  });
+  await settle();
+  grid.scrollTop = 0;
+  fireEvent.scroll(grid);
+  await settle();
+  const selected = screen
+    .getAllByRole("row")
+    .filter((row) => row.getAttribute("aria-selected") === "true");
+  expect(selected.map((row) => row.getAttribute("aria-rowindex"))).toEqual([
+    "3",
+  ]);
+});
+
+test.each([
+  [{ IP: true }, "10.244.", true],
+  [{}, "10.244.", false],
+  [{ Namespace: false }, "kube-system", false],
+  [{}, "kube-system", true],
+])(
+  "with choices %o the text %s matches rows: %s",
+  async (choices, text, matches) => {
+    render(
+      <ResourceTable
+        backend={createMockBackend("ready")}
+        space="prod-eu"
+        gvr={PODS}
+        title="Pods"
+        text={text}
+        choices={choices}
+      />,
+    );
+    await settle();
+    expect(screen.queryByText("No matching pods") === null).toBe(matches);
+  },
+);
+
+test("the first subscription already carries the column choices the text filter follows", async () => {
+  const backend = createMockBackend("ready");
+  const subscribe = vi.spyOn(backend, "subscribe");
+  render(
+    <ResourceTable
+      backend={backend}
+      space="prod-eu"
+      gvr={PODS}
+      title="Pods"
+      text="10.244."
+      choices={{ IP: true }}
+    />,
+  );
+  await settle();
+  const queries = subscribe.mock.calls.flatMap(([, request]) =>
+    request && "columns" in request ? [request.columns] : [],
+  );
+  expect(queries).toEqual([{ IP: true }]);
 });

@@ -1,0 +1,305 @@
+{
+  "id": "com.apple.keylayout.Ukrainian",
+  "keys": {
+    "Backquote": {
+      "value": "'",
+      "withShift": "~",
+      "withAltGr": "]",
+      "withShiftAltGr": "["
+    },
+    "Backslash": {
+      "value": "ґ",
+      "withShift": "Ґ",
+      "withAltGr": "ё",
+      "withShiftAltGr": "Ё"
+    },
+    "BracketLeft": {
+      "value": "х",
+      "withShift": "Х",
+      "withAltGr": "“",
+      "withShiftAltGr": "”"
+    },
+    "BracketRight": {
+      "value": "ї",
+      "withShift": "Ї",
+      "withAltGr": "ъ",
+      "withShiftAltGr": "Ъ"
+    },
+    "Comma": {
+      "value": "б",
+      "withShift": "Б",
+      "withAltGr": "≤",
+      "withShiftAltGr": "<"
+    },
+    "Digit0": {
+      "value": "0",
+      "withShift": ")",
+      "withAltGr": ")",
+      "withShiftAltGr": "`"
+    },
+    "Digit1": {
+      "value": "1",
+      "withShift": "!",
+      "withAltGr": "!",
+      "withShiftAltGr": "|"
+    },
+    "Digit2": {
+      "value": "2",
+      "withShift": "\"",
+      "withAltGr": "@",
+      "withShiftAltGr": "\""
+    },
+    "Digit3": {
+      "value": "3",
+      "withShift": "№",
+      "withAltGr": "#",
+      "withShiftAltGr": "£"
+    },
+    "Digit4": {
+      "value": "4",
+      "withShift": "%",
+      "withAltGr": "$",
+      "withShiftAltGr": "€"
+    },
+    "Digit5": {
+      "value": "5",
+      "withShift": ":",
+      "withAltGr": "%",
+      "withShiftAltGr": "∞"
+    },
+    "Digit6": {
+      "value": "6",
+      "withShift": ",",
+      "withAltGr": "^",
+      "withShiftAltGr": "¬"
+    },
+    "Digit7": {
+      "value": "7",
+      "withShift": ".",
+      "withAltGr": "&",
+      "withShiftAltGr": "¶"
+    },
+    "Digit8": {
+      "value": "8",
+      "withShift": ";",
+      "withAltGr": "*",
+      "withShiftAltGr": "√"
+    },
+    "Digit9": {
+      "value": "9",
+      "withShift": "(",
+      "withAltGr": "(",
+      "withShiftAltGr": "'"
+    },
+    "Equal": {
+      "value": "=",
+      "withShift": "+",
+      "withAltGr": "»",
+      "withShiftAltGr": "«"
+    },
+    "IntlBackslash": {
+      "value": ">",
+      "withShift": "<",
+      "withAltGr": "§",
+      "withShiftAltGr": "±"
+    },
+    "IntlRo": {
+      "value": "'",
+      "withShift": "~",
+      "withAltGr": "]",
+      "withShiftAltGr": "["
+    },
+    "IntlYen": {
+      "value": ">",
+      "withShift": "<",
+      "withAltGr": "§",
+      "withShiftAltGr": "±"
+    },
+    "KeyA": {
+      "value": "ф",
+      "withShift": "Ф",
+      "withAltGr": "ƒ",
+      "withShiftAltGr": "₴"
+    },
+    "KeyB": {
+      "value": "і",
+      "withShift": "І",
+      "withAltGr": "и",
+      "withShiftAltGr": "И"
+    },
+    "KeyC": {
+      "value": "с",
+      "withShift": "С",
+      "withAltGr": "≠",
+      "withShiftAltGr": "≠"
+    },
+    "KeyD": {
+      "value": "в",
+      "withShift": "В",
+      "withAltGr": "ћ",
+      "withShiftAltGr": "Ћ"
+    },
+    "KeyE": {
+      "value": "у",
+      "withShift": "У",
+      "withAltGr": "ќ",
+      "withShiftAltGr": "Ќ"
+    },
+    "KeyF": {
+      "value": "а",
+      "withShift": "А",
+      "withAltGr": "÷",
+      "withShiftAltGr": "÷"
+    },
+    "KeyG": {
+      "value": "п",
+      "withShift": "П",
+      "withAltGr": "©",
+      "withShiftAltGr": "©"
+    },
+    "KeyH": {
+      "value": "р",
+      "withShift": "Р",
+      "withAltGr": "}",
+      "withShiftAltGr": "{"
+    },
+    "KeyI": {
+      "value": "ш",
+      "withShift": "Ш",
+      "withAltGr": "ѕ",
+      "withShiftAltGr": "Ѕ"
+    },
+    "KeyJ": {
+      "value": "о",
+      "withShift": "О",
+      "withAltGr": "°",
+      "withShiftAltGr": "•"
+    },
+    "KeyK": {
+      "value": "л",
+      "withShift": "Л",
+      "withAltGr": "љ",
+      "withShiftAltGr": "Љ"
+    },
+    "KeyL": {
+      "value": "д",
+      "withShift": "Д",
+      "withAltGr": "∆",
+      "withShiftAltGr": "∆"
+    },
+    "KeyM": {
+      "value": "ь",
+      "withShift": "Ь",
+      "withAltGr": "~",
+      "withShiftAltGr": "~"
+    },
+    "KeyN": {
+      "value": "т",
+      "withShift": "Т",
+      "withAltGr": "™",
+      "withShiftAltGr": "™"
+    },
+    "KeyO": {
+      "value": "щ",
+      "withShift": "Щ",
+      "withAltGr": "ў",
+      "withShiftAltGr": "Ў"
+    },
+    "KeyP": {
+      "value": "з",
+      "withShift": "З",
+      "withAltGr": "‘",
+      "withShiftAltGr": "’"
+    },
+    "KeyQ": {
+      "value": "й",
+      "withShift": "Й",
+      "withAltGr": "ј",
+      "withShiftAltGr": "Ј"
+    },
+    "KeyR": {
+      "value": "к",
+      "withShift": "К",
+      "withAltGr": "®",
+      "withShiftAltGr": "®"
+    },
+    "KeyS": {
+      "value": "и",
+      "withShift": "И",
+      "withAltGr": "ы",
+      "withShiftAltGr": "Ы"
+    },
+    "KeyT": {
+      "value": "е",
+      "withShift": "Е",
+      "withAltGr": "†",
+      "withShiftAltGr": "†"
+    },
+    "KeyU": {
+      "value": "г",
+      "withShift": "Г",
+      "withAltGr": "ѓ",
+      "withShiftAltGr": "Ѓ"
+    },
+    "KeyV": {
+      "value": "м",
+      "withShift": "М",
+      "withAltGr": "µ",
+      "withShiftAltGr": "µ"
+    },
+    "KeyW": {
+      "value": "ц",
+      "withShift": "Ц",
+      "withAltGr": "џ",
+      "withShiftAltGr": "Џ"
+    },
+    "KeyX": {
+      "value": "ч",
+      "withShift": "Ч",
+      "withAltGr": "≈",
+      "withShiftAltGr": "≈"
+    },
+    "KeyY": {
+      "value": "н",
+      "withShift": "Н",
+      "withAltGr": "њ",
+      "withShiftAltGr": "Њ"
+    },
+    "KeyZ": {
+      "value": "я",
+      "withShift": "Я",
+      "withAltGr": "ђ",
+      "withShiftAltGr": "Ђ"
+    },
+    "Minus": {
+      "value": "-",
+      "withShift": "_",
+      "withAltGr": "–",
+      "withShiftAltGr": "—"
+    },
+    "Period": {
+      "value": "ю",
+      "withShift": "Ю",
+      "withAltGr": "≥",
+      "withShiftAltGr": ">"
+    },
+    "Quote": {
+      "value": "є",
+      "withShift": "Є",
+      "withAltGr": "э",
+      "withShiftAltGr": "Э"
+    },
+    "Semicolon": {
+      "value": "ж",
+      "withShift": "Ж",
+      "withAltGr": "…",
+      "withShiftAltGr": "…"
+    },
+    "Slash": {
+      "value": "/",
+      "withShift": "?",
+      "withAltGr": "“",
+      "withShiftAltGr": "„"
+    }
+  }
+}

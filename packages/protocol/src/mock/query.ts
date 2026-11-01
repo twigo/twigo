@@ -38,26 +38,35 @@ export function checkQuery(query: ListQuery, columns: readonly Column[]): void {
       "the mock backend does not filter by label",
     );
   }
-  if (
-    query.sort &&
-    !columns.some((column) => column.name === query.sort?.column)
-  ) {
-    throw new IpcError("invalidInput", `no column ${query.sort.column}`);
+  const named = [
+    ...(query.sort ? [query.sort.column] : []),
+    ...(query.groupBy === null ? [] : [query.groupBy]),
+    ...(query.values ? [query.values.column] : []),
+  ];
+  const unknown = named.find(
+    (name) => !columns.some((column) => column.name === name),
+  );
+  if (unknown !== undefined) {
+    throw new IpcError("invalidInput", `no column ${unknown}`);
   }
 }
 
-/** Filters on the shown columns and sorts, as Rust's query view does (ARCHITECTURE 3.4). */
+/**
+ * Filters on the query's columns and sorts, as Rust's query view does
+ * (ARCHITECTURE 3.4). `counted` are the matches before `values`, which the
+ * grouped counts come from.
+ */
 export function runQuery(
   pods: readonly Pod[],
   query: ListQuery,
   columns: readonly Column[],
-): Pod[] {
+): { rows: Pod[]; counted: Pod[] } {
   const withContext = columns[0]?.name === "Context";
   const withNamespace = columns.some((column) => column.name === "Namespace");
   const cells = (pod: Pod) => podCells(pod, withContext, withNamespace);
-  const shown = columns.flatMap((column, i) =>
-    column.priority === 0 ? [i] : [],
-  );
+  const matched = (column: Column) =>
+    query.columns?.[column.name] ?? column.priority === 0;
+  const shown = columns.flatMap((column, i) => (matched(column) ? [i] : []));
   const namespaces = new Set(query.namespaces);
   const text = query.text?.trim().toLowerCase() ?? "";
   const negate = text.startsWith("!");
@@ -72,10 +81,17 @@ export function runQuery(
     });
     return hit !== negate;
   });
+  const valuesAt = columns.findIndex(
+    (column) => column.name === query.values?.column,
+  );
+  const kept = new Set(query.values?.values);
+  const rows = query.values
+    ? matches.filter((pod) => kept.has(String(cells(pod)[valuesAt] ?? "")))
+    : matches;
   const sort = query.sort ?? { column: "Name", descending: false };
   const index = columns.findIndex((column) => column.name === sort.column);
   const age = columns[index]?.kind === "age";
-  const keyed = matches.map((pod) => ({ pod, key: cells(pod)[index] }));
+  const keyed = rows.map((pod) => ({ pod, key: cells(pod)[index] }));
   keyed.sort((a, b) => {
     const order = age
       ? b.pod.created - a.pod.created
@@ -84,5 +100,5 @@ export function runQuery(
       (sort.descending ? -order : order) || collator.compare(a.pod.id, b.pod.id)
     );
   });
-  return keyed.map(({ pod }) => pod);
+  return { rows: keyed.map(({ pod }) => pod), counted: matches };
 }

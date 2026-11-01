@@ -20,28 +20,28 @@
   --brand: oklch(0.55 0.16 245);
   --brand-foreground: oklch(0.99 0.005 245);
 
-  /* Light chrome is cool-tinted toward the brand hue (never dead gray);
-     content surfaces stay white so data reads on paper. */
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.18 0.008 248);
+  /* Neutral greys with a trace of the brand hue: an app's chrome, not a
+     tinted dashboard. Content surfaces stay white so data reads on paper. */
+  --background: oklch(0.975 0.002 250);
+  --foreground: oklch(0.32 0.004 250);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.008 248);
+  --card-foreground: oklch(0.32 0.004 250);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.008 248);
-  --primary: oklch(0.24 0.012 248);
-  --primary-foreground: oklch(0.985 0.002 240);
-  --secondary: oklch(0.966 0.004 242);
-  --secondary-foreground: oklch(0.24 0.012 248);
-  --muted: oklch(0.966 0.004 242);
-  --muted-foreground: oklch(0.5 0.012 248);
+  --popover-foreground: oklch(0.32 0.004 250);
+  --primary: oklch(0.3 0.006 250);
+  --primary-foreground: oklch(0.985 0.002 250);
+  --secondary: oklch(0.955 0.002 250);
+  --secondary-foreground: oklch(0.3 0.006 250);
+  --muted: oklch(0.955 0.002 250);
+  --muted-foreground: oklch(0.5 0.006 250);
   /* Tertiary text: units, timestamps, kbd hints, section labels. */
-  --muted-foreground-2: oklch(0.6 0.01 248);
-  --accent: oklch(0.957 0.006 242);
-  --accent-foreground: oklch(0.24 0.012 248);
+  --muted-foreground-2: oklch(0.62 0.005 250);
+  --accent: oklch(0.945 0.003 250);
+  --accent-foreground: oklch(0.3 0.006 250);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.917 0.006 242);
-  --input: oklch(0.905 0.007 242);
+  --border: oklch(0.915 0.003 250);
+  --input: oklch(0.9 0.004 250);
   --ring: var(--brand);
 
   /* States are ALPHA overlays so they composite over any surface (not a solid
@@ -62,20 +62,23 @@
     0 0 0 2px color-mix(in oklab, var(--brand) 45%, transparent),
     0 0 0 4px color-mix(in oklab, var(--brand) 18%, transparent);
 
-  /* Hairlines in alpha tiers; micro for in-table row separators. */
+  /* Hairlines in alpha tiers. */
   --border-subtle: oklch(0 0 0 / 4%);
-  --border-micro: oklch(0 0 0 / 2.5%);
 
-  /* Editor pane = the content surface; on light it stays white like the canvas. */
+  /* The shell carries the title bar, the space rail and the status bar.
+     The side bars and the panel share its tone; the editor is the one
+     surface that stands out, white on light (VS Code's ramp). */
+  --shell: oklch(0.975 0.002 250);
   --editor: oklch(1 0 0);
 
-  --sidebar: oklch(0.977 0.003 242);
-  --sidebar-foreground: oklch(0.18 0.008 248);
-  --sidebar-border: oklch(0.917 0.006 242);
-  --panel: oklch(0.977 0.003 242);
-  /* Brand-ink bar: deeper than raw brand so it anchors instead of shouting. */
-  --statusbar: oklch(0.45 0.09 248);
-  --statusbar-foreground: oklch(0.97 0.012 245);
+  --sidebar: oklch(0.975 0.002 250);
+  --sidebar-foreground: oklch(0.32 0.004 250);
+  --sidebar-border: oklch(0.915 0.003 250);
+  --panel: oklch(0.975 0.002 250);
+  /* A matte, muted blue: low chroma, so it reads as ink, not as a glossy
+     accent. */
+  --statusbar: oklch(0.52 0.075 245);
+  --statusbar-foreground: oklch(0.98 0.006 245);
 
   --ok: oklch(0.62 0.14 150);
   --warn: oklch(0.72 0.15 75);
@@ -106,30 +109,30 @@
   --brand: oklch(0.72 0.135 245);
   --brand-foreground: oklch(0.15 0.03 250);
 
-  /* Deep-ocean neutrals (trace of brand hue; flat-gray darks read cheap).
-     Depth comes from a luminance ramp - the focused EDITOR is the darkest
-     surface and chrome steps lighter outward, no shadows on docked chrome:
-     editor 0.135 < canvas 0.15 < sidebar/panel 0.188 < card 0.215 < popover 0.235. */
-  --editor: oklch(0.135 0.006 245);
-  --background: oklch(0.15 0.006 245);
-  --foreground: oklch(0.93 0.005 240);
-  --card: oklch(0.215 0.008 245);
-  --card-foreground: oklch(0.93 0.005 240);
-  --popover: oklch(0.235 0.009 245);
-  --popover-foreground: oklch(0.93 0.005 240);
-  --primary: oklch(0.93 0.005 240);
-  --primary-foreground: oklch(0.2 0.008 245);
-  --secondary: oklch(0.25 0.009 245);
-  --secondary-foreground: oklch(0.93 0.005 240);
-  --muted: oklch(0.25 0.009 245);
-  --muted-foreground: oklch(0.66 0.011 242);
-  --muted-foreground-2: oklch(0.51 0.01 242);
-  --accent: oklch(0.272 0.011 244);
-  --accent-foreground: oklch(0.93 0.005 240);
+  /* Neutral greys with a trace of the brand hue, and text a step below
+     white: the shell and the side bars 0.205, the editor 0.235, card 0.25,
+     popover 0.27, as VS Code's ramp (#181818 to #1F1F1F, text #CCCCCC). */
+  --shell: oklch(0.205 0.002 250);
+  --editor: oklch(0.235 0.002 250);
+  --background: oklch(0.205 0.002 250);
+  --foreground: oklch(0.87 0.002 250);
+  --card: oklch(0.25 0.003 250);
+  --card-foreground: oklch(0.87 0.002 250);
+  --popover: oklch(0.27 0.003 250);
+  --popover-foreground: oklch(0.87 0.002 250);
+  --primary: oklch(0.87 0.002 250);
+  --primary-foreground: oklch(0.205 0.002 250);
+  --secondary: oklch(0.28 0.003 250);
+  --secondary-foreground: oklch(0.87 0.002 250);
+  --muted: oklch(0.28 0.003 250);
+  --muted-foreground: oklch(0.7 0.003 250);
+  --muted-foreground-2: oklch(0.56 0.003 250);
+  --accent: oklch(0.3 0.003 250);
+  --accent-foreground: oklch(0.87 0.002 250);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.93 0.02 240 / 10%);
-  --input: oklch(0.93 0.02 240 / 14%);
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 12%);
   --ring: var(--brand);
 
   --row-hover: oklch(1 0 0 / 4%);
@@ -139,16 +142,14 @@
 
   --tab-selected-bg: color-mix(in oklab, var(--brand) 14%, var(--card));
   --tab-selected-border: color-mix(in oklab, var(--brand) 30%, var(--border));
-  --border-subtle: oklch(0.93 0.02 240 / 5%);
-  --border-micro: oklch(0.93 0.02 240 / 2.5%);
+  --border-subtle: oklch(1 0 0 / 5%);
 
-  --sidebar: oklch(0.188 0.007 245);
-  --sidebar-foreground: oklch(0.93 0.005 240);
-  --sidebar-border: oklch(0.93 0.02 240 / 8%);
-  --panel: oklch(0.188 0.007 245);
-  /* Ink, not neon: the bar sits a step above the canvas with brand undertone. */
-  --statusbar: oklch(0.3 0.05 248);
-  --statusbar-foreground: oklch(0.9 0.025 245);
+  --sidebar: oklch(0.205 0.002 250);
+  --sidebar-foreground: oklch(0.87 0.002 250);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --panel: oklch(0.205 0.002 250);
+  --statusbar: oklch(0.4 0.06 245);
+  --statusbar-foreground: oklch(0.94 0.012 245);
 
   --ok: oklch(0.72 0.15 150);
   --warn: oklch(0.78 0.15 75);
@@ -196,12 +197,12 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-editor: var(--editor);
+  --color-shell: var(--shell);
   --color-row-hover: var(--row-hover);
   --color-row-active: var(--row-active);
   --color-selected: var(--selected);
   --color-selected-unfocused: var(--selected-unfocused);
   --color-border-subtle: var(--border-subtle);
-  --color-border-micro: var(--border-micro);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
@@ -230,9 +231,13 @@
   --shadow-md: var(--shadow-md);
   --shadow-lg: var(--shadow-lg);
 
+  /* Two weights, as VS Code and JetBrains use: 400, and 600 for emphasis. */
+  --font-weight-medium: 600;
+
+  /* The platform's UI font, as VS Code's workbench: SF on macOS. */
   --font-sans:
-    "Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system,
-    "Segoe UI", sans-serif;
+    -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
+    system-ui, Ubuntu, Cantarell, sans-serif;
   --font-mono:
     "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
     monospace;

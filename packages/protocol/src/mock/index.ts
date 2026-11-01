@@ -9,13 +9,21 @@ import type {
 import { IpcError } from "../error";
 import type {
   Column,
+  GroupCount,
+  KeyboardLayout,
   ListBatch,
   ListQuery,
   RowId,
   ViewState,
 } from "../generated";
-import { Cluster, podRow, type Pod } from "./cluster";
-import { POD_COUNT, SPACES } from "./fixtures";
+import { Cluster, podCells, podRow, type Pod } from "./cluster";
+import { CONTEXTS, NAMESPACES, POD_COUNT, SPACES, VERSIONS } from "./fixtures";
+import dvorak from "./layouts/dvorak.json";
+import french from "./layouts/french.json";
+import german from "./layouts/german.json";
+import ukrainian from "./layouts/ukrainian.json";
+import us from "./layouts/us.json";
+import RESOURCES from "./resources.json";
 import { checkQuery, podColumns, runQuery } from "./query";
 
 /** `live` connects, syncs and then changes pods every second; any other value pins that state. */
@@ -34,17 +42,42 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "error",
 ];
 
+/** Keyboard layouts recorded on macOS by `cargo run -p twigo-keyboard --example record`. */
+export const MOCK_LAYOUTS = [
+  "us",
+  "ukrainian",
+  "german",
+  "french",
+  "dvorak",
+] as const;
+
+export type MockLayout = (typeof MOCK_LAYOUTS)[number];
+
+const LAYOUTS: Readonly<Record<MockLayout, KeyboardLayout>> = {
+  us,
+  ukrainian,
+  german,
+  french,
+  dvorak,
+};
+
 const FLUSH_MS = 50;
 const CHURN_MS = 1000;
 
 /**
- * Runs the UI in a plain browser on fixtures (ARCHITECTURE 2.3): spaces, and
- * pods behind a query view with the same windowing and flow control as Rust.
+ * Runs the UI in a plain browser on fixtures (ARCHITECTURE 2.3): spaces,
+ * pods behind a query view with the same windowing and flow control as Rust,
+ * and a keyboard layout that never changes.
  */
-export function createMockBackend(scenario: MockScenario = "live"): Backend {
+export function createMockBackend(
+  scenario: MockScenario = "live",
+  layout: MockLayout = "us",
+): Backend {
   const now = Date.now();
   const clusters = new Map<string, Cluster>();
   const subscriptions = new Map<number, Subscription>();
+  const spaces = [...SPACES];
+  const state = new Map<string, string>();
   let nextId = 1;
   let churn: ReturnType<typeof setInterval> | undefined;
 
@@ -57,6 +90,12 @@ export function createMockBackend(scenario: MockScenario = "live"): Backend {
     return found;
   };
 
+  const space = (id: string) => {
+    const found = spaces.find((candidate) => candidate.id === id);
+    if (!found) throw new IpcError("notFound", `no space ${id}`);
+    return found;
+  };
+
   const subscription = (id: number) => {
     const found = subscriptions.get(id);
     if (!found) throw new IpcError("notFound", `no subscription ${id}`);
@@ -66,7 +105,39 @@ export function createMockBackend(scenario: MockScenario = "live"): Backend {
   const plain: {
     [C in PlainCommand]: (request: RequestOf<C>) => ResponseOf<C>;
   } = {
-    spaces_list: () => SPACES,
+    spaces_list: () => [...spaces],
+    contexts_list: () => CONTEXTS,
+    space_open: (name) => {
+      const context = CONTEXTS.find((candidate) => candidate.name === name);
+      if (!context) throw new IpcError("notFound", `no context ${name}`);
+      const open = spaces.find(
+        (candidate) =>
+          candidate.contexts.length === 1 &&
+          candidate.contexts[0]?.name === name,
+      );
+      if (open) return open;
+      const created = { id: name, name, contexts: [context] };
+      spaces.push(created);
+      return created;
+    },
+    resources_list: (id) => {
+      space(id);
+      return RESOURCES;
+    },
+    cluster_version: (name) => {
+      const version = VERSIONS[name];
+      if (!version) throw new IpcError("notFound", `no context ${name}`);
+      return { gitVersion: version };
+    },
+    namespaces_list: (id) => {
+      space(id);
+      return [...NAMESPACES].sort();
+    },
+    state_get: (key) => state.get(key) ?? null,
+    state_set: ({ key, value }) => {
+      state.set(key, value);
+      return null;
+    },
     list_set_window: ({ id, start, end }) => {
       subscription(id).setWindow(start, end);
       return null;
@@ -93,9 +164,8 @@ export function createMockBackend(scenario: MockScenario = "live"): Backend {
     ) => ResponseOf<C>;
   } = {
     list_subscribe: (query, onMessage) => {
-      const space = SPACES.find((candidate) => candidate.id === query.space);
-      if (!space) throw new IpcError("notFound", `no space ${query.space}`);
-      const columns = podColumns(space.contexts.length, query);
+      const listed = space(query.space);
+      const columns = podColumns(listed.contexts.length, query);
       checkQuery(query, columns);
       const id = nextId++;
       subscriptions.set(
@@ -103,7 +173,7 @@ export function createMockBackend(scenario: MockScenario = "live"): Backend {
         new Subscription(
           query,
           columns,
-          space.contexts.map((context) => cluster(context.name)),
+          listed.contexts.map((context) => cluster(context.name)),
           scenario,
           onMessage,
         ),
@@ -125,6 +195,7 @@ export function createMockBackend(scenario: MockScenario = "live"): Backend {
       }
       return id;
     },
+    keyboard_layout_watch: () => LAYOUTS[layout],
   };
 
   return {
@@ -187,13 +258,14 @@ class Subscription {
   #seq = 0;
   #acked = 0;
   #dirty = true;
-  #cache: { version: string; pods: Pod[] } | undefined;
+  #cache: { version: string; rows: Pod[]; counted: Pod[] } | undefined;
   #sent: {
     total: number;
     ids: readonly RowId[];
     versions: ReadonlyMap<RowId, number>;
     status: string;
-  } = { total: -1, ids: [], versions: new Map(), status: "" };
+    groups: string;
+  } = { total: -1, ids: [], versions: new Map(), status: "", groups: "" };
 
   constructor(
     query: ListQuery,
@@ -262,27 +334,27 @@ class Subscription {
     );
   }
 
-  #pods(): Pod[] {
-    if (!SHOWS_ROWS.has(this.#status.state)) return [];
+  #pods(): { rows: Pod[]; counted: Pod[] } {
+    if (!SHOWS_ROWS.has(this.#status.state)) return { rows: [], counted: [] };
     const version = this.#clusters.map((c) => c.version).join(",");
     if (this.#cache?.version !== version) {
       const pods = this.#clusters.flatMap((c) => c.pods);
-      this.#cache = {
-        version,
-        pods: runQuery(pods, this.#query, this.#columns),
-      };
+      this.#cache = { version, ...runQuery(pods, this.#query, this.#columns) };
     }
-    return this.#cache.pods;
+    return this.#cache;
   }
 
   #flush(): void {
     if (!this.#dirty || this.#seq !== this.#acked) return;
     this.#dirty = false;
-    const pods = this.#pods();
+    const { rows: pods, counted } = this.#pods();
     const [start, end] = this.#window;
     const visible = pods.slice(start, end);
     const ids = visible.map((pod) => pod.id);
     const status = JSON.stringify(this.#status);
+    const groups = this.#groups(counted);
+    const groupsJson = JSON.stringify(groups);
+    const groupsChanged = groupsJson !== this.#sent.groups;
     const first = this.#seq === 0;
     const windowChanged =
       first ||
@@ -295,6 +367,7 @@ class Subscription {
       !windowChanged &&
       upserts.length === 0 &&
       status === this.#sent.status &&
+      !groupsChanged &&
       pods.length === this.#sent.total
     ) {
       return;
@@ -306,6 +379,7 @@ class Subscription {
       ids,
       versions: new Map(visible.map((pod) => [pod.id, pod.version])),
       status,
+      groups: groupsJson,
     };
     this.#seq++;
     this.#onMessage({
@@ -315,6 +389,26 @@ class Subscription {
       window: windowChanged ? { start, ids } : null,
       upserts: upserts.map((pod) => podRow(pod, withContext, withNamespace)),
       status: this.#status,
+      groups: groups && (first || groupsChanged) ? groups : null,
     });
+  }
+
+  /** The matching pods per value of the `groupBy` column, largest first. */
+  #groups(pods: readonly Pod[]): GroupCount[] | null {
+    const column = this.#query.groupBy;
+    if (column === null) return null;
+    const at = this.#columns.findIndex(
+      (candidate) => candidate.name === column,
+    );
+    const withContext = this.#columns[0]?.name === "Context";
+    const withNamespace = this.#columns.some((c) => c.name === "Namespace");
+    const counts = new Map<string, number>();
+    for (const pod of pods) {
+      const value = String(podCells(pod, withContext, withNamespace)[at] ?? "");
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+    return [...counts]
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
   }
 }

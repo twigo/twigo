@@ -1,0 +1,40 @@
+[package]
+name = "twigo-keyboard"
+description = "The active keyboard layout and its changes, read from the OS for keybindings"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+twigo-ipc.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-core-foundation.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gdkwayland-sys.workspace = true
+gdkx11-sys.workspace = true
+gtk.workspace = true
+wayland-sys.workspace = true
+x11rb.workspace = true
+xkbcommon.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true
+windows-core.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gtk.workspace = true
+x11rb.workspace = true
+
+[[test]]
+name = "layouts"
+harness = false

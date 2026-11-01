@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { ListBatch, ListQuery } from "../generated";
+import type { KeyboardLayout, ListBatch, ListQuery } from "../generated";
 import { createMockBackend, type MockScenario } from "./index";
 
 function query(rest: Partial<ListQuery> = {}): ListQuery {
@@ -9,7 +9,10 @@ function query(rest: Partial<ListQuery> = {}): ListQuery {
     namespaces: [],
     labelSelector: null,
     text: null,
+    columns: null,
     sort: null,
+    groupBy: null,
+    values: null,
     ...rest,
   };
 }
@@ -61,6 +64,22 @@ test("lists the spaces with their context colours", async () => {
     ["dev", "green"],
     ["dev+qa", "green"],
   ]);
+});
+
+test("answers with the chosen keyboard layout, US by default, and never changes it", async () => {
+  const typed = async (backend: ReturnType<typeof createMockBackend>) => {
+    const changes: KeyboardLayout[] = [];
+    const layout = backend.subscribe("keyboard_layout_watch", null, (l) =>
+      changes.push(l),
+    );
+    await vi.advanceTimersByTimeAsync(5000);
+    return { keyQ: (await layout).keys.KeyQ?.value, changes };
+  };
+  expect(await typed(createMockBackend())).toEqual({ keyQ: "q", changes: [] });
+  expect(await typed(createMockBackend("live", "french"))).toEqual({
+    keyQ: "a",
+    changes: [],
+  });
 });
 
 test("a live subscription connects, syncs and becomes ready with 5k pods; the next one starts ready", async () => {
@@ -165,9 +184,40 @@ test("pinned states keep or drop rows as Rust does", async () => {
   }
 });
 
-test("text matches the shown columns only", async () => {
-  const hidden = await open("ready", query({ text: "<none>" }));
-  expect(hidden.batches[0]?.total).toBe(0);
+test("text matches the columns of priority 0 and those the query's choices show", async () => {
+  const total = async (text: string, columns: Record<string, boolean> | null) =>
+    (await open("ready", query({ text, columns }))).batches[0]?.total;
+  expect(await total("<none>", null)).toBe(0);
+  expect(await total("10.244.", null)).toBe(0);
+  expect(await total("10.244.", { IP: true })).toBe(5000);
+  expect(await total("kube-system", null)).toBeGreaterThan(0);
+  expect(await total("kube-system", { Namespace: false })).toBe(0);
+});
+
+test("a choice for a column the list lacks does nothing", async () => {
+  const one = await open(
+    "ready",
+    query({
+      namespaces: ["payments"],
+      text: "payments",
+      columns: { Namespace: true, IP: true },
+    }),
+  );
+  expect(one.batches[0]?.total).toBeGreaterThan(0);
+});
+
+test("an unknown groupBy column is refused at subscribe", async () => {
+  const backend = createMockBackend();
+  const pending = backend.subscribe(
+    "list_subscribe",
+    query({ groupBy: "Bogus" }),
+    () => undefined,
+  );
+  const rejected = expect(pending).rejects.toMatchObject({
+    kind: "invalidInput",
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  await rejected;
 });
 
 test("an unknown sort column is refused at subscribe", async () => {
@@ -189,6 +239,117 @@ test("label selectors are refused, since the mock cannot match labels", async ()
   const pending = backend.subscribe(
     "list_subscribe",
     query({ labelSelector: "app=api" }),
+    () => undefined,
+  );
+  const rejected = expect(pending).rejects.toMatchObject({
+    kind: "invalidInput",
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  await rejected;
+});
+
+async function call<T>(pending: Promise<T>): Promise<T> {
+  await vi.advanceTimersByTimeAsync(0);
+  return pending;
+}
+
+test("opening a context without a space creates its space once", async () => {
+  const backend = createMockBackend();
+  const before = await call(backend.invoke("spaces_list", null));
+  const space = await call(backend.invoke("space_open", "kind-local"));
+  expect(space).toEqual({
+    id: "kind-local",
+    name: "kind-local",
+    contexts: [{ name: "kind-local", color: null }],
+  });
+  const again = await call(backend.invoke("space_open", "kind-local"));
+  expect(again).toBe(space);
+  const after = await call(backend.invoke("spaces_list", null));
+  expect(after).toHaveLength(before.length + 1);
+});
+
+test("opening a context that has a space returns that space", async () => {
+  const backend = createMockBackend();
+  const space = await call(backend.invoke("space_open", "staging"));
+  expect(space.id).toBe("staging");
+});
+
+test("opening an unknown context fails with notFound", async () => {
+  const backend = createMockBackend();
+  const failed = backend
+    .invoke("space_open", "nowhere")
+    .catch((e: unknown) => e);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(await failed).toMatchObject({ kind: "notFound" });
+});
+
+test("state reads back what was stored, and null before", async () => {
+  const backend = createMockBackend();
+  expect(await call(backend.invoke("state_get", "space/prod-eu"))).toBeNull();
+  await call(
+    backend.invoke("state_set", { key: "space/prod-eu", value: "{}" }),
+  );
+  expect(await call(backend.invoke("state_get", "space/prod-eu"))).toBe("{}");
+});
+
+test("grouped counts follow the rows once a live list syncs", async () => {
+  const { batches, ack } = await open("live", query({ groupBy: "Status" }));
+  for (let i = 0; i < 40; i++) {
+    await ack();
+    await vi.advanceTimersByTimeAsync(50);
+  }
+  const groups = batches.flatMap((batch) =>
+    batch.groups ? [batch.groups] : [],
+  );
+  const latest = groups[groups.length - 1] ?? [];
+  expect(latest.reduce((sum, group) => sum + group.count, 0)).toBe(5000);
+});
+
+test("a change of counts alone sends a batch with the new groups", async () => {
+  const { batches, ack } = await open("live", query({ groupBy: "Status" }));
+  for (let ms = 0; ms < 4000; ms += 50) {
+    await ack();
+    await vi.advanceTimersByTimeAsync(50);
+  }
+  const ready = batches.findIndex((batch) => batch.status.state === "ready");
+  const after = batches.slice(ready + 1);
+  expect(ready).toBeGreaterThan(0);
+  expect(after.length).toBeGreaterThan(0);
+  expect(after.every((batch) => batch.groups !== null)).toBe(true);
+  after.forEach((batch, i) => {
+    expect(batch.groups).not.toEqual(batches[ready + i]?.groups);
+  });
+});
+
+test("no groupBy, no groups", async () => {
+  const { batches } = await open("ready");
+  expect(batches.every((batch) => batch.groups === null)).toBe(true);
+});
+
+test("values keep their rows, and the grouped counts stay those of every value", async () => {
+  const all = await open("ready", query({ groupBy: "Status" }));
+  const picked = await open(
+    "ready",
+    query({
+      groupBy: "Status",
+      values: { column: "Status", values: ["CrashLoopBackOff", "Error"] },
+    }),
+  );
+  const counts = all.batches[0]?.groups ?? [];
+  const count = (value: string) =>
+    counts.find((group) => group.value === value)?.count ?? 0;
+  expect(picked.batches[0]?.total).toBe(
+    count("CrashLoopBackOff") + count("Error"),
+  );
+  expect(picked.batches[0]?.total).toBeGreaterThan(0);
+  expect(picked.batches[0]?.groups).toEqual(counts);
+});
+
+test("values of an unknown column are refused at subscribe", async () => {
+  const backend = createMockBackend();
+  const pending = backend.subscribe(
+    "list_subscribe",
+    query({ values: { column: "Bogus", values: ["x"] } }),
     () => undefined,
   );
   const rejected = expect(pending).rejects.toMatchObject({

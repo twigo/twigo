@@ -1,0 +1,108 @@
+@import "dockview-react/dist/styles/dockview.css";
+@import "allotment/dist/style.css";
+
+/* The workbench's parts on the design tokens of packages/ui (ARCHITECTURE 4.9).
+   Imported by the app after @twigo/ui/styles.css. */
+
+/* Allotment's separator between the parts, on the design tokens. */
+.twigo-workbench {
+  --separator-border: var(--border);
+  --focus-border: var(--brand);
+}
+/* Allotment draws a separator as its pane's ::before at z-index 5; each
+   part's content is its own stacking context, so nothing in it (a sticky
+   table header at z-index 10) paints over the line. */
+.twigo-workbench .split-view-view > * {
+  isolation: isolate;
+}
+
+/* A coloured context tints the title bar's left end, behind the breadcrumb. */
+.twigo-titlebar[data-color] {
+  /* --twigo-context is the context's colour token, set inline. */
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--twigo-context) 30%, transparent),
+    transparent 360px
+  );
+}
+/* Dockview on the design tokens. Tabs connect to their editor (VS Code
+   1.144 dropped detached pill tabs for this): the strip takes the shell's
+   surface, the active tab the editor's, open into it. */
+.twigo-dockview.dockview-theme-light {
+  color-scheme: light;
+  --dv-background-color: var(--editor);
+  --dv-group-view-background-color: var(--editor);
+  --dv-tabs-and-actions-container-background-color: var(--shell);
+  --dv-tabs-and-actions-container-height: 34px;
+  --dv-tabs-and-actions-container-font-size: 13px;
+  --dv-activegroup-visiblepanel-tab-background-color: var(--editor);
+  --dv-activegroup-visiblepanel-tab-color: var(--foreground);
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-activegroup-hiddenpanel-tab-color: var(--muted-foreground);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--editor);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--muted-foreground);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--muted-foreground);
+  --dv-tab-divider-color: transparent;
+  --dv-separator-border: var(--border);
+  --dv-paneview-active-outline-color: transparent;
+  --dv-active-sash-color: var(--brand);
+  --dv-icon-hover-background-color: var(--row-hover);
+}
+
+.dark .twigo-dockview.dockview-theme-light {
+  color-scheme: dark;
+}
+
+/* The strip scrolls by wheel; dockview's own scrollbars crowd it. */
+.twigo-dockview .dv-scrollbar-horizontal {
+  display: none;
+}
+.twigo-dockview .dv-tabs-container {
+  scrollbar-width: none;
+}
+.twigo-dockview .dv-tabs-container::-webkit-scrollbar {
+  display: none;
+}
+.twigo-dockview .dv-tabs-and-actions-container {
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+/* Centred above the strip's bottom line, a little high, since lowercase
+   titles read low when their capitals are centred. */
+.twigo-dockview .dv-tabs-container > .dv-tab {
+  padding: 0 2px 2px 4px;
+}
+/* The active tab covers the strip's bottom line. Above it and left of the
+   first tab the part's own separators already draw a line; a second one
+   there would double it. */
+.twigo-dockview .dv-tab.dv-active-tab {
+  box-shadow:
+    inset 1px 0 0 var(--border),
+    inset -1px 0 0 var(--border);
+}
+.twigo-dockview .dv-tab.dv-active-tab:first-child {
+  box-shadow: inset -1px 0 0 var(--border);
+}
+.twigo-dockview .dv-tabs-container > .dv-tab.dv-inactive-tab:hover {
+  background-color: var(--row-hover);
+}
+.twigo-dockview .dv-tab.dv-inactive-tab .lucide {
+  opacity: 0.7;
+}
+/* Close shows on the active tab or on hover. */
+.twigo-dockview .dv-tab .twigo-tab-close {
+  opacity: 0;
+  transition: opacity var(--dur-instant) var(--ease-out);
+}
+.twigo-dockview .dv-tab.dv-active-tab .twigo-tab-close,
+.twigo-dockview .dv-tab:hover .twigo-tab-close {
+  opacity: 0.6;
+}
+.twigo-dockview .dv-tab .twigo-tab-close:hover {
+  opacity: 1;
+}
+
+/* A preview tab's title is italic until the tab is pinned (ARCHITECTURE 4.3). */
+.twigo-dockview .dv-tab [data-preview="true"] {
+  font-style: italic;
+}

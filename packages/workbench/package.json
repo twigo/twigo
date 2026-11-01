@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./styles.css": "./src/styles.css",
+    "./testing": "./src/testing.tsx"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -13,7 +15,10 @@
   },
   "dependencies": {
     "@twigo/protocol": "workspace:*",
-    "@twigo/ui": "workspace:*"
+    "@twigo/ui": "workspace:*",
+    "allotment": "^1.20.6",
+    "dockview-react": "^8.8.3",
+    "lucide-react": "^1.65.0"
   },
   "peerDependencies": {
     "react": "^19.3.1"

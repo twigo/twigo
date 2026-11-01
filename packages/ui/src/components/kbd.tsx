@@ -13,7 +13,7 @@ export function Kbd({
   return (
     <kbd
       className={cn(
-        "inline-flex h-[18px] items-center rounded border border-border bg-muted px-1 font-mono text-[10px] font-medium text-muted-foreground shadow-[inset_0_-1.5px_0_color-mix(in_oklab,var(--foreground)_9%,transparent)]",
+        "inline-flex h-5 items-center rounded border border-border bg-muted px-1.5 font-sans text-[11px] text-muted-foreground shadow-[inset_0_-1.5px_0_color-mix(in_oklab,var(--foreground)_9%,transparent)]",
         className,
       )}
     >
