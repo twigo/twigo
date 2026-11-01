@@ -57,15 +57,17 @@ struct State {
 struct Open {
     capture: Option<CaptureConnection>,
     retired: bool,
-    /// The server is going away, or the pool dialled past it: poisoned, so
-    /// the pool hands it out no more before it learns why, but not retired,
-    /// so a route that moves still retires the streams left on it.
+    /// The server is going away, or the pool dialled past it: poisoned at
+    /// its next use, so the pool hands it out no more before it learns why,
+    /// but not retired, so a route that moves still retires the streams
+    /// left on it.
     passed: bool,
     route: Option<Route>,
     /// Negotiated HTTP/2, so the pool shares it rather than dial anew.
     h2: bool,
-    /// Has carried a request, so the pool hands it out: between its
-    /// handshake and that, another request would dial past it.
+    /// Has carried a request, which only a pooled connection does: before
+    /// that, a request that skipped the gate would find the pool empty and
+    /// dial.
     served: bool,
 }
 
@@ -146,9 +148,11 @@ impl Connections {
     }
 
     /// hyper-util dials only when its pool holds no HTTP/2 connection that
-    /// can take a stream, and holds one once it has carried a request: the
-    /// others are going away, as after a GOAWAY that came between requests,
-    /// which no request's error tells.
+    /// can take a stream, and a connection that has carried a request is in
+    /// it: such connections are going away, as after a GOAWAY that came
+    /// between requests, which no request's error tells. One pooled in the
+    /// moment between a request's checkout and its dial is passed wrongly,
+    /// which costs a dial or two.
     fn dial(&self) -> u64 {
         let mut state = self.state();
         for open in state
