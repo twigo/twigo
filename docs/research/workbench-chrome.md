@@ -10,19 +10,21 @@ The choices it led to are in [ARCHITECTURE](../ARCHITECTURE.md) 4.1, 4.2 and 4.9
   Lens 5 replaced workspaces with a catalog and a hotbar of 40 px cluster tiles ([v5.0.0](https://github.com/lensapp/lens/releases/tag/v5.0.0)).
   Lens 2024 moved clusters into one navigator tree with tabs from several clusters side by side ([Mirantis, 2024-03-12](https://www.mirantis.com/blog/getting-started-with-lens-2024-early-access)).
   Users pushed back in [lensapp/lens#8101](https://github.com/lensapp/lens/issues/8101): it became easy to open the pods of the wrong cluster, and the old hotbar "made the separation between clusters much firmer".
-  Lens put the active cluster in the status bar in 2025.1 and brought the hotbar back on 2025-04-10 ([blog](https://lenshq.io/blog/hotbar-is-back/)).
+  Lens put the active cluster in the status bar in 2025.1 ([2025.1.161916, 2025-01-15](https://docs.lenshq.io/release-notes/lens-k8s-ide/lens-2025-1-161916/)) and brought the hotbar back on 2025-04-10 ([blog](https://lenshq.io/blog/hotbar-is-back/)).
 - **A rail alone does not scale.**
   Users ask for more than 12 slots and for folders ([lensapp/lens#7333](https://github.com/lensapp/lens/issues/7333), [freelensapp/freelens#527](https://github.com/freelensapp/freelens/issues/527) "50+ clusters"), and find initials hard to read ([lensapp/lens#3498](https://github.com/lensapp/lens/issues/3498)).
 - **Every client lists every context, searchable, recent first.**
   Headlamp opens a cluster popup with search and recents from its top bar ([shortcutsSlice.ts at v0.46.0](https://github.com/kubernetes-sigs/headlamp/blob/v0.46.0/frontend/src/redux/shortcutsSlice.ts#L63-L67)); Aptakube a context selector on ⌘O that opens tag groups at once ([1.22.0](https://github.com/aptakube/aptakube/releases/tag/1.22.0)); k9s `:ctx` ([context.go at v0.51.0](https://github.com/derailed/k9s/blob/v0.51.0/internal/render/context.go#L54)).
 - **Production is colour plus a guard, repeated where damage happens.**
   Aptakube shows a context's colour on its avatar, in tables, dialogs and shell tabs, with Protected and Read-only levels ([1.22.0](https://github.com/aptakube/aptakube/releases/tag/1.22.0)); JET Pilot asks for the cluster's name before a delete ([README at v2.3.0](https://github.com/unxsist/jet-pilot/blob/v2.3.0/README.md)); k9s marks `[R]` or `[RW]` after the context ([types.go at v0.51.0](https://github.com/derailed/k9s/blob/v0.51.0/internal/ui/types.go#L20-L21)).
-- **The side bar is a sectioned resource tree, 200–240 px, never a tree of clusters.**
+- **The side bar is a sectioned resource tree, 200–240 px wide.**
+  Headlamp groups its items under sections such as Cluster and Workloads ([useSidebarItems.tsx at v0.46.0](https://github.com/kubernetes-sigs/headlamp/blob/v0.46.0/frontend/src/components/Sidebar/useSidebarItems.tsx#L242-L296)) in a 240 px drawer ([Sidebar.tsx at v0.46.0](https://github.com/kubernetes-sigs/headlamp/blob/v0.46.0/frontend/src/components/Sidebar/Sidebar.tsx#L41)); Freelens's side bar starts at 200 px ([sidebar-storage.injectable.ts at v2.0.0](https://github.com/freelensapp/freelens/blob/v2.0.0/packages/core/src/renderer/components/layout/sidebar-storage/sidebar-storage.injectable.ts#L15)).
+  Lens 2024's tree of clusters is the one users pushed back on.
 
 ## What the IDEs teach
 
 - **Surfaces became islands.**
-  Fleet did it first (December 2024), JetBrains made Islands the default in 2025.3 ([blog, 2025-12](https://blog.jetbrains.com/platform/2025/12/meet-the-islands-theme-the-new-default-look-for-jetbrains-ides/)), VS Code's Modern UI followed as the default in October 2026 ([blog, 2026-10-15](https://code.visualstudio.com/blogs/2026/10/15/modern-ui)).
+  Fleet did it first ([blog, 2024-12](https://blog.jetbrains.com/fleet/2024/12/introducing-fleets-new-islands-ui/)), JetBrains made Islands the default in 2025.3 ([blog, 2025-12](https://blog.jetbrains.com/platform/2025/12/meet-the-islands-theme-the-new-default-look-for-jetbrains-ides/)), VS Code's Modern UI followed as the default in October 2026 ([blog, 2026-10-15](https://code.visualstudio.com/blogs/2026/10/15/modern-ui)).
   In all three the content is the darkest surface, the shell around it lighter, and the status bar takes the shell's colour with no accent fill.
   JetBrains steps from #191A1C to #26282C ([ManyIslandsDark.theme.json at idea/262.11879.100](https://github.com/JetBrains/intellij-community/blob/idea/262.11879.100/platform/platform-resources/src/themes/islands/ManyIslandsDark.theme.json#L404-L428)); VS Code's cards have 4 px gaps, an 8 px radius and a 1 px border ([floatingPanels.css at 1.144.0](https://github.com/microsoft/vscode/blob/1.144.0/src/vs/workbench/browser/media/floatingPanels.css#L25-L49)).
 - **The left rail shrinks or goes.**

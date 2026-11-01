@@ -92,7 +92,7 @@ Everything NATS-specific goes.
 | Tauri plugin set (`src-tauri/src/lib.rs`): single-instance (registered first) and window-state now; updater, process, opener and dialog with the features that call them                                                                                                        | `apps/desktop/src-tauri`                | Window chrome stays: `titleBarStyle: Overlay`, `trafficLightPosition`, and the strict CSP.                                                                                                                                                                                                      |
 | `libs/ui` (shadcn components, `theme.css` tokens, sparkline, `cn`)                                                                                                                                                                                                              | `packages/ui`                           | It is the base of the design system (4.9). `code-viewer` (CodeMirror) is replaced by Monaco.                                                                                                                                                                                                    |
 | `apps/twigo/src/index.css`: typography (Inter `cv01`/`ss03`, weights 510/590, 13 px base, tabular numbers) and the dockview tab skin (selected-tab chip, no underline)                                                                                                          | `packages/ui`, `packages/workbench`     | The rest of the design language (4.9).                                                                                                                                                                                                                                                          |
-| Toaster + `store/toasts.ts`, `ErrorBoundary`, `PanelBoundary`, `store/zoom.ts`, `store/commandHistory.ts`, `lib/updater.ts` + `store/updateCheck.ts`, `shell/menu.ts` (native menu built from commands), `lib/appVersion.ts`                                                    | `packages/workbench`                    | `menu.ts` changes: it is built from the menu registry (5.1), not a hand-written list.                                                                                                                                                                                                           |
+| `ErrorBoundary`, `PanelBoundary`, `store/zoom.ts`, `store/commandHistory.ts`, `lib/updater.ts` + `store/updateCheck.ts`, `shell/menu.ts` (native menu built from commands), `lib/appVersion.ts`                                                                                 | `packages/workbench`                    | `menu.ts` changes: it is built from the menu registry (5.1), not a hand-written list.                                                                                                                                                                                                           |
 | Typed IPC errors: Rust `Error::kind` + TS `IpcError` (`lib/api.ts`, `nats/error.rs`)                                                                                                                                                                                            | `crates/twigo-ipc`, `packages/protocol` | Error kinds are generated from Rust instead of written by hand.                                                                                                                                                                                                                                 |
 | Bounded coalescing with a `dropped` counter (`nats/subscription.rs`)                                                                                                                                                                                                            | `twigo-sessions` (logs)                 | The same rule holds: never lose data silently, show the gap.                                                                                                                                                                                                                                    |
 
@@ -113,6 +113,7 @@ Everything NATS-specific goes.
 | `store/connScoped.ts` (teardown registry)                                                                | Space and context teardown registry                                               | Same pattern, keyed by context.                                                                                                                                                                                                                             |
 | Connection manager UX (`ConnectionPicker`, `ConnectionSwitcher`, import and write-back of NATS contexts) | Cluster catalog (5.5)                                                             | Same promise: **read what the CLI already has**, here the kubeconfig. Twigo never writes the kubeconfig except through explicit commands.                                                                                                                   |
 | `emit.rs` (global events)                                                                                | Channels per subscription + a few typed global events                             | Tauri documents its events as "not designed for low latency or high throughput".                                                                                                                                                                            |
+| `components/workbench/Toaster.tsx` + `store/toasts.ts`                                                   | `Toast` and `notify` in `packages/ui`; the shell mounts `<Toaster>`               | sonner positions, stacks and times the toasts, so the hand-written store goes; the look and the lifetimes stay, and a repeat with the same key replaces its toast                                                                                           |
 
 ### Drop
 
@@ -214,14 +215,14 @@ It translates Tauri commands and channels into calls on `twigo-core`.
 
 ### 2.3 Frontend packages
 
-| Package              | Owns                                                                                                                                                                          | May import                    |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| `packages/ui`        | Tokens, primitives (shadcn/Radix), table and tree primitives, empty, loading and error states                                                                                 | —                             |
-| `packages/workbench` | Layout parts, contribution registries, command, menu, keybinding and context-key services, quick access, notifications, settings UI, spaces UI, editor service                | `ui`, `protocol`              |
-| `packages/kube`      | Every Kubernetes view and editor; registers into the workbench registries                                                                                                     | `ui`, `workbench`, `protocol` |
-| `packages/protocol`  | Generated request and response types, a channel client with seq/ack, and a **mock backend** that runs the UI in a plain browser on fixtures (design reviews, component tests) | —                             |
-| `packages/utils`     | Pure helpers without React or IPC, such as formatters                                                                                                                         | —                             |
-| `apps/desktop/src`   | Bootstraps the workbench and registers `kube`                                                                                                                                 | all                           |
+| Package              | Owns                                                                                                                                                                                       | May import                    |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------- |
+| `packages/ui`        | Tokens, primitives (shadcn/Radix), table and tree primitives, toasts (`notify`), empty, loading and error states                                                                           | —                             |
+| `packages/workbench` | Layout parts, contribution registries, command, menu, keybinding and context-key services, quick access, the toaster and notification centre (4.7), settings UI, spaces UI, editor service | `ui`, `protocol`              |
+| `packages/kube`      | Every Kubernetes view and editor; registers into the workbench registries                                                                                                                  | `ui`, `workbench`, `protocol` |
+| `packages/protocol`  | Generated request and response types, a channel client with seq/ack, and a **mock backend** that runs the UI in a plain browser on fixtures (design reviews, component tests)              | —                             |
+| `packages/utils`     | Pure helpers without React or IPC, such as formatters                                                                                                                                      | —                             |
+| `apps/desktop/src`   | Bootstraps the workbench and registers `kube`                                                                                                                                              | all                           |
 
 Every package may import `utils`.
 The ESLint boundary rule from legacy now enforces the whole table; above all, `workbench` must not import `kube`.
@@ -243,11 +244,11 @@ Upstream  (context × GVR × scope × server-side selectors)   ref-counted · li
 RowStore  uid → Row { meta-lite (name, ns, uid, rv, labels, owners, created), cells[] }
   │ change set
   ▼
-QueryView  (per subscription: namespaces, label filter, text filter, values, sort, window)   incremental ordered index
+QueryView  (per subscription: namespaces, label filter, text filter, values, groupBy, sort, window)   incremental ordered index
   │ window diff
   ▼
 Batcher   coalesce by uid · flush ≤ 50 ms · one unacked batch · paused while hidden
-  │ Channel (JSON): { seq, total, columns?, window?:{start, ids}, upserts, status }
+  │ Channel (JSON): { seq, total, columns?, window?:{start, ids}, upserts, status, groups? }
   ▼
 View store (frontend)   Map<id, Row> + version, read via useSyncExternalStore
   ▼
@@ -380,14 +381,15 @@ A Table row takes about 700 bytes, half of a `PartialObjectMeta<Pod>` without ma
 ### 3.4 Query views: Rust sorts, filters and windows
 
 The frontend never holds the full list.
-A subscription carries a `ListQuery { space, gvr, namespaces, labelSelector, text, sort, groupBy, values }`.
+A subscription carries a `ListQuery { space, gvr, namespaces, labelSelector, text, columns, sort, groupBy, values }`.
 The webview then sends `setWindow(start, end)` as the user scrolls, covering the visible rows plus about two screens of overscan.
 
 - Rust keeps an incremental ordered index per query view.
   - Cells carry their column type, but many core columns are formatted strings: Pod Ready `1/2`, Restarts `3 (5m ago)`, Age.
   - Rust derives sort keys: known formats are parsed (ratios, leading counts, durations, Age from `creationTimestamp`), and other strings sort naturally.
 - A change set updates the index in O(log n) per row and computes what changed **inside the window**.
-- Text filter: substring or fuzzy match on name plus the visible columns.
+- Text filter: substring or fuzzy match on the columns the table shows, Name among them, which `columns` names; without it, on the columns of priority 0.
+  A name the list lacks is skipped, since the webview names the columns of its last batch and a query for one namespace drops Namespace.
   `/!` negates; a regex can be given explicitly, k9s style.
 - Values keep the rows whose column holds one of them, such as a pod's Status in CrashLoopBackOff or Error.
   `groupBy` counts the rows before values drop any, so a filter by health keeps every health's count.
@@ -663,7 +665,9 @@ Extensions add commands, not prefixes.
 
 ### 4.7 Notifications and progress
 
-A notification centre with severity, actions and do-not-disturb, built on the legacy Toaster.
+A notification centre with severity, actions and do-not-disturb, built on the toasts of `packages/ui`.
+`notify` raises a toast from anywhere, and sonner, under the `<Toaster>` the workbench shell mounts, positions, stacks and times them.
+The toasts exist; the centre does not yet.
 Every long operation reports progress from Rust: drain, apply, Helm, provider "Create cluster".
 Progress shows in the status bar, or in a notification when the operation needs attention.
 
