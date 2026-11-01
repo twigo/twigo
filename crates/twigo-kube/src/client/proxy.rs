@@ -42,12 +42,8 @@ impl std::fmt::Debug for Proxy {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum ProxyError {
-    #[error("proxy-url {0:?} is not an http, https or socks5 URL")]
-    ProxyUrl(String),
-    #[error("{0} {1:?} is not an http, https, socks5 or socks5h URL")]
-    Environment(&'static str, String),
-}
+#[error("proxy-url {0:?} is not an http, https or socks5 URL")]
+pub struct ProxyError(String);
 
 /// The proxy variables of the login shell's environment.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -82,32 +78,33 @@ pub fn proxy_for(
     env: &ProxyEnv,
 ) -> Result<Option<Proxy>, ProxyError> {
     if let Some(url) = proxy_url.filter(|url| !url.is_empty()) {
+        // hyper-util takes a URL without a scheme for http; client-go does
+        // not.
+        let named = url.split_once("://").map(|(scheme, _)| scheme);
         return match parse(url, server) {
-            Some(proxy) if matches!(scheme(&proxy), "http" | "https" | "socks5") => {
+            Some(proxy) if matches!(named, Some("http" | "https" | "socks5")) => {
                 Ok(Some(Proxy(proxy)))
             }
-            _ => Err(ProxyError::ProxyUrl(url.to_owned())),
+            _ => Err(ProxyError(url.to_owned())),
         };
     }
-    let (name, value) = match server.scheme_str() {
-        Some("https") => ("HTTPS_PROXY", &env.https),
-        Some("http") => ("HTTP_PROXY", &env.http),
+    let value = match server.scheme_str() {
+        Some("https") => &env.https,
+        Some("http") => &env.http,
         _ => return Ok(None),
     };
     let Some(value) = value else {
         return Ok(None);
     };
-    // Go's transport fails every request through a scheme it cannot dial.
-    let named = value.parse::<Uri>().ok();
-    if named
-        .as_ref()
-        .and_then(Uri::scheme_str)
-        .is_some_and(|scheme| !matches!(scheme, "http" | "https" | "socks5" | "socks5h"))
-    {
-        return Err(ProxyError::Environment(name, value.clone()));
-    }
-    // Go ignores a value it cannot parse.
-    let Some(proxy) = parse(value, server) else {
+    // Go's transport dials a proxy of any scheme but socks5 as an HTTP one,
+    // and ignores a value it cannot parse.
+    let value = match value.split_once("://") {
+        Some((scheme, rest)) if !matches!(scheme, "http" | "https" | "socks5" | "socks5h") => {
+            format!("http://{rest}")
+        }
+        _ => value.clone(),
+    };
+    let Some(proxy) = parse(&value, server) else {
         return Ok(None);
     };
     let host = server.host().unwrap_or_default();
@@ -126,10 +123,6 @@ pub fn proxy_for(
 /// A proxy URL, `http://` when it has no scheme, its credentials split off.
 fn parse(url: &str, server: &Uri) -> Option<Intercept> {
     Matcher::builder().all(url).build().intercept(server)
-}
-
-fn scheme(proxy: &Intercept) -> &str {
-    proxy.uri().scheme_str().unwrap_or_default()
 }
 
 /// Go's NO_PROXY rules.
@@ -357,10 +350,7 @@ https://10.0.0.5:6443|[10.0.0.5]:6443|DIRECT";
         assert_eq!(socks.intercept().raw_auth(), Some(("user", "p@ss")));
         let http = pick("http://user:p%40ss@proxy:1").unwrap().unwrap();
         assert_eq!(http.intercept().basic_auth().unwrap(), "Basic dXNlcjpwQHNz");
-        assert!(matches!(
-            pick("ftp://f:1"),
-            Err(ProxyError::Environment("HTTPS_PROXY", _))
-        ));
+        assert_eq!(pick("ftp://f:1").unwrap().unwrap().uri(), "http://f:1/");
     }
 
     #[test]
@@ -372,9 +362,8 @@ https://10.0.0.5:6443|[10.0.0.5]:6443|DIRECT";
             .unwrap();
         assert!(proxy.is_socks());
         assert!(proxy_for(&kind, Some(""), &env).unwrap().is_none());
-        assert!(matches!(
-            proxy_for(&kind, Some("socks5h://s:1080"), &env),
-            Err(ProxyError::ProxyUrl(_))
-        ));
+        for refused in ["socks5h://s:1080", "proxy.corp:3128"] {
+            assert!(proxy_for(&kind, Some(refused), &env).is_err(), "{refused}");
+        }
     }
 }

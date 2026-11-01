@@ -55,8 +55,8 @@ impl Dialer {
     }
 }
 
-/// The proxy's URL with Go's default port for its scheme, which hyper-util
-/// knows only for http and https.
+/// The URL with Go's default port for its scheme: hyper-util knows none for
+/// socks5, and its tunnels take 443 for any server without a port.
 fn with_port(uri: &Uri) -> Uri {
     if uri.port().is_some() {
         return uri.clone();
@@ -95,11 +95,11 @@ impl Service<Uri> for Dialer {
                 Box::pin(async move { Ok(Stream::Tcp(dialling.await?)) })
             }
             Dialer::Tunnel(tunnel) => {
-                let dialling = tunnel.call(server);
+                let dialling = tunnel.call(with_port(&server));
                 Box::pin(async move { Ok(Stream::Tunnel(Box::new(dialling.await?))) })
             }
             Dialer::Socks(socks) => {
-                let dialling = socks.call(server);
+                let dialling = socks.call(with_port(&server));
                 Box::pin(async move { Ok(Stream::Tcp(dialling.await?)) })
             }
         }
@@ -176,5 +176,21 @@ impl Write for Stream {
             Stream::Tcp(tcp) => Pin::new(tcp).poll_write_vectored(cx, bufs),
             Stream::Tunnel(tunnel) => Pin::new(&mut **tunnel).poll_write_vectored(cx, bufs),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ports_default_by_scheme() {
+        let port = |url: &str| with_port(&url.parse().unwrap()).port_u16();
+        assert_eq!(port("http://api.example.com"), Some(80));
+        assert_eq!(port("https://api.example.com"), Some(443));
+        assert_eq!(port("socks5://proxy"), Some(1080));
+        assert_eq!(port("http://api.example.com:6443"), Some(6443));
+        let v6 = with_port(&"https://[fd00::5]".parse().unwrap());
+        assert_eq!(v6.to_string(), "https://[fd00::5]:443/");
     }
 }

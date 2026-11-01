@@ -16,7 +16,8 @@
 //! A client with no usable connection opens one TCP and TLS connection per
 //! concurrent first request and keeps only the first that negotiates `h2`
 //! ([HTTP/2 spike](../../../../docs/spikes/http2.md)), so while none is
-//! usable, requests go one at a time until a connection is up.
+//! usable, one request dials and the others wait until it is connected or
+//! has failed.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -57,6 +58,8 @@ struct Open {
     capture: Option<CaptureConnection>,
     retired: bool,
     route: Option<Route>,
+    /// Negotiated HTTP/2, so the pool shares it rather than dial anew.
+    h2: bool,
 }
 
 /// The ends of a connection's TCP leg: to the server, or to its proxy.
@@ -135,13 +138,19 @@ impl Connections {
         self.0.state.lock().expect("connections lock")
     }
 
+    /// hyper-util dials only when none of its HTTP/2 connections can take a
+    /// stream any more: they are going away, as after a GOAWAY that came
+    /// between requests, which no request's error tells.
     fn dial(&self) -> u64 {
         let mut state = self.state();
+        for open in state.open.values_mut().filter(|open| open.h2) {
+            open.retired = true;
+        }
         state.next += 1;
         state.next - 1
     }
 
-    fn opened(&self, id: u64, route: Option<Route>) {
+    fn opened(&self, id: u64, route: Option<Route>, h2: bool) {
         let mut state = self.state();
         let retired = id < state.floor;
         state.open.insert(
@@ -150,6 +159,7 @@ impl Connections {
                 capture: None,
                 retired,
                 route,
+                h2,
             },
         );
     }
@@ -162,14 +172,19 @@ impl Connections {
         self.state().open.values().any(|open| !open.retired)
     }
 
-    /// While no connection is usable, the gate lets one request through at
-    /// a time.
+    /// While no connection is usable, one request dials and the others wait
+    /// until it is connected or has failed, then go together: after a
+    /// failure, one at a time would make each wait out the last one's
+    /// timeout.
     async fn gate(&self) -> Option<OwnedMutexGuard<()>> {
         if self.usable() {
             return None;
         }
-        let guard = Arc::clone(&self.0.warming).lock_owned().await;
-        (!self.usable()).then_some(guard)
+        if let Ok(dialling) = Arc::clone(&self.0.warming).try_lock_owned() {
+            return Some(dialling);
+        }
+        drop(self.0.warming.lock().await);
+        None
     }
 
     /// Notes the connection a request went over, and poisons it if it is
@@ -274,7 +289,8 @@ where
         let connections = self.connections.clone();
         Box::pin(async move {
             let io = dialling.await.map_err(Into::into)?;
-            connections.opened(id, route(&io.connected()));
+            let connected = io.connected();
+            connections.opened(id, route(&connected), connected.is_negotiated_h2());
             Ok(TrackedIo {
                 io,
                 id,
@@ -385,19 +401,21 @@ where
         let connections = self.connections.clone();
         let inner = self.inner.clone();
         Box::pin(async move {
-            let mut capture = capture_connection(&mut request);
-            let gate = connections.gate().await;
+            let capture = capture_connection(&mut request);
+            let mut gate = connections.gate().await;
             let response = inner.oneshot(request);
             tokio::pin!(response);
-            let result = match gate {
-                None => response.await,
-                Some(gate) => {
-                    tokio::select! {
-                        result = &mut response => result,
-                        () = async { capture.wait_for_connection_metadata().await; } => {
-                            drop(gate);
-                            response.await
-                        }
+            // The connection is noted as soon as the request has one, so
+            // that retiring reaches it while its first response is due.
+            let mut connected = capture.clone();
+            let mut noted = false;
+            let result = loop {
+                tokio::select! {
+                    result = &mut response => break result,
+                    () = async { connected.wait_for_connection_metadata().await; }, if !noted => {
+                        noted = true;
+                        connections.used(capture.clone(), false);
+                        gate.take();
                     }
                 }
             }
@@ -434,6 +452,25 @@ mod tests {
     }
 
     #[test]
+    fn a_new_dial_takes_the_open_http2_connections_out_of_use() {
+        let connections = Connections::default();
+        let h2 = connections.dial();
+        connections.opened(h2, None, true);
+        assert!(connections.usable());
+        connections.dial();
+        assert!(!connections.usable(), "the pool dials only past them");
+
+        let connections = Connections::default();
+        let http1 = connections.dial();
+        connections.opened(http1, None, false);
+        connections.dial();
+        assert!(
+            connections.usable(),
+            "an HTTP/1.1 connection may just be busy"
+        );
+    }
+
+    #[test]
     fn loopback_routes_from_loopback() {
         let server = SocketAddr::from((Ipv4Addr::LOCALHOST, 6443));
         assert_eq!(source_for(server), Some(Ipv4Addr::LOCALHOST.into()));
@@ -446,7 +483,7 @@ mod tests {
         let local = Ipv4Addr::new(192, 168, 1, 2).into();
         let open = |connections: &Connections| {
             let id = connections.dial();
-            connections.opened(id, Some(Route { local, remote }));
+            connections.opened(id, Some(Route { local, remote }), true);
         };
         open(&connections);
         open(&connections);

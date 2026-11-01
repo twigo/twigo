@@ -41,6 +41,11 @@ pub enum Refusal {
     },
     /// A REFUSED_STREAM for the second.
     Reset,
+    /// A GOAWAY whose last stream is the first, then the connection closes
+    /// without answering it.
+    Drop { code: u32 },
+    /// The first answered this late.
+    Delay(std::time::Duration),
 }
 
 pub struct Server {
@@ -130,6 +135,16 @@ async fn answer(
                         write(&mut io, DATA, 0, stream, b"ok").await?;
                         answered.lock().unwrap().push((connection, stream));
                         continue;
+                    }
+                    (1, Some(Refusal::Drop { code })) => {
+                        let mut payload = stream.to_be_bytes().to_vec();
+                        payload.extend(code.to_be_bytes());
+                        write(&mut io, GOAWAY, 0, 0, &payload).await?;
+                        return Ok(());
+                    }
+                    (1, Some(Refusal::Delay(delay))) => {
+                        first = stream;
+                        tokio::time::sleep(delay).await;
                     }
                     (1, _) => first = stream,
                     (_, Some(Refusal::GoAway { code, after, .. })) if requests <= after + 1 => {

@@ -1,6 +1,6 @@
 //! One retry of a request the server never processed (ARCHITECTURE 3.2).
 //! RFC 9113 8.7 lets a client retry those, whatever their method: streams
-//! above the last one a graceful GOAWAY names, and streams refused with
+//! above the last one a GOAWAY names, and streams refused with
 //! REFUSED_STREAM. hyper retries neither.
 
 use std::future::Future;
@@ -69,19 +69,16 @@ fn copy(request: &Request<Body>) -> Option<Request<Body>> {
     Some(copy)
 }
 
-/// h2 gives every stream above a GOAWAY's last stream id the GOAWAY as its
-/// error. A GOAWAY with an error code also ends the streams below that id,
-/// which the server may have processed, so only a graceful one counts.
+/// h2 gives the GOAWAY as their error only to the streams above its last
+/// stream id, whatever its code, and to those opened after it; the streams
+/// below run on until they end or the connection closes under them.
 pub(super) fn unprocessed(error: &(dyn std::error::Error + 'static)) -> bool {
     let mut source = Some(error);
     while let Some(error) = source {
         if let Some(h2) = error.downcast_ref::<h2::Error>() {
             return h2.is_remote()
-                && match h2.reason() {
-                    Some(Reason::NO_ERROR) => h2.is_go_away(),
-                    Some(Reason::REFUSED_STREAM) => h2.is_reset(),
-                    _ => false,
-                };
+                && (h2.is_go_away()
+                    || (h2.is_reset() && h2.reason() == Some(Reason::REFUSED_STREAM)));
         }
         source = error.source();
     }
