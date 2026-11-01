@@ -129,7 +129,7 @@ function CommandCenter({ space }: { space: Space | undefined }) {
       onClick={() => {
         quickAccess.show("");
       }}
-      className="flex h-[22px] items-center gap-1.5 rounded-md border border-border bg-foreground/5 px-2 text-xs text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+      className="flex h-7 items-center gap-2 rounded-md border border-border bg-foreground/5 px-2.5 text-[13px] text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
     >
       <Search aria-hidden className="size-3.5 shrink-0" />
       <span className="truncate">Search {space?.name ?? "Twigo"}</span>
