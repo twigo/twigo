@@ -20,7 +20,7 @@ use serde_json::json;
 use tokio::task::JoinHandle;
 use twigo_cache::table::TableDecoder;
 use twigo_cache::table::request::{self, WatchFrom};
-use twigo_kube::client::Clients;
+use twigo_kube::client::{Budgets, Clients, Options};
 
 const WATCHES: usize = 50;
 const REPLICAS: i32 = 5000;
@@ -193,7 +193,16 @@ fn row(name: &str, connections: usize, latency: &Latency, note: &str) {
 }
 
 async fn phase(name: &str, config: &Config, namespace: &str, port: u16) {
-    let clients = Clients::new(config.clone()).unwrap();
+    // The counter's watch budget above the example's watches.
+    let budgets = Budgets {
+        watches: WATCHES,
+        ..Budgets::default()
+    };
+    let options = Options {
+        budgets,
+        ..Options::default()
+    };
+    let clients = Clients::new(config, options).unwrap();
     let client = if name == "HTTP/2" {
         clients.api
     } else {
@@ -264,7 +273,7 @@ async fn main() {
         WINDOW.as_secs()
     );
     println!();
-    let api = Clients::new(config.clone()).unwrap().api;
+    let api = Clients::new(&config, Options::default()).unwrap().api;
     let version = resource_version(&api, &collection).await;
     let watches = Watches::open(&api, &collection, &version, 10).await;
     tokio::time::sleep(IDLE).await;
