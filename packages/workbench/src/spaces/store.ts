@@ -10,7 +10,7 @@ import type { Catalog } from "./catalog";
 export interface PartState {
   readonly visible: boolean;
   /** The container shown, once the user picked one. */
-  readonly container: string | undefined;
+  readonly container?: string | undefined;
 }
 
 /** What a space remembers (ARCHITECTURE 4.1, 4.2); part sizes are the app's ({@link PartSizes}). */
@@ -38,7 +38,9 @@ const part = (fallback: PartState) =>
   v.fallback(
     v.object({
       visible: v.fallback(v.boolean(), fallback.visible),
-      container: v.fallback(v.undefinedable(v.string()), undefined),
+      // Optional, not undefinedable: JSON drops an undefined container, and
+      // `v.object` rejects a missing key unless its schema is optional.
+      container: v.fallback(v.optional(v.string()), undefined),
     }),
     fallback,
   );

@@ -42,6 +42,7 @@ test("the next window comes back to the space, its parts, namespaces and views",
   const backend = createMockBackend("ready");
   const first = await window(backend);
   first.spaces.select("staging");
+  first.spaces.setPart("staging", "sidebar", { visible: false });
   first.spaces.setPart("staging", "panel", { visible: true, container: "out" });
   first.spaces.update("staging", (state) => ({
     ...state,
@@ -52,6 +53,7 @@ test("the next window comes back to the space, its parts, namespaces and views",
 
   const { spaces } = await window(backend);
   expect(spaces.active?.id).toBe("staging");
+  expect(spaces.state("staging").parts.sidebar.visible).toBe(false);
   expect(spaces.state("staging").parts.panel).toEqual({
     visible: true,
     container: "out",
