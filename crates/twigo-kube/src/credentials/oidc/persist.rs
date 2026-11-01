@@ -7,7 +7,7 @@
 //! the lock exists; Twigo waits a moment for it, and never removes a lock it
 //! did not create.
 
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -94,9 +94,17 @@ fn replace(target: &Path, text: &str) -> Result<(), PersistError> {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let temporary = dir.join(format!(".{name}.twigo-{}", std::process::id()));
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.subsec_nanos())
+        .unwrap_or_default();
+    let temporary = dir.join(format!(".{name}.twigo-{}-{nanos}", std::process::id()));
     let written = (|| {
-        let mut file = File::create(&temporary)?;
+        // A new file, never one a link at that name points to.
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
         file.set_permissions(fs::metadata(target)?.permissions())?;
         file.write_all(text.as_bytes())?;
         file.sync_all()?;

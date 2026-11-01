@@ -155,6 +155,7 @@ export class MockAuth {
       case "browser":
         prod.status = {
           state: "running",
+          since: new Date().toISOString(),
           output: OUTPUT[prod.plugin.digest] ?? "",
         };
         break;
@@ -184,13 +185,15 @@ export class MockAuth {
   signIn(context: string): null {
     const entry = this.#trustedEntry(context);
     if (entry.status.state === "running") return null;
-    entry.status = { state: "running", output: "" };
+    const since = new Date().toISOString();
+    entry.status = { state: "running", since, output: "" };
     this.#emit(context);
     const signsIn = entry.plugin.signsIn;
     entry.timer = setTimeout(
       () => {
         entry.status = {
           state: "running",
+          since,
           output: OUTPUT[entry.plugin.digest] ?? "",
         };
         this.#emit(context);
@@ -221,16 +224,20 @@ export class MockAuth {
     return null;
   }
 
-  /** Rejects as Rust does while the context has no credential. */
+  /**
+   * A request's credential: an idle plugin starts a run, as in Rust, but the
+   * request fails at once where Rust's would wait for the run; the
+   * workbench asks again once the credential is ready.
+   */
   check(context: string): void {
     const auth = this.#auth(context);
     if (auth.state === "untrusted") this.#trustedEntry(context);
-    if (auth.state === "plugin" && auth.status.state !== "ready") {
-      throw new IpcError(
-        "unauthorized",
-        `${auth.plugin.command} gave no credential`,
-      );
-    }
+    if (auth.state !== "plugin" || auth.status.state === "ready") return;
+    if (auth.status.state === "idle") this.signIn(context);
+    throw new IpcError(
+      "unauthorized",
+      `${auth.plugin.command} gave no credential yet`,
+    );
   }
 
   review(): ExecReview {

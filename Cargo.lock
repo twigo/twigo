@@ -5537,6 +5537,7 @@ name = "twigo-core"
 version = "0.1.0"
 dependencies = [
  "atomic-write-file",
+ "http",
  "jiff",
  "kube",
  "rcgen",

@@ -8,36 +8,52 @@ use rustls::client::ResolvesClientCert;
 use rustls::crypto::CryptoProvider;
 use rustls::sign::CertifiedKey;
 
+use super::connections::Connections;
 use crate::credentials::Credential;
 
-#[derive(Debug, Default)]
 pub struct Identity {
     /// The TLS config's, for loading the key.
     provider: OnceLock<Arc<CryptoProvider>>,
     current: Mutex<Option<Current>>,
+    /// The api client's, retired when the certificate changes, as client-go
+    /// closes the connections the old one opened, whichever client saw it
+    /// first.
+    connections: Connections,
 }
 
-#[derive(Debug)]
+impl std::fmt::Debug for Identity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Identity").finish_non_exhaustive()
+    }
+}
+
 struct Current {
     from: Arc<Credential>,
     key: Option<Arc<CertifiedKey>>,
 }
 
 impl Identity {
+    pub fn new(connections: Connections) -> Self {
+        Self {
+            provider: OnceLock::new(),
+            current: Mutex::default(),
+            connections,
+        }
+    }
+
     pub fn provider(&self, provider: &Arc<CryptoProvider>) {
         self.provider.get_or_init(|| Arc::clone(provider));
     }
 
-    /// Offers the certificate of `credential` from now on, and says whether
-    /// it differs from the one offered before, as client-go compares them
-    /// before it closes the connections the old one opened.
-    pub fn offer(&self, credential: &Arc<Credential>) -> Result<bool, rustls::Error> {
+    /// Offers the certificate of `credential` from now on, and retires the
+    /// connections if it differs from the one offered before.
+    pub fn offer(&self, credential: &Arc<Credential>) -> Result<(), rustls::Error> {
         let mut current = self.current.lock().expect("identity lock");
         if current
             .as_ref()
             .is_some_and(|current| Arc::ptr_eq(&current.from, credential))
         {
-            return Ok(false);
+            return Ok(());
         }
         let key = match &credential.identity {
             Some(identity) => {
@@ -60,7 +76,11 @@ impl Identity {
             from: Arc::clone(credential),
             key,
         });
-        Ok(changed)
+        drop(current);
+        if changed {
+            self.connections.retire();
+        }
+        Ok(())
     }
 }
 

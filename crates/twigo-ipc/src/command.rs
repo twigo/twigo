@@ -218,3 +218,14 @@ impl Command for ExecTrust {
     type Response = ();
     type Message = ();
 }
+
+/// Opens a sign-in link in the person's browser: https, or a plugin's own
+/// server on localhost or 127.0.0.1.
+pub struct UrlOpen;
+
+impl Command for UrlOpen {
+    const NAME: &'static str = "url_open";
+    type Request = String;
+    type Response = ();
+    type Message = ();
+}

@@ -14,6 +14,7 @@ fn main() {
         "context_sign_in_cancel",
         "exec_review",
         "exec_trust",
+        "url_open",
     ]);
     let mut attributes = tauri_build::Attributes::new().app_manifest(commands);
     // An inlined plugin keeps its permissions in OUT_DIR, so builds without the feature have no

@@ -164,7 +164,11 @@ groupBy: string | null,
  */
 values: ColumnValues | null, };
 
-export type PluginStatus = { "state": "idle" } | { "state": "waiting" } | { "state": "running", output: string, } | { "state": "ready", 
+export type PluginStatus = { "state": "idle" } | { "state": "waiting" } | { "state": "running", 
+/**
+ * When the run started, RFC 3339.
+ */
+since: string, output: string, } | { "state": "ready", 
 /**
  * RFC 3339; none when the credential lasts until the cluster
  * rejects it.
@@ -291,4 +295,5 @@ export type Commands = {
   context_sign_in_cancel: { request: string; response: null; message: null };
   exec_review: { request: null; response: ExecReview; message: null };
   exec_trust: { request: Array<string>; response: null; message: null };
+  url_open: { request: string; response: null; message: null };
 };

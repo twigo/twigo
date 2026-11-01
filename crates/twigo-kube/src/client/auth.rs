@@ -14,7 +14,6 @@ use kube::client::Body;
 use secrecy::ExposeSecret;
 use tower::{BoxError, Layer, Service, ServiceExt};
 
-use super::connections::Connections;
 use super::identity::Identity;
 use super::retry::copy;
 use crate::credentials::{Credential, Provider};
@@ -23,22 +22,11 @@ use crate::credentials::{Credential, Provider};
 pub struct AuthLayer {
     provider: Provider,
     identity: Arc<Identity>,
-    /// Retired when the certificate changes, as client-go closes the
-    /// connections the old one opened.
-    connections: Option<Connections>,
 }
 
 impl AuthLayer {
-    pub fn new(
-        provider: Provider,
-        identity: Arc<Identity>,
-        connections: Option<Connections>,
-    ) -> Self {
-        Self {
-            provider,
-            identity,
-            connections,
-        }
+    pub fn new(provider: Provider, identity: Arc<Identity>) -> Self {
+        Self { provider, identity }
     }
 
     async fn authorize<B>(&self, request: &mut Request<B>) -> Result<Arc<Credential>, BoxError> {
@@ -48,11 +36,7 @@ impl AuthLayer {
             value.set_sensitive(true);
             request.headers_mut().insert(AUTHORIZATION, value);
         }
-        if self.identity.offer(&credential)?
-            && let Some(connections) = &self.connections
-        {
-            connections.retire();
-        }
+        self.identity.offer(&credential)?;
         Ok(credential)
     }
 }
@@ -105,8 +89,13 @@ where
             let Some(mut again) = again else {
                 return Ok(response);
             };
-            layer.authorize(&mut again).await?;
-            inner.oneshot(again).await.map_err(Into::into)
+            let used = layer.authorize(&mut again).await?;
+            let response = inner.oneshot(again).await.map_err(Into::into)?;
+            if response.status() == StatusCode::UNAUTHORIZED {
+                layer.provider.reject(&used);
+                layer.provider.rejected_again();
+            }
+            Ok(response)
         })
     }
 }

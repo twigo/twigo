@@ -36,10 +36,6 @@ export class Workbench {
   readonly sizes: PartSizes;
   readonly shellEnvironment: ShellEnvironmentStatus;
   readonly credentials: Credentials;
-  /** Opens a link in the person's browser; the app replaces it under Tauri. */
-  openUrl: (url: string) => void = (url) => {
-    window.open(url, "_blank", "noopener,noreferrer");
-  };
 
   constructor(
     readonly backend: Backend,
@@ -67,6 +63,13 @@ export class Workbench {
     this.sizes = new PartSizes(state);
     this.shellEnvironment = new ShellEnvironmentStatus(backend, this.keys);
     this.credentials = new Credentials(backend, this.spaces, (error) => {
+      this.report(error);
+    });
+  }
+
+  /** Opens a sign-in link in the person's browser; Rust checks it first. */
+  openUrl(url: string): void {
+    this.backend.invoke("url_open", url).catch((error: unknown) => {
       this.report(error);
     });
   }

@@ -94,8 +94,10 @@ struct Status {
 /// fields it does not know. An `apiVersion` that differs from the one
 /// configured is refused; a missing one is not.
 pub(super) fn parse(stdout: &[u8], configured: ApiVersion) -> Result<Credential, OutputError> {
-    let credential: ExecCredential =
-        serde_saphyr::from_slice(stdout).map_err(|error| OutputError::Decode(error.to_string()))?;
+    // serde-saphyr quotes the text around a fault, which holds the token.
+    let credential: ExecCredential = serde_saphyr::from_slice(stdout).map_err(|_| {
+        OutputError::Decode("it is neither JSON nor YAML of an ExecCredential".to_owned())
+    })?;
     if let Some(returned) = credential.api_version.filter(|v| !v.is_empty())
         && returned != configured.as_str()
     {

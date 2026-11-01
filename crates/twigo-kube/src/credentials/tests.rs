@@ -250,7 +250,12 @@ fn output_is_read_by_client_go_s_rules() {
         parse(r#"{"status":{"token":"t","expirationTimestamp":"tomorrow"}}"#),
         Err(OutputError::Expiry(_))
     ));
-    assert!(matches!(parse("not: [json"), Err(OutputError::Decode(_))));
+    let Err(OutputError::Decode(message)) =
+        parse("status:\n  token: s3cr3t-token\n  token: twice\n")
+    else {
+        panic!("broken output does not decode");
+    };
+    assert!(!message.contains("s3cr3t"), "{message}");
 }
 
 #[test]
@@ -743,4 +748,79 @@ async fn after_a_failed_sign_in_the_plugin_waits_to_be_asked_again() {
     assert!(source.credential().await.is_err());
     assert!(source.credential().await.is_err());
     assert_eq!(plugins.runs(), 4, "an unattended plugin runs again at once");
+}
+
+#[tokio::test]
+async fn a_helper_left_holding_stderr_does_not_hold_the_credential() {
+    let plugins = Plugins::new();
+    let script = plugins.script(
+        "helper",
+        r#"sleep 5 >/dev/null &
+printf '{"status":{"token":"done"}}'"#,
+    );
+    let timeouts = Timeouts {
+        unattended: Duration::from_secs(2),
+        sign_in: Duration::from_secs(2),
+    };
+    let source = Registry::new(env(&[]), focused(true), timeouts).source(exec(&script, ""));
+    assert_eq!(token(&source.credential().await.unwrap()), "done");
+}
+
+#[tokio::test]
+async fn the_output_keeps_its_start_and_its_end() {
+    let plugins = Plugins::new();
+    let script = plugins.script(
+        "verbose",
+        r#"echo 'enter the code F3JQ7K9PL' >&2
+i=0; while [ $i -lt 400 ]; do echo 'progress ................................................' >&2; i=$((i+1)); done
+echo 'the last word' >&2
+exit 1"#,
+    );
+    let source = registry().source(exec(&script, ""));
+    assert!(source.credential().await.is_err());
+    let Status::Failed { output, .. } = source.status().borrow().clone() else {
+        panic!("the run failed");
+    };
+    assert!(
+        output.starts_with("enter the code F3JQ7K9PL\n"),
+        "{output:.60}"
+    );
+    assert!(output.contains("\n…\n"));
+    assert!(output.ends_with("the last word\n"));
+    assert!(output.len() < 17 << 10);
+}
+
+#[test]
+fn the_login_shell_s_environment_can_make_a_plugin_ask() {
+    let azure = exec(
+        Path::new("kubelogin"),
+        "      args: [get-token, --server-id, x, --login, azurecli]\n",
+    );
+    let shell = |vars: &[(&str, &str)]| -> ShellEnv {
+        vars.iter()
+            .map(|(name, value)| (OsString::from(name), OsString::from(value)))
+            .collect()
+    };
+    assert!(!azure.signs_in_with(&shell(&[])));
+    assert!(azure.signs_in_with(&shell(&[("AAD_LOGIN_METHOD", "devicecode")])));
+}
+
+#[tokio::test]
+async fn the_plugins_under_way_die_with_the_app() {
+    let plugins = Plugins::new();
+    let script = hanging(&plugins);
+    let registry = registry();
+    let source = registry.source(exec(&script, ""));
+    let waiting = tokio::spawn({
+        let source = Arc::clone(&source);
+        async move { source.credential().await }
+    });
+    let pid = child(&plugins).await;
+    registry.shutdown();
+    assert!(gone(pid).await);
+    let ended = tokio::time::timeout(Duration::from_secs(5), waiting)
+        .await
+        .expect("the run ends")
+        .unwrap();
+    assert!(ended.is_err());
 }

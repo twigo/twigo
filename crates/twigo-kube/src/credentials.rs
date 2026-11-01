@@ -33,6 +33,13 @@ impl Provider {
         })
     }
 
+    /// Notes that the server rejected the credential of a new run too.
+    pub(crate) fn rejected_again(&self) {
+        if let Provider::Exec(source) = self {
+            source.rejected_again();
+        }
+    }
+
     /// Drops `used`, which the server rejected.
     pub(crate) fn reject(&self, used: &std::sync::Arc<Credential>) {
         match self {

@@ -11,6 +11,8 @@ use ring::digest::{SHA256, digest};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
+use twigo_env::ShellEnv;
+
 use super::sign_in;
 
 /// The cluster extension client-go hands the plugin as `spec.cluster.config`.
@@ -169,6 +171,19 @@ impl Exec {
     /// only while Twigo's window has the focus.
     pub fn sign_in(&self) -> bool {
         self.sign_in
+    }
+
+    /// [`Exec::sign_in`], with the login shell's environment under the
+    /// entry's, as the plugin gets them.
+    pub fn signs_in_with(&self, shell: &ShellEnv) -> bool {
+        let mut env: Vec<(String, String)> = shell
+            .iter()
+            .filter_map(|(name, value)| {
+                Some((name.to_str()?.to_owned(), value.to_str()?.to_owned()))
+            })
+            .collect();
+        env.extend(self.env.iter().cloned());
+        sign_in::needs(&self.command, &self.args, &env)
     }
 
     /// Whether the command is looked up on `PATH`: a name with no path

@@ -176,6 +176,10 @@ export function createMockBackend(
     context_sign_in_cancel: (context) => auth.cancel(context),
     exec_review: () => auth.review(),
     exec_trust: (digests) => auth.trust(digests),
+    url_open: (url) => {
+      globalThis.open(url, "_blank", "noopener,noreferrer");
+      return null;
+    },
     namespaces_list: (id) => {
       space(id);
       return [...NAMESPACES].sort();

@@ -294,3 +294,55 @@ async fn a_plugin_that_may_ask_waits_for_the_focus() {
     assert_eq!(unreachable.kind, twigo_ipc::ErrorKind::Unavailable);
     assert_eq!(plugins.runs(), 1);
 }
+
+#[test]
+fn only_sign_in_links_open() {
+    assert!(sign_in_url("https://microsoft.com/devicelogin").is_ok());
+    assert!(sign_in_url("http://127.0.0.1:53712/2c9b0d6e").is_ok());
+    assert!(sign_in_url("http://localhost/callback").is_ok());
+    assert!(sign_in_url("http://example.com/login").is_err());
+    assert!(sign_in_url("http://localhost:1@example.com/").is_err());
+    assert!(sign_in_url("file:///etc/passwd").is_err());
+    assert!(sign_in_url("javascript:alert(1)").is_err());
+}
+
+#[tokio::test]
+async fn a_credential_got_by_signing_in_outlives_a_reread_of_its_context() {
+    let plugins = Plugins::new(1, false);
+    let (core, _data) = plugins.core().await;
+    let review = core.review().await;
+    core.trust_plugins(vec![review.plugins[0].plugin.digest.clone()])
+        .unwrap();
+    let mut auth = core.follow_auth("kind-0".to_owned());
+    auth.next().await;
+    core.sign_in("kind-0").await.unwrap();
+    let ready = async {
+        loop {
+            if let twigo_ipc::ContextAuth::Plugin {
+                status: twigo_ipc::PluginStatus::Ready { .. },
+                ..
+            } = auth.next().await
+            {
+                break;
+            }
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(5), ready)
+        .await
+        .expect("the follower sees the credential come");
+    core.trust_plugins(vec!["another".to_owned()]).unwrap();
+    let reread = tokio::time::timeout(Duration::from_millis(300), auth.next()).await;
+    assert!(
+        reread.is_err(),
+        "nothing changed for the context: {reread:?}"
+    );
+    let mut again = core.follow_auth("kind-0".to_owned());
+    let twigo_ipc::ContextAuth::Plugin { status, .. } = again.next().await else {
+        panic!("a trusted plugin");
+    };
+    assert!(
+        matches!(status, twigo_ipc::PluginStatus::Ready { .. }),
+        "{status:?}"
+    );
+    assert_eq!(plugins.runs(), 1);
+}

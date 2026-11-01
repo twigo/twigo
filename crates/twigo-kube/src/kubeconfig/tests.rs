@@ -443,6 +443,21 @@ fn a_user_entry_knows_the_first_file_that_names_it() {
 }
 
 #[test]
+fn a_token_in_the_entry_wins_over_its_oidc_provider() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = write(
+        dir.path(),
+        "config",
+        &OIDC.replace(
+            "    auth-provider:",
+            "    token: static\n    auth-provider:",
+        ),
+    );
+    let catalog = kubectl(&[&file]).load();
+    assert!(context(&catalog, "kind-oidc").entries.oidc().is_none());
+}
+
+#[test]
 fn refreshed_oidc_tokens_leave_the_fingerprint_alone() {
     let dir = tempfile::tempdir().unwrap();
     let file = write(dir.path(), "config", OIDC);

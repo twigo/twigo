@@ -1,7 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { isTauri } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { registerKube } from "@twigo/kube";
 import { tauriBackend, toIpcError, type Backend } from "@twigo/protocol";
 import { createWorkbench, platformOf, WorkbenchView } from "@twigo/workbench";
@@ -34,13 +33,6 @@ async function start() {
     backend,
     platformOf(navigator.userAgent),
   );
-  if (isTauri()) {
-    workbench.openUrl = (url) => {
-      openUrl(url).catch((error: unknown) => {
-        workbench.report(error);
-      });
-    };
-  }
   registerKube(workbench);
   if (isTauri() && workbench.platform === "mac") installNativeMenu(workbench);
   return <WorkbenchView workbench={workbench} />;

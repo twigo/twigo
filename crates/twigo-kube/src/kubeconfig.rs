@@ -222,8 +222,14 @@ impl Entries {
     /// The user entry's `auth-provider: oidc`, with its file of origin.
     pub fn oidc(&self) -> Option<Result<OidcUser, OidcError>> {
         let user = self.config.auth_infos.first()?;
-        let provider = user.auth_info.as_ref()?.auth_provider.as_ref()?;
-        if provider.name != "oidc" {
+        let info = user.auth_info.as_ref()?;
+        let provider = info.auth_provider.as_ref()?;
+        // A token or basic auth in the entry wins, as in client-go.
+        if provider.name != "oidc"
+            || info.token.is_some()
+            || info.token_file.is_some()
+            || info.username.is_some()
+        {
             return None;
         }
         Some(OidcEntry::of(&provider.config).map(|entry| OidcUser {

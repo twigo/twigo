@@ -222,8 +222,6 @@ async fn a_revoked_token_gets_one_401_one_new_run_and_success() {
         .delete("revoked", &DeleteParams::default())
         .await
         .unwrap();
-    // A bound token dies with its ServiceAccount, once the API server's
-    // cache of accounts sees the deletion.
     let mut direct = Config::new(clients_url(&live));
     direct.root_cert = live_root(&live).await;
     direct.auth_info.token = Some(revoked.clone().into());

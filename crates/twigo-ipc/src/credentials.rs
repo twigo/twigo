@@ -52,7 +52,11 @@ pub enum PluginStatus {
     /// have the focus.
     Waiting,
     /// What it printed on stderr so far: device codes and URLs.
-    Running { output: String },
+    Running {
+        /// When the run started, RFC 3339.
+        since: String,
+        output: String,
+    },
     Ready {
         /// RFC 3339; none when the credential lasts until the cluster
         /// rejects it.

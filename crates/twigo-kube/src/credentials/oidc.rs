@@ -22,6 +22,7 @@ use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use http::{StatusCode, Uri};
 use jiff::{SignedDuration, Timestamp};
 use kube::config::Kubeconfig;
+use ring::digest::{SHA256, digest};
 use secrecy::SecretString;
 use serde::Deserialize;
 
@@ -61,7 +62,7 @@ pub enum OidcError {
 }
 
 /// The provider's settings, as the user entry holds them.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct OidcEntry {
     issuer: String,
     client_id: String,
@@ -70,6 +71,15 @@ pub struct OidcEntry {
     refresh_token: Option<String>,
     /// PEM.
     ca: Option<Vec<u8>>,
+}
+
+impl std::fmt::Debug for OidcEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OidcEntry")
+            .field("issuer", &self.issuer)
+            .field("client_id", &self.client_id)
+            .finish_non_exhaustive()
+    }
 }
 
 impl OidcEntry {
@@ -99,17 +109,28 @@ impl OidcEntry {
         })
     }
 
-    /// Identifies the provider whose tokens a source keeps.
+    /// Identifies the provider whose tokens a source keeps: everything but
+    /// the tokens, so a corrected secret or CA reaches a new source.
     pub(super) fn key(&self, origin: Option<&Path>, user: &str) -> String {
-        format!(
-            "{}\0{user}\0{}\0{}",
+        let mut settings = Vec::new();
+        for part in [
             origin
-                .map(Path::display)
-                .map(|p| p.to_string())
+                .map(|path| path.as_os_str().as_encoded_bytes())
                 .unwrap_or_default(),
-            self.issuer,
-            self.client_id
-        )
+            user.as_bytes(),
+            self.issuer.as_bytes(),
+            self.client_id.as_bytes(),
+            self.client_secret.as_bytes(),
+            self.ca.as_deref().unwrap_or_default(),
+        ] {
+            settings.extend_from_slice(&(part.len() as u64).to_be_bytes());
+            settings.extend_from_slice(part);
+        }
+        digest(&SHA256, &settings)
+            .as_ref()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
     }
 }
 
@@ -135,6 +156,11 @@ struct State {
     /// The credential of `entry.id_token`, so a rejection names it.
     current: Option<Arc<Credential>>,
     style: Option<Style>,
+    /// The id-token and refresh token the user's file held when this source
+    /// last read or wrote it: only tokens someone else wrote since are taken
+    /// from it, never ones it still holds after a failed write or a
+    /// rejection.
+    on_disk: (Option<String>, Option<String>),
 }
 
 impl std::fmt::Debug for Oidc {
@@ -157,6 +183,7 @@ impl Oidc {
             user,
             env,
             state: Mutex::new(State {
+                on_disk: (entry.id_token.clone(), entry.refresh_token.clone()),
                 entry,
                 current: None,
                 style: None,
@@ -201,6 +228,8 @@ impl Oidc {
         if let Some(origin) = self.origin.clone() {
             let user = self.user.clone();
             let id_token = tokens.id_token;
+            let written_id = id_token.clone();
+            let written_refresh = rotated.clone();
             let written = tokio::task::spawn_blocking(move || {
                 persist::write(
                     &origin,
@@ -208,18 +237,23 @@ impl Oidc {
                     &entry.issuer,
                     &entry.client_id,
                     &id_token,
-                    rotated.as_deref(),
+                    written_refresh.as_deref(),
                 )
                 .map_err(|error| (origin, error))
             })
             .await
             .expect("the write does not panic");
-            if let Err((origin, error)) = written {
-                eprintln!(
+            match written {
+                Ok(()) => {
+                    let mut state = self.state();
+                    let refresh = rotated.or_else(|| state.on_disk.1.clone());
+                    state.on_disk = (Some(written_id), refresh);
+                }
+                Err((origin, error)) => eprintln!(
                     "kept the refreshed oidc tokens of {} in memory only: {}: {error}",
                     self.user,
                     origin.display()
-                );
+                ),
             }
         }
         credential
@@ -228,7 +262,7 @@ impl Oidc {
 
     /// Drops `used`, which the server rejected, so the next request
     /// refreshes.
-    pub(crate) fn reject(&self, used: &Arc<Credential>) {
+    pub fn reject(&self, used: &Arc<Credential>) {
         let mut state = self.state();
         if state
             .current
@@ -268,7 +302,7 @@ impl Oidc {
     }
 
     /// Takes the tokens in the user's file when kubectl, or another Twigo,
-    /// replaced them since.
+    /// wrote new ones since this source last saw it.
     fn read_back(&self) {
         let Some(origin) = &self.origin else {
             return;
@@ -293,13 +327,18 @@ impl Oidc {
         if on_disk.issuer != state.entry.issuer || on_disk.client_id != state.entry.client_id {
             return;
         }
-        if on_disk.id_token != state.entry.id_token {
-            state.entry.id_token = on_disk.id_token;
+        let found = (on_disk.id_token, on_disk.refresh_token);
+        if found == state.on_disk {
+            return;
+        }
+        if found.0.is_some() && found.0 != state.entry.id_token {
+            state.entry.id_token.clone_from(&found.0);
             state.current = None;
         }
-        if on_disk.refresh_token.is_some() && on_disk.refresh_token != state.entry.refresh_token {
-            state.entry.refresh_token = on_disk.refresh_token;
+        if found.1.is_some() {
+            state.entry.refresh_token.clone_from(&found.1);
         }
+        state.on_disk = found;
     }
 
     async fn refresh(&self, entry: &OidcEntry, refresh_token: &str) -> Result<Tokens, OidcError> {

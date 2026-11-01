@@ -24,13 +24,6 @@
     "allow-context-sign-in-cancel",
     "allow-exec-review",
     "allow-exec-trust",
-    {
-      "identifier": "opener:allow-open-url",
-      "allow": [
-        { "url": "https://*" },
-        { "url": "http://localhost:*" },
-        { "url": "http://127.0.0.1:*" }
-      ]
-    }
+    "allow-url-open"
   ]
 }

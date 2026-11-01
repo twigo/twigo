@@ -14,7 +14,6 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",
-    "@tauri-apps/plugin-opener": "^2.7.2",
     "@twigo/kube": "workspace:*",
     "@twigo/protocol": "workspace:*",
     "@twigo/ui": "workspace:*",

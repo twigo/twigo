@@ -385,3 +385,44 @@ async fn a_certificate_from_the_plugin_is_offered_and_a_new_one_opens_a_new_conn
     );
     assert_eq!(plugin.runs(), 2);
 }
+
+#[tokio::test]
+async fn a_new_certificate_seen_first_by_the_sessions_client_retires_the_api_s_connections() {
+    let server = Server::start().await;
+    let plugin = Plugin::new();
+    let (cert, key) = server.client_pem("first");
+    plugin.prints(serde_json::json!({"clientCertificateData": cert, "clientKeyData": key}));
+    server.accept_client("first");
+    let clients = clients(&server, plugin.exec());
+    assert_eq!(get(&clients).await.unwrap(), "ok");
+
+    server.revoke_client("first");
+    server.accept_client("second");
+    let (cert, key) = server.client_pem("second");
+    plugin.prints(serde_json::json!({"clientCertificateData": cert, "clientKeyData": key}));
+    let request = Request::get("/version").body(Vec::new()).unwrap();
+    assert_eq!(clients.sessions.request_text(request).await.unwrap(), "ok");
+    assert_eq!(get(&clients).await.unwrap(), "ok");
+    let last = server.seen().pop().unwrap();
+    assert_eq!(
+        (last.client.as_deref(), last.status),
+        (Some("second"), 200),
+        "the api client left its connection with the old certificate"
+    );
+    assert_ne!(last.connection, 0);
+}
+
+#[tokio::test]
+async fn a_sign_in_plugin_whose_new_credential_is_rejected_too_waits_to_be_asked() {
+    let server = Server::start().await;
+    let plugin = Plugin::new();
+    plugin.prints(serde_json::json!({"token": "never-accepted"}));
+    let clients = clients(&server, plugin.exec());
+    let Err(kube::Error::Api(status)) = get(&clients).await else {
+        panic!("the server rejects the token");
+    };
+    assert_eq!(status.code, 401);
+    assert_eq!(plugin.runs(), 2, "one new run after the first 401");
+    assert!(get(&clients).await.is_err());
+    assert_eq!(plugin.runs(), 2, "held, so the next request runs nothing");
+}

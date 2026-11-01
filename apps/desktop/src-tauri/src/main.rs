@@ -11,7 +11,8 @@ use std::sync::{Arc, Mutex};
 
 use tauri::async_runtime::JoinHandle;
 use tauri::ipc::Channel;
-use tauri::{Manager, RunEvent, State, Webview, WindowEvent};
+use tauri::{AppHandle, Manager, RunEvent, State, Webview, WindowEvent};
+use tauri_plugin_opener::OpenerExt;
 use twigo_core::Core;
 use twigo_env::Environment;
 use twigo_ipc::{
@@ -231,6 +232,18 @@ fn exec_trust(app: State<'_, App>, request: Vec<String>) -> Result<(), IpcError>
     app.core.trust_plugins(request)
 }
 
+#[tauri::command]
+fn url_open(handle: AppHandle, request: String) -> Result<(), IpcError> {
+    let url = twigo_core::sign_in_url(&request)?;
+    handle
+        .opener()
+        .open_url(url, None::<&str>)
+        .map_err(|error| IpcError {
+            kind: ErrorKind::Internal,
+            message: format!("could not open {request}: {error}"),
+        })
+}
+
 fn explicit_kubeconfig() -> Option<PathBuf> {
     #[cfg(any(debug_assertions, feature = "bench"))]
     if let Some(file) = std::env::var_os(EXPLICIT_KUBECONFIG).filter(|v| !v.is_empty()) {
@@ -325,6 +338,7 @@ fn main() {
             context_sign_in_cancel,
             exec_review,
             exec_trust,
+            url_open,
         ])
         .on_window_event(|window, event| {
             let focused = match event {
@@ -345,10 +359,12 @@ fn main() {
         // which ends the process without `ExitRequested`, but still with
         // `Exit`: the webview cannot be asked for anything by then, so it
         // sends every change at once and this writes them.
-        if let RunEvent::Exit = event
-            && let Err(error) = app.state::<App>().core.state.flush()
-        {
-            eprintln!("could not save the state: {error}");
+        if let RunEvent::Exit = event {
+            let core = &app.state::<App>().core;
+            core.shutdown();
+            if let Err(error) = core.state.flush() {
+                eprintln!("could not save the state: {error}");
+            }
         }
     });
 }

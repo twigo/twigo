@@ -11,6 +11,8 @@ use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
 use jiff::Timestamp;
+use nix::sys::signal::{Signal, killpg};
+use nix::unistd::Pid;
 use tokio::sync::{oneshot, watch};
 use twigo_env::ShellEnv;
 
@@ -21,9 +23,10 @@ use super::oidc::{Oidc, OidcEntry};
 use super::output::Credential;
 use super::run::{self, RunError};
 
-/// How much of a plugin's stderr its status keeps: device codes and URLs
-/// come early, errors last.
-const OUTPUT_KEPT: usize = 16 << 10;
+/// How much of a plugin's stderr its status keeps, from its start and from
+/// its end: device codes and URLs come first, errors last.
+const OUTPUT_HEAD: usize = 8 << 10;
+const OUTPUT_TAIL: usize = 8 << 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Timeouts {
@@ -80,6 +83,15 @@ impl Registry {
         }
     }
 
+    /// Kills every plugin under way, as the app quits: one waiting for a
+    /// browser would keep its port, and the next run could not listen.
+    pub fn shutdown(&self) {
+        let sources = self.sources.lock().expect("registry lock");
+        for source in sources.values().filter_map(Weak::upgrade) {
+            source.kill();
+        }
+    }
+
     pub fn source(&self, exec: Exec) -> Arc<Source> {
         let key = exec.key();
         let mut sources = self.sources.lock().expect("registry lock");
@@ -122,6 +134,7 @@ pub enum Status {
     Waiting,
     /// What it printed on stderr so far.
     Running {
+        since: Timestamp,
         output: String,
     },
     Ready {
@@ -165,6 +178,8 @@ type Outcome = Option<Result<Arc<Credential>, RunError>>;
 struct Run {
     done: watch::Receiver<Outcome>,
     cancel: Option<oneshot::Sender<()>>,
+    /// The plugin's process group, once it started.
+    group: Option<Pid>,
 }
 
 impl std::fmt::Debug for Source {
@@ -209,7 +224,7 @@ impl Source {
                 }
                 match &state.run {
                     Some(run) => Some(run.done.clone()),
-                    None if self.exec.sign_in() => {
+                    None if self.signs_in() => {
                         if let Some(error) = &state.held {
                             return Err(CredentialError::SignInFailed(error.clone()));
                         }
@@ -241,6 +256,39 @@ impl Source {
         state.held = None;
         if state.run.is_none() {
             self.start(&mut state);
+        }
+    }
+
+    /// Whether the plugin may ask the person to sign in, with the login
+    /// shell's environment, which Azure/kubelogin reads its login method
+    /// from too; as the entry alone says until that environment is known.
+    pub fn signs_in(&self) -> bool {
+        match &*self.shared.env.borrow() {
+            Some(env) => self.exec.signs_in_with(env),
+            None => self.exec.sign_in(),
+        }
+    }
+
+    /// Holds a plugin that may ask the person to sign in after the cluster
+    /// rejected the credential of a new run too: running it again by itself
+    /// would only open browser after browser.
+    pub(crate) fn rejected_again(&self) {
+        if !self.signs_in() {
+            return;
+        }
+        let error = RunError::Rejected(self.exec.command().to_owned());
+        self.state().held = Some(error.clone());
+        self.status.send_replace(Status::Failed {
+            error,
+            output: String::new(),
+        });
+    }
+
+    fn kill(&self) {
+        let group = self.state().run.as_ref().and_then(|run| run.group);
+        if let Some(group) = group {
+            // It may have just ended.
+            let _ = killpg(group, Signal::SIGKILL);
         }
     }
 
@@ -277,8 +325,10 @@ impl Source {
         state.run = Some(Run {
             done: outcome.clone(),
             cancel: Some(cancel),
+            group: None,
         });
         self.status.send_replace(Status::Running {
+            since: Timestamp::now(),
             output: String::new(),
         });
         let source = Arc::clone(self);
@@ -294,12 +344,12 @@ impl Source {
                     });
                 }
                 Err(error) => {
-                    if source.exec.sign_in() {
+                    if source.signs_in() {
                         state.held = Some(error.clone());
                     }
                     source.status.send_modify(|status| {
                         let output = match status {
-                            Status::Running { output } => std::mem::take(output),
+                            Status::Running { output, .. } => std::mem::take(output),
                             _ => String::new(),
                         };
                         *status = Status::Failed {
@@ -335,21 +385,36 @@ impl Source {
                 std::future::pending::<()>().await;
             }
         };
-        let timeout = if self.exec.sign_in() {
+        let timeout = if self.signs_in() {
             self.shared.timeouts.sign_in
         } else {
             self.shared.timeouts.unattended
         };
-        // Raw, so a character split between two reads comes out whole.
-        let mut printed = Vec::new();
-        run::run(&self.exec, &env, timeout, cancel, |chunk| {
-            printed.extend_from_slice(chunk);
-            if printed.len() > OUTPUT_KEPT {
-                printed.drain(..printed.len() - OUTPUT_KEPT);
+        let started = |group| {
+            if let Some(run) = self.state().run.as_mut() {
+                run.group = Some(group);
             }
-            let output = String::from_utf8_lossy(&printed).into_owned();
+        };
+        // Raw, so a character split between two reads comes out whole.
+        let mut head = Vec::new();
+        let mut tail = Vec::new();
+        let mut cut = false;
+        run::run(&self.exec, &env, timeout, cancel, started, |mut chunk| {
+            let taken = OUTPUT_HEAD.saturating_sub(head.len()).min(chunk.len());
+            head.extend_from_slice(&chunk[..taken]);
+            chunk = &chunk[taken..];
+            tail.extend_from_slice(chunk);
+            if tail.len() > OUTPUT_TAIL {
+                tail.drain(..tail.len() - OUTPUT_TAIL);
+                cut = true;
+            }
+            let mut output = String::from_utf8_lossy(&head).into_owned();
+            if cut {
+                output.push_str("\n…\n");
+            }
+            output.push_str(&String::from_utf8_lossy(&tail));
             self.status.send_modify(|status| {
-                if let Status::Running { output: shown } = status {
+                if let Status::Running { output: shown, .. } = status {
                     *shown = output;
                 }
             });

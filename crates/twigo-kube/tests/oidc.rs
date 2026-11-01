@@ -221,9 +221,9 @@ users:
 }
 
 struct Setup {
-    _dir: TempDir,
+    dir: TempDir,
     file: PathBuf,
-    _registry: Registry,
+    registry: Registry,
     oidc: Arc<Oidc>,
 }
 
@@ -239,9 +239,9 @@ fn setup(text: &str) -> Setup {
     );
     let oidc = registry.oidc(Some(file.clone()), "dev", entry(&file));
     Setup {
-        _dir: dir,
+        dir,
         file,
-        _registry: registry,
+        registry,
         oidc,
     }
 }
@@ -376,4 +376,82 @@ fn lock(file: &Path) -> PathBuf {
     let mut name = file.as_os_str().to_owned();
     name.push(".lock");
     name.into()
+}
+
+#[tokio::test]
+async fn a_rejected_token_is_refreshed_rather_than_read_back_from_the_file() {
+    let issuer = Issuer::start("r1").await;
+    let valid = jwt(SignedDuration::from_hours(1), 0);
+    let setup = setup(&kubeconfig(&issuer, &valid, Some("r1")));
+    let rejected = setup.oidc.credential().await.unwrap();
+    assert_eq!(token(&rejected), valid);
+    setup.oidc.reject(&rejected);
+    let refreshed = token(&setup.oidc.credential().await.unwrap());
+    assert_ne!(refreshed, valid);
+    assert_eq!(issuer.grants().len(), 1);
+}
+
+#[tokio::test]
+async fn after_a_failed_write_the_next_refresh_spends_the_rotated_token() {
+    let issuer = Issuer::start("r1").await;
+    let setup = setup(&kubeconfig(
+        &issuer,
+        &jwt(SignedDuration::from_secs(-60), 0),
+        Some("r1"),
+    ));
+    std::fs::write(lock(&setup.file), "").unwrap();
+    let first = setup.oidc.credential().await.unwrap();
+    setup.oidc.reject(&first);
+    setup.oidc.credential().await.unwrap();
+    let spent: Vec<String> = issuer
+        .grants()
+        .into_iter()
+        .map(|(form, _)| form["refresh_token"].clone())
+        .collect();
+    assert_eq!(spent, ["r1", "r2"]);
+}
+
+#[tokio::test]
+async fn the_tokens_go_to_the_file_a_symlink_names() {
+    let issuer = Issuer::start("r1").await;
+    let setup = setup(&kubeconfig(
+        &issuer,
+        &jwt(SignedDuration::from_secs(-60), 0),
+        Some("r1"),
+    ));
+    let link = setup.dir.path().join("link");
+    std::os::unix::fs::symlink(&setup.file, &link).unwrap();
+    let through_link = setup.registry.oidc(Some(link.clone()), "dev", entry(&link));
+    through_link.credential().await.unwrap();
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert!(
+        std::fs::read_to_string(&setup.file)
+            .unwrap()
+            .contains("refresh-token: r2")
+    );
+}
+
+#[tokio::test]
+async fn a_corrected_client_secret_reaches_a_new_source() {
+    let issuer = Issuer::start("r1").await;
+    let expired = jwt(SignedDuration::from_secs(-60), 0);
+    let setup = setup(
+        &kubeconfig(&issuer, &expired, Some("r1"))
+            .replace("client-secret: s3cret", "client-secret: wrong"),
+    );
+    assert!(matches!(
+        setup.oidc.credential().await,
+        Err(OidcError::Refresh { .. })
+    ));
+    std::fs::write(&setup.file, kubeconfig(&issuer, &expired, Some("r1"))).unwrap();
+    let corrected = setup
+        .registry
+        .oidc(Some(setup.file.clone()), "dev", entry(&setup.file));
+    assert!(!Arc::ptr_eq(&corrected, &setup.oidc));
+    corrected.credential().await.unwrap();
 }

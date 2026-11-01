@@ -95,16 +95,13 @@ impl Clients {
         let proxy = options.proxy.as_ref();
         let counter = Counter::new(options.budgets);
         let connections = Connections::default();
-        let identity = Arc::new(Identity::default());
+        let identity = Arc::new(Identity::new(connections.clone()));
         let offered = matches!(options.provider, Some(Provider::Exec(_))).then_some(&identity);
-        let auth = |connections: Option<&Connections>| {
-            options.provider.as_ref().map(|provider| {
-                AuthLayer::new(
-                    provider.clone(),
-                    Arc::clone(&identity),
-                    connections.cloned(),
-                )
-            })
+        let auth = || {
+            options
+                .provider
+                .as_ref()
+                .map(|provider| AuthLayer::new(provider.clone(), Arc::clone(&identity)))
         };
 
         let mut builder = hyper_util::client::legacy::Client::builder(TokioExecutor::new());
@@ -124,7 +121,7 @@ impl Clients {
         let api = ServiceBuilder::new()
             .layer(config.base_uri_layer())
             .option_layer(config.auth_layer()?)
-            .option_layer(auth(Some(&connections)))
+            .option_layer(auth())
             .layer(config.extra_headers_layer()?)
             .layer(CounterLayer(counter.clone()))
             .layer(TimeoutLayer::new(REQUEST_TIMEOUT))
@@ -132,12 +129,15 @@ impl Clients {
             .layer(ConnectionsLayer(connections.clone()))
             .service(api);
 
+        // Each session upgrades its connection, which leaves the pool, so an
+        // idle one would only carry a certificate the plugin has replaced.
         let sessions = hyper_util::client::legacy::Client::builder(TokioExecutor::new())
+            .pool_max_idle_per_host(0)
             .build::<_, Body>(connector(config, Alpn::Http1, proxy, offered)?);
 
         Ok(Clients {
             api: Client::new(api, config.default_namespace.clone()),
-            sessions: kube_client(config, sessions, auth(None))?,
+            sessions: kube_client(config, sessions, auth())?,
             counter,
             connections,
         })
@@ -170,7 +170,12 @@ fn without_plugins(config: &Config, provided: bool) -> Result<Config, Error> {
     }
     let mut config = config.clone();
     config.auth_info.exec = None;
-    if provided {
+    // client-go's bearer and basic round trippers wrap the provider's, which
+    // passes on a request that carries a header already; kube reads the
+    // provider first.
+    let user = &config.auth_info;
+    let static_auth = user.token.is_some() || user.token_file.is_some() || user.username.is_some();
+    if provided || static_auth {
         config.auth_info.auth_provider = None;
     }
     Ok(config)

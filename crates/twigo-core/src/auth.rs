@@ -114,8 +114,10 @@ impl AuthFollower {
             .clone()
             .expect("waited for");
         let trusted = self.trust.borrow_and_update().clone();
+        // The source stays held until its successor is, so the registry
+        // hands out the same one with its credential and its held failure.
+        let held = self.plugin.take();
         self.status = None;
-        self.plugin = None;
         let Some(context) = contexts.find(&self.context) else {
             return ContextAuth::Invalid {
                 message: format!("no source lists the context {:?}", self.context),
@@ -136,12 +138,15 @@ impl AuthFollower {
             };
         }
         let source = self.core.credentials.source(exec.clone());
+        drop(held);
         let mut status = source.status();
         let current = status.borrow_and_update().clone();
+        let mut described = plugin(&exec);
+        described.signs_in = source.signs_in();
         self.status = Some(status);
         self.plugin = Some(source);
         ContextAuth::Plugin {
-            plugin: plugin(&exec),
+            plugin: described,
             status: plugin_status(&current, &exec),
         }
     }
@@ -168,7 +173,8 @@ fn plugin_status(status: &Status, exec: &Exec) -> PluginStatus {
     match status {
         Status::Idle => PluginStatus::Idle,
         Status::Waiting => PluginStatus::Waiting,
-        Status::Running { output } => PluginStatus::Running {
+        Status::Running { since, output } => PluginStatus::Running {
+            since: since.to_string(),
             output: output.clone(),
         },
         Status::Ready { expires } => PluginStatus::Ready {

@@ -83,6 +83,11 @@ impl Core {
         self.focused.send_replace(focused);
     }
 
+    /// Kills the plugins under way, as the app quits.
+    pub fn shutdown(&self) {
+        self.credentials.shutdown();
+    }
+
     /// The context's clients, once the catalog and the login shell's
     /// environment are known.
     pub async fn clients(&self, context: &str) -> Result<Arc<Clients>, ClientsError> {
@@ -239,6 +244,27 @@ impl Core {
             }
         };
         tokio::join!(sources, seen);
+    }
+}
+
+/// A link the sign-in panel may open: https, or a plugin's own server on
+/// localhost or 127.0.0.1, without a user part, which would name another
+/// host.
+pub fn sign_in_url(url: &str) -> Result<String, IpcError> {
+    let refused = || IpcError {
+        kind: twigo_ipc::ErrorKind::InvalidInput,
+        message: format!("Twigo opens only sign-in links: {url}"),
+    };
+    let parsed: http::Uri = url.parse().map_err(|_| refused())?;
+    let authority = parsed.authority().ok_or_else(refused)?;
+    if authority.as_str().contains('@') {
+        return Err(refused());
+    }
+    let local = matches!(authority.host(), "localhost" | "127.0.0.1");
+    match parsed.scheme_str() {
+        Some("https") => Ok(url.to_owned()),
+        Some("http") if local => Ok(url.to_owned()),
+        _ => Err(refused()),
     }
 }
 

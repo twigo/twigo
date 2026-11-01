@@ -20,6 +20,10 @@ use super::output::{self, Credential, OutputError};
 /// end.
 const MAX_STDOUT: u64 = 1 << 20;
 
+/// How long stderr may stay open once the plugin exited: a helper it left
+/// running may hold it, and client-go never waits for it.
+const STDERR_GRACE: Duration = Duration::from_millis(100);
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RunError {
     #[error("exec: executable {0} not found")]
@@ -40,15 +44,19 @@ pub enum RunError {
     Output(#[from] OutputError),
     #[error("exec plugin cannot support interactive mode: standard input is not a terminal")]
     NeedsTerminal,
+    #[error("the cluster rejected the credential {0} gave")]
+    Rejected(String),
 }
 
-/// Runs `exec` once with `env`, the login shell's environment, and passes
-/// each chunk of its stderr to `stderr`.
+/// Runs `exec` once with `env`, the login shell's environment, tells
+/// `started` the process group it runs in, and passes each chunk of its
+/// stderr to `stderr`.
 pub(super) async fn run(
     exec: &Exec,
     env: &ShellEnv,
     timeout: Duration,
     cancel: impl Future<Output = ()>,
+    started: impl FnOnce(Pid),
     mut stderr: impl FnMut(&[u8]),
 ) -> Result<Credential, RunError> {
     let command = exec.command().to_owned();
@@ -63,6 +71,9 @@ pub(super) async fn run(
         .id()
         .and_then(|id| i32::try_from(id).ok())
         .map(Pid::from_raw);
+    if let Some(group) = group {
+        started(group);
+    }
     let mut out = child.stdout.take().expect("stdout is piped");
     let mut err = child.stderr.take().expect("stderr is piped");
     let read = |error: io::Error| RunError::Read {
@@ -83,13 +94,29 @@ pub(super) async fn run(
             }
             Ok(printed)
         };
-        let complained = async { forward(&mut err, &mut stderr).await.map_err(read) };
         let exited = async { child.wait().await.map_err(read) };
-        tokio::try_join!(printed, complained, exited)
+        let done = async { tokio::try_join!(printed, exited) };
+        let complained = forward(&mut err, &mut stderr);
+        tokio::pin!(done, complained);
+        let mut closed = false;
+        let result = loop {
+            tokio::select! {
+                result = &mut complained, if !closed => {
+                    result.map_err(read)?;
+                    closed = true;
+                }
+                result = &mut done => break result?,
+            }
+        };
+        if !closed {
+            // Its error is the reader's, and the run is over.
+            let _ = tokio::time::timeout(STDERR_GRACE, complained).await;
+        }
+        Ok(result)
     };
     let ended = tokio::select! {
         result = tokio::time::timeout(timeout, work) => match result {
-            Ok(Ok((printed, (), status))) => Ok((printed, status)),
+            Ok(Ok((printed, status))) => Ok((printed, status)),
             Ok(Err(error)) => Err(error),
             Err(_) => Err(RunError::Timeout { command: command.clone(), after: timeout }),
         },

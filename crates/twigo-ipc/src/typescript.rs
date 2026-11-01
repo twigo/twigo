@@ -7,7 +7,7 @@ use crate::command::{
     ClusterVersionGet, Command, ContextAuthWatch, ContextSignIn, ContextSignInCancel,
     ContextsWatch, ExecReviewGet, ExecTrust, KeyboardLayoutWatch, ListAck, ListSetWindow,
     ListSubscribe, ListUnsubscribe, NamespacesList, ResourcesList, ShellEnvironmentRetry,
-    ShellEnvironmentWatch, SpaceOpen, SpacesList, StateLoad, StateSet,
+    ShellEnvironmentWatch, SpaceOpen, SpacesList, StateLoad, StateSet, UrlOpen,
 };
 
 /// The TypeScript module of `packages/protocol`: every type the commands
@@ -38,6 +38,7 @@ pub fn typescript() -> String {
     module.command::<ContextSignInCancel>();
     module.command::<ExecReviewGet>();
     module.command::<ExecTrust>();
+    module.command::<UrlOpen>();
 
     let mut out = String::from(
         "// Generated from crates/twigo-ipc: TWIGO_UPDATE_TYPESCRIPT=1 cargo test -p twigo-ipc --test typescript\n",
