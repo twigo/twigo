@@ -10,6 +10,7 @@ const QUERY: ListQuery = {
   namespaces: [],
   labelSelector: null,
   text: null,
+  columns: null,
   sort: null,
   groupBy: null,
   values: null,
@@ -92,6 +93,18 @@ test("a batch replaces the window and reports the cells it changed", async () =>
   fake.send(batch(3, { window: { start: 5, ids: ["b"] } }));
   expect([...view.getSnapshot().rows.keys()]).toEqual(["b"]);
   expect(view.getSnapshot().changed.size).toBe(0);
+});
+
+test("a batch without groups keeps the previous ones", async () => {
+  const fake = fakeBackend();
+  const view = new ListView(fake.backend, QUERY);
+  fake.resolve(7);
+  await vi.runAllTimersAsync();
+  const groups = [{ value: "Running", count: 2 }];
+  fake.send(batch(1, { window: { start: 0, ids: [] }, groups }));
+  fake.send(batch(2, { total: 3 }));
+  expect(view.getSnapshot().total).toBe(3);
+  expect(view.getSnapshot().groups).toEqual(groups);
 });
 
 test("every seq is acknowledged once, after the next frame", async () => {

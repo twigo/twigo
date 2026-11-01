@@ -12,7 +12,8 @@ export type ColumnChoices = Readonly<Record<string, boolean>>;
 export class ColumnPresets {
   readonly changes = new Changes();
   readonly #choices = new Map<string, ColumnChoices>();
-  readonly #loading = new Set<string>();
+  /** Absent until the first read; a failed read is retried by the next choice. */
+  readonly #reads = new Map<string, "reading" | "read" | "failed">();
 
   constructor(
     private readonly backend: Backend,
@@ -22,29 +23,44 @@ export class ColumnPresets {
   /** Empty until the saved choices are read. */
   choices(gvr: Gvr): ColumnChoices {
     const key = presetKey(gvr);
-    if (!this.#choices.has(key)) this.#load(key);
+    if (!this.#reads.has(key)) this.#load(key);
     return this.#choices.get(key) ?? {};
   }
 
+  /** Before the saved choices are read, it waits for them and saves both. */
   choose(gvr: Gvr, column: string, shown: boolean): void {
     const key = presetKey(gvr);
-    const next = { ...this.choices(gvr), [column]: shown };
-    this.#choices.set(key, next);
+    this.#choices.set(key, { ...this.#choices.get(key), [column]: shown });
     this.changes.emit();
-    this.backend
-      .invoke("state_set", { key, value: JSON.stringify(next) })
-      .catch(this.onError);
+    const read = this.#reads.get(key);
+    if (read === "read") this.#save(key);
+    else if (read !== "reading") this.#load(key);
   }
 
   #load(key: string): void {
-    if (this.#loading.has(key)) return;
-    this.#loading.add(key);
-    this.backend.invoke("state_get", key).then((saved) => {
-      if (!this.#choices.has(key)) {
-        this.#choices.set(key, readChoices(saved));
+    this.#reads.set(key, "reading");
+    this.backend.invoke("state_get", key).then(
+      (saved) => {
+        this.#reads.set(key, "read");
+        const chosen = this.#choices.get(key);
+        this.#choices.set(key, { ...readChoices(saved), ...chosen });
         this.changes.emit();
-      }
-    }, this.onError);
+        if (chosen) this.#save(key);
+      },
+      (error: unknown) => {
+        this.#reads.set(key, "failed");
+        this.onError(error);
+      },
+    );
+  }
+
+  #save(key: string): void {
+    this.backend
+      .invoke("state_set", {
+        key,
+        value: JSON.stringify(this.#choices.get(key) ?? {}),
+      })
+      .catch(this.onError);
   }
 }
 

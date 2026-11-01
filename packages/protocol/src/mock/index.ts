@@ -400,7 +400,6 @@ class Subscription {
     const at = this.#columns.findIndex(
       (candidate) => candidate.name === column,
     );
-    if (at < 0) return null;
     const withContext = this.#columns[0]?.name === "Context";
     const withNamespace = this.#columns.some((c) => c.name === "Namespace");
     const counts = new Map<string, number>();

@@ -54,6 +54,7 @@ fn queries_use_camel_case_and_newtypes_are_bare() {
         namespaces: vec![],
         label_selector: Some("app=api".into()),
         text: None,
+        columns: Some(vec!["Name".into(), "IP".into()]),
         sort: Some(Sort {
             column: "Age".into(),
             descending: true,
@@ -66,6 +67,7 @@ fn queries_use_camel_case_and_newtypes_are_bare() {
     };
     assert_eq!(wire(&query)["labelSelector"], json!("app=api"));
     assert_eq!(wire(&query)["groupBy"], json!("Status"));
+    assert_eq!(wire(&query)["columns"], json!(["Name", "IP"]));
     assert_eq!(
         wire(&query)["values"],
         json!({ "column": "Status", "values": ["Error"] })

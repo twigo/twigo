@@ -1,7 +1,7 @@
 import { cn } from "@twigo/ui";
 import { useChanges } from "@twigo/workbench";
 import type { ListFilters } from "./filters";
-import { byHealth, HEALTH, type Health } from "./health";
+import { byHealth, HEALTH, healthValues, type Health } from "./health";
 import { SHOWS_ROWS, type ListStatuses } from "./listStatus";
 import { statusColumn } from "./tones";
 import { parseListUri } from "./uri";
@@ -27,7 +27,7 @@ export function HealthFilter({
     return null;
   const counts = byHealth(input.gvr, column, list.groups);
   const total = ORDER.reduce((sum, health) => sum + counts[health].count, 0);
-  const picked = filters.health(uri);
+  const picked = filters.health(uri)?.health;
   const chip = (
     health: Health | undefined,
     label: string,
@@ -39,7 +39,10 @@ export function HealthFilter({
       type="button"
       aria-pressed={picked === health}
       onClick={() => {
-        filters.setHealth(uri, health);
+        filters.setHealth(
+          uri,
+          health && { health, values: healthValues(counts[health]) },
+        );
       }}
       className={cn(
         "flex h-6 items-center gap-1.5 rounded-md px-2 text-[12px] text-muted-foreground hover:bg-row-hover hover:text-foreground",

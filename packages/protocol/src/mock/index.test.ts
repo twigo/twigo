@@ -9,6 +9,7 @@ function query(rest: Partial<ListQuery> = {}): ListQuery {
     namespaces: [],
     labelSelector: null,
     text: null,
+    columns: null,
     sort: null,
     groupBy: null,
     values: null,
@@ -183,9 +184,40 @@ test("pinned states keep or drop rows as Rust does", async () => {
   }
 });
 
-test("text matches the shown columns only", async () => {
-  const hidden = await open("ready", query({ text: "<none>" }));
-  expect(hidden.batches[0]?.total).toBe(0);
+test("text matches the columns of priority 0 unless the query names its columns", async () => {
+  const total = async (text: string, columns: string[] | null) =>
+    (await open("ready", query({ text, columns }))).batches[0]?.total;
+  expect(await total("<none>", null)).toBe(0);
+  expect(await total("10.244.", null)).toBe(0);
+  expect(await total("10.244.", ["Name", "IP"])).toBe(5000);
+  expect(await total("kube-system", null)).toBeGreaterThan(0);
+  expect(await total("kube-system", ["Name"])).toBe(0);
+});
+
+test("a named column the list lacks is no error", async () => {
+  const one = await open(
+    "ready",
+    query({
+      namespaces: ["payments"],
+      text: "payments",
+      columns: ["Name", "Namespace", "IP"],
+    }),
+  );
+  expect(one.batches[0]?.total).toBeGreaterThan(0);
+});
+
+test("an unknown groupBy column is refused at subscribe", async () => {
+  const backend = createMockBackend();
+  const pending = backend.subscribe(
+    "list_subscribe",
+    query({ groupBy: "Bogus" }),
+    () => undefined,
+  );
+  const rejected = expect(pending).rejects.toMatchObject({
+    kind: "invalidInput",
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  await rejected;
 });
 
 test("an unknown sort column is refused at subscribe", async () => {
@@ -271,6 +303,22 @@ test("grouped counts follow the rows once a live list syncs", async () => {
   );
   const latest = groups[groups.length - 1] ?? [];
   expect(latest.reduce((sum, group) => sum + group.count, 0)).toBe(5000);
+});
+
+test("a change of counts alone sends a batch with the new groups", async () => {
+  const { batches, ack } = await open("live", query({ groupBy: "Status" }));
+  for (let ms = 0; ms < 4000; ms += 50) {
+    await ack();
+    await vi.advanceTimersByTimeAsync(50);
+  }
+  const ready = batches.findIndex((batch) => batch.status.state === "ready");
+  const after = batches.slice(ready + 1);
+  expect(ready).toBeGreaterThan(0);
+  expect(after.length).toBeGreaterThan(0);
+  expect(after.every((batch) => batch.groups !== null)).toBe(true);
+  after.forEach((batch, i) => {
+    expect(batch.groups).not.toEqual(batches[ready + i]?.groups);
+  });
 });
 
 test("no groupBy, no groups", async () => {

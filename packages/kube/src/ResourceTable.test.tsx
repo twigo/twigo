@@ -24,7 +24,7 @@ import type {
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import { PODS } from "./kinds";
 import { stateLabel } from "./listStatus";
-import { ResourceTable } from "./ResourceTable";
+import { ResourceTable, type ListController } from "./ResourceTable";
 
 beforeAll(() => {
   Object.defineProperty(HTMLElement.prototype, "clientHeight", {
@@ -289,3 +289,80 @@ test("columns share the free width until dragging an edge sizes one", async () =
   fireEvent.pointerMove(edge, { clientX: -1000, pointerId: 1 });
   expect(row()?.style.gridTemplateColumns.startsWith("48px ")).toBe(true);
 });
+
+test("filters that match nothing say so and offer to clear them", async () => {
+  const onClearFilters = vi.fn();
+  render(
+    <ResourceTable
+      backend={createMockBackend("ready")}
+      space="prod-eu"
+      gvr={PODS}
+      title="Pods"
+      text="no-such-pod"
+      onClearFilters={onClearFilters}
+    />,
+  );
+  await settle();
+  expect(screen.getByText("No matching pods")).toBeTruthy();
+  expect(screen.queryByText("No pods")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+  expect(onClearFilters).toHaveBeenCalledTimes(1);
+});
+
+test("j moves on from the selected row after it scrolled out of the window", async () => {
+  let controller: ListController | undefined;
+  render(
+    <ResourceTable
+      backend={createMockBackend("ready")}
+      space="prod-eu"
+      gvr={PODS}
+      title="Pods"
+      register={(_, list) => {
+        controller = list;
+        return () => undefined;
+      }}
+    />,
+  );
+  await settle();
+  fireEvent.click(screen.getAllByRole("row")[1] ?? document.body);
+  const grid = screen.getByRole("grid");
+  grid.scrollTop = 3000 * 26;
+  fireEvent.scroll(grid);
+  await settle();
+  act(() => {
+    controller?.move(1);
+  });
+  await settle();
+  grid.scrollTop = 0;
+  fireEvent.scroll(grid);
+  await settle();
+  const selected = screen
+    .getAllByRole("row")
+    .filter((row) => row.getAttribute("aria-selected") === "true");
+  expect(selected.map((row) => row.getAttribute("aria-rowindex"))).toEqual([
+    "3",
+  ]);
+});
+
+test.each([
+  [{ IP: true }, "10.244.", true],
+  [{}, "10.244.", false],
+  [{ Namespace: false }, "kube-system", false],
+  [{}, "kube-system", true],
+])(
+  "with choices %o the text %s matches rows: %s",
+  async (choices, text, matches) => {
+    render(
+      <ResourceTable
+        backend={createMockBackend("ready")}
+        space="prod-eu"
+        gvr={PODS}
+        title="Pods"
+        text={text}
+        choices={choices}
+      />,
+    );
+    await settle();
+    expect(screen.queryByText("No matching pods") === null).toBe(matches);
+  },
+);

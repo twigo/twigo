@@ -23,6 +23,11 @@ pub struct ListQuery {
     pub namespaces: Vec<String>,
     pub label_selector: Option<String>,
     pub text: Option<String>,
+    /// The shown columns by name, which the text filter matches; null for
+    /// the columns of priority 0. A name the list lacks is skipped: the
+    /// client names the columns of its last batch, and a query for one
+    /// namespace drops Namespace.
+    pub columns: Option<Vec<String>>,
     pub sort: Option<Sort>,
     /// A column to count the matching rows by, such as a pod's Status.
     pub group_by: Option<String>,

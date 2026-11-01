@@ -1,8 +1,6 @@
 import type { Workbench } from "@twigo/workbench";
-import { sameGvr } from "./discovery";
 import type { ListServices } from "./ListEditor";
 import { objectOf } from "./selection";
-import { parseListUri } from "./uri";
 
 /**
  * Commands on the selected row of the active list, and the row menu
@@ -16,10 +14,9 @@ export function registerResourceActions(
   const { commands, menus, editors } = workbench;
   const target = () => {
     const uri = editors.active;
-    const input = uri === undefined ? undefined : parseListUri(uri);
-    const selected = input && services.selection.get(input.space);
-    if (!uri || !input || !selected || !sameGvr(selected.gvr, input.gvr))
-      return undefined;
+    const selected =
+      uri === undefined ? undefined : services.selection.get(uri);
+    if (!uri || !selected) return undefined;
     return { uri, object: objectOf(selected.row) };
   };
   const actions: readonly {

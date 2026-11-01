@@ -2,12 +2,11 @@ import type { Column, Gvr, Row } from "@twigo/protocol";
 import { Changes } from "@twigo/workbench";
 
 export interface Selected {
-  readonly space: string;
   readonly gvr: Gvr;
   readonly kind: string;
   readonly columns: readonly Column[];
   readonly row: Row;
-  /** Open the row's details when its list mounts, as going to a resource does. */
+  /** Open the row's details, as going to a resource does. */
   readonly reveal?: boolean;
 }
 
@@ -20,20 +19,21 @@ export function objectOf(row: Row): { namespace?: string; name: string } {
 }
 
 /**
- * Per space, the row last selected in any of its tables (ARCHITECTURE
- * 4.3), so a list that mounts again selects it again.
+ * Per list editor URI, the row last selected in its table (ARCHITECTURE
+ * 4.3), so a list that mounts again selects it again, and two lists of one
+ * space keep their own.
  */
 export class Selection {
   readonly changes = new Changes();
-  readonly #spaces = new Map<string, Selected>();
+  readonly #lists = new Map<string, Selected>();
 
-  get(space: string): Selected | undefined {
-    return this.#spaces.get(space);
+  get(uri: string): Selected | undefined {
+    return this.#lists.get(uri);
   }
 
-  set(selected: Selected): void {
-    if (this.#spaces.get(selected.space) === selected) return;
-    this.#spaces.set(selected.space, selected);
+  set(uri: string, selected: Selected): void {
+    if (this.#lists.get(uri) === selected) return;
+    this.#lists.set(uri, selected);
     this.changes.emit();
   }
 }

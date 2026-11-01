@@ -89,8 +89,13 @@ interface Props {
   /** Only the rows whose column holds one of these values. */
   values?: ColumnValues;
   labelSelector?: string;
-  /** The row selected when the table mounts, such as the one it had before. */
-  initialSelected?: RowId;
+  /** Clears the text and the values, from the state of a list they leave empty. */
+  onClearFilters?: () => void;
+  /**
+   * The row to select: when the table mounts, such as the one it had
+   * before, and whenever it changes, such as on going to a resource.
+   */
+  selectedId?: RowId;
   /** The selected row, whenever it changes or its data does. */
   onSelect?: (row: Row, columns: readonly Column[]) => void;
   /** A row the user opened: a click, or Enter through `activate`. */
@@ -132,7 +137,8 @@ function ResourceList({
   text,
   values,
   labelSelector,
-  initialSelected,
+  onClearFilters,
+  selectedId,
   onSelect,
   onActivate,
   onStatus,
@@ -143,23 +149,37 @@ function ResourceList({
   onRetry,
 }: Props & { onRetry: () => void }) {
   const [sort, setSort] = useState<Sort | null>(null);
-  const [selected, setSelected] = useState(initialSelected);
+  const [selected, setSelected] = useState(selectedId);
+  const [followed, setFollowed] = useState(selectedId);
+  if (selectedId !== followed) {
+    setFollowed(selectedId);
+    setSelected(selectedId);
+  }
+  const shown = (column: Column) =>
+    column.name === "Name" || (choices[column.name] ?? column.priority === 0);
+  // The latest batch's columns name the shown ones to the text filter; null
+  // without a text or a column choice, so neither resubscribes for nothing.
+  const [known, setKnown] = useState<readonly Column[]>([]);
+  const matched =
+    text && known.some((column) => shown(column) !== (column.priority === 0))
+      ? known.filter(shown).map((column) => column.name)
+      : null;
   const { snapshot, flash, setWindow } = useListView(backend, {
     space,
     gvr,
     namespaces: [...namespaces],
     labelSelector: labelSelector ?? null,
     text: text ?? null,
+    columns: matched,
     sort,
     groupBy: statusColumn(gvr) ?? null,
     values: values ?? null,
   });
+  if (snapshot.columns !== known) setKnown(snapshot.columns);
   const now = useNow(1000);
   const [grid, setGrid] = useState<HTMLDivElement | null>(null);
   const { status } = snapshot;
   const showsRows = SHOWS_ROWS.has(status.state);
-  const shown = (column: Column) =>
-    column.name === "Name" || (choices[column.name] ?? column.priority === 0);
   const columns = snapshot.columns
     .map((column, index) => ({ ...column, index }))
     .filter(shown);
@@ -191,8 +211,13 @@ function ResourceList({
   }, [wantedRow]);
 
   const latest = useRef({ snapshot, selected, onActivate });
+  // Where the selected row was last seen, to move from once it leaves the window.
+  const seen = useRef<{ id: RowId; index: number }>(undefined);
   useEffect(() => {
     latest.current = { snapshot, selected, onActivate };
+    const index = selected === undefined ? -1 : indexOf(snapshot, selected);
+    if (selected !== undefined && index >= 0)
+      seen.current = { id: selected, index };
   });
   const controller = useMemo<ListController>(() => {
     const go = (index: number) => {
@@ -206,7 +231,9 @@ function ResourceList({
       move(delta) {
         const { snapshot: shown, selected: id } = latest.current;
         const at = id === undefined ? -1 : indexOf(shown, id);
-        go(at < 0 ? shown.start : at + delta);
+        const last = seen.current;
+        const from = at >= 0 ? at : last && last.id === id ? last.index : -1;
+        go(from < 0 ? shown.start : from + delta);
       },
       moveToEdge(edge) {
         go(edge === "first" ? 0 : latest.current.snapshot.total - 1);
@@ -297,6 +324,17 @@ function ResourceList({
           </div>
           {!showsRows ? (
             <SkeletonRows template={template} count={columns.length || 5} />
+          ) : snapshot.total === 0 && (text || values) ? (
+            <EmptyState
+              icon={Icon}
+              title={`No matching ${title.toLowerCase()}`}
+              {...(onClearFilters && {
+                action: { label: "Clear filters", onClick: onClearFilters },
+              })}
+              className="py-16"
+            >
+              <p>No {title.toLowerCase()} match the filters.</p>
+            </EmptyState>
           ) : snapshot.total === 0 ? (
             <EmptyState
               icon={Icon}

@@ -1,6 +1,13 @@
 import { Changes } from "@twigo/workbench";
 import type { Health } from "./health";
 
+/** A picked health and the status column's values it stands for. */
+export interface HealthChoice {
+  readonly health: Health;
+  /** As derived from the list's counts when it last had them. */
+  readonly values: readonly string[];
+}
+
 /**
  * What each open list editor filters its rows by, by URI: a text and a
  * health. It also carries the asks for a filter field's focus.
@@ -8,7 +15,7 @@ import type { Health } from "./health";
 export class ListFilters {
   readonly changes = new Changes();
   readonly #texts = new Map<string, string>();
-  readonly #health = new Map<string, Health>();
+  readonly #health = new Map<string, HealthChoice>();
   readonly #focus = new Map<string, number>();
 
   text(uri: string): string | undefined {
@@ -20,13 +27,19 @@ export class ListFilters {
     this.changes.emit();
   }
 
-  health(uri: string): Health | undefined {
+  health(uri: string): HealthChoice | undefined {
     return this.#health.get(uri);
   }
 
   /** Undefined shows every row. */
-  setHealth(uri: string, health: Health | undefined): void {
-    if (health) this.#health.set(uri, health);
+  setHealth(uri: string, choice: HealthChoice | undefined): void {
+    const current = this.#health.get(uri);
+    if (
+      current?.health === choice?.health &&
+      current?.values.join("\n") === choice?.values.join("\n")
+    )
+      return;
+    if (choice) this.#health.set(uri, choice);
     else this.#health.delete(uri);
     this.changes.emit();
   }

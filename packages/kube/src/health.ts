@@ -40,3 +40,8 @@ export function byHealth(
   }
   return counts;
 }
+
+/** A health's values, sorted, so counts that swap keep the list's query. */
+export function healthValues(count: HealthCount): string[] {
+  return count.values.map((group) => group.value).sort();
+}

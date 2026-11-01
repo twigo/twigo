@@ -16,7 +16,11 @@ import {
   vi,
 } from "vitest";
 import { createMockBackend } from "@twigo/protocol/mock";
-import { Workbench, WorkbenchView } from "@twigo/workbench";
+import {
+  Workbench,
+  WorkbenchView,
+  type QuickAccessContext,
+} from "@twigo/workbench";
 import { PODS } from "./kinds";
 import { registerKube } from "./register";
 import { cellTone } from "./tones";
@@ -73,6 +77,7 @@ async function podsList(backend = createMockBackend("ready")) {
   return workbench;
 }
 
+const NOWHERE: QuickAccessContext = { lookup: () => undefined };
 const rows = () => screen.getAllByRole("row").slice(1);
 const details = () =>
   screen.queryByRole("complementary", { name: "Pod details" });
@@ -212,4 +217,93 @@ test("the column chooser shows a wide column, and the kind keeps the choice", as
   cleanup();
   await podsList(backend);
   expect(screen.getByRole("columnheader", { name: "IP" })).toBeTruthy();
+});
+
+const nameOf = (row: HTMLElement | undefined) =>
+  row?.children[0]?.textContent ?? "?";
+
+test("two lists of a space keep their own selected row for the details and the row commands", async () => {
+  const writeText = vi.fn(() => Promise.resolve());
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  const workbench = await podsList();
+  const all = nameOf(rows()[0]);
+  fireEvent.click(rows()[0] ?? document.body);
+  act(() => {
+    workbench.editors.open("k8s-list://prod-eu/v1/pods?ns=payments");
+  });
+  await settle();
+  const payments = nameOf(rows()[1]);
+  fireEvent.click(rows()[1] ?? document.body);
+  expect(details()?.textContent).toContain(payments);
+
+  act(() => {
+    workbench.editors.open("k8s-list://prod-eu/v1/pods");
+  });
+  await settle();
+  expect(details()?.textContent).toContain(all);
+  await act(() =>
+    workbench.commands.execute("k8s.resource.copyName", (key) =>
+      key === "listFocus" ? true : undefined,
+    ),
+  );
+  expect(writeText).toHaveBeenCalledWith(all);
+});
+
+test("a list reopened with a health chip picked subscribes with that health's values", async () => {
+  const backend = createMockBackend("ready");
+  const workbench = await podsList(backend);
+  fireEvent.click(chip("Failing"));
+  await settle();
+  act(() => {
+    workbench.editors.close("k8s-list://prod-eu/v1/pods");
+  });
+  await settle();
+  const subscribe = vi.spyOn(backend, "subscribe");
+  act(() => {
+    workbench.editors.open("k8s-list://prod-eu/v1/pods");
+  });
+  await settle();
+  const values = subscribe.mock.calls.flatMap(([command, query]) =>
+    command === "list_subscribe" && query ? [query.values?.values] : [],
+  );
+  expect(values).toEqual([["CrashLoopBackOff", "Error", "ImagePullBackOff"]]);
+  expect(rows().length).toBeGreaterThan(0);
+});
+
+test("going to a pod again shows its details again after they were closed", async () => {
+  const workbench = await podsList();
+  const provider = workbench.quickAccess.resolve("auth-api-1a4")?.provider;
+  if (!provider) throw new Error("no provider");
+  const goTo = async () => {
+    const pending = provider.items("auth-api-1a4", NOWHERE);
+    await settle();
+    const [first] = await pending;
+    if (!first) throw new Error("no pods");
+    await act(() => provider.accept(first, "auth-api-1a4", NOWHERE));
+    await settle();
+    return first.label;
+  };
+  const name = await goTo();
+  expect(details()?.textContent).toContain(name);
+  fireEvent.click(screen.getByRole("button", { name: "Close details" }));
+  expect(details()).toBeNull();
+  await goTo();
+  expect(details()?.textContent).toContain(name);
+
+  fireEvent.change(screen.getByRole("textbox", { name: "Filter rows" }), {
+    target: { value: "" },
+  });
+  await settle();
+  const other = rows().find((row) => nameOf(row) !== name);
+  fireEvent.click(other ?? document.body);
+  expect(details()?.textContent).toContain(nameOf(other));
+  await goTo();
+  expect(details()?.textContent).toContain(name);
+  const selected = rows().filter(
+    (row) => row.getAttribute("aria-selected") === "true",
+  );
+  expect(selected.map(nameOf)).toEqual([name]);
 });

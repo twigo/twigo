@@ -5,7 +5,7 @@ import { useChanges, useWorkbench } from "@twigo/workbench";
 import type { Discovery } from "./discovery";
 import { SHOWS_ROWS, stateLabel, type ListStatuses } from "./listStatus";
 import type { ListFilters } from "./filters";
-import { byHealth, HEALTH } from "./health";
+import { byHealth, HEALTH, healthValues } from "./health";
 import { statusColumn } from "./tones";
 import { parseListUri } from "./uri";
 
@@ -147,7 +147,10 @@ export function ListSummaryItem({
                 .map((group) => group.value)
                 .join(", ")}`}
               onClick={() => {
-                filters.setHealth(active, health);
+                filters.setHealth(active, {
+                  health,
+                  values: healthValues(counts[health]),
+                });
               }}
             >
               <span

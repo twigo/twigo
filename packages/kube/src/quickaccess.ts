@@ -1,4 +1,10 @@
-import { ListView, type ListSnapshot, type Resource } from "@twigo/protocol";
+import {
+  ListView,
+  type Column,
+  type ListSnapshot,
+  type Resource,
+  type Row,
+} from "@twigo/protocol";
 import { commandScore } from "@twigo/ui";
 import type {
   QuickAccessProvider,
@@ -214,7 +220,10 @@ export function resourceProvider(
   selection: Selection,
 ): QuickAccessProvider {
   const { spaces, backend, editors } = workbench;
-  let shown: { space: string; snapshot: ListSnapshot } | undefined;
+  const picks = new WeakMap<
+    QuickPickItem,
+    { space: string; columns: readonly Column[]; row: Row }
+  >();
   return {
     prefix: "",
     placeholder: "Go to a pod by name",
@@ -229,12 +238,12 @@ export function resourceProvider(
           namespaces: [...spaces.state(space.id).namespaces],
           labelSelector: null,
           text: filter.trim() === "" ? null : filter.trim(),
+          columns: null,
           sort: null,
           groupBy: null,
           values: null,
         }),
       );
-      shown = { space: space.id, snapshot };
       const name = snapshot.columns.findIndex(
         (column) => column.name === "Name",
       );
@@ -244,34 +253,29 @@ export function resourceProvider(
       return snapshot.ids.flatMap((id) => {
         const row = snapshot.rows.get(id);
         if (!row) return [];
-        return [
-          {
-            id,
-            label: String(row.cells[name] ?? id),
-            ...(namespace >= 0 && {
-              description: String(row.cells[namespace] ?? ""),
-            }),
-          },
-        ];
+        const item: QuickPickItem = {
+          id,
+          label: String(row.cells[name] ?? id),
+          ...(namespace >= 0 && {
+            description: String(row.cells[namespace] ?? ""),
+          }),
+        };
+        picks.set(item, { space: space.id, columns: snapshot.columns, row });
+        return [item];
       });
     },
     accept(item) {
-      const row = shown?.snapshot.rows.get(item.id);
-      if (!shown || !row) return;
-      selection.set({
-        space: shown.space,
+      const pick = picks.get(item);
+      if (!pick) return;
+      const uri = listUri({ space: pick.space, gvr: PODS, text: item.label });
+      selection.set(uri, {
         gvr: PODS,
         kind: "Pod",
-        columns: shown.snapshot.columns,
-        row,
+        columns: pick.columns,
+        row: pick.row,
         reveal: true,
       });
-      editors.open(
-        listUri({ space: shown.space, gvr: PODS, text: item.label }),
-        {
-          preview: true,
-        },
-      );
+      editors.open(uri, { preview: true });
     },
   };
 }

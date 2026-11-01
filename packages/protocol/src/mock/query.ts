@@ -38,22 +38,21 @@ export function checkQuery(query: ListQuery, columns: readonly Column[]): void {
       "the mock backend does not filter by label",
     );
   }
-  if (
-    query.sort &&
-    !columns.some((column) => column.name === query.sort?.column)
-  ) {
-    throw new IpcError("invalidInput", `no column ${query.sort.column}`);
-  }
-  if (
-    query.values &&
-    !columns.some((column) => column.name === query.values?.column)
-  ) {
-    throw new IpcError("invalidInput", `no column ${query.values.column}`);
+  const named = [
+    ...(query.sort ? [query.sort.column] : []),
+    ...(query.groupBy === null ? [] : [query.groupBy]),
+    ...(query.values ? [query.values.column] : []),
+  ];
+  const unknown = named.find(
+    (name) => !columns.some((column) => column.name === name),
+  );
+  if (unknown !== undefined) {
+    throw new IpcError("invalidInput", `no column ${unknown}`);
   }
 }
 
 /**
- * Filters on the shown columns and sorts, as Rust's query view does
+ * Filters on the query's columns and sorts, as Rust's query view does
  * (ARCHITECTURE 3.4). `counted` are the matches before `values`, which the
  * grouped counts come from.
  */
@@ -65,9 +64,9 @@ export function runQuery(
   const withContext = columns[0]?.name === "Context";
   const withNamespace = columns.some((column) => column.name === "Namespace");
   const cells = (pod: Pod) => podCells(pod, withContext, withNamespace);
-  const shown = columns.flatMap((column, i) =>
-    column.priority === 0 ? [i] : [],
-  );
+  const matched = (column: Column) =>
+    query.columns ? query.columns.includes(column.name) : column.priority === 0;
+  const shown = columns.flatMap((column, i) => (matched(column) ? [i] : []));
   const namespaces = new Set(query.namespaces);
   const text = query.text?.trim().toLowerCase() ?? "";
   const negate = text.startsWith("!");

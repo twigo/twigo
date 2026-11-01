@@ -4,10 +4,10 @@ import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { Details } from "./Details";
 import type { ColumnPresets } from "./columnPresets";
 import type { ListFilters } from "./filters";
-import { byHealth } from "./health";
+import { byHealth, healthValues } from "./health";
 import { sameGvr, useResources, type Discovery } from "./discovery";
 import { pluralTitle } from "./kinds";
-import type { ListStatuses } from "./listStatus";
+import { SHOWS_ROWS, type ListStatuses } from "./listStatus";
 import type { Lists } from "./lists";
 import {
   ResourceTable,
@@ -66,10 +66,13 @@ export function ListEditor({
     if (title) editors.setTitle(uri, title);
   }, [editors, uri, title]);
 
-  const remembered = input && selection.get(input.space);
-  const mine =
-    remembered && sameGvr(remembered.gvr, input.gvr) ? remembered : undefined;
+  const mine = selection.get(uri);
   const [open, setOpen] = useState(mine?.reveal === true);
+  const [revealed, setRevealed] = useState(mine);
+  if (mine !== revealed) {
+    setRevealed(mine);
+    if (mine?.reveal) setOpen(true);
+  }
   const table = useRef<ListController>(undefined);
   const [wrapper, setWrapper] = useState<HTMLDivElement | null>(null);
 
@@ -120,22 +123,30 @@ export function ListEditor({
   const onSelect = useCallback(
     (row: Row, columns: readonly Column[]) => {
       if (!input) return;
-      selection.set({
-        space: input.space,
+      selection.set(uri, {
         gvr: input.gvr,
         kind: resource?.kind ?? input.gvr.resource,
         columns,
         row,
       });
     },
-    [input, resource, selection],
+    [input, resource, selection, uri],
   );
 
+  const column = input && statusColumn(input.gvr);
   const onStatus = useCallback(
     (total: number, status: ViewState, groups: readonly GroupCount[]) => {
       statuses.set(uri, { title: title ?? uri, total, status, groups });
+      const picked = filters.health(uri);
+      if (input && column && picked && SHOWS_ROWS.has(status.state)) {
+        const counts = byHealth(input.gvr, column, groups);
+        filters.setHealth(uri, {
+          health: picked.health,
+          values: healthValues(counts[picked.health]),
+        });
+      }
     },
-    [statuses, uri, title],
+    [statuses, filters, input, column, uri, title],
   );
 
   if (!input) return null;
@@ -162,17 +173,9 @@ export function ListEditor({
       }),
     )
     .filter((group) => group.length > 0);
-  const column = statusColumn(input.gvr);
   const health = filters.health(uri);
   const values =
-    column && health
-      ? {
-          column,
-          values: byHealth(input.gvr, column, statuses.get(uri)?.groups ?? [])[
-            health
-          ].values.map((group) => group.value),
-        }
-      : undefined;
+    column && health ? { column, values: [...health.values] } : undefined;
   return (
     <div ref={setWrapper} className="relative h-full overflow-hidden">
       <ResourceTable
@@ -189,7 +192,11 @@ export function ListEditor({
         }}
         rowActions={rowActions}
         labelSelector={input.labels}
-        initialSelected={mine?.row.id}
+        onClearFilters={() => {
+          filters.setText(uri, "");
+          filters.setHealth(uri, undefined);
+        }}
+        selectedId={mine?.row.id}
         onSelect={onSelect}
         onActivate={() => {
           setOpen(true);

@@ -139,3 +139,23 @@ test("no prefix finds pods by name and opens the pick's list with its details", 
     { preview: true },
   );
 });
+
+test("no prefix opens the pick of an earlier query that resolved first", async () => {
+  const { workbench } = await kube();
+  const open = vi
+    .spyOn(workbench.editors, "open")
+    .mockImplementation(() => undefined);
+  const provider = workbench.quickAccess.resolve("auth")?.provider;
+  if (!provider) throw new Error("no provider");
+  const [auth] = await Promise.all([
+    provider.items("auth-api-1a4", NOWHERE),
+    provider.items("ledger", NOWHERE),
+  ]);
+  const [first] = auth;
+  if (!first) throw new Error("no auth pods");
+  await act(() => provider.accept(first, "auth-api-1a4", NOWHERE));
+  expect(open).toHaveBeenCalledWith(
+    `k8s-list://prod-eu/v1/pods?q=${first.label}`,
+    { preview: true },
+  );
+});
