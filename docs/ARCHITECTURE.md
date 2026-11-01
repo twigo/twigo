@@ -318,8 +318,8 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   - The HTTP/2 connection sends keep-alive pings, while idle too, since one dead connection now stalls every watch of the cluster.
     A failed ping closes it.
     Both take client-go's timings: keepalive after 30 s, and a ping once the connection has read nothing for 30 s, answered within 15 s.
-  - A request the server never processed is retried once, whatever its method (RFC 9113, 8.7): a stream above the last one a graceful GOAWAY names, or one refused with `REFUSED_STREAM`.
-    A GOAWAY with an error code also ends streams the server may have processed, so those fail.
+  - A request the server never processed is retried once, whatever its method (RFC 9113, 8.7): a stream above the last one a GOAWAY names, whatever its code, or one refused with `REFUSED_STREAM`.
+    The streams below that id run on, and fail if the connection closes under them.
   - An idle timer expects an event or a bookmark every couple of minutes.
     When it fires, a probe request goes over the shared connection first.
     If the probe answers, only that upstream re-watches.
@@ -327,13 +327,16 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   - On wake from sleep, every connection is retired and every upstream re-watches.
     `twigo-netmon` hears of it from IOKit's system power notifications on macOS, as Chromium's and Firefox's power monitors do, and from logind's `PrepareForSleep(false)` on Linux.
   - On a network change, a connection is retired only when its route moved: the kernel would now send to its server, or its proxy, from another address, or not at all.
-    `twigo-netmon` hears of a change from SystemConfiguration's dynamic store on macOS and from rtnetlink's address and route groups on Linux, and passes a burst on once it has been quiet for a second.
+    `twigo-netmon` hears of a change from SystemConfiguration's dynamic store on macOS, which tells the addresses of services and interfaces, and from rtnetlink's address and route groups on Linux, where an overflow of its buffer counts as a change, and passes a burst on once it has been quiet for a second.
+    On macOS a change of routes alone, without an address, goes unseen.
     Chromium closes every HTTP/2 session on any address change, which Docker's interfaces set off on Linux; here containers, kind's bridge and VPNs for other networks leave connections alone, while a Wi-Fi switch or a VPN in front of the cluster retires them.
     A move to another network that keeps the address goes unseen until a ping fails, 45 s at most.
   - Retiring poisons the connection: the pool keeps a dead connection that still looks open, and every actor's client holds a clone of that pool, so rebuilding one client would not reach the others.
     The streams on it run until their upstreams re-watch.
-  - While a client has no usable connection, its requests go one at a time until one is up: a cold client opens one TCP and TLS connection per concurrent first request and keeps only the first that negotiates `h2` ([HTTP/2 spike](spikes/http2.md)).
-    A connection stops being usable once it is retired or closed, or once the server says it is going away.
+  - While a client has no usable connection, one request dials and the others wait until it is connected or has failed: a cold client opens one TCP and TLS connection per concurrent first request and keeps only the first that negotiates `h2` ([HTTP/2 spike](spikes/http2.md)).
+    After a failure the others go together, so none waits out another's timeout.
+    A connection stops being usable once it is retired or closed, once a request learns that the server is going away, or once hyper-util dials past it, as a GOAWAY that came between requests makes it do.
+    The requests such a GOAWAY hands back unsent, hyper-util sends again itself, dialling a connection for each, which no layer above it sees.
   - Views show `stale` while this happens.
 - **Initial list.**
   - Streaming lists (`sendInitialEvents=true`) on 1.34 and later.

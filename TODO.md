@@ -9,3 +9,4 @@ Findings that belong to no step yet.
   - An http API server goes through an HTTP proxy's CONNECT tunnel, where Go sends the proxy the request in absolute form.
   - No test reaches a cluster through an https proxy, whose certificate would have to be in the OS trust store.
 - `twigo-netmon` on macOS is tested only for registering its listeners: no test provokes a wake or a network change there, while on Linux a private bus and a dummy link do.
+- After a GOAWAY that came between requests, hyper-util 0.1.21 sends the requests it hands back unsent again by itself, dialling a connection for each, below the gate of `crates/twigo-kube/src/client/connections.rs`; its public API tells such a retry from a failed request in no way (`retry_canceled_requests`).
