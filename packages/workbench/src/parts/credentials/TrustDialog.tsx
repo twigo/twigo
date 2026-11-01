@@ -58,7 +58,7 @@ export function TrustDialog() {
           <Button
             size="sm"
             onClick={() => {
-              void credentials.trust();
+              void credentials.trust(auth.plugin.digest);
             }}
           >
             Trust and connect

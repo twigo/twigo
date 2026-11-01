@@ -90,11 +90,13 @@ export function SignInBody({
         </p>
       )}
 
-      {output !== "" && <Output text={output} open={failed} />}
+      {output !== "" && (
+        <Output key={status.state} text={output} open={failed} />
+      )}
 
       <div className="mt-3 flex items-center justify-between gap-2">
         <span className="tabular-nums text-muted-foreground">
-          {!failed && <Elapsed since={credentials.since} />}
+          {status.state === "running" && <Elapsed since={status.since} />}
         </span>
         <div className="flex gap-2">
           {failed ? (
@@ -135,7 +137,7 @@ export function SignInBody({
 }
 
 function Link({ url }: { url: string }) {
-  const { openUrl } = useWorkbench();
+  const workbench = useWorkbench();
   return (
     <div className="flex items-center gap-1">
       <a
@@ -143,7 +145,7 @@ function Link({ url }: { url: string }) {
         className="min-w-0 truncate font-mono text-[11px] text-brand underline-offset-2 hover:underline"
         onClick={(event) => {
           event.preventDefault();
-          openUrl(url);
+          workbench.openUrl(url);
         }}
       >
         {url}
@@ -198,18 +200,20 @@ function Output({ text, open }: { text: string; open: boolean }) {
   );
 }
 
-function Elapsed({ since }: { since: number | undefined }) {
-  const [now, setNow] = useState(since);
+function Elapsed({ since }: { since: string }) {
+  const started = Date.parse(since);
+  const [now, setNow] = useState(started);
   useEffect(() => {
-    const timer = setInterval(() => {
+    const tick = () => {
       setNow(Date.now());
-    }, 1000);
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
     return () => {
       clearInterval(timer);
     };
   }, []);
-  if (since === undefined || now === undefined) return null;
-  const seconds = Math.max(0, Math.floor((now - since) / 1000));
+  const seconds = Math.max(0, Math.floor((now - started) / 1000));
   return (
     <>
       {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}

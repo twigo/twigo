@@ -25,8 +25,8 @@ export class Credentials {
   #prompted: string | undefined;
   #trustOpen = false;
   #panelOpen = false;
-  /** When the run under way started, for its elapsed time. */
-  #since: number | undefined;
+  /** The person closed the panel of this run, so it opens again only for the next. */
+  #dismissed = false;
   #arming: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
@@ -60,10 +60,6 @@ export class Credentials {
     return this.#panelOpen;
   }
 
-  get since(): number | undefined {
-    return this.#since;
-  }
-
   setTrustOpen(open: boolean): void {
     this.#trustOpen = open;
     this.changes.emit();
@@ -71,6 +67,7 @@ export class Credentials {
 
   setPanelOpen(open: boolean): void {
     this.#panelOpen = open;
+    this.#dismissed = !open;
     this.changes.emit();
   }
 
@@ -88,35 +85,87 @@ export class Credentials {
 
   /**
    * Trusts the plugins of `digests` and closes the review; a plugin left
-   * out asks when its space opens next.
+   * out asks when its space opens next. The active space's plugin, if
+   * trusted, signs in at once, as "Trust and connect" does.
    */
   async answerReview(digests: readonly string[]): Promise<void> {
+    const context = this.#context;
+    const active =
+      this.#auth.state === "untrusted" ? this.#auth.plugin.digest : undefined;
     this.#review = [];
-    this.#prompted = this.#context;
+    this.#prompted = context;
     this.changes.emit();
-    await this.backend.invoke("exec_trust", [...digests]);
+    try {
+      await this.backend.invoke("exec_trust", [...digests]);
+      if (context !== undefined && active && digests.includes(active)) {
+        await this.#signIn(context);
+      }
+    } catch (error) {
+      this.onError(error);
+    }
   }
 
-  async trust(): Promise<void> {
-    if (this.#auth.state !== "untrusted") return;
-    const { digest } = this.#auth.plugin;
+  /**
+   * Trusts the plugin of `digest`, the one the prompt showed, and signs in
+   * with it; nothing happens if the kubeconfig changed it since.
+   */
+  async trust(digest: string): Promise<void> {
+    const context = this.#context;
+    const auth = this.#auth;
+    if (
+      context === undefined ||
+      auth.state !== "untrusted" ||
+      auth.plugin.digest !== digest
+    ) {
+      return;
+    }
     this.#trustOpen = false;
     this.changes.emit();
-    await this.backend.invoke("exec_trust", [digest]);
-    await this.signIn();
+    try {
+      await this.backend.invoke("exec_trust", [digest]);
+      await this.#signIn(context);
+    } catch (error) {
+      this.onError(error);
+    }
   }
 
   async signIn(): Promise<void> {
     const context = this.#context;
     if (context === undefined) return;
-    this.#panelOpen = true;
-    this.changes.emit();
-    await this.backend.invoke("context_sign_in", context);
+    try {
+      await this.#signIn(context);
+    } catch (error) {
+      this.onError(error);
+    }
   }
 
   async cancel(): Promise<void> {
-    if (this.#context === undefined) return;
-    await this.backend.invoke("context_sign_in_cancel", this.#context);
+    const context = this.#context;
+    if (context === undefined) return;
+    try {
+      await this.backend.invoke("context_sign_in_cancel", context);
+    } catch (error) {
+      this.onError(error);
+    }
+  }
+
+  /** Runs `context`'s plugin, its panel open while `context` is active. */
+  async #signIn(context: string): Promise<void> {
+    if (context === this.#context) {
+      this.#panelOpen = true;
+      this.#dismissed = false;
+      this.changes.emit();
+    }
+    try {
+      await this.backend.invoke("context_sign_in", context);
+    } catch (error) {
+      if (context === this.#context) this.setPanelOpen(false);
+      throw error;
+    }
+  }
+
+  #show(): void {
+    if (!this.#dismissed) this.#panelOpen = true;
   }
 
   #arm(context: string): void {
@@ -128,7 +177,8 @@ export class Credentials {
         auth.state === "plugin" &&
         auth.status.state === "running"
       ) {
-        this.setPanelOpen(true);
+        this.#show();
+        this.changes.emit();
       }
     }, SHOW_AFTER_MS);
   }
@@ -140,6 +190,8 @@ export class Credentials {
     this.#context = context;
     this.#auth = { state: "none" };
     this.#panelOpen = false;
+    this.#dismissed = false;
+    clearTimeout(this.#arming);
     this.#prompted = undefined;
     this.changes.emit();
     if (context === undefined) return;
@@ -165,24 +217,27 @@ export class Credentials {
     const was = this.#auth;
     this.#auth = next;
     const status = next.state === "plugin" ? next.status : undefined;
-    const wasRunning = was.state === "plugin" && was.status.state === "running";
+    const signsIn = next.state === "plugin" && next.plugin.signsIn;
+    const previous = was.state === "plugin" ? was.status.state : undefined;
     if (status?.state === "running") {
-      if (!wasRunning) this.#since = Date.now();
+      if (previous !== "running") this.#dismissed = false;
       // A plugin that may ask shows the panel once it prints, or after a
       // moment without a credential: a browser flow often prints nothing.
-      if (next.state === "plugin" && next.plugin.signsIn) {
-        if (status.output.trim() !== "") this.#panelOpen = true;
-        else if (!wasRunning) this.#arm(context);
+      if (signsIn) {
+        if (status.output.trim() !== "") this.#show();
+        else if (previous !== "running") this.#arm(context);
       }
     } else {
-      this.#since = undefined;
       clearTimeout(this.#arming);
+    }
+    // A sign-in that failed shows why, however fast it failed.
+    if (status?.state === "failed" && signsIn && previous !== "failed") {
+      this.#show();
     }
     if (status?.state === "ready") {
       this.#panelOpen = false;
-      if (!(was.state === "plugin" && was.status.state === "ready")) {
-        this.#ready++;
-      }
+      this.#dismissed = false;
+      if (previous !== "ready") this.#ready++;
     }
     if (next.state === "untrusted" && this.#prompted !== context) {
       this.#prompted = context;
