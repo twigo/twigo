@@ -41,9 +41,7 @@ const OWN: Readonly<Record<string, readonly PredefinedMenuItemOptions[]>> = {
  * 5.1) and sets it again whenever a command, menu or keybinding changes.
  */
 export function installNativeMenu(workbench: Workbench): void {
-  let queued = false;
   const build = async () => {
-    queued = false;
     const submenus = await Promise.all([
       Submenu.new({ text: "Twigo", items: [...APP] }),
       ...nativeMenus(workbench).map(({ title, groups }) => {
@@ -76,13 +74,26 @@ export function installNativeMenu(workbench: Workbench): void {
     const previous = await menu.setAsAppMenu();
     await Promise.all([menu.close(), previous?.close()]);
   };
-  const rebuild = () => {
-    if (queued) return;
-    queued = true;
-    queueMicrotask(() => {
-      build().catch((error: unknown) => {
+  // One build at a time: setAsAppMenu is an async command, so two builds in
+  // flight could land in either order and leave the older menu up. A change
+  // during a build asks for one more build after it.
+  let building = false;
+  let again = false;
+  const drain = async () => {
+    while (again) {
+      again = false;
+      await build().catch((error: unknown) => {
         workbench.report(error);
       });
+    }
+    building = false;
+  };
+  const rebuild = () => {
+    again = true;
+    if (building) return;
+    building = true;
+    queueMicrotask(() => {
+      void drain();
     });
   };
   workbench.commands.changes.subscribe(rebuild);
