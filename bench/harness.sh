@@ -34,7 +34,10 @@ created=
 app=
 churn=
 cleanup() {
-  if [ -n "$churn" ]; then kill -INT "$churn" 2>/dev/null || true; fi
+  if [ -n "$churn" ]; then
+    kill -INT "$churn" 2>/dev/null || true
+    wait "$churn" 2>/dev/null || true
+  fi
   if [ -n "$app" ]; then kill "$app" 2>/dev/null || true; fi
   if [ -n "$created" ]; then "$root/bench/cluster.sh" down bench >&2 || true; fi
 }
@@ -68,8 +71,35 @@ jq -n --arg date "$date" --arg machine "$cpu, $memory GB" --arg os "macOS $os_ve
   '{date: $date, machine: $machine, os: $os, commit: $commit, build: $build}' >"$out/run.json"
 
 "$tool" churn --kubeconfig "$kubeconfig" --rate "$RATE" --log "$out/churn.jsonl" \
-  >"$out/churn.json" &
+  >"$out/churn.json" 2>"$out/churn.log" &
 churn=$!
+
+churn_alive() {
+  if ! kill -0 "$churn" 2>/dev/null; then
+    echo "the churn generator exited" >&2
+    tail -20 "$out/churn.log" >&2
+    exit 1
+  fi
+}
+
+no_failure() {
+  if [ -e "$out/failure.json" ]; then
+    cat "$out/failure.json" >&2
+    echo >&2
+    exit 1
+  fi
+}
+
+left=30
+until [ -s "$out/churn.jsonl" ]; do
+  churn_alive
+  left=$((left - 1))
+  if [ "$left" -le 0 ]; then
+    echo "the churn generator logged no change within 30 s" >&2
+    exit 1
+  fi
+  sleep 1
+done
 
 # The bench build has an identifier of its own, so its window state starts fresh here and the
 # user's Twigo keeps its own and its single-instance lock.
@@ -77,14 +107,16 @@ rm -f "$HOME/Library/Application Support/io.twigo.ide.bench/.window-state.json"
 TWIGO_BENCH=$out "$tool" launch "$target/release/twigo" >"$out/app.log" 2>&1 &
 app=$!
 
+# The webview writes failure.json and then idle.json, so a failure is checked after the file.
 wait_for() {
   local file=$1 left=$2
-  while [ ! -e "$out/$file" ]; do
-    if [ -e "$out/failure.json" ]; then
-      cat "$out/failure.json" >&2
-      echo >&2
-      exit 1
+  while :; do
+    if [ -e "$out/$file" ]; then
+      no_failure
+      return
     fi
+    no_failure
+    churn_alive
     if ! kill -0 "$app" 2>/dev/null; then
       echo "the app quit before writing $file" >&2
       tail -20 "$out/app.log" >&2
@@ -110,8 +142,14 @@ sleep "$IDLE_SAMPLE"
 "$tool" sample "$app" >"$out/idle-end.json"
 wait "$app"
 app=
+no_failure
+churn_alive
 kill -INT "$churn"
-wait "$churn"
+if ! wait "$churn"; then
+  echo "the churn generator failed" >&2
+  tail -20 "$out/churn.log" >&2
+  exit 1
+fi
 churn=
 
 "$tool" report "$out"

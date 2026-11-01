@@ -13,12 +13,15 @@ Before M1 there is no Rust list path, so it reports what M0 can measure and says
 
 1. `cargo build --release -p twigo-bench`, then `pnpm tauri build --no-bundle --features bench --config src-tauri/tauri.bench.conf.json`: a release build, since a debug core's CPU and memory say nothing about the budgets.
 2. `twigo-bench churn` starts against the cluster at 100 changes/s and runs until the app is done.
+   The harness waits for its first logged change, and stops with the churn's error whenever it exits early.
 3. `twigo-bench launch target/release/twigo` starts the app with `TWIGO_BENCH=$TWIGO_BENCH_DIR/harness`.
 4. The webview's driver opens `k8s-list://prod-eu/v1/pods`, waits for the first rows, scrolls for 5 s, sorts ten times and then watches changed cells for 60 s.
    When it starts watching it writes `steady.json`; 10 s later the harness samples memory.
 5. The driver writes `webview.json` and calls `idle`: the app hides its window, writes `idle.json` and quits 45 s later.
    The harness waits 5 s, then samples CPU time at the start and the end of 30 s.
 6. The harness stops the churn and runs `twigo-bench report`.
+
+When the driver fails, the webview writes `failure.json` and then calls `idle` all the same, so the harness checks for `failure.json` after every wait and before the report, prints it and stops.
 
 ## The bench mode
 
