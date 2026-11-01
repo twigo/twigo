@@ -508,15 +508,15 @@ The bench also replays the cases that broke other clients, and one that loopback
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-| Part               | Holds                                                                                                                                                                        |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Title bar          | Breadcrumb of the space and its namespace scope, search that opens quick access, part toggles; drag region; native traffic lights on macOS                                   |
-| Space rail         | Tiles of the open spaces (D6, Lens's hotbar), ⌘1..9 by position, a button that opens any context                                                                             |
-| Primary side bar   | View containers as tabs in its header (Explorer, Port forwards, Helm, Extensions and contributed ones); the active one's views: resource tree, saved filters                 |
-| Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups                                                                                              |
-| Panel              | Terminal (pty), cluster Events stream, Output (Twigo logs per channel), Agent activity (audit, 6.6)                                                                          |
-| Secondary side bar | The ACP agent panel later; hidden while nothing lives there, as is the panel                                                                                                 |
-| Status bar         | The active editor's facts (a list's count and view state), policy mode, port-forward items, sync state, extension items; the breadcrumb, not the status bar, names the space |
+| Part               | Holds                                                                                                                                                                                                                                                                  |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Title bar          | Breadcrumb of the space and its namespace scope, search that opens quick access, part toggles; drag region; native traffic lights on macOS                                                                                                                             |
+| Space rail         | Tiles of the open spaces (D6, Lens's hotbar), ⌘1..9 by position, a button that opens any context                                                                                                                                                                       |
+| Primary side bar   | View containers as tabs in its header (Explorer, Port forwards, Helm, Extensions and contributed ones); the active one's views: resource tree, saved filters                                                                                                           |
+| Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups                                                                                                                                                                                        |
+| Panel              | Terminal (pty), cluster Events stream, Output (Twigo logs per channel), Agent activity (audit, 6.6)                                                                                                                                                                    |
+| Secondary side bar | The ACP agent panel later; hidden while nothing lives there, as is the panel                                                                                                                                                                                           |
+| Status bar         | The cluster's health: on the left its connection and Kubernetes version (later policy mode, port-forwards, sync); on the right the active list's rows and how many are healthy, pending or failing, each a filter; the breadcrumb, not the status bar, names the space |
 
 The parts sit flush, split by hairlines, with no cards or gaps: the owner tried islands, as JetBrains Islands and VS Code's 2026 layout ([research](research/workbench-chrome.md)), and preferred flat parts.
 Views are descriptors (ID, title, container, `when`, provider), so the user can move a view to another container, VS Code style.
@@ -689,7 +689,7 @@ It moves into `packages/ui` unchanged and gets extended for the new views.
   - Hover and selection are alpha overlays, so they work on any surface.
   - A two-layer focus ring.
   - Hairline borders in alpha tiers.
-  - The status bar is shell with quiet text; colour is left for the cluster.
+  - The status bar is a matte, muted blue, low in chroma so it reads as ink, never a glossy accent.
 - **Type.**
   - The platform's UI font, SF on macOS, as VS Code; tabular numbers for every metric column.
   - Two weights, 400 and 600, as VS Code and JetBrains; 13 px base, 12 px secondary, 11 px labels; sentence case, no capitals.
