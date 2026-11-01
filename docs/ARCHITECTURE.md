@@ -1029,6 +1029,7 @@ That is why `aws`, `gke-gcloud-auth-plugin` and `kubelogin` "are not found" in L
   - `-i` is required, because gcloud's `path.zsh.inc` lives in `.zshrc`.
   - The binary prints its environment between two copies of the joined marker, entries ending in NUL as `env -0` prints them, so multi-line values survive and whatever rc files print around it is dropped.
     The marker reaches the shell only in halves, so a shell that traces its commands (`set -x`) never prints it whole.
+    A background job an rc file leaves running shares the pipe, so a line it prints at the wrong moment can still land inside the frame and corrupt one entry: the binary passes the whole frame to one `write_all`, which splits only when the pipe is full, while the fallback's frame comes from three processes.
   - fish, nushell, xonsh and pwsh need their own invocation forms: fish and xonsh escape `\` and `'` in single quotes, nushell runs a raw string with `^`, xonsh wraps the call in `![…]`, and pwsh takes `-Login -Command "& '…'"`, doubling every quote PowerShell reads as a single quote, `‘’‚‛` included.
     Each form was run on fish 4.9.3, nushell 0.116.1, xonsh 0.25.0 and pwsh 7.6.9 (Docker, 2026-11-01), with tracing on where the shell has it.
   - If the shell runs but the binary prints nothing, the shell runs `/bin/sh -c 'set +x; printf %s%s "$1" "$2"; /usr/bin/env -0; printf %s%s "$1" "$2"' sh <head> <tail>` instead, `set +x` because bash as `/bin/sh` traces when an exported `SHELLOPTS` holds `xtrace`.
