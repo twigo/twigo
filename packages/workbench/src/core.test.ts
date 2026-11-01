@@ -9,8 +9,8 @@ const enabled = (workbench: Workbench, command: string) =>
 
 test("selectSpaceN selects the Nth space and is enabled while there is one", async () => {
   const workbench = await testWorkbench();
-  expect(enabled(workbench, "workbench.action.selectSpace4")).toBe(true);
-  expect(enabled(workbench, "workbench.action.selectSpace5")).toBe(false);
+  expect(enabled(workbench, "workbench.action.selectSpace3")).toBe(true);
+  expect(enabled(workbench, "workbench.action.selectSpace4")).toBe(false);
 
   await act(() =>
     workbench.commands.execute(
@@ -21,8 +21,8 @@ test("selectSpaceN selects the Nth space and is enabled while there is one", asy
   expect(workbench.spaces.active?.id).toBe("staging");
 
   await act(() => workbench.spaces.open("kind-local"));
-  expect(enabled(workbench, "workbench.action.selectSpace5")).toBe(true);
-  expect(enabled(workbench, "workbench.action.selectSpace6")).toBe(false);
+  expect(enabled(workbench, "workbench.action.selectSpace4")).toBe(true);
+  expect(enabled(workbench, "workbench.action.selectSpace5")).toBe(false);
 });
 
 test("moveView moves one view, then another", async () => {

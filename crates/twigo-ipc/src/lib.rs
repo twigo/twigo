@@ -20,5 +20,5 @@ pub use list::{
     SetWindow, Sort, SubscriptionId, ViewState, Window,
 };
 pub use space::{Context, ContextColor, Space};
-pub use state::StateEntry;
+pub use state::{StateEntry, StateSnapshot};
 pub use typescript::typescript;

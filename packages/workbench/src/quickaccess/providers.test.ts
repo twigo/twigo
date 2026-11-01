@@ -58,9 +58,11 @@ test("> puts what ran last first and remembers it in the backend", async () => {
   const found = await provider.items("", NOWHERE);
   expect(found[0]?.id).toBe("workbench.action.togglePanel");
   expect(workbench.spaces.state("prod-eu").parts.panel.visible).toBe(true);
-  expect(
-    await workbench.backend.invoke("state_get", "quickaccess/history"),
-  ).toBe(JSON.stringify(["workbench.action.togglePanel"]));
+  await workbench.state.settled();
+  const stored = await workbench.backend.invoke("state_load", null);
+  expect(stored.app["quickaccess/history"]).toBe(
+    JSON.stringify(["workbench.action.togglePanel"]),
+  );
 });
 
 test("ctx lists the spaces, then the contexts without one", async () => {
@@ -69,7 +71,6 @@ test("ctx lists the spaces, then the contexts without one", async () => {
     ["Spaces", "prod-eu"],
     ["Spaces", "staging"],
     ["Spaces", "dev"],
-    ["Spaces", "dev+qa"],
     ["Contexts", "qa"],
     ["Contexts", "kind-local"],
   ]);

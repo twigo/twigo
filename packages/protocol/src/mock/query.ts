@@ -5,14 +5,11 @@ import { POD_COLUMNS } from "./fixtures";
 
 const collator = new Intl.Collator("en", { numeric: true });
 
-/** The columns of a query: Context in multi-context spaces, Namespace unless one namespace is chosen. */
-export function podColumns(contexts: number, query: ListQuery): Column[] {
+/** The columns of a query: Namespace unless one namespace is chosen. */
+export function podColumns(query: ListQuery): Column[] {
   const [name, ...rest] = POD_COLUMNS;
   if (!name) throw new Error("POD_COLUMNS is empty");
   return [
-    ...(contexts > 1
-      ? [{ name: "Context", kind: "string" as const, priority: 0 }]
-      : []),
     name,
     ...(query.namespaces.length === 1
       ? []
@@ -61,9 +58,8 @@ export function runQuery(
   query: ListQuery,
   columns: readonly Column[],
 ): { rows: Pod[]; counted: Pod[] } {
-  const withContext = columns[0]?.name === "Context";
   const withNamespace = columns.some((column) => column.name === "Namespace");
-  const cells = (pod: Pod) => podCells(pod, withContext, withNamespace);
+  const cells = (pod: Pod) => podCells(pod, withNamespace);
   const matched = (column: Column) =>
     query.columns?.[column.name] ?? column.priority === 0;
   const shown = columns.flatMap((column, i) => (matched(column) ? [i] : []));

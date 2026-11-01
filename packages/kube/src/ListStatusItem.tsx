@@ -64,7 +64,7 @@ export function ClusterStatusItem({
   useChanges(statuses.changes);
   const space = spaces.active;
   const [only, ...more] = space?.contexts ?? [];
-  const context = more.length === 0 ? only?.name : undefined;
+  const context = more.length === 0 ? only : undefined;
   const [version, setVersion] = useState<{ context: string; value: string }>();
   useEffect(() => {
     if (!context) return;

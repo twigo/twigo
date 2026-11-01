@@ -3,6 +3,11 @@ fn main() {
         "keyboard_layout_watch",
         "shell_environment_watch",
         "shell_environment_retry",
+        "contexts_watch",
+        "spaces_list",
+        "space_open",
+        "state_load",
+        "state_set",
     ]);
     let mut attributes = tauri_build::Attributes::new().app_manifest(commands);
     // An inlined plugin keeps its permissions in OUT_DIR, so builds without the feature have no

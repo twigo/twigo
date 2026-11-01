@@ -11,10 +11,11 @@ import { onlyColor } from "./spaceBadge";
  * left end, as JetBrains tints it with a project's colour.
  */
 export function TitleBar() {
-  const { spaces } = useWorkbench();
+  const { spaces, catalog } = useWorkbench();
   useChanges(spaces.changes);
+  useChanges(catalog.changes);
   const space = spaces.active;
-  const color = space && onlyColor(space);
+  const color = space && onlyColor(space, catalog);
   return (
     // 36 px pairs with trafficLightPosition in tauri.conf.json: change both or neither.
     <header
@@ -41,7 +42,7 @@ function Breadcrumb({ space }: { space: Space }) {
     <>
       <Crumb label="Switch space" onClick={() => quickAccess.show("ctx ")}>
         <span className="truncate font-medium">
-          {space.contexts.map((context) => context.name).join(" + ")}
+          {space.contexts.join(" + ")}
         </span>
       </Crumb>
       <ChevronRight

@@ -54,15 +54,18 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-test("lists the spaces with their context colours", async () => {
+test("lists the spaces, and the catalog colours their contexts", async () => {
   const backend = createMockBackend();
   const spaces = backend.invoke("spaces_list", null);
+  const contexts = backend.subscribe("contexts_watch", null, () => undefined);
   await vi.advanceTimersByTimeAsync(0);
-  expect((await spaces).map((s) => [s.id, s.contexts[0]?.color])).toEqual([
+  const colors = new Map((await contexts).map((c) => [c.name, c.color]));
+  expect(
+    (await spaces).map((s) => [s.id, colors.get(s.contexts[0] ?? "")]),
+  ).toEqual([
     ["prod-eu", "red"],
     ["staging", "orange"],
     ["dev", "green"],
-    ["dev+qa", "green"],
   ]);
 });
 
@@ -192,13 +195,11 @@ test("rows come sorted by the query's column, and the first batch carries the co
   ]);
 });
 
-test("one namespace drops the Namespace column, and a multi-context space adds Context", async () => {
+test("one namespace drops the Namespace column", async () => {
   const one = await open("ready", query({ namespaces: ["payments"] }));
   expect(one.batches[0]?.columns?.some((c) => c.name === "Namespace")).toBe(
     false,
   );
-  const merged = await open("ready", query({ space: "dev+qa" }));
-  expect(merged.batches[0]?.columns?.[0]?.name).toBe("Context");
 });
 
 test("text filters match and negate", async () => {
@@ -298,7 +299,7 @@ test("opening a context without a space creates its space once", async () => {
   expect(space).toEqual({
     id: "kind-local",
     name: "kind-local",
-    contexts: [{ name: "kind-local", color: null }],
+    contexts: ["kind-local"],
   });
   const again = await call(backend.invoke("space_open", "kind-local"));
   expect(again).toBe(space);
@@ -321,13 +322,30 @@ test("opening an unknown context fails with notFound", async () => {
   expect(await failed).toMatchObject({ kind: "notFound" });
 });
 
-test("state reads back what was stored, and null before", async () => {
+test("state loads what was stored, all of a set or none", async () => {
   const backend = createMockBackend();
-  expect(await call(backend.invoke("state_get", "space/prod-eu"))).toBeNull();
+  expect(await call(backend.invoke("state_load", null))).toEqual({
+    app: {},
+    spaces: {},
+  });
   await call(
-    backend.invoke("state_set", { key: "space/prod-eu", value: "{}" }),
+    backend.invoke("state_set", [
+      { space: null, key: "history", value: "[]" },
+      { space: "prod-eu", key: "namespaces", value: '["default"]' },
+    ]),
   );
-  expect(await call(backend.invoke("state_get", "space/prod-eu"))).toBe("{}");
+  const failed = backend
+    .invoke("state_set", [
+      { space: null, key: "kept", value: "1" },
+      { space: "nowhere", key: "lost", value: "1" },
+    ])
+    .catch((e: unknown) => e);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(await failed).toMatchObject({ kind: "notFound" });
+  expect(await call(backend.invoke("state_load", null))).toEqual({
+    app: { history: "[]" },
+    spaces: { "prod-eu": { namespaces: '["default"]' } },
+  });
 });
 
 test("grouped counts follow the rows once a live list syncs", async () => {

@@ -1,63 +1,35 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { IpcError } from "@twigo/protocol";
+import { expect, test } from "vitest";
 import { createMockBackend } from "@twigo/protocol/mock";
+import { StateStore } from "@twigo/workbench";
 import { ColumnPresets } from "./columnPresets";
 import { PODS } from "./kinds";
 
 const KEY = "columns//pods";
 
-beforeEach(() => {
-  vi.useFakeTimers();
-});
+async function presets(backend = createMockBackend("ready")) {
+  const state = await StateStore.load(backend, () => undefined);
+  return { presets: new ColumnPresets(state), state };
+}
 
-afterEach(() => {
-  vi.clearAllTimers();
-  vi.useRealTimers();
-});
-
-async function saved(value: string) {
+test("a choice joins the stored ones and comes back in the next window", async () => {
   const backend = createMockBackend("ready");
-  const stored = backend.invoke("state_set", { key: KEY, value });
-  await vi.runAllTimersAsync();
-  await stored;
-  return backend;
-}
+  await backend.invoke("state_set", [
+    { space: null, key: KEY, value: JSON.stringify({ IP: true }) },
+  ]);
+  const first = await presets(backend);
+  expect(first.presets.choices(PODS)).toEqual({ IP: true });
+  first.presets.choose(PODS, "Node", true);
+  expect(first.presets.choices(PODS)).toEqual({ IP: true, Node: true });
 
-async function read(backend: ReturnType<typeof createMockBackend>) {
-  const value = backend.invoke("state_get", KEY);
-  await vi.runAllTimersAsync();
-  return value;
-}
-
-test("a choice made before the saved choices load joins them", async () => {
-  const backend = await saved(JSON.stringify({ IP: true }));
-  const presets = new ColumnPresets(backend, () => undefined);
-  expect(presets.choices(PODS)).toEqual({});
-  presets.choose(PODS, "Node", true);
-  await vi.runAllTimersAsync();
-  expect(presets.choices(PODS)).toEqual({ IP: true, Node: true });
-  expect(JSON.parse((await read(backend)) ?? "")).toEqual({
-    IP: true,
-    Node: true,
-  });
+  await first.state.settled();
+  const next = await presets(backend);
+  expect(next.presets.choices(PODS)).toEqual({ IP: true, Node: true });
 });
 
-test("after a failed read, the next choice reads again before it saves", async () => {
-  const backend = await saved(JSON.stringify({ IP: true }));
-  const onError = vi.fn();
-  vi.spyOn(backend, "invoke").mockRejectedValueOnce(
-    new IpcError("internal", "disk"),
-  );
-  const presets = new ColumnPresets(backend, onError);
-  presets.choices(PODS);
-  await vi.runAllTimersAsync();
-  expect(onError).toHaveBeenCalledTimes(1);
-  expect(presets.choices(PODS)).toEqual({});
-  presets.choose(PODS, "Node", true);
-  await vi.runAllTimersAsync();
-  expect(presets.choices(PODS)).toEqual({ IP: true, Node: true });
-  expect(JSON.parse((await read(backend)) ?? "")).toEqual({
-    IP: true,
-    Node: true,
-  });
+test("stored choices that are not column names and flags read as none", async () => {
+  const backend = createMockBackend("ready");
+  await backend.invoke("state_set", [
+    { space: null, key: KEY, value: JSON.stringify({ IP: "yes" }) },
+  ]);
+  expect((await presets(backend)).presets.choices(PODS)).toEqual({});
 });

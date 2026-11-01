@@ -18,7 +18,8 @@
     "@twigo/ui": "workspace:*",
     "allotment": "^1.20.6",
     "dockview-react": "^8.8.3",
-    "lucide-react": "^1.65.0"
+    "lucide-react": "^1.65.0",
+    "valibot": "^1.5.0"
   },
   "peerDependencies": {
     "react": "^19.3.1"

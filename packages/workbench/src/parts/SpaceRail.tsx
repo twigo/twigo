@@ -19,8 +19,9 @@ const TILE: Readonly<Record<ContextColor, string>> = {
  * cluster, ⌘1..9 by position, and a button that opens any context.
  */
 export function SpaceRail() {
-  const { spaces, keybindings, quickAccess } = useWorkbench();
+  const { spaces, catalog, keybindings, quickAccess } = useWorkbench();
   useChanges(spaces.changes);
+  useChanges(catalog.changes);
   useChanges(keybindings.changes);
   const active = spaces.active?.id;
   return (
@@ -36,6 +37,7 @@ export function SpaceRail() {
           <SpaceTile
             key={space.id}
             space={space}
+            color={onlyColor(space, catalog)}
             selected={space.id === active}
             shortcut={binding && keybindings.label(binding.presses)}
             onSelect={() => {
@@ -65,16 +67,17 @@ export function SpaceRail() {
 
 function SpaceTile({
   space,
+  color,
   selected,
   shortcut,
   onSelect,
 }: {
   space: Space;
+  color: ContextColor | undefined;
   selected: boolean;
   shortcut: string | undefined;
   onSelect: () => void;
 }) {
-  const color = onlyColor(space);
   const tint = color && TILE[color];
   return (
     <Tooltip>
@@ -107,7 +110,7 @@ function SpaceTile({
         </button>
       </TooltipTrigger>
       <TooltipContent side="right" className="flex items-center gap-2">
-        <span>{space.contexts.map((context) => context.name).join(" + ")}</span>
+        <span>{space.contexts.join(" + ")}</span>
         {shortcut && <span className="text-muted-foreground">{shortcut}</span>}
       </TooltipContent>
     </Tooltip>

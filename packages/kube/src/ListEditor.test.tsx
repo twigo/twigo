@@ -17,6 +17,7 @@ import {
 } from "vitest";
 import { createMockBackend } from "@twigo/protocol/mock";
 import {
+  StateStore,
   Workbench,
   WorkbenchView,
   type QuickAccessContext,
@@ -61,12 +62,19 @@ async function settle(steps = 6) {
 }
 
 async function podsList(backend = createMockBackend("ready")) {
-  const workbench = new Workbench(backend, "mac", {
-    id: "us",
-    keys: {},
-  });
+  const state = StateStore.load(backend, () => undefined);
+  await act(() => vi.advanceTimersByTimeAsync(10));
+  const workbench = new Workbench(
+    backend,
+    "mac",
+    { id: "us", keys: {} },
+    await state,
+  );
   registerKube(workbench);
-  const loaded = workbench.spaces.load();
+  const loaded = Promise.all([
+    workbench.catalog.watch(),
+    workbench.spaces.load(),
+  ]);
   await act(() => vi.advanceTimersByTimeAsync(10));
   await loaded;
   render(<WorkbenchView workbench={workbench} />);

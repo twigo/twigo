@@ -3,7 +3,6 @@ import { NAMESPACES, WORKLOADS } from "./fixtures";
 
 export interface Pod {
   id: RowId;
-  context: string;
   namespace: string;
   name: string;
   containers: number;
@@ -120,7 +119,6 @@ export class Cluster {
     this.#serial++;
     return {
       id: `${this.context}/${namespace}/${name}`,
-      context: this.context,
       namespace,
       name,
       containers,
@@ -144,13 +142,8 @@ export class Cluster {
 }
 
 /** The cells of a pod, matching `podColumns`. */
-export function podCells(
-  pod: Pod,
-  withContext: boolean,
-  withNamespace: boolean,
-): Cell[] {
+export function podCells(pod: Pod, withNamespace: boolean): Cell[] {
   return [
-    ...(withContext ? [pod.context] : []),
     pod.name,
     ...(withNamespace ? [pod.namespace] : []),
     `${pod.ready}/${pod.containers}`,
@@ -164,15 +157,11 @@ export function podCells(
   ];
 }
 
-export function podRow(
-  pod: Pod,
-  withContext: boolean,
-  withNamespace: boolean,
-): Row {
+export function podRow(pod: Pod, withNamespace: boolean): Row {
   return {
     id: pod.id,
     created: new Date(pod.created).toISOString(),
-    cells: podCells(pod, withContext, withNamespace),
+    cells: podCells(pod, withNamespace),
   };
 }
 

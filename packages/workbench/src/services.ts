@@ -8,8 +8,11 @@ import { Editors } from "./editors/registry";
 import { ShellEnvironmentStatus } from "./environment";
 import type { Platform } from "./keybindings/chord";
 import { Keybindings } from "./keybindings/service";
+import { PartSizes } from "./parts/sizes";
 import { QuickAccess } from "./quickaccess/registry";
+import { Catalog } from "./spaces/catalog";
 import { Spaces } from "./spaces/store";
+import { StateStore } from "./state/store";
 import { Views } from "./views/registry";
 import { registerCore } from "./core";
 
@@ -27,13 +30,16 @@ export class Workbench {
   readonly editors = new Editors(this.keys);
   readonly quickAccess = new QuickAccess(this.keys);
   readonly keybindings: Keybindings;
+  readonly catalog: Catalog;
   readonly spaces: Spaces;
+  readonly sizes: PartSizes;
   readonly shellEnvironment: ShellEnvironmentStatus;
 
   constructor(
     readonly backend: Backend,
     readonly platform: Platform,
     layout: KeyboardLayout,
+    readonly state: StateStore,
   ) {
     this.keys.set("platform", platform);
     this.keybindings = new Keybindings(
@@ -42,9 +48,17 @@ export class Workbench {
       layout,
       platform,
     );
-    this.spaces = new Spaces(backend, this.keys, (error) => {
-      this.report(error);
-    });
+    this.catalog = new Catalog(backend);
+    this.spaces = new Spaces(
+      backend,
+      state,
+      this.catalog,
+      this.keys,
+      (error) => {
+        this.report(error);
+      },
+    );
+    this.sizes = new PartSizes(state);
     this.shellEnvironment = new ShellEnvironmentStatus(backend, this.keys);
   }
 
@@ -57,8 +71,9 @@ export class Workbench {
 }
 
 /**
- * A workbench on the backend's keyboard layout, following its changes, with
- * the spaces loaded.
+ * A workbench on the backend's keyboard layout and stored state, following
+ * their changes, with the spaces loaded. The catalog comes when its sources
+ * have been read, which waits for the login shell's environment.
  */
 export async function createWorkbench(
   backend: Backend,
@@ -76,11 +91,22 @@ export async function createWorkbench(
       else target.early = next;
     },
   );
-  const workbench = new Workbench(backend, platform, target.early ?? layout);
+  const state = await StateStore.load(backend, (error) => {
+    target.workbench?.report(error);
+  });
+  const workbench = new Workbench(
+    backend,
+    platform,
+    target.early ?? layout,
+    state,
+  );
   target.workbench = workbench;
   registerCore(workbench);
   // Nothing waits for it: the status bar shows the environment when it comes.
   workbench.shellEnvironment.watch().catch((error: unknown) => {
+    workbench.report(error);
+  });
+  workbench.catalog.watch().catch((error: unknown) => {
     workbench.report(error);
   });
   await workbench.spaces.load();

@@ -6,14 +6,25 @@ mod bench;
 
 use std::collections::HashMap;
 use std::ffi::OsString;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use tauri::async_runtime::JoinHandle;
 use tauri::ipc::Channel;
-use tauri::{Manager, State, Webview};
+use tauri::{Manager, RunEvent, State, Webview};
+use twigo_core::Core;
 use twigo_env::Environment;
-use twigo_ipc::{IpcError, KeyboardLayout, ShellEnvironment};
+use twigo_ipc::{
+    Context, ErrorKind, IpcError, KeyboardLayout, ShellEnvironment, Space, StateEntry,
+    StateSnapshot,
+};
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
+
+/// The explicit mode's kubeconfig (ARCHITECTURE 5.5): the only source of
+/// contexts, of which only `kind-*` and `kwok-*` count. Debug and bench
+/// builds only.
+#[cfg(any(debug_assertions, feature = "bench"))]
+const EXPLICIT_KUBECONFIG: &str = "TWIGO_KUBECONFIG";
 
 /// The layout watch and one subscription per webview, which a reload
 /// replaces.
@@ -42,11 +53,28 @@ fn keyboard_layout_watch(
     Ok(layout)
 }
 
-/// The login shell's environment and one follower per webview, which a
+/// One task per webview that sends a watched value's changes, which a
 /// reload replaces.
+#[derive(Default)]
+struct Followers(Mutex<HashMap<String, JoinHandle<()>>>);
+
+impl Followers {
+    fn replace(&self, webview: &Webview, follower: JoinHandle<()>) {
+        let replaced = self
+            .0
+            .lock()
+            .expect("followers lock")
+            .insert(webview.label().to_owned(), follower);
+        if let Some(replaced) = replaced {
+            replaced.abort();
+        }
+    }
+}
+
+/// The login shell's environment and its followers.
 struct Shell {
     environment: Arc<Environment>,
-    followers: Mutex<HashMap<String, JoinHandle<()>>>,
+    followers: Followers,
 }
 
 #[tauri::command]
@@ -65,14 +93,7 @@ fn shell_environment_watch(
             }
         }
     });
-    let replaced = shell
-        .followers
-        .lock()
-        .expect("followers lock")
-        .insert(webview.label().to_owned(), follower);
-    if let Some(replaced) = replaced {
-        replaced.abort();
-    }
+    shell.followers.replace(&webview, follower);
     Ok(current)
 }
 
@@ -80,6 +101,79 @@ fn shell_environment_watch(
 async fn shell_environment_retry(shell: State<'_, Shell>) -> Result<(), IpcError> {
     shell.environment.retry().await;
     Ok(())
+}
+
+/// The core and the followers of its catalog.
+struct App {
+    core: Arc<Core>,
+    contexts: Followers,
+}
+
+#[tauri::command]
+async fn contexts_watch(
+    webview: Webview,
+    app: State<'_, App>,
+    channel: Channel<Vec<Context>>,
+) -> Result<Vec<Context>, IpcError> {
+    let mut contexts = app.core.catalog.subscribe();
+    // Marks what it answers with as seen, so the follower sends only what
+    // comes after.
+    let current = contexts
+        .wait_for(Option::is_some)
+        .await
+        .expect("the catalog lives as long as the app")
+        .as_ref()
+        .expect("waited for")
+        .ipc();
+    let follower = tauri::async_runtime::spawn(async move {
+        while contexts.changed().await.is_ok() {
+            let next = contexts.borrow_and_update().as_ref().map(|c| c.ipc());
+            if let Some(next) = next
+                && let Err(error) = channel.send(next)
+            {
+                eprintln!("could not send the contexts: {error}");
+            }
+        }
+    });
+    app.contexts.replace(&webview, follower);
+    Ok(current)
+}
+
+#[tauri::command]
+fn spaces_list(app: State<'_, App>) -> Vec<Space> {
+    app.core.state.spaces()
+}
+
+#[tauri::command]
+async fn space_open(app: State<'_, App>, request: String) -> Result<Space, IpcError> {
+    if app.core.catalog.contexts().await.find(&request).is_none() {
+        return Err(IpcError {
+            kind: ErrorKind::NotFound,
+            message: format!("no source lists the context {request:?}"),
+        });
+    }
+    Ok(app.core.state.open_space(&request))
+}
+
+#[tauri::command]
+fn state_load(app: State<'_, App>) -> StateSnapshot {
+    app.core.state.snapshot()
+}
+
+#[tauri::command]
+fn state_set(app: State<'_, App>, request: Vec<StateEntry>) -> Result<(), IpcError> {
+    app.core
+        .state
+        .set(request)
+        .map_err(|error| IpcError::from(&error))
+}
+
+fn explicit_kubeconfig() -> Option<PathBuf> {
+    #[cfg(any(debug_assertions, feature = "bench"))]
+    if let Some(file) = std::env::var_os(EXPLICIT_KUBECONFIG).filter(|v| !v.is_empty()) {
+        return Some(file.into());
+    }
+    None
 }
 
 fn main() {
@@ -113,7 +207,7 @@ fn main() {
         .plugin(tauri_plugin_window_state::Builder::default().build());
     #[cfg(feature = "bench")]
     let builder = builder.plugin(bench::plugin());
-    builder
+    let app = builder
         .setup(|app| {
             let main = MainThread::new().ok_or("Tauri ran setup off the main thread")?;
             app.manage(Keyboard {
@@ -125,9 +219,20 @@ fn main() {
                 let environment = Arc::clone(&environment);
                 async move { environment.resolve().await }
             });
+            let core = Arc::new(Core::new(app.path().app_data_dir()?.join("state.json")));
+            tauri::async_runtime::spawn({
+                let core = Arc::clone(&core);
+                let environment = Arc::clone(&environment);
+                let explicit = explicit_kubeconfig();
+                async move { core.run(environment.subscribe(), explicit).await }
+            });
             app.manage(Shell {
                 environment,
-                followers: Mutex::default(),
+                followers: Followers::default(),
+            });
+            app.manage(App {
+                core,
+                contexts: Followers::default(),
             });
             Ok(())
         })
@@ -135,7 +240,23 @@ fn main() {
             keyboard_layout_watch,
             shell_environment_watch,
             shell_environment_retry,
+            contexts_watch,
+            spaces_list,
+            space_open,
+            state_load,
+            state_set,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Twigo");
+        .build(tauri::generate_context!())
+        .expect("error while building Twigo");
+    app.run(|app, event| {
+        // macOS delivers ⌘Q, the Dock's Quit and logout as `terminate:`,
+        // which ends the process without `ExitRequested`, but still with
+        // `Exit`: the webview cannot be asked for anything by then, so it
+        // sends every change at once and this writes them.
+        if let RunEvent::Exit = event
+            && let Err(error) = app.state::<App>().core.state.flush()
+        {
+            eprintln!("could not save the state: {error}");
+        }
+    });
 }

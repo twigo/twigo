@@ -6,7 +6,7 @@ use ts_rs::TS;
 
 use crate::{
     Ack, ClusterVersion, Context, KeyboardLayout, ListBatch, ListQuery, Resource, SetWindow,
-    ShellEnvironment, Space, StateEntry, SubscriptionId,
+    ShellEnvironment, Space, StateEntry, StateSnapshot, SubscriptionId,
 };
 
 pub trait Command {
@@ -26,14 +26,16 @@ impl Command for SpacesList {
     type Message = ();
 }
 
-/// Every context the catalog knows, with or without a space.
-pub struct ContextsList;
+/// Answers with every context the catalog lists, with or without a space,
+/// once its sources have been read, then sends the list again on every
+/// change.
+pub struct ContextsWatch;
 
-impl Command for ContextsList {
-    const NAME: &'static str = "contexts_list";
+impl Command for ContextsWatch {
+    const NAME: &'static str = "contexts_watch";
     type Request = ();
     type Response = Vec<Context>;
-    type Message = ();
+    type Message = Vec<Context>;
 }
 
 /// The one-context space of a context, created if it has none (ARCHITECTURE 4.2).
@@ -123,21 +125,22 @@ impl Command for KeyboardLayoutWatch {
     type Message = KeyboardLayout;
 }
 
-/// A stored value, by key; none if nothing was stored.
-pub struct StateGet;
+/// Every stored value.
+pub struct StateLoad;
 
-impl Command for StateGet {
-    const NAME: &'static str = "state_get";
-    type Request = String;
-    type Response = Option<String>;
+impl Command for StateLoad {
+    const NAME: &'static str = "state_load";
+    type Request = ();
+    type Response = StateSnapshot;
     type Message = ();
 }
 
+/// Stores the entries, all or none.
 pub struct StateSet;
 
 impl Command for StateSet {
     const NAME: &'static str = "state_set";
-    type Request = StateEntry;
+    type Request = Vec<StateEntry>;
     type Response = ();
     type Message = ();
 }

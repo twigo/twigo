@@ -26,9 +26,7 @@ export function registerKube(workbench: Workbench): void {
     discovery: new Discovery(workbench.backend),
     lists: new Lists(),
     filters: new ListFilters(),
-    columns: new ColumnPresets(workbench.backend, (error) => {
-      workbench.report(error);
-    }),
+    columns: new ColumnPresets(workbench.state),
     selection: new Selection(),
     statuses: new ListStatuses(),
   };

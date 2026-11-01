@@ -63,6 +63,12 @@ impl ShellEnv {
     }
 }
 
+impl FromIterator<(OsString, OsString)> for ShellEnv {
+    fn from_iter<I: IntoIterator<Item = (OsString, OsString)>>(vars: I) -> Self {
+        Self(vars.into_iter().collect())
+    }
+}
+
 /// Prints this process's environment framed by the marker whose halves
 /// are `head` and `tail`, for [`DUMP_ENV`].
 pub fn dump(head: &OsStr, tail: &OsStr) -> io::Result<()> {

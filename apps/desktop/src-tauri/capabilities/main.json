@@ -12,6 +12,11 @@
     "core:resources:allow-close",
     "allow-keyboard-layout-watch",
     "allow-shell-environment-watch",
-    "allow-shell-environment-retry"
+    "allow-shell-environment-retry",
+    "allow-contexts-watch",
+    "allow-spaces-list",
+    "allow-space-open",
+    "allow-state-load",
+    "allow-state-set"
   ]
 }
