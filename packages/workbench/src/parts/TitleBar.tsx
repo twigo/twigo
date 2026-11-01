@@ -25,7 +25,7 @@ export function TitleBar() {
         color &&
         ({ "--twigo-context": `var(--context-${color})` } as CSSProperties)
       }
-      className="twigo-titlebar grid h-9 shrink-0 grid-cols-[minmax(max-content,1fr)_minmax(0,28rem)_2fr] items-center gap-3 border-b border-border bg-shell pr-2 pl-[92px]"
+      className="twigo-titlebar grid h-9 shrink-0 grid-cols-[minmax(max-content,2fr)_minmax(0,28rem)_5fr] items-center gap-3 border-b border-border bg-shell pr-2 pl-[92px]"
     >
       <div className="flex min-w-0 items-center gap-0.5">
         {space && <Breadcrumb space={space} />}
