@@ -200,3 +200,20 @@ async fn the_fallback_shares_the_first_run_s_deadline() {
     let elapsed = started.elapsed();
     assert!(elapsed < StdDuration::from_millis(1400), "{elapsed:?}");
 }
+
+/// bash, `/bin/sh` on macOS, turns tracing on from an exported `SHELLOPTS`;
+/// dash, `/bin/sh` on Debian and Ubuntu, ignores it.
+#[tokio::test]
+async fn an_exported_shellopts_does_not_trace_into_the_fallback_frame() {
+    let fakes = Fakes::new();
+    let shell = fakes.script("sh", "set -x\nexport SHELLOPTS\neval \"$4\"");
+    let env = resolve_with(&shell, Some(&fakes.path("gone")), TIMEOUT)
+        .await
+        .expect("an environment");
+    let mangled: Vec<_> = env
+        .iter()
+        .filter(|(name, _)| name.as_encoded_bytes().contains(&b'\n'))
+        .collect();
+    assert!(mangled.is_empty(), "{mangled:?}");
+    assert!(env.get("PATH").is_some());
+}

@@ -140,7 +140,8 @@ async fn resolve_with(
     let env = [
         OsStr::new("/bin/sh"),
         OsStr::new("-c"),
-        OsStr::new(r#"printf %s%s "$1" "$2"; /usr/bin/env -0; printf %s%s "$1" "$2""#),
+        // bash as `/bin/sh` traces when an exported `SHELLOPTS` says so.
+        OsStr::new(r#"set +x; printf %s%s "$1" "$2"; /usr/bin/env -0; printf %s%s "$1" "$2""#),
         OsStr::new("sh"),
         &head,
         &tail,
