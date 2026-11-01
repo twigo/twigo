@@ -5,6 +5,7 @@ import { QuickAccessWidget } from "../quickaccess/QuickAccessWidget";
 import { useChanges, useWorkbench } from "../react";
 import type { Location } from "../views/registry";
 import { EditorArea } from "./EditorArea";
+import { PanelBoundary, PartCrash } from "./PanelBoundary";
 import { PartView } from "./PartView";
 import { SpaceRail } from "./SpaceRail";
 import { StatusBar } from "./StatusBar";
@@ -55,9 +56,32 @@ export function Shell() {
 
   return (
     <div className="twigo-workbench flex h-full flex-col bg-shell">
-      <TitleBar />
+      <PanelBoundary
+        label="Title bar"
+        fallback={(crash) => (
+          <div
+            data-tauri-drag-region
+            className="flex h-9 shrink-0 items-center border-b border-border bg-shell pl-[92px]"
+          >
+            <PartCrash crash={crash} />
+          </div>
+        )}
+      >
+        <TitleBar />
+      </PanelBoundary>
       <div className="flex min-h-0 flex-1">
-        <SpaceRail />
+        <PanelBoundary
+          label="Space rail"
+          fallback={(crash) => (
+            <PartCrash
+              crash={crash}
+              iconOnly
+              className="w-12 flex-col border-r border-border bg-shell py-2"
+            />
+          )}
+        >
+          <SpaceRail />
+        </PanelBoundary>
         <Allotment
           key={space?.id}
           className="min-w-0 flex-1"
@@ -98,7 +122,14 @@ export function Shell() {
           </Allotment.Pane>
         </Allotment>
       </div>
-      <StatusBar />
+      <PanelBoundary
+        label="Status bar"
+        fallback={(crash) => (
+          <PartCrash crash={crash} className="h-6 bg-statusbar px-2" />
+        )}
+      >
+        <StatusBar />
+      </PanelBoundary>
       <QuickAccessWidget />
       <Toaster />
     </div>
