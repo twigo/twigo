@@ -4,6 +4,7 @@ import {
   Boxes,
   CalendarClock,
   CirclePlay,
+  Cloud,
   Copy,
   Cylinder,
   Database,
@@ -17,11 +18,14 @@ import {
   KeyRound,
   Layers,
   Link,
+  Network,
   Puzzle,
   Scale,
   Server,
+  Shield,
   ShieldCheck,
   ShieldHalf,
+  SlidersHorizontal,
   Spline,
   TimerReset,
   Waypoints,
@@ -80,9 +84,14 @@ export function isBuiltIn(gvr: Gvr): boolean {
 }
 
 /** The explorer's sections for built-in resources, by `group/resource`, after Lens's sidebar. */
-const SECTIONS: readonly { title: string; resources: readonly string[] }[] = [
+const SECTIONS: readonly {
+  title: string;
+  icon: LucideIcon;
+  resources: readonly string[];
+}[] = [
   {
     title: "Workloads",
+    icon: Boxes,
     resources: [
       "/pods",
       "apps/deployments",
@@ -95,6 +104,7 @@ const SECTIONS: readonly { title: string; resources: readonly string[] }[] = [
   },
   {
     title: "Config",
+    icon: SlidersHorizontal,
     resources: [
       "/configmaps",
       "/secrets",
@@ -111,6 +121,7 @@ const SECTIONS: readonly { title: string; resources: readonly string[] }[] = [
   },
   {
     title: "Network",
+    icon: Network,
     resources: [
       "/services",
       "discovery.k8s.io/endpointslices",
@@ -121,6 +132,7 @@ const SECTIONS: readonly { title: string; resources: readonly string[] }[] = [
   },
   {
     title: "Storage",
+    icon: HardDrive,
     resources: [
       "/persistentvolumeclaims",
       "/persistentvolumes",
@@ -129,6 +141,7 @@ const SECTIONS: readonly { title: string; resources: readonly string[] }[] = [
   },
   {
     title: "Access Control",
+    icon: Shield,
     resources: [
       "/serviceaccounts",
       "rbac.authorization.k8s.io/clusterroles",
@@ -139,6 +152,7 @@ const SECTIONS: readonly { title: string; resources: readonly string[] }[] = [
   },
   {
     title: "Cluster",
+    icon: Cloud,
     resources: [
       "/nodes",
       "/namespaces",
@@ -150,6 +164,8 @@ const SECTIONS: readonly { title: string; resources: readonly string[] }[] = [
 
 export interface Section<T> {
   readonly title: string;
+  /** Top-level sections only; the kinds in them show none in the tree. */
+  readonly icon?: LucideIcon;
   readonly items: readonly T[];
   /** Custom resources come in one section, a group per API group, as in Lens. */
   readonly groups: readonly Section<T>[];
@@ -169,8 +185,9 @@ export function sections<T extends { readonly gvr: Gvr }>(
       resource,
     ]),
   );
-  const builtIn = SECTIONS.map(({ title, resources: keys }) => ({
+  const builtIn = SECTIONS.map(({ title, icon, resources: keys }) => ({
     title,
+    icon,
     items: keys.flatMap((key) => byKey.get(key) ?? []),
     groups: [],
   }));
@@ -188,7 +205,7 @@ export function sections<T extends { readonly gvr: Gvr }>(
   return [
     ...builtIn.filter((section) => section.items.length > 0),
     ...(groups.length > 0
-      ? [{ title: "Custom Resources", items: [], groups }]
+      ? [{ title: "Custom Resources", icon: Puzzle, items: [], groups }]
       : []),
   ];
 }

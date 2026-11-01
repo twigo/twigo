@@ -5,7 +5,6 @@ import { toIpcError } from "@twigo/protocol";
 import { cn, EmptyState, Skeleton } from "@twigo/ui";
 import { useChanges, useWorkbench } from "@twigo/workbench";
 import { useResources, type Discovery } from "./discovery";
-import { KindIcon } from "./KindIcon";
 import { pluralTitle, sections, type Section } from "./kinds";
 import { listUri } from "./uri";
 
@@ -90,6 +89,9 @@ function ExplorerSection({
         className="flex h-[22px] w-full items-center gap-1 pr-2 text-left text-[13px] hover:bg-row-hover"
       >
         <Chevron className="size-4 shrink-0 text-muted-foreground" />
+        {section.icon && (
+          <section.icon className="mr-0.5 size-4 shrink-0 text-muted-foreground" />
+        )}
         {title}
       </button>
       {open && (
@@ -118,14 +120,10 @@ function ExplorerSection({
                 }}
                 style={{ paddingLeft: 28 + depth * 16 }}
                 className={cn(
-                  "flex h-[22px] w-full items-center gap-1.5 pr-2 text-left text-[13px] hover:bg-row-hover",
+                  "flex h-[22px] w-full items-center pr-2 text-left text-[13px] hover:bg-row-hover",
                   editors.active === uri && "bg-selected-unfocused",
                 )}
               >
-                <KindIcon
-                  gvr={resource.gvr}
-                  className="size-4 shrink-0 text-muted-foreground"
-                />
                 <span className="truncate">
                   {pluralTitle(resource.kind, resource.gvr.resource)}
                 </span>

@@ -46,3 +46,11 @@ test("recorded discovery fills Lens's sections, then custom groups", () => {
     .filter((item) => item.gvr.resource === "events");
   expect(events.map((item) => item.gvr.group)).toEqual([""]);
 });
+
+test("top-level sections have icons, the custom groups inside them none", () => {
+  const result = sections(RESOURCES);
+  expect(result.filter((section) => !section.icon)).toEqual([]);
+  expect(
+    result.flatMap((section) => section.groups).filter((group) => group.icon),
+  ).toEqual([]);
+});
