@@ -59,7 +59,7 @@ The sources are in the appendix.
 | Full list of every kind with no `limit`; one watch per namespace; a full app instance per open cluster (iframes)                                        | Freelens / OpenLens                                | Shared, ref-counted Table watches per GVR and scope (per namespace, widened above 4 namespaces); one webview; per-cluster budgets (3.2)                       |
 | Unbatched global events per watch event; full snapshot per change; merge on the UI thread                                                               | Kubeli, srelens, Aptakube                          | Rust coalesces, sorts and windows; one Channel per view; acks for flow control (3.5)                                                                          |
 | Hangs with "All namespaces" on 30k pods; freezes on big ConfigMaps; eager metrics on huge lists                                                         | Aptakube #499, #575                                | Rust owns sort, filter and window; metrics only for visible rows; large values rendered lazily (3.4, 3.6)                                                     |
-| Exec plugins not found from a Dock launch; kubelogin re-run every 30 s, opening browser tabs; device codes lost; plugins run for every context at start | Lens #7956, Headlamp #7879, Freelens < 2.0         | Login-shell environment, a credential runner of our own with timeout, single-flight, backoff and visible prompts; connect only on space activation (6.1, 6.2) |
+| Exec plugins not found from a Dock launch; kubelogin re-run every 30 s, opening browser tabs; device codes lost; plugins run for every context at start | Lens #7956, Headlamp #7879, Freelens < 2.0         | Login-shell environment, a credential runner of our own: timeout, single-flight, no retry loops, visible prompts; connect only on space activation (6.1, 6.2) |
 | Empty views after a fixed cache-sync timeout                                                                                                            | k9s PR #4023                                       | Typed view states: `syncing / ready / relisting / forbidden / unauthorized / error` (3.7)                                                                     |
 | Port-forwards tied to one pod; no failover behind a Service; random pod names restored                                                                  | k9s, Aptakube #384, #519                           | Forward targets are Services or workloads, resolved through EndpointSlices on every new connection (4.6)                                                      |
 | Extension API removed, rewritten or put behind a paywall; extensions break with each host React/MobX bump                                               | Lens 2024.9 and 2026.10, Freelens 2.0              | Versioned WIT kept side by side (Zed), no host libraries shared as implicit API, a fixture extension in CI (5.3)                                              |
@@ -1095,38 +1095,51 @@ That is why `aws`, `gke-gcloud-auth-plugin` and `kubelogin` "are not found" in L
 ### 6.2 Credentials (`twigo-kube`)
 
 kube-rs's built-in exec auth does not suit a GUI.
-It runs the plugin with a blocking `Command::output()` and no timeout, verified in `kube-client/src/client/auth/mod.rs`.
-It inherits stdin and stderr, so device codes disappear.
-In our probe it ran the plugin three times while building one client.
-Twigo therefore owns credentials:
+kube-client 4.2.0 runs the plugin with a blocking `Command::output()` and no timeout, three times for each client it builds, with the terminal's stdin and stderr, so device codes disappear ([research](research/credentials.md)).
+Twigo therefore owns credentials, and follows client-go's rules where the plugin sees them:
 
 - **Clients.**
   Each context has two shared hyper-util clients: an HTTP/2 one for requests, watches and logs, and an HTTP/1.1 one for exec, attach and port-forward (3.2).
-  Every actor's kube clients are built over them with kube's base URI and header layers and our auth layer, and carry the credential's expiry.
-  The exec block is stripped from the config first.
+  Every actor's kube clients are built over them with kube's base URI and header layers and Twigo's auth layer.
+  The exec block is stripped from the config first, and the `gcp` and `azure` auth providers are refused with client-go's messages, since kube would run gcp's `cmd-path`.
+  A token, basic auth or a client certificate in the user entry wins over its plugin, as in client-go.
 - **The credential runner.**
-  - Uses `tokio::process` with the shell environment, null stdin and its own process group, and caps stdout at 1 MiB.
-  - Sets `KUBERNETES_EXEC_INFO`, including cluster info when `provideClusterInfo` is set.
-  - Times out after 120 s, and the user can cancel.
-  - Concurrent requests for the same credential share one run.
-  - Caches per hash of the user and cluster entries until 60 s before the credential expires.
-    A 401 drops the cache and retries once.
-- **Interactive plugins** (kubelogin devicecode or interactive, `oidc-login`, `pinniped`, `tsh`, `aws sso`):
-  - They are classified up front.
-    Nothing in the background ever runs one.
-  - The user starts them, and their stderr streams into a sign-in panel that shows device codes and URLs (redacted in logs).
-  - After sign-in, Twigo rebuilds the context's clients for every actor, as in 6.3, and restarts the watches that were unauthorized.
+  - Uses `tokio::process` with the shell environment, then the entry's `env`, then `KUBERNETES_EXEC_INFO`; null stdin, its own process group, killed whole on a timeout or a cancel, and stdout capped at 1 MiB.
+  - `KUBERNETES_EXEC_INFO` says `interactive: false`, since Twigo never passes a terminal, and carries the cluster when `provideClusterInfo` is set.
+    A plugin set to `interactiveMode: Always` is refused, as client-go refuses it without a terminal.
+  - Reads the output by client-go's rules: the configured apiVersion, a token, a PEM certificate and key, or both, as JSON or YAML.
+  - Contexts whose entries name the same plugin share it, keyed as client-go keys its authenticators: the exec config, and the cluster when it is passed.
+    Concurrent requests share one run, and its failure too.
+  - Caches the credential until 60 s before it expires; without an expiry, until the server rejects it.
+    A 401 drops it, runs the plugin once more and retries the request once, its body rebuilt from the bytes kube holds; client-go only refreshes for the next request.
+  - A certificate from the plugin is offered at each TLS handshake, and a new one retires the context's connections, as client-go closes them.
+    TLS resumption is off for these clients, since a resumed session keeps the certificate of the handshake it resumes.
+- **Plugins that may ask the person to sign in.**
+  A cold cache makes them open a browser or print a device code, and none can be told to fail instead; `interactiveMode` does not tell them apart.
+  - Only plugins known never to ask run unattended: `aws eks get-token`, aws-iam-authenticator, gke-gcloud-auth-plugin, doctl without SSO, `oci`, `pinniped login static`, and Azure/kubelogin's non-interactive logins (with `AAD_LOGIN_METHOD` read as kubelogin reads it).
+    Every other plugin, an unknown command included, may ask.
+  - One that may ask runs only while a Twigo window has the focus, so that its browser or code finds the person (the owner's choice, 2026-11-01).
+    With a warm cache it answers at once and nobody notices; while the window is in the background, the request waits for it to come back.
+  - After a sign-in fails or is cancelled, it runs again only when the person asks, since retrying by itself would open browser after browser.
+  - The sign-in panel is the popover of the status bar's credentials item (the owner's choice among a dialog and a corner card, 2026-11-01).
+    It opens once the plugin prints, or after 2 s without a credential, since a browser flow often prints nothing, and leaves the focus where it was.
+    It shows the device code and the link, which opens through tauri-plugin-opener for https and the plugin's own server on localhost, the plugin's output, its elapsed time and Cancel; a failure shows the fix the plugin's message names, such as `aws sso login`.
+  - Unattended runs time out at 120 s; sign-ins at 10 min, past int128/kubelogin's and tsh's own 180 s, since a tsh killed mid-login leaves a lock that breaks the cluster until `tsh login`.
 - **Lazy.**
-  Credentials are resolved only when a space activates, never for all contexts at startup.
+  Credentials are resolved only when a request needs one, which a space's activation is, never for all contexts at startup.
   Headlamp #7879 is the failure this avoids.
 - **Kubeconfig trust**, adapted from VS Code's workspace trust.
   - An exec plugin is a command chosen by whoever wrote the kubeconfig.
-  - On first run, Twigo lists the exec commands it found, and the user confirms them once.
-  - A new or changed exec entry (a different hash of command, args and env) asks again before it runs.
-- **Other auth methods.**
-  The deprecated `auth-provider: oidc` refreshes its token.
-  Writing the refreshed token back to the kubeconfig is an explicit opt-in; kube-rs never writes it back.
-  Client certificates and token files are also supported.
+  - On the first start, Twigo lists every exec plugin the kubeconfigs name, with the contexts that use each, and the person trusts them once.
+  - A new or changed entry (a different digest of command, args and env) asks when its space activates, before it runs.
+  - The digests live in `trust.json` beside the state store, which only Rust writes; an unreadable file trusts nothing.
+- **The deprecated `auth-provider: oidc`.**
+  - Twigo refreshes it as client-go does: the id-token until 10 s before its `exp`, then discovery and a `refresh_token` grant, with the IdP's CA and the login shell's proxy.
+  - It writes the new id-token and refresh-token back to the user's file, as kubectl does, since the file is the token store every client shares and Dex rotates the refresh token on every refresh (the owner's choice, 2026-11-01).
+    Only the two values change, through `yaml-edit`, under kubectl's `<file>.lock`, by a rename over the resolved file.
+  - One refresh runs at a time, the file is read again first so a token kubectl got meanwhile is taken, and the new tokens go to memory before the file, so a failed write never loses the only valid refresh token.
+  - The oidc tokens do not count in the fingerprint (6.3), so a refresh rebuilds no client.
+- **Client certificates and token files** work through kube.
 
 ### 6.3 Transport
 
@@ -1140,7 +1153,7 @@ Twigo therefore owns credentials:
   - socks5 and socks5h both leave names to the proxy, as Go does.
   - An https proxy's certificate is checked against the OS trust store, and the proxy gets no client certificate.
     client-go checks it against the cluster's CA and would give it the cluster's client certificate, since Go's transport reuses its TLS config for the proxy.
-- When the kubeconfig changes, Twigo fingerprints each context from its context, cluster and user entries plus the files they reference.
+- When the kubeconfig changes, Twigo fingerprints each context from its context, cluster and user entries plus the files they reference, the user's oidc tokens left out (6.2).
   It rebuilds only the clients whose fingerprint changed, for every actor at once, since each actor's kube clients hold the context's shared pools (6.4), and restarts their upstreams.
   New proxy variables in the login shell rebuild every context's clients the same way.
 - Exec, attach and port-forward use kube-rs WebSockets (`v5.channel.k8s.io`, falling back to `v4`; there is no SPDY) over the HTTP/1.1 client; requests, watches and logs share the HTTP/2 connection (3.2).
