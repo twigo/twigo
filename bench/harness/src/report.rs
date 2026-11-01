@@ -1,0 +1,552 @@
+//! The report of ARCHITECTURE 3.8's six metrics at 5k pods, from what the app's bench mode, the
+//! process sampler and the churn generator wrote into one directory.
+
+use std::collections::HashMap;
+use std::fmt::Write as _;
+use std::path::Path;
+
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+
+use crate::churn::Summary as Churn;
+use crate::process::Sample;
+use crate::stats::{Spread, percentile};
+
+const FIRST_PAINT_MS: f64 = 1000.0;
+const CHANGE_P95_MS: f64 = 150.0;
+const FPS: f64 = 60.0;
+/// requestAnimationFrame jitters, so a scroll passes at 95 % of the target's frames.
+const FPS_PASS: f64 = 57.0;
+const SORT_P95_MS: f64 = 50.0;
+const CORE_RSS_MB: f64 = 150.0;
+const WEBVIEW_MB: f64 = 300.0;
+const IDLE_CPU_PERCENT: f64 = 1.0;
+const MB: f64 = 1_000_000.0;
+
+/// What the app's webview driver measured (`apps/desktop/bench`).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Webview {
+    pub backend: String,
+    pub rows: u32,
+    pub changes_per_second: f64,
+    pub refresh_ms: f64,
+    pub first_paint: FirstPaint,
+    pub scroll: Scroll,
+    pub sort: Vec<SortSample>,
+    pub changes: Changes,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FirstPaint {
+    pub batch_to_paint_ms: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Scroll {
+    pub seconds: f64,
+    pub px_per_second: f64,
+    pub frame_ms: Vec<f64>,
+    pub blank_frames: u32,
+}
+
+#[derive(Deserialize)]
+pub struct SortSample {
+    pub column: String,
+    pub descending: bool,
+    pub ms: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Changes {
+    pub seconds: f64,
+    pub ms: Vec<f64>,
+    pub offscreen: u32,
+    pub superseded: u32,
+    pub timed_out: u32,
+}
+
+/// What the webview reported once the window was hidden.
+#[derive(Deserialize)]
+pub struct Hidden {
+    pub visibility: String,
+}
+
+/// The run, from `bench/harness.sh`.
+#[derive(Deserialize, Serialize)]
+pub struct Run {
+    pub date: String,
+    pub machine: String,
+    pub os: String,
+    pub commit: String,
+    pub build: String,
+}
+
+pub struct Inputs {
+    pub run: Run,
+    pub webview: Webview,
+    pub memory: Sample,
+    pub idle: (Sample, Sample),
+    pub hidden: Option<Hidden>,
+    pub churn: Option<Churn>,
+}
+
+fn read<T: DeserializeOwned>(dir: &Path, name: &str) -> Result<T, String> {
+    let path = dir.join(name);
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+fn read_optional<T: DeserializeOwned>(dir: &Path, name: &str) -> Result<Option<T>, String> {
+    if dir.join(name).exists() {
+        read(dir, name).map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
+impl Inputs {
+    pub fn read(dir: &Path) -> Result<Self, String> {
+        Ok(Inputs {
+            run: read(dir, "run.json")?,
+            webview: read(dir, "webview.json")?,
+            memory: read(dir, "memory.json")?,
+            idle: (read(dir, "idle-start.json")?, read(dir, "idle-end.json")?),
+            hidden: read_optional(dir, "hidden.json")?,
+            churn: read_optional(dir, "churn.json")?,
+        })
+    }
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Status {
+    Pass,
+    Fail,
+    /// The real path does not exist before M1.
+    NotMeasurableBeforeM1,
+    /// Half of a metric, on the mock: shown, never judged against the target.
+    MockHalf,
+}
+
+impl Status {
+    fn judge(pass: bool) -> Self {
+        if pass { Status::Pass } else { Status::Fail }
+    }
+
+    fn label(&self) -> &'static str {
+        match self {
+            Status::Pass => "pass",
+            Status::Fail => "FAIL",
+            Status::NotMeasurableBeforeM1 => "not measurable before M1",
+            Status::MockHalf => "mock half, not judged",
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct Row {
+    pub metric: String,
+    pub value: Option<String>,
+    pub target: String,
+    pub status: Status,
+    pub measured: String,
+}
+
+#[derive(Serialize)]
+pub struct Report {
+    pub run: Run,
+    pub rows: Vec<Row>,
+    pub churn: Option<Churn>,
+}
+
+/// CPU time of the app and its WebKit processes between two samples, as a share of one core.
+/// A process that started in between counts whole; one that ended in between is lost.
+pub fn cpu_percent(start: &Sample, end: &Sample) -> f64 {
+    let before: HashMap<i32, u64> = std::iter::once(&start.app)
+        .chain(&start.webkit)
+        .map(|p| (p.pid, p.cpu_ns))
+        .collect();
+    let used: u64 = std::iter::once(&end.app)
+        .chain(&end.webkit)
+        .map(|p| {
+            p.cpu_ns
+                .saturating_sub(before.get(&p.pid).copied().unwrap_or(0))
+        })
+        .sum();
+    used as f64 / ((end.at_ms - start.at_ms) * 1e6) * 100.0
+}
+
+fn mb(bytes: u64) -> f64 {
+    bytes as f64 / MB
+}
+
+pub fn fps(frame_ms: &[f64]) -> f64 {
+    1000.0 * frame_ms.len() as f64 / frame_ms.iter().sum::<f64>()
+}
+
+fn spread_text(spread: &Spread) -> String {
+    format!(
+        "p50 {:.1} ms, max {:.1} ms, n = {}",
+        spread.p50, spread.max, spread.n
+    )
+}
+
+pub fn build(inputs: Inputs) -> Report {
+    let Inputs {
+        run,
+        webview,
+        memory,
+        idle,
+        hidden,
+        churn,
+    } = inputs;
+    let on_mock = format!(
+        "{} rows from the {} backend, in the webview",
+        webview.rows, webview.backend
+    );
+    let mut rows = Vec::new();
+
+    rows.push(Row {
+        metric: "First paint after the space connects".into(),
+        value: None,
+        target: format!("< {:.0} s", FIRST_PAINT_MS / 1000.0),
+        status: Status::NotMeasurableBeforeM1,
+        measured: "needs the Rust list path: watch hub, row store, query view and batcher (M1)"
+            .into(),
+    });
+    rows.push(Row {
+        metric: "  webview half".into(),
+        value: Some(format!("{:.1} ms", webview.first_paint.batch_to_paint_ms)),
+        target: "-".into(),
+        status: Status::MockHalf,
+        measured: format!("first batch with rows received → rows painted; {on_mock}"),
+    });
+
+    let changes = Spread::of(&webview.changes.ms);
+    rows.push(Row {
+        metric: "Change → painted cell, p95".into(),
+        value: None,
+        target: format!("< {CHANGE_P95_MS:.0} ms"),
+        status: Status::NotMeasurableBeforeM1,
+        measured: "needs the cluster's changes to reach the webview through Rust (M1)".into(),
+    });
+    rows.push(Row {
+        metric: "  webview half".into(),
+        value: changes.as_ref().map(|s| format!("{:.1} ms", s.p95)),
+        target: "-".into(),
+        status: Status::MockHalf,
+        measured: format!(
+            "batch received → changed cell painted, on screen; {}; {} offscreen, {} superseded, {} timed out; {:.0} changes/s for {:.0} s; {on_mock}",
+            changes.as_ref().map_or("no samples".into(), spread_text),
+            webview.changes.offscreen,
+            webview.changes.superseded,
+            webview.changes.timed_out,
+            webview.changes_per_second,
+            webview.changes.seconds,
+        ),
+    });
+
+    let scroll_fps = fps(&webview.scroll.frame_ms);
+    let frame_p95 = percentile(&webview.scroll.frame_ms, 95.0).unwrap_or(f64::NAN);
+    rows.push(Row {
+        metric: "Scroll and sort: scroll".into(),
+        value: Some(format!("{scroll_fps:.1} fps")),
+        target: format!("{FPS:.0} fps"),
+        status: Status::judge(scroll_fps >= FPS_PASS),
+        measured: format!(
+            "requestAnimationFrame over {:.0} s of programmatic scroll at {:.0} px/s; frame p95 {frame_p95:.1} ms, display frame {:.1} ms; rows awaiting data in {} of {} frames; {on_mock}, which serves each window from JS",
+            webview.scroll.seconds,
+            webview.scroll.px_per_second,
+            webview.refresh_ms,
+            webview.scroll.blank_frames,
+            webview.scroll.frame_ms.len(),
+        ),
+    });
+
+    let sorts: Vec<f64> = webview.sort.iter().map(|s| s.ms).collect();
+    let sort = Spread::of(&sorts);
+    let columns: Vec<String> = webview
+        .sort
+        .iter()
+        .map(|s| format!("{}{}", s.column, if s.descending { "↓" } else { "↑" }))
+        .collect();
+    rows.push(Row {
+        metric: "Scroll and sort: sort".into(),
+        value: sort.as_ref().map(|s| format!("p95 {:.1} ms", s.p95)),
+        target: format!("< {SORT_P95_MS:.0} ms"),
+        status: Status::judge(sort.as_ref().is_some_and(|s| s.p95 < SORT_P95_MS)),
+        measured: format!(
+            "header click → resorted rows painted, {}; {}; {on_mock}, which sorts in JS, unlike Rust's incremental index",
+            columns.join(" "),
+            sort.as_ref().map_or("no samples".into(), spread_text),
+        ),
+    });
+
+    let core = mb(memory.app.rss);
+    rows.push(Row {
+        metric: "Core RSS with the pod list open".into(),
+        value: Some(format!("{core:.0} MB")),
+        target: format!("< {CORE_RSS_MB:.0} MB"),
+        status: Status::judge(core < CORE_RSS_MB),
+        measured: format!(
+            "resident size of {} (pid {}) under churn; M0's core holds no watch cache yet, and the list lives in the webview's mock",
+            memory.app.name, memory.app.pid
+        ),
+    });
+
+    let webkit = mb(memory.webkit.iter().map(|p| p.footprint).sum());
+    let webkit_rss = mb(memory.webkit.iter().map(|p| p.rss).sum());
+    let names: Vec<String> = memory
+        .webkit
+        .iter()
+        .map(|p| {
+            format!(
+                "{} {:.0} MB",
+                p.name.trim_start_matches(crate::process::WEBKIT_PREFIX),
+                mb(p.footprint)
+            )
+        })
+        .collect();
+    rows.push(Row {
+        metric: "Webview memory with the pod list open".into(),
+        value: Some(format!("{webkit:.0} MB")),
+        target: format!("< {WEBVIEW_MB:.0} MB"),
+        status: Status::judge(!memory.webkit.is_empty() && webkit < WEBVIEW_MB),
+        measured: format!(
+            "physical footprint of the WebKit processes the app is responsible for ({}), under churn; their RSS adds up to {webkit_rss:.0} MB; {} other WebKit processes left out; the webview holds the mock's {} pods",
+            names.join(", "),
+            memory.other_webkit.len(),
+            webview.rows,
+        ),
+    });
+
+    let (start, end) = &idle;
+    let cpu = cpu_percent(start, end);
+    rows.push(Row {
+        metric: "Idle CPU, 100 changes/s, window hidden".into(),
+        value: Some(format!("{cpu:.2} %")),
+        target: format!("< {IDLE_CPU_PERCENT:.0} %"),
+        status: Status::judge(cpu < IDLE_CPU_PERCENT),
+        measured: format!(
+            "CPU time of the app and its {} WebKit processes over {:.0} s, as a share of one core; document {}; the mock churns {:.0} changes/s in the webview, and the cluster's churn reaches nothing before M1",
+            end.webkit.len(),
+            (end.at_ms - start.at_ms) / 1000.0,
+            hidden.map_or("visibility not reported".into(), |h| h.visibility),
+            webview.changes_per_second,
+        ),
+    });
+
+    Report { run, rows, churn }
+}
+
+pub fn table(report: &Report) -> String {
+    let mut out = String::new();
+    let run = &report.run;
+    let _ = writeln!(
+        out,
+        "{}, {}, {}, {} build, {}",
+        run.date, run.machine, run.os, run.build, run.commit
+    );
+    if let Some(churn) = &report.churn {
+        let _ = writeln!(
+            out,
+            "Churn on kwok: {:.1} changes/s over {} pods for {:.0} s, {} errors{}",
+            churn.changes_per_second,
+            churn.pods,
+            churn.seconds,
+            churn.errors,
+            churn
+                .latency_ms
+                .as_ref()
+                .map_or(String::new(), |s| format!(", patch p95 {:.1} ms", s.p95)),
+        );
+    }
+    let _ = writeln!(out);
+    let _ = writeln!(
+        out,
+        "| Metric | Value | Target | Status | What it measured |"
+    );
+    let _ = writeln!(out, "| --- | --- | --- | --- | --- |");
+    for row in &report.rows {
+        let _ = writeln!(
+            out,
+            "| {} | {} | {} | {} | {} |",
+            row.metric,
+            row.value.as_deref().unwrap_or("-"),
+            row.target,
+            row.status.label(),
+            row.measured
+        );
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::process::Process;
+
+    fn process(pid: i32, name: &str, rss: u64, footprint: u64, cpu_ns: u64) -> Process {
+        Process {
+            pid,
+            responsible: 700,
+            name: name.to_owned(),
+            rss,
+            footprint,
+            cpu_ns,
+        }
+    }
+
+    fn sample(at_ms: f64, app_cpu: u64, webkit: Vec<Process>) -> Sample {
+        Sample {
+            at_ms,
+            app: process(700, "twigo", 90 * 1_000_000, 80 * 1_000_000, app_cpu),
+            webkit,
+            other_webkit: vec![process(501, "com.apple.WebKit.Networking", 1, 1, 1)],
+        }
+    }
+
+    fn inputs(sort_ms: f64, frame_ms: f64, idle_ns: u64) -> Inputs {
+        let webkit = |cpu| {
+            vec![
+                process(
+                    701,
+                    "com.apple.WebKit.WebContent",
+                    200_000_000,
+                    150_000_000,
+                    cpu,
+                ),
+                process(
+                    702,
+                    "com.apple.WebKit.Networking",
+                    20_000_000,
+                    10_000_000,
+                    cpu,
+                ),
+            ]
+        };
+        Inputs {
+            run: Run {
+                date: "2026-11-01".into(),
+                machine: "Apple M4 Max".into(),
+                os: "macOS 27.0".into(),
+                commit: "abc".into(),
+                build: "release".into(),
+            },
+            webview: Webview {
+                backend: "mock".into(),
+                rows: 5000,
+                changes_per_second: 100.0,
+                refresh_ms: 16.7,
+                first_paint: FirstPaint {
+                    batch_to_paint_ms: 20.0,
+                },
+                scroll: Scroll {
+                    seconds: 5.0,
+                    px_per_second: 4000.0,
+                    frame_ms: vec![frame_ms; 300],
+                    blank_frames: 0,
+                },
+                sort: vec![SortSample {
+                    column: "Name".into(),
+                    descending: false,
+                    ms: sort_ms,
+                }],
+                changes: Changes {
+                    seconds: 60.0,
+                    ms: vec![10.0, 20.0],
+                    offscreen: 0,
+                    superseded: 0,
+                    timed_out: 0,
+                },
+            },
+            memory: sample(0.0, 0, webkit(0)),
+            idle: (
+                sample(0.0, 1_000, webkit(1_000)),
+                sample(10_000.0, 1_000 + idle_ns, webkit(1_000)),
+            ),
+            hidden: Some(Hidden {
+                visibility: "hidden".into(),
+            }),
+            churn: None,
+        }
+    }
+
+    fn statuses(report: &Report) -> Vec<(&str, &Status)> {
+        report
+            .rows
+            .iter()
+            .map(|row| (row.metric.as_str(), &row.status))
+            .collect()
+    }
+
+    #[test]
+    fn every_metric_has_a_row_and_the_real_paths_wait_for_m1() {
+        let report = build(inputs(30.0, 16.7, 1_000_000));
+        assert_eq!(
+            statuses(&report),
+            [
+                (
+                    "First paint after the space connects",
+                    &Status::NotMeasurableBeforeM1
+                ),
+                ("  webview half", &Status::MockHalf),
+                ("Change → painted cell, p95", &Status::NotMeasurableBeforeM1),
+                ("  webview half", &Status::MockHalf),
+                ("Scroll and sort: scroll", &Status::Pass),
+                ("Scroll and sort: sort", &Status::Pass),
+                ("Core RSS with the pod list open", &Status::Pass),
+                ("Webview memory with the pod list open", &Status::Pass),
+                ("Idle CPU, 100 changes/s, window hidden", &Status::Pass),
+            ]
+        );
+        assert!(report.rows[0].value.is_none());
+        assert!(report.rows[2].value.is_none());
+        assert_eq!(report.rows[7].value.as_deref(), Some("160 MB"));
+        assert_eq!(report.rows[8].value.as_deref(), Some("0.01 %"));
+    }
+
+    #[test]
+    fn slow_sorts_dropped_frames_and_a_busy_idle_fail() {
+        let report = build(inputs(80.0, 20.0, 200_000_000));
+        let failed: Vec<&str> = report
+            .rows
+            .iter()
+            .filter(|row| row.status == Status::Fail)
+            .map(|row| row.metric.as_str())
+            .collect();
+        assert_eq!(
+            failed,
+            [
+                "Scroll and sort: scroll",
+                "Scroll and sort: sort",
+                "Idle CPU, 100 changes/s, window hidden"
+            ]
+        );
+    }
+
+    #[test]
+    fn cpu_counts_a_process_that_started_in_between_whole() {
+        let start = sample(0.0, 0, vec![]);
+        let end = sample(
+            1_000.0,
+            5_000_000,
+            vec![process(701, "com.apple.WebKit.WebContent", 1, 1, 5_000_000)],
+        );
+        assert!((cpu_percent(&start, &end) - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_table_lists_every_row() {
+        let report = build(inputs(30.0, 16.7, 0));
+        let table = table(&report);
+        assert_eq!(table.lines().filter(|l| l.starts_with("| ")).count(), 11);
+        assert!(table.contains(
+            "| First paint after the space connects | - | < 1 s | not measurable before M1 |"
+        ));
+    }
+}

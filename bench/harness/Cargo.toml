@@ -1,6 +1,6 @@
 [package]
 name = "twigo-bench"
-description = "The bench harness's tools: the churn generator (ARCHITECTURE 3.8)"
+description = "The bench harness's tools: the churn generator, the process sampler and the report (ARCHITECTURE 3.8)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -17,3 +17,7 @@ serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 twigo-kube.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc.workspace = true
+mach2.workspace = true
