@@ -498,7 +498,7 @@ It builds the app's bench mode in release, runs a churn generator at 100 changes
 - **Idle CPU** is the CPU time of the app and those WebKit processes over 30 s with the window hidden, as a share of one core.
 
 Until M1 the webview runs on the mock backend, so first paint and change → painted cell are not measurable: only their webview halves, from a batch to its paint, are shown, apart and unjudged.
-Scroll, sort, memory and idle CPU are measured in the real app on the mock, which sorts and windows in JS in the webview, while the core holds no watch cache.
+Scroll, sort, memory and idle CPU are measured in the real app on the mock, which sorts and windows in JS in the webview, while the core holds no watch cache, so they are shown and not judged either: the report judges a metric, and fails the run on a missed target, only off the mock.
 CI does not run the harness yet: it needs an unlocked GUI session, since WebKit paints nothing behind a locked screen, and Linux needs the sampler's WebKitGTK branch.
 
 The bench also replays the cases that broke other clients, and one that loopback cannot show:

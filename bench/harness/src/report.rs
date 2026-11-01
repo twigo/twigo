@@ -130,19 +130,33 @@ pub enum Status {
     NotMeasurableBeforeM1,
     /// Half of a metric, on the mock: shown, never judged against the target.
     MockHalf,
+    /// The whole metric, measured on the mock, whose work is not Rust's: shown, never judged.
+    OnMock,
 }
 
 impl Status {
-    fn judge(pass: bool) -> Self {
-        if pass { Status::Pass } else { Status::Fail }
-    }
-
     fn label(&self) -> &'static str {
         match self {
             Status::Pass => "pass",
             Status::Fail => "FAIL",
             Status::NotMeasurableBeforeM1 => "not measurable before M1",
             Status::MockHalf => "mock half, not judged",
+            Status::OnMock => "on the mock, not judged before M1",
+        }
+    }
+}
+
+/// Judges a measurement against its target, unless the webview ran on the mock.
+struct Judge {
+    on_mock: bool,
+}
+
+impl Judge {
+    fn status(&self, pass: bool) -> Status {
+        match (self.on_mock, pass) {
+            (true, _) => Status::OnMock,
+            (false, true) => Status::Pass,
+            (false, false) => Status::Fail,
         }
     }
 }
@@ -161,6 +175,16 @@ pub struct Report {
     pub run: Run,
     pub rows: Vec<Row>,
     pub churn: Option<Churn>,
+}
+
+impl Report {
+    pub fn failed(&self) -> Vec<&str> {
+        self.rows
+            .iter()
+            .filter(|row| row.status == Status::Fail)
+            .map(|row| row.metric.as_str())
+            .collect()
+    }
 }
 
 /// CPU time of the app and its WebKit processes between two samples, as a share of one core.
@@ -208,6 +232,9 @@ pub fn build(inputs: Inputs) -> Report {
         "{} rows from the {} backend, in the webview",
         webview.rows, webview.backend
     );
+    let judge = Judge {
+        on_mock: webview.backend == "mock",
+    };
     let mut rows = Vec::new();
 
     rows.push(Row {
@@ -256,9 +283,9 @@ pub fn build(inputs: Inputs) -> Report {
         metric: "Scroll and sort: scroll".into(),
         value: Some(format!("{scroll_fps:.1} fps")),
         target: format!("{FPS:.0} fps"),
-        status: Status::judge(scroll_fps >= FPS_PASS),
+        status: judge.status(scroll_fps >= FPS_PASS),
         measured: format!(
-            "requestAnimationFrame over {:.0} s of programmatic scroll at {:.0} px/s; frame p95 {frame_p95:.1} ms, display frame {:.1} ms; rows awaiting data in {} of {} frames; {on_mock}, which serves each window from JS",
+            "requestAnimationFrame over {:.0} s of programmatic scroll at {:.0} px/s; frame p95 {frame_p95:.1} ms, display frame {:.1} ms; rows awaiting data in {} of {} frames; {on_mock}, which serves each window from JS and reruns the query over every pod on each churn tick, on the webview's main thread",
             webview.scroll.seconds,
             webview.scroll.px_per_second,
             webview.refresh_ms,
@@ -278,9 +305,9 @@ pub fn build(inputs: Inputs) -> Report {
         metric: "Scroll and sort: sort".into(),
         value: sort.as_ref().map(|s| format!("p95 {:.1} ms", s.p95)),
         target: format!("< {SORT_P95_MS:.0} ms"),
-        status: Status::judge(sort.as_ref().is_some_and(|s| s.p95 < SORT_P95_MS)),
+        status: judge.status(sort.as_ref().is_some_and(|s| s.p95 < SORT_P95_MS)),
         measured: format!(
-            "header click → resorted rows painted, {}; {}; {on_mock}, which sorts in JS, unlike Rust's incremental index",
+            "header click → resorted rows painted, {}; {}; {on_mock}, which sorts every pod in JS on the webview's main thread, unlike Rust's incremental index",
             columns.join(" "),
             sort.as_ref().map_or("no samples".into(), spread_text),
         ),
@@ -291,7 +318,7 @@ pub fn build(inputs: Inputs) -> Report {
         metric: "Core RSS with the pod list open".into(),
         value: Some(format!("{core:.0} MB")),
         target: format!("< {CORE_RSS_MB:.0} MB"),
-        status: Status::judge(core < CORE_RSS_MB),
+        status: judge.status(core < CORE_RSS_MB),
         measured: format!(
             "resident size of {} (pid {}) under churn; M0's core holds no watch cache yet, and the list lives in the webview's mock",
             memory.app.name, memory.app.pid
@@ -315,9 +342,9 @@ pub fn build(inputs: Inputs) -> Report {
         metric: "Webview memory with the pod list open".into(),
         value: Some(format!("{webkit:.0} MB")),
         target: format!("< {WEBVIEW_MB:.0} MB"),
-        status: Status::judge(!memory.webkit.is_empty() && webkit < WEBVIEW_MB),
+        status: judge.status(!memory.webkit.is_empty() && webkit < WEBVIEW_MB),
         measured: format!(
-            "physical footprint of the WebKit processes the app is responsible for ({}), under churn; their RSS adds up to {webkit_rss:.0} MB; {} other WebKit processes left out; the webview holds the mock's {} pods",
+            "physical footprint of the WebKit processes the app is responsible for ({}), under churn; their RSS adds up to {webkit_rss:.0} MB; {} other WebKit processes left out; the webview holds the mock's {} pods, which Rust holds from M1",
             names.join(", "),
             memory.other_webkit.len(),
             webview.rows,
@@ -330,9 +357,9 @@ pub fn build(inputs: Inputs) -> Report {
         metric: "Idle CPU, 100 changes/s, window hidden".into(),
         value: Some(format!("{cpu:.2} %")),
         target: format!("< {IDLE_CPU_PERCENT:.0} %"),
-        status: Status::judge(cpu < IDLE_CPU_PERCENT),
+        status: judge.status(cpu < IDLE_CPU_PERCENT),
         measured: format!(
-            "CPU time of the app and its {} WebKit processes over {:.0} s, as a share of one core; document {}; the mock churns {:.0} changes/s in the webview, and the cluster's churn reaches nothing before M1",
+            "CPU time of the app and its {} WebKit processes over {:.0} s, as a share of one core; document {}; hidden, the webview stops acknowledging batches, so this counts the mock's {:.0} changes/s timer in the webview, and the cluster's churn reaches nothing before M1",
             end.webkit.len(),
             (end.at_ms - start.at_ms) / 1000.0,
             hidden.map_or("visibility not reported".into(), |h| h.visibility),
@@ -410,7 +437,7 @@ mod tests {
         }
     }
 
-    fn inputs(sort_ms: f64, frame_ms: f64, idle_ns: u64) -> Inputs {
+    fn inputs(backend: &str, sort_ms: f64, frame_ms: f64, idle_ns: u64) -> Inputs {
         let webkit = |cpu| {
             vec![
                 process(
@@ -438,7 +465,7 @@ mod tests {
                 build: "release".into(),
             },
             webview: Webview {
-                backend: "mock".into(),
+                backend: backend.into(),
                 rows: 5000,
                 changes_per_second: 100.0,
                 refresh_ms: 16.7,
@@ -485,8 +512,8 @@ mod tests {
     }
 
     #[test]
-    fn every_metric_has_a_row_and_the_real_paths_wait_for_m1() {
-        let report = build(inputs(30.0, 16.7, 1_000_000));
+    fn every_metric_has_a_row_and_none_measured_on_the_mock_is_judged() {
+        let report = build(inputs("mock", 80.0, 20.0, 200_000_000));
         assert_eq!(
             statuses(&report),
             [
@@ -497,30 +524,25 @@ mod tests {
                 ("  webview half", &Status::MockHalf),
                 ("Change → painted cell, p95", &Status::NotMeasurableBeforeM1),
                 ("  webview half", &Status::MockHalf),
-                ("Scroll and sort: scroll", &Status::Pass),
-                ("Scroll and sort: sort", &Status::Pass),
-                ("Core RSS with the pod list open", &Status::Pass),
-                ("Webview memory with the pod list open", &Status::Pass),
-                ("Idle CPU, 100 changes/s, window hidden", &Status::Pass),
+                ("Scroll and sort: scroll", &Status::OnMock),
+                ("Scroll and sort: sort", &Status::OnMock),
+                ("Core RSS with the pod list open", &Status::OnMock),
+                ("Webview memory with the pod list open", &Status::OnMock),
+                ("Idle CPU, 100 changes/s, window hidden", &Status::OnMock),
             ]
         );
         assert!(report.rows[0].value.is_none());
         assert!(report.rows[2].value.is_none());
         assert_eq!(report.rows[7].value.as_deref(), Some("160 MB"));
-        assert_eq!(report.rows[8].value.as_deref(), Some("0.01 %"));
+        assert_eq!(report.rows[8].value.as_deref(), Some("2.00 %"));
+        assert!(report.failed().is_empty());
     }
 
     #[test]
-    fn slow_sorts_dropped_frames_and_a_busy_idle_fail() {
-        let report = build(inputs(80.0, 20.0, 200_000_000));
-        let failed: Vec<&str> = report
-            .rows
-            .iter()
-            .filter(|row| row.status == Status::Fail)
-            .map(|row| row.metric.as_str())
-            .collect();
+    fn off_the_mock_slow_sorts_dropped_frames_and_a_busy_idle_fail() {
+        let report = build(inputs("tauri", 80.0, 20.0, 200_000_000));
         assert_eq!(
-            failed,
+            report.failed(),
             [
                 "Scroll and sort: scroll",
                 "Scroll and sort: sort",
@@ -542,7 +564,7 @@ mod tests {
 
     #[test]
     fn the_table_lists_every_row() {
-        let report = build(inputs(30.0, 16.7, 0));
+        let report = build(inputs("mock", 30.0, 16.7, 0));
         let table = table(&report);
         assert_eq!(table.lines().filter(|l| l.starts_with("| ")).count(), 11);
         assert!(table.contains(
