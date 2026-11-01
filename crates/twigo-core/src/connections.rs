@@ -12,7 +12,23 @@ use twigo_kube::kubeconfig::{self, Fingerprint};
 
 #[derive(Default)]
 pub struct Connections {
-    contexts: Mutex<HashMap<String, Arc<tokio::sync::Mutex<Option<Built>>>>>,
+    contexts: Mutex<HashMap<String, Arc<Slot>>>,
+}
+
+/// A context's clients, which retiring reaches while new ones are built.
+#[derive(Default)]
+struct Slot {
+    building: tokio::sync::Mutex<()>,
+    built: Mutex<Option<Built>>,
+}
+
+impl Slot {
+    fn current(&self, context: &kubeconfig::Context, env: &ProxyEnv) -> Option<Arc<Clients>> {
+        let built = self.built.lock().expect("slot lock");
+        let built = built.as_ref()?;
+        (built.fingerprint == context.fingerprint && built.env == *env)
+            .then(|| Arc::clone(&built.clients))
+    }
 }
 
 struct Built {
@@ -41,12 +57,12 @@ impl Connections {
             let mut contexts = self.contexts.lock().expect("connections lock");
             Arc::clone(contexts.entry(context.name.clone()).or_default())
         };
-        let mut built = slot.lock().await;
-        if let Some(built) = &*built
-            && built.fingerprint == context.fingerprint
-            && built.env == *env
-        {
-            return Ok(Arc::clone(&built.clients));
+        if let Some(clients) = slot.current(context, env) {
+            return Ok(clients);
+        }
+        let _building = slot.building.lock().await;
+        if let Some(clients) = slot.current(context, env) {
+            return Ok(clients);
         }
         let options = KubeConfigOptions {
             context: Some(context.name.clone()),
@@ -61,7 +77,7 @@ impl Connections {
                 ..Options::default()
             },
         )?);
-        *built = Some(Built {
+        *slot.built.lock().expect("slot lock") = Some(Built {
             fingerprint: context.fingerprint,
             env: env.clone(),
             clients: Arc::clone(&clients),
@@ -97,9 +113,8 @@ impl Connections {
         let contexts = self.contexts.lock().expect("connections lock");
         contexts
             .iter()
-            // A slot being built has no connection yet.
             .filter_map(|(name, slot)| {
-                let built = slot.try_lock().ok()?;
+                let built = slot.built.lock().expect("slot lock");
                 Some((name.clone(), Arc::clone(&built.as_ref()?.clients)))
             })
             .collect()
@@ -189,6 +204,28 @@ contexts:
             .await
             .unwrap();
         assert!(!Arc::ptr_eq(&b, &through), "the proxy variables changed");
+    }
+
+    #[tokio::test]
+    async fn retiring_reaches_clients_while_new_ones_are_built() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config"), KUBECONFIG).unwrap();
+        ca(
+            dir.path(),
+            &rcgen::generate_simple_self_signed(["a".to_owned()]).unwrap(),
+        );
+        let connections = Connections::default();
+        let catalog = load(dir.path());
+        let a = connections
+            .clients(find(&catalog, "kind-a"), &ProxyEnv::default())
+            .await
+            .unwrap();
+        let retired = a.connections().retired();
+
+        let slot = Arc::clone(&connections.contexts.lock().unwrap()["kind-a"]);
+        let _building = slot.building.lock().await;
+        connections.retire();
+        assert!(retired.has_changed().unwrap());
     }
 
     #[tokio::test]
