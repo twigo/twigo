@@ -4,7 +4,7 @@ import type { Alignment } from "../views/registry";
 /** Items that features contribute, ordered by priority on each side (ARCHITECTURE 4.1). */
 export function StatusBar() {
   return (
-    <footer className="flex h-6 shrink-0 items-center justify-between gap-3 border-t border-border bg-statusbar pr-3 pl-4 text-xs text-statusbar-foreground">
+    <footer className="flex h-6 shrink-0 items-center justify-between gap-2 bg-statusbar px-2 text-xs text-statusbar-foreground">
       <Side alignment="left" />
       <Side alignment="right" />
     </footer>

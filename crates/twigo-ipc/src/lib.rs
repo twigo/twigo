@@ -10,12 +10,12 @@ mod space;
 mod state;
 mod typescript;
 
-pub use discovery::Resource;
+pub use discovery::{ClusterVersion, Resource};
 pub use error::{ErrorKind, IpcError};
 pub use keyboard::{KeyMapping, KeyboardLayout};
 pub use list::{
-    Ack, Cell, Column, ColumnKind, Gvr, ListBatch, ListQuery, Row, RowId, SetWindow, Sort,
-    SubscriptionId, ViewState, Window,
+    Ack, Cell, Column, ColumnKind, GroupCount, Gvr, ListBatch, ListQuery, Row, RowId, SetWindow,
+    Sort, SubscriptionId, ViewState, Window,
 };
 pub use space::{Context, ContextColor, Space};
 pub use state::StateEntry;

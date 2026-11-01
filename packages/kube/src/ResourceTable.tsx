@@ -11,6 +11,7 @@ import type {
   Backend,
   Cell,
   Column,
+  GroupCount,
   Gvr,
   ListSnapshot,
   Row,
@@ -22,7 +23,7 @@ import { cn, EmptyState, Skeleton } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import type { FlashTracker } from "./flash";
 import { kindIcon } from "./kinds";
-import { cellTone } from "./tones";
+import { cellTone, statusColumn } from "./tones";
 import { useListView } from "./useListView";
 import { useNow } from "./useNow";
 
@@ -56,7 +57,11 @@ interface Props {
   /** A row the user opened: a click, or Enter through `activate`. */
   onActivate?: (row: Row) => void;
   /** How many rows match and the view's state, as they change. */
-  onStatus?: (total: number, status: ViewState) => void;
+  onStatus?: (
+    total: number,
+    status: ViewState,
+    groups: readonly GroupCount[],
+  ) => void;
   /** Registers the focusable grid while it is mounted, for context keys and commands. */
   register?: (grid: HTMLElement, list: ListController) => () => void;
 }
@@ -98,6 +103,7 @@ function ResourceList({
     labelSelector: labelSelector ?? null,
     text: text ?? null,
     sort,
+    groupBy: statusColumn(gvr) ?? null,
   });
   const now = useNow(1000);
   const [grid, setGrid] = useState<HTMLDivElement | null>(null);
@@ -178,8 +184,8 @@ function ResourceList({
   }, [onSelect, selectedRow, snapshot.columns]);
 
   useEffect(() => {
-    onStatus?.(snapshot.total, status);
-  }, [onStatus, snapshot.total, status]);
+    onStatus?.(snapshot.total, status, snapshot.groups);
+  }, [onStatus, snapshot.total, status, snapshot.groups]);
 
   const [widths, setWidths] = useState<Readonly<Record<string, number>>>({});
   const widthOf = (column: Column) =>

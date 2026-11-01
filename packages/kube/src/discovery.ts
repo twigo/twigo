@@ -4,6 +4,7 @@ import type { Backend, Gvr, Resource } from "@twigo/protocol";
 /** The resources each space serves, asked once per space. */
 export class Discovery {
   readonly #spaces = new Map<string, Promise<readonly Resource[]>>();
+  readonly #versions = new Map<string, Promise<string>>();
 
   constructor(private readonly backend: Backend) {}
 
@@ -13,6 +14,19 @@ export class Discovery {
       pending = this.backend.invoke("resources_list", space);
       pending.catch(() => this.#spaces.delete(space));
       this.#spaces.set(space, pending);
+    }
+    return pending;
+  }
+
+  /** A context's Kubernetes version, asked once. */
+  version(context: string): Promise<string> {
+    let pending = this.#versions.get(context);
+    if (!pending) {
+      pending = this.backend
+        .invoke("cluster_version", context)
+        .then((version) => version.gitVersion);
+      pending.catch(() => this.#versions.delete(context));
+      this.#versions.set(context, pending);
     }
     return pending;
   }

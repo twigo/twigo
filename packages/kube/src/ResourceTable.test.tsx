@@ -15,7 +15,12 @@ import {
   vi,
 } from "vitest";
 import { StrictMode } from "react";
-import type { Backend, ListBatch, ViewState } from "@twigo/protocol";
+import type {
+  Backend,
+  GroupCount,
+  ListBatch,
+  ViewState,
+} from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import { PODS } from "./kinds";
 import { stateLabel } from "./listStatus";
@@ -57,7 +62,10 @@ async function settle(steps = 6) {
 }
 
 async function show(scenario: MockScenario, space = "prod-eu") {
-  const onStatus = vi.fn<(total: number, status: ViewState) => void>();
+  const onStatus =
+    vi.fn<
+      (total: number, status: ViewState, groups: readonly GroupCount[]) => void
+    >();
   render(
     <ResourceTable
       backend={createMockBackend(scenario)}
@@ -75,7 +83,10 @@ const header = (name: string) => screen.getByRole("columnheader", { name });
 
 test("rows from the window render with the server's priority-0 columns", async () => {
   const onStatus = await show("ready");
-  expect(onStatus).toHaveBeenLastCalledWith(5000, { state: "ready" });
+  const [total, status, groups] = onStatus.mock.lastCall ?? [];
+  expect([total, status]).toEqual([5000, { state: "ready" }]);
+  expect(groups?.reduce((sum, group) => sum + group.count, 0)).toBe(5000);
+  expect(groups?.[0]?.value).toBe("Running");
   const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
   expect(headers).toEqual([
     "Name",
@@ -212,6 +223,7 @@ function batch(
       cells: [id, value],
     })),
     status: { state: "ready" },
+    groups: null,
   };
 }
 

@@ -5,8 +5,8 @@
 use ts_rs::TS;
 
 use crate::{
-    Ack, Context, KeyboardLayout, ListBatch, ListQuery, Resource, SetWindow, Space, StateEntry,
-    SubscriptionId,
+    Ack, ClusterVersion, Context, KeyboardLayout, ListBatch, ListQuery, Resource, SetWindow, Space,
+    StateEntry, SubscriptionId,
 };
 
 pub trait Command {
@@ -54,6 +54,16 @@ impl Command for ResourcesList {
     const NAME: &'static str = "resources_list";
     type Request = String;
     type Response = Vec<Resource>;
+    type Message = ();
+}
+
+/// A context's Kubernetes version, by the context's name.
+pub struct ClusterVersionGet;
+
+impl Command for ClusterVersionGet {
+    const NAME: &'static str = "cluster_version";
+    type Request = String;
+    type Response = ClusterVersion;
     type Message = ();
 }
 

@@ -230,6 +230,7 @@ export function resourceProvider(
           labelSelector: null,
           text: filter.trim() === "" ? null : filter.trim(),
           sort: null,
+          groupBy: null,
         }),
       );
       shown = { space: space.id, snapshot };

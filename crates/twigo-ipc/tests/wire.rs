@@ -58,8 +58,10 @@ fn queries_use_camel_case_and_newtypes_are_bare() {
             column: "Age".into(),
             descending: true,
         }),
+        group_by: Some("Status".into()),
     };
     assert_eq!(wire(&query)["labelSelector"], json!("app=api"));
+    assert_eq!(wire(&query)["groupBy"], json!("Status"));
     assert_eq!(wire(&SubscriptionId(7)), json!(7));
     assert_eq!(
         wire(&RowId("prod/default/api".into())),

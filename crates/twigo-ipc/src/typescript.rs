@@ -4,8 +4,9 @@ use std::fmt::Write;
 use ts_rs::{Config, TS, TypeVisitor};
 
 use crate::command::{
-    Command, ContextsList, KeyboardLayoutWatch, ListAck, ListSetWindow, ListSubscribe,
-    ListUnsubscribe, NamespacesList, ResourcesList, SpaceOpen, SpacesList, StateGet, StateSet,
+    ClusterVersionGet, Command, ContextsList, KeyboardLayoutWatch, ListAck, ListSetWindow,
+    ListSubscribe, ListUnsubscribe, NamespacesList, ResourcesList, SpaceOpen, SpacesList, StateGet,
+    StateSet,
 };
 
 /// The TypeScript module of `packages/protocol`: every type the commands
@@ -21,6 +22,7 @@ pub fn typescript() -> String {
     module.command::<SpaceOpen>();
     module.command::<ResourcesList>();
     module.command::<NamespacesList>();
+    module.command::<ClusterVersionGet>();
     module.command::<ListSubscribe>();
     module.command::<ListSetWindow>();
     module.command::<ListAck>();

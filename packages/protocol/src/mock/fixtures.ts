@@ -31,6 +31,15 @@ export const CONTEXTS: Context[] = [
   { name: "kind-local", color: null },
 ];
 
+/** Each context's Kubernetes version, within the releases Twigo supports (D12). */
+export const VERSIONS: Readonly<Record<string, string>> = {
+  "prod-eu": "v1.33.4",
+  staging: "v1.35.2",
+  dev: "v1.37.0",
+  qa: "v1.36.1",
+  "kind-local": "v1.37.0",
+};
+
 /** Pods per context; dev has none, to show the empty state. */
 export const POD_COUNT: Readonly<Record<string, number>> = {
   "prod-eu": 5000,

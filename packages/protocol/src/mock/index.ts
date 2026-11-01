@@ -9,14 +9,15 @@ import type {
 import { IpcError } from "../error";
 import type {
   Column,
+  GroupCount,
   KeyboardLayout,
   ListBatch,
   ListQuery,
   RowId,
   ViewState,
 } from "../generated";
-import { Cluster, podRow, type Pod } from "./cluster";
-import { CONTEXTS, NAMESPACES, POD_COUNT, SPACES } from "./fixtures";
+import { Cluster, podCells, podRow, type Pod } from "./cluster";
+import { CONTEXTS, NAMESPACES, POD_COUNT, SPACES, VERSIONS } from "./fixtures";
 import dvorak from "./layouts/dvorak.json";
 import french from "./layouts/french.json";
 import german from "./layouts/german.json";
@@ -122,6 +123,11 @@ export function createMockBackend(
     resources_list: (id) => {
       space(id);
       return RESOURCES;
+    },
+    cluster_version: (name) => {
+      const version = VERSIONS[name];
+      if (!version) throw new IpcError("notFound", `no context ${name}`);
+      return { gitVersion: version };
     },
     namespaces_list: (id) => {
       space(id);
@@ -258,7 +264,8 @@ class Subscription {
     ids: readonly RowId[];
     versions: ReadonlyMap<RowId, number>;
     status: string;
-  } = { total: -1, ids: [], versions: new Map(), status: "" };
+    groups: string;
+  } = { total: -1, ids: [], versions: new Map(), status: "", groups: "" };
 
   constructor(
     query: ListQuery,
@@ -348,6 +355,9 @@ class Subscription {
     const visible = pods.slice(start, end);
     const ids = visible.map((pod) => pod.id);
     const status = JSON.stringify(this.#status);
+    const groups = this.#groups(pods);
+    const groupsJson = JSON.stringify(groups);
+    const groupsChanged = groupsJson !== this.#sent.groups;
     const first = this.#seq === 0;
     const windowChanged =
       first ||
@@ -360,6 +370,7 @@ class Subscription {
       !windowChanged &&
       upserts.length === 0 &&
       status === this.#sent.status &&
+      !groupsChanged &&
       pods.length === this.#sent.total
     ) {
       return;
@@ -371,6 +382,7 @@ class Subscription {
       ids,
       versions: new Map(visible.map((pod) => [pod.id, pod.version])),
       status,
+      groups: groupsJson,
     };
     this.#seq++;
     this.#onMessage({
@@ -380,6 +392,27 @@ class Subscription {
       window: windowChanged ? { start, ids } : null,
       upserts: upserts.map((pod) => podRow(pod, withContext, withNamespace)),
       status: this.#status,
+      groups: groups && (first || groupsChanged) ? groups : null,
     });
+  }
+
+  /** The matching pods per value of the `groupBy` column, largest first. */
+  #groups(pods: readonly Pod[]): GroupCount[] | null {
+    const column = this.#query.groupBy;
+    if (column === null) return null;
+    const at = this.#columns.findIndex(
+      (candidate) => candidate.name === column,
+    );
+    if (at < 0) return null;
+    const withContext = this.#columns[0]?.name === "Context";
+    const withNamespace = this.#columns.some((c) => c.name === "Namespace");
+    const counts = new Map<string, number>();
+    for (const pod of pods) {
+      const value = String(podCells(pod, withContext, withNamespace)[at] ?? "");
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+    return [...counts]
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
   }
 }

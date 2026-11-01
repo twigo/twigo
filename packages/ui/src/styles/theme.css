@@ -76,9 +76,10 @@
   --sidebar-foreground: oklch(0.32 0.004 250);
   --sidebar-border: oklch(0.915 0.003 250);
   --panel: oklch(0.975 0.002 250);
-  /* The status bar is shell with quiet text; colour is the cluster's. */
-  --statusbar: var(--shell);
-  --statusbar-foreground: oklch(0.45 0.006 250);
+  /* A matte, muted blue: low chroma, so it reads as ink, not as a glossy
+     accent. */
+  --statusbar: oklch(0.5 0.07 252);
+  --statusbar-foreground: oklch(0.97 0.008 252);
 
   --ok: oklch(0.62 0.14 150);
   --warn: oklch(0.72 0.15 75);
@@ -149,8 +150,8 @@
   --sidebar-foreground: oklch(0.87 0.002 250);
   --sidebar-border: oklch(1 0 0 / 8%);
   --panel: oklch(0.205 0.002 250);
-  --statusbar: var(--shell);
-  --statusbar-foreground: oklch(0.7 0.003 250);
+  --statusbar: oklch(0.34 0.05 252);
+  --statusbar-foreground: oklch(0.9 0.015 252);
 
   --ok: oklch(0.72 0.15 150);
   --warn: oklch(0.78 0.15 75);

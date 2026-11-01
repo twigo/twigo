@@ -5,7 +5,7 @@ import { Explorer } from "./Explorer";
 import { ListIcon } from "./KindIcon";
 import { ListEditor, type ListServices } from "./ListEditor";
 import { ListStatuses } from "./listStatus";
-import { ListStatusItem } from "./ListStatusItem";
+import { ClusterStatusItem, ListSummaryItem } from "./ListStatusItem";
 import { Lists } from "./lists";
 import {
   listProvider,
@@ -61,10 +61,21 @@ export function registerKube(workbench: Workbench): void {
     component: () => <Explorer discovery={services.discovery} />,
   });
   views.registerStatusBarItem({
-    id: "kube.list",
+    id: "kube.cluster",
     alignment: "left",
     priority: 100,
-    component: () => <ListStatusItem statuses={services.statuses} />,
+    component: () => (
+      <ClusterStatusItem
+        statuses={services.statuses}
+        discovery={services.discovery}
+      />
+    ),
+  });
+  views.registerStatusBarItem({
+    id: "kube.list",
+    alignment: "right",
+    priority: 100,
+    component: () => <ListSummaryItem statuses={services.statuses} />,
   });
 
   editors.register({

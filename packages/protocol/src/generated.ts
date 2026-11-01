@@ -4,6 +4,15 @@ export type Ack = { id: SubscriptionId, seq: number, };
 
 export type Cell = null | boolean | number | number | string;
 
+/**
+ * What the API server says about itself, from `/version`.
+ */
+export type ClusterVersion = { 
+/**
+ * Such as `v1.33.4`.
+ */
+gitVersion: string, };
+
 export type Column = { name: string, kind: ColumnKind, 
 /**
  * 0 is shown by default; higher only in the wide view.
@@ -21,6 +30,8 @@ color: ContextColor | null, };
 export type ContextColor = "red" | "orange" | "yellow" | "green" | "blue" | "purple";
 
 export type ErrorKind = "invalidInput" | "notFound" | "conflict" | "forbidden" | "unauthorized" | "timeout" | "unavailable" | "internal";
+
+export type GroupCount = { value: string, count: number, };
 
 export type Gvr = { 
 /**
@@ -81,13 +92,22 @@ window: Window | null,
 /**
  * Rows that entered the window or changed.
  */
-upserts: Array<Row>, status: ViewState, };
+upserts: Array<Row>, status: ViewState, 
+/**
+ * With `group_by`: the matching rows per value of that column, present
+ * in the first batch and whenever a count changes.
+ */
+groups: Array<GroupCount> | null, };
 
 export type ListQuery = { space: string, gvr: Gvr, 
 /**
  * Empty for every namespace the space covers.
  */
-namespaces: Array<string>, labelSelector: string | null, text: string | null, sort: Sort | null, };
+namespaces: Array<string>, labelSelector: string | null, text: string | null, sort: Sort | null, 
+/**
+ * A column to count the matching rows by, such as a pod's Status.
+ */
+groupBy: string | null, };
 
 /**
  * A resource the space's clusters serve, from discovery: what the explorer
@@ -149,6 +169,7 @@ export type Commands = {
   space_open: { request: string; response: Space; message: null };
   resources_list: { request: string; response: Array<Resource>; message: null };
   namespaces_list: { request: string; response: Array<string>; message: null };
+  cluster_version: { request: string; response: ClusterVersion; message: null };
   list_subscribe: { request: ListQuery; response: SubscriptionId; message: ListBatch };
   list_set_window: { request: SetWindow; response: null; message: null };
   list_ack: { request: Ack; response: null; message: null };

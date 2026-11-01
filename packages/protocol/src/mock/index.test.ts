@@ -10,6 +10,7 @@ function query(rest: Partial<ListQuery> = {}): ListQuery {
     labelSelector: null,
     text: null,
     sort: null,
+    groupBy: null,
     ...rest,
   };
 }
@@ -256,4 +257,22 @@ test("state reads back what was stored, and null before", async () => {
     backend.invoke("state_set", { key: "space/prod-eu", value: "{}" }),
   );
   expect(await call(backend.invoke("state_get", "space/prod-eu"))).toBe("{}");
+});
+
+test("grouped counts follow the rows once a live list syncs", async () => {
+  const { batches, ack } = await open("live", query({ groupBy: "Status" }));
+  for (let i = 0; i < 40; i++) {
+    await ack();
+    await vi.advanceTimersByTimeAsync(50);
+  }
+  const groups = batches.flatMap((batch) =>
+    batch.groups ? [batch.groups] : [],
+  );
+  const latest = groups[groups.length - 1] ?? [];
+  expect(latest.reduce((sum, group) => sum + group.count, 0)).toBe(5000);
+});
+
+test("no groupBy, no groups", async () => {
+  const { batches } = await open("ready");
+  expect(batches.every((batch) => batch.groups === null)).toBe(true);
 });

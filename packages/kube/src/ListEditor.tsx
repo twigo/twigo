@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Column, Row, ViewState } from "@twigo/protocol";
+import type { Column, GroupCount, Row, ViewState } from "@twigo/protocol";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { Details } from "./Details";
 import { sameGvr, useResources, type Discovery } from "./discovery";
@@ -106,8 +106,8 @@ export function ListEditor({
   );
 
   const onStatus = useCallback(
-    (total: number, status: ViewState) => {
-      statuses.set(uri, { title: title ?? uri, total, status });
+    (total: number, status: ViewState, groups: readonly GroupCount[]) => {
+      statuses.set(uri, { title: title ?? uri, total, status, groups });
     },
     [statuses, uri, title],
   );

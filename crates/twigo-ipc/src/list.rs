@@ -24,6 +24,8 @@ pub struct ListQuery {
     pub label_selector: Option<String>,
     pub text: Option<String>,
     pub sort: Option<Sort>,
+    /// A column to count the matching rows by, such as a pod's Status.
+    pub group_by: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -65,6 +67,15 @@ pub struct ListBatch {
     /// Rows that entered the window or changed.
     pub upserts: Vec<Row>,
     pub status: ViewState,
+    /// With `group_by`: the matching rows per value of that column, present
+    /// in the first batch and whenever a count changes.
+    pub groups: Option<Vec<GroupCount>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct GroupCount {
+    pub value: String,
+    pub count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

@@ -14,3 +14,11 @@ pub struct Resource {
     pub short_names: Vec<String>,
     pub namespaced: bool,
 }
+
+/// What the API server says about itself, from `/version`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ClusterVersion {
+    /// Such as `v1.33.4`.
+    pub git_version: String,
+}

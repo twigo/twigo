@@ -11,6 +11,7 @@ const QUERY: ListQuery = {
   labelSelector: null,
   text: null,
   sort: null,
+  groupBy: null,
 };
 
 function row(id: string, ...cells: Row["cells"]): Row {
@@ -25,6 +26,7 @@ function batch(seq: number, rest: Partial<ListBatch> = {}): ListBatch {
     window: null,
     upserts: [],
     status: { state: "ready" },
+    groups: null,
     ...rest,
   };
 }
