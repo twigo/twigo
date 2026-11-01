@@ -9,6 +9,11 @@ fn main() {
         "state_load",
         "state_set",
         "cluster_version",
+        "context_auth_watch",
+        "context_sign_in",
+        "context_sign_in_cancel",
+        "exec_review",
+        "exec_trust",
     ]);
     let mut attributes = tauri_build::Attributes::new().app_manifest(commands);
     // An inlined plugin keeps its permissions in OUT_DIR, so builds without the feature have no

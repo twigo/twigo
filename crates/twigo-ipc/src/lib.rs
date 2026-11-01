@@ -2,6 +2,7 @@
 //! gets its TypeScript types from these, through [`typescript`].
 
 pub mod command;
+mod credentials;
 mod discovery;
 mod environment;
 mod error;
@@ -11,6 +12,7 @@ mod space;
 mod state;
 mod typescript;
 
+pub use credentials::{ContextAuth, EnvVar, ExecPlugin, ExecReview, PluginStatus, ReviewedPlugin};
 pub use discovery::{ClusterVersion, Resource};
 pub use environment::ShellEnvironment;
 pub use error::{ErrorKind, IpcError};

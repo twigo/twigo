@@ -16,6 +16,8 @@ use kube::config::{Kubeconfig, KubeconfigError, NamedAuthInfo, NamedCluster, Nam
 use serde::Deserialize;
 use twigo_ipc::ContextColor;
 
+use crate::credentials::{Exec, ExecError};
+
 pub use fingerprint::Fingerprint;
 pub use watch::Watch;
 
@@ -192,6 +194,24 @@ impl Entries {
     pub fn proxy_url(&self) -> Option<&str> {
         let cluster = self.0.clusters.first()?.cluster.as_ref()?;
         cluster.proxy_url.as_deref()
+    }
+
+    /// The user entry's exec plugin, if it names one that the entry's other
+    /// credentials do not override.
+    pub fn exec(&self) -> Result<Option<Exec>, ExecError> {
+        let Some(user) = self.0.auth_infos.first() else {
+            return Ok(None);
+        };
+        let Some(auth) = &user.auth_info else {
+            return Ok(None);
+        };
+        let cluster = self
+            .0
+            .clusters
+            .first()
+            .and_then(|named| named.cluster.clone())
+            .unwrap_or_default();
+        Exec::of(&user.name, auth, &cluster)
     }
 }
 

@@ -5,8 +5,8 @@
 use ts_rs::TS;
 
 use crate::{
-    Ack, ClusterVersion, Context, KeyboardLayout, ListBatch, ListQuery, Resource, SetWindow,
-    ShellEnvironment, Space, StateEntry, StateSnapshot, SubscriptionId,
+    Ack, ClusterVersion, Context, ContextAuth, ExecReview, KeyboardLayout, ListBatch, ListQuery,
+    Resource, SetWindow, ShellEnvironment, Space, StateEntry, StateSnapshot, SubscriptionId,
 };
 
 pub trait Command {
@@ -162,6 +162,59 @@ pub struct ShellEnvironmentRetry;
 impl Command for ShellEnvironmentRetry {
     const NAME: &'static str = "shell_environment_retry";
     type Request = ();
+    type Response = ();
+    type Message = ();
+}
+
+/// Answers with how a context gets its credentials, by the context's name,
+/// then sends it again on every change.
+pub struct ContextAuthWatch;
+
+impl Command for ContextAuthWatch {
+    const NAME: &'static str = "context_auth_watch";
+    type Request = String;
+    type Response = ContextAuth;
+    type Message = ContextAuth;
+}
+
+/// Runs a context's plugin now, by the context's name: how the person signs
+/// in, again after a failure too.
+pub struct ContextSignIn;
+
+impl Command for ContextSignIn {
+    const NAME: &'static str = "context_sign_in";
+    type Request = String;
+    type Response = ();
+    type Message = ();
+}
+
+/// Ends the run of a context's plugin, by the context's name.
+pub struct ContextSignInCancel;
+
+impl Command for ContextSignInCancel {
+    const NAME: &'static str = "context_sign_in_cancel";
+    type Request = String;
+    type Response = ();
+    type Message = ();
+}
+
+/// The plugins the person has not trusted yet.
+pub struct ExecReviewGet;
+
+impl Command for ExecReviewGet {
+    const NAME: &'static str = "exec_review";
+    type Request = ();
+    type Response = ExecReview;
+    type Message = ();
+}
+
+/// Trusts the plugins of these digests (`ExecPlugin::digest`) and marks the
+/// review answered, an empty list included.
+pub struct ExecTrust;
+
+impl Command for ExecTrust {
+    const NAME: &'static str = "exec_trust";
+    type Request = Vec<String>;
     type Response = ();
     type Message = ();
 }

@@ -382,7 +382,9 @@ test("the first subscription already carries the column choices the text filter 
   );
   await settle();
   const queries = subscribe.mock.calls.flatMap(([, request]) =>
-    request && "columns" in request ? [request.columns] : [],
+    typeof request === "object" && request && "columns" in request
+      ? [request.columns]
+      : [],
   );
   expect(queries).toEqual([{ IP: true }]);
 });

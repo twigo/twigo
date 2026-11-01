@@ -4,7 +4,8 @@ use std::fmt::Write;
 use ts_rs::{Config, TS, TypeVisitor};
 
 use crate::command::{
-    ClusterVersionGet, Command, ContextsWatch, KeyboardLayoutWatch, ListAck, ListSetWindow,
+    ClusterVersionGet, Command, ContextAuthWatch, ContextSignIn, ContextSignInCancel,
+    ContextsWatch, ExecReviewGet, ExecTrust, KeyboardLayoutWatch, ListAck, ListSetWindow,
     ListSubscribe, ListUnsubscribe, NamespacesList, ResourcesList, ShellEnvironmentRetry,
     ShellEnvironmentWatch, SpaceOpen, SpacesList, StateLoad, StateSet,
 };
@@ -32,6 +33,11 @@ pub fn typescript() -> String {
     module.command::<StateSet>();
     module.command::<ShellEnvironmentWatch>();
     module.command::<ShellEnvironmentRetry>();
+    module.command::<ContextAuthWatch>();
+    module.command::<ContextSignIn>();
+    module.command::<ContextSignInCancel>();
+    module.command::<ExecReviewGet>();
+    module.command::<ExecTrust>();
 
     let mut out = String::from(
         "// Generated from crates/twigo-ipc: TWIGO_UPDATE_TYPESCRIPT=1 cargo test -p twigo-ipc --test typescript\n",

@@ -4,19 +4,19 @@
 #[cfg(feature = "bench")]
 mod bench;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use tauri::async_runtime::JoinHandle;
 use tauri::ipc::Channel;
-use tauri::{Manager, RunEvent, State, Webview};
+use tauri::{Manager, RunEvent, State, Webview, WindowEvent};
 use twigo_core::Core;
 use twigo_env::Environment;
 use twigo_ipc::{
-    ClusterVersion, Context, ErrorKind, IpcError, KeyboardLayout, ShellEnvironment, Space,
-    StateEntry, StateSnapshot,
+    ClusterVersion, Context, ContextAuth, ErrorKind, ExecReview, IpcError, KeyboardLayout,
+    ShellEnvironment, Space, StateEntry, StateSnapshot,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
 
@@ -103,10 +103,27 @@ async fn shell_environment_retry(shell: State<'_, Shell>) -> Result<(), IpcError
     Ok(())
 }
 
-/// The core and the followers of its catalog.
+/// The core and the followers of its catalog and of the active context's
+/// credentials.
 struct App {
     core: Arc<Core>,
     contexts: Followers,
+    auth: Followers,
+    /// The labels of the windows that have the focus, which moves from one
+    /// to the next in either order of their events.
+    focused: Mutex<HashSet<String>>,
+}
+
+impl App {
+    fn focus(&self, window: &str, focused: bool) {
+        let mut windows = self.focused.lock().expect("focus lock");
+        if focused {
+            windows.insert(window.to_owned());
+        } else {
+            windows.remove(window);
+        }
+        self.core.set_focused(!windows.is_empty());
+    }
 }
 
 #[tauri::command]
@@ -173,6 +190,47 @@ async fn cluster_version(app: State<'_, App>, request: String) -> Result<Cluster
     app.core.cluster_version(&request).await
 }
 
+#[tauri::command]
+async fn context_auth_watch(
+    webview: Webview,
+    app: State<'_, App>,
+    request: String,
+    channel: Channel<ContextAuth>,
+) -> Result<ContextAuth, IpcError> {
+    let mut auth = app.core.follow_auth(request);
+    let current = auth.next().await;
+    let follower = tauri::async_runtime::spawn(async move {
+        loop {
+            let next = auth.next().await;
+            if let Err(error) = channel.send(next) {
+                eprintln!("could not send the context's credentials: {error}");
+            }
+        }
+    });
+    app.auth.replace(&webview, follower);
+    Ok(current)
+}
+
+#[tauri::command]
+async fn context_sign_in(app: State<'_, App>, request: String) -> Result<(), IpcError> {
+    app.core.sign_in(&request).await
+}
+
+#[tauri::command]
+async fn context_sign_in_cancel(app: State<'_, App>, request: String) -> Result<(), IpcError> {
+    app.core.cancel_sign_in(&request).await
+}
+
+#[tauri::command]
+async fn exec_review(app: State<'_, App>) -> Result<ExecReview, IpcError> {
+    Ok(app.core.review().await)
+}
+
+#[tauri::command]
+fn exec_trust(app: State<'_, App>, request: Vec<String>) -> Result<(), IpcError> {
+    app.core.trust_plugins(request)
+}
+
 fn explicit_kubeconfig() -> Option<PathBuf> {
     #[cfg(any(debug_assertions, feature = "bench"))]
     if let Some(file) = std::env::var_os(EXPLICIT_KUBECONFIG).filter(|v| !v.is_empty()) {
@@ -224,7 +282,7 @@ fn main() {
                 let environment = Arc::clone(&environment);
                 async move { environment.resolve().await }
             });
-            let core = Arc::new(Core::new(app.path().app_data_dir()?.join("state.json")));
+            let core = Arc::new(Core::new(&app.path().app_data_dir()?));
             tauri::async_runtime::spawn({
                 let core = Arc::clone(&core);
                 let environment = Arc::clone(&environment);
@@ -239,10 +297,16 @@ fn main() {
                 environment,
                 followers: Followers::default(),
             });
-            app.manage(App {
+            let app_state = App {
                 core,
                 contexts: Followers::default(),
-            });
+                auth: Followers::default(),
+                focused: Mutex::default(),
+            };
+            if let Some(window) = app.get_webview_window("main") {
+                app_state.focus("main", window.is_focused().unwrap_or(false));
+            }
+            app.manage(app_state);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -255,7 +319,24 @@ fn main() {
             state_load,
             state_set,
             cluster_version,
+            context_auth_watch,
+            context_sign_in,
+            context_sign_in_cancel,
+            exec_review,
+            exec_trust,
         ])
+        .on_window_event(|window, event| {
+            let focused = match event {
+                WindowEvent::Focused(focused) => *focused,
+                WindowEvent::Destroyed => false,
+                _ => return,
+            };
+            // Before setup the app is not managed yet; setup reads the
+            // window's focus itself.
+            if let Some(app) = window.app_handle().try_state::<App>() {
+                app.focus(window.label(), focused);
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building Twigo");
     app.run(|app, event| {
