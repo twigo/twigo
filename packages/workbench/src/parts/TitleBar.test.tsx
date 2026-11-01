@@ -29,9 +29,7 @@ test("the breadcrumb names the space and its scope and opens their pickers", asy
   const { workbench } = await mounted();
   const space = screen.getByRole("button", { name: "Switch space" });
   expect(space.textContent).toBe("prod-eu");
-  expect(space.querySelector("[data-color]")?.getAttribute("data-color")).toBe(
-    "red",
-  );
+  expect(space.querySelector("[data-color]")).toBeNull();
   expect(
     screen.getByRole("button", { name: "Select namespace" }).textContent,
   ).toBe("All namespaces");

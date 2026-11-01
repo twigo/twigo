@@ -9,14 +9,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { Space } from "@twigo/protocol";
-import {
-  cn,
-  ContextDot,
-  Kbd,
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@twigo/ui";
+import { cn, Kbd, Tooltip, TooltipContent, TooltipTrigger } from "@twigo/ui";
 import { useChanges, useWorkbench } from "../react";
 import { onlyColor } from "./spaceBadge";
 import type { Location } from "../views/registry";
@@ -81,11 +74,9 @@ export function TitleBar() {
 function Breadcrumb({ space }: { space: Space }) {
   const { spaces, quickAccess } = useWorkbench();
   const { namespaces } = spaces.state(space.id);
-  const color = onlyColor(space);
   return (
     <>
       <Crumb label="Switch space" onClick={() => quickAccess.show("ctx ")}>
-        {color && <ContextDot color={color} />}
         <span className="truncate font-medium">
           {space.contexts.map((context) => context.name).join(" + ")}
         </span>

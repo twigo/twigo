@@ -529,7 +529,7 @@ The layout per space is persisted (dockview `toJSON` plus part sizes and visibil
   The rail shows a tile per open space: two letters on the tint of its context's colour, the active one ringed and marked, a lock badge on a locked context.
   The title bar's breadcrumb names the active space and its namespace scope and opens their pickers.
   An optional user-chosen colour from the context's metadata (5.5) is the only extra colour, from six tokens: red, orange, yellow, green, blue and purple.
-  It tints the tile, puts a filled 8 px dot before the name in the breadcrumb, and tints the title bar's left end behind it, as JetBrains does with a project's colour.
+  It tints the tile and the title bar's left end behind the breadcrumb, as JetBrains does with a project's colour.
   A space with several contexts shows none.
 - Every editor in a space belongs to that space's contexts.
   Opening another cluster's object means switching spaces or running **Compare with…**, which opens a diff editor against an object picked from any context and says so in its title.
