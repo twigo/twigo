@@ -17,6 +17,7 @@
     "allow-spaces-list",
     "allow-space-open",
     "allow-state-load",
-    "allow-state-set"
+    "allow-state-set",
+    "allow-cluster-version"
   ]
 }

@@ -11,14 +11,18 @@ publish.workspace = true
 [dependencies]
 atomic-write-file.workspace = true
 jiff = { workspace = true, features = ["serde"] }
+kube.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync"] }
+tower.workspace = true
 twigo-env.workspace = true
 twigo-ipc.workspace = true
 twigo-kube.workspace = true
+twigo-netmon.workspace = true
 
 [dev-dependencies]
+rcgen.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "time"] }

@@ -15,8 +15,8 @@ use tauri::{Manager, RunEvent, State, Webview};
 use twigo_core::Core;
 use twigo_env::Environment;
 use twigo_ipc::{
-    Context, ErrorKind, IpcError, KeyboardLayout, ShellEnvironment, Space, StateEntry,
-    StateSnapshot,
+    ClusterVersion, Context, ErrorKind, IpcError, KeyboardLayout, ShellEnvironment, Space,
+    StateEntry, StateSnapshot,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
 
@@ -168,6 +168,11 @@ fn state_set(app: State<'_, App>, request: Vec<StateEntry>) -> Result<(), IpcErr
         .map_err(|error| IpcError::from(&error))
 }
 
+#[tauri::command]
+async fn cluster_version(app: State<'_, App>, request: String) -> Result<ClusterVersion, IpcError> {
+    app.core.cluster_version(&request).await
+}
+
 fn explicit_kubeconfig() -> Option<PathBuf> {
     #[cfg(any(debug_assertions, feature = "bench"))]
     if let Some(file) = std::env::var_os(EXPLICIT_KUBECONFIG).filter(|v| !v.is_empty()) {
@@ -226,6 +231,10 @@ fn main() {
                 let explicit = explicit_kubeconfig();
                 async move { core.run(environment.subscribe(), explicit).await }
             });
+            tauri::async_runtime::spawn({
+                let core = Arc::clone(&core);
+                async move { core.follow_network(twigo_netmon::Watch::start()).await }
+            });
             app.manage(Shell {
                 environment,
                 followers: Followers::default(),
@@ -245,6 +254,7 @@ fn main() {
             space_open,
             state_load,
             state_set,
+            cluster_version,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Twigo");
