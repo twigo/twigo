@@ -2534,6 +2534,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
+name = "mach2"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0d28e293f2b8c9d2b2d1c0193bd3c1cbdc0d2cf396888dc01162f7cf9d6c3f3"
+
+[[package]]
 name = "markup5ever"
 version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5017,12 +5023,29 @@ dependencies = [
 name = "twigo"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-single-instance",
  "tauri-plugin-window-state",
  "twigo-ipc",
  "twigo-keyboard",
+]
+
+[[package]]
+name = "twigo-bench"
+version = "0.1.0"
+dependencies = [
+ "fastrand",
+ "json-patch",
+ "k8s-openapi",
+ "kube",
+ "libc",
+ "mach2",
+ "serde",
+ "serde_json",
+ "tokio",
+ "twigo-kube",
 ]
 
 [[package]]

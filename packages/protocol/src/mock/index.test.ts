@@ -126,6 +126,44 @@ test("no batch follows until the previous one is acknowledged, and the next carr
   expect(second?.upserts).toHaveLength(10);
 });
 
+test("a window change flushes at once, without waiting for the next tick", async () => {
+  const sub = await open("ready");
+  await sub.ack();
+  await sub.window(100, 140);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(sub.batches.map((b) => b.seq)).toEqual([1, 2]);
+  expect(sub.batches[1]?.window?.start).toBe(100);
+});
+
+test("with a rate, a live list changes that many pods a second and no more", async () => {
+  const backend = createMockBackend("live", "us", 100);
+  const batches: ListBatch[] = [];
+  const pending = backend.subscribe("list_subscribe", query(), (b) =>
+    batches.push(b),
+  );
+  await vi.advanceTimersByTimeAsync(0);
+  const id = await pending;
+  const ack = async () => {
+    const latest = last(batches);
+    if (latest) await call(backend.invoke("list_ack", { id, seq: latest.seq }));
+  };
+  await call(backend.invoke("list_set_window", { id, start: 0, end: 5000 }));
+  for (let ms = 0; ms < 2000; ms += 50) {
+    await ack();
+    await vi.advanceTimersByTimeAsync(50);
+  }
+  await ack();
+  const from = batches.length;
+  for (let ms = 0; ms < 2000; ms += 50) {
+    await vi.advanceTimersByTimeAsync(50);
+    await ack();
+  }
+  const changed = batches.slice(from).flatMap((b) => b.upserts);
+  expect(changed.length).toBeGreaterThanOrEqual(190);
+  expect(changed.length).toBeLessThanOrEqual(210);
+  expect(last(batches)?.total).toBe(5000);
+});
+
 test("rows come sorted by the query's column, and the first batch carries the columns", async () => {
   const sub = await open(
     "ready",

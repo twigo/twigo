@@ -8,10 +8,15 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# The bench mode of bench/harness.sh: commands that write results and quit (src/bench.rs).
+bench = ["dep:serde_json"]
+
 [build-dependencies]
 tauri-build.workspace = true
 
 [dependencies]
+serde_json = { workspace = true, optional = true }
 tauri.workspace = true
 tauri-plugin-single-instance.workspace = true
 tauri-plugin-window-state.workspace = true

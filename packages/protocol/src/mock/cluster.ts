@@ -67,6 +67,17 @@ export class Cluster {
     this.version++;
   }
 
+  /** Changes `count` distinct random pods. */
+  change(count: number): void {
+    const picked = new Set<Pod>();
+    while (picked.size < Math.min(count, this.pods.length)) {
+      const pod = this.pods[Math.floor(this.#random() * this.pods.length)];
+      if (pod) picked.add(pod);
+    }
+    for (const pod of picked) this.#change(pod);
+    this.version++;
+  }
+
   #change(pod: Pod): void {
     const roll = this.#random();
     if (roll < 0.5) {
