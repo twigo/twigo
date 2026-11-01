@@ -102,18 +102,32 @@ Measured on 2026-11-01 on an Apple M4 Max (16 cores, 48 GB), macOS 27.0, Docker 
 
 ## Results at 5k pods
 
-Not measured yet.
-On 2026-11-01 the Mac's screen was locked while this step ran: the bench window's document was `hidden`, and `requestAnimationFrame` never fired within 2 s, so nothing painted and every webview metric was out of reach.
-The driver now fails at once in that state, with "the window is not visible", and the harness prints that and stops.
+`bench/harness.sh` without a kubeconfig, with the screen unlocked, on 2026-11-01 at 11:35 UTC:
 
-What did run that day, on the machine above:
+2026-11-01T11:35Z, Apple M4 Max, 48 GB, macOS 27.0, release build, 9c0fdc3, with uncommitted changes
+Churn on kwok: 100.0 changes/s over 5000 pods for 118 s, 0 errors, patch p95 3.8 ms
 
-- `bench/harness.sh <kubeconfig>` against the churn cluster: the release build, the churn at 100.03 changes/s, the launch, the visibility failure, and the clean-up of the app and the churn.
-- `bench/harness.sh` without a kubeconfig, under macOS's bash 3.2: the cluster's creation, 5,000 pods, the same failure, and the cluster's deletion.
-- The driver end to end in headless Chrome, with a stand-in for Tauri's IPC: every phase finished and `twigo-bench report` read its `webview.json`.
-  Those are Chromium's timings, not WebKit's, and are not results.
+| Metric                                 | Value       | Target   | Status                            | What it measured                                                                                                                                                                                                                                                                                                            |
+| -------------------------------------- | ----------- | -------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| First paint after the space connects   | -           | < 1 s    | not measurable before M1          | needs the Rust list path: watch hub, row store, query view and batcher (M1)                                                                                                                                                                                                                                                 |
+| ↳ webview half                         | 19.0 ms     | -        | mock half, not judged             | first batch with rows received → rows painted; 5000 rows from the mock backend, in the webview                                                                                                                                                                                                                              |
+| Change → painted cell, p95             | -           | < 150 ms | not measurable before M1          | needs the cluster's changes to reach the webview through Rust (M1)                                                                                                                                                                                                                                                          |
+| ↳ webview half                         | 10.0 ms     | -        | mock half, not judged             | batch received → changed cell painted, on screen; p50 6.0 ms, max 10.0 ms, n = 38; 74 offscreen, 0 superseded, 0 timed out; 100 changes/s for 60 s; 5000 rows from the mock backend, in the webview                                                                                                                         |
+| Scroll and sort: scroll                | 59.8 fps    | 60 fps   | on the mock, not judged before M1 | requestAnimationFrame over 5 s of programmatic scroll at 4000 px/s; frame p95 18.0 ms, display frame 17.0 ms; rows awaiting data in 0 of 300 frames; 5000 rows from the mock backend, in the webview, which serves each window from JS and reruns the query over every pod on each churn tick, on the webview's main thread |
+| Scroll and sort: sort                  | p95 25.0 ms | < 50 ms  | on the mock, not judged before M1 | header click → resorted rows painted, Status↑ Status↓ Age↑ Age↓ Restarts↑ Restarts↓ Namespace↑ Namespace↓ Name↑ Name↓; p50 17.0 ms, max 25.0 ms, n = 10; 5000 rows from the mock backend, in the webview, which sorts every pod in JS on the webview's main thread, unlike Rust's incremental index                         |
+| Core RSS with the pod list open        | 97 MB       | < 150 MB | on the mock, not judged before M1 | resident size of twigo (pid 94588) under churn; M0's core holds no watch cache yet, and the list lives in the webview's mock                                                                                                                                                                                                |
+| Webview memory with the pod list open  | 640 MB      | < 300 MB | on the mock, not judged before M1 | physical footprint of the WebKit processes the app is responsible for (Networking 8 MB, WebContent 368 MB, GPU 265 MB), under churn; their RSS adds up to 413 MB; 1 other WebKit processes left out; the webview holds the mock's 5000 pods, which Rust holds from M1                                                       |
+| Idle CPU, 100 changes/s, window hidden | 0.83 %      | < 1 %    | on the mock, not judged before M1 | CPU time of the app and its 3 WebKit processes over 30 s, as a share of one core; document hidden; hidden, the webview stops acknowledging batches, so this counts the mock's 100 changes/s timer in the webview, and the cluster's churn reaches nothing before M1                                                         |
 
-The table that `bench/harness.sh` prints on the first run with the screen unlocked goes here, with its machine and date.
+"With uncommitted changes" was a local edit to `apps/desktop/src/main.tsx`, the app's own entry, which the bench build does not load.
+Nothing in the table is judged: every value comes from the mock in the webview, so it bounds only the webview's share of each target.
+Webview memory is already over the whole budget of 3.8 with the mock's 5000 pods in it, the GPU process's 265 MB included.
+
+The run before it failed 55 s into the measurements: Terminal came to the front and covered the bench window, whose document then turned `hidden`.
+The bench window now stays above other windows, and the failure names a covered window as well as a locked screen.
+
+Earlier the same day the screen was locked while this step ran, so nothing painted.
+What ran then: `bench/harness.sh <kubeconfig>` against the churn cluster, and `bench/harness.sh` without a kubeconfig under macOS's bash 3.2, up to the visibility failure and through the clean-up; and the driver end to end in headless Chrome with a stand-in for Tauri's IPC, whose Chromium timings are not results.
 
 ## What M1 and CI must add
 
