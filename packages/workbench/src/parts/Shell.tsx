@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect } from "react";
 import { Allotment, LayoutPriority } from "allotment";
 import { Toaster } from "@twigo/ui";
 import { QuickAccessWidget } from "../quickaccess/QuickAccessWidget";
@@ -69,9 +69,7 @@ export function Shell() {
             preferredSize={size("sidebar")}
             visible={shown("sidebar")}
           >
-            <Island>
-              <PartView location="sidebar" />
-            </Island>
+            <PartView location="sidebar" />
           </Allotment.Pane>
           <Allotment.Pane minSize={320} priority={LayoutPriority.High}>
             <Allotment
@@ -80,18 +78,14 @@ export function Shell() {
               onDragEnd={remember([undefined, "panel"])}
             >
               <Allotment.Pane minSize={120} priority={LayoutPriority.High}>
-                <Island>
-                  <EditorArea />
-                </Island>
+                <EditorArea />
               </Allotment.Pane>
               <Allotment.Pane
                 minSize={80}
                 preferredSize={size("panel")}
                 visible={shown("panel")}
               >
-                <Island>
-                  <PartView location="panel" />
-                </Island>
+                <PartView location="panel" />
               </Allotment.Pane>
             </Allotment>
           </Allotment.Pane>
@@ -100,29 +94,13 @@ export function Shell() {
             preferredSize={size("secondary")}
             visible={shown("secondary")}
           >
-            <Island>
-              <PartView location="secondary" />
-            </Island>
+            <PartView location="secondary" />
           </Allotment.Pane>
         </Allotment>
       </div>
       <StatusBar />
       <QuickAccessWidget />
       <Toaster />
-    </div>
-  );
-}
-
-/**
- * A part as a card on the shell, JetBrains Islands and VS Code 2026's
- * floating panels: half of the 6 px gap on each side of every pane.
- */
-function Island({ children }: { children: ReactNode }) {
-  return (
-    <div className="h-full p-[3px]">
-      <div className="h-full overflow-hidden rounded-lg border border-border bg-editor">
-        {children}
-      </div>
     </div>
   );
 }

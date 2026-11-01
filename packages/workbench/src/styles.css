@@ -4,10 +4,9 @@
 /* The workbench's parts on the design tokens of packages/ui (ARCHITECTURE 4.9).
    Imported by the app after @twigo/ui/styles.css. */
 
-/* The parts are islands: the gaps between them do what allotment's separator
-   line did, so the line goes and the sash stays, on the gap. */
+/* Allotment's separator between the parts, on the design tokens. */
 .twigo-workbench {
-  --separator-border: transparent;
+  --separator-border: var(--border);
   --focus-border: var(--brand);
 }
 

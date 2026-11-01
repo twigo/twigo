@@ -518,7 +518,7 @@ The bench also replays the cases that broke other clients, and one that loopback
 | Secondary side bar | The ACP agent panel later; hidden while nothing lives there, as is the panel                                                                                 |
 | Status bar         | Context, namespace, policy mode, port-forward items, sync state, extension items                                                                             |
 
-The parts are islands: cards on the shell with 6 px gaps, as JetBrains Islands and VS Code's 2026 layout ([research](research/workbench-chrome.md)).
+The parts sit flush, split by hairlines, with no cards or gaps: the owner tried islands, as JetBrains Islands and VS Code's 2026 layout ([research](research/workbench-chrome.md)), and preferred flat parts.
 Views are descriptors (ID, title, container, `when`, provider), so the user can move a view to another container, VS Code style.
 The layout per space is persisted (dockview `toJSON` plus part sizes and visibility).
 
@@ -695,7 +695,7 @@ It moves into `packages/ui` unchanged and gets extended for the new views.
   - Two weights, 400 and 600, as VS Code and JetBrains; 13 px base, 12 px secondary, 11 px labels; sentence case, no capitals.
   - Dense rows: 22 px in trees and tables; icons 16 px, Lucide's 1.5 stroke drawing 1 px lines.
 - **Surfaces.**
-  The parts are islands on the shell (4.1), and editor tabs connect to their editor: the active tab takes the editor's surface.
+  Flat parts split by hairlines (4.1), and editor tabs connect to their editor: the active tab takes the editor's surface.
 - **Motion.**
   An instant-in, gentle-out ladder (`--dur-instant` 100 ms to `--dur-slow` 300 ms).
   Anything bound to a key is instant.
@@ -725,7 +725,7 @@ It moves into `packages/ui` unchanged and gets extended for the new views.
 - **Settled with the owner** on 2026-11-01, after [research](research/workbench-chrome.md) into Kubernetes clients, IDEs and tools with many targets:
   - a rail of space tiles replaces the space tabs and the activity bar (4.2);
   - the title bar is a breadcrumb, a search and the part toggles;
-  - islands, connected tabs, two weights and sentence case.
+  - flat parts split by hairlines, connected tabs, two weights and sentence case.
 
 ## 5. Commands, keybindings and extensions
 

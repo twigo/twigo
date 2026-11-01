@@ -26,7 +26,7 @@ export function SpaceRail() {
   return (
     <nav
       aria-label="Spaces"
-      className="flex w-12 shrink-0 flex-col items-center gap-1.5 bg-shell py-1.5"
+      className="flex w-12 shrink-0 flex-col items-center gap-1.5 border-r border-border bg-shell py-1.5"
     >
       {spaces.list.map((space, index) => {
         const binding = keybindings.primary(

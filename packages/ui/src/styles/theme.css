@@ -66,9 +66,8 @@
   --border-subtle: oklch(0 0 0 / 4%);
   --border-micro: oklch(0 0 0 / 2.5%);
 
-  /* Islands: the parts are cards with a border on the shell, which carries
-     the title bar, the space rail, the gaps and the status bar. The side
-     bars and the panel share the shell's tone; the editor is the one
+  /* The shell carries the title bar, the space rail and the status bar.
+     The side bars and the panel share its tone; the editor is the one
      surface that stands out, white on light (VS Code's ramp). */
   --shell: oklch(0.975 0.002 250);
   --editor: oklch(1 0 0);
