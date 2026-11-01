@@ -51,7 +51,7 @@ Nothing of it ships.
 | Scroll                               | Mean fps from `requestAnimationFrame` over 5 s of scrolling at 4,000 px/s; passes at 57 fps, 95 % of 60, since frames jitter                                                                 | Shown, not judged: measured in the real WebKit webview, on the mock, which serves each window from JS and reruns the query over all 5,000 pods on each churn tick, on the webview's main thread.          |
 | Sort                                 | Header click → the new order's first 10 rows painted, ten clicks over Status, Age, Restarts, Namespace and Name, each ascending then descending, so that every click changes those rows; p95 | Shown, not judged: measured in the real webview, on the mock, which sorts 5,000 rows in JS on the webview's main thread, unlike Rust's incremental index.                                                 |
 | Core RSS                             | Resident size of the app process under churn, with the list open                                                                                                                             | Shown, not judged: M0's core holds no watch cache, and the mock keeps the pods in the webview.                                                                                                            |
-| Webview memory                       | Physical footprint summed over the `com.apple.WebKit.*` processes the app is responsible for                                                                                                 | Shown, not judged: the webview's JS heap holds the mock's 5,000 pods, which Rust holds from M1.                                                                                                           |
+| Webview memory                       | Physical footprint summed over the `com.apple.WebKit.*` processes the app is responsible for but the GPU process, which a row of its own shows and never judges                              | Shown, not judged: the webview's JS heap holds the mock's 5,000 pods, which Rust holds from M1.                                                                                                           |
 | Idle CPU                             | CPU time of the app and its WebKit processes over 30 s with the window hidden, as a share of one core                                                                                        | Shown, not judged: with the window hidden, `requestAnimationFrame` stops, so the list stops acknowledging batches, and the sample counts the mock's churn timer in the webview, nothing of the Rust path. |
 
 The report judges a metric against its target only when the webview ran on a backend other than the mock, the `backend` of `webview.json`; a row measured on the mock shows its value as "on the mock, not judged before M1".
@@ -160,8 +160,12 @@ The values are medians in MB; Networking was 6–7 MB in every state.
   The list of 5000 mock pods adds 46 MB over the workbench at rest.
   The mock's churn adds 130–220 MB more, much of it WebKit Malloc that `footprint` shows as reclaimable: the mock reruns the query over every pod on each change in JS, and the garbage waits for the collector.
   From M1 Rust holds the pods and runs the queries, and the webview gets only patches.
+- **Not a cache.**
+  `vmmap -summary` of the GPU process, with the pod list under churn, showed its 227 MB of owned graphics memory dirty, with 0 K volatile: the kernel cannot drop it, so it is the system's real cost, not a cache.
+  `memory_pressure -S`, which would have simulated the system's pressure notification, needs root and changed nothing.
 - **The budget.**
-  3.8's 300 MB counts every WebKit process, so the GPU pool alone takes most of it on any live page.
+  3.8's 300 MB counted every WebKit process, so the GPU pool alone took most of it on any live page.
+  From 2026-11-01 the budget counts the WebKit processes but the GPU process, and the report shows the GPU process on a row of its own, never judged: re-reported with that split, the 12:25 run's webview memory is 425 MB, and its GPU process 262 MB.
 
 ## What M1 and CI must add
 

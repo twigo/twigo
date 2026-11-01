@@ -9,7 +9,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::churn::Summary as Churn;
-use crate::process::Sample;
+use crate::process::{Process, Sample};
 use crate::stats::{Spread, percentile};
 
 const FIRST_PAINT_MS: f64 = 1000.0;
@@ -22,6 +22,7 @@ const CORE_RSS_MB: f64 = 150.0;
 const WEBVIEW_MB: f64 = 300.0;
 const IDLE_CPU_PERCENT: f64 = 1.0;
 const MB: f64 = 1_000_000.0;
+const GPU_PROCESS: &str = "com.apple.WebKit.GPU";
 
 /// What the app's webview driver measured (`apps/desktop/bench`).
 #[derive(Deserialize)]
@@ -142,6 +143,8 @@ pub enum Status {
     NotMeasurableBeforeM1,
     /// Half of a metric, on the mock: shown, never judged against the target.
     MockHalf,
+    /// Shown beside a metric, never judged.
+    Shown,
     /// The whole metric, measured on the mock, whose work is not Rust's: shown, never judged.
     OnMock,
 }
@@ -153,6 +156,7 @@ impl Status {
             Status::Fail => "FAIL",
             Status::NotMeasurableBeforeM1 => "not measurable before M1",
             Status::MockHalf => "mock half, not judged",
+            Status::Shown => "shown, not judged",
             Status::OnMock => "on the mock, not judged before M1",
         }
     }
@@ -218,6 +222,10 @@ pub fn cpu_percent(start: &Sample, end: &Sample) -> f64 {
 
 fn mb(bytes: u64) -> f64 {
     bytes as f64 / MB
+}
+
+fn is_gpu(process: &Process) -> bool {
+    process.name == GPU_PROCESS
 }
 
 fn median_mb(samples: &[Sample], bytes: impl Fn(&Sample) -> u64) -> f64 {
@@ -345,11 +353,15 @@ pub fn build(inputs: Inputs) -> Report {
         ),
     });
 
-    let webkit = median_mb(&memory, |s| s.webkit.iter().map(|p| p.footprint).sum());
-    let webkit_rss = median_mb(&memory, |s| s.webkit.iter().map(|p| p.rss).sum());
+    let budgeted = |s: &Sample, bytes: fn(&Process) -> u64| -> u64 {
+        s.webkit.iter().filter(|p| !is_gpu(p)).map(bytes).sum()
+    };
+    let webkit = median_mb(&memory, |s| budgeted(s, |p| p.footprint));
+    let webkit_rss = median_mb(&memory, |s| budgeted(s, |p| p.rss));
     let names: Vec<String> = first
         .webkit
         .iter()
+        .filter(|p| !is_gpu(p))
         .map(|p| {
             let footprint = median_mb(&memory, |s| {
                 s.webkit
@@ -370,11 +382,29 @@ pub fn build(inputs: Inputs) -> Report {
         target: format!("< {WEBVIEW_MB:.0} MB"),
         status: judge.status(webkit < WEBVIEW_MB),
         measured: format!(
-            "physical footprint of the WebKit processes the app is responsible for ({}), under churn, the median of {} samples; their RSS adds up to {webkit_rss:.0} MB; {} other WebKit processes left out; the webview holds the mock's {} pods, which Rust holds from M1",
+            "physical footprint of the WebKit processes the app is responsible for but the GPU process ({}), under churn, the median of {} samples; their RSS adds up to {webkit_rss:.0} MB; {} other WebKit processes left out; the webview holds the mock's {} pods, which Rust holds from M1",
             names.join(", "),
             memory.len(),
             first.other_webkit.len(),
             webview.rows,
+        ),
+    });
+
+    let gpu = median_mb(&memory, |s| {
+        s.webkit
+            .iter()
+            .filter(|p| is_gpu(p))
+            .map(|p| p.footprint)
+            .sum()
+    });
+    rows.push(Row {
+        metric: "  GPU process".into(),
+        value: Some(format!("{gpu:.0} MB")),
+        target: "-".into(),
+        status: Status::Shown,
+        measured: format!(
+            "physical footprint of the app's WebKit GPU process, the median of {} samples; any page that repaints holds about 260 MB there, WebKit's pool of IOSurfaces, so it stays out of the budget (docs/bench.md)",
+            memory.len()
         ),
     });
 
@@ -481,6 +511,7 @@ mod tests {
                     10_000_000,
                     cpu,
                 ),
+                process(703, "com.apple.WebKit.GPU", 30_000_000, 500_000_000, cpu),
             ]
         };
         Inputs {
@@ -555,13 +586,15 @@ mod tests {
                 ("Scroll and sort: sort", &Status::OnMock),
                 ("Core RSS with the pod list open", &Status::OnMock),
                 ("Webview memory with the pod list open", &Status::OnMock),
+                ("  GPU process", &Status::Shown),
                 ("Idle CPU, 100 changes/s, window hidden", &Status::OnMock),
             ]
         );
         assert!(report.rows[0].value.is_none());
         assert!(report.rows[2].value.is_none());
         assert_eq!(report.rows[7].value.as_deref(), Some("160 MB"));
-        assert_eq!(report.rows[8].value.as_deref(), Some("2.00 %"));
+        assert_eq!(report.rows[8].value.as_deref(), Some("500 MB"));
+        assert_eq!(report.rows[9].value.as_deref(), Some("2.00 %"));
         assert!(report.failed().is_empty());
     }
 
@@ -604,11 +637,10 @@ mod tests {
             .collect();
         let report = build(all);
         assert_eq!(report.rows[6].value.as_deref(), Some("200 MB"));
-        assert_eq!(report.rows[7].value.as_deref(), Some("210 MB"));
+        assert_eq!(report.rows[7].value.as_deref(), Some("200 MB"));
+        assert_eq!(report.rows[8].value.as_deref(), Some("10 MB"));
         assert!(
-            report.rows[7]
-                .measured
-                .contains("WebContent 200 MB, GPU 10 MB"),
+            report.rows[7].measured.contains("(WebContent 200 MB)"),
             "{}",
             report.rows[7].measured
         );
@@ -629,7 +661,7 @@ mod tests {
     fn the_table_lists_every_row() {
         let report = build(inputs("mock", 30.0, 16.7, 0));
         let table = table(&report);
-        assert_eq!(table.lines().filter(|l| l.starts_with("| ")).count(), 11);
+        assert_eq!(table.lines().filter(|l| l.starts_with("| ")).count(), 12);
         assert!(table.contains(
             "| First paint after the space connects | - | < 1 s | not measurable before M1 |"
         ));

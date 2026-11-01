@@ -484,7 +484,8 @@ These are targets, measured on a kwok cluster, which simulates nodes and pods wi
 | Webview memory with the pod list open                    | < 300 MB             | < 400 MB              |
 | Idle CPU (100 changes/s background churn, window hidden) | < 1 %                | < 2 %                 |
 
-The memory numbers count WebKit's `com.apple.WebKit.*` processes.
+The memory numbers count WebKit's `com.apple.WebKit.*` processes, all but the GPU process.
+Any page that repaints, a blank one with one changing number included, holds about 260 MB there, WebKit's pool of IOSurfaces, so counting it would measure WebKit rather than Twigo; the report shows it on a row of its own ([bench](bench.md#where-the-webviews-memory-goes)).
 They are children of launchd, not of the app, so measuring per process under-reports a Tauri app by about half.
 
 `bench/harness.sh` measures them at 5k pods on macOS ([bench](bench.md)).
@@ -494,7 +495,7 @@ It builds the app's bench mode in release, runs a churn generator at 100 changes
 - **Change → painted cell** joins the churn generator's log of changes, in Unix ms, with the webview's paints.
 - **Scroll** is the mean fps of `requestAnimationFrame` over 5 s of scrolling at 4,000 px/s, and **sort** the p95 from a header click to the resorted rows painted, over ten sorts.
 - **Core RSS** is the app process's resident size with the list open under churn.
-- **Webview memory** is the physical footprint of the WebKit processes the app is responsible for, the process macOS records as having asked for them; the harness starts the app responsible for itself, since one started from a terminal shares the terminal's.
+- **Webview memory** is the physical footprint of the WebKit processes the app is responsible for, the process macOS records as having asked for them, but the GPU process, which is shown apart and never judged; the harness starts the app responsible for itself, since one started from a terminal shares the terminal's.
 - **Idle CPU** is the CPU time of the app and those WebKit processes over 30 s with the window hidden, as a share of one core.
 
 Until M1 the webview runs on the mock backend, so first paint and change → painted cell are not measurable: only their webview halves, from a batch to its paint, are shown, apart and unjudged.
