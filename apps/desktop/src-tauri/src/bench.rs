@@ -1,7 +1,8 @@
 //! The bench mode of `bench/harness.sh` (ARCHITECTURE 3.8), in builds with the `bench` feature
 //! only. `TWIGO_BENCH` names the directory the webview's driver writes into: `write` stores one
 //! JSON file, and `idle` hides the window, says so in `idle.json`, and quits after `IDLE`, the
-//! time the harness samples idle CPU in.
+//! time the harness samples idle CPU in. The window stays above other windows, since WebKit
+//! paints nothing in a window they cover.
 
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -28,6 +29,11 @@ pub fn plugin<R: Runtime>() -> TauriPlugin<R> {
                     .permission("twigo-bench:allow-idle"),
             )?;
             Ok(())
+        })
+        .on_window_ready(|window| {
+            if let Err(error) = window.set_always_on_top(true) {
+                eprintln!("could not keep the bench window on top: {error}");
+            }
         })
         .build()
 }

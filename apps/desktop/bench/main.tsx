@@ -25,7 +25,7 @@ function write(name: string, value: unknown): Promise<void> {
 }
 
 const NOT_VISIBLE =
-  "the window is not visible: WebKit renders nothing while the screen is locked";
+  "the window is not visible: WebKit renders nothing while the screen is locked or the window is covered";
 
 /** Runs `work` while the window stays visible, since nothing paints otherwise. */
 function whileVisible<T>(work: () => Promise<T>): Promise<T> {
