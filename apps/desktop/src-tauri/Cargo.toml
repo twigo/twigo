@@ -24,3 +24,4 @@ twigo-core.workspace = true
 twigo-env.workspace = true
 twigo-ipc.workspace = true
 twigo-keyboard.workspace = true
+twigo-netmon.workspace = true

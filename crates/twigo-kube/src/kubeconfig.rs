@@ -10,8 +10,9 @@ mod watch;
 use std::ffi::OsStr;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use kube::config::{Kubeconfig, KubeconfigError, NamedContext};
+use kube::config::{Kubeconfig, KubeconfigError, NamedAuthInfo, NamedCluster, NamedContext};
 use serde::Deserialize;
 use twigo_ipc::ContextColor;
 
@@ -136,6 +137,7 @@ pub struct Context {
     pub fingerprint: Fingerprint,
     /// Why no connection can be made, when the kubeconfig already says.
     pub problem: Option<Problem>,
+    pub entries: Entries,
 }
 
 impl Context {
@@ -158,9 +160,50 @@ impl Context {
             order: extension.order,
             fingerprint: Fingerprint::of(named, cluster, user),
             problem,
+            entries: Entries::new(named, cluster, user),
         }
     }
 }
+
+/// A context's context, cluster and user entries, as a kubeconfig of their
+/// own whose current context it is: what its clients are built from.
+#[derive(Debug, Clone)]
+pub struct Entries(Arc<Kubeconfig>);
+
+impl Entries {
+    fn new(
+        named: &NamedContext,
+        cluster: Option<&NamedCluster>,
+        user: Option<&NamedAuthInfo>,
+    ) -> Self {
+        Self(Arc::new(Kubeconfig {
+            current_context: Some(named.name.clone()),
+            contexts: vec![named.clone()],
+            clusters: cluster.into_iter().cloned().collect(),
+            auth_infos: user.into_iter().cloned().collect(),
+            ..Kubeconfig::default()
+        }))
+    }
+
+    pub fn kubeconfig(&self) -> Kubeconfig {
+        Kubeconfig::clone(&self.0)
+    }
+
+    pub fn proxy_url(&self) -> Option<&str> {
+        let cluster = self.0.clusters.first()?.cluster.as_ref()?;
+        cluster.proxy_url.as_deref()
+    }
+}
+
+/// kube's kubeconfig types compare only in kube's own tests.
+impl PartialEq for Entries {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+            || serde_json::to_value(&*self.0).ok() == serde_json::to_value(&*other.0).ok()
+    }
+}
+
+impl Eq for Entries {}
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Problem {

@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::mpsc;
 use tokio::time::{Instant, MissedTickBehavior};
-use twigo_kube::client::Clients;
+use twigo_kube::client::{self, Budgets, Clients};
 
 use crate::stats::Spread;
 
@@ -24,7 +24,7 @@ const NAMESPACE: &str = "bench";
 const SELECTOR: &str = "app=bench";
 const CONTAINER: &str = "app";
 const IN_FLIGHT: usize = 64;
-/// The API client has no read timeout, so a patch the server never answers would hold its pod.
+/// A patch the server never answers would hold its pod for the client's own request timeout, 70 s.
 const PATCH_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct Options {
@@ -121,7 +121,20 @@ pub async fn run(options: Options) -> Result<Summary, String> {
     let config = Config::from_custom_kubeconfig(kubeconfig, &KubeConfigOptions::default())
         .await
         .map_err(|e| e.to_string())?;
-    let client = Clients::new(config).map_err(|e| e.to_string())?.api;
+    // Its patches in flight, not the UI's budget.
+    let budgets = Budgets {
+        requests: IN_FLIGHT,
+        ..Budgets::default()
+    };
+    let client = Clients::new(
+        &config,
+        client::Options {
+            budgets,
+            ..client::Options::default()
+        },
+    )
+    .map_err(|e| e.to_string())?
+    .api;
     let api: Api<Pod> = Api::namespaced(client, NAMESPACE);
 
     let pods = pods(&api).await.map_err(|e| e.to_string())?;

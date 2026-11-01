@@ -8,6 +8,7 @@ fn main() {
         "space_open",
         "state_load",
         "state_set",
+        "cluster_version",
     ]);
     let mut attributes = tauri_build::Attributes::new().app_manifest(commands);
     // An inlined plugin keeps its permissions in OUT_DIR, so builds without the feature have no

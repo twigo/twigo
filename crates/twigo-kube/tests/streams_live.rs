@@ -7,7 +7,7 @@ use kube::config::{KubeConfigOptions, Kubeconfig};
 use kube::{Api, Client, Config};
 use serde_json::json;
 use twigo_cache::table::request::{self, WatchFrom};
-use twigo_kube::client::Clients;
+use twigo_kube::client::{Budgets, Clients, Options};
 
 async fn api() -> (Client, u16) {
     let path = std::env::var_os("TWIGO_TEST_KUBECONFIG")
@@ -22,7 +22,23 @@ async fn api() -> (Client, u16) {
         .await
         .unwrap();
     let port = config.cluster_url.port_u16().expect("an explicit API port");
-    (Clients::new(config).unwrap().api, port)
+    // The counter's watch budget at the server's limit, so the limit shows.
+    let budgets = Budgets {
+        watches: 100,
+        ..Budgets::default()
+    };
+    (
+        Clients::new(
+            &config,
+            Options {
+                budgets,
+                ..Options::default()
+            },
+        )
+        .unwrap()
+        .api,
+        port,
+    )
 }
 
 fn connections(port: u16) -> usize {

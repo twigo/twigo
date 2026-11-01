@@ -19,7 +19,7 @@ for version in "${versions[@]}"; do
   name="matrix-${version/./}"
   kubeconfig=$(bench/cluster.sh up "$name" "$version" | tail -1)
   status=0
-  TWIGO_TEST_KUBECONFIG="$kubeconfig" cargo test -p twigo-cache -p twigo-kube -- --ignored || status=$?
+  TWIGO_TEST_KUBECONFIG="$kubeconfig" cargo test -p twigo-cache -p twigo-kube -p twigo-core -- --ignored || status=$?
   bench/cluster.sh down "$name"
   name=
   echo "Kubernetes $version: $([ $status -eq 0 ] && echo passed || echo FAILED)"
