@@ -10,6 +10,18 @@
   --focus-border: var(--brand);
 }
 
+/* On macOS the window is transparent over the system's sidebar material
+   (windowEffects in tauri.conf.json), and the chrome lets it show through,
+   as Finder's and Xcode's do; the editor stays opaque. */
+html.vibrancy body {
+  background: transparent;
+}
+html.vibrancy {
+  --shell: transparent;
+  --sidebar: transparent;
+  --panel: transparent;
+}
+
 /* A coloured context tints the title bar's left end, behind the breadcrumb. */
 .twigo-titlebar[data-color] {
   /* --twigo-context is the context's colour token, set inline. */

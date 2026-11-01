@@ -34,7 +34,10 @@ async function start() {
     platformOf(navigator.userAgent),
   );
   registerKube(workbench);
-  if (isTauri() && workbench.platform === "mac") installNativeMenu(workbench);
+  if (isTauri() && workbench.platform === "mac") {
+    installNativeMenu(workbench);
+    document.documentElement.classList.add("vibrancy");
+  }
   return <WorkbenchView workbench={workbench} />;
 }
 
