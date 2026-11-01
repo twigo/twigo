@@ -48,6 +48,31 @@ export function EditorArea() {
 function SpaceEditors({ space }: { space: string }) {
   const workbench = useWorkbench();
   const [api, setApi] = useState<DockviewApi>();
+  const [host, setHost] = useState<HTMLDivElement | null>(null);
+
+  // Dockview 8.8 lays out a frame after its ResizeObserver fires
+  // (watchElementResize defers to requestAnimationFrame), so the editors
+  // trailed a dragged sash; laying out straight from the observer keeps up.
+  useEffect(() => {
+    if (!api || !host) return;
+    let last = "";
+    const observer = new ResizeObserver(([entry]) => {
+      // A hidden element measures zero, which would collapse the grid.
+      if (!entry || !host.offsetParent) return;
+      // Rounded and deduplicated: a fractional devicePixelRatio would
+      // otherwise lay out against itself.
+      const width = Math.round(entry.contentRect.width);
+      const height = Math.round(entry.contentRect.height);
+      const size = `${String(width)}x${String(height)}`;
+      if (size === last) return;
+      last = size;
+      api.layout(width, height);
+    });
+    observer.observe(host);
+    return () => {
+      observer.disconnect();
+    };
+  }, [api, host]);
 
   useEffect(() => {
     if (!api) return;
@@ -83,14 +108,17 @@ function SpaceEditors({ space }: { space: string }) {
   };
 
   return (
-    <DockviewReact
-      theme={THEME}
-      components={COMPONENTS}
-      tabComponents={TABS}
-      rightHeaderActionsComponent={GroupActions}
-      watermarkComponent={Watermark}
-      onReady={onReady}
-    />
+    <div ref={setHost} className="h-full">
+      <DockviewReact
+        theme={THEME}
+        components={COMPONENTS}
+        tabComponents={TABS}
+        rightHeaderActionsComponent={GroupActions}
+        watermarkComponent={Watermark}
+        disableAutoResizing
+        onReady={onReady}
+      />
+    </div>
   );
 }
 
