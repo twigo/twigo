@@ -16,11 +16,6 @@
     @apply bg-background font-sans text-foreground;
     font-size: 13px;
     line-height: 1.45;
-    /* Inter's alternate glyphs (cv01 single-story a, ss03) - the typeface
-       reads generic without them. tnum keeps metric columns from jittering. */
-    font-feature-settings:
-      "cv01" 1,
-      "ss03" 1;
     -webkit-font-smoothing: antialiased;
     overflow: hidden;
     /* WKWebView (Tauri) needs the prefix; without it a tab drag selects text. */
@@ -29,10 +24,7 @@
   }
 
   .tabular-nums {
-    font-feature-settings:
-      "cv01" 1,
-      "ss03" 1,
-      "tnum" 1;
+    font-variant-numeric: tabular-nums;
   }
 
   /* Native <button> doesn't show the pointer cursor and Tailwind's reset
@@ -88,8 +80,9 @@
     background-clip: padding-box;
   }
 
-  /* lucide's default 2px stroke reads heavy at our icon sizes; 1.75 is lighter. */
+  /* Lucide draws on a 24 px grid: 1.5 there is a 1 px line at 16 px, as
+     an IDE's icons are drawn. */
   svg.lucide {
-    stroke-width: 1.75px;
+    stroke-width: 1.5px;
   }
 }
