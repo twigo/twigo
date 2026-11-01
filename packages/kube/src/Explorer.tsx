@@ -95,7 +95,12 @@ function ExplorerSection({
         {title}
       </button>
       {open && (
-        <div role="group">
+        <div role="group" className="relative">
+          <span
+            aria-hidden
+            style={{ left: 15.5 + depth * 16 }}
+            className="pointer-events-none absolute inset-y-0 w-px bg-border"
+          />
           {groups.map((group) => (
             <ExplorerSection
               key={group.title}
