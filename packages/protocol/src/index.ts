@@ -12,6 +12,7 @@ export type {
   Cell,
   Column,
   ColumnKind,
+  ColumnValues,
   Context,
   ClusterVersion,
   ContextColor,

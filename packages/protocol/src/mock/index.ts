@@ -258,7 +258,7 @@ class Subscription {
   #seq = 0;
   #acked = 0;
   #dirty = true;
-  #cache: { version: string; pods: Pod[] } | undefined;
+  #cache: { version: string; rows: Pod[]; counted: Pod[] } | undefined;
   #sent: {
     total: number;
     ids: readonly RowId[];
@@ -334,28 +334,25 @@ class Subscription {
     );
   }
 
-  #pods(): Pod[] {
-    if (!SHOWS_ROWS.has(this.#status.state)) return [];
+  #pods(): { rows: Pod[]; counted: Pod[] } {
+    if (!SHOWS_ROWS.has(this.#status.state)) return { rows: [], counted: [] };
     const version = this.#clusters.map((c) => c.version).join(",");
     if (this.#cache?.version !== version) {
       const pods = this.#clusters.flatMap((c) => c.pods);
-      this.#cache = {
-        version,
-        pods: runQuery(pods, this.#query, this.#columns),
-      };
+      this.#cache = { version, ...runQuery(pods, this.#query, this.#columns) };
     }
-    return this.#cache.pods;
+    return this.#cache;
   }
 
   #flush(): void {
     if (!this.#dirty || this.#seq !== this.#acked) return;
     this.#dirty = false;
-    const pods = this.#pods();
+    const { rows: pods, counted } = this.#pods();
     const [start, end] = this.#window;
     const visible = pods.slice(start, end);
     const ids = visible.map((pod) => pod.id);
     const status = JSON.stringify(this.#status);
-    const groups = this.#groups(pods);
+    const groups = this.#groups(counted);
     const groupsJson = JSON.stringify(groups);
     const groupsChanged = groupsJson !== this.#sent.groups;
     const first = this.#seq === 0;

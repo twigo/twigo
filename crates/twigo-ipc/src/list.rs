@@ -26,6 +26,16 @@ pub struct ListQuery {
     pub sort: Option<Sort>,
     /// A column to count the matching rows by, such as a pod's Status.
     pub group_by: Option<String>,
+    /// Keeps the rows whose column holds one of the values. The counts of
+    /// `group_by` come before it, so the values it drops keep theirs.
+    pub values: Option<ColumnValues>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ColumnValues {
+    /// A column name from [`ListBatch::columns`].
+    pub column: String,
+    pub values: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

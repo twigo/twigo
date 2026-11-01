@@ -21,6 +21,12 @@ priority: number, };
 
 export type ColumnKind = "string" | "integer" | "number" | "boolean" | "date" | "age" | "other";
 
+export type ColumnValues = { 
+/**
+ * A column name from [`ListBatch::columns`].
+ */
+column: string, values: Array<string>, };
+
 export type Context = { name: string, 
 /**
  * From the `twigo` extension of the kubeconfig context; none by default.
@@ -107,7 +113,12 @@ namespaces: Array<string>, labelSelector: string | null, text: string | null, so
 /**
  * A column to count the matching rows by, such as a pod's Status.
  */
-groupBy: string | null, };
+groupBy: string | null, 
+/**
+ * Keeps the rows whose column holds one of the values. The counts of
+ * `group_by` come before it, so the values it drops keep theirs.
+ */
+values: ColumnValues | null, };
 
 /**
  * A resource the space's clusters serve, from discovery: what the explorer

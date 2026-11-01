@@ -11,6 +11,7 @@ function query(rest: Partial<ListQuery> = {}): ListQuery {
     text: null,
     sort: null,
     groupBy: null,
+    values: null,
     ...rest,
   };
 }
@@ -275,4 +276,37 @@ test("grouped counts follow the rows once a live list syncs", async () => {
 test("no groupBy, no groups", async () => {
   const { batches } = await open("ready");
   expect(batches.every((batch) => batch.groups === null)).toBe(true);
+});
+
+test("values keep their rows, and the grouped counts stay those of every value", async () => {
+  const all = await open("ready", query({ groupBy: "Status" }));
+  const picked = await open(
+    "ready",
+    query({
+      groupBy: "Status",
+      values: { column: "Status", values: ["CrashLoopBackOff", "Error"] },
+    }),
+  );
+  const counts = all.batches[0]?.groups ?? [];
+  const count = (value: string) =>
+    counts.find((group) => group.value === value)?.count ?? 0;
+  expect(picked.batches[0]?.total).toBe(
+    count("CrashLoopBackOff") + count("Error"),
+  );
+  expect(picked.batches[0]?.total).toBeGreaterThan(0);
+  expect(picked.batches[0]?.groups).toEqual(counts);
+});
+
+test("values of an unknown column are refused at subscribe", async () => {
+  const backend = createMockBackend();
+  const pending = backend.subscribe(
+    "list_subscribe",
+    query({ values: { column: "Bogus", values: ["x"] } }),
+    () => undefined,
+  );
+  const rejected = expect(pending).rejects.toMatchObject({
+    kind: "invalidInput",
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  await rejected;
 });

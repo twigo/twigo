@@ -12,6 +12,7 @@ const QUERY: ListQuery = {
   text: null,
   sort: null,
   groupBy: null,
+  values: null,
 };
 
 function row(id: string, ...cells: Row["cells"]): Row {

@@ -44,14 +44,24 @@ export function checkQuery(query: ListQuery, columns: readonly Column[]): void {
   ) {
     throw new IpcError("invalidInput", `no column ${query.sort.column}`);
   }
+  if (
+    query.values &&
+    !columns.some((column) => column.name === query.values?.column)
+  ) {
+    throw new IpcError("invalidInput", `no column ${query.values.column}`);
+  }
 }
 
-/** Filters on the shown columns and sorts, as Rust's query view does (ARCHITECTURE 3.4). */
+/**
+ * Filters on the shown columns and sorts, as Rust's query view does
+ * (ARCHITECTURE 3.4). `counted` are the matches before `values`, which the
+ * grouped counts come from.
+ */
 export function runQuery(
   pods: readonly Pod[],
   query: ListQuery,
   columns: readonly Column[],
-): Pod[] {
+): { rows: Pod[]; counted: Pod[] } {
   const withContext = columns[0]?.name === "Context";
   const withNamespace = columns.some((column) => column.name === "Namespace");
   const cells = (pod: Pod) => podCells(pod, withContext, withNamespace);
@@ -72,10 +82,17 @@ export function runQuery(
     });
     return hit !== negate;
   });
+  const valuesAt = columns.findIndex(
+    (column) => column.name === query.values?.column,
+  );
+  const kept = new Set(query.values?.values);
+  const rows = query.values
+    ? matches.filter((pod) => kept.has(String(cells(pod)[valuesAt] ?? "")))
+    : matches;
   const sort = query.sort ?? { column: "Name", descending: false };
   const index = columns.findIndex((column) => column.name === sort.column);
   const age = columns[index]?.kind === "age";
-  const keyed = matches.map((pod) => ({ pod, key: cells(pod)[index] }));
+  const keyed = rows.map((pod) => ({ pod, key: cells(pod)[index] }));
   keyed.sort((a, b) => {
     const order = age
       ? b.pod.created - a.pod.created
@@ -84,5 +101,5 @@ export function runQuery(
       (sort.descending ? -order : order) || collator.compare(a.pod.id, b.pod.id)
     );
   });
-  return keyed.map(({ pod }) => pod);
+  return { rows: keyed.map(({ pod }) => pod), counted: matches };
 }

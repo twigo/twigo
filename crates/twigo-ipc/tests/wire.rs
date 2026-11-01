@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 use twigo_ipc::{
-    Cell, ErrorKind, Gvr, IpcError, ListQuery, RowId, Sort, SubscriptionId, ViewState,
+    Cell, ColumnValues, ErrorKind, Gvr, IpcError, ListQuery, RowId, Sort, SubscriptionId, ViewState,
 };
 
 fn wire<T: serde::Serialize>(value: &T) -> Value {
@@ -59,9 +59,17 @@ fn queries_use_camel_case_and_newtypes_are_bare() {
             descending: true,
         }),
         group_by: Some("Status".into()),
+        values: Some(ColumnValues {
+            column: "Status".into(),
+            values: vec!["Error".into()],
+        }),
     };
     assert_eq!(wire(&query)["labelSelector"], json!("app=api"));
     assert_eq!(wire(&query)["groupBy"], json!("Status"));
+    assert_eq!(
+        wire(&query)["values"],
+        json!({ "column": "Status", "values": ["Error"] })
+    );
     assert_eq!(wire(&SubscriptionId(7)), json!(7));
     assert_eq!(
         wire(&RowId("prod/default/api".into())),
