@@ -1,3 +1,4 @@
+import * as v from "valibot";
 import { commandScore } from "@twigo/ui";
 import type { Workbench } from "../services";
 import type { QuickAccessProvider, QuickPickItem } from "./registry";
@@ -17,27 +18,19 @@ export function filtered<T extends QuickPickItem>(
 }
 
 const HISTORY_KEY = "quickaccess/history";
+const HISTORY = v.array(v.string());
 const HISTORY_SIZE = 20;
 
 /** `>`: every command its `commandPalette` item lets show, recently used first (legacy commandHistory). */
 export function commandsProvider(workbench: Workbench): QuickAccessProvider {
-  const { commands, menus, keybindings, backend } = workbench;
-  let history: string[] | undefined;
-  const loaded = async () => {
-    if (history) return history;
-    const saved = await backend.invoke("state_get", HISTORY_KEY);
-    const parsed: unknown = saved === null ? [] : JSON.parse(saved);
-    history = Array.isArray(parsed)
-      ? parsed.filter((id): id is string => typeof id === "string")
-      : [];
-    return history;
-  };
+  const { commands, menus, keybindings, state } = workbench;
+  const history = () => state.get(null, HISTORY_KEY, HISTORY, []);
   return {
     prefix: ">",
     placeholder: "Type the name of a command to run",
     help: "Run a command",
-    async items(filter, { lookup }) {
-      const recent = await loaded();
+    items(filter, { lookup }) {
+      const recent = history();
       const rank = (id: string) => {
         const at = recent.indexOf(id);
         return at < 0 ? recent.length : at;
@@ -61,19 +54,8 @@ export function commandsProvider(workbench: Workbench): QuickAccessProvider {
       return filtered(items, filter);
     },
     async accept(item, _filter, { lookup }) {
-      const recent = await loaded();
-      history = [item.id, ...recent.filter((id) => id !== item.id)].slice(
-        0,
-        HISTORY_SIZE,
-      );
-      backend
-        .invoke("state_set", {
-          key: HISTORY_KEY,
-          value: JSON.stringify(history),
-        })
-        .catch((error: unknown) => {
-          workbench.report(error);
-        });
+      const recent = history().filter((id) => id !== item.id);
+      state.set(null, HISTORY_KEY, [item.id, ...recent].slice(0, HISTORY_SIZE));
       await commands.execute(item.id, lookup);
     },
   };
@@ -126,30 +108,25 @@ export function helpProvider(workbench: Workbench): QuickAccessProvider {
 
 /** `ctx `: switch to a space, or open the space of a context that has none (ARCHITECTURE 4.2). */
 export function spacesProvider(workbench: Workbench): QuickAccessProvider {
-  const { spaces, backend } = workbench;
+  const { spaces, catalog } = workbench;
   return {
     prefix: "ctx ",
     placeholder: "Switch to a space, or open one for a context",
     help: "Switch or open a space",
-    async items(filter) {
-      const contexts = await backend.invoke("contexts_list", null);
+    items(filter) {
       const own = new Set(
         spaces.list.flatMap((space) =>
-          space.contexts.length === 1
-            ? space.contexts.map((context) => context.name)
-            : [],
+          space.contexts.length === 1 ? space.contexts : [],
         ),
       );
       const items: QuickPickItem[] = [
         ...spaces.list.map((space) => ({
           id: `space:${space.id}`,
           label: space.name,
-          description: space.contexts
-            .map((context) => context.name)
-            .join(" + "),
+          description: space.contexts.join(" + "),
           group: "Spaces",
         })),
-        ...contexts
+        ...(catalog.list ?? [])
           .filter((context) => !own.has(context.name))
           .map((context) => ({
             id: `context:${context.name}`,

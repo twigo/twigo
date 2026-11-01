@@ -18,12 +18,13 @@ const DEFAULT_SIZE: Readonly<Record<Location, number>> = {
 };
 
 /**
- * The parts of ARCHITECTURE 4.1. Sizes and visibility belong to the active
- * space, so the split views remount with it.
+ * The parts of ARCHITECTURE 4.1. Visibility belongs to the active space, so
+ * the split views remount with it; sizes are the app's.
  */
 export function Shell() {
-  const { spaces, keybindings, views } = useWorkbench();
+  const { spaces, sizes, keybindings, views } = useWorkbench();
   useChanges(spaces.changes);
+  useChanges(sizes.changes);
   useChanges(views.changes);
 
   useEffect(() => {
@@ -42,14 +43,13 @@ export function Shell() {
     (parts?.[location].visible ?? false) &&
     views.containers(location).length > 0;
   const size = (location: Location) =>
-    parts?.[location].size ?? DEFAULT_SIZE[location];
+    sizes.get(location) ?? DEFAULT_SIZE[location];
   const remember =
-    (locations: readonly (Location | undefined)[]) => (sizes: number[]) => {
-      if (!space) return;
+    (locations: readonly (Location | undefined)[]) => (measured: number[]) => {
       locations.forEach((location, index) => {
-        const measured = sizes[index];
-        if (location && measured && measured > 0) {
-          spaces.setPart(space.id, location, { size: Math.round(measured) });
+        const value = measured[index];
+        if (location && value && value > 0) {
+          sizes.set(location, Math.round(value));
         }
       });
     };

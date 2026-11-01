@@ -19,6 +19,7 @@ export type {
   QuickPickItem,
 } from "./quickaccess/registry";
 export { createWorkbench, Workbench } from "./services";
+export { StateStore } from "./state/store";
 export type {
   Location,
   StatusBarItem,

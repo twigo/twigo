@@ -44,15 +44,14 @@ test("the breadcrumb names the space and its scope and opens their pickers", asy
 test("the breadcrumb follows the space and its namespace scope", async () => {
   const { workbench } = await mounted();
   act(() => {
-    workbench.spaces.select("dev+qa");
-    workbench.spaces.update("dev+qa", (state) => ({
+    workbench.spaces.select("staging");
+    workbench.spaces.update("staging", (state) => ({
       ...state,
       namespaces: ["payments"],
     }));
   });
   const space = screen.getByRole("button", { name: "Switch space" });
-  expect(space.textContent).toBe("dev + qa");
-  expect(space.querySelector("[data-color]")).toBeNull();
+  expect(space.textContent).toBe("staging");
   expect(
     screen.getByRole("button", { name: "Select namespace" }).textContent,
   ).toBe("payments");

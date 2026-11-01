@@ -29,6 +29,8 @@ export type {
   ShellEnvironment,
   Sort,
   Space,
+  StateEntry,
+  StateSnapshot,
   SubscriptionId,
   ViewState,
 } from "./generated";

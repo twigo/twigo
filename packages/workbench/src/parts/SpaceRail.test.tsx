@@ -22,10 +22,10 @@ test("a tile per space, the active one current, a click switches", async () => {
   const tile = (name: string) => screen.getByRole("button", { name });
   expect(tile("prod-eu").getAttribute("aria-current")).toBe("true");
   expect(tile("staging").textContent).toBe("ST");
-  fireEvent.click(tile("dev+qa"));
-  expect(workbench.spaces.active?.id).toBe("dev+qa");
-  expect(tile("dev+qa").getAttribute("aria-current")).toBe("true");
-  expect(workbench.keys.lookup(null)("space.multiContext")).toBe(true);
+  fireEvent.click(tile("dev"));
+  expect(workbench.spaces.active?.id).toBe("dev");
+  expect(tile("dev").getAttribute("aria-current")).toBe("true");
+  expect(workbench.keys.lookup(null)("context.name")).toBe("dev");
 });
 
 test("the last button opens the space picker", async () => {

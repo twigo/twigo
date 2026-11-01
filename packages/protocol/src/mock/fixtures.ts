@@ -1,28 +1,12 @@
 import type { Column, Context, Space } from "../generated";
 
 export const SPACES: Space[] = [
-  {
-    id: "prod-eu",
-    name: "prod-eu",
-    contexts: [{ name: "prod-eu", color: "red" }],
-  },
-  {
-    id: "staging",
-    name: "staging",
-    contexts: [{ name: "staging", color: "orange" }],
-  },
-  { id: "dev", name: "dev", contexts: [{ name: "dev", color: "green" }] },
-  {
-    id: "dev+qa",
-    name: "dev+qa",
-    contexts: [
-      { name: "dev", color: "green" },
-      { name: "qa", color: null },
-    ],
-  },
+  { id: "prod-eu", name: "prod-eu", contexts: ["prod-eu"] },
+  { id: "staging", name: "staging", contexts: ["staging"] },
+  { id: "dev", name: "dev", contexts: ["dev"] },
 ];
 
-/** The catalog: the contexts of the spaces, plus one that has no space yet. */
+/** The catalog: the contexts of the spaces, plus two that have none yet. */
 export const CONTEXTS: Context[] = [
   { name: "prod-eu", color: "red" },
   { name: "staging", color: "orange" },

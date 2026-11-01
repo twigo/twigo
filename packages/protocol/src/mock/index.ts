@@ -106,7 +106,8 @@ export function createMockBackend(
   const clusters = new Map<string, Cluster>();
   const subscriptions = new Map<number, Subscription>();
   const spaces = [...SPACES];
-  const state = new Map<string, string>();
+  const appState = new Map<string, string>();
+  const spaceState = new Map<string, Map<string, string>>();
   let nextId = 1;
   let churn: ReturnType<typeof setInterval> | undefined;
 
@@ -135,17 +136,16 @@ export function createMockBackend(
     [C in PlainCommand]: (request: RequestOf<C>) => ResponseOf<C>;
   } = {
     spaces_list: () => [...spaces],
-    contexts_list: () => CONTEXTS,
     space_open: (name) => {
-      const context = CONTEXTS.find((candidate) => candidate.name === name);
-      if (!context) throw new IpcError("notFound", `no context ${name}`);
+      if (!CONTEXTS.some((context) => context.name === name)) {
+        throw new IpcError("notFound", `no source lists the context ${name}`);
+      }
       const open = spaces.find(
         (candidate) =>
-          candidate.contexts.length === 1 &&
-          candidate.contexts[0]?.name === name,
+          candidate.contexts.length === 1 && candidate.contexts[0] === name,
       );
       if (open) return open;
-      const created = { id: name, name, contexts: [context] };
+      const created = { id: name, name, contexts: [name] };
       spaces.push(created);
       return created;
     },
@@ -170,9 +170,33 @@ export function createMockBackend(
       }, RETRY_MS);
       return null;
     },
-    state_get: (key) => state.get(key) ?? null,
-    state_set: ({ key, value }) => {
-      state.set(key, value);
+    state_load: () => ({
+      app: Object.fromEntries(appState),
+      spaces: Object.fromEntries(
+        [...spaceState].map(([id, values]) => [id, Object.fromEntries(values)]),
+      ),
+    }),
+    state_set: (entries) => {
+      for (const { space: id, key, value } of entries) {
+        if (id !== null) space(id);
+        try {
+          JSON.parse(value);
+        } catch {
+          throw new IpcError("invalidInput", `the value of ${key} is not JSON`);
+        }
+      }
+      for (const { space: id, key, value } of entries) {
+        if (id === null) {
+          appState.set(key, value);
+          continue;
+        }
+        let values = spaceState.get(id);
+        if (!values) {
+          values = new Map();
+          spaceState.set(id, values);
+        }
+        values.set(key, value);
+      }
       return null;
     },
     list_set_window: ({ id, start, end }) => {
@@ -224,19 +248,16 @@ export function createMockBackend(
     ) => ResponseOf<C>;
   } = {
     list_subscribe: (query, onMessage) => {
-      const listed = space(query.space);
-      const columns = podColumns(listed.contexts.length, query);
+      const [context] = space(query.space).contexts;
+      if (context === undefined) {
+        throw new IpcError("notFound", `space ${query.space} has no context`);
+      }
+      const columns = podColumns(query);
       checkQuery(query, columns);
       const id = nextId++;
       subscriptions.set(
         id,
-        new Subscription(
-          query,
-          columns,
-          listed.contexts.map((context) => cluster(context.name)),
-          lists,
-          onMessage,
-        ),
+        new Subscription(query, columns, cluster(context), lists, onMessage),
       );
       if (lists === "live" && churn === undefined) {
         churn =
@@ -246,6 +267,7 @@ export function createMockBackend(
       }
       return id;
     },
+    contexts_watch: () => CONTEXTS,
     keyboard_layout_watch: () => LAYOUTS[layout],
     shell_environment_watch: (_request, onMessage) => {
       environmentWatchers.add(onMessage);
@@ -304,7 +326,7 @@ const SHOWS_ROWS = new Set<ViewState["state"]>(["ready", "relisting", "stale"]);
 /** The batcher of one subscription: one unacknowledged batch at a time, the latest state wins. */
 class Subscription {
   readonly #query: ListQuery;
-  readonly #clusters: readonly Cluster[];
+  readonly #cluster: Cluster;
   readonly #columns: Column[];
   readonly #onMessage: (batch: ListBatch) => void;
   readonly #timers: ReturnType<typeof setTimeout>[] = [];
@@ -313,7 +335,7 @@ class Subscription {
   #seq = 0;
   #acked = 0;
   #dirty = true;
-  #cache: { version: string; rows: Pod[]; counted: Pod[] } | undefined;
+  #cache: { version: number; rows: Pod[]; counted: Pod[] } | undefined;
   #sent: {
     total: number;
     ids: readonly RowId[];
@@ -325,19 +347,19 @@ class Subscription {
   constructor(
     query: ListQuery,
     columns: Column[],
-    clusters: readonly Cluster[],
+    cluster: Cluster,
     scenario: ListScenario,
     onMessage: (batch: ListBatch) => void,
   ) {
     this.#query = query;
-    this.#clusters = clusters;
+    this.#cluster = cluster;
     this.#columns = columns;
     this.#onMessage = onMessage;
-    if (scenario === "live" && clusters.every((c) => c.synced)) {
+    if (scenario === "live" && cluster.synced) {
       this.#status = { state: "ready" };
     } else if (scenario === "live") {
       this.#status = { state: "connecting" };
-      const total = clusters.reduce((sum, c) => sum + c.pods.length, 0);
+      const total = cluster.pods.length;
       [0.25, 0.6, 0.9].forEach((share, step) => {
         this.#later(300 + step * 250, {
           state: "syncing",
@@ -345,7 +367,7 @@ class Subscription {
         });
       });
       this.#later(1100, { state: "ready" }, () => {
-        for (const cluster of clusters) cluster.synced = true;
+        cluster.synced = true;
       });
     } else {
       this.#status = PINNED[scenario];
@@ -397,9 +419,8 @@ class Subscription {
 
   #pods(): { rows: Pod[]; counted: Pod[] } {
     if (!SHOWS_ROWS.has(this.#status.state)) return { rows: [], counted: [] };
-    const version = this.#clusters.map((c) => c.version).join(",");
+    const { version, pods } = this.#cluster;
     if (this.#cache?.version !== version) {
-      const pods = this.#clusters.flatMap((c) => c.pods);
       this.#cache = { version, ...runQuery(pods, this.#query, this.#columns) };
     }
     return this.#cache;
@@ -433,7 +454,6 @@ class Subscription {
     ) {
       return;
     }
-    const withContext = this.#columns[0]?.name === "Context";
     const withNamespace = this.#columns.some((c) => c.name === "Namespace");
     this.#sent = {
       total: pods.length,
@@ -448,7 +468,7 @@ class Subscription {
       total: pods.length,
       columns: first ? this.#columns : null,
       window: windowChanged ? { start, ids } : null,
-      upserts: upserts.map((pod) => podRow(pod, withContext, withNamespace)),
+      upserts: upserts.map((pod) => podRow(pod, withNamespace)),
       status: this.#status,
       groups: groups && (first || groupsChanged) ? groups : null,
     });
@@ -461,11 +481,10 @@ class Subscription {
     const at = this.#columns.findIndex(
       (candidate) => candidate.name === column,
     );
-    const withContext = this.#columns[0]?.name === "Context";
     const withNamespace = this.#columns.some((c) => c.name === "Namespace");
     const counts = new Map<string, number>();
     for (const pod of pods) {
-      const value = String(podCells(pod, withContext, withNamespace)[at] ?? "");
+      const value = String(podCells(pod, withNamespace)[at] ?? "");
       counts.set(value, (counts.get(value) ?? 0) + 1);
     }
     return [...counts]

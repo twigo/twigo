@@ -46,26 +46,24 @@ const drag = (split: "rows" | "columns", measured: number[]) => {
   });
 };
 
-test("dragged part sizes are saved per space and read back with it", async () => {
+test("dragged part sizes are the app's: they stay as spaces switch, and come back in the next window", async () => {
   const workbench = await testWorkbench();
   render(<WorkbenchView workbench={workbench} />);
   expect(sizes()).toEqual([260, 240, 300]);
 
   drag("columns", [300.4, 900, 0]);
   drag("rows", [500, 199.6]);
-  expect(workbench.spaces.state("prod-eu").parts).toMatchObject({
-    sidebar: { size: 300 },
-    panel: { size: 200 },
-    secondary: { size: undefined },
-  });
   expect(sizes()).toEqual([300, 200, 300]);
+  expect(workbench.sizes.get("secondary")).toBeUndefined();
 
   act(() => {
     workbench.spaces.select("staging");
   });
-  expect(sizes()).toEqual([260, 240, 300]);
-  act(() => {
-    workbench.spaces.select("prod-eu");
-  });
+  expect(sizes()).toEqual([300, 200, 300]);
+
+  await act(() => workbench.state.settled());
+  cleanup();
+  const next = await testWorkbench("ready", workbench.backend);
+  render(<WorkbenchView workbench={next} />);
   expect(sizes()).toEqual([300, 200, 300]);
 });

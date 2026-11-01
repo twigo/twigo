@@ -14,14 +14,18 @@ hyper-timeout.workspace = true
 hyper-util.workspace = true
 k8s-openapi.workspace = true
 kube.workspace = true
+notify-debouncer-full.workspace = true
 rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tower.workspace = true
+twigo-ipc.workspace = true
 
 [dev-dependencies]
 futures.workspace = true
 http.workspace = true
 kube = { workspace = true, features = ["runtime", "ws"] }
-serde_json.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "rt-multi-thread", "time"] }
 twigo-cache.workspace = true

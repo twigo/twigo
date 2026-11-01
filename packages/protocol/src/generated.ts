@@ -27,6 +27,9 @@ export type ColumnValues = {
  */
 column: string, values: Array<string>, };
 
+/**
+ * A context the catalog lists.
+ */
 export type Context = { name: string, 
 /**
  * From the `twigo` extension of the kubeconfig context; none by default.
@@ -181,14 +184,32 @@ column: string, descending: boolean, };
 /**
  * A workbench space: one context or a group of them (ARCHITECTURE 4.2).
  */
-export type Space = { id: string, name: string, contexts: Array<Context>, };
+export type Space = { id: string, name: string, 
+/**
+ * The names of its contexts; the catalog's `Context` says the rest,
+ * as long as a source lists it.
+ */
+contexts: Array<string>, };
 
 /**
- * UI state that is not settings (ARCHITECTURE 4.8): a space's layout, the
- * command history. The value is JSON the webview writes and reads back;
- * the core stores it without looking inside.
+ * UI state that is not settings (ARCHITECTURE 4.8), such as a space's
+ * layout or the command history. The value is JSON that the webview writes
+ * and reads back; the core checks only that it is JSON.
  */
-export type StateEntry = { key: string, value: string, };
+export type StateEntry = { 
+/**
+ * The space it belongs to; none for the whole app.
+ */
+space: string | null, key: string, value: string, };
+
+/**
+ * Every stored value, read once as the webview starts.
+ */
+export type StateSnapshot = { app: { [key in string]: string }, 
+/**
+ * By space id.
+ */
+spaces: { [key in string]: { [key in string]: string } }, };
 
 export type SubscriptionId = number;
 
@@ -201,7 +222,7 @@ export type Window = { start: number, ids: Array<RowId>, };
 
 export type Commands = {
   spaces_list: { request: null; response: Array<Space>; message: null };
-  contexts_list: { request: null; response: Array<Context>; message: null };
+  contexts_watch: { request: null; response: Array<Context>; message: Array<Context> };
   space_open: { request: string; response: Space; message: null };
   resources_list: { request: string; response: Array<Resource>; message: null };
   namespaces_list: { request: string; response: Array<string>; message: null };
@@ -211,8 +232,8 @@ export type Commands = {
   list_ack: { request: Ack; response: null; message: null };
   list_unsubscribe: { request: SubscriptionId; response: null; message: null };
   keyboard_layout_watch: { request: null; response: KeyboardLayout; message: KeyboardLayout };
-  state_get: { request: string; response: string | null; message: null };
-  state_set: { request: StateEntry; response: null; message: null };
+  state_load: { request: null; response: StateSnapshot; message: null };
+  state_set: { request: Array<StateEntry>; response: null; message: null };
   shell_environment_watch: { request: null; response: ShellEnvironment; message: ShellEnvironment };
   shell_environment_retry: { request: null; response: null; message: null };
 };
