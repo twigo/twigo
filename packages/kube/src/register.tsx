@@ -1,5 +1,6 @@
 import { FolderTree } from "lucide-react";
 import type { Workbench } from "@twigo/workbench";
+import { ColumnPresets } from "./columnPresets";
 import { Discovery } from "./discovery";
 import { Explorer, EXPLORER_VIEW } from "./Explorer";
 import { FilterField } from "./FilterField";
@@ -15,6 +16,7 @@ import {
   namespaceProvider,
   resourceProvider,
 } from "./quickaccess";
+import { registerResourceActions } from "./resourceActions";
 import { Selection } from "./selection";
 import { LIST_SCHEME, parseListUri } from "./uri";
 
@@ -24,6 +26,9 @@ export function registerKube(workbench: Workbench): void {
     discovery: new Discovery(workbench.backend),
     lists: new Lists(),
     filters: new ListFilters(),
+    columns: new ColumnPresets(workbench.backend, (error) => {
+      workbench.report(error);
+    }),
     selection: new Selection(),
     statuses: new ListStatuses(),
   };
@@ -184,4 +189,5 @@ export function registerKube(workbench: Workbench): void {
       keys.map((key) => ({ key, command: id, when })),
     ),
   );
+  registerResourceActions(workbench, services);
 }

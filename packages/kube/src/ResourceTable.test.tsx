@@ -95,6 +95,7 @@ test("rows from the window render with the server's priority-0 columns", async (
     "Status",
     "Restarts",
     "Age",
+    "",
   ]);
   expect(screen.getAllByRole("row").length).toBeGreaterThan(10);
 });

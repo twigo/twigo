@@ -7,6 +7,7 @@ async function withEveryEnablement() {
   registerKube(workbench);
   workbench.keys.set("listFocus", true);
   workbench.keys.set("treeFocus", true);
+  workbench.keys.set("resource.namespaced", true);
   workbench.keys.set("detailsOpen", true);
   workbench.keys.set("editor.type", "kube.list");
   workbench.keys.set("space.count", 9);

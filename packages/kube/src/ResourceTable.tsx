@@ -1,9 +1,18 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ArrowDown,
   ArrowUp,
   CircleAlert,
+  Columns3,
+  Ellipsis,
   KeyRound,
   ShieldOff,
 } from "lucide-react";
@@ -20,9 +29,26 @@ import type {
   Sort,
   ViewState,
 } from "@twigo/protocol";
-import { cn, EmptyState, Skeleton } from "@twigo/ui";
+import {
+  cn,
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  EmptyState,
+  Skeleton,
+} from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import type { FlashTracker } from "./flash";
+import type { ColumnChoices } from "./columnPresets";
 import { kindIcon } from "./kinds";
 import { alignsEnd, cellParts, quietColumn } from "./columns";
 import { cellTone, statusColumn } from "./tones";
@@ -30,6 +56,15 @@ import { useListView } from "./useListView";
 import { useNow } from "./useNow";
 
 const ROW_HEIGHT = 26;
+const ACTIONS_WIDTH = 32;
+
+/** An entry of a row's menu, run on the selected row. */
+export interface RowAction {
+  readonly id: string;
+  readonly label: string;
+  readonly keys?: string;
+  readonly run: () => void;
+}
 
 /** States in which Rust sends rows; the loading states show skeletons. */
 const SHOWS_ROWS = new Set<ViewState["state"]>(["ready", "relisting", "stale"]);
@@ -66,6 +101,11 @@ interface Props {
     status: ViewState,
     groups: readonly GroupCount[],
   ) => void;
+  /** Columns the user showed or hid; the rest follow their priority. */
+  choices?: ColumnChoices;
+  onChoose?: (column: string, shown: boolean) => void;
+  /** The groups of a row's menu, from its ⋯ button or a right click. */
+  rowActions?: readonly (readonly RowAction[])[];
   /** Registers the focusable grid while it is mounted, for context keys and commands. */
   register?: (grid: HTMLElement, list: ListController) => () => void;
 }
@@ -97,6 +137,9 @@ function ResourceList({
   onActivate,
   onStatus,
   register,
+  choices = {},
+  onChoose,
+  rowActions = [],
   onRetry,
 }: Props & { onRetry: () => void }) {
   const [sort, setSort] = useState<Sort | null>(null);
@@ -115,9 +158,11 @@ function ResourceList({
   const [grid, setGrid] = useState<HTMLDivElement | null>(null);
   const { status } = snapshot;
   const showsRows = SHOWS_ROWS.has(status.state);
+  const shown = (column: Column) =>
+    column.name === "Name" || (choices[column.name] ?? column.priority === 0);
   const columns = snapshot.columns
     .map((column, index) => ({ ...column, index }))
-    .filter((column) => column.priority === 0);
+    .filter(shown);
 
   const virtualizer = useVirtualizer({
     count: showsRows ? snapshot.total : 0,
@@ -206,8 +251,12 @@ function ResourceList({
       return flexes(column) ? `minmax(${px}px, ${px}fr)` : `${px}px`;
     }),
     ...(columns.some(flexes) ? [] : ["minmax(0, 1fr)"]),
+    `${String(ACTIONS_WIDTH)}px`,
   ].join(" ");
-  const total = columns.reduce((sum, column) => sum + widthOf(column), 0);
+  const total = columns.reduce(
+    (sum, column) => sum + widthOf(column),
+    ACTIONS_WIDTH,
+  );
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-editor">
@@ -239,6 +288,12 @@ function ResourceList({
                 }}
               />
             ))}
+            {!columns.some(flexes) && <div />}
+            <ColumnChooser
+              columns={snapshot.columns}
+              shown={shown}
+              onChoose={onChoose}
+            />
           </div>
           {!showsRows ? (
             <SkeletonRows template={template} count={columns.length || 5} />
@@ -251,58 +306,205 @@ function ResourceList({
               <p>Nothing of this kind exists in the space.</p>
             </EmptyState>
           ) : (
-            <div
-              className="relative"
-              style={{ height: virtualizer.getTotalSize(), minWidth: total }}
-            >
-              {items.map((item) => {
-                const row = rowAt(snapshot, item.index);
-                return (
-                  <div
-                    key={row?.id ?? `pending-${String(item.index)}`}
-                    role="row"
-                    aria-rowindex={item.index + 2}
-                    aria-selected={row !== undefined && row.id === selected}
-                    onClick={() => {
-                      setSelected(row?.id);
-                      if (row) onActivate?.(row);
-                    }}
-                    className={cn(
-                      "absolute inset-x-0 grid items-center border-b border-border-subtle tabular-nums hover:bg-row-hover",
-                      row !== undefined &&
-                        row.id === selected &&
-                        "bg-selected-unfocused group-focus:bg-selected",
-                    )}
-                    style={{
-                      top: item.start,
-                      height: ROW_HEIGHT,
-                      gridTemplateColumns: template,
-                    }}
-                  >
-                    {columns.map((column) =>
-                      row ? (
-                        <DataCell
-                          key={column.name}
-                          row={row}
-                          column={column}
-                          gvr={gvr}
-                          now={now}
-                          flash={flash}
+            <RowMenu actions={rowActions}>
+              <div
+                className="relative"
+                style={{ height: virtualizer.getTotalSize(), minWidth: total }}
+              >
+                {items.map((item) => {
+                  const row = rowAt(snapshot, item.index);
+                  return (
+                    <div
+                      key={row?.id ?? `pending-${String(item.index)}`}
+                      role="row"
+                      aria-rowindex={item.index + 2}
+                      aria-selected={row !== undefined && row.id === selected}
+                      onClick={() => {
+                        setSelected(row?.id);
+                        if (row) onActivate?.(row);
+                      }}
+                      onContextMenu={() => {
+                        setSelected(row?.id);
+                      }}
+                      className={cn(
+                        "group/row absolute inset-x-0 grid items-center border-b border-border-subtle tabular-nums hover:bg-row-hover",
+                        row !== undefined &&
+                          row.id === selected &&
+                          "bg-selected-unfocused group-focus:bg-selected",
+                      )}
+                      style={{
+                        top: item.start,
+                        height: ROW_HEIGHT,
+                        gridTemplateColumns: template,
+                      }}
+                    >
+                      {columns.map((column) =>
+                        row ? (
+                          <DataCell
+                            key={column.name}
+                            row={row}
+                            column={column}
+                            gvr={gvr}
+                            now={now}
+                            flash={flash}
+                          />
+                        ) : (
+                          <div key={column.name} className="px-2">
+                            <Skeleton className="h-2.5 w-3/5" />
+                          </div>
+                        ),
+                      )}
+                      {!columns.some(flexes) && <div />}
+                      {row && (
+                        <RowActions
+                          actions={rowActions}
+                          selected={row.id === selected}
+                          onOpen={() => {
+                            setSelected(row.id);
+                          }}
                         />
-                      ) : (
-                        <div key={column.name} className="px-2">
-                          <Skeleton className="h-2.5 w-3/5" />
-                        </div>
-                      ),
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </RowMenu>
           )}
         </div>
       )}
     </section>
+  );
+}
+
+/** The choice of columns, at the head of the actions column. */
+function ColumnChooser({
+  columns,
+  shown,
+  onChoose,
+}: {
+  columns: readonly Column[];
+  shown: (column: Column) => boolean;
+  onChoose: ((column: string, shown: boolean) => void) | undefined;
+}) {
+  return (
+    <div
+      role="columnheader"
+      className="flex h-full items-center justify-center"
+    >
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          aria-label="Choose columns"
+          disabled={!onChoose}
+          className="flex size-6 items-center justify-center rounded-md hover:bg-row-hover hover:text-foreground data-[state=open]:bg-row-hover"
+        >
+          <Columns3 aria-hidden className="size-3.5" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuLabel>Columns</DropdownMenuLabel>
+          {columns
+            .filter((column) => column.name !== "Name")
+            .map((column) => (
+              <DropdownMenuCheckboxItem
+                key={column.name}
+                checked={shown(column)}
+                onSelect={(event) => {
+                  event.preventDefault();
+                }}
+                onCheckedChange={(checked) => {
+                  onChoose?.(column.name, checked);
+                }}
+              >
+                {column.name}
+              </DropdownMenuCheckboxItem>
+            ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+/** A right click on a row opens its menu; the row it hit is selected first. */
+function RowMenu({
+  actions,
+  children,
+}: {
+  actions: readonly (readonly RowAction[])[];
+  children: ReactNode;
+}) {
+  if (actions.length === 0) return children;
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuContent>
+        {actions.map((group, index) => (
+          <Fragment key={group[0]?.id ?? index}>
+            {index > 0 && <ContextMenuSeparator />}
+            {group.map((action) => (
+              <ContextMenuItem key={action.id} onSelect={action.run}>
+                {action.label}
+                {action.keys && <MenuKeys>{action.keys}</MenuKeys>}
+              </ContextMenuItem>
+            ))}
+          </Fragment>
+        ))}
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+/** The ⋯ button at a row's end: shown on hover and on the selected row. */
+function RowActions({
+  actions,
+  selected,
+  onOpen,
+}: {
+  actions: readonly (readonly RowAction[])[];
+  selected: boolean;
+  onOpen: () => void;
+}) {
+  if (actions.length === 0) return <div role="gridcell" />;
+  return (
+    <div role="gridcell" className="flex items-center justify-center">
+      <DropdownMenu
+        onOpenChange={(open) => {
+          if (open) onOpen();
+        }}
+      >
+        <DropdownMenuTrigger
+          aria-label="Row actions"
+          onClick={(event) => {
+            event.stopPropagation();
+          }}
+          className={cn(
+            "flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-row-hover hover:text-foreground group-hover/row:opacity-100 focus-visible:opacity-100 data-[state=open]:bg-row-hover data-[state=open]:opacity-100",
+            selected && "opacity-100",
+          )}
+        >
+          <Ellipsis aria-hidden className="size-4" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {actions.map((group, index) => (
+            <Fragment key={group[0]?.id ?? index}>
+              {index > 0 && <DropdownMenuSeparator />}
+              {group.map((action) => (
+                <DropdownMenuItem key={action.id} onSelect={action.run}>
+                  {action.label}
+                  {action.keys && <MenuKeys>{action.keys}</MenuKeys>}
+                </DropdownMenuItem>
+              ))}
+            </Fragment>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+function MenuKeys({ children }: { children: string }) {
+  return (
+    <span className="ml-auto pl-4 text-[11px] text-muted-foreground">
+      {children}
+    </span>
   );
 }
 

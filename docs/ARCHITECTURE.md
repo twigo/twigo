@@ -575,7 +575,9 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 ### 4.4 Resource tables and the keyboard
 
 - Columns come from the Table `columnDefinitions` (priority 0 by default, wide on toggle), plus Context, CPU and memory when available, and Namespace unless the query names one namespace.
-  Column presets are kept per GVR.
+  Column presets are kept per GVR, for every space: the user shows or hides columns by name from the head of the actions column, and a column nobody chose for follows its priority.
+- The last column is the row's actions: a ⋯ button on hover and on the selected row, and the same menu on a right click, built from `resource/context`.
+  Its commands act on the selected row of the active list.
   Columns share the free width in proportion to their widths until the user drags one's edge; header dividers show on hover.
 - Cells read by what matters: a status shows a tone dot, a ratio short of its total (Ready `0/1`) is pending, Namespace and Age are quiet, and a count's remainder (Restarts ` (28m ago)`) and a zero count are grey.
   Which column does what is data in `packages/kube`, by `group/resource/column`.

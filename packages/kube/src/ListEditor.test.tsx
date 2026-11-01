@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
 } from "@testing-library/react";
 import {
   afterAll,
@@ -55,8 +56,8 @@ async function settle(steps = 6) {
   }
 }
 
-async function podsList() {
-  const workbench = new Workbench(createMockBackend("ready"), "mac", {
+async function podsList(backend = createMockBackend("ready")) {
+  const workbench = new Workbench(backend, "mac", {
     id: "us",
     keys: {},
   });
@@ -165,4 +166,50 @@ test("/ in the list focuses the filter field, and its text filters the rows", as
   expect(rows().filter((row) => statusOf(row) !== "ImagePullBackOff")).toEqual(
     [],
   );
+});
+
+const openMenu = (trigger: HTMLElement) => {
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+};
+
+test("a row's actions button and a right click run the resource commands on that row", async () => {
+  const writeText = vi.fn(() => Promise.resolve());
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  await podsList();
+  const second = rows()[1];
+  if (!second) throw new Error("no rows");
+  const name = second.children[0]?.textContent;
+  const namespace = second.children[1]?.textContent;
+  const trigger = within(second).getByRole("button", { name: "Row actions" });
+  openMenu(trigger);
+  fireEvent.click(
+    screen.getByRole("menuitem", { name: "Copy Namespace/Name" }),
+  );
+  await settle(1);
+  expect(writeText).toHaveBeenCalledWith(`${namespace ?? ""}/${name ?? ""}`);
+
+  const third = rows()[2];
+  if (!third) throw new Error("no rows");
+  fireEvent.contextMenu(third);
+  fireEvent.click(screen.getByRole("menuitem", { name: "Open Details" }));
+  await settle(1);
+  expect(details()?.textContent).toContain(third.children[0]?.textContent);
+});
+
+test("the column chooser shows a wide column, and the kind keeps the choice", async () => {
+  const backend = createMockBackend("ready");
+  await podsList(backend);
+  expect(screen.queryByRole("columnheader", { name: "IP" })).toBeNull();
+  openMenu(screen.getByRole("button", { name: "Choose columns" }));
+  fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "IP" }));
+  fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+  await settle(1);
+  expect(screen.getByRole("columnheader", { name: "IP" })).toBeTruthy();
+
+  cleanup();
+  await podsList(backend);
+  expect(screen.getByRole("columnheader", { name: "IP" })).toBeTruthy();
 });
