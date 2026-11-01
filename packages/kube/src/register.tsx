@@ -1,8 +1,7 @@
-import { FolderTree, ScanSearch } from "lucide-react";
+import { FolderTree } from "lucide-react";
 import type { Workbench } from "@twigo/workbench";
 import { Discovery } from "./discovery";
 import { Explorer } from "./Explorer";
-import { Inspector } from "./Inspector";
 import { ListIcon } from "./KindIcon";
 import { ListEditor, type ListServices } from "./ListEditor";
 import { Lists } from "./lists";
@@ -58,20 +57,6 @@ export function registerKube(workbench: Workbench): void {
     container: "kube.explorer",
     component: () => <Explorer discovery={services.discovery} />,
   });
-  views.registerContainer({
-    id: "kube.inspector",
-    title: "Inspector",
-    icon: ScanSearch,
-    location: "secondary",
-    order: 0,
-  });
-  views.registerView({
-    id: "kube.inspector",
-    title: "Inspector",
-    container: "kube.inspector",
-    component: () => <Inspector selection={services.selection} />,
-  });
-
   editors.register({
     id: "kube.list",
     scheme: LIST_SCHEME,
@@ -87,6 +72,7 @@ export function registerKube(workbench: Workbench): void {
     id: string;
     title: string;
     keys: string[];
+    when?: string;
     run: () => void;
   }[] = [
     {
@@ -113,20 +99,27 @@ export function registerKube(workbench: Workbench): void {
       keys: ["end", "shift+g"],
       run: () => services.lists.focused()?.moveToEdge("last"),
     },
+    {
+      id: "list.open",
+      title: "Open Row Details",
+      keys: ["enter"],
+      run: () => services.lists.focused()?.activate(),
+    },
+    {
+      id: "k8s.details.close",
+      title: "Close Details",
+      keys: ["escape"],
+      when: "detailsOpen",
+      run: () => services.lists.focused()?.closeDetails(),
+    },
   ];
-  for (const { id, title, run } of moves) {
-    commands.register({
-      id,
-      title,
-      category: "List",
-      enablement: "listFocus",
-      run,
-    });
+  for (const { id, title, when = "listFocus", run } of moves) {
+    commands.register({ id, title, category: "List", enablement: when, run });
   }
   keybindings.register(
     "core",
-    moves.flatMap(({ id, keys }) =>
-      keys.map((key) => ({ key, command: id, when: "listFocus" })),
+    moves.flatMap(({ id, keys, when = "listFocus" }) =>
+      keys.map((key) => ({ key, command: id, when })),
     ),
   );
 }

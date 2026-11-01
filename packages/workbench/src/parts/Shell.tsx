@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from "react";
-import { Allotment } from "allotment";
+import { Allotment, LayoutPriority } from "allotment";
 import { Toaster } from "@twigo/ui";
 import { QuickAccessWidget } from "../quickaccess/QuickAccessWidget";
 import { useChanges, useWorkbench } from "../react";
@@ -21,8 +21,9 @@ const DEFAULT_SIZE: Readonly<Record<Location, number>> = {
  * space, so the split views remount with it.
  */
 export function Shell() {
-  const { spaces, keybindings } = useWorkbench();
+  const { spaces, keybindings, views } = useWorkbench();
   useChanges(spaces.changes);
+  useChanges(views.changes);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -36,6 +37,9 @@ export function Shell() {
 
   const space = spaces.active;
   const parts = space ? spaces.state(space.id).parts : undefined;
+  const shown = (location: Location) =>
+    (parts?.[location].visible ?? false) &&
+    views.containers(location).length > 0;
   const size = (location: Location) =>
     parts?.[location].size ?? DEFAULT_SIZE[location];
   const remember =
@@ -63,19 +67,19 @@ export function Shell() {
           <Allotment.Pane
             minSize={170}
             preferredSize={size("sidebar")}
-            visible={parts?.sidebar.visible ?? false}
+            visible={shown("sidebar")}
           >
             <Island>
               <PartView location="sidebar" />
             </Island>
           </Allotment.Pane>
-          <Allotment.Pane minSize={320}>
+          <Allotment.Pane minSize={320} priority={LayoutPriority.High}>
             <Allotment
               vertical
               proportionalLayout={false}
               onDragEnd={remember([undefined, "panel"])}
             >
-              <Allotment.Pane minSize={120}>
+              <Allotment.Pane minSize={120} priority={LayoutPriority.High}>
                 <Island>
                   <EditorArea />
                 </Island>
@@ -83,7 +87,7 @@ export function Shell() {
               <Allotment.Pane
                 minSize={80}
                 preferredSize={size("panel")}
-                visible={parts?.panel.visible ?? false}
+                visible={shown("panel")}
               >
                 <Island>
                   <PartView location="panel" />
@@ -94,7 +98,7 @@ export function Shell() {
           <Allotment.Pane
             minSize={200}
             preferredSize={size("secondary")}
-            visible={parts?.secondary.visible ?? false}
+            visible={shown("secondary")}
           >
             <Island>
               <PartView location="secondary" />

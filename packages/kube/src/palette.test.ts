@@ -6,6 +6,7 @@ async function withEveryEnablement() {
   const workbench = await testWorkbench();
   registerKube(workbench);
   workbench.keys.set("listFocus", true);
+  workbench.keys.set("detailsOpen", true);
   workbench.keys.set("editor.type", "kube.list");
   workbench.keys.set("space.count", 9);
   return workbench;

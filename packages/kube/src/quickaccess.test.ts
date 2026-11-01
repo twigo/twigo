@@ -122,14 +122,20 @@ test("ns scopes the active space", async () => {
   expect(workbench.spaces.state("prod-eu").namespaces).toEqual(["payments"]);
 });
 
-test("no prefix finds pods by name and shows the pick in the Inspector", async () => {
+test("no prefix finds pods by name and opens the pick's list with its details", async () => {
   const { workbench, run } = await kube();
-  workbench.spaces.setPart("prod-eu", "secondary", { visible: false });
+  const open = vi
+    .spyOn(workbench.editors, "open")
+    .mockImplementation(() => undefined);
   const found = await run("auth-api-1a4");
   expect(found.items.length).toBeGreaterThan(0);
   expect(found.items.every((item) => item.label.includes("auth-api-1a4"))).toBe(
     true,
   );
+  const [first] = found.items;
   await found.accept();
-  expect(workbench.spaces.state("prod-eu").parts.secondary.visible).toBe(true);
+  expect(open).toHaveBeenCalledWith(
+    `k8s-list://prod-eu/v1/pods?q=${first?.label ?? ""}`,
+    { preview: true },
+  );
 });

@@ -35,6 +35,8 @@ const SHOWS_ROWS = new Set<ViewState["state"]>(["ready", "relisting", "stale"]);
 export interface ListController {
   move(delta: number): void;
   moveToEdge(edge: "first" | "last"): void;
+  /** Opens the selected row, as a click on it does. */
+  activate(): void;
 }
 
 interface Props {
@@ -51,6 +53,8 @@ interface Props {
   initialSelected?: RowId;
   /** The selected row, whenever it changes or its data does. */
   onSelect?: (row: Row, columns: readonly Column[]) => void;
+  /** A row the user opened: a click, or Enter through `activate`. */
+  onActivate?: (row: Row) => void;
   /** Registers the focusable grid while it is mounted, for context keys and commands. */
   register?: (grid: HTMLElement, list: ListController) => () => void;
 }
@@ -78,6 +82,7 @@ function ResourceList({
   labelSelector,
   initialSelected,
   onSelect,
+  onActivate,
   register,
   onRetry,
 }: Props & { onRetry: () => void }) {
@@ -125,9 +130,9 @@ function ResourceList({
     }
   }, [wantedRow]);
 
-  const latest = useRef({ snapshot, selected });
+  const latest = useRef({ snapshot, selected, onActivate });
   useEffect(() => {
-    latest.current = { snapshot, selected };
+    latest.current = { snapshot, selected, onActivate };
   });
   const controller = useMemo<ListController>(() => {
     const go = (index: number) => {
@@ -145,6 +150,15 @@ function ResourceList({
       },
       moveToEdge(edge) {
         go(edge === "first" ? 0 : latest.current.snapshot.total - 1);
+      },
+      activate() {
+        const {
+          snapshot: shown,
+          selected: id,
+          onActivate: open,
+        } = latest.current;
+        const row = id === undefined ? undefined : shown.rows.get(id);
+        if (row) open?.(row);
       },
     };
   }, [virtualizer]);
@@ -222,6 +236,7 @@ function ResourceList({
                     aria-selected={row !== undefined && row.id === selected}
                     onClick={() => {
                       setSelected(row?.id);
+                      if (row) onActivate?.(row);
                     }}
                     className={cn(
                       "absolute inset-x-0 grid items-center border-b border-border-micro tabular-nums hover:bg-row-hover",

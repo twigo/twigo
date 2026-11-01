@@ -27,7 +27,7 @@ export const DEFAULT_STATE: SpaceState = {
   parts: {
     sidebar: { visible: true, size: undefined, container: undefined },
     panel: { visible: false, size: undefined, container: undefined },
-    secondary: { visible: true, size: undefined, container: undefined },
+    secondary: { visible: false, size: undefined, container: undefined },
   },
   placement: {},
   namespaces: [],

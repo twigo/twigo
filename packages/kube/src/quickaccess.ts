@@ -206,13 +206,14 @@ function firstRows(view: ListView): Promise<ListSnapshot> {
 
 /**
  * No prefix: pods of the active space by name, filtered in Rust, as the live
- * upstream serves them; picking one shows it in the Inspector without a GET.
+ * upstream serves them; picking one opens its list with its details shown,
+ * without a GET.
  */
 export function resourceProvider(
   workbench: Workbench,
   selection: Selection,
 ): QuickAccessProvider {
-  const { spaces, backend } = workbench;
+  const { spaces, backend, editors } = workbench;
   let shown: { space: string; snapshot: ListSnapshot } | undefined;
   return {
     prefix: "",
@@ -261,8 +262,14 @@ export function resourceProvider(
         kind: "Pod",
         columns: shown.snapshot.columns,
         row,
+        reveal: true,
       });
-      spaces.setPart(shown.space, "secondary", { visible: true });
+      editors.open(
+        listUri({ space: shown.space, gvr: PODS, text: item.label }),
+        {
+          preview: true,
+        },
+      );
     },
   };
 }

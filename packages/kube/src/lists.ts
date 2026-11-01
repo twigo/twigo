@@ -1,17 +1,22 @@
 import type { ListController } from "./ResourceTable";
 
-/** The mounted tables by grid element, so commands act on the one that has the focus. */
-export class Lists {
-  readonly #lists = new WeakMap<Element, ListController>();
+/** What list commands do to the list editor that has the focus. */
+export interface ListCommands extends ListController {
+  closeDetails(): void;
+}
 
-  register(grid: Element, list: ListController): () => void {
-    this.#lists.set(grid, list);
+/** The mounted list editors by element, so commands act on the one that has the focus. */
+export class Lists {
+  readonly #lists = new WeakMap<Element, ListCommands>();
+
+  register(element: Element, list: ListCommands): () => void {
+    this.#lists.set(element, list);
     return () => {
-      this.#lists.delete(grid);
+      this.#lists.delete(element);
     };
   }
 
-  focused(): ListController | undefined {
+  focused(): ListCommands | undefined {
     for (let at = document.activeElement; at; at = at.parentElement) {
       const list = this.#lists.get(at);
       if (list) return list;

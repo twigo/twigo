@@ -105,7 +105,7 @@ Everything NATS-specific goes.
 | `shell/editorHost.ts` + `components/editor/EditorArea.tsx` (dockview)                                    | Editor service (4.3)                                                              | Panels are keyed by `EditorInput` URIs and opened through a resolver. Adds preview tabs, dirty working copies and one layout per space. Keep the `withReplacingLayout` guard: bulk swaps must not count as user closes.                                     |
 | `store/spaces.ts`, `components/workbench/SpaceTabs.tsx`                                                  | Spaces (4.2)                                                                      | Space = a context, or a group of contexts, instead of a domain × target. Each space remembers its views and layout. ⌘1..9, a raw keydown listener in legacy, becomes commands. Legacy hides the strip when only one domain exists; here it is always shown. |
 | `store/workspace.ts` (dockview layout per connection)                                                    | Per-space state                                                                   | Keyed by space ID. Holds layout, open inputs, explorer state and namespace scope.                                                                                                                                                                           |
-| `components/editor/InspectorSplit.tsx`                                                                   | Secondary side bar part                                                           | The inspector becomes a view in the secondary side bar, which can be moved like any other view.                                                                                                                                                             |
+| `components/editor/InspectorSplit.tsx`                                                                   | Row details over a list                                                           | The inspector becomes a drawer that slides in over its list from the right, as Lens's (4.3).                                                                                                                                                                |
 | `store/readonly.ts` + `ConnState.readonly` (frontend-owned, synced to Rust by `conn_sync_readonly`)      | `twigo-policy` (6.4)                                                              | **Rust owns the lock.** The frontend only displays it. Three modes, several policy sources, timed unlock.                                                                                                                                                   |
 | Diff before apply (`lib/diff.ts`, `diffStreamPatch` in `StreamFormDialog`, `RawConfigDialog`)            | Server-side apply dry-run + Monaco diff editor (6.5)                              | The diff now compares live state with the server's dry-run result, so it includes webhook and defaulting changes. A local diff guesses.                                                                                                                     |
 | `lib/persist-storage.ts` (tauri-plugin-store)                                                            | Settings files + state store (4.8)                                                | Settings are user-editable JSONC files with layers. UI state (layouts, history) stays in the store.                                                                                                                                                         |
@@ -495,13 +495,14 @@ The bench also replays the cases that broke other clients, and one that loopback
 
 ```
 ┌ ●●● ● prod-eu 🔒 ▾ › payments ▾      ⌕ Search prod-eu      ◧ ▭ ◨ ── title bar ─┐
-│ PE │╭ Explorer ───╮╭ ⎈ pod/api-7f9 │ deploy/api ─────────╮╭ Inspector ─────────╮│
-│ ST ││ ▾ Workloads ││                                      ││ details of the     ││
-│ DQ ││   Pods  2.1k││   editor groups (dockview grid)      ││ selection; later   ││
-│ +  ││   Deploym.  ││   preview tabs · splits · drag       ││ the agent panel    ││
-│    ││ ▸ Network   │╰──────────────────────────────────────╯│                    ││
-│    ││ ▸ CRDs      │╭ Terminal · Events · Output · Agent ─╮ │                    ││
-│    │╰─────────────╯╰─────────────────────────────────────╯ ╰────────────────────╯│
+│ PE │╭ Explorer ───╮╭ ⎈ Pods │ deploy/api ──────────────────────────────────────╮│
+│ ST ││ ▾ Workloads ││ 5,000 pods · synced          ┌ Pod api-7f9 ──────────── ✕ ┐││
+│ DQ ││   Pods  2.1k││ Name         Ready  Status   │ details over the list,     │││
+│ +  ││   Deploym.  ││ api-7f9      1/1    Running  │ Lens's drawer; arrows move │││
+│    ││ ▸ Network   ││ …                            │ it along, Esc closes       │││
+│    ││ ▸ CRDs      │╰──────────────────────────────┴────────────────────────────╯││
+│    ││             │╭ Terminal · Events · Output · Agent activity ─────────────╮ ││
+│    │╰─────────────╯╰───────────────────────────────────────────────────────────╯ ││
 ├────┴─────────────────────────────────────────────────────────────────────────────┤
 │ prod-eu · ns: payments · READ-ONLY · ⇄ 3 forwards · syncing 2/9     status bar   │
 └──────────────────────────────────────────────────────────────────────────────────┘
@@ -514,7 +515,7 @@ The bench also replays the cases that broke other clients, and one that loopback
 | Primary side bar   | View containers as tabs in its header (Explorer, Port forwards, Helm, Extensions and contributed ones); the active one's views: resource tree, saved filters |
 | Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups                                                                              |
 | Panel              | Terminal (pty), cluster Events stream, Output (Twigo logs per channel), Agent activity (audit, 6.6)                                                          |
-| Secondary side bar | Inspector (details of the selected row without opening it); the ACP agent panel later                                                                        |
+| Secondary side bar | The ACP agent panel later; hidden while nothing lives there, as is the panel                                                                                 |
 | Status bar         | Context, namespace, policy mode, port-forward items, sync state, extension items                                                                             |
 
 The parts are islands: cards on the shell with 6 px gaps, as JetBrains Islands and VS Code's 2026 layout ([research](research/workbench-chrome.md)).
@@ -555,11 +556,10 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 | `twigo://settings`, `twigo://keybindings`, `twigo://extension/<id>` | Settings UI, keybindings UI, extension details                                                                                |
 
 - **Preview tabs.**
-  Single-click or arrow navigation in a list shows the row's data in the Inspector.
-  After a 150 ms pause it fetches the object once with a GET.
+  A click or Enter on a row opens its details, sliding in over the list from the right, as Lens's drawer; arrows move them along and Esc closes them.
+  After a 150 ms pause they fetch the object once with a GET.
   No watch starts until an editor opens.
-  Enter or double-click opens a preview tab (italic title).
-  Editing it or double-clicking pins it.
+  Opening the resource from its details opens a preview tab (italic title); editing it or double-clicking its tab pins it.
 - **Working copies.**
   A YAML editor that the user has changed holds a working copy based on the opened `resourceVersion`.
   - When the live object changes underneath, the editor shows "changed on server" with Compare, Reload and Keep mine.

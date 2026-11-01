@@ -7,11 +7,13 @@ export interface Selected {
   readonly kind: string;
   readonly columns: readonly Column[];
   readonly row: Row;
+  /** Open the row's details when its list mounts, as going to a resource does. */
+  readonly reveal?: boolean;
 }
 
 /**
- * The row the Inspector shows (ARCHITECTURE 4.3): per space, the last one
- * selected in any of its tables, without fetching the object.
+ * Per space, the row last selected in any of its tables (ARCHITECTURE
+ * 4.3), so a list that mounts again selects it again.
  */
 export class Selection {
   readonly changes = new Changes();

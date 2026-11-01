@@ -5,6 +5,7 @@ import {
   render,
   screen,
 } from "@testing-library/react";
+import { Terminal } from "lucide-react";
 import { afterEach, expect, test } from "vitest";
 import { inWorkbench, testWorkbench } from "../testing";
 import { TitleBar } from "./TitleBar";
@@ -60,8 +61,17 @@ test("the breadcrumb follows the space and its namespace scope", async () => {
   ).toBe("payments");
 });
 
-test("the search opens quick access and the toggles show and hide the parts", async () => {
+test("the search opens quick access; a toggle shows for a part with containers and flips it", async () => {
   const { workbench } = await mounted();
+  expect(screen.queryByRole("button", { name: "Toggle Panel" })).toBeNull();
+  act(() => {
+    workbench.views.registerContainer({
+      id: "terminal",
+      title: "Terminal",
+      icon: Terminal,
+      location: "panel",
+    });
+  });
   fireEvent.click(screen.getByRole("button", { name: /Search prod-eu/ }));
   expect(workbench.quickAccess.session?.value).toBe("");
   const panel = screen.getByRole("button", { name: "Toggle Panel" });

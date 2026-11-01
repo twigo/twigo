@@ -158,7 +158,9 @@ function PartToggle({
   command: string;
   icon: LucideIcon;
 }) {
-  const { spaces, commands, keybindings, keys } = useWorkbench();
+  const { spaces, commands, keybindings, keys, views } = useWorkbench();
+  useChanges(views.changes);
+  if (views.containers(location).length === 0) return null;
   const space = spaces.active;
   const visible = space
     ? spaces.state(space.id).parts[location].visible

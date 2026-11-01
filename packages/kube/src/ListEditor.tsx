@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Column, Row } from "@twigo/protocol";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
+import { Details } from "./Details";
 import { sameGvr, useResources, type Discovery } from "./discovery";
 import { pluralTitle } from "./kinds";
 import type { Lists } from "./lists";
@@ -16,7 +17,8 @@ export interface ListServices {
 
 /**
  * A `k8s-list://` editor. Without `ns` in its URI it follows the space's
- * namespace scope; its grid scopes `listFocus` and the resource keys.
+ * namespace scope; its grid scopes `listFocus` and the resource keys. An
+ * opened row's details slide in over the list.
  */
 export function ListEditor({
   uri,
@@ -31,6 +33,7 @@ export function ListEditor({
       ? resources.value.find((candidate) => sameGvr(candidate.gvr, input.gvr))
       : undefined;
   const { lists, selection } = services;
+  useChanges(selection.changes);
   const title = resource
     ? pluralTitle(resource.kind, resource.gvr.resource)
     : undefined;
@@ -38,8 +41,36 @@ export function ListEditor({
     if (title) editors.setTitle(uri, title);
   }, [editors, uri, title]);
 
+  const remembered = input && selection.get(input.space);
+  const mine =
+    remembered && sameGvr(remembered.gvr, input.gvr)
+      ? remembered
+      : undefined;
+  const [open, setOpen] = useState(mine?.reveal === true);
+  const table = useRef<ListController>(undefined);
+  const [wrapper, setWrapper] = useState<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!wrapper) return;
+    const scope = keys.scope(wrapper);
+    scope.set("detailsOpen", open);
+    const unregister = lists.register(wrapper, {
+      move: (delta) => table.current?.move(delta),
+      moveToEdge: (edge) => table.current?.moveToEdge(edge),
+      activate: () => table.current?.activate(),
+      closeDetails: () => {
+        setOpen(false);
+      },
+    });
+    return () => {
+      unregister();
+      scope.dispose();
+    };
+  }, [wrapper, keys, lists, open]);
+
   const register = useCallback(
     (grid: HTMLElement, list: ListController) => {
+      table.current = list;
       const scope = keys.scope(grid);
       scope.set("listFocus", true);
       if (resource) {
@@ -47,13 +78,11 @@ export function ListEditor({
         scope.set("resource.kind", resource.kind);
         scope.set("resource.namespaced", resource.namespaced);
       }
-      const unregister = lists.register(grid, list);
       return () => {
-        unregister();
         scope.dispose();
       };
     },
-    [keys, lists, resource],
+    [keys, resource],
   );
 
   const onSelect = useCallback(
@@ -72,23 +101,31 @@ export function ListEditor({
 
   if (!input) return null;
   const namespaces = input.namespaces ?? spaces.state(input.space).namespaces;
-  const remembered = selection.get(input.space);
   return (
-    <ResourceTable
-      backend={backend}
-      space={input.space}
-      gvr={input.gvr}
-      title={title ?? input.gvr.resource}
-      namespaces={namespaces}
-      text={input.text}
-      labelSelector={input.labels}
-      initialSelected={
-        remembered && sameGvr(remembered.gvr, input.gvr)
-          ? remembered.row.id
-          : undefined
-      }
-      onSelect={onSelect}
-      register={register}
-    />
+    <div ref={setWrapper} className="relative h-full overflow-hidden">
+      <ResourceTable
+        backend={backend}
+        space={input.space}
+        gvr={input.gvr}
+        title={title ?? input.gvr.resource}
+        namespaces={namespaces}
+        text={input.text}
+        labelSelector={input.labels}
+        initialSelected={mine?.row.id}
+        onSelect={onSelect}
+        onActivate={() => {
+          setOpen(true);
+        }}
+        register={register}
+      />
+      {open && mine && (
+        <Details
+          selected={mine}
+          onClose={() => {
+            setOpen(false);
+          }}
+        />
+      )}
+    </div>
   );
 }
