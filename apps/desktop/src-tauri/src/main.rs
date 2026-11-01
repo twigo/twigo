@@ -1,6 +1,9 @@
 // Without it, Windows opens a console next to the release app.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(feature = "bench")]
+mod bench;
+
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -37,7 +40,7 @@ fn keyboard_layout_watch(
 }
 
 fn main() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         // First: a second launch must hand over to the running app before any
         // other plugin touches shared state, such as the window-state file.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -51,7 +54,10 @@ fn main() {
                 }
             }
         }))
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(tauri_plugin_window_state::Builder::default().build());
+    #[cfg(feature = "bench")]
+    let builder = builder.plugin(bench::plugin());
+    builder
         .setup(|app| {
             let main = MainThread::new().ok_or("Tauri ran setup off the main thread")?;
             app.manage(Keyboard {

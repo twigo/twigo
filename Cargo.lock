@@ -5023,6 +5023,7 @@ dependencies = [
 name = "twigo"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-single-instance",

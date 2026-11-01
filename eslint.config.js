@@ -119,7 +119,12 @@ const tokensOnly = [
 ];
 
 export default defineConfig(
-  globalIgnores(["**/dist", "target", "packages/protocol/src/generated.ts"]),
+  globalIgnores([
+    "**/dist",
+    "**/dist-bench",
+    "target",
+    "packages/protocol/src/generated.ts",
+  ]),
   {
     files: ["**/*.{ts,tsx}"],
     extends: [
