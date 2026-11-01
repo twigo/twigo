@@ -508,15 +508,15 @@ The bench also replays the cases that broke other clients, and one that loopback
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-| Part               | Holds                                                                                                                                                        |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Title bar          | Breadcrumb of the space and its namespace scope, search that opens quick access, part toggles; drag region; native traffic lights on macOS                   |
-| Space rail         | Tiles of the open spaces (D6, Lens's hotbar), ⌘1..9 by position, a button that opens any context                                                             |
-| Primary side bar   | View containers as tabs in its header (Explorer, Port forwards, Helm, Extensions and contributed ones); the active one's views: resource tree, saved filters |
-| Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups                                                                              |
-| Panel              | Terminal (pty), cluster Events stream, Output (Twigo logs per channel), Agent activity (audit, 6.6)                                                          |
-| Secondary side bar | The ACP agent panel later; hidden while nothing lives there, as is the panel                                                                                 |
-| Status bar         | Context, namespace, policy mode, port-forward items, sync state, extension items                                                                             |
+| Part               | Holds                                                                                                                                                                        |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Title bar          | Breadcrumb of the space and its namespace scope, search that opens quick access, part toggles; drag region; native traffic lights on macOS                                   |
+| Space rail         | Tiles of the open spaces (D6, Lens's hotbar), ⌘1..9 by position, a button that opens any context                                                                             |
+| Primary side bar   | View containers as tabs in its header (Explorer, Port forwards, Helm, Extensions and contributed ones); the active one's views: resource tree, saved filters                 |
+| Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups                                                                                              |
+| Panel              | Terminal (pty), cluster Events stream, Output (Twigo logs per channel), Agent activity (audit, 6.6)                                                                          |
+| Secondary side bar | The ACP agent panel later; hidden while nothing lives there, as is the panel                                                                                                 |
+| Status bar         | The active editor's facts (a list's count and view state), policy mode, port-forward items, sync state, extension items; the breadcrumb, not the status bar, names the space |
 
 The parts sit flush, split by hairlines, with no cards or gaps: the owner tried islands, as JetBrains Islands and VS Code's 2026 layout ([research](research/workbench-chrome.md)), and preferred flat parts.
 Views are descriptors (ID, title, container, `when`, provider), so the user can move a view to another container, VS Code style.
@@ -696,6 +696,8 @@ It moves into `packages/ui` unchanged and gets extended for the new views.
   - Dense rows: 22 px in trees and tables; icons 16 px, Lucide's 1.5 stroke drawing 1 px lines.
 - **Surfaces.**
   Flat parts split by hairlines (4.1), and editor tabs connect to their editor: the active tab takes the editor's surface.
+  On macOS the chrome lets the system's sidebar material show through, as Finder's and Xcode's does; the editor stays opaque.
+  Table columns resize from their header's edge.
 - **Motion.**
   An instant-in, gentle-out ladder (`--dur-instant` 100 ms to `--dur-slow` 300 ms).
   Anything bound to a key is instant.
