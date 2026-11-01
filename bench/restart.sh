@@ -11,7 +11,10 @@
 #    only a side bar restored as hidden turns visible;
 # 4. checks that the refused context never reached the state.
 # The keys go through System Events, which needs the terminal's
-# Accessibility permission, and the app's window must stay in front.
+# Accessibility permission. They go only while the app is in front, checked
+# before each key, since macOS may refuse to bring it forward while you
+# type elsewhere, and ⌘Q would then quit that other app; key codes keep
+# them independent of the keyboard layout.
 set -euo pipefail
 [ $# -ge 1 ] || { echo "usage: $0 <kubeconfig> [app]" >&2; exit 2; }
 kubeconfig=$1
@@ -28,7 +31,8 @@ case "$context" in
 esac
 
 home=$(mktemp -d)
-trap 'rm -rf "$home"' EXIT
+pid=
+trap '[ -n "$pid" ] && kill "$pid" 2>/dev/null; rm -rf "$home"' EXIT
 mkdir -p "$home/.kube"
 cat >"$home/.kube/config" <<YAML
 clusters:
@@ -70,16 +74,34 @@ start() {
 
 # ⌘B, then ⌘Q within the 300 ms the webview once waited before saving.
 toggle_and_quit() {
-  osascript >/dev/null <<OSA
+  if ! osascript >/dev/null <<OSA; then
 tell application "System Events"
-  set frontmost of (first process whose unix id is $pid) to true
-  delay 0.5
-  keystroke "b" using command down
+  set twigo to first process whose unix id is $pid
+  set frontmost of twigo to true
+  repeat 50 times
+    if frontmost of twigo then exit repeat
+    delay 0.1
+  end repeat
+  if not (frontmost of twigo) then error "the app is not in front"
+  key code 11 using command down
   delay 0.1
-  keystroke "q" using command down
+  if not (frontmost of twigo) then error "the app is not in front"
+  key code 12 using command down
 end tell
 OSA
-  wait "$pid" || true
+    echo "the app did not come to the front, so no key was sent; leave the screen alone and run again" >&2
+    exit 1
+  fi
+  (sleep 10 && kill "$pid" 2>/dev/null) &
+  watchdog=$!
+  status=0
+  wait "$pid" || status=$?
+  kill "$watchdog" 2>/dev/null || true
+  pid=
+  if [ "$status" -ne 0 ]; then
+    echo "the app did not quit cleanly on ⌘Q (status $status)" >&2
+    exit 1
+  fi
 }
 
 expect() {
