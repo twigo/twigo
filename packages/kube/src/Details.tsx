@@ -28,13 +28,14 @@ export function Details({
     <aside
       aria-label={`${kind} details`}
       style={{ width }}
-      className="absolute inset-y-0 right-0 z-10 flex max-w-[85%] animate-in flex-col border-l border-border bg-editor shadow-lg duration-150 slide-in-from-right-8"
+      className="absolute inset-y-0 right-0 z-10 flex max-w-[85%] animate-in flex-col border-l border-border bg-editor shadow-lg animation-duration-150 slide-in-from-right-8"
     >
       <div
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize details"
         onPointerDown={(event) => {
+          event.preventDefault();
           const start = event.clientX;
           const from = width;
           const target = event.currentTarget;
