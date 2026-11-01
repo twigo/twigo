@@ -126,6 +126,15 @@ test("no batch follows until the previous one is acknowledged, and the next carr
   expect(second?.upserts).toHaveLength(10);
 });
 
+test("a window change flushes at once, without waiting for the next tick", async () => {
+  const sub = await open("ready");
+  await sub.ack();
+  await sub.window(100, 140);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(sub.batches.map((b) => b.seq)).toEqual([1, 2]);
+  expect(sub.batches[1]?.window?.start).toBe(100);
+});
+
 test("rows come sorted by the query's column, and the first batch carries the columns", async () => {
   const sub = await open(
     "ready",

@@ -302,9 +302,15 @@ class Subscription {
     );
   }
 
+  /** Flushes at once rather than on the next tick, as Rust's batcher does (ARCHITECTURE 3.5). */
   setWindow(start: number, end: number): void {
     this.#window = [start, end];
     this.touch();
+    this.#timers.push(
+      setTimeout(() => {
+        this.#flush();
+      }, 0),
+    );
   }
 
   ack(seq: number): void {
