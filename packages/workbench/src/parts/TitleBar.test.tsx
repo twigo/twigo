@@ -5,7 +5,6 @@ import {
   render,
   screen,
 } from "@testing-library/react";
-import { Terminal } from "lucide-react";
 import { afterEach, expect, test } from "vitest";
 import { inWorkbench, testWorkbench } from "../testing";
 import { TitleBar } from "./TitleBar";
@@ -59,24 +58,9 @@ test("the breadcrumb follows the space and its namespace scope", async () => {
   ).toBe("payments");
 });
 
-test("the search opens quick access; a toggle shows for a part with containers and flips it", async () => {
+test("the search opens quick access, and the bar has no part toggles", async () => {
   const { workbench } = await mounted();
-  expect(screen.queryByRole("button", { name: "Toggle Panel" })).toBeNull();
-  act(() => {
-    workbench.views.registerContainer({
-      id: "terminal",
-      title: "Terminal",
-      icon: Terminal,
-      location: "panel",
-    });
-  });
   fireEvent.click(screen.getByRole("button", { name: /Search prod-eu/ }));
   expect(workbench.quickAccess.session?.value).toBe("");
-  const panel = screen.getByRole("button", { name: "Toggle Panel" });
-  expect(panel.getAttribute("aria-pressed")).toBe("false");
-  await act(async () => {
-    fireEvent.click(panel);
-    await Promise.resolve();
-  });
-  expect(workbench.spaces.state("prod-eu").parts.panel.visible).toBe(true);
+  expect(screen.queryByRole("button", { name: /Toggle/ })).toBeNull();
 });

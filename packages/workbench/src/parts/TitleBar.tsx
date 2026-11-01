@@ -1,45 +1,14 @@
 import type { CSSProperties, ReactNode } from "react";
-import {
-  ChevronDown,
-  ChevronRight,
-  PanelBottom,
-  PanelLeft,
-  PanelRight,
-  Search,
-  type LucideIcon,
-} from "lucide-react";
+import { ChevronDown, ChevronRight, Search } from "lucide-react";
 import type { Space } from "@twigo/protocol";
-import { cn, Kbd, Tooltip, TooltipContent, TooltipTrigger } from "@twigo/ui";
+import { Kbd } from "@twigo/ui";
 import { useChanges, useWorkbench } from "../react";
 import { onlyColor } from "./spaceBadge";
-import type { Location } from "../views/registry";
-
-const TOGGLES: readonly {
-  location: Location;
-  command: string;
-  icon: LucideIcon;
-}[] = [
-  {
-    location: "sidebar",
-    command: "workbench.action.toggleSidebarVisibility",
-    icon: PanelLeft,
-  },
-  {
-    location: "panel",
-    command: "workbench.action.togglePanel",
-    icon: PanelBottom,
-  },
-  {
-    location: "secondary",
-    command: "workbench.action.toggleAuxiliaryBar",
-    icon: PanelRight,
-  },
-];
 
 /**
  * Where you are (ARCHITECTURE 4.2): the space and its namespace scope as a
- * breadcrumb that opens their pickers, the search that opens quick access,
- * and the part toggles. A space with one coloured context tints the bar's
+ * breadcrumb that opens their pickers, and the search that opens quick
+ * access. A space with one coloured context tints the bar's
  * left end, as JetBrains tints it with a project's colour.
  */
 export function TitleBar() {
@@ -62,11 +31,6 @@ export function TitleBar() {
         {space && <Breadcrumb space={space} />}
       </div>
       <CommandCenter space={space} />
-      <div className="flex justify-end gap-0.5">
-        {TOGGLES.map((toggle) => (
-          <PartToggle key={toggle.location} {...toggle} />
-        ))}
-      </div>
     </header>
   );
 }
@@ -137,53 +101,5 @@ function CommandCenter({ space }: { space: Space | undefined }) {
         <Kbd className="ml-auto">{keybindings.label(binding.presses)}</Kbd>
       )}
     </button>
-  );
-}
-
-function PartToggle({
-  location,
-  command,
-  icon: Icon,
-}: {
-  location: Location;
-  command: string;
-  icon: LucideIcon;
-}) {
-  const { spaces, commands, keybindings, keys, views } = useWorkbench();
-  useChanges(views.changes);
-  if (views.containers(location).length === 0) return null;
-  const space = spaces.active;
-  const visible = space
-    ? spaces.state(space.id).parts[location].visible
-    : false;
-  const title = commands.get(command)?.title ?? command;
-  const binding = keybindings.primary(command);
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          aria-label={title}
-          aria-pressed={visible}
-          onClick={() => {
-            void commands.execute(command, keys.lookup(document.activeElement));
-          }}
-          className={cn(
-            "flex size-6 items-center justify-center rounded-md hover:bg-row-hover",
-            visible ? "text-foreground" : "text-muted-foreground",
-          )}
-        >
-          <Icon className="size-4" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent className="flex items-center gap-2">
-        <span>{title}</span>
-        {binding && (
-          <span className="text-muted-foreground">
-            {keybindings.label(binding.presses)}
-          </span>
-        )}
-      </TooltipContent>
-    </Tooltip>
   );
 }

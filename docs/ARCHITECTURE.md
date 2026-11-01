@@ -494,7 +494,7 @@ The bench also replays the cases that broke other clients, and one that loopback
 ### 4.1 Parts (VS Code layout)
 
 ```
-┌ ●●● ● prod-eu 🔒 ▾ › payments ▾      ⌕ Search prod-eu      ◧ ▭ ◨ ── title bar ─┐
+┌ ●●● ● prod-eu 🔒 ▾ › payments ▾      ⌕ Search prod-eu      ─────── title bar ─┐
 │ PE │╭ Explorer ───╮╭ ⎈ Pods │ deploy/api ──────────────────────────────────────╮│
 │ ST ││ ▾ Workloads ││ 5,000 pods · synced          ┌ Pod api-7f9 ──────────── ✕ ┐││
 │ DQ ││   Pods  2.1k││ Name         Ready  Status   │ details over the list,     │││
@@ -510,7 +510,7 @@ The bench also replays the cases that broke other clients, and one that loopback
 
 | Part               | Holds                                                                                                                                                                                                                                                                  |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Title bar          | Breadcrumb of the space and its namespace scope, search that opens quick access, part toggles; drag region; native traffic lights on macOS                                                                                                                             |
+| Title bar          | Breadcrumb of the space and its namespace scope, search that opens quick access; drag region; native traffic lights on macOS. Parts show and hide by keys (⌘B, ⌘J, ⌥⌘B), the View menu and the palette, not buttons                                                    |
 | Space rail         | Tiles of the open spaces (D6, Lens's hotbar), ⌘1..9 by position, a button that opens any context                                                                                                                                                                       |
 | Primary side bar   | View containers as tabs in its header (Explorer, Port forwards, Helm, Extensions and contributed ones); the active one's views: resource tree, saved filters                                                                                                           |
 | Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups                                                                                                                                                                                        |
@@ -725,7 +725,7 @@ It moves into `packages/ui` unchanged and gets extended for the new views.
     Custom resources get one generic icon.
 - **Settled with the owner** on 2026-11-01, after [research](research/workbench-chrome.md) into Kubernetes clients, IDEs and tools with many targets:
   - a rail of space tiles replaces the space tabs and the activity bar (4.2);
-  - the title bar is a breadcrumb, a search and the part toggles;
+  - the title bar is a breadcrumb and a search;
   - flat parts split by hairlines, connected tabs, two weights and sentence case.
 
 ## 5. Commands, keybindings and extensions

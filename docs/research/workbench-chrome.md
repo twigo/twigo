@@ -50,7 +50,8 @@ The choices it led to are in [ARCHITECTURE](../ARCHITECTURE.md) 4.1, 4.2 and 4.9
 ## Decided with the owner, 2026-11-01
 
 - A rail of space tiles at the left, as Lens's hotbar, replaces the activity bar; ⌘1..9 follow its order, and a button opens the picker of every context.
-- The title bar is a breadcrumb of the space and its namespace scope that opens the `ctx ` and `ns ` pickers, a search that opens quick access, and the part toggles; a coloured context tints its left end.
+- The title bar is a breadcrumb of the space and its namespace scope that opens the `ctx ` and `ns ` pickers, and a search that opens quick access; a coloured context tints its left end.
+  The part toggles were tried there and dropped: keys, the View menu and the palette show and hide the parts.
 - Connected tabs, sentence-case headers, weights 400 and 600.
   Islands were built and tried; the owner preferred flat parts split by hairlines.
 - Side by side with vscode.dev in the same browser, Twigo still read as a web page; VS Code's computed styles showed why: the system UI font, text at #CCCCCC, neutral greys with the editor a step lighter than the shell, and smaller title bar controls.
