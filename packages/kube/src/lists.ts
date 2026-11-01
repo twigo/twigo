@@ -1,11 +1,15 @@
 import type { ListController } from "./ResourceTable";
 
-/** What list commands do to the list editor that has the focus. */
+/** What list commands do to the list or tree that has the focus. */
 export interface ListCommands extends ListController {
-  closeDetails(): void;
+  /** List editors only. */
+  closeDetails?(): void;
+  /** Trees only. */
+  collapse?(): void;
+  expand?(): void;
 }
 
-/** The mounted list editors by element, so commands act on the one that has the focus. */
+/** The mounted lists and trees by element, so commands act on the one that has the focus. */
 export class Lists {
   readonly #lists = new WeakMap<Element, ListCommands>();
 

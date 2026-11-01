@@ -11,3 +11,5 @@ globalThis.ResizeObserver = class {
 };
 
 HTMLElement.prototype.setPointerCapture = () => undefined;
+
+Element.prototype.scrollIntoView = () => undefined;

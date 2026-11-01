@@ -524,7 +524,7 @@ The layout per space is persisted (dockview `toJSON` plus part sizes and visibil
 
 ### 4.2 Spaces (D6)
 
-- A space has an ID, a list of contexts (one or more), a namespace scope and a persisted layout: open inputs, explorer state, view placement.
+- A space has an ID, a list of contexts (one or more), a namespace scope and a persisted layout: open inputs, view placement, and what each view keeps, such as the explorer's open sections.
 - Switching spaces moves the whole workbench: explorer, editors, status bar, policy badge.
   The rail shows a tile per open space: two letters on the tint of its context's colour, the active one ringed and marked, a lock badge on a locked context.
   The title bar's breadcrumb names the active space and its namespace scope and opens their pickers.
@@ -770,7 +770,7 @@ interface CommandDescriptor {
   Core keys:
   - `space.contexts`, `space.multiContext`
   - `context.name`, `context.readOnly`, `context.mode`, `context.provider`
-  - `listFocus`, `editorFocus`, `inputFocus`
+  - `listFocus`, `treeFocus` (a tree, which is also a list: left and right close and open), `editorFocus`, `inputFocus`
   - `resource.group`, `resource.kind`, `resource.namespaced`, `resource.namespace`
   - `selection.count`
   - `editor.dirty`, `editor.type`

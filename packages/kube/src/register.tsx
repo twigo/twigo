@@ -1,7 +1,7 @@
 import { FolderTree } from "lucide-react";
 import type { Workbench } from "@twigo/workbench";
 import { Discovery } from "./discovery";
-import { Explorer } from "./Explorer";
+import { Explorer, EXPLORER_VIEW } from "./Explorer";
 import { ListIcon } from "./KindIcon";
 import { ListEditor, type ListServices } from "./ListEditor";
 import { ListStatuses } from "./listStatus";
@@ -55,10 +55,12 @@ export function registerKube(workbench: Workbench): void {
     order: 0,
   });
   views.registerView({
-    id: "kube.resources",
+    id: EXPLORER_VIEW,
     title: "Resources",
     container: "kube.explorer",
-    component: () => <Explorer discovery={services.discovery} />,
+    component: () => (
+      <Explorer discovery={services.discovery} lists={services.lists} />
+    ),
   });
   views.registerStatusBarItem({
     id: "kube.cluster",
@@ -122,7 +124,7 @@ export function registerKube(workbench: Workbench): void {
     },
     {
       id: "list.open",
-      title: "Open Row Details",
+      title: "Open",
       keys: ["enter"],
       run: () => services.lists.focused()?.activate(),
     },
@@ -131,7 +133,21 @@ export function registerKube(workbench: Workbench): void {
       title: "Close Details",
       keys: ["escape"],
       when: "detailsOpen",
-      run: () => services.lists.focused()?.closeDetails(),
+      run: () => services.lists.focused()?.closeDetails?.(),
+    },
+    {
+      id: "list.collapse",
+      title: "Collapse",
+      keys: ["left"],
+      when: "treeFocus",
+      run: () => services.lists.focused()?.collapse?.(),
+    },
+    {
+      id: "list.expand",
+      title: "Expand",
+      keys: ["right"],
+      when: "treeFocus",
+      run: () => services.lists.focused()?.expand?.(),
     },
   ];
   for (const { id, title, when = "listFocus", run } of moves) {
