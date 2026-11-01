@@ -5,6 +5,7 @@ import {
   type DockviewApi,
   type DockviewReadyEvent,
   type DockviewTheme,
+  type IDockviewHeaderActionsProps,
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
 } from "dockview-react";
@@ -86,6 +87,7 @@ function SpaceEditors({ space }: { space: string }) {
       theme={THEME}
       components={COMPONENTS}
       tabComponents={TABS}
+      rightHeaderActionsComponent={GroupActions}
       watermarkComponent={Watermark}
       onReady={onReady}
     />
@@ -113,6 +115,19 @@ function EditorPanel({ params: raw }: IDockviewPanelProps) {
     <PanelBoundary label={provider.title(new URL(params.uri))}>
       <Component uri={params.uri} />
     </PanelBoundary>
+  );
+}
+
+function GroupActions({ activePanel }: IDockviewHeaderActionsProps) {
+  const { editors } = useWorkbench();
+  const params = readParams(activePanel?.params);
+  const provider = params && editors.resolve(params.uri);
+  if (!params || !provider?.actions) return null;
+  const Actions = provider.actions;
+  return (
+    <div className="flex h-full items-center pr-1.5">
+      <Actions uri={params.uri} />
+    </div>
   );
 }
 

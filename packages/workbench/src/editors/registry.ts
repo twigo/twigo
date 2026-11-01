@@ -20,6 +20,8 @@ export interface EditorProvider {
   /** The tab's icon, which may depend on the URI (the kind of a list). */
   readonly icon?: ComponentType<{ uri: string; className?: string }>;
   readonly component: ComponentType<EditorProps>;
+  /** What the editor shows at the right of its group's tab strip while it is the group's active one. */
+  readonly actions?: ComponentType<EditorProps>;
 }
 
 /** A place in an editor that `@` in quick access goes to, such as a YAML key. */

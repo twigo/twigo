@@ -1,14 +1,13 @@
 import type { CSSProperties, ReactNode } from "react";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
 import type { Space } from "@twigo/protocol";
-import { Kbd } from "@twigo/ui";
 import { useChanges, useWorkbench } from "../react";
 import { onlyColor } from "./spaceBadge";
 
 /**
  * Where you are (ARCHITECTURE 4.2): the space and its namespace scope as a
- * breadcrumb that opens their pickers, and the search that opens quick
- * access. A space with one coloured context tints the bar's
+ * breadcrumb that opens their pickers, and a search button that opens
+ * quick access. A space with one coloured context tints the bar's
  * left end, as JetBrains tints it with a project's colour.
  */
 export function TitleBar() {
@@ -25,9 +24,9 @@ export function TitleBar() {
         color &&
         ({ "--twigo-context": `var(--context-${color})` } as CSSProperties)
       }
-      className="twigo-titlebar grid h-9 shrink-0 grid-cols-[minmax(max-content,2fr)_minmax(0,28rem)_5fr] items-center gap-3 border-b border-border bg-shell pr-2 pl-[92px]"
+      className="twigo-titlebar flex h-9 shrink-0 items-center gap-3 border-b border-border bg-shell pr-2 pl-[92px]"
     >
-      <div className="flex min-w-0 items-center gap-0.5">
+      <div className="flex min-w-0 flex-1 items-center gap-0.5">
         {space && <Breadcrumb space={space} />}
       </div>
       <CommandCenter space={space} />
@@ -87,19 +86,20 @@ function CommandCenter({ space }: { space: Space | undefined }) {
   const { quickAccess, keybindings } = useWorkbench();
   useChanges(keybindings.changes);
   const binding = keybindings.primary("workbench.action.quickOpen");
+  const label = `Search ${space?.name ?? "Twigo"}`;
   return (
     <button
       type="button"
+      aria-label={label}
+      title={
+        binding ? `${label} (${keybindings.label(binding.presses)})` : label
+      }
       onClick={() => {
         quickAccess.show("");
       }}
-      className="flex h-7 items-center gap-2 rounded-md border border-border bg-foreground/5 px-2.5 text-[13px] text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+      className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-row-hover hover:text-foreground"
     >
-      <Search aria-hidden className="size-3.5 shrink-0" />
-      <span className="truncate">Search {space?.name ?? "Twigo"}</span>
-      {binding && (
-        <Kbd className="ml-auto">{keybindings.label(binding.presses)}</Kbd>
-      )}
+      <Search aria-hidden className="size-4" />
     </button>
   );
 }
