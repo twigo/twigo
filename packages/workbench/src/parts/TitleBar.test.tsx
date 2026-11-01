@@ -17,10 +17,10 @@ async function mounted() {
   return { workbench, ...view };
 }
 
-test("the title bar drags the window", async () => {
+test("the whole title bar drags the window, its controls excepted", async () => {
   const { container } = await mounted();
   expect(
-    container.querySelector("header[data-tauri-drag-region]"),
+    container.querySelector('header[data-tauri-drag-region="deep"]'),
   ).not.toBeNull();
 });
 

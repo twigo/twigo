@@ -57,7 +57,7 @@ export function TitleBar() {
   return (
     // 36 px pairs with trafficLightPosition in tauri.conf.json: change both or neither.
     <header
-      data-tauri-drag-region
+      data-tauri-drag-region="deep"
       data-color={color}
       style={
         color &&
