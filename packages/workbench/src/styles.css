@@ -67,8 +67,10 @@
 .twigo-dockview .dv-tabs-and-actions-container {
   box-shadow: inset 0 -1px 0 var(--border);
 }
+/* Centred above the strip's bottom line, a little high, since lowercase
+   titles read low when their capitals are centred. */
 .twigo-dockview .dv-tabs-container > .dv-tab {
-  padding: 0 2px 0 4px;
+  padding: 0 2px 2px 4px;
 }
 /* The active tab covers the strip's bottom line. Above it and left of the
    first tab the part's own separators already draw a line; a second one
