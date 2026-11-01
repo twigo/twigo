@@ -1104,7 +1104,9 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   The exec block is stripped from the config first, and the `gcp` and `azure` auth providers are refused with client-go's messages, since kube would run gcp's `cmd-path`.
   A token, basic auth or a client certificate in the user entry wins over its plugin, as in client-go.
 - **The credential runner.**
-  - Uses `tokio::process` with the shell environment, then the entry's `env`, then `KUBERNETES_EXEC_INFO`; null stdin, its own process group, killed whole on a timeout or a cancel, and stdout capped at 1 MiB.
+  - Uses `tokio::process` with the shell environment, then the entry's `env`, then `KUBERNETES_EXEC_INFO`; null stdin, its own process group, killed whole on a timeout, a cancel or the app's quit, and stdout capped at 1 MiB.
+    It waits for stdout to close but not stderr, which a helper the plugin left running may hold; client-go hands stderr to the terminal.
+    The panel gets the first and the last 8 KiB of stderr: device codes and URLs come first, errors last.
   - `KUBERNETES_EXEC_INFO` says `interactive: false`, since Twigo never passes a terminal, and carries the cluster when `provideClusterInfo` is set.
     A plugin set to `interactiveMode: Always` is refused, as client-go refuses it without a terminal.
   - Reads the output by client-go's rules: the configured apiVersion, a token, a PEM certificate and key, or both, as JSON or YAML.
@@ -1112,18 +1114,19 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     Concurrent requests share one run, and its failure too.
   - Caches the credential until 60 s before it expires; without an expiry, until the server rejects it.
     A 401 drops it, runs the plugin once more and retries the request once, its body rebuilt from the bytes kube holds; client-go only refreshes for the next request.
-  - A certificate from the plugin is offered at each TLS handshake, and a new one retires the context's connections, as client-go closes them.
+  - A certificate from the plugin is offered at each TLS handshake, and a new one retires the api client's connections, whichever client got it first, as client-go closes them; the sessions client keeps no idle connection, since each session upgrades its own.
     TLS resumption is off for these clients, since a resumed session keeps the certificate of the handshake it resumes.
 - **Plugins that may ask the person to sign in.**
   A cold cache makes them open a browser or print a device code, and none can be told to fail instead; `interactiveMode` does not tell them apart.
-  - Only plugins known never to ask run unattended: `aws eks get-token`, aws-iam-authenticator, gke-gcloud-auth-plugin, doctl without SSO, `oci`, `pinniped login static`, and Azure/kubelogin's non-interactive logins (with `AAD_LOGIN_METHOD` read as kubelogin reads it).
+  - Only plugins known never to ask run unattended: `aws eks get-token`, aws-iam-authenticator, gke-gcloud-auth-plugin, doctl without SSO, `oci`, `pinniped login static`, and Azure/kubelogin's non-interactive logins, with `AAD_LOGIN_METHOD` read from the login shell's environment and the entry's, as kubelogin gets it.
     Every other plugin, an unknown command included, may ask.
   - One that may ask runs only while a Twigo window has the focus, so that its browser or code finds the person (the owner's choice, 2026-11-01).
     With a warm cache it answers at once and nobody notices; while the window is in the background, the request waits for it to come back.
-  - After a sign-in fails or is cancelled, it runs again only when the person asks, since retrying by itself would open browser after browser.
+  - After a sign-in fails or is cancelled, or the cluster rejects the credential of a new run too, it runs again only when the person asks, since retrying by itself would open browser after browser.
   - The sign-in panel is the popover of the status bar's credentials item (the owner's choice among a dialog and a corner card, 2026-11-01).
-    It opens once the plugin prints, or after 2 s without a credential, since a browser flow often prints nothing, and leaves the focus where it was.
-    It shows the device code and the link, which opens through tauri-plugin-opener for https and the plugin's own server on localhost, the plugin's output, its elapsed time and Cancel; a failure shows the fix the plugin's message names, such as `aws sso login`.
+    It opens once the plugin prints, after 2 s without a credential, since a browser flow often prints nothing, or when the sign-in fails; it leaves the focus where it was, and stays closed for a run the person closed it on.
+    It shows the device code and the link, the plugin's output, its elapsed time and Cancel; a failure shows the fix the plugin's message names, such as `aws sso login`.
+    Rust opens the link through tauri-plugin-opener, only for https and the plugin's own server on localhost or 127.0.0.1, and never one with a user part.
   - Unattended runs time out at 120 s; sign-ins at 10 min, past int128/kubelogin's and tsh's own 180 s, since a tsh killed mid-login leaves a lock that breaks the cluster until `tsh login`.
 - **Lazy.**
   Credentials are resolved only when a request needs one, which a space's activation is, never for all contexts at startup.
@@ -1136,8 +1139,10 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
 - **The deprecated `auth-provider: oidc`.**
   - Twigo refreshes it as client-go does: the id-token until 10 s before its `exp`, then discovery and a `refresh_token` grant, with the IdP's CA and the login shell's proxy.
   - It writes the new id-token and refresh-token back to the user's file, as kubectl does, since the file is the token store every client shares and Dex rotates the refresh token on every refresh (the owner's choice, 2026-11-01).
-    Only the two values change, through `yaml-edit`, under kubectl's `<file>.lock`, by a rename over the resolved file.
-  - One refresh runs at a time, the file is read again first so a token kubectl got meanwhile is taken, and the new tokens go to memory before the file, so a failed write never loses the only valid refresh token.
+    Only the two values change, through `yaml-edit`, under kubectl's `<file>.lock`, by a rename over the resolved file, so its hard links and ACLs do not carry over; kubectl writes in place.
+  - One refresh runs at a time, and the file is read again first: tokens someone else wrote since, as kubectl does, are taken, never the ones it still holds after a failed write or a rejection.
+    The new tokens go to memory before the file, so a failed write never loses the only valid refresh token.
+  - A token or basic auth in the entry wins over the provider, as in client-go.
   - The oidc tokens do not count in the fingerprint (6.3), so a refresh rebuilds no client.
 - **Client certificates and token files** work through kube.
 
