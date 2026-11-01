@@ -1,0 +1,119 @@
+# The bench harness
+
+M0 step 7, 2026-11-01.
+The harness measures the six budgets of [ARCHITECTURE 3.8](ARCHITECTURE.md#38-performance-budgets-and-the-benchmark) at 5k pods in the real Tauri app.
+Before M1 there is no Rust list path, so it reports what M0 can measure and says what it cannot; M1 swaps the webview's backend and keeps the harness.
+
+- Run: `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/harness.sh` on macOS, with the screen unlocked and the app's window left on screen until it hides itself, about three minutes after launch.
+  Without an argument it creates a kind 1.37 cluster with kwok and 5,000 pods (`bench/cluster.sh up bench`, `bench/pods.sh`) and deletes it at the end; given a kubeconfig, it uses that cluster, which must hold the `bench/bench` Deployment at 5,000 pods.
+- Output: the report table on stdout; `report.json` and every file it is built from in `$TWIGO_BENCH_DIR/harness`.
+- Code: `bench/harness.sh`; `bench/harness`, the `twigo-bench` tool with `churn`, `launch`, `sample` and `report`; `apps/desktop/bench`, the webview's entry and driver; `apps/desktop/src-tauri/src/bench.rs`, the app's bench commands.
+
+## A run
+
+1. `cargo build --release -p twigo-bench`, then `pnpm tauri build --no-bundle --features bench --config src-tauri/tauri.bench.conf.json`: a release build, since a debug core's CPU and memory say nothing about the budgets.
+2. `twigo-bench churn` starts against the cluster at 100 changes/s and runs until the app is done.
+3. `twigo-bench launch target/release/twigo` starts the app with `TWIGO_BENCH=$TWIGO_BENCH_DIR/harness`.
+4. The webview's driver opens `k8s-list://prod-eu/v1/pods`, waits for the first rows, scrolls for 5 s, sorts ten times and then watches changed cells for 60 s.
+   When it starts watching it writes `steady.json`; 10 s later the harness samples memory.
+5. The driver writes `webview.json` and calls `idle`: the app hides its window, writes `idle.json` and quits 45 s later.
+   The harness waits 5 s, then samples CPU time at the start and the end of 30 s.
+6. The harness stops the churn and runs `twigo-bench report`.
+
+## The bench mode
+
+Nothing of it ships.
+
+- **Rust.**
+  The `bench` feature of `apps/desktop/src-tauri` adds an inlined plugin, `twigo-bench`, with two commands: `write` stores one JSON file in `$TWIGO_BENCH`, and `idle` hides the window and quits after 45 s.
+  tauri-build writes an inlined plugin's permissions into `OUT_DIR`, not into the source tree, and the plugin adds its capability at runtime, so a build without the feature has neither the commands nor their grants: on 2026-11-01 `strings` found no `twigo-bench` in the default debug binary and 3 in the bench release binary.
+  A bench build refuses to start without `TWIGO_BENCH`.
+- **The webview.**
+  `vite build --mode bench` builds `apps/desktop/bench`, an entry of its own, into `apps/desktop/dist-bench`; the shipping build never sees it.
+  It boots the workbench as `src/main.tsx` does, on the mock backend with 100 changes/s (`createMockBackend("live", "us", 100)`), through a probe that stamps every list batch with `performance.now()` on arrival, before the view applies it.
+  M1 replaces the mock with `tauriBackend`; the probe, the driver and the harness stay.
+- **The configuration.**
+  `src-tauri/tauri.bench.conf.json` points the build at that entry and gives the app the identifier `io.twigo.ide.bench`, so a run neither hands over to the user's Twigo through the single-instance lock nor reads or writes its window state; the harness deletes the bench app's window state before each run.
+- **The commands stay out of `twigo-ipc`.**
+  The IPC types and the mock backend are the app's protocol; the bench's two commands are not part of it, so the bench entry calls them through `invoke` directly.
+
+## How each metric is measured
+
+"Painted" means the end of the frame in which the DOM first shows the value: the driver checks the DOM in a `requestAnimationFrame` callback and, once it holds, posts a `MessageChannel` message, whose handler runs after that frame is rendered.
+
+| Metric                               | How                                                                                                                                      | Before M1                                                                                                                                                                                               |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| First paint after the space connects | M1: from opening the list to its first rows painted                                                                                      | Not measurable: no Rust list path. The webview half, from the first batch with rows to those rows painted, is reported apart and not judged.                                                            |
+| Change → painted cell, p95           | M1: join the churn log (pod, restart count, Unix ms) with the paints                                                                     | Not measurable: the cluster's changes reach nothing. The webview half, from a batch to its changed cell painted, for cells on screen during 60 s of the mock's churn, is reported apart and not judged. |
+| Scroll                               | Mean fps from `requestAnimationFrame` over 5 s of scrolling at 4,000 px/s; passes at 57 fps, 95 % of 60, since frames jitter             | Measured in the real WebKit webview, on the mock, which serves each window from JS in the webview.                                                                                                      |
+| Sort                                 | Header click → the new first row painted, ten clicks over Name, Status, Restarts, Age and Namespace, each ascending then descending; p95 | Measured in the real webview, on the mock, which sorts 5,000 rows in JS, unlike Rust's incremental index.                                                                                               |
+| Core RSS                             | Resident size of the app process under churn, with the list open                                                                         | Measured; M0's core holds no watch cache, and the mock keeps the pods in the webview.                                                                                                                   |
+| Webview memory                       | Physical footprint summed over the `com.apple.WebKit.*` processes the app is responsible for                                             | Measured; the webview holds the mock's 5,000 pods.                                                                                                                                                      |
+| Idle CPU                             | CPU time of the app and its WebKit processes over 30 s with the window hidden, as a share of one core                                    | Measured, on the mock's churn in the webview.                                                                                                                                                           |
+
+## Which WebKit processes are the app's
+
+WKWebView runs pages, networking and GPU work in the XPC services `com.apple.WebKit.WebContent`, `.Networking` and `.GPU`.
+launchd starts them, so their parent is pid 1, and other apps run their own: during this step a `com.apple.WebKit.Networking` belonged to Spotify.
+Summing every WebKit process would count them; summing the app's children would count none.
+
+- macOS records each process's responsible process, the one that asked for it.
+  `twigo-bench sample` reads it through libsystem's `responsibility_get_pid_responsible_for_pid`, found with `dlsym`, and counts the WebKit processes whose responsible process is the app.
+- A process started from a terminal inherits the terminal as its responsible process.
+  Started from Terminal, the bench app and its three WebKit processes all named Terminal (pid 2623) on 2026-11-01, so they could not be told apart from anything else started there.
+- `twigo-bench launch` therefore replaces itself with the app through `posix_spawn` with `POSIX_SPAWN_SETEXEC` and `responsibility_spawnattrs_setdisclaim`: the pid stays, and the app is responsible for itself, as when launchd starts it.
+  Started so, the app's WebContent, GPU and Networking processes named the app, and Spotify's Networking process was left out.
+- `sample` refuses an app that is not responsible for itself, rather than report an empty sum.
+
+Limits:
+
+- Both functions are undocumented.
+  They are found at run time, and a macOS without them makes `sample` and `launch` fail with the missing name; checked on macOS 27.0 only.
+- Memory is the physical footprint (`ri_phys_footprint` of `proc_pid_rusage`); the report adds their RSS, which counts the pages they share more than once.
+- A WebKit process that ends between the two CPU samples loses its CPU time; one that starts in between counts whole.
+- CPU times of `proc_pid_rusage` are mach absolute time units, converted with `mach_timebase_info`; on 2026-11-01 they matched `ps` to 0.01 s (Spotify 163:15.00, its Networking process 0:06.97).
+- On Linux, WebKitGTK's processes are the app's children, so the sampler needs a branch of its own there; not written.
+
+## The churn generator
+
+`twigo-bench churn [--kubeconfig PATH] [--rate 100] [--seconds S] --log FILE` bumps the restart count of random pods of `bench/bench` through the status subresource: a JSON patch that tests that the first container is `app` and replaces its `restartCount`.
+It paces patches on a fixed interval, catching up after a slow tick, with at most 64 in flight and never two for one pod, until `--seconds` pass or SIGINT.
+Each change is a JSON line with the pod, the new count, and when it was sent and answered, in Unix milliseconds, for M1 to join with the webview's paints; the summary goes to stdout.
+The client comes from `twigo_kube::client::Clients`, the kubeconfig from `--kubeconfig` or `TWIGO_TEST_KUBECONFIG`, and contexts other than `kind-*` and `kwok-*` are refused.
+
+Measured on 2026-11-01 on an Apple M4 Max (16 cores, 48 GB), macOS 27.0, Docker 29.1.3 with 16 CPUs, kind 1.37 with kwok v0.8.0 and 10 nodes (`bench/cluster.sh up churn`, `bench/pods.sh <kubeconfig> 5000`), release build:
+
+| Run                       | Changes | Errors | Changes/s | Patch p50 | p95    | Max   |
+| ------------------------- | ------- | ------ | --------- | --------- | ------ | ----- |
+| `--rate 100 --seconds 60` | 6,000   | 0      | 99.996    | 2.5 ms    | 3.6 ms | 25 ms |
+| `--rate 500 --seconds 10` | 5,000   | 0      | 499.96    | 2.0 ms    | 3.6 ms | 26 ms |
+
+- kwok keeps the field: 30 s after the 60 s run, each of the 3,746 changed pods held the last count logged for it, no other pod had a non-zero one, and `kubectl get pods` showed the counts under RESTARTS.
+- SIGINT after 3 s stopped with 278 changes logged and the summary printed, exit 0.
+- A copy of the kubeconfig with its context renamed `prod-eu` was refused, exit 1.
+
+## Results at 5k pods
+
+Not measured yet.
+On 2026-11-01 the Mac's screen was locked while this step ran: the bench window's document was `hidden`, and `requestAnimationFrame` never fired within 2 s, so nothing painted and every webview metric was out of reach.
+The driver now fails at once in that state, with "the window is not visible", and the harness prints that and stops.
+
+What did run that day, on the machine above:
+
+- `bench/harness.sh <kubeconfig>` against the churn cluster: the release build, the churn at 100.03 changes/s, the launch, the visibility failure, and the clean-up of the app and the churn.
+- `bench/harness.sh` without a kubeconfig, under macOS's bash 3.2: the cluster's creation, 5,000 pods, the same failure, and the cluster's deletion.
+- The driver end to end in headless Chrome, with a stand-in for Tauri's IPC: every phase finished and `twigo-bench report` read its `webview.json`.
+  Those are Chromium's timings, not WebKit's, and are not results.
+
+The table that `bench/harness.sh` prints on the first run with the screen unlocked goes here, with its machine and date.
+
+## What M1 and CI must add
+
+- **M1.**
+  Replace `createMockBackend` with `tauriBackend` in `apps/desktop/bench/main.tsx`, and give the app the harness's kubeconfig.
+  The report then judges first paint (open → first rows painted) and change → painted cell (the churn log joined with paints by pod and restart count, through Unix ms on both sides), and drops the webview halves.
+  Core RSS and idle CPU then include the watch cache and the batcher, and the 20k and 50k columns of 3.8 need `bench/pods.sh` at those counts.
+- **CI.**
+  The harness needs a logged-in, unlocked GUI session; whether GitHub's macOS runners give one is not verified.
+  Linux needs the sampler's WebKitGTK branch and a display, as `bench/ipc/linux.sh` gets from Xvfb in Docker, whose numbers say nothing about a Linux desktop.
+  A workflow would build once, run the harness per pod count, fail on a `FAIL` row, and keep `report.json` as an artifact.

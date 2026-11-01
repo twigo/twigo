@@ -16,6 +16,10 @@
 - A cluster to keep: `export TWIGO_BENCH_DIR=$(mktemp -d)`, `kubeconfig=$(bench/cluster.sh up <name> 1.37 | tail -1)`, then `TWIGO_TEST_KUBECONFIG=$kubeconfig cargo test -p twigo-cache -p twigo-kube -- --ignored`, and `bench/cluster.sh down <name>` with the same `TWIGO_BENCH_DIR` when done.
 - The IPC bench: `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/ipc/run.sh frames` or `bench/ipc/run.sh cost 3` on macOS, and `bench/ipc/linux.sh frames` for WebKitGTK in Docker.
   Each run opens a window and exits by itself.
+- The bench harness ([bench](../../docs/bench.md)): `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/harness.sh` on macOS with the screen unlocked; it creates and deletes its cluster, or takes the kubeconfig of one that `bench/pods.sh` scaled to 5000.
+  The app's window must stay on screen for about three minutes, until it hides itself; the report prints, and its JSON lands in `$TWIGO_BENCH_DIR/harness`.
+- The bench app alone: `pnpm tauri build --no-bundle --features bench --config src-tauri/tauri.bench.conf.json`, then `TWIGO_BENCH=<dir> target/release/twigo-bench launch target/release/twigo`.
+- The churn generator alone: `cargo run --release -p twigo-bench -- churn --kubeconfig <path> --rate 100 --seconds 60 --log churn.jsonl`.
 - Before a push, run only the checks the change affects.
   CI runs the rest, the live tests on every release when `twigo-cache`, `twigo-kube`, `bench/cluster.sh` or the Cargo files change, and the frame probe on WebKitGTK when `bench/ipc` or the Cargo files change.
 
@@ -43,4 +47,7 @@
 - Tailwind scans `packages/` through `@source "../../../packages"` in `apps/desktop/src/index.css`.
   A glob such as `packages/*/src` there generated no utilities from the packages (Tailwind 4.3.3, 2026-10-31).
 - eslint-plugin-react-hooks warns that `useVirtualizer` cannot be memoized by React Compiler; the app does not run the compiler, so the warning stays visible rather than silenced.
+- WebKit paints nothing while the screen is locked, with the display asleep or awake: the document turns `hidden` and `requestAnimationFrame` stops, so the bench driver fails at once rather than measure.
+- A process started from a terminal has the terminal as its responsible process, and so do its `com.apple.WebKit.*` processes; `twigo-bench launch` starts the app responsible for itself, and `twigo-bench sample` refuses an app that is not.
+- The bench build has the identifier `io.twigo.ide.bench`, so it shares neither the single-instance lock nor the window state with Twigo.
 - `bench/` scripts run on macOS's bash 3.2: no associative arrays, and no `$(…)` inside a command's arguments where its failure must stop the script.

@@ -4,7 +4,7 @@ Twigo is an open-source desktop IDE for Kubernetes: native, fast and keyboard-fi
 It aims to match Lens feature for feature without its login wall, its weight or its slowness on large clusters.
 This document fixes the architecture; the M0 spikes in `docs/spikes/` correct it wherever they measured otherwise.
 
-- Status: M0 in progress, steps 1 to 5 done, step 6 in review, 2026-11-01
+- Status: M0 in progress, steps 1 to 5 done, steps 6 and 7 in review, 2026-11-01
 - Stack: Tauri 2 (2.12.x), Rust with kube-rs (4.2.x, k8s-openapi 0.28), React 19 + TypeScript, Tailwind 4, shadcn/ui, pnpm monorepo
 - Reference code: the retired NATS IDE at `6ee327f`, whose history survives only in a local checkout; section 1 maps what carries over
 
@@ -196,7 +196,8 @@ twigo/
 │  ├─ protocol/               generated TS types + typed invoke/channel client + mock backend
 │  └─ utils/
 ├─ extensions/                first-party extensions built on the public API (fixture + dogfood)
-├─ bench/                     kind/kwok cluster scripts, churn generator, perf harness
+├─ bench/                     kind/kwok cluster scripts, perf harness (harness.sh)
+│  ├─ harness/                twigo-bench: churn generator, process sampler, report
 │  └─ ipc/                    IPC bench: the isolation pattern's cost, the tier-2 frame probe
 └─ docs/
 ```
@@ -223,6 +224,7 @@ It translates Tauri commands and channels into calls on `twigo-core`.
 | `packages/protocol`  | Generated request and response types, a channel client with seq/ack, and a **mock backend** that runs the UI in a plain browser on fixtures (design reviews, component tests)              | —                             |
 | `packages/utils`     | Pure helpers without React or IPC, such as formatters                                                                                                                                      | —                             |
 | `apps/desktop/src`   | Bootstraps the workbench and registers `kube`                                                                                                                                              | all                           |
+| `apps/desktop/bench` | The bench mode's entry and driver, built only by `vite build --mode bench` ([bench](bench.md))                                                                                             | all                           |
 
 Every package may import `utils`.
 The ESLint boundary rule from legacy now enforces the whole table; above all, `workbench` must not import `kube`.
@@ -471,8 +473,7 @@ A blank table is never an error state.
 
 ### 3.8 Performance budgets and the benchmark
 
-These are targets.
-CI checks them on a kwok cluster, which simulates nodes and pods without kubelets, at 5k, 20k and 50k pods with churn:
+These are targets, measured on a kwok cluster, which simulates nodes and pods without kubelets, at 5k, 20k and 50k pods with churn:
 
 | Metric                                                   | Target (5k pods)     | Target (50k pods)     |
 | -------------------------------------------------------- | -------------------- | --------------------- |
@@ -485,6 +486,21 @@ CI checks them on a kwok cluster, which simulates nodes and pods without kubelet
 
 The memory numbers count WebKit's `com.apple.WebKit.*` processes.
 They are children of launchd, not of the app, so measuring per process under-reports a Tauri app by about half.
+
+`bench/harness.sh` measures them at 5k pods on macOS ([bench](bench.md)).
+It builds the app's bench mode in release, runs a churn generator at 100 changes/s against kwok, launches the app, whose webview driver opens, scrolls, sorts and watches the pod list, and prints one row per metric with its value, target, status and what it measured:
+
+- **First paint** runs from opening the list to its first rows painted.
+- **Change → painted cell** joins the churn generator's log of changes, in Unix ms, with the webview's paints.
+- **Scroll** is the mean fps of `requestAnimationFrame` over 5 s of scrolling at 4,000 px/s, and **sort** the p95 from a header click to the resorted rows painted, over ten sorts.
+- **Core RSS** is the app process's resident size with the list open under churn.
+- **Webview memory** is the physical footprint of the WebKit processes the app is responsible for, the process macOS records as having asked for them; the harness starts the app responsible for itself, since one started from a terminal shares the terminal's.
+- **Idle CPU** is the CPU time of the app and those WebKit processes over 30 s with the window hidden, as a share of one core.
+
+Until M1 the webview runs on the mock backend, so first paint and change → painted cell are not measurable: only their webview halves, from a batch to its paint, are shown, apart and unjudged.
+Scroll, sort, memory and idle CPU are measured in the real app on the mock, which sorts and windows in JS in the webview, while the core holds no watch cache.
+CI does not run the harness yet: it needs an unlocked GUI session, since WebKit paints nothing behind a locked screen, and Linux needs the sampler's WebKitGTK branch.
+
 The bench also replays the cases that broke other clients, and one that loopback cannot show:
 
 - all namespaces on 30k pods;
