@@ -529,15 +529,15 @@ The bench also replays the cases that broke other clients, and one that loopback
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-| Part               | Holds                                                                                                                                                                                                                                                                  |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Title bar          | Breadcrumb of the space and its namespace scope, a search button that opens quick access; drag region; native traffic lights on macOS. Parts show and hide by keys (⌘B, ⌘J, ⌥⌘B), the View menu and the palette, not buttons                                           |
-| Space rail         | Tiles of the open spaces (D6, Lens's hotbar), ⌘1..9 by position, a button that opens any context                                                                                                                                                                       |
-| Primary side bar   | View containers as tabs in its header (Explorer, Port forwards, Helm, Extensions and contributed ones); the active one's views: resource tree, saved filters                                                                                                           |
-| Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups                                                                                                                                                                                        |
-| Panel              | Terminal (pty), cluster Events stream, Output (Twigo logs per channel), Agent activity (audit, 6.6)                                                                                                                                                                    |
-| Secondary side bar | The ACP agent panel later; hidden while nothing lives there, as is the panel                                                                                                                                                                                           |
-| Status bar         | The cluster's health: on the left its connection and Kubernetes version (later policy mode, port-forwards, sync); on the right the active list's rows and how many are healthy, pending or failing, each a filter; the breadcrumb, not the status bar, names the space |
+| Part               | Holds                                                                                                                                                                                                                                                                                                                                            |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Title bar          | Breadcrumb of the space and its namespace scope, a search button that opens quick access; drag region; native traffic lights on macOS. Parts show and hide by keys (⌘B, ⌘J, ⌥⌘B), the View menu and the palette, not buttons                                                                                                                     |
+| Space rail         | Tiles of the open spaces (D6, Lens's hotbar), ⌘1..9 by position, a button that opens any context                                                                                                                                                                                                                                                 |
+| Primary side bar   | View containers as tabs in its header (Explorer, Port forwards, Helm, Extensions and contributed ones); the active one's views: resource tree, saved filters                                                                                                                                                                                     |
+| Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups                                                                                                                                                                                                                                                                  |
+| Panel              | Terminal (pty), cluster Events stream, Output (Twigo logs per channel), Agent activity (audit, 6.6)                                                                                                                                                                                                                                              |
+| Secondary side bar | The ACP agent panel later; hidden while nothing lives there, as is the panel                                                                                                                                                                                                                                                                     |
+| Status bar         | The cluster's health: on the left a warning while the login shell's environment is missing (6.1), the cluster's connection and Kubernetes version (later policy mode, port-forwards, sync); on the right the active list's rows and how many are healthy, pending or failing, each a filter; the breadcrumb, not the status bar, names the space |
 
 The parts sit flush, split by hairlines, with no cards or gaps: the owner tried islands, as JetBrains Islands and VS Code's 2026 layout ([research](research/workbench-chrome.md)), and preferred flat parts.
 Views are descriptors (ID, title, container, `when`, provider), so the user can move a view to another container, VS Code style.
@@ -1027,8 +1027,10 @@ That is why `aws`, `gke-gcloud-auth-plugin` and `kubelogin` "are not found" in L
   - stdin is null, the child gets its own process group, and a 10 s timeout kills the group.
     The timeout covers rc files that run `exec tmux` or prompt.
   - `-i` is required, because gcloud's `path.zsh.inc` lives in `.zshrc`.
-  - fish, nushell, xonsh and pwsh need their own invocation forms.
-  - If re-executing the binary fails, Twigo falls back to `/usr/bin/env -0`.
+  - The binary prints its environment between two copies of the marker, entries ending in NUL as `env -0` prints them, so multi-line values survive and whatever rc files print around it is dropped.
+  - fish, nushell, xonsh and pwsh need their own invocation forms: fish and xonsh escape `\` and `'` in single quotes, nushell runs a raw string with `^`, xonsh wraps the call in `![…]`, and pwsh takes `-Login -Command "& '…'"`.
+    Each form was run on fish 4.9.3, nushell 0.116.1, xonsh 0.25.0 and pwsh 7.6.9 (Docker, 2026-11-01).
+  - If the shell runs but the binary prints nothing, Twigo runs the shell again with `printf %s <marker>; /usr/bin/env -0; printf %s <marker>`.
 - **The result** is an `Arc<ShellEnv>` applied to every child process: exec plugins, terminals, tier-3 processes, agents.
   Twigo never calls `set_var` on its own process; that is unsafe once threads exist.
 - **The core reads `KUBECONFIG` and the proxy variables from `ShellEnv` explicitly**, in the catalog and in the connector.
@@ -1036,7 +1038,7 @@ That is why `aws`, `gke-gcloud-auth-plugin` and `kubelogin` "are not found" in L
 - **`--dump-env` and `twigo mcp` are handled in `main()` before the Tauri builder**, so the single-instance plugin does not swallow them.
 - **Ordering.**
   Connecting to a cluster waits for the environment.
-  On a timeout, Twigo proceeds with the process environment and shows a status-bar warning with "Retry" and "Show details".
+  On a timeout or any other failure, Twigo proceeds with the process environment and shows a status-bar warning, whose popover offers "Retry" and "Show details": what the shell printed before the frame, never the environment itself.
 - **Linux** uses the same mechanism.
   **Windows** (D2) reads `HKCU\Environment` and the system environment from the registry, because Explorer's environment goes stale after installs.
 - `fix-path-env-rs` is not used: no timeout, line-based parsing that breaks on multi-line values, and `set_var`.

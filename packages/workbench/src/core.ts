@@ -9,6 +9,11 @@ import {
 } from "./quickaccess/providers";
 import { LOCATION_TITLES, LOCATIONS, type Location } from "./views/registry";
 import { ChordItem } from "./parts/StatusItems";
+import {
+  RETRY_SHELL_ENVIRONMENT,
+  SHOW_SHELL_ENVIRONMENT,
+  ShellEnvironmentItem,
+} from "./parts/ShellEnvironmentItem";
 
 const TOGGLES: readonly {
   location: Location;
@@ -255,5 +260,29 @@ export function registerCore(workbench: Workbench): void {
     alignment: "right",
     priority: 100,
     component: ChordItem,
+  });
+
+  const { shellEnvironment } = workbench;
+  commands.register({
+    id: RETRY_SHELL_ENVIRONMENT,
+    title: "Retry Loading the Shell Environment",
+    category: "Shell Environment",
+    enablement: "shellEnvironment == failed",
+    run: () => shellEnvironment.retry(),
+  });
+  commands.register({
+    id: SHOW_SHELL_ENVIRONMENT,
+    title: "Show Why the Shell Environment Is Not Loaded",
+    category: "Shell Environment",
+    enablement: "shellEnvironment == failed",
+    run: () => {
+      shellEnvironment.setDetailsOpen(true);
+    },
+  });
+  views.registerStatusBarItem({
+    id: "workbench.shellEnvironment",
+    alignment: "left",
+    priority: 200,
+    component: ShellEnvironmentItem,
   });
 }
