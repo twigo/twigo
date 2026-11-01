@@ -695,7 +695,7 @@ It moves into `packages/ui` unchanged and gets extended for the new views.
   - Two weights, 400 and 600, as VS Code and JetBrains; 13 px base, 12 px secondary, 11 px labels; sentence case, no capitals.
   - Dense rows: 22 px in trees and tables; icons 16 px, Lucide's 1.5 stroke drawing 1 px lines.
 - **Surfaces.**
-  Flat parts split by hairlines (4.1), and editor tabs connect to their editor: the active tab takes the editor's surface.
+  Flat parts split by hairlines (4.1), and editor tabs connect to their editor: the strip takes the shell's surface, the active tab the editor's, open into it.
   Table columns resize from their header's edge.
 - **Motion.**
   An instant-in, gentle-out ladder (`--dur-instant` 100 ms to `--dur-slow` 300 ms).

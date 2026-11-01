@@ -20,18 +20,14 @@
   );
 }
 /* Dockview on the design tokens. Tabs connect to their editor (VS Code
-   1.144 dropped detached pill tabs for this): the active tab takes the
-   editor's surface, the strip a shade off it. */
+   1.144 dropped detached pill tabs for this): the strip takes the shell's
+   surface, the active tab the editor's, open into it. */
 .twigo-dockview.dockview-theme-light {
   color-scheme: light;
   --dv-background-color: var(--editor);
   --dv-group-view-background-color: var(--editor);
-  --dv-tabs-and-actions-container-background-color: color-mix(
-    in oklab,
-    var(--foreground) 4%,
-    var(--editor)
-  );
-  --dv-tabs-and-actions-container-height: 32px;
+  --dv-tabs-and-actions-container-background-color: var(--shell);
+  --dv-tabs-and-actions-container-height: 34px;
   --dv-tabs-and-actions-container-font-size: 13px;
   --dv-activegroup-visiblepanel-tab-background-color: var(--editor);
   --dv-activegroup-visiblepanel-tab-color: var(--foreground);
@@ -62,8 +58,22 @@
 .twigo-dockview .dv-tabs-container::-webkit-scrollbar {
   display: none;
 }
+.twigo-dockview .dv-tabs-and-actions-container {
+  box-shadow: inset 0 -1px 0 var(--border);
+}
 .twigo-dockview .dv-tabs-container > .dv-tab {
-  border-right: 1px solid var(--border-subtle);
+  padding: 0 2px 0 4px;
+}
+/* The active tab covers the strip's bottom line. Above it and left of the
+   first tab the part's own separators already draw a line; a second one
+   there would double it. */
+.twigo-dockview .dv-tab.dv-active-tab {
+  box-shadow:
+    inset 1px 0 0 var(--border),
+    inset -1px 0 0 var(--border);
+}
+.twigo-dockview .dv-tab.dv-active-tab:first-child {
+  box-shadow: inset -1px 0 0 var(--border);
 }
 .twigo-dockview .dv-tabs-container > .dv-tab.dv-inactive-tab:hover {
   background-color: var(--row-hover);
