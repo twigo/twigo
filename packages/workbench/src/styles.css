@@ -9,6 +9,12 @@
   --separator-border: var(--border);
   --focus-border: var(--brand);
 }
+/* Allotment draws a separator as its pane's ::before at z-index 5; each
+   part's content is its own stacking context, so nothing in it (a sticky
+   table header at z-index 10) paints over the line. */
+.twigo-workbench .split-view-view > * {
+  isolation: isolate;
+}
 
 /* A coloured context tints the title bar's left end, behind the breadcrumb. */
 .twigo-titlebar[data-color] {
