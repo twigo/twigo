@@ -268,7 +268,7 @@ function ResourceList({
                       if (row) onActivate?.(row);
                     }}
                     className={cn(
-                      "absolute inset-x-0 grid items-center border-b border-border-micro tabular-nums hover:bg-row-hover",
+                      "absolute inset-x-0 grid items-center border-b border-border-subtle tabular-nums hover:bg-row-hover",
                       row !== undefined &&
                         row.id === selected &&
                         "bg-selected-unfocused group-focus:bg-selected",
@@ -508,7 +508,7 @@ function SkeletonRows({
       {Array.from({ length: 12 }, (_, i) => (
         <div
           key={i}
-          className="grid items-center border-b border-border-micro"
+          className="grid items-center border-b border-border-subtle"
           style={{
             height: ROW_HEIGHT,
             gridTemplateColumns: template || `repeat(${String(count)}, 1fr)`,
