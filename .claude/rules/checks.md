@@ -5,7 +5,7 @@
 - Rust, one crate: `cargo test -p twigo-cache`, `cargo clippy -p twigo-cache --all-targets -- -D warnings`, `cargo fmt --all --check`.
 - One Rust test: `cargo test -p twigo-cache --test table_fixtures <name>`.
 - Frontend: `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r test`, `pnpm format:check`; one package: `pnpm --filter @twigo/workbench test`.
-- The app: `pnpm tauri dev`; the CI build is `pnpm tauri build --debug --no-bundle`.
+- The app: `TWIGO_KUBECONFIG=<kind kubeconfig> pnpm tauri dev`; the CI build is `pnpm tauri build --debug --no-bundle`.
 - The UI on the mock backend: `pnpm --filter @twigo/desktop dev`, then http://localhost:1420/ in a browser; `?scenario=forbidden` pins a view state (`MOCK_SCENARIOS` in `packages/protocol/src/mock`), and `?layout=french` picks a keyboard layout (`MOCK_LAYOUTS`).
 - The TypeScript of the IPC types: `TWIGO_UPDATE_TYPESCRIPT=1 cargo test -p twigo-ipc --test typescript`.
 - The mock's keyboard layouts: `cargo run -p twigo-keyboard --example record` on a Mac reads installed layouts without selecting them and rewrites `packages/protocol/src/mock/layouts`.
@@ -19,6 +19,7 @@
 - The bench harness ([bench](../../docs/bench.md)): `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/harness.sh` on macOS with the screen unlocked; it creates and deletes its cluster, or takes the kubeconfig of one that `bench/pods.sh` scaled to 5000.
   The app's window must stay on screen for about three minutes, until it hides itself; the report prints, and its JSON lands in `$TWIGO_BENCH_DIR/harness`.
 - The bench app alone: `pnpm tauri build --no-bundle --features bench --config src-tauri/tauri.bench.conf.json`, then `TWIGO_BENCH=<dir> target/release/twigo-bench launch target/release/twigo`.
+- State across ⌘Q and a restart, on macOS with the screen unlocked: `bench/restart.sh <kind kubeconfig>` after the debug build; it runs the app with a temporary `HOME` and presses keys through System Events, which needs the terminal's Accessibility permission.
 - The churn generator alone: `cargo run --release -p twigo-bench -- churn --kubeconfig <path> --rate 100 --seconds 60 --log churn.jsonl`.
 - Before a push, run only the checks the change affects.
   CI runs the rest, the live tests on every release when `twigo-cache`, `twigo-kube`, `bench/cluster.sh` or the Cargo files change, and the frame probe on WebKitGTK when `bench/ipc` or the Cargo files change.
@@ -29,6 +30,8 @@
   An install fails on a package younger than a day (`minimumReleaseAge`): pin the previous version instead of excluding the new one.
 - `tsc` is TypeScript 7 (`@typescript/native`), while `typescript` is `@typescript/typescript6`, the API typescript-eslint needs.
   Keep both aliases.
+- The app reads the kubeconfigs kubectl reads, the user's real clusters among them, unless `TWIGO_KUBECONFIG` names one file: in debug and bench builds only that file's `kind-*` and `kwok-*` contexts count, so development and tests always set it.
+  With a `HOME` of its own the app also keeps its state and window position apart, since Tauri finds the app-data directory through `HOME`.
 - Kubernetes clients come only from `twigo_kube::client::Clients`: `api` speaks HTTP/2, `sessions` HTTP/1.1 for exec, attach and port-forward.
   Never `Config::infer()`, `~/.kube/config` or the current context: tests and examples read `TWIGO_TEST_KUBECONFIG` and refuse contexts other than `kind-*` and `kwok-*`.
 - k8s-openapi moves only together with kube: kube 4.2 requires `^0.28`.
