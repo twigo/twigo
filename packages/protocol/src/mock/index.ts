@@ -63,15 +63,21 @@ const LAYOUTS: Readonly<Record<MockLayout, KeyboardLayout>> = {
 
 const FLUSH_MS = 50;
 const CHURN_MS = 1000;
+const RATE_TICK_MS = 100;
 
 /**
  * Runs the UI in a plain browser on fixtures (ARCHITECTURE 2.3): spaces,
  * pods behind a query view with the same windowing and flow control as Rust,
  * and a keyboard layout that never changes.
+ *
+ * A live list changes pods every second, more of them where they are on
+ * screen; with `changesPerSecond`, each cluster changes that many random
+ * pods a second instead, counted on wall time, as the bench's churn does.
  */
 export function createMockBackend(
   scenario: MockScenario = "live",
   layout: MockLayout = "us",
+  changesPerSecond?: number,
 ): Backend {
   const now = Date.now();
   const clusters = new Map<string, Cluster>();
@@ -157,6 +163,29 @@ export function createMockBackend(
     },
   };
 
+  const demoChurn = () =>
+    setInterval(() => {
+      for (const [context, target] of clusters) {
+        const focus = [...subscriptions.values()].flatMap((sub) =>
+          sub.windowIds(context),
+        );
+        target.churn(Math.ceil(target.pods.length / 500), focus, Date.now());
+      }
+      for (const sub of subscriptions.values()) sub.touch();
+    }, CHURN_MS);
+
+  const steadyChurn = (rate: number) => {
+    const started = Date.now();
+    let applied = 0;
+    return setInterval(() => {
+      const due = Math.floor(((Date.now() - started) * rate) / 1000) - applied;
+      if (due <= 0) return;
+      applied += due;
+      for (const target of clusters.values()) target.change(due);
+      for (const sub of subscriptions.values()) sub.touch();
+    }, RATE_TICK_MS);
+  };
+
   const streams: {
     [C in SubscriptionCommand]: (
       request: RequestOf<C>,
@@ -179,19 +208,10 @@ export function createMockBackend(
         ),
       );
       if (scenario === "live" && churn === undefined) {
-        churn = setInterval(() => {
-          for (const [context, target] of clusters) {
-            const focus = [...subscriptions.values()].flatMap((sub) =>
-              sub.windowIds(context),
-            );
-            target.churn(
-              Math.ceil(target.pods.length / 500),
-              focus,
-              Date.now(),
-            );
-          }
-          for (const sub of subscriptions.values()) sub.touch();
-        }, CHURN_MS);
+        churn =
+          changesPerSecond === undefined
+            ? demoChurn()
+            : steadyChurn(changesPerSecond);
       }
       return id;
     },
