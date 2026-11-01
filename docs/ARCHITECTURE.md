@@ -108,7 +108,7 @@ Everything NATS-specific goes.
 | `components/editor/InspectorSplit.tsx`                                                                   | Row details over a list                                                           | The inspector becomes a drawer that slides in over its list from the right, as Lens's (4.3).                                                                                                                                                                |
 | `store/readonly.ts` + `ConnState.readonly` (frontend-owned, synced to Rust by `conn_sync_readonly`)      | `twigo-policy` (6.4)                                                              | **Rust owns the lock.** The frontend only displays it. Three modes, several policy sources, timed unlock.                                                                                                                                                   |
 | Diff before apply (`lib/diff.ts`, `diffStreamPatch` in `StreamFormDialog`, `RawConfigDialog`)            | Server-side apply dry-run + Monaco diff editor (6.5)                              | The diff now compares live state with the server's dry-run result, so it includes webhook and defaulting changes. A local diff guesses.                                                                                                                     |
-| `lib/persist-storage.ts` (tauri-plugin-store)                                                            | Settings files + state store (4.8)                                                | Settings are user-editable JSONC files with layers. UI state (layouts, history) stays in the store.                                                                                                                                                         |
+| `lib/persist-storage.ts` (tauri-plugin-store)                                                            | Settings files + state store (4.8)                                                | Settings are user-editable JSONC files with layers. UI state (layouts, history) goes to `twigo-core`'s state store, one JSON file written atomically, not tauri-plugin-store.                                                                               |
 | `components/views/VirtualTree.tsx`, `components/editor/MessageTable.tsx` (TanStack Virtual)              | Explorer tree, resource table                                                     | The table becomes window-driven: Rust sends only the visible window (3.4).                                                                                                                                                                                  |
 | `store/connScoped.ts` (teardown registry)                                                                | Space and context teardown registry                                               | Same pattern, keyed by context.                                                                                                                                                                                                                             |
 | Connection manager UX (`ConnectionPicker`, `ConnectionSwitcher`, import and write-back of NATS contexts) | Cluster catalog (5.5)                                                             | Same promise: **read what the CLI already has**, here the kubeconfig. Twigo never writes the kubeconfig except through explicit commands.                                                                                                                   |
@@ -395,8 +395,8 @@ The webview then sends `setWindow(start, end)` as the user scrolls, covering the
   `/!` negates; a regex can be given explicitly, k9s style.
 - Values keep the rows whose column holds one of them, such as a pod's Status in CrashLoopBackOff or Error.
   `groupBy` counts the rows before values drop any, so a filter by health keeps every health's count.
-- Multi-context spaces: the query view merges the upstreams of several contexts and adds a Context column.
-  Row identity is `context/namespace/name`.
+- Multi-context spaces (7.2): the query view merges the upstreams of several contexts and adds a Context column.
+  Row identity is `context/namespace/name` already, so one-context spaces, all that M1 serves, need no change then.
 - Selections and bulk actions refer to row IDs, so "select all 5,000" never ships 5,000 rows.
 
 This scales to 50k rows.
@@ -541,11 +541,15 @@ The bench also replays the cases that broke other clients, and one that loopback
 
 The parts sit flush, split by hairlines, with no cards or gaps: the owner tried islands, as JetBrains Islands and VS Code's 2026 layout ([research](research/workbench-chrome.md)), and preferred flat parts.
 Views are descriptors (ID, title, container, `when`, provider), so the user can move a view to another container, VS Code style.
-The layout per space is persisted (dockview `toJSON` plus part sizes and visibility).
+The layout per space is persisted (dockview `toJSON` and which parts show); part sizes are the app's (4.8).
 
 ### 4.2 Spaces (D6)
 
-- A space has an ID, a list of contexts (one or more), a namespace scope and a persisted layout: open inputs, view placement, and what each view keeps, such as the explorer's open sections.
+- A space has an ID, a list of contexts (one or more), a namespace scope and a persisted layout: open inputs, view placement, and what each view keeps, such as the explorer's open sections (4.8).
+  M1 serves one-context spaces, whose ID is the context's name; `Space.contexts` stays a list for 7.2.
+- The rail shows the spaces whose contexts the catalog lists.
+  A space whose context goes away keeps its state and comes back with it.
+  When the catalog lists contexts but no space has them, as on the first start, the first context's space opens.
 - Switching spaces moves the whole workbench: explorer, editors, status bar, policy badge.
   The rail shows a tile per open space: two letters on the tint of its context's colour, the active one ringed and marked, a lock badge on a locked context.
   The title bar's breadcrumb names the active space and its namespace scope and opens their pickers.
@@ -554,7 +558,7 @@ The layout per space is persisted (dockview `toJSON` plus part sizes and visibil
   A space with several contexts shows none.
 - Every editor in a space belongs to that space's contexts.
   Opening another cluster's object means switching spaces or running **Compare with…**, which opens a diff editor against an object picked from any context and says so in its title.
-- A multi-context space ("dev+qa") gets merged tables with a Context column.
+- A multi-context space ("dev+qa", 7.2) gets merged tables with a Context column.
   Its editors still each carry one context, shown as a chip on the tab.
 - A space connects lazily on its first activation.
   A background space's sessions (port-forwards, exec, logs) survive; its list subscriptions linger, then stop (3.2).
@@ -700,7 +704,25 @@ Progress shows in the status bar, or in a notification when the operation needs 
 - Settings are files the user can edit in the app (with a schema) or through the generated settings UI.
   Changes are picked up live.
   `keybindings.json` works the same way.
-- **State** that is not settings stays in the app store: layouts, recent items, command history, dismissed hints.
+- **State** is what the UI leaves behind and nobody edits by hand: layouts, recent items, command history, column choices ([research](research/state.md)).
+  - It has two scopes, as VS Code's storage has: the app's, and each space's.
+    The app keeps the rail's spaces in order, the active space, part sizes, quick-access history and the columns chosen per kind.
+    A space keeps its editors, which parts show and their containers, moved views, its namespace scope and each view's own state.
+  - Part sizes are the app's, so switching spaces never moves the splits; VS Code keeps them per profile for the same reason.
+  - Each value is a key that one module owns, such as `parts`, `namespaces` or `view/<id>` in a space, and `parts/sizes` or `quickaccess/history` in the app.
+    The module reads it back with a valibot schema, field by field, and what does not fit falls back to its default, so a bad value costs that value only.
+    Extensions (M3) get keys in the same scopes.
+  - The webview reads everything once as it starts (`state_load`), so its reads are synchronous.
+    It sends each change at once (`state_set`), one call in flight, and the changes made meanwhile go together in the next, so a quit loses at most what changed during the last call's round trip.
+  - `twigo-core` holds the state in memory and in `state.json` in the app-data directory, mode 0600.
+    It rewrites the file atomically (temporary file, fsync, rename) a second after a change, and at once on `RunEvent::Exit`.
+    macOS delivers ⌘Q, the Dock's Quit and logout as `terminate:`, which ends the app without `ExitRequested` but still with `Exit`, so nothing waits for the webview at quit.
+  - A space is dropped with its state once the catalog, as noted at each start and at each change, has lacked one of its contexts for 90 days.
+    Only those notings move that clock, so a context that is back by the first reading after a long break keeps its space.
+    It goes as the app starts, before the webview reads any space; VS Code's per-workspace state grew without bound.
+  - A file that cannot be read, or has another version, moves aside as `state.json.unreadable`, and the app starts with nothing remembered.
+    Before users exist there are no migrations.
+  - Secrets never go into the state: they stay in Rust and the keychain (6.2).
 - **What is skipped from VS Code, and why:**
   - Workspace and folder layers: spaces take their place.
   - Profiles and settings sync: later, if users ask.
@@ -971,8 +993,13 @@ Contributions imply their activation events, as VS Code ≥ 1.74 does; `*` is fo
 
 - **Catalog entities** (Lens's model): an ID, a name, a source, labels and tags, an icon or colour, a status (phase, reason), and a connection.
 - **Sources.**
-  - The core ships one: kubeconfig files from `KUBECONFIG` (as the login shell sets it, 6.1), `~/.kube/config` and folders the user adds.
-    They are watched with a notify debouncer on the parent directories, because writers replace files by rename.
+  - The core ships one: kubeconfig files, as kubectl reads them, and folders the user adds (M3).
+    - The files `KUBECONFIG` lists, as the login shell sets it (6.1), else `~/.kube/config`, merged by kubectl's rules: the first file to define a name wins ([research](research/state.md)).
+    - A listed file that does not exist is skipped, as client-go skips it; one that cannot be read or parsed is skipped and logged, and the other files still count.
+    - A notify debouncer watches the closest existing directory above each file, because writers replace files by rename and `~/.kube` may not exist yet, and the directory of a symlink's target, where writes through it land.
+      Reads do not count, since inotify reports every open, Twigo's own loads among them, and a change that leaves the catalog as it was reports nothing.
+    - The explicit mode keeps development, tests and the bench off real clusters: in debug and bench builds `TWIGO_KUBECONFIG` replaces every source, and only its `kind-*` and `kwok-*` contexts count.
+  - The webview follows the catalog through `contexts_watch`, which answers once the sources have been read, after the login shell's environment.
   - Each extension's `clusterProviders` is a further source.
   - Later: Cluster Inventory `ClusterProfile` (SIG Multicluster, alpha).
 - **Connection** is either
@@ -983,6 +1010,9 @@ Contributions imply their activation events, as VS Code ≥ 1.74 does; `*` is fo
     "Export to kubeconfig" is an explicit command; for Segla it writes an exec entry for `sgl cluster credentials <label>`.
 - **Metadata from kubeconfig** `extensions` (name `twigo`): `color`, `tags`, `readOnly`, `order`.
   Twigo reads it and never writes it.
+  Each field is read on its own, so a value Twigo does not know drops only that field.
+  Contexts with an `order` come first, lowest first, then the rest, each group by name.
+  M1 reads `color` and `order`; `readOnly` comes with its consumer in M2, `tags` with the catalog's views.
 - **The generic "Add cluster…" command.**
   Its picker lists "Import kubeconfig…" plus every provider's `create` command.
   The form is a declarative JSON-Schema form.
