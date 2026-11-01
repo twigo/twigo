@@ -7,6 +7,7 @@ import { ContextKeys } from "./contextkey/service";
 import { Editors } from "./editors/registry";
 import { ShellEnvironmentStatus } from "./environment";
 import type { Platform } from "./keybindings/chord";
+import { Credentials } from "./credentials";
 import { Keybindings } from "./keybindings/service";
 import { PartSizes } from "./parts/sizes";
 import { QuickAccess } from "./quickaccess/registry";
@@ -34,6 +35,11 @@ export class Workbench {
   readonly spaces: Spaces;
   readonly sizes: PartSizes;
   readonly shellEnvironment: ShellEnvironmentStatus;
+  readonly credentials: Credentials;
+  /** Opens a link in the person's browser; the app replaces it under Tauri. */
+  openUrl: (url: string) => void = (url) => {
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
 
   constructor(
     readonly backend: Backend,
@@ -60,6 +66,9 @@ export class Workbench {
     );
     this.sizes = new PartSizes(state);
     this.shellEnvironment = new ShellEnvironmentStatus(backend, this.keys);
+    this.credentials = new Credentials(backend, this.spaces, (error) => {
+      this.report(error);
+    });
   }
 
   /** Shows a failure the user did not ask to see but must know about. */
@@ -110,5 +119,8 @@ export async function createWorkbench(
     workbench.report(error);
   });
   await workbench.spaces.load();
+  workbench.credentials.start().catch((error: unknown) => {
+    workbench.report(error);
+  });
   return workbench;
 }

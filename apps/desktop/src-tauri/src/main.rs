@@ -267,7 +267,8 @@ fn main() {
                 }
             }
         }))
-        .plugin(tauri_plugin_window_state::Builder::default().build());
+        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(tauri_plugin_opener::init());
     #[cfg(feature = "bench")]
     let builder = builder.plugin(bench::plugin());
     let app = builder

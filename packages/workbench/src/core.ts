@@ -14,6 +14,7 @@ import {
   SHOW_SHELL_ENVIRONMENT,
   ShellEnvironmentItem,
 } from "./parts/ShellEnvironmentItem";
+import { CredentialsItem } from "./parts/credentials/CredentialsItem";
 
 const TOGGLES: readonly {
   location: Location;
@@ -284,5 +285,11 @@ export function registerCore(workbench: Workbench): void {
     alignment: "left",
     priority: 200,
     component: ShellEnvironmentItem,
+  });
+  views.registerStatusBarItem({
+    id: "workbench.credentials",
+    alignment: "left",
+    priority: 190,
+    component: CredentialsItem,
   });
 }
