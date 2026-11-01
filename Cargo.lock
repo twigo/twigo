@@ -5026,6 +5026,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "twigo-bench"
+version = "0.1.0"
+dependencies = [
+ "fastrand",
+ "json-patch",
+ "k8s-openapi",
+ "kube",
+ "serde",
+ "serde_json",
+ "tokio",
+ "twigo-kube",
+]
+
+[[package]]
 name = "twigo-bench-ipc"
 version = "0.1.0"
 dependencies = [
