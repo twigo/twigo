@@ -7,3 +7,18 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
+
+[dependencies]
+fastrand.workspace = true
+nix.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "sync", "time"] }
+twigo-ipc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt", "test-util"] }
+
+[[test]]
+name = "live"
+harness = false

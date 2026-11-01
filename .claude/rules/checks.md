@@ -43,6 +43,8 @@
 - The live X11 test changes the X server's keymap and group, so it runs only where `TWIGO_TEST_X11_DISPLAY` equals `DISPLAY`, as under `xvfb-run`.
 - The live Wayland test changes sway's keyboard, so it runs only where `TWIGO_TEST_WAYLAND_DISPLAY` equals `WAYLAND_DISPLAY`, as under `crates/twigo-keyboard/linux/wayland.sh`.
   Headless sway has no input devices, so the script holds a virtual keyboard open with `wtype`; `swaymsg` reads a comma as a command separator, so a layout list is quoted.
+- `crates/twigo-env/tests/live.rs` runs bash and zsh from `PATH` as login shells and fails if either is missing, so CI installs zsh.
+  It runs without the test harness, because the shells re-run it with `--dump-env`.
 - TIS must run on the main thread, so `crates/twigo-keyboard/tests/layouts.rs` runs without the test harness.
 - Tailwind scans `packages/` through `@source "../../../packages"` in `apps/desktop/src/index.css`.
   A glob such as `packages/*/src` there generated no utilities from the packages (Tailwind 4.3.3, 2026-10-31).
