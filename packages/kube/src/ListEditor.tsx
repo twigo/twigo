@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Column, Row } from "@twigo/protocol";
+import type { Column, Row, ViewState } from "@twigo/protocol";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { Details } from "./Details";
 import { sameGvr, useResources, type Discovery } from "./discovery";
 import { pluralTitle } from "./kinds";
+import type { ListStatuses } from "./listStatus";
 import type { Lists } from "./lists";
 import { ResourceTable, type ListController } from "./ResourceTable";
 import type { Selection } from "./selection";
@@ -13,6 +14,7 @@ export interface ListServices {
   readonly discovery: Discovery;
   readonly lists: Lists;
   readonly selection: Selection;
+  readonly statuses: ListStatuses;
 }
 
 /**
@@ -32,7 +34,13 @@ export function ListEditor({
     input && resources.state === "ready"
       ? resources.value.find((candidate) => sameGvr(candidate.gvr, input.gvr))
       : undefined;
-  const { lists, selection } = services;
+  const { lists, selection, statuses } = services;
+  useEffect(
+    () => () => {
+      statuses.set(uri, undefined);
+    },
+    [statuses, uri],
+  );
   useChanges(selection.changes);
   const title = resource
     ? pluralTitle(resource.kind, resource.gvr.resource)
@@ -43,9 +51,7 @@ export function ListEditor({
 
   const remembered = input && selection.get(input.space);
   const mine =
-    remembered && sameGvr(remembered.gvr, input.gvr)
-      ? remembered
-      : undefined;
+    remembered && sameGvr(remembered.gvr, input.gvr) ? remembered : undefined;
   const [open, setOpen] = useState(mine?.reveal === true);
   const table = useRef<ListController>(undefined);
   const [wrapper, setWrapper] = useState<HTMLDivElement | null>(null);
@@ -99,6 +105,13 @@ export function ListEditor({
     [input, resource, selection],
   );
 
+  const onStatus = useCallback(
+    (total: number, status: ViewState) => {
+      statuses.set(uri, { title: title ?? uri, total, status });
+    },
+    [statuses, uri, title],
+  );
+
   if (!input) return null;
   const namespaces = input.namespaces ?? spaces.state(input.space).namespaces;
   return (
@@ -116,6 +129,7 @@ export function ListEditor({
         onActivate={() => {
           setOpen(true);
         }}
+        onStatus={onStatus}
         register={register}
       />
       {open && mine && (

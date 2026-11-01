@@ -4,6 +4,8 @@ import { Discovery } from "./discovery";
 import { Explorer } from "./Explorer";
 import { ListIcon } from "./KindIcon";
 import { ListEditor, type ListServices } from "./ListEditor";
+import { ListStatuses } from "./listStatus";
+import { ListStatusItem } from "./ListStatusItem";
 import { Lists } from "./lists";
 import {
   listProvider,
@@ -19,6 +21,7 @@ export function registerKube(workbench: Workbench): void {
     discovery: new Discovery(workbench.backend),
     lists: new Lists(),
     selection: new Selection(),
+    statuses: new ListStatuses(),
   };
   const { views, editors, commands, keybindings, quickAccess } = workbench;
 
@@ -57,6 +60,13 @@ export function registerKube(workbench: Workbench): void {
     container: "kube.explorer",
     component: () => <Explorer discovery={services.discovery} />,
   });
+  views.registerStatusBarItem({
+    id: "kube.list",
+    alignment: "left",
+    priority: 100,
+    component: () => <ListStatusItem statuses={services.statuses} />,
+  });
+
   editors.register({
     id: "kube.list",
     scheme: LIST_SCHEME,

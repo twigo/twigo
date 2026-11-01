@@ -8,7 +8,7 @@ import {
   symbolsProvider,
 } from "./quickaccess/providers";
 import { LOCATION_TITLES, LOCATIONS, type Location } from "./views/registry";
-import { ChordItem, NamespacesItem, SpaceItem } from "./parts/StatusItems";
+import { ChordItem } from "./parts/StatusItems";
 
 const TOGGLES: readonly {
   location: Location;
@@ -250,18 +250,6 @@ export function registerCore(workbench: Workbench): void {
     });
   }
 
-  views.registerStatusBarItem({
-    id: "workbench.space",
-    alignment: "left",
-    priority: 100,
-    component: SpaceItem,
-  });
-  views.registerStatusBarItem({
-    id: "workbench.namespaces",
-    alignment: "left",
-    priority: 90,
-    component: NamespacesItem,
-  });
   views.registerStatusBarItem({
     id: "workbench.chord",
     alignment: "right",

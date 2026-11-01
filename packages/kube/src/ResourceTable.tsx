@@ -55,6 +55,8 @@ interface Props {
   onSelect?: (row: Row, columns: readonly Column[]) => void;
   /** A row the user opened: a click, or Enter through `activate`. */
   onActivate?: (row: Row) => void;
+  /** How many rows match and the view's state, as they change. */
+  onStatus?: (total: number, status: ViewState) => void;
   /** Registers the focusable grid while it is mounted, for context keys and commands. */
   register?: (grid: HTMLElement, list: ListController) => () => void;
 }
@@ -83,6 +85,7 @@ function ResourceList({
   initialSelected,
   onSelect,
   onActivate,
+  onStatus,
   register,
   onRetry,
 }: Props & { onRetry: () => void }) {
@@ -174,19 +177,22 @@ function ResourceList({
     if (selectedRow) onSelect?.(selectedRow, snapshot.columns);
   }, [onSelect, selectedRow, snapshot.columns]);
 
+  useEffect(() => {
+    onStatus?.(snapshot.total, status);
+  }, [onStatus, snapshot.total, status]);
+
+  const [widths, setWidths] = useState<Readonly<Record<string, number>>>({});
+  const widthOf = (column: Column) =>
+    widths[column.name] ?? defaultWidth(column);
   const Icon = kindIcon(gvr);
-  const template = columns.map(width).join(" ");
+  const template = [
+    ...columns.map((column) => `${String(widthOf(column))}px`),
+    "minmax(0, 1fr)",
+  ].join(" ");
+  const total = columns.reduce((sum, column) => sum + widthOf(column), 0);
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-editor">
-      <header className="flex h-7 shrink-0 items-center gap-2 border-b border-border-subtle px-3 text-xs text-muted-foreground">
-        {showsRows && (
-          <span className="tabular-nums">
-            {snapshot.total.toLocaleString("en")} {title.toLowerCase()}
-          </span>
-        )}
-        <StateBadge status={status} />
-      </header>
       {problem(status, title, onRetry) ?? (
         <div
           ref={setGrid}
@@ -199,15 +205,19 @@ function ResourceList({
           <div
             role="row"
             aria-rowindex={1}
-            className="sticky top-0 z-10 grid h-7 items-center border-b border-border-subtle bg-editor text-xs text-muted-foreground"
-            style={{ gridTemplateColumns: template }}
+            className="sticky top-0 z-10 grid h-7 items-center border-b border-border bg-editor text-xs text-muted-foreground"
+            style={{ gridTemplateColumns: template, minWidth: total }}
           >
             {columns.map((column) => (
               <HeaderCell
                 key={column.name}
                 column={column}
+                width={widthOf(column)}
                 sort={sort}
                 onSort={setSort}
+                onResize={(next) => {
+                  setWidths((current) => ({ ...current, [column.name]: next }));
+                }}
               />
             ))}
           </div>
@@ -224,7 +234,7 @@ function ResourceList({
           ) : (
             <div
               className="relative"
-              style={{ height: virtualizer.getTotalSize() }}
+              style={{ height: virtualizer.getTotalSize(), minWidth: total }}
             >
               {items.map((item) => {
                 const row = rowAt(snapshot, item.index);
@@ -289,18 +299,21 @@ function rowAt(snapshot: ListSnapshot, index: number): Row | undefined {
 
 type IndexedColumn = Column & { index: number };
 
-const WIDTHS: Readonly<Record<string, string>> = {
-  Name: "minmax(16rem, 2.5fr)",
-  Namespace: "minmax(8rem, 1fr)",
-  Context: "minmax(7rem, 0.8fr)",
-  Ready: "4.5rem",
-  Status: "minmax(10rem, 1fr)",
-  Restarts: "minmax(7rem, 0.6fr)",
+/** Starting widths in px; the user drags a header's edge to change one. */
+const WIDTHS: Readonly<Record<string, number>> = {
+  Name: 280,
+  Namespace: 140,
+  Context: 120,
+  Ready: 64,
+  Status: 170,
+  Restarts: 120,
 };
 
-function width(column: Column): string {
-  if (column.kind === "age") return "4.5rem";
-  return WIDTHS[column.name] ?? "minmax(6rem, 1fr)";
+const MIN_WIDTH = 48;
+
+function defaultWidth(column: Column): number {
+  if (column.kind === "age") return 72;
+  return WIDTHS[column.name] ?? 140;
 }
 
 function alignEnd(column: Column): boolean {
@@ -313,27 +326,83 @@ function alignEnd(column: Column): boolean {
 
 function HeaderCell({
   column,
+  width,
   sort,
   onSort,
+  onResize,
 }: {
   column: IndexedColumn;
+  width: number;
   sort: Sort | null;
   onSort: (sort: Sort) => void;
+  onResize: (width: number) => void;
 }) {
   const active = sort?.column === column.name;
   const Arrow = active && sort.descending ? ArrowDown : ArrowUp;
+  return (
+    <div className="relative h-full border-r border-border-subtle">
+      <SortButton
+        column={column}
+        active={active}
+        sort={sort}
+        onSort={onSort}
+        Arrow={Arrow}
+      />
+      <span
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={`Resize ${column.name}`}
+        onPointerDown={(event) => {
+          event.preventDefault();
+          const start = event.clientX;
+          const target = event.currentTarget;
+          target.setPointerCapture(event.pointerId);
+          const move = (next: PointerEvent) => {
+            onResize(Math.max(MIN_WIDTH, width + next.clientX - start));
+          };
+          target.addEventListener("pointermove", move);
+          target.addEventListener(
+            "pointerup",
+            () => {
+              target.removeEventListener("pointermove", move);
+            },
+            { once: true },
+          );
+        }}
+        className="absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize hover:bg-brand/40"
+      />
+    </div>
+  );
+}
+
+function SortButton({
+  column,
+  active,
+  sort,
+  onSort,
+  Arrow,
+}: {
+  column: IndexedColumn;
+  active: boolean;
+  sort: Sort | null;
+  onSort: (sort: Sort) => void;
+  Arrow: typeof ArrowUp;
+}) {
   return (
     <button
       type="button"
       role="columnheader"
       aria-sort={
-        active ? (sort.descending ? "descending" : "ascending") : "none"
+        active ? (sort?.descending ? "descending" : "ascending") : "none"
       }
       onClick={() => {
-        onSort({ column: column.name, descending: active && !sort.descending });
+        onSort({
+          column: column.name,
+          descending: active && sort?.descending !== true,
+        });
       }}
       className={cn(
-        "flex h-full items-center gap-1 px-2 text-left hover:text-foreground",
+        "flex h-full w-full items-center gap-1 px-2 text-left hover:text-foreground",
         alignEnd(column) && "flex-row-reverse text-right",
         active && "text-foreground",
       )}
@@ -430,38 +499,6 @@ function SkeletonRows({
       ))}
     </div>
   );
-}
-
-function StateBadge({ status }: { status: ViewState }) {
-  const label = badge(status);
-  if (!label) return null;
-  return (
-    <span
-      className={cn(
-        "ml-auto text-xs text-muted-foreground",
-        status.state === "stale" && "text-warn",
-      )}
-    >
-      {label}
-    </span>
-  );
-}
-
-function badge(status: ViewState): string | undefined {
-  switch (status.state) {
-    case "queued":
-      return "Waiting for a stream slot";
-    case "connecting":
-      return "Connecting…";
-    case "syncing":
-      return `Loading · ${status.loaded.toLocaleString("en")}`;
-    case "relisting":
-      return "Relisting…";
-    case "stale":
-      return "No updates · reconnecting";
-    default:
-      return undefined;
-  }
 }
 
 function problem(

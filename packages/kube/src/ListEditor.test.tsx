@@ -109,3 +109,8 @@ test("Enter on the selected row opens its details", async () => {
   key("Enter");
   expect(details()).not.toBeNull();
 });
+
+test("the status bar counts the active list's rows", async () => {
+  await podsList();
+  expect(screen.getByText("5,000 pods")).toBeTruthy();
+});

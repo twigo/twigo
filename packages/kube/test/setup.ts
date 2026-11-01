@@ -1,4 +1,3 @@
-// jsdom has no layout; dockview and allotment observe element sizes.
 globalThis.ResizeObserver = class {
   observe() {
     return undefined;
@@ -10,3 +9,5 @@ globalThis.ResizeObserver = class {
     return undefined;
   }
 };
+
+HTMLElement.prototype.setPointerCapture = () => undefined;

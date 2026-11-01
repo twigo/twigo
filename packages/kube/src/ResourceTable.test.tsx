@@ -15,9 +15,10 @@ import {
   vi,
 } from "vitest";
 import { StrictMode } from "react";
-import type { Backend, ListBatch } from "@twigo/protocol";
+import type { Backend, ListBatch, ViewState } from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import { PODS } from "./kinds";
+import { stateLabel } from "./listStatus";
 import { ResourceTable } from "./ResourceTable";
 
 beforeAll(() => {
@@ -56,22 +57,25 @@ async function settle(steps = 6) {
 }
 
 async function show(scenario: MockScenario, space = "prod-eu") {
+  const onStatus = vi.fn<(total: number, status: ViewState) => void>();
   render(
     <ResourceTable
       backend={createMockBackend(scenario)}
       space={space}
       gvr={PODS}
       title="Pods"
+      onStatus={onStatus}
     />,
   );
   await settle();
+  return onStatus;
 }
 
 const header = (name: string) => screen.getByRole("columnheader", { name });
 
 test("rows from the window render with the server's priority-0 columns", async () => {
-  await show("ready");
-  expect(screen.getByText("5,000 pods")).toBeTruthy();
+  const onStatus = await show("ready");
+  expect(onStatus).toHaveBeenLastCalledWith(5000, { state: "ready" });
   const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
   expect(headers).toEqual([
     "Name",
@@ -124,9 +128,10 @@ test.each([
   ["syncing", "Loading · 1,850"],
   ["relisting", "Relisting…"],
   ["stale", "No updates · reconnecting"],
-] as const)("%s is named in the header", async (scenario, label) => {
-  await show(scenario);
-  expect(screen.getByText(label)).toBeTruthy();
+] as const)("%s is reported and named", async (scenario, label) => {
+  const onStatus = await show(scenario);
+  const [, status] = onStatus.mock.lastCall ?? [];
+  expect(status && stateLabel(status)).toBe(label);
 });
 
 test("a scroll during a resubscribe reaches the new subscription before it shows", async () => {
@@ -250,4 +255,18 @@ test("a changed cell flashes through the next batch, and a storm flashes nothing
       restarts(id)?.className.includes("animate-flash"),
     ),
   ).toEqual([]);
+});
+
+test("dragging a header's edge resizes its column", async () => {
+  await show("ready");
+  const row = () => screen.getAllByRole("row")[0];
+  expect(row()?.style.gridTemplateColumns.startsWith("280px ")).toBe(true);
+  const edge = screen.getByRole("separator", { name: "Resize Name" });
+  fireEvent.pointerDown(edge, { clientX: 300, pointerId: 1 });
+  fireEvent.pointerMove(edge, { clientX: 400, pointerId: 1 });
+  fireEvent.pointerUp(edge, { pointerId: 1 });
+  expect(row()?.style.gridTemplateColumns.startsWith("380px ")).toBe(true);
+  fireEvent.pointerDown(edge, { clientX: 400, pointerId: 1 });
+  fireEvent.pointerMove(edge, { clientX: -1000, pointerId: 1 });
+  expect(row()?.style.gridTemplateColumns.startsWith("48px ")).toBe(true);
 });
