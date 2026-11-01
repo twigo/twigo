@@ -86,10 +86,10 @@ fn main() {
     // Before Tauri, so that the single-instance plugin never sees the login
     // shell's copy of Twigo and no window opens.
     let args: Vec<OsString> = std::env::args_os().collect();
-    if let [_, flag, marker] = &args[..]
+    if let [_, flag, head, tail] = &args[..]
         && flag == twigo_env::DUMP_ENV
     {
-        if let Err(error) = twigo_env::dump(marker) {
+        if let Err(error) = twigo_env::dump(head, tail) {
             eprintln!("could not print the environment: {error}");
             std::process::exit(1);
         }

@@ -1,4 +1,4 @@
-//! How each login shell is asked to run a command line of external programs.
+//! How each login shell is asked to run an external program.
 
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
@@ -27,13 +27,9 @@ impl Syntax {
     }
 
     /// The arguments that make the shell read its login and interactive
-    /// startup files, then run `calls` one after another.
-    pub(crate) fn args(self, calls: &[&[&OsStr]]) -> Vec<OsString> {
-        let line = calls
-            .iter()
-            .map(|call| self.call(call))
-            .collect::<Vec<_>>()
-            .join(&b"; "[..]);
+    /// startup files, then run `call`, a program and its arguments.
+    pub(crate) fn args(self, call: &[&OsStr]) -> Vec<OsString> {
+        let line = self.call(call);
         let flags: &[&str] = match self {
             // pwsh reads its profile unless told not to; -Login must come first.
             Self::Pwsh => &["-Login", "-Command"],
@@ -65,7 +61,7 @@ impl Syntax {
     fn quote(self, word: &[u8]) -> Vec<u8> {
         match self {
             Self::Posix => single_quoted(word, b"'\\''"),
-            Self::Pwsh => single_quoted(word, b"''"),
+            Self::Pwsh => pwsh_quoted(word),
             // fish's single quotes and Python's both escape `\` and `'`.
             Self::Fish | Self::Xonsh => {
                 let mut out = vec![b'\''];
@@ -103,6 +99,35 @@ fn single_quoted(word: &[u8], quote: &[u8]) -> Vec<u8> {
     out
 }
 
+/// PowerShell reads `‘`, `’`, `‚` and `‛` as single quotes too, and two
+/// quotes in a row as one literal quote.
+fn pwsh_quoted(word: &[u8]) -> Vec<u8> {
+    const QUOTES: [&[u8]; 5] = [
+        b"'",
+        "\u{2018}".as_bytes(),
+        "\u{2019}".as_bytes(),
+        "\u{201A}".as_bytes(),
+        "\u{201B}".as_bytes(),
+    ];
+    let mut out = vec![b'\''];
+    let mut rest = word;
+    while let Some(&byte) = rest.first() {
+        match QUOTES.iter().find(|quote| rest.starts_with(quote)) {
+            Some(quote) => {
+                out.extend_from_slice(quote);
+                out.extend_from_slice(quote);
+                rest = &rest[quote.len()..];
+            }
+            None => {
+                out.push(byte);
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push(b'\'');
+    out
+}
+
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack
         .windows(needle.len())
@@ -116,12 +141,9 @@ mod tests {
     const EXE: &str = r"/opt/a b'c\d/twigo";
 
     fn args(shell: &str) -> Vec<String> {
-        let calls: &[&[&OsStr]] = &[
-            &[OsStr::new(EXE), OsStr::new("--dump-env"), OsStr::new("m")],
-            &[OsStr::new("/usr/bin/env"), OsStr::new("-0")],
-        ];
+        let call = [OsStr::new(EXE), OsStr::new("--dump-env"), OsStr::new("m")];
         Syntax::of(Path::new(shell))
-            .args(calls)
+            .args(&call)
             .into_iter()
             .map(|arg| arg.into_string().expect("UTF-8"))
             .collect()
@@ -129,7 +151,7 @@ mod tests {
 
     #[test]
     fn posix_shells_close_and_reopen_single_quotes() {
-        let line = r"'/opt/a b'\''c\d/twigo' '--dump-env' 'm'; '/usr/bin/env' '-0'";
+        let line = r"'/opt/a b'\''c\d/twigo' '--dump-env' 'm'";
         for shell in ["/bin/bash", "/bin/zsh", "/bin/sh", "/usr/local/bin/unknown"] {
             assert_eq!(args(shell), ["-i", "-l", "-c", line], "{shell}");
         }
@@ -139,12 +161,7 @@ mod tests {
     fn fish_escapes_backslashes_and_quotes() {
         assert_eq!(
             args("/opt/homebrew/bin/fish"),
-            [
-                "-i",
-                "-l",
-                "-c",
-                r"'/opt/a b\'c\\d/twigo' '--dump-env' 'm'; '/usr/bin/env' '-0'"
-            ]
+            ["-i", "-l", "-c", r"'/opt/a b\'c\\d/twigo' '--dump-env' 'm'"]
         );
     }
 
@@ -156,7 +173,7 @@ mod tests {
                 "-i",
                 "-l",
                 "-c",
-                r"^r#'/opt/a b'c\d/twigo'# r#'--dump-env'# r#'m'#; ^r#'/usr/bin/env'# r#'-0'#"
+                r"^r#'/opt/a b'c\d/twigo'# r#'--dump-env'# r#'m'#"
             ]
         );
     }
@@ -174,16 +191,24 @@ mod tests {
                 "-i",
                 "-l",
                 "-c",
-                r"!['/opt/a b\'c\\d/twigo' '--dump-env' 'm']; !['/usr/bin/env' '-0']"
+                r"!['/opt/a b\'c\\d/twigo' '--dump-env' 'm']"
             ]
         );
     }
 
     #[test]
     fn pwsh_doubles_single_quotes_and_logs_in_first() {
-        let line = r"& '/opt/a b''c\d/twigo' '--dump-env' 'm'; & '/usr/bin/env' '-0'";
+        let line = r"& '/opt/a b''c\d/twigo' '--dump-env' 'm'";
         for shell in ["/usr/local/bin/pwsh", "/usr/local/bin/pwsh-preview"] {
             assert_eq!(args(shell), ["-Login", "-Command", line], "{shell}");
         }
+    }
+
+    #[test]
+    fn pwsh_doubles_typographic_single_quotes_too() {
+        assert_eq!(
+            String::from_utf8(Syntax::Pwsh.quote("Bob’s ‘x’ ‚y‛".as_bytes())).expect("UTF-8"),
+            "'Bob’’s ‘‘x’’ ‚‚y‛‛'"
+        );
     }
 }

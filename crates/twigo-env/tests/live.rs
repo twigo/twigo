@@ -1,20 +1,23 @@
 //! bash and zsh, run live as login shells over a home of fixture startup
 //! files, with a copy of this binary at a path that needs quoting standing
 //! in for Twigo. It runs without the test harness, since it is also what
-//! the shells run with `--dump-env`.
+//! the shells run with `--dump-env`. The copy's stdin is a pipe that never
+//! closes and the startup files read from stdin, so a shell that got the
+//! copy's stdin would wait until the timeout. The startup files also trace
+//! every command, so the marker passes through the shell's own output.
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 
 const SHELL: &str = "TWIGO_TEST_LOGIN_SHELL";
 
 fn main() -> ExitCode {
     let args: Vec<OsString> = std::env::args_os().collect();
-    if let [_, flag, marker] = &args[..]
+    if let [_, flag, head, tail] = &args[..]
         && flag == twigo_env::DUMP_ENV
     {
-        twigo_env::dump(marker).expect("print the environment");
+        twigo_env::dump(head, tail).expect("print the environment");
         return ExitCode::SUCCESS;
     }
     match std::env::var_os(SHELL) {
@@ -32,12 +35,17 @@ fn run_each() -> ExitCode {
         let exe = home.path().join(r"a b'c\d").join("twigo");
         std::fs::create_dir(exe.parent().expect("a parent")).expect("a directory");
         std::fs::copy(std::env::current_exe().expect("this binary"), &exe).expect("a copy");
-        let status = Command::new(&exe)
+        let mut copy = Command::new(&exe)
             .env(SHELL, &shell)
             .env("HOME", home.path())
             .env_remove("ZDOTDIR")
-            .status()
+            .stdin(Stdio::piped())
+            .spawn()
             .expect("run the copy");
+        // `wait` closes the child's stdin, so the pipe is held apart.
+        let stdin = copy.stdin.take();
+        let status = copy.wait().expect("wait for the copy");
+        drop(stdin);
         println!(
             "{} {name} ({})",
             if status.success() { "ok" } else { "FAILED" },
@@ -58,6 +66,11 @@ fn write_startup_files(home: &Path, shell: &str) {
         "bash" => (".bash_profile", ".bashrc"),
         _ => (".zprofile", ".zshrc"),
     };
+    let trace = if shell == "bash" {
+        "set -x"
+    } else {
+        "setopt xtrace"
+    };
     let mut login_file = format!("export LOGIN_FILE={shell}\n");
     if shell == "bash" {
         login_file.push_str(". ~/.bashrc\n");
@@ -65,7 +78,9 @@ fn write_startup_files(home: &Path, shell: &str) {
     std::fs::write(home.join(login), login_file).expect("the login file");
     std::fs::write(
         home.join(interactive),
-        format!("echo noise from {shell}\nexport RC_FILE={shell}\nexport MULTI='one\ntwo'\n"),
+        format!(
+            "echo noise from {shell}\nread -r answer\nexport RC_FILE={shell}\nexport MULTI='one\ntwo'\n{trace}\n"
+        ),
     )
     .expect("the interactive file");
 }

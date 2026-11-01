@@ -1022,15 +1022,17 @@ Contributions imply their activation events, as VS Code ≥ 1.74 does; `*` is fo
 GUI apps on macOS start with launchd's minimal `PATH`.
 That is why `aws`, `gke-gcloud-auth-plugin` and `kubelogin` "are not found" in Lens, Headlamp and Podman Desktop.
 
-- **At startup, in the background**, Twigo runs `<shell from getpwuid> -i -l -c "'<twigo exe>' --dump-env <random marker>"`.
+- **At startup, in the background**, Twigo runs `<shell from getpwuid> -i -l -c "'<twigo exe>' --dump-env <head> <tail>"`, where `<head><tail>` is a random marker.
   This is VS Code's `resolveShellEnv` technique.
   - stdin is null, the child gets its own process group, and a 10 s timeout kills the group.
     The timeout covers rc files that run `exec tmux` or prompt.
   - `-i` is required, because gcloud's `path.zsh.inc` lives in `.zshrc`.
-  - The binary prints its environment between two copies of the marker, entries ending in NUL as `env -0` prints them, so multi-line values survive and whatever rc files print around it is dropped.
-  - fish, nushell, xonsh and pwsh need their own invocation forms: fish and xonsh escape `\` and `'` in single quotes, nushell runs a raw string with `^`, xonsh wraps the call in `![…]`, and pwsh takes `-Login -Command "& '…'"`.
-    Each form was run on fish 4.9.3, nushell 0.116.1, xonsh 0.25.0 and pwsh 7.6.9 (Docker, 2026-11-01).
-  - If the shell runs but the binary prints nothing, Twigo runs the shell again with `printf %s <marker>; /usr/bin/env -0; printf %s <marker>`.
+  - The binary prints its environment between two copies of the joined marker, entries ending in NUL as `env -0` prints them, so multi-line values survive and whatever rc files print around it is dropped.
+    The marker reaches the shell only in halves, so a shell that traces its commands (`set -x`) never prints it whole.
+  - fish, nushell, xonsh and pwsh need their own invocation forms: fish and xonsh escape `\` and `'` in single quotes, nushell runs a raw string with `^`, xonsh wraps the call in `![…]`, and pwsh takes `-Login -Command "& '…'"`, doubling every quote PowerShell reads as a single quote, `‘’‚‛` included.
+    Each form was run on fish 4.9.3, nushell 0.116.1, xonsh 0.25.0 and pwsh 7.6.9 (Docker, 2026-11-01), with tracing on where the shell has it.
+  - If the shell runs but the binary prints nothing, the shell runs `/bin/sh -c 'printf %s%s "$1" "$2"; /usr/bin/env -0; printf %s%s "$1" "$2"' sh <head> <tail>` instead.
+    Both runs share the one 10 s timeout.
 - **The result** is an `Arc<ShellEnv>` applied to every child process: exec plugins, terminals, tier-3 processes, agents.
   Twigo never calls `set_var` on its own process; that is unsafe once threads exist.
 - **The core reads `KUBECONFIG` and the proxy variables from `ShellEnv` explicitly**, in the catalog and in the connector.

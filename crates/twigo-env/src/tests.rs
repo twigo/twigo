@@ -22,7 +22,7 @@ impl Fakes {
         // Prints its frame as Twigo's `--dump-env` does.
         fakes.script(
             "twigo",
-            r#"[ "$1" = --dump-env ] || exit 2; printf %s "$2"; /usr/bin/env -0; printf %s "$2""#,
+            r#"[ "$1" = --dump-env ] || exit 2; printf %s%s "$2" "$3"; /usr/bin/env -0; printf %s%s "$2" "$3""#,
         );
         fakes
     }
@@ -39,7 +39,7 @@ impl Fakes {
     }
 
     async fn resolve(&self, shell: &Path) -> Result<ShellEnv, Failure> {
-        resolve_with(shell, Some(&self.path("twigo"))).await
+        resolve_with(shell, Some(&self.path("twigo")), TIMEOUT).await
     }
 }
 
@@ -92,7 +92,7 @@ eval "$4""#,
             log.display()
         ),
     );
-    let env = resolve_with(&shell, Some(&fakes.path("gone")))
+    let env = resolve_with(&shell, Some(&fakes.path("gone")), TIMEOUT)
         .await
         .expect("an environment");
     assert_eq!(env.get("FROM_RC"), Some(OsStr::new("1")));
@@ -100,7 +100,7 @@ eval "$4""#,
     let calls: Vec<_> = calls.lines().collect();
     assert_eq!(calls.len(), 2, "{calls:?}");
     assert!(calls[0].contains("/gone' '--dump-env'"), "{calls:?}");
-    assert!(calls[1].contains("'/usr/bin/env' '-0'"), "{calls:?}");
+    assert!(calls[1].contains("'/bin/sh' '-c'"), "{calls:?}");
 }
 
 #[tokio::test]
@@ -137,7 +137,7 @@ async fn a_shell_that_never_returns_is_killed_with_its_group_at_the_timeout() {
         ),
     );
     let started = Instant::now();
-    let resolving = tokio::spawn(async move { resolve_with(&shell, None).await });
+    let resolving = tokio::spawn(async move { resolve_with(&shell, None, TIMEOUT).await });
     tokio::task::yield_now().await;
     // The clock stays put while this blocks the runtime, so the child
     // reaches `wait` before the timeout can fire.
@@ -171,4 +171,32 @@ fn assert_gone(pid: Pid) {
         std::thread::sleep(StdDuration::from_millis(10));
     }
     panic!("{pid} outlived the timeout");
+}
+
+#[tokio::test]
+async fn a_traced_command_line_is_not_taken_for_the_frame() {
+    let fakes = Fakes::new();
+    let shell = fakes.script("sh", "set -x\nexport FROM_RC=1\neval \"$4\"");
+    let env = fakes.resolve(&shell).await.expect("an environment");
+    assert_eq!(env.get("FROM_RC"), Some(OsStr::new("1")));
+    let fallback = resolve_with(&shell, Some(&fakes.path("gone")), TIMEOUT)
+        .await
+        .expect("an environment");
+    assert_eq!(fallback.get("FROM_RC"), Some(OsStr::new("1")));
+}
+
+#[tokio::test]
+async fn the_fallback_shares_the_first_run_s_deadline() {
+    let fakes = Fakes::new();
+    let shell = fakes.script(
+        "sh",
+        "case \"$4\" in *--dump-env*) sleep 0.6; exit 1;; esac\nsleep 1000",
+    );
+    let started = std::time::Instant::now();
+    let failure = resolve_with(&shell, Some(&fakes.path("twigo")), Duration::from_secs(1))
+        .await
+        .expect_err("a timeout");
+    assert!(matches!(failure.reason, Reason::Timeout), "{failure}");
+    let elapsed = started.elapsed();
+    assert!(elapsed < StdDuration::from_millis(1400), "{elapsed:?}");
 }

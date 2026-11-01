@@ -3,25 +3,25 @@
 //! entries as `env -0` prints them.
 
 use std::collections::BTreeMap;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::io::{self, Write};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
 pub(crate) type Vars = BTreeMap<OsString, OsString>;
 
 pub(crate) fn write(
-    marker: &OsStr,
+    marker: &[u8],
     vars: impl IntoIterator<Item = (OsString, OsString)>,
     out: &mut impl Write,
 ) -> io::Result<()> {
-    let mut frame = marker.as_bytes().to_vec();
+    let mut frame = marker.to_vec();
     for (name, value) in vars {
         frame.extend_from_slice(name.as_bytes());
         frame.push(b'=');
         frame.extend_from_slice(value.as_bytes());
         frame.push(0);
     }
-    frame.extend_from_slice(marker.as_bytes());
+    frame.extend_from_slice(marker);
     out.write_all(&frame)?;
     out.flush()
 }
@@ -78,7 +78,7 @@ mod tests {
             ("EMPTY", ""),
         ]);
         let mut printed = b"Last login: today\n".to_vec();
-        write(OsStr::new("m4rk"), written.clone(), &mut printed).expect("write");
+        write(b"m4rk", written.clone(), &mut printed).expect("write");
         printed.extend_from_slice(b"bye\n");
         assert_eq!(scan(&printed, b"m4rk"), Some(written));
     }

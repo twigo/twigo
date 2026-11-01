@@ -27,8 +27,8 @@ use frame::Vars;
 use shell::Syntax;
 
 /// The argument that makes Twigo print its environment and exit, followed
-/// by the marker to frame it with; `main()` checks for it before anything
-/// else starts.
+/// by the two halves of the marker to frame it with; `main()` checks for it
+/// before anything else starts.
 pub const DUMP_ENV: &str = "--dump-env";
 
 /// Long enough for slow startup files, short enough that one which waits
@@ -63,9 +63,11 @@ impl ShellEnv {
     }
 }
 
-/// Prints this process's environment framed by `marker`, for [`DUMP_ENV`].
-pub fn dump(marker: &OsStr) -> io::Result<()> {
-    frame::write(marker, std::env::vars_os(), &mut io::stdout().lock())
+/// Prints this process's environment framed by the marker whose halves
+/// are `head` and `tail`, for [`DUMP_ENV`].
+pub fn dump(head: &OsStr, tail: &OsStr) -> io::Result<()> {
+    let marker = [head.as_encoded_bytes(), tail.as_encoded_bytes()].concat();
+    frame::write(&marker, std::env::vars_os(), &mut io::stdout().lock())
 }
 
 /// The user's shell from the password database, as login(1) starts it;
@@ -104,18 +106,29 @@ pub enum Reason {
 
 /// Runs `shell` as a login and interactive shell and returns the
 /// environment a program it starts gets. If the shell cannot run Twigo's
-/// own binary, it runs `/usr/bin/env -0` instead.
+/// own binary, it runs `/usr/bin/env -0` instead. Both runs share one
+/// [`TIMEOUT`].
 pub async fn resolve(shell: &Path) -> Result<ShellEnv, Failure> {
-    resolve_with(shell, std::env::current_exe().ok().as_deref()).await
+    resolve_with(shell, std::env::current_exe().ok().as_deref(), TIMEOUT).await
 }
 
 /// [`resolve`], with `exe` standing in for Twigo's binary.
-async fn resolve_with(shell: &Path, exe: Option<&Path>) -> Result<ShellEnv, Failure> {
-    let marker = OsString::from(format!("{:032x}", fastrand::u128(..)));
+async fn resolve_with(
+    shell: &Path,
+    exe: Option<&Path>,
+    timeout: Duration,
+) -> Result<ShellEnv, Failure> {
+    let deadline = Instant::now() + timeout;
+    // The marker goes to the shell in two halves and frames the environment
+    // whole, so a shell that echoes its command lines (`set -x`) never
+    // prints it.
+    let head = OsString::from(format!("{:016x}", fastrand::u64(..)));
+    let tail = OsString::from(format!("{:016x}", fastrand::u64(..)));
+    let marker = [head.as_encoded_bytes(), tail.as_encoded_bytes()].concat();
     let mut earlier = String::new();
     if let Some(exe) = exe {
-        let dump = [exe.as_os_str(), OsStr::new(DUMP_ENV), &marker];
-        match run(shell, &[&dump], &marker).await {
+        let dump = [exe.as_os_str(), OsStr::new(DUMP_ENV), &head, &tail];
+        match run(shell, &dump, &marker, deadline).await {
             Err(Failure {
                 reason: Reason::NoEnvironment(_),
                 output,
@@ -124,9 +137,15 @@ async fn resolve_with(shell: &Path, exe: Option<&Path>) -> Result<ShellEnv, Fail
             resolved => return resolved,
         }
     }
-    let printf = [OsStr::new("printf"), OsStr::new("%s"), &marker];
-    let env = [OsStr::new("/usr/bin/env"), OsStr::new("-0")];
-    run(shell, &[&printf, &env, &printf], &marker)
+    let env = [
+        OsStr::new("/bin/sh"),
+        OsStr::new("-c"),
+        OsStr::new(r#"printf %s%s "$1" "$2"; /usr/bin/env -0; printf %s%s "$1" "$2""#),
+        OsStr::new("sh"),
+        &head,
+        &tail,
+    ];
+    run(shell, &env, &marker, deadline)
         .await
         .map_err(|mut failure| {
             failure.output = earlier + &failure.output;
@@ -134,21 +153,24 @@ async fn resolve_with(shell: &Path, exe: Option<&Path>) -> Result<ShellEnv, Fail
         })
 }
 
-async fn run(shell: &Path, calls: &[&[&OsStr]], marker: &OsStr) -> Result<ShellEnv, Failure> {
-    let deadline = Instant::now() + TIMEOUT;
+async fn run(
+    shell: &Path,
+    call: &[&OsStr],
+    marker: &[u8],
+    deadline: Instant,
+) -> Result<ShellEnv, Failure> {
     let failure = |reason, output: &[u8]| Failure {
         shell: shell.to_owned(),
         reason,
         output: tail(output),
     };
     let (mut child, mut printed) =
-        spawn(shell, calls).map_err(|error| failure(Reason::Start(error), b""))?;
+        spawn(shell, call).map_err(|error| failure(Reason::Start(error), b""))?;
     let group = child
         .id()
         .and_then(|id| i32::try_from(id).ok())
         .map(Pid::from_raw);
 
-    let marker = marker.as_encoded_bytes();
     let mut buffer = Vec::new();
     let read = async {
         loop {
@@ -193,11 +215,11 @@ async fn run(shell: &Path, calls: &[&[&OsStr]], marker: &OsStr) -> Result<ShellE
 
 /// The shell in its own process group, without input, its stdout and
 /// stderr on one pipe so that what it prints keeps its order.
-fn spawn(shell: &Path, calls: &[&[&OsStr]]) -> io::Result<(tokio::process::Child, pipe::Receiver)> {
+fn spawn(shell: &Path, call: &[&OsStr]) -> io::Result<(tokio::process::Child, pipe::Receiver)> {
     let (reader, writer) = io::pipe()?;
     let mut command = Command::new(shell);
     command
-        .args(Syntax::of(shell).args(calls))
+        .args(Syntax::of(shell).args(call))
         .stdin(Stdio::null())
         .stdout(writer.try_clone()?)
         .stderr(writer)
