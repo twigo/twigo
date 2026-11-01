@@ -68,8 +68,13 @@ export function installNativeMenu(workbench: Workbench): void {
       }),
     ]);
     const menu = await Menu.new({ items: submenus });
+    // Each handle is an entry in Tauri's resource table: the menu holds its
+    // submenus and the app holds the menu it shows, so dropping our handles
+    // leaves the returned previous menu as the old tree's last one, and
+    // closing it frees the old items and their action channels.
+    await Promise.all(submenus.map((submenu) => submenu.close()));
     const previous = await menu.setAsAppMenu();
-    await previous?.close();
+    await Promise.all([menu.close(), previous?.close()]);
   };
   const rebuild = () => {
     if (queued) return;
