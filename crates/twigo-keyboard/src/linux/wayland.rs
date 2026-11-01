@@ -15,8 +15,8 @@ use gtk::gdk;
 use gtk::glib::object::ObjectType;
 use gtk::prelude::*;
 use wayland_sys::client::{
-    wl_display, wl_display_roundtrip, wl_proxy, wl_proxy_add_listener, wl_proxy_get_version,
-    wl_proxy_marshal_constructor_versioned,
+    wl_display, wl_display_roundtrip, wl_proxy, wl_proxy_add_listener, wl_proxy_destroy,
+    wl_proxy_get_version, wl_proxy_marshal_constructor_versioned,
 };
 use wayland_sys::common::{wl_array, wl_interface};
 use xkbcommon::xkb;
@@ -84,6 +84,7 @@ pub(super) fn observe(
     display: &gdk::Display,
     shared: &'static Shared,
 ) -> Result<(), Error> {
+    // A keyboard of an earlier call still listens for its keymap.
     if KEYBOARD.with_borrow(Option::is_some) {
         return Err(Error::Unavailable("the compositor sent no keymap".into()));
     }
@@ -103,13 +104,6 @@ pub(super) fn observe(
                 .cast::<wl_display>(),
         )
     };
-    KEYBOARD.set(Some(Keyboard {
-        shared,
-        reader: Reader::new(),
-        keymap: None,
-        group: 0,
-        published: None,
-    }));
     // SAFETY: `wl_seat_get_keyboard` of `wayland-client-protocol.h`; the new
     // proxy inherits the seat's queue, GDK's default one.
     let keyboard = unsafe {
@@ -133,13 +127,25 @@ pub(super) fn observe(
         )
     };
     if added != 0 {
+        // SAFETY: the proxy is ours, and nothing else refers to it.
+        unsafe { wl_proxy_destroy(keyboard) };
         return Err(Error::Unavailable(
             "cannot listen to the Wayland keyboard".into(),
         ));
     }
+    KEYBOARD.set(Some(Keyboard {
+        shared,
+        reader: Reader::new(),
+        keymap: None,
+        group: 0,
+        published: None,
+    }));
     // The compositor answers get_keyboard with the keymap and, if the app
     // has focus, the modifiers.
     if unsafe { wl_display_roundtrip(wl_display) } < 0 {
+        KEYBOARD.set(None);
+        // SAFETY: as above.
+        unsafe { wl_proxy_destroy(keyboard) };
         return Err(Error::Unavailable("the Wayland roundtrip failed".into()));
     }
     if KEYBOARD.with_borrow(|keyboard| keyboard.as_ref().is_some_and(|k| k.keymap.is_none())) {

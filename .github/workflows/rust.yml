@@ -34,7 +34,9 @@ jobs:
             librsvg2-dev \
             libxkbcommon-x11-dev \
             x11-xkb-utils \
-            xvfb
+            xvfb \
+            sway \
+            wtype
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
@@ -44,6 +46,8 @@ jobs:
       - run: cargo test --workspace
       - name: Follow the keyboard layout on a live X server
         run: xvfb-run -a sh -c 'TWIGO_TEST_X11_DISPLAY=$DISPLAY cargo test -p twigo-keyboard --test x11 -- --ignored'
+      - name: Follow the keyboard layout on a live Wayland compositor
+        run: crates/twigo-keyboard/linux/wayland.sh cargo test -p twigo-keyboard --test wayland -- --ignored
       - uses: pnpm/action-setup@v6
         with:
           cache: true

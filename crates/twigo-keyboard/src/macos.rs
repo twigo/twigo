@@ -186,33 +186,28 @@ unsafe fn translate(
     modifiers: u32,
     keyboard_type: u32,
 ) -> Result<String, i32> {
+    // With no new dead-key states, a dead key types the character it shows
+    // on its own and the state stays 0.
     let mut dead_key_state = 0;
     // The most UCKeyTranslate ever writes (`UnicodeUtilities.h`).
     let mut chars = [0u16; 255];
     let mut length = 0;
-    // A dead key types nothing and only sets the dead-key state; pressing it
-    // again in that state types its spacing character.
-    for _ in 0..2 {
-        let status = unsafe {
-            UCKeyTranslate(
-                layout,
-                key,
-                K_UC_KEY_ACTION_DOWN,
-                modifiers,
-                keyboard_type,
-                K_UC_KEY_TRANSLATE_NO_DEAD_KEYS_MASK,
-                &mut dead_key_state,
-                chars.len(),
-                &mut length,
-                chars.as_mut_ptr(),
-            )
-        };
-        if status != 0 {
-            return Err(status);
-        }
-        if length > 0 || dead_key_state == 0 {
-            break;
-        }
+    let status = unsafe {
+        UCKeyTranslate(
+            layout,
+            key,
+            K_UC_KEY_ACTION_DOWN,
+            modifiers,
+            keyboard_type,
+            K_UC_KEY_TRANSLATE_NO_DEAD_KEYS_MASK,
+            &mut dead_key_state,
+            chars.len(),
+            &mut length,
+            chars.as_mut_ptr(),
+        )
+    };
+    if status != 0 {
+        return Err(status);
     }
     let text = String::from_utf16_lossy(&chars[..length]);
     if text.chars().any(char::is_control) {

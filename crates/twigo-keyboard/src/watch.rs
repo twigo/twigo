@@ -1,10 +1,14 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use twigo_ipc::KeyboardLayout;
 
 use crate::{Error, MainThread, platform};
 
-type Callback = Arc<dyn Fn(&KeyboardLayout) + Send + Sync>;
+type Callback = Box<dyn Fn(&KeyboardLayout) + Send + Sync>;
+
+/// A subscriber's callback, called under its lock, until its subscription
+/// empties it.
+type Slot = Arc<Mutex<Option<Callback>>>;
 
 /// The process's one view of the active layout. The platform observer
 /// publishes into it; subscribers read it from any thread.
@@ -14,7 +18,7 @@ pub(crate) struct Shared {
 
 struct State {
     layout: Option<KeyboardLayout>,
-    subscribers: Vec<(u64, Callback)>,
+    subscribers: Vec<(u64, Slot)>,
     next_id: u64,
 }
 
@@ -32,7 +36,7 @@ impl Shared {
     /// Records the active layout and, if it changed, hands it to every
     /// subscriber.
     pub(crate) fn publish(&self, layout: KeyboardLayout) {
-        let subscribers: Vec<Callback> = {
+        let subscribers: Vec<Slot> = {
             let mut state = self.state.lock().expect("layout lock");
             if state.layout.as_ref() == Some(&layout) {
                 return;
@@ -41,7 +45,9 @@ impl Shared {
             state.subscribers.iter().map(|(_, s)| s.clone()).collect()
         };
         for subscriber in subscribers {
-            subscriber(&layout);
+            if let Some(on_change) = &*subscriber.lock().unwrap_or_else(PoisonError::into_inner) {
+                on_change(&layout);
+            }
         }
     }
 
@@ -53,7 +59,9 @@ impl Shared {
         let mut state = self.state.lock().expect("layout lock");
         let id = state.next_id;
         state.next_id += 1;
-        state.subscribers.push((id, on_change));
+        state
+            .subscribers
+            .push((id, Arc::new(Mutex::new(Some(on_change)))));
         let layout = state
             .layout
             .clone()
@@ -62,8 +70,14 @@ impl Shared {
     }
 
     fn unsubscribe(&self, id: u64) {
-        let mut state = self.state.lock().expect("layout lock");
-        state.subscribers.retain(|(other, _)| *other != id);
+        let slot = {
+            let mut state = self.state.lock().expect("layout lock");
+            let at = state.subscribers.iter().position(|(other, _)| *other == id);
+            at.map(|at| state.subscribers.remove(at).1)
+        };
+        if let Some(slot) = slot {
+            *slot.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        }
     }
 }
 
@@ -89,11 +103,13 @@ impl LayoutWatch {
         &self,
         on_change: impl Fn(&KeyboardLayout) + Send + Sync + 'static,
     ) -> (KeyboardLayout, Subscription) {
-        self.0.subscribe(Arc::new(on_change))
+        self.0.subscribe(Box::new(on_change))
     }
 }
 
-/// Stops its callback when dropped.
+/// Stops its callback when dropped: once `drop` returns, the callback never
+/// runs again, so `drop` waits for a call in progress and must not run inside
+/// the callback itself.
 pub struct Subscription {
     shared: &'static Shared,
     id: u64,
@@ -135,7 +151,7 @@ mod tests {
         static SHARED: Shared = Shared::new();
         SHARED.publish(layout("us"));
         let (seen, on_change) = recorder();
-        let (current, _subscription) = SHARED.subscribe(Arc::new(on_change));
+        let (current, _subscription) = SHARED.subscribe(Box::new(on_change));
         SHARED.publish(layout("ua"));
         SHARED.publish(layout("ua"));
         SHARED.publish(layout("de"));
@@ -144,13 +160,32 @@ mod tests {
     }
 
     #[test]
+    fn dropping_a_subscription_waits_for_its_running_callback() {
+        static SHARED: Shared = Shared::new();
+        SHARED.publish(layout("us"));
+        let done = Arc::new(Mutex::new(false));
+        let (enter, entered) = std::sync::mpsc::channel();
+        let finished = done.clone();
+        let (_, subscription) = SHARED.subscribe(Box::new(move |_: &KeyboardLayout| {
+            enter.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            *finished.lock().unwrap() = true;
+        }));
+        let publisher = std::thread::spawn(|| SHARED.publish(layout("ua")));
+        entered.recv().unwrap();
+        drop(subscription);
+        assert!(*done.lock().unwrap());
+        publisher.join().unwrap();
+    }
+
+    #[test]
     fn a_dropped_subscription_hears_nothing() {
         static SHARED: Shared = Shared::new();
         SHARED.publish(layout("us"));
         let (dropped, on_change) = recorder();
-        let (_, subscription) = SHARED.subscribe(Arc::new(on_change));
+        let (_, subscription) = SHARED.subscribe(Box::new(on_change));
         let (kept, on_change) = recorder();
-        let (_, _kept) = SHARED.subscribe(Arc::new(on_change));
+        let (_, _kept) = SHARED.subscribe(Box::new(on_change));
         drop(subscription);
         SHARED.publish(layout("ua"));
         assert!(dropped.lock().unwrap().is_empty());
