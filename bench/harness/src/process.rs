@@ -58,6 +58,12 @@ pub fn attribute(processes: Vec<Process>, app: i32, at_ms: f64) -> Result<Sample
             app.name, app.pid, app.responsible
         ));
     }
+    if webkit.is_empty() {
+        return Err(format!(
+            "found no WebKit process that {} ({}) is responsible for",
+            app.name, app.pid
+        ));
+    }
     Ok(Sample {
         at_ms,
         app,
@@ -255,6 +261,16 @@ mod tests {
     #[test]
     fn no_sample_without_the_app() {
         assert!(attribute(vec![process(1, 1, "launchd")], 700, 0.0).is_err());
+    }
+
+    #[test]
+    fn no_sample_of_an_app_without_its_webkit_processes() {
+        let all = vec![
+            process(700, 700, "twigo"),
+            process(801, 800, "com.apple.WebKit.WebContent"),
+        ];
+        let error = attribute(all, 700, 0.0).unwrap_err();
+        assert!(error.contains("no WebKit process"), "{error}");
     }
 
     #[test]

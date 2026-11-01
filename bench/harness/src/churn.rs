@@ -168,7 +168,7 @@ where
     let (done, mut answers) = mpsc::unbounded_channel::<Answer>();
     let mut in_flight = HashSet::new();
     let mut ticker = tokio::time::interval(Duration::from_secs_f64(1.0 / rate));
-    ticker.set_missed_tick_behavior(MissedTickBehavior::Burst);
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let deadline = async {
         match seconds {
             Some(seconds) => tokio::time::sleep(Duration::from_secs_f64(seconds)).await,
@@ -399,6 +399,42 @@ users:
         assert!(calls.made > 100);
         assert_eq!((summary.changes, summary.errors), (calls.made, 0));
         assert_eq!(lines(&log).len(), calls.made);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn after_a_stall_the_rate_resumes_without_the_backlog() {
+        let made = Arc::new(Mutex::new(0usize));
+        let patch = {
+            let made = made.clone();
+            move |_, _| {
+                let first = {
+                    let mut made = made.lock().unwrap();
+                    *made += 1;
+                    *made == 1
+                };
+                async move {
+                    if first {
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
+                    Ok(())
+                }
+            }
+        };
+        let mut log = Vec::new();
+
+        churn(
+            names(1),
+            100.0,
+            Some(2.0),
+            std::future::pending(),
+            patch,
+            &mut log,
+        )
+        .await
+        .unwrap();
+
+        let made = *made.lock().unwrap();
+        assert!((95..=110).contains(&made), "{made} patches");
     }
 
     #[tokio::test(start_paused = true)]

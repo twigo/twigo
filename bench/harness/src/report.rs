@@ -342,7 +342,7 @@ pub fn build(inputs: Inputs) -> Report {
         metric: "Webview memory with the pod list open".into(),
         value: Some(format!("{webkit:.0} MB")),
         target: format!("< {WEBVIEW_MB:.0} MB"),
-        status: judge.status(!memory.webkit.is_empty() && webkit < WEBVIEW_MB),
+        status: judge.status(webkit < WEBVIEW_MB),
         measured: format!(
             "physical footprint of the WebKit processes the app is responsible for ({}), under churn; their RSS adds up to {webkit_rss:.0} MB; {} other WebKit processes left out; the webview holds the mock's {} pods, which Rust holds from M1",
             names.join(", "),

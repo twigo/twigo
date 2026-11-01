@@ -33,9 +33,20 @@ mkdir -p "$out"
 created=
 app=
 churn=
+stop_wait() {
+  i=0
+  while kill -0 "$1" 2>/dev/null; do
+    [ "$i" -ge 15 ] && return 1
+    i=$((i + 1))
+    sleep 1
+  done
+}
 cleanup() {
+  # A background job inherits SIGINT ignored until tokio installs its handler,
+  # so a churn stuck before that only stops on SIGTERM.
   if [ -n "$churn" ]; then
     kill -INT "$churn" 2>/dev/null || true
+    stop_wait "$churn" || kill -TERM "$churn" 2>/dev/null || true
     wait "$churn" 2>/dev/null || true
   fi
   if [ -n "$app" ]; then kill "$app" 2>/dev/null || true; fi
@@ -140,7 +151,11 @@ sleep "$IDLE_SETTLE"
 "$tool" sample "$app" >"$out/idle-start.json"
 sleep "$IDLE_SAMPLE"
 "$tool" sample "$app" >"$out/idle-end.json"
-wait "$app"
+if ! wait "$app"; then
+  echo "the app failed after its last sample" >&2
+  tail -40 "$out/app.log" >&2 2>/dev/null || true
+  exit 1
+fi
 app=
 no_failure
 churn_alive
