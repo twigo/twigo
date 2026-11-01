@@ -49,6 +49,16 @@ test("a change is saved once, debounced, and read back by the next window", asyn
   });
 });
 
+test("a view's state is kept per space and read back by the next window", async () => {
+  const backend = createMockBackend("ready");
+  const { spaces } = await loaded(backend);
+  spaces.setView("prod-eu", "tree", { open: ["Config"] });
+  await vi.advanceTimersByTimeAsync(400);
+  const { spaces: next } = await loaded(backend);
+  expect(next.view("prod-eu", "tree")).toEqual({ open: ["Config"] });
+  expect(next.view("staging", "tree")).toBeUndefined();
+});
+
 test("an update that changes nothing neither notifies nor saves", async () => {
   const { spaces, backend } = await loaded();
   const save = vi.spyOn(backend, "invoke");
@@ -87,6 +97,7 @@ test.each([
       namespaces: ["a"],
     },
   ],
+  ['{"views":["not","a","record"]}', DEFAULT_STATE],
   [
     '{"placement":{"view":"container","bad":2}}',
     {

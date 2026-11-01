@@ -20,6 +20,8 @@ export interface SpaceState {
   readonly placement: Readonly<Record<string, string>>;
   /** Empty for every namespace. */
   readonly namespaces: readonly string[];
+  /** What each view keeps, by view ID, read back unchecked: the view checks it. */
+  readonly views: Readonly<Record<string, unknown>>;
 }
 
 export const DEFAULT_STATE: SpaceState = {
@@ -31,6 +33,7 @@ export const DEFAULT_STATE: SpaceState = {
   },
   placement: {},
   namespaces: [],
+  views: {},
 };
 
 const SAVE_MS = 300;
@@ -126,6 +129,17 @@ export class Spaces {
     });
   }
 
+  view(id: string, view: string): unknown {
+    return this.state(id).views[view];
+  }
+
+  setView(id: string, view: string, value: unknown): void {
+    this.update(id, (state) => ({
+      ...state,
+      views: { ...state.views, [view]: value },
+    }));
+  }
+
   #setList(list: readonly Space[]) {
     this.#list = list;
     this.keys.set("space.count", list.length);
@@ -175,6 +189,7 @@ export function readState(json: string): SpaceState {
           (name): name is string => typeof name === "string",
         )
       : [],
+    views: isRecord(value.views) ? value.views : {},
   };
 }
 
