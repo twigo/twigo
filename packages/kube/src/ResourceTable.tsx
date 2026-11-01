@@ -29,7 +29,7 @@ import { cellTone, statusColumn } from "./tones";
 import { useListView } from "./useListView";
 import { useNow } from "./useNow";
 
-const ROW_HEIGHT = 22;
+const ROW_HEIGHT = 26;
 
 /** States in which Rust sends rows; the loading states show skeletons. */
 const SHOWS_ROWS = new Set<ViewState["state"]>(["ready", "relisting", "stale"]);
