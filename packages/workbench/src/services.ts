@@ -61,16 +61,19 @@ export async function createWorkbench(
   backend: Backend,
   platform: Platform,
 ): Promise<Workbench> {
-  // A layout change can only arrive as a later event, once the workbench exists.
-  const target: { workbench?: Workbench } = {};
+  // Tauri sends channel messages apart from the command's response, so a
+  // change may arrive first; the watch reads the layout as it subscribes, so
+  // such a change is the newer layout.
+  const target: { workbench?: Workbench; early?: KeyboardLayout } = {};
   const layout = await backend.subscribe(
     "keyboard_layout_watch",
     null,
     (next) => {
-      target.workbench?.keybindings.setLayout(next);
+      if (target.workbench) target.workbench.keybindings.setLayout(next);
+      else target.early = next;
     },
   );
-  const workbench = new Workbench(backend, platform, layout);
+  const workbench = new Workbench(backend, platform, target.early ?? layout);
   target.workbench = workbench;
   registerCore(workbench);
   await workbench.spaces.load();

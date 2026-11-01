@@ -54,7 +54,7 @@ test("a character no key types, not even on the US layout, has no press", () => 
   expect(mapped("us", "mod+é")).toBeUndefined();
 });
 
-test("bare presses are the writing-system keys without Ctrl, Alt or Cmd", () => {
+test("bare presses are the keys that type or move the caret, without Ctrl, Alt or Cmd", () => {
   const mapper = new KeyboardMapper(us, "mac");
   const press = (keys: string) => {
     const [chord] = parseKeys(keys, "mac");
@@ -65,7 +65,25 @@ test("bare presses are the writing-system keys without Ctrl, Alt or Cmd", () => 
   expect(isBare(press("j"))).toBe(true);
   expect(isBare(press("shift+g"))).toBe(true);
   expect(isBare(press("space"))).toBe(true);
+  for (const key of [
+    "backspace",
+    "delete",
+    "enter",
+    "tab",
+    "shift+tab",
+    "left",
+    "right",
+    "up",
+    "down",
+    "home",
+    "end",
+    "pageup",
+    "pagedown",
+  ]) {
+    expect(isBare(press(key)), key).toBe(true);
+  }
   expect(isBare(press("escape"))).toBe(false);
+  expect(isBare(press("f5"))).toBe(false);
   expect(isBare(press("mod+j"))).toBe(false);
   expect(isBare(press("alt+j"))).toBe(false);
 });

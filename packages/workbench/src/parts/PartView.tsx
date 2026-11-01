@@ -73,7 +73,7 @@ export function PartView({ location }: { location: Location }) {
           className="flex-1"
           title="No views here"
         >
-          <p>Move a view here, or open one from the activity bar.</p>
+          <p>Move a view here with View › Move View… or the command palette.</p>
         </EmptyState>
       ) : shown.length === 1 && shown[0] ? (
         <ViewBody view={shown[0]} />

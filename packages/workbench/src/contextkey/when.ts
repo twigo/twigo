@@ -2,7 +2,8 @@
  * When-expressions over context keys (ARCHITECTURE 5.1): the subset `==`,
  * `!=`, `&&`, `||`, `!`, `=~`, `in`, `<`, `>` of VS Code's grammar, with its
  * precedence and coercions (src/vs/platform/contextkey/common/contextkey.ts at
- * 1.144.0).
+ * 1.144.0): `==` is JavaScript's, `<` and `>` parseFloat the key's value, and
+ * `=~` tests it as a string.
  */
 
 export type ContextValue = string | number | boolean | readonly string[];
@@ -247,14 +248,11 @@ export function evaluate(when: When, lookup: Lookup): boolean {
       return !equals(lookup(when.key), when.value);
     case "<":
     case ">": {
-      const value = lookup(when.key);
-      if (typeof value !== "number") return false;
+      const value = Number.parseFloat(String(lookup(when.key)));
       return when.op === "<" ? value < when.value : value > when.value;
     }
-    case "=~": {
-      const value = lookup(when.key);
-      return typeof value === "string" && when.regex.test(value);
-    }
+    case "=~":
+      return when.regex.test(String(lookup(when.key)));
     case "in": {
       const list = lookup(when.list);
       const value = lookup(when.key);
@@ -269,8 +267,11 @@ export function evaluate(when: When, lookup: Lookup): boolean {
   }
 }
 
-/** VS Code compares with `==`, so `count == 2` holds for the number 2. */
+/** JavaScript's `==` against a string, which VS Code compares with: `count == 2.0` holds for the number 2. */
 function equals(value: ContextValue | undefined, literal: string): boolean {
-  if (value === undefined || Array.isArray(value)) return false;
-  return String(value) === literal;
+  if (value === undefined) return false;
+  if (typeof value === "string" || Array.isArray(value)) {
+    return String(value) === literal;
+  }
+  return Number(value) === Number(literal);
 }

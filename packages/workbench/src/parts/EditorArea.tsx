@@ -100,7 +100,7 @@ function SpaceEditors({ space }: { space: string }) {
       try {
         ready.fromJSON(saved);
       } catch (error) {
-        ready.clear();
+        // Dockview 8.8 clears what a failed load added before it rethrows.
         workbench.report(error);
       }
     }

@@ -200,7 +200,7 @@ export function registerCore(workbench: Workbench): void {
       id,
       title,
       category: "Editor",
-      enablement: "editor.type",
+      enablement: "editor.open",
       run: () => {
         const uri = editors.active;
         if (uri) run(uri);

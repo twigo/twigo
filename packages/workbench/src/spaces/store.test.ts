@@ -79,6 +79,20 @@ test("opening a context without a space adds its space and selects it", async ()
   expect(spaces.active?.id).toBe("kind-local");
 });
 
+test("opening the same context twice at once adds its space once", async () => {
+  const { spaces } = await loaded();
+  const done = Promise.all([
+    spaces.open("kind-local"),
+    spaces.open("kind-local"),
+  ]);
+  await vi.runAllTimersAsync();
+  await done;
+  expect(spaces.list.filter((space) => space.id === "kind-local")).toHaveLength(
+    1,
+  );
+  expect(spaces.active?.id).toBe("kind-local");
+});
+
 test("a failed save reaches onError", async () => {
   const { spaces, backend, onError } = await loaded();
   vi.spyOn(backend, "invoke").mockRejectedValue(new Error("disk full"));

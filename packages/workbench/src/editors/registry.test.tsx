@@ -8,7 +8,7 @@ afterEach(cleanup);
 
 async function mounted() {
   const workbench = await testWorkbench();
-  workbench.editors.register({
+  const unregister = workbench.editors.register({
     id: "test.note",
     scheme: "note",
     title: (uri) => uri.host,
@@ -26,7 +26,7 @@ async function mounted() {
         .querySelector("[data-preview]")
         ?.getAttribute("data-preview"),
     }));
-  return { workbench, editors: workbench.editors, tabs };
+  return { workbench, editors: workbench.editors, tabs, unregister };
 }
 
 test("opening a URI shows its editor and makes it the active one", async () => {
@@ -98,4 +98,29 @@ test("a URI nothing opens fails loudly", async () => {
   expect(() => {
     editors.open("nowhere://x");
   }).toThrow("no editor opens nowhere://x");
+});
+
+test("the editor commands work on a restored editor nothing opens", async () => {
+  const { workbench, editors, tabs, unregister } = await mounted();
+  act(() => {
+    editors.open("note://a", { preview: true });
+  });
+  act(() => {
+    workbench.spaces.select("staging");
+    unregister();
+  });
+  act(() => {
+    workbench.spaces.select("prod-eu");
+  });
+  expect(screen.getByText("Nothing opens this")).toBeTruthy();
+  const lookup = workbench.keys.lookup(null);
+  expect(lookup("editor.type")).toBeUndefined();
+  await act(() =>
+    workbench.commands.execute("workbench.action.keepEditor", lookup),
+  );
+  expect(tabs()).toEqual([{ title: "a", preview: "false" }]);
+  await act(() =>
+    workbench.commands.execute("workbench.action.closeActiveEditor", lookup),
+  );
+  expect(tabs()).toEqual([]);
 });

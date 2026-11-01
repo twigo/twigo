@@ -59,7 +59,9 @@ function Open({ session }: { session: Session }) {
 
   const result: Loaded = pick
     ? { state: "ready", items: filtered(pick.items, value) }
-    : (loaded?.result ?? { state: "loading" });
+    : loaded?.value === value
+      ? loaded.result
+      : { state: "loading" };
   const items = result.state === "ready" ? result.items : [];
   const groups = [...new Set(items.map((item) => item.group))];
 

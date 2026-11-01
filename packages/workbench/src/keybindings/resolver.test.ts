@@ -182,6 +182,9 @@ describe("bare keys", () => {
       { key: "l", command: "logs" },
       { key: "shift+j", command: "owner" },
       { key: "escape", command: "clear" },
+      { key: "f5", command: "refresh" },
+      { key: "backspace", command: "delete" },
+      { key: "down", command: "next" },
     ],
   });
 
@@ -198,8 +201,17 @@ describe("bare keys", () => {
     ).toBe("none");
   });
 
-  test("named keys are not bare", () => {
+  test("keys that edit text or move the caret are bare", () => {
+    const input = { listFocus: true, inputFocus: true };
+    expect(resolve(target, [press("Backspace")], LIST)).toBe("delete");
+    expect(resolve(target, [press("Backspace")], input)).toBe("none");
+    expect(resolve(target, [press("ArrowDown")], LIST)).toBe("next");
+    expect(resolve(target, [press("ArrowDown")], input)).toBe("none");
+  });
+
+  test("Escape and the function keys are not bare", () => {
     expect(resolve(target, [press("Escape")])).toBe("clear");
+    expect(resolve(target, [press("F5")])).toBe("refresh");
   });
 });
 

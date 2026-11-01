@@ -167,6 +167,7 @@ export class Editors {
     const uri = panel && paramsOf(panel)?.uri;
     if (uri === this.#active) return;
     this.#active = uri;
+    this.keys.set("editor.open", uri !== undefined);
     this.keys.set(
       "editor.type",
       uri === undefined ? undefined : this.resolve(uri)?.id,

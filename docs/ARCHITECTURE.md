@@ -787,7 +787,7 @@ interface CommandDescriptor {
   - `listFocus`, `treeFocus` (a tree, which is also a list: left and right close and open), `editorFocus`, `inputFocus`
   - `resource.group`, `resource.kind`, `resource.namespaced`, `resource.namespace`
   - `selection.count`
-  - `editor.dirty`, `editor.type`
+  - `editor.open`, `editor.dirty`, `editor.type`
   - `capability.<verb>.<resource>` (cached SelfSubjectAccessReview)
   - `platform`
 

@@ -45,12 +45,24 @@ const US: readonly (readonly [string, string, string])[] = [
   }),
 ];
 
-const WRITING_CODES = new Set([
+const TEXT_CODES = new Set([
   ...US.map(([code]) => code),
   "Space",
   "IntlBackslash",
   "IntlRo",
   "IntlYen",
+  "Backspace",
+  "Delete",
+  "Enter",
+  "Tab",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
 ]);
 
 const MODIFIER_CODES = new Set([
@@ -204,11 +216,9 @@ export function pressId(press: Press): string {
 }
 
 /**
- * A press that types a character: such bindings fire only while a list has
- * the focus, never in an input (ARCHITECTURE 5.2).
+ * A press that types or moves the caret in a text input: such bindings fire
+ * only while a list has the focus, never in an input (ARCHITECTURE 5.2).
  */
 export function isBare(press: Press): boolean {
-  return (
-    !press.ctrl && !press.alt && !press.meta && WRITING_CODES.has(press.code)
-  );
+  return !press.ctrl && !press.alt && !press.meta && TEXT_CODES.has(press.code);
 }

@@ -67,7 +67,11 @@ export class Spaces {
   /** Reads the spaces and their saved states, then selects the first space. */
   async load(): Promise<void> {
     const list = await this.backend.invoke("spaces_list", null);
-    await Promise.all(list.map((space) => this.#restore(space.id)));
+    await Promise.all(
+      list.map(async (space) => {
+        this.#states.set(space.id, await this.#saved(space.id));
+      }),
+    );
     this.#setList(list);
     const first = list[0];
     if (first) this.select(first.id);
@@ -88,9 +92,13 @@ export class Spaces {
   /** The one-context space of a context, created if needed, becomes active. */
   async open(context: string): Promise<Space> {
     const space = await this.backend.invoke("space_open", context);
-    if (!this.#list.some((candidate) => candidate.id === space.id)) {
-      await this.#restore(space.id);
-      this.#setList([...this.#list, space]);
+    if (!this.#has(space.id)) {
+      const state = await this.#saved(space.id);
+      // Another open of the same context may have added the space meanwhile.
+      if (!this.#has(space.id)) {
+        this.#states.set(space.id, state);
+        this.#setList([...this.#list, space]);
+      }
     }
     this.select(space.id);
     return space;
@@ -145,9 +153,13 @@ export class Spaces {
     this.keys.set("space.count", list.length);
   }
 
-  async #restore(id: string): Promise<void> {
+  #has(id: string): boolean {
+    return this.#list.some((space) => space.id === id);
+  }
+
+  async #saved(id: string): Promise<SpaceState> {
     const saved = await this.backend.invoke("state_get", stateKey(id));
-    this.#states.set(id, saved === null ? DEFAULT_STATE : readState(saved));
+    return saved === null ? DEFAULT_STATE : readState(saved);
   }
 }
 
