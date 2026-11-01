@@ -173,3 +173,25 @@ async fn requests_that_waited_for_a_failed_first_connection_go_at_once() {
         started.elapsed()
     );
 }
+
+/// A request that comes while the first connection is past TLS but not yet
+/// in hyper-util's pool would dial a connection of its own.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_request_during_the_first_handshake_keeps_to_one_connection() {
+    for _ in 0..50 {
+        let server = serve(None).await;
+        let clients = std::sync::Arc::new(clients(&server));
+        let early = {
+            let clients = std::sync::Arc::clone(&clients);
+            tokio::spawn(async move {
+                while clients.connections().open() == 0 {
+                    tokio::task::yield_now().await;
+                }
+                get(&clients, "/early").await
+            })
+        };
+        assert!(get(&clients, "/first").await.is_ok());
+        assert!(early.await.unwrap().is_ok());
+        assert_eq!(clients.connections().dialled(), 1);
+    }
+}

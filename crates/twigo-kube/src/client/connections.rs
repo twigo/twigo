@@ -57,9 +57,16 @@ struct State {
 struct Open {
     capture: Option<CaptureConnection>,
     retired: bool,
+    /// The server is going away, or the pool dialled past it: poisoned, so
+    /// the pool hands it out no more before it learns why, but not retired,
+    /// so a route that moves still retires the streams left on it.
+    passed: bool,
     route: Option<Route>,
     /// Negotiated HTTP/2, so the pool shares it rather than dial anew.
     h2: bool,
+    /// Has carried a request, so the pool hands it out: between its
+    /// handshake and that, another request would dial past it.
+    served: bool,
 }
 
 /// The ends of a connection's TCP leg: to the server, or to its proxy.
@@ -138,13 +145,18 @@ impl Connections {
         self.0.state.lock().expect("connections lock")
     }
 
-    /// hyper-util dials only when none of its HTTP/2 connections can take a
-    /// stream any more: they are going away, as after a GOAWAY that came
-    /// between requests, which no request's error tells.
+    /// hyper-util dials only when its pool holds no HTTP/2 connection that
+    /// can take a stream, and holds one once it has carried a request: the
+    /// others are going away, as after a GOAWAY that came between requests,
+    /// which no request's error tells.
     fn dial(&self) -> u64 {
         let mut state = self.state();
-        for open in state.open.values_mut().filter(|open| open.h2) {
-            open.retired = true;
+        for open in state
+            .open
+            .values_mut()
+            .filter(|open| open.h2 && open.served)
+        {
+            open.passed = true;
         }
         state.next += 1;
         state.next - 1
@@ -158,8 +170,10 @@ impl Connections {
             Open {
                 capture: None,
                 retired,
+                passed: false,
                 route,
                 h2,
+                served: false,
             },
         );
     }
@@ -169,7 +183,10 @@ impl Connections {
     }
 
     fn usable(&self) -> bool {
-        self.state().open.values().any(|open| !open.retired)
+        self.state()
+            .open
+            .values()
+            .any(|open| open.served && !open.retired && !open.passed)
     }
 
     /// While no connection is usable, one request dials and the others wait
@@ -188,7 +205,7 @@ impl Connections {
     }
 
     /// Notes the connection a request went over, and poisons it if it is
-    /// retired or going away.
+    /// retired or passed.
     fn used(&self, capture: CaptureConnection, going_away: bool) {
         let Some(id) = id(&capture) else {
             return;
@@ -197,8 +214,9 @@ impl Connections {
         let Some(open) = state.open.get_mut(&id) else {
             return;
         };
-        open.retired |= going_away;
-        if open.retired {
+        open.served = true;
+        open.passed |= going_away;
+        if open.retired || open.passed {
             poison(&capture);
         }
         open.capture.get_or_insert(capture);
@@ -433,6 +451,10 @@ mod tests {
 
     use super::*;
 
+    fn served(connections: &Connections, id: u64) {
+        connections.state().open.get_mut(&id).unwrap().served = true;
+    }
+
     #[tokio::test]
     async fn a_dialled_connection_keeps_its_route() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -456,13 +478,42 @@ mod tests {
         let connections = Connections::default();
         let h2 = connections.dial();
         connections.opened(h2, None, true);
+        assert!(!connections.usable(), "not yet in the pool");
+        served(&connections, h2);
         assert!(connections.usable());
         connections.dial();
         assert!(!connections.usable(), "the pool dials only past them");
 
         let connections = Connections::default();
+        let handshaking = connections.dial();
+        connections.opened(handshaking, None, true);
+        connections.dial();
+        served(&connections, handshaking);
+        assert!(
+            connections.usable(),
+            "a dial during its handshake passed nothing"
+        );
+
+        let connections = Connections::default();
+        let remote = SocketAddr::from((Ipv4Addr::new(10, 0, 0, 5), 6443));
+        let route = Route {
+            local: Ipv4Addr::new(192, 168, 1, 2).into(),
+            remote,
+        };
+        let watched = connections.dial();
+        connections.opened(watched, Some(route), true);
+        served(&connections, watched);
+        connections.dial();
+        let elsewhere = Ipv4Addr::new(10, 8, 0, 2).into();
+        assert!(
+            connections.retire_if_moved(|_| Some(elsewhere)),
+            "the streams left on a passed connection still move"
+        );
+
+        let connections = Connections::default();
         let http1 = connections.dial();
         connections.opened(http1, None, false);
+        served(&connections, http1);
         connections.dial();
         assert!(
             connections.usable(),
@@ -483,7 +534,8 @@ mod tests {
         let local = Ipv4Addr::new(192, 168, 1, 2).into();
         let open = |connections: &Connections| {
             let id = connections.dial();
-            connections.opened(id, Some(Route { local, remote }), true);
+            connections.opened(id, Some(Route { local, remote }), false);
+            served(connections, id);
         };
         open(&connections);
         open(&connections);

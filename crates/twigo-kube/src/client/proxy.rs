@@ -80,10 +80,11 @@ pub fn proxy_for(
     if let Some(url) = proxy_url.filter(|url| !url.is_empty()) {
         // hyper-util takes a URL without a scheme for http; client-go does
         // not.
-        let named = url.split_once("://").map(|(scheme, _)| scheme);
-        return match parse(url, server) {
-            Some(proxy) if matches!(named, Some("http" | "https" | "socks5")) => {
-                Ok(Some(Proxy(proxy)))
+        return match split_scheme(url) {
+            Some((scheme, rest)) if matches!(scheme.as_str(), "http" | "https" | "socks5") => {
+                parse(&format!("{scheme}://{rest}"), server)
+                    .map(|proxy| Some(Proxy(proxy)))
+                    .ok_or_else(|| ProxyError(url.to_owned()))
             }
             _ => Err(ProxyError(url.to_owned())),
         };
@@ -98,11 +99,14 @@ pub fn proxy_for(
     };
     // Go's transport dials a proxy of any scheme but socks5 as an HTTP one,
     // and ignores a value it cannot parse.
-    let value = match value.split_once("://") {
-        Some((scheme, rest)) if !matches!(scheme, "http" | "https" | "socks5" | "socks5h") => {
-            format!("http://{rest}")
+    let value = match split_scheme(value) {
+        Some((scheme, rest))
+            if matches!(scheme.as_str(), "http" | "https" | "socks5" | "socks5h") =>
+        {
+            format!("{scheme}://{rest}")
         }
-        _ => value.clone(),
+        Some((_, rest)) => format!("http://{rest}"),
+        None => value.clone(),
     };
     let Some(proxy) = parse(&value, server) else {
         return Ok(None);
@@ -118,6 +122,12 @@ pub fn proxy_for(
     Ok(NoProxy::parse(&env.no)
         .proxies(host, port)
         .then_some(Proxy(proxy)))
+}
+
+/// The scheme, lowercased as Go's url.Parse lowercases it, and the rest.
+fn split_scheme(url: &str) -> Option<(String, &str)> {
+    let (scheme, rest) = url.split_once("://")?;
+    Some((scheme.to_ascii_lowercase(), rest))
 }
 
 /// A proxy URL, `http://` when it has no scheme, its credentials split off.
@@ -351,6 +361,8 @@ https://10.0.0.5:6443|[10.0.0.5]:6443|DIRECT";
         let http = pick("http://user:p%40ss@proxy:1").unwrap().unwrap();
         assert_eq!(http.intercept().basic_auth().unwrap(), "Basic dXNlcjpwQHNz");
         assert_eq!(pick("ftp://f:1").unwrap().unwrap().uri(), "http://f:1/");
+        assert!(pick("SOCKS5://s:1080").unwrap().unwrap().is_socks());
+        assert_eq!(pick("HTTPS://p").unwrap().unwrap().uri(), "https://p/");
     }
 
     #[test]
@@ -362,6 +374,8 @@ https://10.0.0.5:6443|[10.0.0.5]:6443|DIRECT";
             .unwrap();
         assert!(proxy.is_socks());
         assert!(proxy_for(&kind, Some(""), &env).unwrap().is_none());
+        let upper = proxy_for(&kind, Some("HTTP://proxy:3128"), &env).unwrap();
+        assert_eq!(upper.unwrap().uri(), "http://proxy:3128/");
         for refused in ["socks5h://s:1080", "proxy.corp:3128"] {
             assert!(proxy_for(&kind, Some(refused), &env).is_err(), "{refused}");
         }

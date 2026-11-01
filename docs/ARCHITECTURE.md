@@ -335,7 +335,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
     The streams on it run until their upstreams re-watch.
   - While a client has no usable connection, one request dials and the others wait until it is connected or has failed: a cold client opens one TCP and TLS connection per concurrent first request and keeps only the first that negotiates `h2` ([HTTP/2 spike](spikes/http2.md)).
     After a failure the others go together, so none waits out another's timeout.
-    A connection stops being usable once it is retired or closed, once a request learns that the server is going away, or once hyper-util dials past it, as a GOAWAY that came between requests makes it do.
+    A connection counts as usable once it has carried a request, since hyper-util's pool holds it only from then, and stops once it is retired or closed, once a request learns that the server is going away, or once hyper-util dials past it, as a GOAWAY that came between requests makes it do.
     The requests such a GOAWAY hands back unsent, hyper-util sends again itself, dialling a connection for each, which no layer above it sees.
   - Views show `stale` while this happens.
 - **Initial list.**
