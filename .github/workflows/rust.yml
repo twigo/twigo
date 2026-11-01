@@ -29,6 +29,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            dbus \
             libwebkit2gtk-4.1-dev \
             libxdo-dev \
             libssl-dev \
@@ -51,6 +52,12 @@ jobs:
         run: xvfb-run -a sh -c 'TWIGO_TEST_X11_DISPLAY=$DISPLAY cargo test -p twigo-keyboard --test x11 -- --ignored'
       - name: Follow the keyboard layout on a live Wayland compositor
         run: crates/twigo-keyboard/linux/wayland.sh cargo test -p twigo-keyboard --test wayland -- --ignored
+      - name: Follow wake and network changes
+        # The netlink test adds a dummy link, as root in a network of its own.
+        run: |
+          cargo test -p twigo-netmon -- --ignored a_resume_from_sleep_is_a_wake
+          test=$(cargo test -p twigo-netmon --lib --no-run --message-format=json | jq -r 'select(.profile.test and .executable != null) | .executable')
+          sudo unshare --net "$test" --ignored an_address_added_is_a_network_change
       - uses: pnpm/action-setup@v6
         with:
           cache: true
