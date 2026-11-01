@@ -363,3 +363,47 @@ fn a_write_through_a_symlink_is_seen() {
     let changed = changes.recv_timeout(Duration::from_secs(5)).unwrap();
     assert_eq!(names(&changed), ["kind-a", "kind-b"]);
 }
+
+#[test]
+fn a_context_carries_its_own_entries() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = write(
+        dir.path(),
+        "config",
+        "
+clusters:
+- name: a
+  cluster: { server: 'https://a:6443', proxy-url: 'socks5://proxy:1080' }
+- name: b
+  cluster: { server: 'https://b:6443' }
+users:
+- name: a
+  user: { token: a }
+- name: b
+  user: { token: b }
+contexts:
+- name: kind-a
+  context: { cluster: a, user: a }
+- name: kind-b
+  context: { cluster: b, user: b }
+",
+    );
+    let catalog = kubectl(&[&file]).load();
+    let a = &context(&catalog, "kind-a").entries;
+    let kubeconfig = a.kubeconfig();
+    assert_eq!(kubeconfig.current_context.as_deref(), Some("kind-a"));
+    let clusters: Vec<_> = kubeconfig
+        .clusters
+        .iter()
+        .map(|c| c.name.as_str())
+        .collect();
+    let users: Vec<_> = kubeconfig
+        .auth_infos
+        .iter()
+        .map(|u| u.name.as_str())
+        .collect();
+    assert_eq!((clusters, users), (vec!["a"], vec!["a"]));
+    assert_eq!(a.proxy_url(), Some("socks5://proxy:1080"));
+    assert_eq!(context(&catalog, "kind-b").entries.proxy_url(), None);
+    assert_ne!(*a, context(&catalog, "kind-b").entries);
+}
