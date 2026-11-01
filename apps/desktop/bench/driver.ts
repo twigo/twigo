@@ -1,13 +1,27 @@
-import type { ListBatch } from "@twigo/protocol";
+import type { ListBatch, Sort } from "@twigo/protocol";
 import type { Workbench } from "@twigo/workbench";
 import type { ListProbe, Probe } from "./probe";
 
 const PODS = "k8s-list://prod-eu/v1/pods";
 const SCROLL_SECONDS = 5;
 const SCROLL_PX_PER_SECOND = 4000;
-const SORTS = ["Name", "Status", "Restarts", "Age", "Namespace"].flatMap(
-  (column) => [column, column],
-);
+/**
+ * Clicked in this order, from the default Name ascending, so that every click
+ * changes the first rows on the mock; each column's second click descends.
+ */
+export const SORTS: readonly Sort[] = [
+  "Status",
+  "Age",
+  "Restarts",
+  "Namespace",
+  "Name",
+].flatMap((column) => [
+  { column, descending: false },
+  { column, descending: true },
+]);
+const TOP_ROWS = 10;
+/** The DOM carries no row ids, so rows are told apart by these cells. */
+const KEYS = ["Namespace", "Name"];
 const CHANGE_SECONDS = 60;
 const WAIT_MS = 5000;
 const PAINT_TIMEOUT_MS = 1000;
@@ -114,6 +128,38 @@ function blank(table: HTMLElement): boolean {
   ].some((row) => onScreen(table, row) && cellText(row, 0) === undefined);
 }
 
+/** The first rows of the list's window, once it starts at the top and holds them. */
+export function topRows(list: ListProbe): string[] | undefined {
+  const count = Math.min(TOP_ROWS, list.total);
+  if (list.start !== 0 || list.ids.length < count) return undefined;
+  const at = KEYS.map((key) => list.columns.findIndex((c) => c.name === key));
+  return list.ids.slice(0, count).map((id) => {
+    const cells = list.cells(id);
+    return at.map((i) => String(cells?.[i] ?? "")).join("/");
+  });
+}
+
+/** The first rows on screen, named as `topRows` names them. */
+function shownRows(table: HTMLElement, count: number): string[] {
+  const titles = headers(table).map((h) => h.textContent);
+  const at = KEYS.map((key) => titles.indexOf(key));
+  const shown: string[] = [];
+  for (let index = 0; index < count; index++) {
+    const row = rowAt(table, index);
+    if (!row) break;
+    shown.push(at.map((i) => cellText(row, i) ?? "").join("/"));
+  }
+  return shown;
+}
+
+function same(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((item, i) => item === b[i]);
+}
+
+export function shows(table: HTMLElement, expected: readonly string[]) {
+  return same(shownRows(table, expected.length), expected);
+}
+
 function nextBatch(
   list: ListProbe,
   matches: (batch: ListBatch) => boolean,
@@ -194,31 +240,36 @@ async function top(): Promise<void> {
 async function sorts(probe: Probe): Promise<Results["sort"]> {
   await top();
   const samples: Results["sort"] = [];
-  for (const column of SORTS) {
+  for (const { column, descending } of SORTS) {
     await sleep(300);
+    const sorted = `${column} ${descending ? "descending" : "ascending"}`;
     const table = grid();
     const button = header(table, column);
+    const before = shownRows(table, TOP_ROWS);
     const opened = probe.next();
     const clicked = performance.now();
     button.click();
     const list = await opened;
-    let expected = "";
-    await nextBatch(list, (batch) => {
-      const id = batch.window?.start === 0 ? batch.window.ids[0] : undefined;
-      if (id === undefined) return false;
-      const name = list.columns.findIndex((c) => c.name === "Name");
-      expected = String(list.cells(id)?.[name] ?? "");
-      return true;
+    let expected: string[] = [];
+    await nextBatch(list, () => {
+      const first = topRows(list);
+      if (first) expected = first;
+      return first !== undefined;
     });
-    const painted = await paintedWhen(() => {
-      const row = rowAt(table, 0);
-      return row !== null && cellText(row, 0) === expected;
-    }, `rows sorted by ${column}`);
-    samples.push({
-      column,
-      descending: button.getAttribute("aria-sort") === "descending",
-      ms: painted - clicked,
-    });
+    if (same(expected, before)) {
+      throw new Error(
+        `sorting by ${sorted} leaves the first rows as they were`,
+      );
+    }
+    const painted = await paintedWhen(
+      () => shows(table, expected),
+      `rows sorted by ${sorted}`,
+    );
+    const shown = button.getAttribute("aria-sort");
+    if (shown !== (descending ? "descending" : "ascending")) {
+      throw new Error(`clicking ${column} sorted it ${String(shown)}`);
+    }
+    samples.push({ column, descending, ms: painted - clicked });
   }
   return samples;
 }
