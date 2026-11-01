@@ -155,6 +155,23 @@ export type SetWindow = { id: SubscriptionId, start: number,
  */
 end: number, };
 
+/**
+ * Where the login shell's environment stands (ARCHITECTURE 6.1).
+ */
+export type ShellEnvironment = { "state": "resolving" } | { "state": "resolved" } | { "state": "failed", 
+/**
+ * The shell's path, such as `/bin/zsh`.
+ */
+shell: string, 
+/**
+ * What went wrong, worded to follow the shell's path: `did not answer in 10 s`.
+ */
+reason: string, 
+/**
+ * The end of what the shell printed, the environment left out.
+ */
+output: string, };
+
 export type Sort = { 
 /**
  * A column name from [`ListBatch::columns`].
@@ -196,4 +213,6 @@ export type Commands = {
   keyboard_layout_watch: { request: null; response: KeyboardLayout; message: KeyboardLayout };
   state_get: { request: string; response: string | null; message: null };
   state_set: { request: StateEntry; response: null; message: null };
+  shell_environment_watch: { request: null; response: ShellEnvironment; message: ShellEnvironment };
+  shell_environment_retry: { request: null; response: null; message: null };
 };

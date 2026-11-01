@@ -5,8 +5,8 @@
 use ts_rs::TS;
 
 use crate::{
-    Ack, ClusterVersion, Context, KeyboardLayout, ListBatch, ListQuery, Resource, SetWindow, Space,
-    StateEntry, SubscriptionId,
+    Ack, ClusterVersion, Context, KeyboardLayout, ListBatch, ListQuery, Resource, SetWindow,
+    ShellEnvironment, Space, StateEntry, SubscriptionId,
 };
 
 pub trait Command {
@@ -138,6 +138,27 @@ pub struct StateSet;
 impl Command for StateSet {
     const NAME: &'static str = "state_set";
     type Request = StateEntry;
+    type Response = ();
+    type Message = ();
+}
+
+/// Answers with where the login shell's environment stands, then sends it
+/// again on every change.
+pub struct ShellEnvironmentWatch;
+
+impl Command for ShellEnvironmentWatch {
+    const NAME: &'static str = "shell_environment_watch";
+    type Request = ();
+    type Response = ShellEnvironment;
+    type Message = ShellEnvironment;
+}
+
+/// Resolves the login shell's environment again after a failure.
+pub struct ShellEnvironmentRetry;
+
+impl Command for ShellEnvironmentRetry {
+    const NAME: &'static str = "shell_environment_retry";
+    type Request = ();
     type Response = ();
     type Message = ();
 }

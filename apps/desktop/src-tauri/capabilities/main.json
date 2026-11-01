@@ -10,6 +10,8 @@
     "core:menu:allow-new",
     "core:menu:allow-set-as-app-menu",
     "core:resources:allow-close",
-    "allow-keyboard-layout-watch"
+    "allow-keyboard-layout-watch",
+    "allow-shell-environment-watch",
+    "allow-shell-environment-retry"
   ]
 }

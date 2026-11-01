@@ -1,5 +1,9 @@
 fn main() {
-    let commands = tauri_build::AppManifest::new().commands(&["keyboard_layout_watch"]);
+    let commands = tauri_build::AppManifest::new().commands(&[
+        "keyboard_layout_watch",
+        "shell_environment_watch",
+        "shell_environment_retry",
+    ]);
     let mut attributes = tauri_build::Attributes::new().app_manifest(commands);
     // An inlined plugin keeps its permissions in OUT_DIR, so builds without the feature have no
     // trace of the bench's commands.
