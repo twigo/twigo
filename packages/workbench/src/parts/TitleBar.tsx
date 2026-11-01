@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -8,7 +8,7 @@ import {
   Search,
   type LucideIcon,
 } from "lucide-react";
-import type { ContextColor, Space } from "@twigo/protocol";
+import type { Space } from "@twigo/protocol";
 import {
   cn,
   ContextDot,
@@ -20,15 +20,6 @@ import {
 import { useChanges, useWorkbench } from "../react";
 import { onlyColor } from "./spaceBadge";
 import type { Location } from "../views/registry";
-
-const STRIP: Readonly<Record<ContextColor, string>> = {
-  red: "bg-context-red",
-  orange: "bg-context-orange",
-  yellow: "bg-context-yellow",
-  green: "bg-context-green",
-  blue: "bg-context-blue",
-  purple: "bg-context-purple",
-};
 
 const TOGGLES: readonly {
   location: Location;
@@ -55,7 +46,8 @@ const TOGGLES: readonly {
 /**
  * Where you are (ARCHITECTURE 4.2): the space and its namespace scope as a
  * breadcrumb that opens their pickers, the search that opens quick access,
- * and the part toggles. A space with one coloured context draws a strip.
+ * and the part toggles. A space with one coloured context tints the bar's
+ * left end, as JetBrains tints it with a project's colour.
  */
 export function TitleBar() {
   const { spaces } = useWorkbench();
@@ -63,24 +55,26 @@ export function TitleBar() {
   const space = spaces.active;
   const color = space && onlyColor(space);
   return (
-    <div className="shrink-0">
-      {/* 36 px pairs with trafficLightPosition in tauri.conf.json: change both or neither. */}
-      <header
-        data-tauri-drag-region
-        className="grid h-9 grid-cols-[1fr_minmax(0,28rem)_1fr] items-center gap-3 bg-shell pr-2 pl-[78px]"
-      >
-        <div className="flex min-w-0 items-center gap-0.5">
-          {space && <Breadcrumb space={space} />}
-        </div>
-        <CommandCenter space={space} />
-        <div className="flex justify-end gap-0.5">
-          {TOGGLES.map((toggle) => (
-            <PartToggle key={toggle.location} {...toggle} />
-          ))}
-        </div>
-      </header>
-      <div className={cn("h-0.5", color ? STRIP[color] : "bg-shell")} />
-    </div>
+    // 36 px pairs with trafficLightPosition in tauri.conf.json: change both or neither.
+    <header
+      data-tauri-drag-region
+      data-color={color}
+      style={
+        color &&
+        ({ "--twigo-context": `var(--context-${color})` } as CSSProperties)
+      }
+      className="twigo-titlebar grid h-9 shrink-0 grid-cols-[1fr_minmax(0,28rem)_1fr] items-center gap-3 bg-shell pr-2 pl-[78px]"
+    >
+      <div className="flex min-w-0 items-center gap-0.5">
+        {space && <Breadcrumb space={space} />}
+      </div>
+      <CommandCenter space={space} />
+      <div className="flex justify-end gap-0.5">
+        {TOGGLES.map((toggle) => (
+          <PartToggle key={toggle.location} {...toggle} />
+        ))}
+      </div>
+    </header>
   );
 }
 
@@ -123,7 +117,7 @@ function Crumb({
       type="button"
       aria-label={label}
       onClick={onClick}
-      className="flex h-7 min-w-0 items-center gap-1.5 rounded-md px-2 text-[13px] transition-colors hover:bg-row-hover"
+      className="flex h-6 min-w-0 items-center gap-1.5 rounded-md px-1.5 text-[13px] hover:bg-row-hover"
     >
       {children}
       <ChevronDown
@@ -144,7 +138,7 @@ function CommandCenter({ space }: { space: Space | undefined }) {
       onClick={() => {
         quickAccess.show("");
       }}
-      className="flex h-7 items-center gap-2 rounded-md border border-border bg-card/60 px-2.5 text-[13px] text-muted-foreground transition-colors hover:bg-card hover:text-foreground"
+      className="flex h-[22px] items-center gap-1.5 rounded-md border border-border bg-foreground/5 px-2 text-xs text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
     >
       <Search aria-hidden className="size-3.5 shrink-0" />
       <span className="truncate">Search {space?.name ?? "Twigo"}</span>
@@ -182,7 +176,7 @@ function PartToggle({
             void commands.execute(command, keys.lookup(document.activeElement));
           }}
           className={cn(
-            "flex size-7 items-center justify-center rounded-md transition-colors hover:bg-row-hover",
+            "flex size-6 items-center justify-center rounded-md hover:bg-row-hover",
             visible ? "text-foreground" : "text-muted-foreground",
           )}
         >

@@ -89,7 +89,7 @@ function ExplorerSection({
         style={{ paddingLeft: 8 + depth * 16 }}
         className="flex h-[22px] w-full items-center gap-1 pr-2 text-left text-[13px] hover:bg-row-hover"
       >
-        <Chevron className="size-3.5 shrink-0 text-muted-foreground" />
+        <Chevron className="size-4 shrink-0 text-muted-foreground" />
         {title}
       </button>
       {open && (
@@ -124,7 +124,7 @@ function ExplorerSection({
               >
                 <KindIcon
                   gvr={resource.gvr}
-                  className="size-3.5 shrink-0 text-muted-foreground"
+                  className="size-4 shrink-0 text-muted-foreground"
                 />
                 <span className="truncate">
                   {pluralTitle(resource.kind, resource.gvr.resource)}

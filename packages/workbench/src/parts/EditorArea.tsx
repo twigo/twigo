@@ -131,7 +131,7 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
       }}
     >
       {params && provider?.icon && (
-        <provider.icon uri={params.uri} className="size-3.5 shrink-0" />
+        <provider.icon uri={params.uri} className="size-4 shrink-0" />
       )}
       <span data-preview={params?.preview ?? false} className="truncate">
         {api.title}

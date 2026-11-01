@@ -11,6 +11,15 @@
   --focus-border: var(--brand);
 }
 
+/* A coloured context tints the title bar's left end, behind the breadcrumb. */
+.twigo-titlebar[data-color] {
+  /* --twigo-context is the context's colour token, set inline. */
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--twigo-context) 30%, transparent),
+    transparent 360px
+  );
+}
 /* Dockview on the design tokens. Tabs connect to their editor (VS Code
    1.144 dropped detached pill tabs for this): the active tab takes the
    editor's surface, the strip a shade off it. */

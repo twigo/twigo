@@ -6,12 +6,12 @@ import { initials, onlyColor } from "./spaceBadge";
 
 /** The tint of a space's tile, from its one context's colour. */
 const TILE: Readonly<Record<ContextColor, string>> = {
-  red: "bg-context-red/25 text-foreground",
-  orange: "bg-context-orange/25 text-foreground",
-  yellow: "bg-context-yellow/25 text-foreground",
-  green: "bg-context-green/25 text-foreground",
-  blue: "bg-context-blue/25 text-foreground",
-  purple: "bg-context-purple/25 text-foreground",
+  red: "bg-context-red/20 text-foreground",
+  orange: "bg-context-orange/20 text-foreground",
+  yellow: "bg-context-yellow/20 text-foreground",
+  green: "bg-context-green/20 text-foreground",
+  blue: "bg-context-blue/20 text-foreground",
+  purple: "bg-context-purple/20 text-foreground",
 };
 
 /**
@@ -26,7 +26,7 @@ export function SpaceRail() {
   return (
     <nav
       aria-label="Spaces"
-      className="flex w-14 shrink-0 flex-col items-center gap-2 bg-shell py-2"
+      className="flex w-12 shrink-0 flex-col items-center gap-1.5 bg-shell py-1.5"
     >
       {spaces.list.map((space, index) => {
         const binding = keybindings.primary(
@@ -52,7 +52,7 @@ export function SpaceRail() {
             onClick={() => {
               quickAccess.show("ctx ");
             }}
-            className="flex size-9 items-center justify-center rounded-lg border border-dashed border-border text-muted-foreground transition-colors hover:border-solid hover:bg-row-hover hover:text-foreground"
+            className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-row-hover hover:text-foreground"
           >
             <Plus className="size-4" />
           </button>
@@ -89,16 +89,16 @@ function SpaceTile({
           <span
             aria-hidden
             className={cn(
-              "absolute top-1/2 left-0 w-[3px] -translate-y-1/2 rounded-r-full bg-foreground transition-all duration-150",
-              selected ? "h-6" : "h-0 group-hover:h-3",
+              "absolute top-1/2 left-0 w-0.5 -translate-y-1/2 rounded-r-full bg-foreground",
+              selected ? "h-5" : "h-0",
             )}
           />
           <span
             className={cn(
-              "flex size-9 items-center justify-center rounded-lg text-xs font-medium transition-colors",
+              "flex size-8 items-center justify-center rounded-md text-[11px] font-medium",
               tint ?? "bg-card text-muted-foreground",
               selected
-                ? "ring-2 ring-foreground/70"
+                ? "ring-1 ring-foreground/60"
                 : "group-hover:ring-1 group-hover:ring-border",
             )}
           >
