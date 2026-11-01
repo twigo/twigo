@@ -5525,6 +5525,7 @@ dependencies = [
 name = "twigo-kube"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
  "bytes",
  "form_urlencoded",
  "futures",
@@ -5537,12 +5538,17 @@ dependencies = [
  "hyper-timeout",
  "hyper-util",
  "ipnet",
+ "jiff",
  "k8s-openapi",
  "kube",
+ "nix",
  "notify-debouncer-full",
  "rcgen",
+ "ring",
  "rustls",
+ "secrecy",
  "serde",
+ "serde-saphyr",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
@@ -5550,6 +5556,7 @@ dependencies = [
  "tokio-rustls",
  "tower",
  "twigo-cache",
+ "twigo-env",
  "twigo-ipc",
 ]
 

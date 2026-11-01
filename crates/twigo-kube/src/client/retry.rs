@@ -59,7 +59,7 @@ where
 
 /// None for a streamed body, which cannot be sent twice; kube buffers every
 /// body it builds.
-fn copy(request: &Request<Body>) -> Option<Request<Body>> {
+pub(super) fn copy(request: &Request<Body>) -> Option<Request<Body>> {
     let mut copy = Request::new(request.body().try_clone()?);
     *copy.method_mut() = request.method().clone();
     *copy.uri_mut() = request.uri().clone();

@@ -28,6 +28,7 @@ twigo-kube = { path = "crates/twigo-kube" }
 twigo-netmon = { path = "crates/twigo-netmon" }
 
 atomic-write-file = "0.3.1"
+base64 = "0.23.1"
 bytes = "1.12.1"
 dhat = "0.3.3"
 dispatch2 = "0.3.1"
@@ -60,9 +61,13 @@ objc2-core-foundation = { version = "0.3.2", default-features = false, features 
 objc2-io-kit = { version = "0.3.2", default-features = false, features = ["dispatch2", "libc", "pwr_mgt", "std"] }
 objc2-system-configuration = { version = "0.3.2", default-features = false, features = ["SCDynamicStore", "SCDynamicStoreKey", "SCSchemaDefinitions", "dispatch2", "std"] }
 rcgen = "0.14.10"
+ring = "0.17.14"
 rustls = { version = "0.23.46", default-features = false }
+secrecy = "0.10.3"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["raw_value"] }
+# kube 4.2's version, so the tree carries one YAML parser.
+serde-saphyr = "0.0.29"
 tauri = "2.12.5"
 tauri-build = "2.7.4"
 tauri-plugin-single-instance = "2.5.5"
