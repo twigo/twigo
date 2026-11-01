@@ -1,11 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
-import type { GroupCount, Gvr, ViewState } from "@twigo/protocol";
+import type { ViewState } from "@twigo/protocol";
 import { cn } from "@twigo/ui";
 import { useChanges, useWorkbench } from "@twigo/workbench";
 import type { Discovery } from "./discovery";
 import { SHOWS_ROWS, stateLabel, type ListStatuses } from "./listStatus";
-import { cellTone, statusColumn, type Tone } from "./tones";
-import { listUri, parseListUri } from "./uri";
+import type { ListFilters } from "./filters";
+import { byHealth, HEALTH } from "./health";
+import { statusColumn } from "./tones";
+import { parseListUri } from "./uri";
 
 /** A status-bar entry: a button with a hover, as VS Code's are. */
 function Entry({
@@ -105,43 +107,29 @@ export function ClusterStatusItem({
   );
 }
 
-const TONE: Readonly<Record<Tone | "ok", { dot: string; name: string }>> = {
-  ok: { dot: "bg-ok", name: "healthy" },
-  warn: { dot: "bg-warn", name: "pending" },
-  error: { dot: "bg-error", name: "failing" },
-};
-
-/** The status column's values by tone: healthy, pending, failing. */
-function byTone(gvr: Gvr, column: string, groups: readonly GroupCount[]) {
-  const tones = new Map<Tone | "ok", GroupCount[]>();
-  for (const group of groups) {
-    const tone = cellTone(gvr, column, group.value) ?? "ok";
-    tones.set(tone, [...(tones.get(tone) ?? []), group]);
-  }
-  return (["ok", "warn", "error"] as const).flatMap((tone) => {
-    const values = tones.get(tone) ?? [];
-    const count = values.reduce((sum, group) => sum + group.count, 0);
-    return count > 0 ? [{ tone, count, values }] : [];
-  });
-}
+const ORDER = ["ok", "warn", "error"] as const;
 
 /**
  * The active list's rows, and how many are healthy, pending or failing;
- * a click on a count filters the list to that status.
+ * a click on a count shows only those rows.
  */
-export function ListSummaryItem({ statuses }: { statuses: ListStatuses }) {
-  const { editors, quickAccess } = useWorkbench();
+export function ListSummaryItem({
+  statuses,
+  filters,
+}: {
+  statuses: ListStatuses;
+  filters: ListFilters;
+}) {
+  const { editors } = useWorkbench();
   useChanges(editors.changes);
   useChanges(statuses.changes);
   const active = editors.active;
   const list = active === undefined ? undefined : statuses.get(active);
   const input = active === undefined ? undefined : parseListUri(active);
-  if (!list || !input || !SHOWS_ROWS.has(list.status.state)) return null;
+  if (!active || !list || !input || !SHOWS_ROWS.has(list.status.state))
+    return null;
   const column = statusColumn(input.gvr);
-  const tones = column ? byTone(input.gvr, column, list.groups) : [];
-  const filter = (value: string) => {
-    editors.open(listUri({ ...input, text: value }), { preview: true });
-  };
+  const counts = column && byHealth(input.gvr, column, list.groups);
   return (
     <div className="flex items-center">
       <Entry
@@ -149,39 +137,27 @@ export function ListSummaryItem({ statuses }: { statuses: ListStatuses }) {
       >
         {list.total.toLocaleString("en")} {list.title.toLowerCase()}
       </Entry>
-      {tones.map(({ tone, count, values }) => (
-        <Entry
-          key={tone}
-          label={`${count.toLocaleString("en")} ${TONE[tone].name}: ${values
-            .map((group) => group.value)
-            .join(", ")}`}
-          onClick={() => {
-            const [one, ...others] = values;
-            if (one && others.length === 0) {
-              filter(one.value);
-              return;
-            }
-            void quickAccess
-              .pick(
-                `Show ${TONE[tone].name} ${list.title.toLowerCase()}`,
-                values.map((group) => ({
-                  id: group.value,
-                  label: group.value,
-                  description: group.count.toLocaleString("en"),
-                })),
-              )
-              .then((picked) => {
-                if (picked) filter(picked.id);
-              });
-          }}
-        >
-          <span
-            aria-hidden
-            className={cn("size-1.5 rounded-full", TONE[tone].dot)}
-          />
-          {count.toLocaleString("en")}
-        </Entry>
-      ))}
+      {counts &&
+        ORDER.filter((health) => counts[health].count > 0).map((health) => {
+          const { count, values } = counts[health];
+          return (
+            <Entry
+              key={health}
+              label={`${count.toLocaleString("en")} ${HEALTH[health].name}: ${values
+                .map((group) => group.value)
+                .join(", ")}`}
+              onClick={() => {
+                filters.setHealth(active, health);
+              }}
+            >
+              <span
+                aria-hidden
+                className={cn("size-1.5 rounded-full", HEALTH[health].dot)}
+              />
+              {count.toLocaleString("en")}
+            </Entry>
+          );
+        })}
     </div>
   );
 }

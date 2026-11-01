@@ -4,6 +4,8 @@ import type { ListController } from "./ResourceTable";
 export interface ListCommands extends ListController {
   /** List editors only. */
   closeDetails?(): void;
+  /** Opens or focuses the list editor's filter field. */
+  filter?(): void;
   /** Trees only. */
   collapse?(): void;
   expand?(): void;

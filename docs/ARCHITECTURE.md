@@ -243,7 +243,7 @@ Upstream  (context × GVR × scope × server-side selectors)   ref-counted · li
 RowStore  uid → Row { meta-lite (name, ns, uid, rv, labels, owners, created), cells[] }
   │ change set
   ▼
-QueryView  (per subscription: namespaces, label filter, text filter, sort, window)   incremental ordered index
+QueryView  (per subscription: namespaces, label filter, text filter, values, sort, window)   incremental ordered index
   │ window diff
   ▼
 Batcher   coalesce by uid · flush ≤ 50 ms · one unacked batch · paused while hidden
@@ -380,7 +380,7 @@ A Table row takes about 700 bytes, half of a `PartialObjectMeta<Pod>` without ma
 ### 3.4 Query views: Rust sorts, filters and windows
 
 The frontend never holds the full list.
-A subscription carries a `ListQuery { space, gvr, namespaces, labelSelector, text, sort, columns }`.
+A subscription carries a `ListQuery { space, gvr, namespaces, labelSelector, text, sort, groupBy, values }`.
 The webview then sends `setWindow(start, end)` as the user scrolls, covering the visible rows plus about two screens of overscan.
 
 - Rust keeps an incremental ordered index per query view.
@@ -389,6 +389,8 @@ The webview then sends `setWindow(start, end)` as the user scrolls, covering the
 - A change set updates the index in O(log n) per row and computes what changed **inside the window**.
 - Text filter: substring or fuzzy match on name plus the visible columns.
   `/!` negates; a regex can be given explicitly, k9s style.
+- Values keep the rows whose column holds one of them, such as a pod's Status in CrashLoopBackOff or Error.
+  `groupBy` counts the rows before values drop any, so a filter by health keeps every health's count.
 - Multi-context spaces: the query view merges the upstreams of several contexts and adds a Context column.
   Row identity is `context/namespace/name`.
 - Selections and bulk actions refer to row IDs, so "select all 5,000" never ships 5,000 rows.
@@ -494,7 +496,7 @@ The bench also replays the cases that broke other clients, and one that loopback
 ### 4.1 Parts (VS Code layout)
 
 ```
-┌ ●●● ● prod-eu 🔒 ▾ › payments ▾      ⌕ Search prod-eu      ─────── title bar ─┐
+┌ ●●● ● prod-eu 🔒 ▾ › payments ▾      ───────────────────────────── title bar ⌕ ┐
 │ PE │╭ Explorer ───╮╭ ⎈ Pods │ deploy/api ──────────────────────────────────────╮│
 │ ST ││ ▾ Workloads ││ 5,000 pods · synced          ┌ Pod api-7f9 ──────────── ✕ ┐││
 │ DQ ││   Pods  2.1k││ Name         Ready  Status   │ details over the list,     │││
@@ -510,7 +512,7 @@ The bench also replays the cases that broke other clients, and one that loopback
 
 | Part               | Holds                                                                                                                                                                                                                                                                  |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Title bar          | Breadcrumb of the space and its namespace scope, search that opens quick access; drag region; native traffic lights on macOS. Parts show and hide by keys (⌘B, ⌘J, ⌥⌘B), the View menu and the palette, not buttons                                                    |
+| Title bar          | Breadcrumb of the space and its namespace scope, a search button that opens quick access; drag region; native traffic lights on macOS. Parts show and hide by keys (⌘B, ⌘J, ⌥⌘B), the View menu and the palette, not buttons                                           |
 | Space rail         | Tiles of the open spaces (D6, Lens's hotbar), ⌘1..9 by position, a button that opens any context                                                                                                                                                                       |
 | Primary side bar   | View containers as tabs in its header (Explorer, Port forwards, Helm, Extensions and contributed ones); the active one's views: resource tree, saved filters                                                                                                           |
 | Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups                                                                                                                                                                                        |
@@ -574,7 +576,10 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 
 - Columns come from the Table `columnDefinitions` (priority 0 by default, wide on toggle), plus Context, CPU and memory when available, and Namespace unless the query names one namespace.
   Column presets are kept per GVR.
-- Focus model: arrows or `j`/`k` move, Enter opens, Space marks, ⇧Space marks a range, `/` filters, Esc clears.
+- Focus model: arrows or `j`/`k` move, Enter opens, Space marks, ⇧Space marks a range, `/` or ⌘F filters, Esc clears.
+- A list's filters sit at the right of its group's tab strip, as the editor's actions (`editor/title`): chips for All, Failing, Pending and Healthy with their counts, for kinds with a status column, and the text field.
+  They take no row of their own, so a table sits under three bars: title, tabs, header.
+  Each open list keeps its own; a count in the status bar picks the same chip.
 - Single-key verbs work only when a table is focused (context key `listFocus`): `l` logs, `s` shell, `e` edit YAML, `d` describe/overview, `y` copy YAML, `f` port-forward, `⇧J` jump to owner, `⌫` delete (with confirmation).
   These are ordinary commands with keybindings, so users can remap them.
 - Changed cells flash briefly: the cell's background starts at the `--flash` tint and fades out over 1 s.

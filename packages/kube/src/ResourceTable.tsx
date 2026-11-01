@@ -11,6 +11,7 @@ import type {
   Backend,
   Cell,
   Column,
+  ColumnValues,
   GroupCount,
   Gvr,
   ListSnapshot,
@@ -49,6 +50,8 @@ interface Props {
   /** Empty or absent for every namespace the space covers. */
   namespaces?: readonly string[];
   text?: string;
+  /** Only the rows whose column holds one of these values. */
+  values?: ColumnValues;
   labelSelector?: string;
   /** The row selected when the table mounts, such as the one it had before. */
   initialSelected?: RowId;
@@ -86,6 +89,7 @@ function ResourceList({
   title,
   namespaces = [],
   text,
+  values,
   labelSelector,
   initialSelected,
   onSelect,
@@ -104,6 +108,7 @@ function ResourceList({
     text: text ?? null,
     sort,
     groupBy: statusColumn(gvr) ?? null,
+    values: values ?? null,
   });
   const now = useNow(1000);
   const [grid, setGrid] = useState<HTMLDivElement | null>(null);

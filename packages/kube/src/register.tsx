@@ -2,6 +2,9 @@ import { FolderTree } from "lucide-react";
 import type { Workbench } from "@twigo/workbench";
 import { Discovery } from "./discovery";
 import { Explorer, EXPLORER_VIEW } from "./Explorer";
+import { FilterField } from "./FilterField";
+import { HealthFilter } from "./HealthFilter";
+import { ListFilters } from "./filters";
 import { ListIcon } from "./KindIcon";
 import { ListEditor, type ListServices } from "./ListEditor";
 import { ListStatuses } from "./listStatus";
@@ -20,6 +23,7 @@ export function registerKube(workbench: Workbench): void {
   const services: ListServices = {
     discovery: new Discovery(workbench.backend),
     lists: new Lists(),
+    filters: new ListFilters(),
     selection: new Selection(),
     statuses: new ListStatuses(),
   };
@@ -77,7 +81,12 @@ export function registerKube(workbench: Workbench): void {
     id: "kube.list",
     alignment: "right",
     priority: 100,
-    component: () => <ListSummaryItem statuses={services.statuses} />,
+    component: () => (
+      <ListSummaryItem
+        statuses={services.statuses}
+        filters={services.filters}
+      />
+    ),
   });
 
   editors.register({
@@ -89,6 +98,16 @@ export function registerKube(workbench: Workbench): void {
     },
     icon: ListIcon,
     component: ({ uri }) => <ListEditor uri={uri} services={services} />,
+    actions: ({ uri }) => (
+      <div className="flex items-center gap-2">
+        <HealthFilter
+          uri={uri}
+          filters={services.filters}
+          statuses={services.statuses}
+        />
+        <FilterField uri={uri} filters={services.filters} />
+      </div>
+    ),
   });
 
   const moves: readonly {
@@ -134,6 +153,12 @@ export function registerKube(workbench: Workbench): void {
       keys: ["escape"],
       when: "detailsOpen",
       run: () => services.lists.focused()?.closeDetails?.(),
+    },
+    {
+      id: "k8s.list.filter",
+      title: "Filter Rows",
+      keys: ["/", "mod+f"],
+      run: () => services.lists.focused()?.filter?.(),
     },
     {
       id: "list.collapse",

@@ -16,7 +16,9 @@ import {
 } from "vitest";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { Workbench, WorkbenchView } from "@twigo/workbench";
+import { PODS } from "./kinds";
 import { registerKube } from "./register";
+import { cellTone } from "./tones";
 
 beforeAll(() => {
   Object.defineProperty(HTMLElement.prototype, "clientHeight", {
@@ -113,4 +115,54 @@ test("Enter on the selected row opens its details", async () => {
 test("the status bar counts the active list's rows", async () => {
   await podsList();
   expect(screen.getByText("5,000 pods")).toBeTruthy();
+});
+
+const statusOf = (row: HTMLElement) => row.children[3]?.textContent ?? "";
+const chip = (name: string) =>
+  screen.getByRole("button", { name: new RegExp(`^${name}`) });
+
+test("a health chip shows only its rows while every count stays", async () => {
+  await podsList();
+  const counts = () =>
+    ["All", "Failing", "Pending", "Healthy"].map(
+      (name) => chip(name).textContent,
+    );
+  const before = counts();
+  fireEvent.click(chip("Failing"));
+  await settle();
+  expect(chip("Failing").getAttribute("aria-pressed")).toBe("true");
+  expect(rows().length).toBeGreaterThan(0);
+  expect(
+    rows().filter((row) => cellTone(PODS, "Status", statusOf(row)) !== "error"),
+  ).toEqual([]);
+  expect(counts()).toEqual(before);
+  fireEvent.click(chip("All"));
+  await settle();
+  expect(screen.getByText("5,000 pods")).toBeTruthy();
+});
+
+test("a count in the status bar shows only those rows", async () => {
+  await podsList();
+  fireEvent.click(screen.getByRole("button", { name: /pending:/ }));
+  await settle();
+  expect(chip("Pending").getAttribute("aria-pressed")).toBe("true");
+  expect(
+    rows().filter((row) => cellTone(PODS, "Status", statusOf(row)) !== "warn"),
+  ).toEqual([]);
+});
+
+test("/ in the list focuses the filter field, and its text filters the rows", async () => {
+  await podsList();
+  act(() => {
+    screen.getByRole("grid").focus();
+  });
+  key("Slash");
+  const field = screen.getByRole("textbox", { name: "Filter rows" });
+  expect(document.activeElement).toBe(field);
+  fireEvent.change(field, { target: { value: "ImagePullBackOff" } });
+  await settle();
+  expect(rows().length).toBeGreaterThan(0);
+  expect(rows().filter((row) => statusOf(row) !== "ImagePullBackOff")).toEqual(
+    [],
+  );
 });
