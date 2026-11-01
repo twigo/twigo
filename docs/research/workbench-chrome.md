@@ -50,9 +50,10 @@ The choices it led to are in [ARCHITECTURE](../ARCHITECTURE.md) 4.1, 4.2 and 4.9
 ## Decided with the owner, 2026-11-01
 
 - A rail of space tiles at the left, as Lens's hotbar, replaces the activity bar; ⌘1..9 follow its order, and a button opens the picker of every context.
-- The title bar is a breadcrumb of the space and its namespace scope that opens the `ctx ` and `ns ` pickers, a search that opens quick access, and the part toggles; a coloured context draws a strip under it.
+- The title bar is a breadcrumb of the space and its namespace scope that opens the `ctx ` and `ns ` pickers, a search that opens quick access, and the part toggles; a coloured context tints its left end.
 - Islands surfaces, connected tabs, sentence-case headers, weights 400 and 600.
-- The UI font, system or Inter, is chosen on live variants.
+- Side by side with vscode.dev in the same browser, Twigo still read as a web page; VS Code's computed styles showed why: the system UI font, text at #CCCCCC, neutral greys with the editor a step lighter than the shell, and smaller title bar controls.
+  Twigo took the same kind of ramp and the platform's UI font, without copying VS Code's chrome.
 
 ## Left for later
 

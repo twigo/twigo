@@ -495,7 +495,6 @@ The bench also replays the cases that broke other clients, and one that loopback
 
 ```
 ┌ ●●● ● prod-eu 🔒 ▾ › payments ▾      ⌕ Search prod-eu      ◧ ▭ ◨ ── title bar ─┐
-├━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ strip: context colour ┤
 │ PE │╭ Explorer ───╮╭ ⎈ pod/api-7f9 │ deploy/api ─────────╮╭ Inspector ─────────╮│
 │ ST ││ ▾ Workloads ││                                      ││ details of the     ││
 │ DQ ││   Pods  2.1k││   editor groups (dockview grid)      ││ selection; later   ││
@@ -529,7 +528,7 @@ The layout per space is persisted (dockview `toJSON` plus part sizes and visibil
   The rail shows a tile per open space: two letters on the tint of its context's colour, the active one ringed and marked, a lock badge on a locked context.
   The title bar's breadcrumb names the active space and its namespace scope and opens their pickers.
   An optional user-chosen colour from the context's metadata (5.5) is the only extra colour, from six tokens: red, orange, yellow, green, blue and purple.
-  It tints the tile, puts a filled 8 px dot before the name in the breadcrumb, and draws a 2 px strip under the title bar.
+  It tints the tile, puts a filled 8 px dot before the name in the breadcrumb, and tints the title bar's left end behind it, as JetBrains does with a project's colour.
   A space with several contexts shows none.
 - Every editor in a space belongs to that space's contexts.
   Opening another cluster's object means switching spaces or running **Compare with…**, which opens a diff editor against an object picked from any context and says so in its title.
@@ -684,17 +683,17 @@ It moves into `packages/ui` unchanged and gets extended for the new views.
 - **Tokens (`theme.css`).**
   - An azure brand pair (`--brand` at oklch hue ≈245).
     Changing that pair re-skins the app.
-  - Neutrals are tinted with the brand hue.
-    Light-mode content surfaces stay white.
-    Dark mode has a surface ladder: the parts (editor, side bars, panel) 0.195, card 0.215, the shell 0.255, popover 0.275; content is darkest, as JetBrains Islands does.
+  - Neutral greys with a trace of the brand hue: an app's chrome, not a tinted dashboard.
+    The shell and the side bars share one tone and the editor is the surface that stands out: 0.975 and white on light, 0.205 and 0.235 on dark, with card 0.25 and popover 0.27, as VS Code's ramp.
+    Text sits a step below white on dark (0.87).
   - Hover and selection are alpha overlays, so they work on any surface.
   - A two-layer focus ring.
   - Hairline borders in alpha tiers.
   - The status bar is shell with quiet text; colour is left for the cluster.
 - **Type.**
-  - Inter Variable with `cv01` and `ss03`, or the system UI font: chosen on live variants; tabular numbers for every metric column.
+  - The platform's UI font, SF on macOS, as VS Code; tabular numbers for every metric column.
   - Two weights, 400 and 600, as VS Code and JetBrains; 13 px base, 12 px secondary, 11 px labels; sentence case, no capitals.
-  - Dense rows: 22 px in trees, 24 px in tables.
+  - Dense rows: 22 px in trees and tables; icons 16 px, Lucide's 1.5 stroke drawing 1 px lines.
 - **Surfaces.**
   The parts are islands on the shell (4.1), and editor tabs connect to their editor: the active tab takes the editor's surface.
 - **Motion.**
