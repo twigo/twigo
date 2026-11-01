@@ -184,23 +184,23 @@ test("pinned states keep or drop rows as Rust does", async () => {
   }
 });
 
-test("text matches the columns of priority 0 unless the query names its columns", async () => {
-  const total = async (text: string, columns: string[] | null) =>
+test("text matches the columns of priority 0 and those the query's choices show", async () => {
+  const total = async (text: string, columns: Record<string, boolean> | null) =>
     (await open("ready", query({ text, columns }))).batches[0]?.total;
   expect(await total("<none>", null)).toBe(0);
   expect(await total("10.244.", null)).toBe(0);
-  expect(await total("10.244.", ["Name", "IP"])).toBe(5000);
+  expect(await total("10.244.", { IP: true })).toBe(5000);
   expect(await total("kube-system", null)).toBeGreaterThan(0);
-  expect(await total("kube-system", ["Name"])).toBe(0);
+  expect(await total("kube-system", { Namespace: false })).toBe(0);
 });
 
-test("a named column the list lacks is no error", async () => {
+test("a choice for a column the list lacks does nothing", async () => {
   const one = await open(
     "ready",
     query({
       namespaces: ["payments"],
       text: "payments",
-      columns: ["Name", "Namespace", "IP"],
+      columns: { Namespace: true, IP: true },
     }),
   );
   expect(one.batches[0]?.total).toBeGreaterThan(0);

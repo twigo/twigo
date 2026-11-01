@@ -65,7 +65,7 @@ export function runQuery(
   const withNamespace = columns.some((column) => column.name === "Namespace");
   const cells = (pod: Pod) => podCells(pod, withContext, withNamespace);
   const matched = (column: Column) =>
-    query.columns ? query.columns.includes(column.name) : column.priority === 0;
+    query.columns?.[column.name] ?? column.priority === 0;
   const shown = columns.flatMap((column, i) => (matched(column) ? [i] : []));
   const namespaces = new Set(query.namespaces);
   const text = query.text?.trim().toLowerCase() ?? "";

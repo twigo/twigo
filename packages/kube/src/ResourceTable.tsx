@@ -157,13 +157,10 @@ function ResourceList({
   }
   const shown = (column: Column) =>
     column.name === "Name" || (choices[column.name] ?? column.priority === 0);
-  // The latest batch's columns name the shown ones to the text filter; null
-  // without a text or a column choice, so neither resubscribes for nothing.
-  const [known, setKnown] = useState<readonly Column[]>([]);
+  // Without a text the choices change no rows, so they stay out of the
+  // query and a column toggle does not resubscribe.
   const matched =
-    text && known.some((column) => shown(column) !== (column.priority === 0))
-      ? known.filter(shown).map((column) => column.name)
-      : null;
+    text && Object.keys(choices).length > 0 ? { ...choices } : null;
   const { snapshot, flash, setWindow } = useListView(backend, {
     space,
     gvr,
@@ -175,7 +172,6 @@ function ResourceList({
     groupBy: statusColumn(gvr) ?? null,
     values: values ?? null,
   });
-  if (snapshot.columns !== known) setKnown(snapshot.columns);
   const now = useNow(1000);
   const [grid, setGrid] = useState<HTMLDivElement | null>(null);
   const { status } = snapshot;

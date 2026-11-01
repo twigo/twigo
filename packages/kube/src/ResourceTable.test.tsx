@@ -366,3 +366,23 @@ test.each([
     expect(screen.queryByText("No matching pods") === null).toBe(matches);
   },
 );
+
+test("the first subscription already carries the column choices the text filter follows", async () => {
+  const backend = createMockBackend("ready");
+  const subscribe = vi.spyOn(backend, "subscribe");
+  render(
+    <ResourceTable
+      backend={backend}
+      space="prod-eu"
+      gvr={PODS}
+      title="Pods"
+      text="10.244."
+      choices={{ IP: true }}
+    />,
+  );
+  await settle();
+  const queries = subscribe.mock.calls.flatMap(([, request]) =>
+    request && "columns" in request ? [request.columns] : [],
+  );
+  expect(queries).toEqual([{ IP: true }]);
+});

@@ -1,6 +1,8 @@
 //! Resource lists: a subscription per view, filtered, sorted and windowed in
 //! Rust (ARCHITECTURE 3.4), delivered as batches with flow control (3.5).
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -23,11 +25,12 @@ pub struct ListQuery {
     pub namespaces: Vec<String>,
     pub label_selector: Option<String>,
     pub text: Option<String>,
-    /// The shown columns by name, which the text filter matches; null for
-    /// the columns of priority 0. A name the list lacks is skipped: the
-    /// client names the columns of its last batch, and a query for one
-    /// namespace drops Namespace.
-    pub columns: Option<Vec<String>>,
+    /// The user's column choices by name, which the text filter follows:
+    /// true shows a column, false hides it, and the rest show by priority 0.
+    /// The server resolves them against its own columns, so a choice for a
+    /// column the list lacks, such as Namespace under one namespace, does
+    /// nothing. Null shows the columns of priority 0.
+    pub columns: Option<BTreeMap<String, bool>>,
     pub sort: Option<Sort>,
     /// A column to count the matching rows by, such as a pod's Status.
     pub group_by: Option<String>,

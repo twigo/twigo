@@ -111,12 +111,13 @@ export type ListQuery = { space: string, gvr: Gvr,
  */
 namespaces: Array<string>, labelSelector: string | null, text: string | null, 
 /**
- * The shown columns by name, which the text filter matches; null for
- * the columns of priority 0. A name the list lacks is skipped: the
- * client names the columns of its last batch, and a query for one
- * namespace drops Namespace.
+ * The user's column choices by name, which the text filter follows:
+ * true shows a column, false hides it, and the rest show by priority 0.
+ * The server resolves them against its own columns, so a choice for a
+ * column the list lacks, such as Namespace under one namespace, does
+ * nothing. Null shows the columns of priority 0.
  */
-columns: Array<string> | null, sort: Sort | null, 
+columns: { [key in string]: boolean } | null, sort: Sort | null, 
 /**
  * A column to count the matching rows by, such as a pod's Status.
  */

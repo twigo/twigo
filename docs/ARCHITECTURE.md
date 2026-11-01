@@ -388,8 +388,8 @@ The webview then sends `setWindow(start, end)` as the user scrolls, covering the
   - Cells carry their column type, but many core columns are formatted strings: Pod Ready `1/2`, Restarts `3 (5m ago)`, Age.
   - Rust derives sort keys: known formats are parsed (ratios, leading counts, durations, Age from `creationTimestamp`), and other strings sort naturally.
 - A change set updates the index in O(log n) per row and computes what changed **inside the window**.
-- Text filter: substring or fuzzy match on the columns the table shows, Name among them, which `columns` names; without it, on the columns of priority 0.
-  A name the list lacks is skipped, since the webview names the columns of its last batch and a query for one namespace drops Namespace.
+- Text filter: substring or fuzzy match on the columns the table shows, Name among them.
+  `columns` carries the user's choices by name, and Rust resolves them against its own columns, so the first batch already filters right and a choice for a column the list lacks, such as Namespace under one namespace, does nothing; without choices the columns of priority 0 count.
   `/!` negates; a regex can be given explicitly, k9s style.
 - Values keep the rows whose column holds one of them, such as a pod's Status in CrashLoopBackOff or Error.
   `groupBy` counts the rows before values drop any, so a filter by health keeps every health's count.
