@@ -106,7 +106,22 @@ impl Connections {
     /// keep running: their owners re-open them after the returned
     /// generation, which [`Connections::retired`] also tells.
     pub fn retire(&self) {
-        let mut state = self.state();
+        self.retire_locked(self.state());
+    }
+
+    /// Retires every connection unless a retirement came after `seen`, a
+    /// value of [`Connections::retired`]: several upstreams whose probes
+    /// fail at once retire the connection once.
+    pub fn retire_after(&self, seen: u64) -> bool {
+        let state = self.state();
+        if *self.0.retired.borrow() != seen {
+            return false;
+        }
+        self.retire_locked(state);
+        true
+    }
+
+    fn retire_locked(&self, mut state: std::sync::MutexGuard<'_, State>) {
         state.floor = state.next;
         for open in state.open.values_mut() {
             open.retired = true;
@@ -114,7 +129,7 @@ impl Connections {
                 poison(capture);
             }
         }
-        drop(state);
+        // Under the lock, so that a concurrent `retire_after` sees it.
         self.0.retired.send_modify(|generation| *generation += 1);
     }
 
@@ -523,6 +538,17 @@ mod tests {
             connections.usable(),
             "an HTTP/1.1 connection may just be busy"
         );
+    }
+
+    #[test]
+    fn probes_that_fail_together_retire_once() {
+        let connections = Connections::default();
+        let mut retired = connections.retired();
+        let seen = *retired.borrow_and_update();
+        assert!(connections.retire_after(seen));
+        assert!(!connections.retire_after(seen), "the first one retired");
+        assert_eq!(*retired.borrow_and_update(), seen + 1);
+        assert!(connections.retire_after(seen + 1));
     }
 
     #[test]
