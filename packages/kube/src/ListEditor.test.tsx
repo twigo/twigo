@@ -425,6 +425,16 @@ test("the details open the object once the selection rests on a row, not while i
   expect(opened()).toHaveLength(0);
   await settle();
   expect(opened()).toHaveLength(1);
+  const shown = rows().find(
+    (row) => row.getAttribute("aria-selected") === "true",
+  );
+  expect(opened()[0]?.[1]).toMatchObject({
+    object: {
+      namespaced: true,
+      namespace: shown?.children[1]?.textContent,
+      name: shown?.children[0]?.textContent,
+    },
+  });
   expect(
     within(details() ?? document.body).getByRole("region", {
       name: "Metadata",

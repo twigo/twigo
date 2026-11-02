@@ -166,3 +166,19 @@ test("a view closed before its id comes closes the object once it does", async (
   await vi.runAllTimersAsync();
   expect(fake.calls).toContainEqual(["object_close", 4]);
 });
+
+test("values asked for before the id comes are read once it does", async () => {
+  const fake = fakeBackend();
+  const view = new ObjectView(fake.backend, POD, OVERVIEW);
+  const read = view.values(["mode"]);
+  await vi.runAllTimersAsync();
+  expect(fake.calls.some(([command]) => command === "object_values")).toBe(
+    false,
+  );
+  fake.resolve(5);
+  await read;
+  expect(fake.calls).toContainEqual([
+    "object_values",
+    { id: 5, keys: ["mode"] },
+  ]);
+});

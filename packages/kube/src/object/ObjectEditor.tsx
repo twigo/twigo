@@ -3,6 +3,7 @@ import type {
   ObjectQuery,
   ObjectRef,
   ObjectSnapshot,
+  Related,
   RelatedObject,
 } from "@twigo/protocol";
 import {
@@ -96,21 +97,7 @@ export function ObjectEditor({
       {tab === "related" && (
         <Shown snapshot={snapshot} has={snapshot.related !== undefined}>
           {snapshot.related && (
-            <div className="flex flex-col gap-4">
-              {snapshot.related.unavailable !== null && (
-                <p className="text-error">{snapshot.related.unavailable}</p>
-              )}
-              <RelatedList
-                title="Owners"
-                objects={snapshot.related.owners}
-                onOpen={open}
-              />
-              <RelatedList
-                title="Owns"
-                objects={snapshot.related.owned}
-                onOpen={open}
-              />
-            </div>
+            <RelatedView related={snapshot.related} onOpen={open} />
           )}
         </Shown>
       )}
@@ -151,6 +138,31 @@ function Shown({
       </div>
     );
   return children;
+}
+
+/** An object's owners and the objects it owns, or why those cannot be listed. */
+export function RelatedView({
+  related,
+  onOpen,
+}: {
+  related: Related;
+  onOpen: (target: ObjectRef) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      <RelatedList title="Owners" objects={related.owners} onOpen={onOpen} />
+      {related.unavailable === null ? (
+        <RelatedList title="Owns" objects={related.owned} onOpen={onOpen} />
+      ) : (
+        <section aria-label="Owns">
+          <h3 className="mb-1 text-xs font-semibold text-muted-foreground">
+            Owns
+          </h3>
+          <p className="text-error">{related.unavailable}</p>
+        </section>
+      )}
+    </div>
+  );
 }
 
 function RelatedList({

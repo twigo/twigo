@@ -44,6 +44,7 @@ export class ObjectView {
   readonly #listeners = new Set<() => void>();
   #snapshot = INITIAL_OBJECT;
   #id: SubscriptionId | undefined;
+  readonly #opened: Promise<SubscriptionId>;
   #parts: ObjectParts;
   #partsSent: ObjectParts;
   #unacked: number | undefined;
@@ -53,24 +54,27 @@ export class ObjectView {
     this.#backend = backend;
     this.#parts = parts;
     this.#partsSent = parts;
-    backend
-      .subscribe("object_open", { object, parts }, (batch) => {
+    this.#opened = backend.subscribe(
+      "object_open",
+      { object, parts },
+      (batch) => {
         this.#apply(batch);
-      })
-      .then(
-        (id) => {
-          this.#id = id;
-          if (this.#closed) {
-            void this.#backend.invoke("object_close", id);
-            return;
-          }
-          if (!sameParts(this.#parts, this.#partsSent)) this.#sendParts();
-          if (this.#unacked !== undefined) this.#ack(this.#unacked);
-        },
-        (error: unknown) => {
-          this.#fail(error);
-        },
-      );
+      },
+    );
+    this.#opened.then(
+      (id) => {
+        this.#id = id;
+        if (this.#closed) {
+          void this.#backend.invoke("object_close", id);
+          return;
+        }
+        if (!sameParts(this.#parts, this.#partsSent)) this.#sendParts();
+        if (this.#unacked !== undefined) this.#ack(this.#unacked);
+      },
+      (error: unknown) => {
+        this.#fail(error);
+      },
+    );
   }
 
   readonly subscribe = (listener: () => void): (() => void) => {
@@ -87,14 +91,12 @@ export class ObjectView {
   }
 
   /** The values of a ConfigMap's keys; null for a key it lacks or holds as binary data. */
+  /** Waits for the subscription's id, since a batch may come before it. */
   values(keys: readonly string[]): Promise<(string | null)[]> {
-    if (this.#id === undefined)
-      return Promise.reject(
-        new IpcError("unavailable", "the object is not open yet"),
-      );
-    return this.#backend.invoke("object_values", {
-      id: this.#id,
-      keys: [...keys],
+    return this.#opened.then((id) => {
+      if (this.#closed)
+        throw new IpcError("unavailable", "the object is closed");
+      return this.#backend.invoke("object_values", { id, keys: [...keys] });
     });
   }
 
