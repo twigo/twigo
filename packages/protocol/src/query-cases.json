@@ -1,5 +1,5 @@
 {
-  "about": "Query cases that the mock (src/mock/query.test.ts) and Rust's query view (crates/twigo-cache/tests/query_cases.rs) both run, so they sort, filter, count and window alike (ARCHITECTURE 3.4). Rows hold the server's cells, null in Age columns; each list's rows pass through its namespaces first, as the hub's upstreams do. A case's query lists only what it sets; ids are in the window's order, and a case that expects `refused` expects the query refused with that error kind.",
+  "about": "Query cases that the mock (src/mock/query.test.ts) and Rust's query view (crates/twigo-cache/tests/query_cases.rs) both run, so they sort, filter, count, group and window alike (ARCHITECTURE 3.4). Rows hold the server's cells, null in Age columns; each list's rows pass through its namespaces first, as the hub's upstreams do. A case's query lists only what it sets; ids are in the window's order, and the window indexes the rows of the groups not collapsed; a case that sets groupBy expects its groups, none without `groups`; and a case that expects `refused` expects the query refused with that error kind.",
   "context": "kind-test",
   "lists": [
     {
@@ -604,6 +604,285 @@
           }
         },
         {
+          "name": "groups follow the natural order of their text, not the sort's keys",
+          "query": {
+            "groupBy": {
+              "column": "Restarts",
+              "collapsed": []
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 8,
+            "ids": [
+              "kind-test/beta/api-1",
+              "kind-test/alpha/web-1",
+              "kind-test/beta/web-09",
+              "kind-test/beta/Web-3",
+              "kind-test/beta/api-2",
+              "kind-test/alpha/web-10",
+              "kind-test/alpha/db-1",
+              "kind-test/alpha/web-2"
+            ],
+            "groups": [
+              {
+                "value": "0",
+                "rows": 3,
+                "counts": []
+              },
+              {
+                "value": "1 (45s ago)",
+                "rows": 1,
+                "counts": []
+              },
+              {
+                "value": "2",
+                "rows": 1,
+                "counts": []
+              },
+              {
+                "value": "3 (1h ago)",
+                "rows": 1,
+                "counts": []
+              },
+              {
+                "value": "3 (5m ago)",
+                "rows": 1,
+                "counts": []
+              },
+              {
+                "value": "12 (5m ago)",
+                "rows": 1,
+                "counts": []
+              }
+            ]
+          }
+        },
+        {
+          "name": "a collapsed group counts in the total, the counts and its rows, but not in the window",
+          "query": {
+            "groupBy": {
+              "column": "Namespace",
+              "collapsed": ["alpha", "gamma"]
+            },
+            "countBy": "Status"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 8,
+            "ids": [
+              "kind-test/beta/api-1",
+              "kind-test/beta/api-2",
+              "kind-test/beta/Web-3",
+              "kind-test/beta/web-09"
+            ],
+            "counts": [
+              {
+                "value": "Running",
+                "count": 4
+              },
+              {
+                "value": "Completed",
+                "count": 1
+              },
+              {
+                "value": "CrashLoopBackOff",
+                "count": 1
+              },
+              {
+                "value": "Error",
+                "count": 1
+              },
+              {
+                "value": "Pending",
+                "count": 1
+              }
+            ],
+            "groups": [
+              {
+                "value": "alpha",
+                "rows": 4,
+                "counts": [
+                  {
+                    "value": "Running",
+                    "count": 3
+                  },
+                  {
+                    "value": "CrashLoopBackOff",
+                    "count": 1
+                  }
+                ]
+              },
+              {
+                "value": "beta",
+                "rows": 4,
+                "counts": [
+                  {
+                    "value": "Completed",
+                    "count": 1
+                  },
+                  {
+                    "value": "Error",
+                    "count": 1
+                  },
+                  {
+                    "value": "Pending",
+                    "count": 1
+                  },
+                  {
+                    "value": "Running",
+                    "count": 1
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "the window indexes the rows of the groups not collapsed",
+          "query": {
+            "groupBy": {
+              "column": "Status",
+              "collapsed": ["CrashLoopBackOff"]
+            }
+          },
+          "window": [1, 4],
+          "expect": {
+            "total": 8,
+            "ids": [
+              "kind-test/beta/api-1",
+              "kind-test/beta/web-09",
+              "kind-test/alpha/db-1"
+            ],
+            "groups": [
+              {
+                "value": "Completed",
+                "rows": 1,
+                "counts": []
+              },
+              {
+                "value": "CrashLoopBackOff",
+                "rows": 1,
+                "counts": []
+              },
+              {
+                "value": "Error",
+                "rows": 1,
+                "counts": []
+              },
+              {
+                "value": "Pending",
+                "rows": 1,
+                "counts": []
+              },
+              {
+                "value": "Running",
+                "rows": 4,
+                "counts": []
+              }
+            ]
+          }
+        },
+        {
+          "name": "values empty a group, which goes, while the counts keep every row",
+          "query": {
+            "groupBy": {
+              "column": "Namespace",
+              "collapsed": []
+            },
+            "countBy": "Status",
+            "values": {
+              "column": "Status",
+              "values": ["Error"]
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 1,
+            "ids": ["kind-test/beta/api-1"],
+            "counts": [
+              {
+                "value": "Running",
+                "count": 4
+              },
+              {
+                "value": "Completed",
+                "count": 1
+              },
+              {
+                "value": "CrashLoopBackOff",
+                "count": 1
+              },
+              {
+                "value": "Error",
+                "count": 1
+              },
+              {
+                "value": "Pending",
+                "count": 1
+              }
+            ],
+            "groups": [
+              {
+                "value": "beta",
+                "rows": 1,
+                "counts": [
+                  {
+                    "value": "Completed",
+                    "count": 1
+                  },
+                  {
+                    "value": "Error",
+                    "count": 1
+                  },
+                  {
+                    "value": "Pending",
+                    "count": 1
+                  },
+                  {
+                    "value": "Running",
+                    "count": 1
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "a group column the list lacks groups nothing, and collapses nothing",
+          "query": {
+            "groupBy": {
+              "column": "Phase",
+              "collapsed": [""]
+            }
+          },
+          "window": [0, 2],
+          "expect": {
+            "total": 8,
+            "ids": ["kind-test/beta/api-1", "kind-test/beta/api-2"]
+          }
+        },
+        {
+          "name": "under one namespace there is no Namespace column to group by",
+          "query": {
+            "namespaces": ["alpha"],
+            "groupBy": {
+              "column": "Namespace",
+              "collapsed": []
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 4,
+            "ids": [
+              "kind-test/alpha/db-1",
+              "kind-test/alpha/web-1",
+              "kind-test/alpha/web-2",
+              "kind-test/alpha/web-10"
+            ]
+          }
+        },
+        {
           "name": "a window in the middle",
           "query": {},
           "window": [2, 4],
@@ -1079,6 +1358,158 @@
               {
                 "value": "true",
                 "count": 2
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "persistentvolumes",
+      "namespaced": false,
+      "columns": [
+        {
+          "name": "Name",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "Capacity",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "Status",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "Claim",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "StorageClass",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "Age",
+          "kind": "age",
+          "priority": 0
+        }
+      ],
+      "rows": [
+        {
+          "namespace": null,
+          "name": "pv-1",
+          "created": "2026-10-01T00:00:00Z",
+          "labels": {},
+          "cells": ["pv-1", "10Gi", "Bound", "alpha/data", "standard", null]
+        },
+        {
+          "namespace": null,
+          "name": "pv-2",
+          "created": "2026-10-02T00:00:00Z",
+          "labels": {},
+          "cells": ["pv-2", "5Gi", "Available", "", "standard", null]
+        },
+        {
+          "namespace": null,
+          "name": "pv-3",
+          "created": "2026-10-03T00:00:00Z",
+          "labels": {},
+          "cells": ["pv-3", "20Gi", "Bound", "beta/logs", "", null]
+        },
+        {
+          "namespace": null,
+          "name": "pv-10",
+          "created": "2026-10-04T00:00:00Z",
+          "labels": {},
+          "cells": ["pv-10", "1Gi", "Released", "alpha/old", "fast", null]
+        },
+        {
+          "namespace": null,
+          "name": "pv-9",
+          "created": "2026-10-05T00:00:00Z",
+          "labels": {},
+          "cells": ["pv-9", "2Gi", "Available", "", "", null]
+        }
+      ],
+      "cases": [
+        {
+          "name": "the empty value groups last",
+          "query": {
+            "groupBy": {
+              "column": "Claim",
+              "collapsed": []
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 5,
+            "ids": [
+              "kind-test/pv-1",
+              "kind-test/pv-10",
+              "kind-test/pv-3",
+              "kind-test/pv-2",
+              "kind-test/pv-9"
+            ],
+            "groups": [
+              {
+                "value": "alpha/data",
+                "rows": 1,
+                "counts": []
+              },
+              {
+                "value": "alpha/old",
+                "rows": 1,
+                "counts": []
+              },
+              {
+                "value": "beta/logs",
+                "rows": 1,
+                "counts": []
+              },
+              {
+                "value": "",
+                "rows": 2,
+                "counts": []
+              }
+            ]
+          }
+        },
+        {
+          "name": "the empty value collapses as any other, and rows keep the query's sort",
+          "query": {
+            "groupBy": {
+              "column": "StorageClass",
+              "collapsed": [""]
+            },
+            "sort": {
+              "column": "Name",
+              "descending": true
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 5,
+            "ids": ["kind-test/pv-10", "kind-test/pv-2", "kind-test/pv-1"],
+            "groups": [
+              {
+                "value": "fast",
+                "rows": 1,
+                "counts": []
+              },
+              {
+                "value": "standard",
+                "rows": 2,
+                "counts": []
+              },
+              {
+                "value": "",
+                "rows": 2,
+                "counts": []
               }
             ]
           }

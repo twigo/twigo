@@ -508,6 +508,51 @@ test("values of a column the list lacks keep every row", async () => {
   expect(batches[0]?.total).toBe(5000);
 });
 
+test("a grouped list sends its groups, and its window skips the collapsed ones", async () => {
+  const grouped = await open(
+    "ready",
+    query({ groupBy: { column: "Status", collapsed: [] } }),
+  );
+  const groups = grouped.batches[0]?.groups ?? [];
+  expect(groups.map((group) => group.value)).toEqual(
+    groups.map((group) => group.value).sort(natural),
+  );
+  expect(groups.reduce((sum, group) => sum + group.rows, 0)).toBe(5000);
+  const running = groups.find((group) => group.value === "Running")?.rows;
+  expect(running).toBeGreaterThan(0);
+
+  const collapsed = await open(
+    "ready",
+    query({ groupBy: { column: "Status", collapsed: ["Running"] } }),
+  );
+  await collapsed.ack();
+  await collapsed.window(0, 5000);
+  await vi.advanceTimersByTimeAsync(10);
+  const batch = last(collapsed.batches);
+  expect(batch?.total).toBe(5000);
+  expect(batch?.window?.ids).toHaveLength(5000 - (running ?? 0));
+  expect(collapsed.batches[0]?.groups).toEqual(groups);
+});
+
+test("groups come once a list knows its columns, empty until it shows rows", async () => {
+  for (const [scenario, groups] of [
+    ["connecting", null],
+    ["syncing", []],
+  ] as const) {
+    const sub = await open(
+      scenario,
+      query({ groupBy: { column: "Status", collapsed: [] } }),
+    );
+    expect(sub.batches[0]?.groups, scenario).toEqual(groups);
+  }
+  const odd = await open(
+    "ready",
+    query({ groupBy: { column: "Bogus", collapsed: [""] } }),
+  );
+  expect(odd.batches[0]?.groups).toBeNull();
+  expect(odd.batches[0]?.total).toBe(5000);
+});
+
 test("a request for an idle plugin's credential starts its run, and only sign-in links open", async () => {
   vi.useRealTimers();
   const backend = createMockBackend("review");

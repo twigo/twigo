@@ -458,6 +458,7 @@ class Subscription {
     versions: ReadonlyMap<RowId, number>;
     status: string;
     counts: string;
+    groups: string;
     columns: boolean;
   } = {
     total: -1,
@@ -466,6 +467,7 @@ class Subscription {
     versions: new Map(),
     status: "",
     counts: "",
+    groups: "null",
     columns: false,
   };
 
@@ -554,9 +556,12 @@ class Subscription {
 
   #rows(): QueryResult<PodRow> {
     if (!SHOWS_ROWS.has(this.#status.state)) {
+      const knows = KNOWS_COLUMNS.has(this.#status.state);
       return {
         rows: [],
+        readable: [],
         counts: this.#query.query.countBy === null ? null : [],
+        groups: this.#query.group === null || !knows ? null : [],
       };
     }
     const { version, pods } = this.#cluster;
@@ -579,14 +584,16 @@ class Subscription {
     if (!this.#window || !this.#dirty || this.#seq !== this.#acked) return;
     this.#dirty = false;
     this.#moved = false;
-    const { rows, counts } = this.#rows();
-    const pods = rows.map((row) => row.pod);
+    const { rows, readable, counts, groups } = this.#rows();
+    const total = rows.length;
     const [start, end] = this.#window;
-    const visible = pods.slice(start, end);
+    const visible = readable.slice(start, end).map((row) => row.pod);
     const ids = visible.map((pod) => pod.id);
     const status = JSON.stringify(this.#status);
     const countsJson = JSON.stringify(counts);
     const countsChanged = countsJson !== this.#sent.counts;
+    const groupsJson = JSON.stringify(groups);
+    const groupsChanged = groupsJson !== this.#sent.groups;
     const first = this.#seq === 0;
     const knows = KNOWS_COLUMNS.has(this.#status.state);
     const columnsChanged = first || knows !== this.#sent.columns;
@@ -603,31 +610,33 @@ class Subscription {
       upserts.length === 0 &&
       status === this.#sent.status &&
       !countsChanged &&
+      !groupsChanged &&
       !columnsChanged &&
-      pods.length === this.#sent.total
+      total === this.#sent.total
     ) {
       return;
     }
     const withNamespace = this.#columns.some((c) => c.name === "Namespace");
     this.#sent = {
-      total: pods.length,
+      total,
       start,
       ids,
       versions: new Map(visible.map((pod) => [pod.id, pod.version])),
       status,
       counts: countsJson,
+      groups: groupsJson,
       columns: knows,
     };
     this.#seq++;
     this.#onMessage({
       seq: this.#seq,
-      total: pods.length,
+      total,
       columns: columnsChanged ? (knows ? this.#columns : []) : null,
       window: windowChanged ? { start, ids } : null,
       upserts: upserts.map((pod) => podRow(pod, withNamespace)),
       status: this.#status,
       counts: counts && (first || countsChanged) ? counts : null,
-      groups: null,
+      groups: groupsChanged ? (groups ?? []) : null,
     });
   }
 }
