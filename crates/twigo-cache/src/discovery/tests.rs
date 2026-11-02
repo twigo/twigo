@@ -382,3 +382,52 @@ async fn clients_refused_for_an_untrusted_plugin_come_once_the_entry_changes() {
     edit.send_replace(Some(fingerprint("https://a.example:6443/other")));
     assert_eq!(names(&next(&mut follower).await), ["namespaces"]);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_change_that_lags_keeps_its_rechecks_across_a_restart() {
+    let fake = fake();
+    let (edit, entry) = watch::channel(Some(fingerprint("https://a.example:6443")));
+    let cache = tempfile::tempdir().unwrap();
+    let mut follower = edited_over(fake.hub(Budgets::default()).0, cache.path(), entry).await;
+    assert_eq!(names(&next(&mut follower).await), ["namespaces"]);
+
+    let start = Instant::now();
+    fake.add("customresourcedefinitions", None, "gadgets.example.com");
+    tokio::spawn({
+        let fake = fake.clone();
+        async move {
+            sleep(Duration::from_millis(300)).await;
+            edit.send_replace(Some(fingerprint("https://a.example:6443/kubens")));
+            sleep(Duration::from_millis(700)).await;
+            fake.state().serve("example.com", "gadgets", "Gadget");
+        }
+    });
+    assert_eq!(names(&next(&mut follower).await), ["namespaces", "gadgets"]);
+    assert_eq!(start.elapsed(), RECHECKS[0]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_cluster_recreated_at_the_same_address_shows_nothing_of_the_old_one() {
+    let old = fake();
+    old.state().serve("example.com", "widgets", "Widget");
+    let current = Arc::new(Mutex::new(Ok(old.clients_reaching(
+        Budgets::default(),
+        "https://192.168.49.2:8443 trusting ca-1",
+    ))));
+    let (edit, entry) = watch::channel(Some(fingerprint("https://192.168.49.2:8443")));
+    let cache = tempfile::tempdir().unwrap();
+    let mut follower = edited_over(Hub::new(swapping(&current)), cache.path(), entry).await;
+    assert_eq!(names(&next(&mut follower).await), ["namespaces", "widgets"]);
+
+    let booting = fake();
+    booting.state().unavailable = usize::MAX;
+    rebuild(
+        &current,
+        Ok(booting.clients_reaching(
+            Budgets::default(),
+            "https://192.168.49.2:8443 trusting ca-2",
+        )),
+    );
+    edit.send_replace(Some(fingerprint("https://192.168.49.2:8443/recreated")));
+    assert_eq!(failure(&next(&mut follower).await), ErrorKind::Unavailable);
+}

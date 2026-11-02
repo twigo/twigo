@@ -109,7 +109,7 @@ async fn a_fingerprint_changes_with_its_own_context_but_not_with_oidc_tokens() {
             &file,
             format!(
                 "clusters: [{{ name: c, cluster: {{ server: '{server}' }} }}]
-users: [{{ name: u, user: {{ auth-provider: {{ name: oidc, config: {{ idp-issuer-url: 'https://issuer.example', client-id: twigo, id-token: {token}, refresh-token: r }} }} }} }}]
+users: [{{ name: u, user: {{ auth-provider: {{ name: oidc, config: {{ idp-issuer-url: 'https://issuer.example', client-id: twigo, id-token: {token}, refresh-token: {token}-refresh }} }} }} }}]
 contexts: [{{ name: kind-a, context: {{ cluster: c, user: u }} }}, {{ name: kind-b, context: {{ cluster: c, namespace: {namespace} }} }}]
 "
             ),

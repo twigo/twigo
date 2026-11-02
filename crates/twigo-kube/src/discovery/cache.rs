@@ -1,4 +1,4 @@
-//! Discovery on disk, one file per server, so a start revalidates it with
+//! Discovery on disk, one file per cluster, so a start revalidates it with
 //! its ETags instead of downloading it again.
 
 use std::io::{self, Write as _};
@@ -17,10 +17,11 @@ impl Cache {
         Self { dir: dir.into() }
     }
 
-    /// The server's discovery as last stored, if any; a file that cannot
-    /// be read is an error, though the next store replaces it.
-    pub fn load(&self, server: &str) -> io::Result<Option<Discovery>> {
-        let json = match std::fs::read(self.path(server)) {
+    /// The cluster's discovery as last stored, if any; a file that cannot
+    /// be read is an error, though the next store replaces it. `cluster`
+    /// names it as `Clients::cluster` does.
+    pub fn load(&self, cluster: &str) -> io::Result<Option<Discovery>> {
+        let json = match std::fs::read(self.path(cluster)) {
             Ok(json) => json,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
@@ -30,7 +31,7 @@ impl Cache {
             .map_err(io::Error::other)
     }
 
-    pub fn store(&self, server: &str, discovery: &Discovery) -> io::Result<()> {
+    pub fn store(&self, cluster: &str, discovery: &Discovery) -> io::Result<()> {
         let json = serde_json::to_vec(discovery).expect("discovery serializes");
         std::fs::create_dir_all(&self.dir)?;
         let mut options = AtomicWriteFile::options();
@@ -41,15 +42,15 @@ impl Cache {
             // It names the cluster's custom resources.
             options.preserve_mode(false).mode(0o600);
         }
-        let mut file = options.open(self.path(server))?;
+        let mut file = options.open(self.path(cluster))?;
         file.write_all(&json)?;
         file.commit()
     }
 
-    /// Named by a digest of the server's URL, which may hold any
+    /// Named by a digest of the cluster's name, which may hold any
     /// character.
-    fn path(&self, server: &str) -> PathBuf {
-        let digest = ring::digest::digest(&ring::digest::SHA256, server.as_bytes());
+    fn path(&self, cluster: &str) -> PathBuf {
+        let digest = ring::digest::digest(&ring::digest::SHA256, cluster.as_bytes());
         let name: String = digest.as_ref()[..16]
             .iter()
             .map(|byte| format!("{byte:02x}"))

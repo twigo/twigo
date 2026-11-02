@@ -56,7 +56,7 @@ pub struct Clients {
     pub api: Client,
     /// Exec, attach and port-forward: their WebSocket upgrade needs HTTP/1.1.
     pub sessions: Client,
-    server: http::Uri,
+    cluster: String,
     counter: Counter,
     connections: Connections,
 }
@@ -140,15 +140,16 @@ impl Clients {
         Ok(Clients {
             api: Client::new(api, config.default_namespace.clone()),
             sessions: kube_client(config, sessions, auth())?,
-            server: config.cluster_url.clone(),
+            cluster: cluster(config),
             counter,
             connections,
         })
     }
 
-    /// Clients over `service` in place of a server, `https://fake.invalid`,
-    /// with the stream counter of `budgets` and connections that nothing
-    /// dials: for the tests of what runs over them.
+    /// Clients over `service` in place of a server, the cluster
+    /// `https://fake.invalid`, with the stream counter of `budgets` and
+    /// connections that nothing dials: for the tests of what runs over
+    /// them.
     #[cfg(feature = "test-util")]
     pub fn over<S, B>(service: S, budgets: Budgets) -> Self
     where
@@ -168,15 +169,25 @@ impl Clients {
         Clients {
             api: Client::new(api, "default"),
             sessions: Client::new(service, "default"),
-            server: http::Uri::from_static("https://fake.invalid"),
+            cluster: "https://fake.invalid".to_owned(),
             counter,
             connections: Connections::default(),
         }
     }
 
-    /// The URL of the API server they reach.
-    pub fn server(&self) -> &http::Uri {
-        &self.server
+    /// The cluster they reach: its URL and the certificates they trust it
+    /// with, since a cluster recreated at the same address, as minikube's
+    /// or kind's on a fixed port, gets a CA of its own.
+    pub fn cluster(&self) -> &str {
+        &self.cluster
+    }
+
+    /// The same clients, said to reach `cluster`: for the tests of what
+    /// tells clusters apart.
+    #[cfg(feature = "test-util")]
+    pub fn reaching(mut self, cluster: &str) -> Self {
+        self.cluster = cluster.to_owned();
+        self
     }
 
     pub fn usage(&self) -> watch::Receiver<Usage> {
@@ -186,6 +197,27 @@ impl Clients {
     pub fn connections(&self) -> &Connections {
         &self.connections
     }
+}
+
+/// The cluster's URL with a digest of the CAs it is trusted with, or a word
+/// for the system's roots or any certificate.
+fn cluster(config: &Config) -> String {
+    let trust = match &config.root_cert {
+        _ if config.accept_invalid_certs => "any certificate".to_owned(),
+        None => "the system's roots".to_owned(),
+        Some(certificates) => {
+            let mut context = ring::digest::Context::new(&ring::digest::SHA256);
+            for certificate in certificates {
+                context.update(&(certificate.len() as u64).to_be_bytes());
+                context.update(certificate);
+            }
+            context.finish().as_ref()[..16]
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect()
+        }
+    };
+    format!("{} trusting {trust}", config.cluster_url)
 }
 
 /// The config without what kube would get credentials from itself: the
@@ -290,4 +322,32 @@ fn connector(
     // No read timeout: it would time the whole multiplexed connection, so a
     // quiet cluster would cut every watch.
     Ok(connector)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cluster_is_its_url_and_what_it_is_trusted_with() {
+        let with = |certificates: Option<Vec<Vec<u8>>>, any: bool| {
+            let mut config = Config::new(http::Uri::from_static("https://192.168.49.2:8443"));
+            config.root_cert = certificates;
+            config.accept_invalid_certs = any;
+            cluster(&config)
+        };
+        let first = with(Some(vec![b"ca-1".to_vec()]), false);
+        assert!(
+            first.starts_with("https://192.168.49.2:8443/ trusting "),
+            "{first}"
+        );
+        assert_eq!(first, with(Some(vec![b"ca-1".to_vec()]), false));
+        assert_ne!(first, with(Some(vec![b"ca-2".to_vec()]), false));
+        assert_ne!(
+            with(Some(vec![b"ab".to_vec(), b"c".to_vec()]), false),
+            with(Some(vec![b"a".to_vec(), b"bc".to_vec()]), false)
+        );
+        assert!(with(None, false).ends_with("trusting the system's roots"));
+        assert!(with(Some(vec![b"ca-1".to_vec()]), true).ends_with("trusting any certificate"));
+    }
 }

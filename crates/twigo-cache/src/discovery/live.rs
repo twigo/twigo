@@ -57,8 +57,10 @@ async fn a_second_start_answers_from_the_cache_with_304() {
         "customresourcedefinitions"
     ));
     drop(first);
-    let server = clients.server().to_string();
-    let stored = cache.load(&server).unwrap().expect("a cached discovery");
+    let stored = cache
+        .load(clients.cluster())
+        .unwrap()
+        .expect("a cached discovery");
     let files: Vec<_> = std::fs::read_dir(dir.path())
         .unwrap()
         .map(|entry| entry.unwrap().path())

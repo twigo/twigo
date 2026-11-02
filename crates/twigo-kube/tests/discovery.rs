@@ -277,19 +277,24 @@ async fn a_refusal_keeps_the_servers_status() {
 }
 
 #[tokio::test]
-async fn the_cache_keeps_discovery_per_server() {
+async fn the_cache_keeps_discovery_per_cluster() {
     let dir = tempfile::tempdir().unwrap();
     let cache = Cache::new(dir.path().join("discovery"));
-    let server = "https://127.0.0.1:6443";
-    assert!(cache.load(server).unwrap().is_none());
+    let cluster = "https://127.0.0.1:6443 trusting 0123456789abcdef";
+    assert!(cache.load(cluster).unwrap().is_none());
     let discovery = Discovery::refresh(&Server::kind().client(), None)
         .await
         .unwrap()
         .unwrap();
 
-    cache.store(server, &discovery).unwrap();
-    assert_eq!(cache.load(server).unwrap(), Some(discovery));
-    assert!(cache.load("https://127.0.0.1:6444").unwrap().is_none());
+    cache.store(cluster, &discovery).unwrap();
+    assert_eq!(cache.load(cluster).unwrap(), Some(discovery));
+    assert!(
+        cache
+            .load("https://127.0.0.1:6443 trusting fedcba9876543210")
+            .unwrap()
+            .is_none()
+    );
     let files: Vec<_> = std::fs::read_dir(dir.path().join("discovery"))
         .unwrap()
         .map(|entry| entry.unwrap().path())
@@ -303,5 +308,5 @@ async fn the_cache_keeps_discovery_per_server() {
     }
 
     std::fs::write(&files[0], b"{").unwrap();
-    assert!(cache.load(server).is_err());
+    assert!(cache.load(cluster).is_err());
 }

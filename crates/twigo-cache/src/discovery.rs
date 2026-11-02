@@ -35,11 +35,13 @@ pub struct Follower {
     /// The context's fingerprint, whose change restarts the follower.
     entry: watch::Receiver<Option<Fingerprint>>,
     indexes: [Index; 2],
-    /// The discovery last answered, or cached, by the server's URL.
+    /// The discovery last answered, or cached, by the cluster, as
+    /// `Clients::cluster` names it.
     known: Option<(String, Discovery)>,
     /// Whether the server answered `known` to this follower: a cached copy
-    /// may be another cluster's that took over the URL, which only the
-    /// server's ETags tell apart.
+    /// may be another cluster's at the same address and with the same
+    /// trust, as behind a load balancer, which only the server's ETags tell
+    /// apart.
     confirmed: bool,
     /// Whether the clients of the last fetch were replaced.
     abandoned: Option<watch::Receiver<bool>>,
@@ -141,11 +143,11 @@ impl Follower {
 
     /// Holds the indexes anew, which restarts those a failed credential
     /// ended, as the hub restarts an ended upstream for a new subscription,
-    /// and forgets the failure and the fetches due.
+    /// and forgets the failure; the fetches due after a change stay, since
+    /// the server's discovery may still lag it.
     async fn restart(&mut self) {
         self.indexes = indexes(&self.hub, &self.context).await;
         self.failed = None;
-        self.due.clear();
     }
 
     async fn fetch(&mut self) -> Discovered {
@@ -160,24 +162,24 @@ impl Follower {
             }
         };
         self.abandoned = Some(clients.connections().abandoned());
-        let server = clients.server().to_string();
+        let cluster = clients.cluster().to_owned();
         if self
             .known
             .as_ref()
-            .is_none_or(|(known, _)| *known != server)
+            .is_none_or(|(known, _)| *known != cluster)
         {
             self.known = self
-                .load(&server)
+                .load(&cluster)
                 .await
-                .map(|found| (server.clone(), found));
+                .map(|found| (cluster.clone(), found));
             self.confirmed = false;
         }
         let cached = self.known.as_ref().map(|(_, discovery)| discovery);
         match Discovery::refresh(&clients.api, cached).await {
             Ok(None) => self.confirmed = true,
             Ok(Some(discovery)) => {
-                self.store(&server, &discovery).await;
-                self.known = Some((server, discovery));
+                self.store(&cluster, &discovery).await;
+                self.known = Some((cluster, discovery));
                 self.confirmed = true;
             }
             Err(error) => {
@@ -210,27 +212,27 @@ impl Follower {
         }
     }
 
-    async fn load(&self, server: &str) -> Option<Discovery> {
+    async fn load(&self, cluster: &str) -> Option<Discovery> {
         let cache = Arc::clone(&self.cache);
-        let key = server.to_owned();
+        let key = cluster.to_owned();
         let loaded = tokio::task::spawn_blocking(move || cache.load(&key))
             .await
             .expect("loading does not panic");
         loaded.unwrap_or_else(|error| {
-            eprintln!("could not read the cached discovery of {server}: {error}");
+            eprintln!("could not read the cached discovery of {cluster}: {error}");
             None
         })
     }
 
-    async fn store(&self, server: &str, discovery: &Discovery) {
+    async fn store(&self, cluster: &str, discovery: &Discovery) {
         let cache = Arc::clone(&self.cache);
-        let key = server.to_owned();
+        let key = cluster.to_owned();
         let discovery = discovery.clone();
         let stored = tokio::task::spawn_blocking(move || cache.store(&key, &discovery))
             .await
             .expect("storing does not panic");
         if let Err(error) = stored {
-            eprintln!("could not cache the discovery of {server}: {error}");
+            eprintln!("could not cache the discovery of {cluster}: {error}");
         }
     }
 }

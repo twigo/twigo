@@ -113,12 +113,21 @@ impl Fake {
 
     /// Clients over this server.
     pub fn clients(&self, budgets: Budgets) -> Arc<Clients> {
+        Arc::new(self.over(budgets))
+    }
+
+    /// Clients over this server, said to reach `cluster`.
+    pub fn clients_reaching(&self, budgets: Budgets, cluster: &str) -> Arc<Clients> {
+        Arc::new(self.over(budgets).reaching(cluster))
+    }
+
+    fn over(&self, budgets: Budgets) -> Clients {
         let fake = self.clone();
         let service = tower::service_fn(move |request: Request<kube::client::Body>| {
             let fake = fake.clone();
             async move { fake.answer(request).await }
         });
-        Arc::new(Clients::over(service, budgets))
+        Clients::over(service, budgets)
     }
 
     /// The hub over this server, every context's clients with `budgets`.
