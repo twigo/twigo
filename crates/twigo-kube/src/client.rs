@@ -56,6 +56,7 @@ pub struct Clients {
     pub api: Client,
     /// Exec, attach and port-forward: their WebSocket upgrade needs HTTP/1.1.
     pub sessions: Client,
+    server: http::Uri,
     counter: Counter,
     connections: Connections,
 }
@@ -139,14 +140,15 @@ impl Clients {
         Ok(Clients {
             api: Client::new(api, config.default_namespace.clone()),
             sessions: kube_client(config, sessions, auth())?,
+            server: config.cluster_url.clone(),
             counter,
             connections,
         })
     }
 
-    /// Clients over `service` in place of a server, with the stream counter
-    /// of `budgets` and connections that nothing dials: for the tests of
-    /// what runs over them.
+    /// Clients over `service` in place of a server, `https://fake.invalid`,
+    /// with the stream counter of `budgets` and connections that nothing
+    /// dials: for the tests of what runs over them.
     #[cfg(feature = "test-util")]
     pub fn over<S, B>(service: S, budgets: Budgets) -> Self
     where
@@ -166,9 +168,15 @@ impl Clients {
         Clients {
             api: Client::new(api, "default"),
             sessions: Client::new(service, "default"),
+            server: http::Uri::from_static("https://fake.invalid"),
             counter,
             connections: Connections::default(),
         }
+    }
+
+    /// The URL of the API server they reach.
+    pub fn server(&self) -> &http::Uri {
+        &self.server
     }
 
     pub fn usage(&self) -> watch::Receiver<Usage> {
