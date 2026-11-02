@@ -8,6 +8,7 @@
 //! reader never holds the connection back.
 
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -31,6 +32,11 @@ const TIMEOUT_SECONDS: u32 = 290;
 /// (`cacheWatcher.nextBookmarkTime`, Kubernetes v1.37.0), so two missing
 /// mean the watch has stalled.
 pub(crate) const IDLE: Duration = Duration::from_secs(120);
+/// The longest an upstream waits after a failure before it tries again.
+pub const RETRY_WITHIN: Duration = Duration::from_secs(5);
+/// How often a resource the server cannot watch is listed again: the
+/// interval of metrics (ARCHITECTURE 3.6).
+const POLL: Duration = Duration::from_secs(15);
 
 /// Gets a context's clients, or says why the upstream cannot have them.
 pub type Connect = Arc<
@@ -55,6 +61,8 @@ pub(crate) struct Upstream<T> {
     pub store: Store<T>,
     status: Mutex<Status>,
     state: watch::Sender<ViewState>,
+    /// It holds a watch open, so evicting it frees one.
+    watching: AtomicBool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -89,11 +97,34 @@ impl<T: Item> Upstream<T> {
                 listed: false,
             }),
             state: watch::Sender::new(ViewState::Connecting),
+            watching: AtomicBool::new(false),
         }
     }
 
     pub fn state(&self) -> watch::Receiver<ViewState> {
         self.state.subscribe()
+    }
+
+    /// The store has held a whole list since the upstream started.
+    pub fn listed(&self) -> bool {
+        self.status().listed
+    }
+
+    pub fn watching(&self) -> bool {
+        self.watching.load(Ordering::Relaxed)
+    }
+
+    /// The state of a run about to start, set before it does, so nobody
+    /// reads a failure it is about to retry.
+    pub fn restart(&self) {
+        self.update(|status| {
+            status.queued = false;
+            status.phase = if status.listed {
+                Phase::Relisting
+            } else {
+                Phase::Connecting
+            };
+        });
     }
 
     /// While a request waits for its class's budget, the upstream is
@@ -173,14 +204,7 @@ async fn start<D: Decode>(
 ) where
     D::Item: Item,
 {
-    upstream.update(|status| {
-        status.queued = false;
-        status.phase = if status.listed {
-            Phase::Relisting
-        } else {
-            Phase::Connecting
-        };
-    });
+    upstream.restart();
     let mut run = Run {
         watch_waiting: waiting(&upstream, Some(Arc::clone(&env.waiting))),
         list_waiting: waiting(&upstream, None),
@@ -190,6 +214,7 @@ async fn start<D: Decode>(
         upstream,
         clients: None,
         backoff: backoff(),
+        unwatchable: false,
     };
     if let Err(view) = run.run(next).await {
         run.upstream.update(|status| {
@@ -203,7 +228,7 @@ fn backoff() -> ExponentialBackoff {
     // Jitter adds up to the delay again: 0.5–5 s in all (ARCHITECTURE 3.2).
     ExponentialBuilder::new()
         .with_min_delay(Duration::from_millis(500))
-        .with_max_delay(Duration::from_millis(2500))
+        .with_max_delay(RETRY_WITHIN / 2)
         .with_jitter()
         .without_max_times()
         .build()
@@ -251,6 +276,8 @@ enum Outcome {
     NoColumns(Next),
     /// The server's answer makes no sense to the decoder.
     Undecodable(DecodeError),
+    /// A list of a resource the server cannot watch ended.
+    Polled,
 }
 
 struct Run<D: Decode> {
@@ -263,6 +290,9 @@ struct Run<D: Decode> {
     backoff: ExponentialBackoff,
     watch_waiting: Waiting,
     list_waiting: Waiting,
+    /// The server answered a watch with 405, as for ComponentStatus and
+    /// metrics: the upstream lists again every [`POLL`].
+    unwatchable: bool,
 }
 
 type Lines = Pin<Box<dyn AsyncBufRead + Send>>;
@@ -333,6 +363,18 @@ where
                     self.pause().await;
                     next
                 }
+                Outcome::Polled => {
+                    tokio::time::sleep(POLL).await;
+                    Next::List
+                }
+                Outcome::Failed {
+                    error: kube::Error::Api(status),
+                    verb: "watch",
+                    ..
+                } if status.code == 405 => {
+                    self.unwatchable = true;
+                    Next::List
+                }
                 Outcome::Undecodable(error) => {
                     let error = IpcError {
                         kind: ErrorKind::Internal,
@@ -368,14 +410,14 @@ where
             // What an interrupted first list stored.
             self.upstream.store.replace(Items::new());
         }
-        if listed {
+        if listed && !self.unwatchable {
             self.set_phase(Phase::Relisting);
         }
         let listing = || Listing {
             collected: listed.then(Items::new),
             loaded: 0,
         };
-        if self.env.cluster.streaming(clients) != Some(false) {
+        if !self.unwatchable && self.env.cluster.streaming(clients) != Some(false) {
             let outcome = self
                 .stream(
                     clients,
@@ -429,6 +471,9 @@ where
             }
         };
         self.listed(listing);
+        if self.unwatchable {
+            return Outcome::Polled;
+        }
         let start = WatchFrom::ResourceVersion(&from);
         self.stream(clients, start, None, from.clone()).await
     }
@@ -460,6 +505,7 @@ where
             },
             _ = retired.changed() => return Outcome::Retired(again(&from, &listing)),
         };
+        let _watching = Watching::new(&self.upstream.watching);
         match &listing {
             Some(_) => self.env.cluster.set_streaming(clients, true),
             // The server watches from `from`, so nothing was missed.
@@ -604,6 +650,22 @@ where
             format: self.spec.format,
             field_selector: self.spec.field_selector.as_deref(),
         }
+    }
+}
+
+/// Marks an upstream as holding a watch while the guard lives.
+struct Watching<'a>(&'a AtomicBool);
+
+impl<'a> Watching<'a> {
+    fn new(flag: &'a AtomicBool) -> Self {
+        flag.store(true, Ordering::Relaxed);
+        Self(flag)
+    }
+}
+
+impl Drop for Watching<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Relaxed);
     }
 }
 

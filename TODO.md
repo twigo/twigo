@@ -21,4 +21,4 @@ Findings that belong to no step yet.
 - The watch hub (`twigo_cache::hub`, ARCHITECTURE 3.2):
   - The access review that lets more than four namespaces share a cluster-wide upstream is kept with the context's clients, so a RoleBinding granted later counts only once they are rebuilt or Twigo restarts.
   - A resumed watch reports `ready` on its `200`, before a `410 Gone` in its body turns it to `relisting`, so a view can flash ready for a moment.
-  - A streaming list of 5,000 pods allocates 44.2 MiB on its way to the 4.0 MiB it keeps, where ten pages of 500 allocate 12.7 MiB, since each event is a Table of its own (`examples/hub_memory.rs` and `table_memory.rs`, kind 1.37 with `bench/pods.sh` at 5,000, 2026-11-02); step 11's budgets say whether it matters.
+  - Listing and storing 5,000 pods by a streaming list allocates 44.2 MiB in all, HTTP/2 reads and body chunks included, to keep 4.0 MiB (`examples/hub_memory.rs`, kind 1.37 with `bench/pods.sh` at 5,000, 2026-11-02); a paged list of the same pods was not measured the same way, and step 11's budgets say whether it matters.

@@ -46,6 +46,8 @@ pub struct State {
     pub forbidden: HashSet<String>,
     /// Paths that answer `401`.
     pub unauthorized: HashSet<String>,
+    /// Resources the server cannot watch, as ComponentStatus.
+    pub unwatchable: HashSet<String>,
     /// The person may list pods cluster-wide.
     pub may_list: bool,
     /// `/version` fails as over a dead connection.
@@ -262,16 +264,31 @@ impl Fake {
         }
         let target = target(&path);
         if param("watch") != Some("true") {
+            // A continue token is the list's version and where the next
+            // page starts.
+            let (version, start) = param("continue")
+                .and_then(|token| token.split_once(':'))
+                .map(|(version, start)| (version.to_owned(), start.parse::<usize>().unwrap()))
+                .unwrap_or((state.version.to_string(), 0));
+            let limit: usize = param("limit").map_or(usize::MAX, |limit| limit.parse().unwrap());
             let items = state.items(&target);
+            let end = start.saturating_add(limit).min(items.len());
+            let mut metadata = json!({ "resourceVersion": version });
+            if end < items.len() {
+                metadata["continue"] = json!(format!("{version}:{end}"));
+            }
             return full(
                 StatusCode::OK,
                 json!({
                     "kind": "PartialObjectMetadataList",
                     "apiVersion": "meta.k8s.io/v1",
-                    "metadata": { "resourceVersion": state.version.to_string() },
-                    "items": items,
+                    "metadata": metadata,
+                    "items": items[start..end],
                 }),
             );
+        }
+        if state.unwatchable.contains(&target.resource) {
+            return status(StatusCode::METHOD_NOT_ALLOWED, "MethodNotAllowed");
         }
         let (sender, receiver) = mpsc::unbounded();
         let send = |value: &Value| {
@@ -380,7 +397,10 @@ impl State {
                 resource: watch.resource.clone(),
                 namespace: watch.namespace.clone(),
             };
-            !target.matches(resource, namespace)
+            // A held list sends what it holds once released, changes
+            // after.
+            watch.held
+                || !target.matches(resource, namespace)
                 || watch
                     .sender
                     .unbounded_send(Ok(Frame::data(event.clone())))

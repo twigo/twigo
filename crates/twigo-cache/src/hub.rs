@@ -40,7 +40,7 @@ use crate::store::Item;
 use crate::table::{Column, Row, TableDecoder};
 use crate::upstream::{self, Env, Spec, Upstream};
 
-pub use crate::upstream::Connect;
+pub use crate::upstream::{Connect, RETRY_WITHIN};
 
 /// How long an upstream outlives its last subscription.
 pub const LINGER: Duration = Duration::from_secs(60);
@@ -147,10 +147,13 @@ struct Inner {
 struct Registry {
     entries: HashMap<Key, Entry>,
     next_borrower: u64,
+    /// Numbers every linger, so the timer of one that ended does nothing,
+    /// in this entry or in one created for the same key since.
+    next_linger: u64,
 }
 
 struct Entry {
-    upstream: Arc<dyn Any + Send + Sync>,
+    upstream: Arc<dyn Running>,
     state: watch::Receiver<ViewState>,
     task: JoinHandle<()>,
     subscribers: usize,
@@ -159,13 +162,12 @@ struct Entry {
     borrowers: HashMap<u64, Arc<dyn Fn() + Send + Sync>>,
     /// Since when nothing holds it.
     idle_since: Option<Instant>,
-    /// Counts its lingers, so a timer of an earlier one does nothing.
     linger: u64,
     /// It has lingered out while subscriptions borrowed it.
     expired: bool,
-    /// Its watch waits for the budget, and whether an eviction was made
-    /// for it.
-    queued: bool,
+    /// Since when its watch waits for the budget, and whether an eviction
+    /// was made for it.
+    queued: Option<Instant>,
     served: bool,
 }
 
@@ -174,9 +176,30 @@ impl Entry {
         failed(&self.state.borrow())
     }
 
-    /// Nothing shows it: evictable.
+    /// Nothing shows it.
     fn idle(&self) -> bool {
         self.subscribers == 0 && self.borrowers.is_empty()
+    }
+
+    /// Evicting it frees a watch.
+    fn evictable(&self) -> bool {
+        self.idle() && self.upstream.watching()
+    }
+}
+
+/// What the registry asks of an upstream, whatever its items.
+trait Running: Send + Sync {
+    fn watching(&self) -> bool;
+    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync>;
+}
+
+impl<T: Item> Running for Upstream<T> {
+    fn watching(&self) -> bool {
+        Upstream::watching(self)
+    }
+
+    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
+        self
     }
 }
 
@@ -281,8 +304,8 @@ impl Hub {
             .collect()
     }
 
-    /// Holds the upstream of `key`, started if there is none or if it
-    /// failed.
+    /// Holds the upstream of `key`, started if there is none or if its run
+    /// ended, as rejected credentials end it.
     fn hold<T: Item>(&self, key: &Key, filter: Option<Arc<HashSet<String>>>) -> Part<T>
     where
         Self: Spawn<T>,
@@ -296,9 +319,11 @@ impl Hub {
                     entry.idle_since = None;
                     entry.expired = false;
                     let upstream = Arc::clone(&entry.upstream)
+                        .into_any()
                         .downcast::<Upstream<T>>()
                         .expect("a key's form fixes its upstream's items");
-                    if entry.failed() {
+                    if entry.task.is_finished() {
+                        upstream.restart();
                         let task = self.spawn(key, Arc::clone(&upstream));
                         abort = Some(std::mem::replace(&mut entry.task, task));
                     }
@@ -307,7 +332,7 @@ impl Hub {
                 None => {
                     let upstream = Arc::new(Upstream::<T>::new());
                     let entry = Entry {
-                        upstream: Arc::clone(&upstream) as Arc<dyn Any + Send + Sync>,
+                        upstream: Arc::clone(&upstream) as Arc<dyn Running>,
                         state: upstream.state(),
                         task: self.spawn(key, Arc::clone(&upstream)),
                         subscribers: 1,
@@ -315,7 +340,7 @@ impl Hub {
                         idle_since: None,
                         linger: 0,
                         expired: false,
-                        queued: false,
+                        queued: None,
                         served: false,
                     };
                     registry.entries.insert(key.clone(), entry);
@@ -349,15 +374,19 @@ impl Hub {
             .get_mut(key)
             .filter(|entry| !entry.failed() && !entry.expired)?;
         let upstream = Arc::clone(&entry.upstream)
+            .into_any()
             .downcast::<Upstream<T>>()
             .expect("a key's form fixes its upstream's items");
         let moving = Arc::downgrade(&subscription.inner);
-        let hub = self.clone();
+        let hub = Arc::downgrade(&self.inner);
         let from = key.clone();
         entry.borrowers.insert(
             id,
             Arc::new(move || {
-                tokio::spawn(move_off(moving.clone(), hub.clone(), from.clone()));
+                if let Some(inner) = hub.upgrade() {
+                    let hub = Hub { inner };
+                    tokio::spawn(move_off(moving.clone(), hub, from.clone()));
+                }
             }),
         );
         registry.next_borrower += 1;
@@ -454,6 +483,16 @@ impl Hub {
     }
 }
 
+impl Drop for Inner {
+    /// Its upstreams go with it.
+    fn drop(&mut self) {
+        let registry = self.registry.get_mut().expect("hub lock");
+        for entry in registry.entries.values() {
+            entry.task.abort();
+        }
+    }
+}
+
 impl Inner {
     fn registry(&self) -> MutexGuard<'_, Registry> {
         self.registry.lock().expect("hub lock")
@@ -474,20 +513,15 @@ impl Inner {
     /// A watch of `key` waits for the budget, or stops waiting.
     fn waiting(&self, key: &Key, queued: bool) {
         let mut registry = self.registry();
-        let evicted = {
-            let Some(entry) = registry.entries.get_mut(key) else {
-                return;
-            };
-            entry.queued = queued;
-            entry.served = false;
-            if !queued {
-                return;
-            }
-            evict(&mut registry, key)
+        let Some(entry) = registry.entries.get_mut(key) else {
+            return;
         };
-        if let Some(entry) = registry.entries.get_mut(key) {
-            entry.served = evicted.is_some();
+        entry.queued = queued.then(Instant::now);
+        entry.served = false;
+        if !queued {
+            return;
         }
+        let evicted = evict(&mut registry, &key.context);
         drop(registry);
         if let Some(task) = evicted {
             task.abort();
@@ -504,8 +538,11 @@ impl Inner {
             return;
         }
         entry.idle_since = Some(Instant::now());
-        entry.linger += 1;
-        let linger = entry.linger;
+        registry.next_linger += 1;
+        let linger = registry.next_linger;
+        if let Some(entry) = registry.entries.get_mut(key) {
+            entry.linger = linger;
+        }
         let hub = Arc::downgrade(self);
         let expiring = key.clone();
         tokio::spawn(async move {
@@ -514,21 +551,7 @@ impl Inner {
                 hub.expire(&expiring, linger);
             }
         });
-        // A watch that waits for the budget takes this one's place at once.
-        let evicted = if entry.idle() && !entry.queued {
-            let waiting = registry.entries.iter_mut().find(|(other, entry)| {
-                other.context == key.context && entry.queued && !entry.served
-            });
-            match waiting {
-                Some((_, entry)) => {
-                    entry.served = true;
-                    registry.entries.remove(key).map(|entry| entry.task)
-                }
-                None => None,
-            }
-        } else {
-            None
-        };
+        let evicted = make_way(&mut registry, key);
         drop(registry);
         if let Some(task) = evicted {
             task.abort();
@@ -565,10 +588,12 @@ impl Inner {
             return;
         };
         entry.borrowers.remove(&id);
-        let gone = entry.expired && entry.idle();
-        let task = gone
-            .then(|| registry.entries.remove(key).map(|entry| entry.task))
-            .flatten();
+        let task = if entry.expired && entry.idle() {
+            serve(&mut registry, &key.context, key);
+            registry.entries.remove(key).map(|entry| entry.task)
+        } else {
+            make_way(&mut registry, key)
+        };
         drop(registry);
         if let Some(task) = task {
             task.abort();
@@ -576,19 +601,54 @@ impl Inner {
     }
 }
 
-/// Removes the least recently used idle upstream that holds a watch in the
-/// context of `waiting`, and gives its task to abort once the lock is let
-/// go.
-fn evict(registry: &mut Registry, waiting: &Key) -> Option<JoinHandle<()>> {
+/// For a watch of `context` that waits for the budget, removes the least
+/// recently used idle upstream that holds a watch there, and gives its
+/// task to abort once the lock is let go.
+fn evict(registry: &mut Registry, context: &str) -> Option<JoinHandle<()>> {
     let victim = registry
         .entries
         .iter()
-        .filter(|(key, entry)| {
-            key.context == waiting.context && *key != waiting && entry.idle() && !entry.queued
-        })
+        .filter(|(key, entry)| key.context == context && entry.evictable())
         .min_by_key(|(_, entry)| entry.idle_since)
         .map(|(key, _)| key.clone())?;
+    serve(registry, context, &victim);
     registry.entries.remove(&victim).map(|entry| entry.task)
+}
+
+/// An upstream that just went idle makes way for a watch of its context
+/// that waits for the budget.
+fn make_way(registry: &mut Registry, key: &Key) -> Option<JoinHandle<()>> {
+    let evictable = registry.entries.get(key).is_some_and(Entry::evictable);
+    if !(evictable && serve(registry, &key.context, key)) {
+        return None;
+    }
+    registry.entries.remove(key).map(|entry| entry.task)
+}
+
+/// Marks the watch of `context` that has waited longest, and no eviction
+/// served yet, as the one the watch `freed` holds goes to: the counter
+/// admits waiters in order. Says whether one waits; nothing does if
+/// `freed` holds no watch.
+fn serve(registry: &mut Registry, context: &str, freed: &Key) -> bool {
+    if !registry
+        .entries
+        .get(freed)
+        .is_some_and(|entry| entry.upstream.watching())
+    {
+        return false;
+    }
+    let first = registry
+        .entries
+        .iter_mut()
+        .filter(|(key, entry)| key.context == context && entry.queued.is_some() && !entry.served)
+        .min_by_key(|(_, entry)| entry.queued);
+    match first {
+        Some((_, entry)) => {
+            entry.served = true;
+            true
+        }
+        None => false,
+    }
 }
 
 /// What a subscription's part holds of its upstream.
@@ -685,6 +745,42 @@ impl<T: Item> Subscription<T> {
         )
     }
 
+    /// Every part has held a whole list since it started, so the rows are
+    /// all there, if maybe stale.
+    pub fn listed(&self) -> bool {
+        self.inner.parts().iter().all(|part| part.upstream.listed())
+    }
+
+    /// Its rows once every part has listed them, if maybe stale since; or
+    /// the state that refuses them, or `stale` when a first list has
+    /// failed for two of the longest backoffs.
+    pub async fn whole(&mut self) -> Result<Vec<Arc<T>>, ViewState> {
+        loop {
+            let state = self.state();
+            match state {
+                ViewState::Forbidden { .. } | ViewState::Unauthorized | ViewState::Error { .. } => {
+                    return Err(state);
+                }
+                _ if self.listed() => return Ok(self.items()),
+                ViewState::Stale => {
+                    let tried = tokio::time::timeout(2 * RETRY_WITHIN, async {
+                        while self.state() == ViewState::Stale {
+                            self.changed().await;
+                        }
+                    });
+                    if tried.await.is_err() {
+                        return Err(ViewState::Stale);
+                    }
+                }
+                ViewState::Ready
+                | ViewState::Relisting
+                | ViewState::Queued
+                | ViewState::Connecting
+                | ViewState::Syncing { .. } => self.changed().await,
+            }
+        }
+    }
+
     /// Its rows, from every part.
     pub fn items(&self) -> Vec<Arc<T>> {
         let parts = self.inner.parts();
@@ -731,9 +827,9 @@ impl<T: Item> Subscription<T> {
             );
         }
         select_all(waits).await;
-        if self.seen.swapped.has_changed().unwrap_or(false) {
-            self.seen.refresh(&self.inner);
-        }
+        // A swap may be what woke it, and its parts' receivers are the old
+        // ones until then.
+        self.seen.refresh(&self.inner);
     }
 }
 
@@ -782,14 +878,15 @@ where
     }) else {
         return;
     };
-    let mut states: Vec<_> = parts.iter().map(|part| part.upstream.state()).collect();
     let listed = async {
-        for state in &mut states {
-            // Ends with the upstream, which the part holds.
-            let _ = state
-                .wait_for(|state| {
-                    matches!(state, ViewState::Ready | ViewState::Stale) || failed(state)
-                })
+        for part in &parts {
+            // A refusal moves it too: the cluster-wide upstream would show
+            // what these may not list. Ends with the upstream, which the
+            // part holds.
+            let _ = part
+                .upstream
+                .state()
+                .wait_for(|state| part.upstream.listed() || failed(state))
                 .await;
         }
     };

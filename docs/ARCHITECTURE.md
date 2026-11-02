@@ -273,7 +273,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   - Coming back resumes from the last `resourceVersion`, or relists on `410 Gone`.
 - **Scope follows the namespace selection.**
   - One upstream per selected namespace, so looking at 200 pods in one namespace never watches the cluster's 50k.
-  - "All namespaces", or more than a few selected namespaces (default 4), switches to one cluster-wide upstream, if the user may list the kind cluster-wide (one SelfSubjectAccessReview, cached per space).
+  - "All namespaces", or more than a few selected namespaces (default 4), switches to one cluster-wide upstream, if the user may list the kind cluster-wide (one SelfSubjectAccessReview, kept with the context's clients).
     Rust then filters by namespace.
   - Hysteresis: while a cluster-wide upstream runs or lingers, it serves narrower selections too, without holding it, so toggling back and forth costs nothing.
     Once it has lingered out, those selections move to upstreams per namespace, and keep its rows until theirs are listed.
@@ -309,7 +309,8 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   - A proxy or server that answers HTTP/1.1 turns every stream back into a connection; the budgets stay the same.
     Benchmarks tune each of them.
   - When the watch budget is full, the least recently used idle upstreams are evicted.
-    The counter tells a watch that it waits, through an extension of its request, and that is when the hub evicts one.
+    The counter tells a watch that it waits, through an extension of its request, and that is when the hub evicts one: an idle upstream with a watch open, since evicting one in its backoff or in a paged list frees none.
+    The freed watch goes to the one that has waited longest, as the counter admits them in order.
     When nothing is idle, the new subscription waits in the state `queued` and its view says why, until an upstream of the context lingers and makes way at once.
   - When the log or session budget is full, a new log stream, exec session or port-forward connection waits in `queued` the same way.
     Its tab says why, and the status bar lists open sessions so the user can close some.
@@ -347,7 +348,8 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   - The capability is learnt once per cluster, from its first streaming list: 1.33 refuses `sendInitialEvents` with 422 on that field ([`validateWatchOptions`](https://github.com/kubernetes/kubernetes/blob/v1.33.12/staging/src/k8s.io/apimachinery/pkg/apis/meta/internalversion/validation/validation.go#L53-L62)).
     The answer, and the access reviews of the scope, are kept with the context's clients, so clients rebuilt for another server learn them again.
   - A relist, after `410 Gone` or over rebuilt clients, keeps the rows on screen and replaces them with its own once it ends.
-  - A rebuild of a context's clients retires the connections of those it replaces, so every watch re-opens over the new ones and relists.
+  - A changed fingerprint or proxy variables, or a context no source lists any more, retire the connections of its clients at once, so every watch re-opens over rebuilt clients and relists.
+  - A resource the server cannot watch, which answers a watch with 405 as ComponentStatus and metrics do ([`handleWatch`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/get.go#L268-L270)), is listed in pages again every 15 s, the interval of metrics (3.6).
 - **Backoff.**
   UI-friendly: 0.5–5 s with jitter, reset on every event.
   kube-runtime's default of 0.8–30 s leaves lists stale for a long time after an API-server restart.
