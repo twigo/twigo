@@ -50,6 +50,7 @@ export function useObject(
     return () => {
       first();
       view.close();
+      setLive((shown) => (shown?.view === view ? undefined : shown));
     };
   }, [backend, key]);
   const current = live?.key === key ? live?.view : undefined;

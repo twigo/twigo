@@ -434,6 +434,13 @@ test("the details open the object once the selection rests on a row, not while i
 
 test("opening the object from the details keeps the list in a tab of its own", async () => {
   const workbench = await podsList();
+  act(() => {
+    workbench.editors.close("k8s-list://prod-eu/v1/pods");
+  });
+  act(() => {
+    workbench.editors.open("k8s-list://prod-eu/v1/pods", { preview: true });
+  });
+  await settle();
   const [first] = rows();
   if (!first) throw new Error("no rows");
   fireEvent.click(first);
@@ -447,14 +454,17 @@ test("opening the object from the details keeps the list in a tab of its own", a
 });
 
 test("the details say why the object cannot open, over the row's cells", async () => {
-  const backend = createMockBackend("ready");
-  const subscribe = backend.subscribe.bind(backend);
-  vi.spyOn(backend, "subscribe").mockImplementation(
-    (command, request, onMessage) =>
-      command === "object_open"
-        ? Promise.reject(new Error("Command object_open not allowed by ACL"))
-        : subscribe(command, request, onMessage),
-  );
+  const mock = createMockBackend("ready");
+  const backend: typeof mock = {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe(command, request, onMessage) {
+      if (command === "object_open")
+        return Promise.reject(
+          new Error("Command object_open not allowed by ACL"),
+        );
+      return mock.subscribe(command, request, onMessage);
+    },
+  };
   await podsList(backend);
   const [first] = rows();
   if (!first) throw new Error("no rows");
@@ -464,4 +474,25 @@ test("the details say why the object cannot open, over the row's cells", async (
     "Command object_open not allowed by ACL",
   );
   expect(details()?.textContent).toContain("Ready");
+});
+
+test("the details show the document of the row the selection rests on", async () => {
+  await podsList();
+  const [first, second] = rows();
+  if (!first || !second) throw new Error("no rows");
+  const nameOf = (row: HTMLElement) => row.children[0]?.textContent ?? "?";
+  fireEvent.click(first);
+  await settle();
+  const metadata = () =>
+    within(details() ?? document.body).getByRole("region", {
+      name: "Metadata",
+    }).textContent;
+  expect(metadata()).toContain(nameOf(first));
+  act(() => {
+    screen.getByRole("grid").focus();
+  });
+  key("KeyJ");
+  await settle();
+  expect(metadata()).toContain(nameOf(second));
+  expect(metadata()).not.toContain(nameOf(first));
 });

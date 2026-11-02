@@ -33,6 +33,7 @@ export type {
   Label,
   ListBatch,
   ListQuery,
+  ObjectBatch,
   ObjectEvent,
   ObjectParts,
   ObjectQuery,

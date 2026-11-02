@@ -4,18 +4,28 @@ import { Changes } from "@twigo/workbench";
 export interface Selected {
   readonly gvr: Gvr;
   readonly kind: string;
+  /** Whether the resource lives in namespaces, as discovery says. */
+  readonly namespaced: boolean;
   readonly columns: readonly Column[];
   readonly row: Row;
   /** Open the row's details, as going to a resource does. */
   readonly reveal?: boolean;
 }
 
-/** A row's object, from its ID: `context/namespace/name`, or `context/name` when cluster-scoped. */
-export function objectOf(row: Row): { namespace?: string; name: string } {
-  const [, ...rest] = row.id.split("/");
-  const name = rest.pop() ?? "";
-  const namespace = rest.join("/");
-  return namespace === "" ? { name } : { namespace, name };
+/**
+ * A row's object, from its ID: `context/namespace/name`, or `context/name`
+ * when cluster-scoped. A context's name may hold slashes, as an EKS
+ * cluster's ARN does, and a namespace's or object's never does, so the ID
+ * is read from the right.
+ */
+export function objectOf({ row, namespaced }: Selected): {
+  namespace?: string;
+  name: string;
+} {
+  const parts = row.id.split("/");
+  const name = parts.pop() ?? "";
+  const namespace = namespaced ? parts.pop() : undefined;
+  return namespace === undefined ? { name } : { namespace, name };
 }
 
 /**

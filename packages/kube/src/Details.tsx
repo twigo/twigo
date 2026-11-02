@@ -33,14 +33,12 @@ const OVERVIEW = {
 export function Details({
   selected,
   space,
-  namespaced,
   discovery,
   onOpen,
   onClose,
 }: {
   selected: Selected;
   space: string;
-  namespaced: boolean;
   discovery: Discovery;
   /** Opens an object's editor beside the list. */
   onOpen: (uri: string) => void;
@@ -49,8 +47,8 @@ export function Details({
   const { backend } = useWorkbench();
   const resources = useResources(discovery, space);
   const [width, setWidth] = useState(440);
-  const { gvr, kind, row } = selected;
-  const { namespace, name } = objectOf(row);
+  const { gvr, kind, namespaced } = selected;
+  const { namespace, name } = objectOf(selected);
   const { group, version, resource } = gvr;
   const query: ObjectQuery = useMemo(
     () => ({

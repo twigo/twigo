@@ -17,7 +17,7 @@ export function registerResourceActions(
     const selected =
       uri === undefined ? undefined : services.selection.get(uri);
     if (!uri || !selected) return undefined;
-    return { uri, object: objectOf(selected.row) };
+    return { uri, object: objectOf(selected) };
   };
   const actions: readonly {
     id: string;

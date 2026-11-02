@@ -133,10 +133,11 @@ export function ListEditor({
 
   const onSelect = useCallback(
     (row: Row, columns: readonly Column[]) => {
-      if (!input) return;
+      if (!input || !resource) return;
       selection.set(uri, {
         gvr: input.gvr,
-        kind: resource?.kind ?? input.gvr.resource,
+        kind: resource.kind,
+        namespaced: resource.namespaced,
         columns,
         row,
       });
@@ -245,7 +246,6 @@ export function ListEditor({
         <Details
           selected={mine}
           space={input.space}
-          namespaced={resource?.namespaced ?? false}
           discovery={services.discovery}
           onOpen={(object) => {
             editors.pin(uri);
