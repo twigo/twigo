@@ -181,7 +181,7 @@ twigo/
 ├─ crates/
 │  ├─ twigo-core/             app services: spaces, settings layers, catalog, command bus, approvals
 │  ├─ twigo-kube/             contexts, client factory, credential runner, discovery/OpenAPI cache, operations
-│  ├─ twigo-cache/            watch hub (upstreams, row stores, query views, batching)
+│  ├─ twigo-cache/            watch hub (upstreams, row stores, query views, batching), the discovery it follows
 │  ├─ twigo-sessions/         logs, exec/attach, port-forward manager, pty terminal
 │  ├─ twigo-policy/           read-only modes, authorize(), policy proxy, approvals, audit log, redaction
 │  ├─ twigo-env/              login-shell environment resolution
@@ -479,9 +479,22 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
   - Only the namespaces of the rows currently in a visible window are polled, and only while a CPU or memory column is shown.
   - The values merge into the rows in Rust as extra cells.
 - **Discovery and OpenAPI.**
-  - Aggregated discovery (`run_aggregated()`, GA since 1.30), with a fallback to legacy discovery.
-  - A per-cluster disk cache holds discovery with its ETag (`If-None-Match` → 304), invalidated by the CRD and APIService metadata upstreams.
-    Users who may not list those poll discovery with the ETag instead.
+  - Aggregated discovery, GA since 1.30: one request each to `/api` and `/apis`, with client-go's `Accept`, the aggregated form first and plain JSON after it ([`acceptDiscoveryFormats`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/client-go/discovery/discovery_client.go#L68)).
+    kube's `run_aggregated()` is not used: it sends no `If-None-Match`, and it reads a legacy `APIGroupList` as an empty list, since its `items` default ([`v2.rs`](https://github.com/kube-rs/kube/blob/4.2.0/kube-core/src/discovery/v2.rs#L20-L28)).
+  - There is no fallback to legacy discovery, since every supported release serves the aggregated form.
+    An answer of another type, as from a proxy that drops the `Accept` header, fails and says that the server did not answer aggregated discovery.
+  - Discovery answers with the resources that have the `list` verb, each at its group's most preferred version that serves it, as client-go's [`ServerPreferredResources`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/client-go/discovery/discovery_client.go#L976-L1043) picks them.
+    Those that cannot be watched, as ComponentStatus, are listed again (3.2).
+    A version that an aggregated server left stale comes after the others, where client-go drops it ([`convertAPIGroup`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/client-go/discovery/aggregated_discovery.go#L80-L81)), so its kinds stay and their lists say why they fail.
+  - A disk cache in the app's cache directory holds each server's discovery with its ETags (`If-None-Match` → 304), so a start revalidates it rather than downloads it.
+  - `resources_watch` follows the active space's discovery in `twigo-cache`, through the CRD and APIService metadata upstreams.
+    The API server updates its discovery from such a change in a controller of its own, which may not be done when the change reaches Twigo: apiextensions' discovery controller waits for the CRD's `Established` condition through an informer of its own ([`sync`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiextensions-apiserver/pkg/apiserver/customresource_discovery_controller.go#L105)).
+    So discovery is fetched once the changes have been quiet for 0.5 s, and again 2 s and 10 s after the last of them.
+    On kind 1.37 a CRD came with the first of these, 0.52 to 0.54 s after its creation, in four runs of `a_crd_created_while_followed_comes_without_a_restart` (2026-11-02).
+  - Users who may not list CRDs or may not list APIServices poll discovery with its ETags every minute, the interval at which kube-aggregator refreshes an aggregated server's discovery ([`discoveryRefreshInterval`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/kube-aggregator/pkg/apiserver/handler_discovery.go#L58)).
+    An aggregated server whose resources change while its APIService does not is seen with the next change, or once the space is followed again.
+  - A failed fetch is tried again after 5 s, the hub's longest backoff.
+    An unauthorized one waits for the space to be followed again, which the frontend does once a credential comes, as for the upstreams (3.2).
   - OpenAPI v3 documents are fetched lazily on the first edit of a group/version and cached forever under their `?hash=` URL, which is immutable.
     Rust converts them to JSON Schema for the YAML editor.
 - **Never pre-fetched.**
