@@ -33,9 +33,11 @@
   --secondary: oklch(0.955 0.002 250);
   --secondary-foreground: oklch(0.3 0.006 250);
   --muted: oklch(0.955 0.002 250);
-  --muted-foreground: oklch(0.5 0.006 250);
-  /* Tertiary text: units, timestamps, kbd hints, section labels. */
-  --muted-foreground-2: oklch(0.62 0.005 250);
+  /* Three text tiers, each at 4.5:1 or more on the shell and the editor
+     (WCAG 1.4.3): secondary for what places a row, tertiary for units,
+     timestamps, hints and empty values. */
+  --muted-foreground: oklch(0.47 0.006 250);
+  --muted-foreground-2: oklch(0.55 0.005 250);
   --accent: oklch(0.945 0.003 250);
   --accent-foreground: oklch(0.3 0.006 250);
   --destructive: oklch(0.577 0.245 27.325);
@@ -56,10 +58,10 @@
   --tab-selected-bg: color-mix(in oklab, var(--brand) 8%, var(--card));
   --tab-selected-border: color-mix(in oklab, var(--brand) 22%, var(--border));
 
-  /* Two-layer focus: tight inner ring + translucent halo (one ring reads
-     cheap). Shared - the nested var(--brand) resolves per theme at use. */
+  /* A solid inner ring, 3:1 or more against any surface (WCAG 1.4.11), and
+     a translucent halo. The nested var(--brand) resolves per theme at use. */
   --focus-ring:
-    0 0 0 2px color-mix(in oklab, var(--brand) 45%, transparent),
+    0 0 0 2px var(--brand),
     0 0 0 4px color-mix(in oklab, var(--brand) 18%, transparent);
 
   /* Hairlines in alpha tiers. */
@@ -67,7 +69,7 @@
 
   /* The shell carries the title bar, the space rail and the status bar.
      The side bars and the panel share its tone; the editor is the one
-     surface that stands out, white on light (VS Code's ramp). */
+     surface that stands out: white on light, darkest on dark. */
   --shell: oklch(0.975 0.002 250);
   --editor: oklch(1 0 0);
 
@@ -75,13 +77,14 @@
   --sidebar-foreground: oklch(0.32 0.004 250);
   --sidebar-border: oklch(0.915 0.003 250);
   --panel: oklch(0.975 0.002 250);
-  /* A matte, muted blue: low chroma, so it reads as ink, not as a glossy
-     accent. */
   --statusbar: oklch(0.52 0.075 245);
   --statusbar-foreground: oklch(0.98 0.006 245);
 
+  /* Tones (ARCHITECTURE 4.9). --warn fills dots and edges; as text it is
+     --warn-foreground, which reads at 4.5:1. */
   --ok: oklch(0.62 0.14 150);
   --warn: oklch(0.72 0.15 75);
+  --warn-foreground: oklch(0.55 0.14 70);
   --error: oklch(0.577 0.245 27.325);
 
   /* Context dots: the only colour a user picks (kubeconfig metadata, 4.2). */
@@ -110,23 +113,24 @@
   --brand-foreground: oklch(0.15 0.03 250);
 
   /* Neutral greys with a trace of the brand hue, and text a step below
-     white: the shell and the side bars 0.205, the editor 0.235, card 0.25,
-     popover 0.27, as VS Code's ramp (#181818 to #1F1F1F, text #CCCCCC). */
-  --shell: oklch(0.205 0.002 250);
-  --editor: oklch(0.235 0.002 250);
-  --background: oklch(0.205 0.002 250);
+     white. The editor is the darkest surface, 0.185 under a 0.218 shell,
+     as VS Code's Dark 2026, JetBrains Islands and Zed draw it; card 0.25
+     and popover 0.27 float above both. */
+  --shell: oklch(0.218 0.002 250);
+  --editor: oklch(0.185 0.002 250);
+  --background: oklch(0.218 0.002 250);
   --foreground: oklch(0.87 0.002 250);
   --card: oklch(0.25 0.003 250);
   --card-foreground: oklch(0.87 0.002 250);
   --popover: oklch(0.27 0.003 250);
   --popover-foreground: oklch(0.87 0.002 250);
   --primary: oklch(0.87 0.002 250);
-  --primary-foreground: oklch(0.205 0.002 250);
+  --primary-foreground: oklch(0.218 0.002 250);
   --secondary: oklch(0.28 0.003 250);
   --secondary-foreground: oklch(0.87 0.002 250);
   --muted: oklch(0.28 0.003 250);
-  --muted-foreground: oklch(0.7 0.003 250);
-  --muted-foreground-2: oklch(0.56 0.003 250);
+  --muted-foreground: oklch(0.75 0.003 250);
+  --muted-foreground-2: oklch(0.65 0.003 250);
   --accent: oklch(0.3 0.003 250);
   --accent-foreground: oklch(0.87 0.002 250);
   --destructive: oklch(0.704 0.191 22.216);
@@ -144,15 +148,16 @@
   --tab-selected-border: color-mix(in oklab, var(--brand) 30%, var(--border));
   --border-subtle: oklch(1 0 0 / 5%);
 
-  --sidebar: oklch(0.205 0.002 250);
+  --sidebar: oklch(0.218 0.002 250);
   --sidebar-foreground: oklch(0.87 0.002 250);
   --sidebar-border: oklch(1 0 0 / 8%);
-  --panel: oklch(0.205 0.002 250);
+  --panel: oklch(0.218 0.002 250);
   --statusbar: oklch(0.4 0.06 245);
   --statusbar-foreground: oklch(0.94 0.012 245);
 
   --ok: oklch(0.72 0.15 150);
   --warn: oklch(0.78 0.15 75);
+  --warn-foreground: oklch(0.8 0.13 75);
   --error: oklch(0.704 0.191 22.216);
 
   --context-red: oklch(0.7 0.17 25);
@@ -219,6 +224,7 @@
   --color-statusbar-foreground: var(--statusbar-foreground);
   --color-ok: var(--ok);
   --color-warn: var(--warn);
+  --color-warn-foreground: var(--warn-foreground);
   --color-error: var(--error);
   --color-context-red: var(--context-red);
   --color-context-orange: var(--context-orange);
