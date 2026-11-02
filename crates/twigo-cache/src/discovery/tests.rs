@@ -487,3 +487,60 @@ async fn an_edit_that_keeps_the_cluster_keeps_its_list_through_an_outage() {
     );
     assert!(asked(&down, "/apis") > 0);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_new_follower_rechecks_what_its_predecessor_saw() {
+    let fake = fake();
+    let (hub, _) = fake.hub(Budgets::default());
+    let cache = tempfile::tempdir().unwrap();
+    let mut first = over(hub.clone(), cache.path()).await;
+    assert_eq!(names(&next(&mut first).await), ["namespaces"]);
+    fake.add("customresourcedefinitions", None, "gadgets.example.com");
+    assert!(
+        timeout(Duration::from_millis(200), first.next())
+            .await
+            .is_err()
+    );
+    drop(first);
+
+    let start = Instant::now();
+    let mut second = over(hub, cache.path()).await;
+    assert_eq!(names(&next(&mut second).await), ["namespaces"]);
+    tokio::spawn({
+        let fake = fake.clone();
+        async move {
+            sleep(Duration::from_secs(1)).await;
+            fake.state().serve("example.com", "gadgets", "Gadget");
+        }
+    });
+    assert_eq!(names(&next(&mut second).await), ["namespaces", "gadgets"]);
+    assert_eq!(start.elapsed(), RECHECKS[0]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn steady_changes_put_discovery_off_by_the_first_recheck_at_most() {
+    let fake = fake();
+    let cache = tempfile::tempdir().unwrap();
+    let mut follower = follower(&fake, cache.path()).await;
+    assert_eq!(names(&next(&mut follower).await), ["namespaces"]);
+    assert!(
+        timeout(Duration::from_secs(11), follower.next())
+            .await
+            .is_err()
+    );
+
+    let start = Instant::now();
+    fake.state().serve("example.com", "gadgets", "Gadget");
+    let churn = tokio::spawn({
+        let fake = fake.clone();
+        async move {
+            loop {
+                fake.add("customresourcedefinitions", None, "gadgets.example.com");
+                sleep(Duration::from_millis(400)).await;
+            }
+        }
+    });
+    assert_eq!(names(&next(&mut follower).await), ["namespaces", "gadgets"]);
+    assert_eq!(start.elapsed(), RECHECKS[0]);
+    churn.abort();
+}

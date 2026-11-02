@@ -14,8 +14,10 @@ export type Loaded<T> =
 
 /**
  * The resources of the active space, as Rust follows them (ARCHITECTURE
- * 3.6), and each context's version. A space shown before keeps its last
- * answer until it is followed again.
+ * 3.6), and each context's version. A space shown again keeps its last
+ * answer until its new follower's first, so it shows at once; that answer
+ * may be of another cluster if the space's kubeconfig entry changed
+ * meanwhile.
  */
 export class Discovery {
   readonly changes = new Changes();

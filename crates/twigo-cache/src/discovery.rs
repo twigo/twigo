@@ -20,8 +20,9 @@ use crate::table::Row;
 
 /// The API server updates its discovery from a change of a CRD or an
 /// APIService in a controller of its own, which may not be done when the
-/// change reaches Twigo: discovery is fetched once the changes settle, and
-/// twice more after the last of them.
+/// change reaches Twigo: discovery is fetched once the changes settle, or
+/// the first recheck after the first of them, whichever comes first, and
+/// at the rechecks after the last of them.
 const SETTLE: Duration = Duration::from_millis(500);
 const RECHECKS: [Duration; 2] = [Duration::from_secs(2), Duration::from_secs(10)];
 /// kube-aggregator's `discoveryRefreshInterval`, how often the API server
@@ -47,6 +48,8 @@ pub struct Follower {
     abandoned: Option<watch::Receiver<bool>>,
     /// The fetches due after a change, soonest first.
     due: Vec<Instant>,
+    /// When the first change since the last fetch came.
+    burst: Option<Instant>,
     poll: Instant,
     /// What the last fetch's failure asks for.
     failed: Option<Failed>,
@@ -78,7 +81,8 @@ impl Follower {
     ) -> Self {
         entry.borrow_and_update();
         let indexes = indexes(&hub, &context).await;
-        Self {
+        let listed = indexes.iter().any(|index| index.seen.is_some());
+        let mut follower = Self {
             hub,
             cache,
             context,
@@ -88,10 +92,17 @@ impl Follower {
             confirmed: false,
             abandoned: None,
             due: Vec::new(),
+            burst: None,
             poll: Instant::now() + POLL,
             failed: None,
             last: None,
+        };
+        // Indexes that another follower left listed have told it changes
+        // whose discovery may still lag.
+        if listed {
+            follower.schedule();
         }
+        follower
     }
 
     /// The context's resources at first, then each time they change.
@@ -100,6 +111,7 @@ impl Follower {
             if self.last.is_some() {
                 self.wait().await;
             }
+            self.burst = None;
             let discovered = self.fetch().await;
             self.poll = Instant::now() + POLL;
             if self.last.as_ref() != Some(&discovered) {
@@ -143,9 +155,10 @@ impl Follower {
     /// The fetches after a change, from now.
     fn schedule(&mut self) {
         let now = Instant::now();
-        self.due = std::iter::once(SETTLE)
-            .chain(RECHECKS)
-            .map(|after| now + after)
+        let burst = *self.burst.get_or_insert(now);
+        let settled = (now + SETTLE).min(burst + RECHECKS[0]);
+        self.due = std::iter::once(settled)
+            .chain(RECHECKS.map(|after| now + after))
             .collect();
     }
 
