@@ -42,6 +42,7 @@ struct Inner {
     state: Mutex<State>,
     warming: Arc<tokio::sync::Mutex<()>>,
     retired: watch::Sender<u64>,
+    abandoned: watch::Sender<bool>,
 }
 
 #[derive(Default)]
@@ -87,6 +88,7 @@ impl Default for Connections {
             state: Mutex::default(),
             warming: Arc::default(),
             retired: watch::Sender::new(0),
+            abandoned: watch::Sender::new(false),
         }))
     }
 }
@@ -156,6 +158,19 @@ impl Connections {
     /// Counts the retirements.
     pub fn retired(&self) -> watch::Receiver<u64> {
         self.0.retired.subscribe()
+    }
+
+    /// Retires every connection for good: other clients replace these, so
+    /// whoever holds them moves to those, however late they look, which a
+    /// count of retirements would not tell them.
+    pub fn abandon(&self) {
+        self.0.abandoned.send_replace(true);
+        self.retire();
+    }
+
+    /// Whether the clients were abandoned.
+    pub fn abandoned(&self) -> watch::Receiver<bool> {
+        self.0.abandoned.subscribe()
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
@@ -549,6 +564,15 @@ mod tests {
         assert!(!connections.retire_after(seen), "the first one retired");
         assert_eq!(*retired.borrow_and_update(), seen + 1);
         assert!(connections.retire_after(seen + 1));
+    }
+
+    #[test]
+    fn abandoned_clients_say_so_to_whoever_looks_later() {
+        let connections = Connections::default();
+        connections.abandon();
+        let abandoned = connections.abandoned();
+        assert!(*abandoned.borrow());
+        assert_eq!(*connections.retired().borrow(), 1, "retired too");
     }
 
     #[test]

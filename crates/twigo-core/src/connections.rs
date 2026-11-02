@@ -104,11 +104,18 @@ impl Connections {
             },
         )?);
         let latest = self.latest.lock().expect("latest lock");
-        if !latest.current(context, env) {
-            // Built from a context or proxy variables that changed meanwhile:
-            // its watches re-open at once, over clients built from the new.
+        let kept = {
+            let contexts = self.contexts.lock().expect("connections lock");
+            contexts
+                .get(&context.name)
+                .is_some_and(|kept| Arc::ptr_eq(kept, &slot))
+        };
+        if !(kept && latest.current(context, env)) {
+            // Built from a context or proxy variables that changed
+            // meanwhile, or for a slot `keep` dropped: whoever holds them
+            // moves to clients built from what holds now.
             drop(latest);
-            clients.connections().retire();
+            clients.connections().abandon();
             return Ok(clients);
         }
         let replaced = slot.built.lock().expect("slot lock").replace(Built {
@@ -120,7 +127,7 @@ impl Connections {
         if let Some(replaced) = replaced {
             // Its watches re-open over the new clients, which may reach
             // another server.
-            replaced.clients.connections().retire();
+            replaced.clients.connections().abandon();
         }
         Ok(clients)
     }
@@ -130,7 +137,15 @@ impl Connections {
     /// fingerprint changed, are dropped and their connections retired, so
     /// the watches over them re-open, over rebuilt clients if their
     /// context is still listed.
-    pub fn keep(&self, listed: &HashMap<String, Fingerprint>) {
+    /// A name the sources list twice counts by its first, as the catalog's
+    /// `find` takes it.
+    pub fn keep<'a>(&self, contexts: impl IntoIterator<Item = &'a kubeconfig::Context>) {
+        let mut listed = HashMap::new();
+        for context in contexts {
+            listed
+                .entry(context.name.clone())
+                .or_insert(context.fingerprint);
+        }
         let mut latest = self.latest.lock().expect("latest lock");
         latest.fingerprints = Some(listed.clone());
         let mut contexts = self.contexts.lock().expect("connections lock");
@@ -149,7 +164,7 @@ impl Connections {
         drop(contexts);
         drop(latest);
         for clients in gone {
-            clients.connections().retire();
+            clients.connections().abandon();
         }
     }
 
@@ -169,7 +184,7 @@ impl Connections {
         drop(contexts);
         drop(latest);
         for clients in gone {
-            clients.connections().retire();
+            clients.connections().abandon();
         }
     }
 
@@ -341,15 +356,10 @@ contexts:
             &rcgen::generate_simple_self_signed(["a".to_owned()]).unwrap(),
         );
         let catalog = load(dir.path());
-        let listed: HashMap<String, Fingerprint> = catalog
-            .contexts
-            .iter()
-            .map(|context| (context.name.clone(), context.fingerprint))
-            .collect();
-        connections.keep(&listed);
+        connections.keep(&catalog.contexts);
         assert!(a_retired.has_changed().unwrap(), "its CA file changed");
         assert!(!b_retired.has_changed().unwrap(), "it did not change");
-        connections.keep(&listed);
+        connections.keep(&catalog.contexts);
         connections.follow_env(&env);
         assert!(
             !b_retired.has_changed().unwrap(),
@@ -379,33 +389,102 @@ contexts:
             &rcgen::generate_simple_self_signed(["a".to_owned()]).unwrap(),
         );
         let after = load(dir.path());
-        connections.keep(
-            &after
-                .contexts
-                .iter()
-                .map(|context| (context.name.clone(), context.fingerprint))
-                .collect(),
-        );
+        connections.keep(&after.contexts);
 
         let stale = connections
             .clients(find(&before, "kind-a"), &env, None)
             .await
             .unwrap();
-        assert_eq!(
-            *stale.connections().retired().borrow(),
-            1,
-            "retired at once"
+        assert!(
+            *stale.connections().abandoned().borrow(),
+            "abandoned, which whoever holds them sees however late"
         );
         let current = connections
             .clients(find(&after, "kind-a"), &env, None)
             .await
             .unwrap();
-        assert_eq!(*current.connections().retired().borrow(), 0);
+        assert!(!*current.connections().abandoned().borrow());
         let again = connections
             .clients(find(&after, "kind-a"), &env, None)
             .await
             .unwrap();
         assert!(Arc::ptr_eq(&current, &again), "the current ones are kept");
+    }
+
+    #[tokio::test]
+    async fn a_name_listed_twice_counts_by_its_first() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config"),
+            "
+clusters:
+- name: a
+  cluster: { server: 'https://a.example:6443' }
+- name: b
+  cluster: { server: 'https://b.example:6443' }
+contexts:
+- name: kind-a
+  context: { cluster: a }
+- name: kind-a
+  context: { cluster: b }
+",
+        )
+        .unwrap();
+        let catalog = load(dir.path());
+        let twice: Vec<_> = catalog
+            .contexts
+            .iter()
+            .filter(|context| context.name == "kind-a")
+            .collect();
+        assert_eq!(twice.len(), 2, "the loader keeps both");
+        assert_ne!(twice[0].fingerprint, twice[1].fingerprint);
+        let connections = Connections::default();
+        connections.keep(&catalog.contexts);
+        let env = ProxyEnv::default();
+        let first = connections.clients(twice[0], &env, None).await.unwrap();
+        let again = connections.clients(twice[0], &env, None).await.unwrap();
+        assert!(Arc::ptr_eq(&first, &again), "kept, not rebuilt each time");
+    }
+
+    #[tokio::test]
+    async fn a_build_for_a_slot_keep_dropped_is_abandoned() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config"), KUBECONFIG).unwrap();
+        ca(
+            dir.path(),
+            &rcgen::generate_simple_self_signed(["a".to_owned()]).unwrap(),
+        );
+        let connections = Arc::new(Connections::default());
+        let catalog = load(dir.path());
+        let a = find(&catalog, "kind-a").clone();
+        connections
+            .clients(&a, &ProxyEnv::default(), None)
+            .await
+            .unwrap();
+        let slot = Arc::clone(&connections.contexts.lock().unwrap()["kind-a"]);
+        let building = slot.building.lock().await;
+        let proxied = ProxyEnv::from_vars(|name| {
+            (name == "HTTPS_PROXY").then(|| "http://proxy.example:3128".to_owned())
+        });
+        let build = tokio::spawn({
+            let (connections, a, proxied) = (Arc::clone(&connections), a.clone(), proxied.clone());
+            async move { connections.clients(&a, &proxied, None).await.unwrap() }
+        });
+        tokio::task::yield_now().await;
+        connections.keep(std::iter::empty());
+        connections.keep(&catalog.contexts);
+        connections.follow_env(&proxied);
+        let fresh = connections.clients(&a, &proxied, None).await.unwrap();
+        drop(building);
+
+        let orphaned = build.await.unwrap();
+        assert!(
+            *orphaned.connections().abandoned().borrow(),
+            "nothing would reach it in a slot no longer kept"
+        );
+        let current = connections.clients(&a, &proxied, None).await.unwrap();
+        assert!(Arc::ptr_eq(&fresh, &current));
+        assert!(!*current.connections().abandoned().borrow());
     }
 
     #[tokio::test]
@@ -425,8 +504,7 @@ contexts:
             .unwrap();
 
         let retired = b.connections().retired();
-        let a = find(&catalog, "kind-a").fingerprint;
-        connections.keep(&HashMap::from([("kind-a".to_owned(), a)]));
+        connections.keep([find(&catalog, "kind-a")]);
         assert!(
             retired.has_changed().unwrap(),
             "the watches over them re-open"

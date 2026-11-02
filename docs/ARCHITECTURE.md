@@ -349,7 +349,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
     The answer, and the access reviews of the scope, are kept with the context's clients, so clients rebuilt for another server learn them again.
   - A relist, after `410 Gone` or over rebuilt clients, keeps the rows on screen and replaces them with its own once it ends.
   - A changed fingerprint or proxy variables, or a context no source lists any more, retire the connections of its clients at once, so its watches re-open over rebuilt clients and relist, or show that no source lists the context.
-    Clients a build finishes after such a change are retired as it stores them.
+    Such clients are abandoned, not only retired: a watch that starts on them later still learns that they were replaced, which a count of retirements, followed from the moment it subscribes, would not tell it; so are clients a build finishes after such a change.
   - A resource the server cannot watch, which answers a watch with 405 as ComponentStatus and metrics do ([`handleWatch`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/get.go#L268-L270)), is listed in pages again every 15 s, the interval of metrics (3.6).
 - **Backoff.**
   UI-friendly: 0.5–5 s with jitter, reset on every event.

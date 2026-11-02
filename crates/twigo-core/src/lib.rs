@@ -230,7 +230,7 @@ impl Core {
             }),
             Err(ViewState::Unauthorized) => Err(IpcError {
                 kind: ErrorKind::Unauthorized,
-                message: "no credentials Twigo may use for this context".to_owned(),
+                message: "no credentials for this context that the cluster accepts".to_owned(),
             }),
             Err(ViewState::Error { error }) => Err(error),
             Err(_) => Err(IpcError {
@@ -294,11 +294,7 @@ impl Core {
                 if let Some(listed) = listed {
                     let names: HashSet<String> = listed.iter().map(|c| c.name.clone()).collect();
                     self.state.saw(&names, Timestamp::now());
-                    let fingerprints = listed
-                        .iter()
-                        .map(|c| (c.name.clone(), c.fingerprint))
-                        .collect();
-                    self.connections.keep(&fingerprints);
+                    self.connections.keep(listed.iter());
                 }
                 if contexts.changed().await.is_err() {
                     return;

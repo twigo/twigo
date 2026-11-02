@@ -623,6 +623,39 @@ async fn whole_rows_wait_for_a_whole_list() {
     ));
 }
 
+#[tokio::test(start_paused = true)]
+async fn clients_abandoned_before_their_first_watch_are_left_at_once() {
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    let abandoned = fake.clients(Budgets::default());
+    abandoned.connections().abandon();
+    let current = fake.clients(Budgets::default());
+    let connects = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let connect: Connect = {
+        let (abandoned, current, connects) = (
+            Arc::clone(&abandoned),
+            Arc::clone(&current),
+            Arc::clone(&connects),
+        );
+        Arc::new(move |_context| {
+            let first = connects.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0;
+            let clients = Arc::clone(if first { &abandoned } else { &current });
+            Box::pin(async move { Ok(clients) })
+        })
+    };
+    let hub = Hub::new(connect);
+    let mut pods = hub.rows(query(&["a"])).await;
+    ready(&mut pods).await;
+    assert_eq!(names(&pods), ["p1"]);
+    assert_eq!(connects.load(std::sync::atomic::Ordering::Relaxed), 2);
+    sleep(Duration::from_secs(30)).await;
+    assert_eq!(
+        connects.load(std::sync::atomic::Ordering::Relaxed),
+        2,
+        "and stay on the current ones"
+    );
+}
+
 #[test]
 fn names_that_are_none_stay_in_their_segment() {
     let path = pods().path(&Scope::Namespace("a/b?c<d".to_owned()));

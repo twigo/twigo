@@ -498,6 +498,13 @@ where
         };
         let mut retired = clients.connections().retired();
         let seen = *retired.borrow_and_update();
+        // Abandoned clients say so to whoever looks, however late.
+        let mut abandoned = clients.connections().abandoned();
+        let mut abandoned = std::pin::pin!(async move {
+            if abandoned.wait_for(|abandoned| *abandoned).await.is_err() {
+                std::future::pending::<()>().await;
+            }
+        });
         let mut request = request::watch(&self.collection(), start, TIMEOUT_SECONDS);
         request.extensions_mut().insert(self.watch_waiting.clone());
         let mut lines: Lines = tokio::select! {
@@ -509,6 +516,7 @@ where
                 }
             },
             _ = retired.changed() => return Outcome::Retired(again(&from, &listing)),
+            () = &mut abandoned => return Outcome::Retired(again(&from, &listing)),
         };
         let _watching = Watching::new(&self.upstream.watching);
         match &listing {
@@ -523,6 +531,7 @@ where
             let read = tokio::select! {
                 read = tokio::time::timeout(IDLE, lines.read_until(b'\n', &mut line)) => read,
                 _ = retired.changed() => return Outcome::Retired(again(&from, &listing)),
+                () = &mut abandoned => return Outcome::Retired(again(&from, &listing)),
             };
             match read {
                 Err(_) => {

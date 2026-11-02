@@ -98,14 +98,19 @@ impl Fake {
         self.0.lock().unwrap()
     }
 
-    /// The hub over this server, every context's clients with `budgets`.
-    pub fn hub(&self, budgets: Budgets) -> (Hub, Arc<Clients>) {
+    /// Clients over this server.
+    pub fn clients(&self, budgets: Budgets) -> Arc<Clients> {
         let fake = self.clone();
         let service = tower::service_fn(move |request: Request<kube::client::Body>| {
             let fake = fake.clone();
             async move { fake.answer(request).await }
         });
-        let clients = Arc::new(Clients::over(service, budgets));
+        Arc::new(Clients::over(service, budgets))
+    }
+
+    /// The hub over this server, every context's clients with `budgets`.
+    pub fn hub(&self, budgets: Budgets) -> (Hub, Arc<Clients>) {
+        let clients = self.clients(budgets);
         let connect: Connect = {
             let clients = Arc::clone(&clients);
             Arc::new(move |_context| {
