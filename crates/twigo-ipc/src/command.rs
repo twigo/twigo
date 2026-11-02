@@ -5,8 +5,9 @@
 use ts_rs::TS;
 
 use crate::{
-    Ack, ClusterVersion, Context, ContextAuth, Discovered, ExecReview, KeyboardLayout, ListBatch,
-    ListQuery, SetWindow, ShellEnvironment, Space, StateEntry, StateSnapshot, SubscriptionId,
+    Ack, ClusterVersion, Context, ContextAuth, Discovered, ExecReview, GetValues, KeyboardLayout,
+    ListBatch, ListQuery, ObjectBatch, OpenObject, SetParts, SetWindow, ShellEnvironment, Space,
+    StateEntry, StateSnapshot, SubscriptionId,
 };
 
 pub trait Command {
@@ -113,6 +114,56 @@ pub struct ListUnsubscribe;
 
 impl Command for ListUnsubscribe {
     const NAME: &'static str = "list_unsubscribe";
+    type Request = SubscriptionId;
+    type Response = ();
+    type Message = ();
+}
+
+/// Opens an object for the drawer or a resource editor, whose batches come
+/// over the channel until it closes.
+pub struct ObjectOpen;
+
+impl Command for ObjectOpen {
+    const NAME: &'static str = "object_open";
+    type Request = OpenObject;
+    type Response = SubscriptionId;
+    type Message = ObjectBatch;
+}
+
+/// Says what the views of an open object show, which Rust follows.
+pub struct ObjectSetParts;
+
+impl Command for ObjectSetParts {
+    const NAME: &'static str = "object_set_parts";
+    type Request = SetParts;
+    type Response = ();
+    type Message = ();
+}
+
+pub struct ObjectAck;
+
+impl Command for ObjectAck {
+    const NAME: &'static str = "object_ack";
+    type Request = Ack;
+    type Response = ();
+    type Message = ();
+}
+
+/// The values of an open ConfigMap's keys, None for a key it lacks or holds
+/// as binary data.
+pub struct ObjectValues;
+
+impl Command for ObjectValues {
+    const NAME: &'static str = "object_values";
+    type Request = GetValues;
+    type Response = Vec<Option<String>>;
+    type Message = ();
+}
+
+pub struct ObjectClose;
+
+impl Command for ObjectClose {
+    const NAME: &'static str = "object_close";
     type Request = SubscriptionId;
     type Response = ();
     type Message = ();

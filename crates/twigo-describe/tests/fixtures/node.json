@@ -1,0 +1,289 @@
+{
+  "events": [
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-02T20:44:21Z",
+      "last": "2026-11-02T20:44:21Z",
+      "message": "Node kwok-node-0 event: Registered Node kwok-node-0 in Controller",
+      "reason": "RegisteredNode",
+      "source": "node-controller",
+      "type": "Normal"
+    }
+  ],
+  "object": {
+    "apiVersion": "v1",
+    "kind": "Node",
+    "metadata": {
+      "annotations": {
+        "kubectl.kubernetes.io/last-applied-configuration": "{\"apiVersion\":\"v1\",\"kind\":\"Node\",\"metadata\":{\"annotations\":{\"kwok.x-k8s.io/node\":\"fake\",\"node.alpha.kubernetes.io/ttl\":\"0\"},\"labels\":{\"kubernetes.io/hostname\":\"kwok-node-0\",\"kubernetes.io/os\":\"linux\",\"type\":\"kwok\"},\"name\":\"kwok-node-0\"},\"spec\":{\"taints\":[{\"effect\":\"NoSchedule\",\"key\":\"kwok.x-k8s.io/node\",\"value\":\"fake\"}]},\"status\":{\"allocatable\":{\"cpu\":\"64\",\"memory\":\"512Gi\",\"pods\":\"1000\"},\"capacity\":{\"cpu\":\"64\",\"memory\":\"512Gi\",\"pods\":\"1000\"}}}\n",
+        "kwok.x-k8s.io/node": "fake",
+        "node.alpha.kubernetes.io/ttl": "0"
+      },
+      "creationTimestamp": "2026-11-02T20:44:20Z",
+      "labels": {
+        "beta.kubernetes.io/os": "linux",
+        "kubernetes.io/hostname": "kwok-node-0",
+        "kubernetes.io/os": "linux",
+        "type": "kwok"
+      },
+      "managedFields": [
+        {
+          "apiVersion": "v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:metadata": {
+              "f:labels": {
+                "f:beta.kubernetes.io/os": {}
+              }
+            },
+            "f:spec": {
+              "f:podCIDR": {},
+              "f:podCIDRs": {
+                ".": {},
+                "v:\"10.244.1.0/24\"": {}
+              },
+              "f:taints": {}
+            }
+          },
+          "manager": "kube-controller-manager",
+          "operation": "Update",
+          "time": "2026-11-02T20:44:20Z"
+        },
+        {
+          "apiVersion": "v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:metadata": {
+              "f:annotations": {
+                ".": {},
+                "f:kubectl.kubernetes.io/last-applied-configuration": {},
+                "f:kwok.x-k8s.io/node": {},
+                "f:node.alpha.kubernetes.io/ttl": {}
+              },
+              "f:labels": {
+                ".": {},
+                "f:kubernetes.io/hostname": {},
+                "f:kubernetes.io/os": {},
+                "f:type": {}
+              }
+            }
+          },
+          "manager": "kubectl-client-side-apply",
+          "operation": "Update",
+          "time": "2026-11-02T20:44:20Z"
+        },
+        {
+          "apiVersion": "v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:status": {
+              "f:addresses": {
+                ".": {},
+                "k:{\"type\":\"InternalIP\"}": {
+                  ".": {},
+                  "f:address": {},
+                  "f:type": {}
+                }
+              },
+              "f:conditions": {
+                ".": {},
+                "k:{\"type\":\"DiskPressure\"}": {
+                  ".": {},
+                  "f:lastHeartbeatTime": {},
+                  "f:lastTransitionTime": {},
+                  "f:message": {},
+                  "f:reason": {},
+                  "f:status": {},
+                  "f:type": {}
+                },
+                "k:{\"type\":\"MemoryPressure\"}": {
+                  ".": {},
+                  "f:lastHeartbeatTime": {},
+                  "f:lastTransitionTime": {},
+                  "f:message": {},
+                  "f:reason": {},
+                  "f:status": {},
+                  "f:type": {}
+                },
+                "k:{\"type\":\"NetworkUnavailable\"}": {
+                  ".": {},
+                  "f:lastHeartbeatTime": {},
+                  "f:lastTransitionTime": {},
+                  "f:message": {},
+                  "f:reason": {},
+                  "f:status": {},
+                  "f:type": {}
+                },
+                "k:{\"type\":\"PIDPressure\"}": {
+                  ".": {},
+                  "f:lastHeartbeatTime": {},
+                  "f:lastTransitionTime": {},
+                  "f:message": {},
+                  "f:reason": {},
+                  "f:status": {},
+                  "f:type": {}
+                },
+                "k:{\"type\":\"Ready\"}": {
+                  ".": {},
+                  "f:lastHeartbeatTime": {},
+                  "f:lastTransitionTime": {},
+                  "f:message": {},
+                  "f:reason": {},
+                  "f:status": {},
+                  "f:type": {}
+                }
+              },
+              "f:daemonEndpoints": {
+                "f:kubeletEndpoint": {
+                  "f:Port": {}
+                }
+              },
+              "f:nodeInfo": {
+                "f:architecture": {},
+                "f:containerRuntimeVersion": {},
+                "f:kernelVersion": {},
+                "f:kubeProxyVersion": {},
+                "f:kubeletVersion": {},
+                "f:operatingSystem": {}
+              },
+              "f:phase": {}
+            }
+          },
+          "manager": "kwok",
+          "operation": "Update",
+          "subresource": "status",
+          "time": "2026-11-02T21:04:33Z"
+        }
+      ],
+      "name": "kwok-node-0",
+      "resourceVersion": "3731",
+      "uid": "f545f5ea-082c-49a8-9e18-ae3265e8f2ff"
+    },
+    "spec": {
+      "podCIDR": "10.244.1.0/24",
+      "podCIDRs": [
+        "10.244.1.0/24"
+      ],
+      "taints": [
+        {
+          "effect": "NoSchedule",
+          "key": "kwok.x-k8s.io/node",
+          "value": "fake"
+        }
+      ]
+    },
+    "status": {
+      "addresses": [
+        {
+          "address": "10.244.0.5",
+          "type": "InternalIP"
+        }
+      ],
+      "allocatable": {
+        "cpu": "64",
+        "memory": "512Gi",
+        "pods": "1k"
+      },
+      "capacity": {
+        "cpu": "64",
+        "memory": "512Gi",
+        "pods": "1k"
+      },
+      "conditions": [
+        {
+          "lastHeartbeatTime": "2026-11-02T21:04:33Z",
+          "lastTransitionTime": "2026-11-02T20:44:20Z",
+          "message": "kubelet is posting ready status",
+          "reason": "KubeletReady",
+          "status": "True",
+          "type": "Ready"
+        },
+        {
+          "lastHeartbeatTime": "2026-11-02T21:04:33Z",
+          "lastTransitionTime": "2026-11-02T20:44:20Z",
+          "message": "kubelet has sufficient memory available",
+          "reason": "KubeletHasSufficientMemory",
+          "status": "False",
+          "type": "MemoryPressure"
+        },
+        {
+          "lastHeartbeatTime": "2026-11-02T21:04:33Z",
+          "lastTransitionTime": "2026-11-02T20:44:20Z",
+          "message": "kubelet has no disk pressure",
+          "reason": "KubeletHasNoDiskPressure",
+          "status": "False",
+          "type": "DiskPressure"
+        },
+        {
+          "lastHeartbeatTime": "2026-11-02T21:04:33Z",
+          "lastTransitionTime": "2026-11-02T20:44:20Z",
+          "message": "kubelet has sufficient PID available",
+          "reason": "KubeletHasSufficientPID",
+          "status": "False",
+          "type": "PIDPressure"
+        },
+        {
+          "lastHeartbeatTime": "2026-11-02T21:04:33Z",
+          "lastTransitionTime": "2026-11-02T20:44:20Z",
+          "message": "RouteController created a route",
+          "reason": "RouteCreated",
+          "status": "False",
+          "type": "NetworkUnavailable"
+        }
+      ],
+      "daemonEndpoints": {
+        "kubeletEndpoint": {
+          "Port": 10247
+        }
+      },
+      "nodeInfo": {
+        "architecture": "amd64",
+        "bootID": "",
+        "containerRuntimeVersion": "kwok-v0.8.0",
+        "kernelVersion": "kwok-v0.8.0",
+        "kubeProxyVersion": "kwok-v0.8.0",
+        "kubeletVersion": "kwok-v0.8.0",
+        "machineID": "",
+        "operatingSystem": "linux",
+        "osImage": "",
+        "systemUUID": ""
+      },
+      "phase": "Running"
+    }
+  },
+  "printed": [
+    {
+      "column": "Status",
+      "value": "Ready"
+    },
+    {
+      "column": "Roles",
+      "value": "<none>"
+    },
+    {
+      "column": "Version",
+      "value": "kwok-v0.8.0"
+    },
+    {
+      "column": "Internal-IP",
+      "value": "10.244.0.5"
+    },
+    {
+      "column": "External-IP",
+      "value": "<none>"
+    },
+    {
+      "column": "OS-Image",
+      "value": "<unknown>"
+    },
+    {
+      "column": "Kernel-Version",
+      "value": "kwok-v0.8.0 (amd64)"
+    },
+    {
+      "column": "Container-Runtime",
+      "value": "kwok-v0.8.0"
+    }
+  ]
+}

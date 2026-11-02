@@ -2,6 +2,8 @@
 
 export type Ack = { id: SubscriptionId, seq: number, };
 
+export type Block = { "type": "fields", fields: Array<Field>, } | { "type": "conditions", conditions: Array<Condition>, } | { "type": "data", entries: Array<DataEntry>, } | { "type": "tree", nodes: Array<TreeNode>, } | { "type": "events", events: Array<ObjectEvent>, };
+
 export type Cell = null | boolean | number | number | string;
 
 /**
@@ -27,6 +29,17 @@ export type ColumnValues = {
  */
 column: string, values: Array<string>, };
 
+export type Condition = { type: string, status: string, 
+/**
+ * Whether this status is good news, as Ready=True is and
+ * MemoryPressure=True is not.
+ */
+tone: Tone, reason: string | null, message: string | null, 
+/**
+ * RFC 3339.
+ */
+lastTransition: string | null, };
+
 /**
  * A context the catalog lists.
  */
@@ -42,6 +55,12 @@ color: ContextColor | null, };
 export type ContextAuth = { "state": "none" } | { "state": "invalid", message: string, } | { "state": "untrusted", plugin: ExecPlugin, } | { "state": "plugin", plugin: ExecPlugin, status: PluginStatus, };
 
 export type ContextColor = "red" | "orange" | "yellow" | "green" | "blue" | "purple";
+
+export type DataEntry = { key: string, bytes: number, 
+/**
+ * From `binaryData`, or a Secret value that is not UTF-8.
+ */
+binary: boolean, };
 
 /**
  * A context's resources as discovery last answered, or why it did not.
@@ -79,6 +98,14 @@ export type ExecReview = {
  * when it is about to run.
  */
 reviewed: boolean, plugins: Array<ReviewedPlugin>, };
+
+export type Field = { label: string, value: Value, };
+
+/**
+ * Asks for the values of a ConfigMap's keys, which its Overview lists with
+ * their sizes only.
+ */
+export type GetValues = { id: SubscriptionId, keys: Array<string>, };
 
 export type GroupCount = { value: string, count: number, };
 
@@ -119,6 +146,8 @@ id: string,
  * The writing-system keys, by `KeyboardEvent.code` (`KeyA`, `Slash`).
  */
 keys: { [key in string]: KeyMapping }, };
+
+export type Label = { key: string, value: string, };
 
 /**
  * One flush of a subscription. Rust sends the next batch only after the
@@ -189,6 +218,118 @@ groupBy: string | null,
  */
 values: ColumnValues | null, };
 
+/**
+ * One flush of an open object. Rust sends the next only after the webview
+ * acknowledged this one's `seq`, and coalesces changes meanwhile.
+ */
+export type ObjectBatch = { seq: number, status: ViewState, 
+/**
+ * False until the object is listed, and once it is deleted.
+ */
+exists: boolean, 
+/**
+ * Present when it changed, while the overview part is shown.
+ */
+overview: Overview | null, 
+/**
+ * The object's JSON with managedFields dropped and a Secret's values
+ * replaced by their sizes; present when it changed, while the manifest
+ * part is shown.
+ */
+manifest: string | null, 
+/**
+ * Newest first; present when they changed, while the events part is
+ * shown.
+ */
+events: Array<ObjectEvent> | null, 
+/**
+ * Present when it changed, while the related part is shown.
+ */
+related: Related | null, };
+
+export type ObjectEvent = { 
+/**
+ * Normal or Warning.
+ */
+type: string, reason: string, message: string, 
+/**
+ * The component that reported it.
+ */
+source: string, 
+/**
+ * How often it happened; 1 for a single event.
+ */
+count: number, 
+/**
+ * RFC 3339.
+ */
+first: string | null, 
+/**
+ * RFC 3339.
+ */
+last: string | null, 
+/**
+ * The part of the object it is about, such as `spec.containers{app}`.
+ */
+fieldPath: string | null, };
+
+/**
+ * What the views of an open object show; Rust follows only these.
+ */
+export type ObjectParts = { 
+/**
+ * The Overview document, its events included.
+ */
+overview: boolean, 
+/**
+ * The object as the YAML tab shows it.
+ */
+manifest: boolean, 
+/**
+ * The object's events, for the Events tab.
+ */
+events: boolean, 
+/**
+ * Its owners and the objects it owns.
+ */
+related: boolean, };
+
+/**
+ * Names one object of a space.
+ */
+export type ObjectQuery = { space: string, gvr: Gvr, 
+/**
+ * Whether the resource lives in namespaces, as discovery says.
+ */
+namespaced: boolean, 
+/**
+ * None for a cluster-scoped object.
+ */
+namespace: string | null, name: string, };
+
+/**
+ * An object a link points at, by kind: the webview finds its resource
+ * through discovery.
+ */
+export type ObjectRef = { 
+/**
+ * Empty for the core group.
+ */
+group: string, version: string, kind: string, 
+/**
+ * The namespace of the object that points at it, which the webview
+ * drops when discovery says the kind is cluster-scoped.
+ */
+namespace: string | null, name: string, };
+
+export type OpenObject = { object: ObjectQuery, parts: ObjectParts, };
+
+/**
+ * An object described for people: sections in their order, each a list of
+ * blocks from a closed set (ARCHITECTURE 4.3).
+ */
+export type Overview = { sections: Array<Section>, };
+
 export type PluginStatus = { "state": "idle" } | { "state": "waiting" } | { "state": "running", 
 /**
  * When the run started, RFC 3339.
@@ -203,6 +344,14 @@ expires: string | null, } | { "state": "failed", error: string, output: string,
  * The kubeconfig's `installHint`, when the command was not found.
  */
 installHint: string | null, };
+
+export type Related = { owners: Array<RelatedObject>, owned: Array<RelatedObject>, };
+
+export type RelatedObject = { target: ObjectRef, 
+/**
+ * The owner reference that ties them is the controller's.
+ */
+controller: boolean, };
 
 /**
  * A resource the space's clusters serve, from discovery: what the explorer
@@ -230,6 +379,14 @@ cells: Array<Cell>, };
  * `context/namespace/name`, or `context/name` for cluster-scoped objects.
  */
 export type RowId = string;
+
+export type Section = { 
+/**
+ * Stable, such as `core.metadata`; folding is kept by it.
+ */
+id: string, title: string, blocks: Array<Block>, };
+
+export type SetParts = { id: SubscriptionId, parts: ObjectParts, };
 
 export type SetWindow = { id: SubscriptionId, start: number, 
 /**
@@ -292,6 +449,17 @@ spaces: { [key in string]: { [key in string]: string } }, };
 
 export type SubscriptionId = number;
 
+export type Tone = "neutral" | "success" | "warning" | "danger";
+
+export type TreeNode = { key: string, 
+/**
+ * A scalar as text; None for a map or a list, whose entries are its
+ * children.
+ */
+value: string | null, children: Array<TreeNode>, };
+
+export type Value = { "type": "text", text: string, } | { "type": "time", at: string, } | { "type": "link", target: ObjectRef, text: string, } | { "type": "labels", labels: Array<Label>, } | { "type": "list", items: Array<Value>, };
+
 /**
  * The state of the upstream behind a subscription (ARCHITECTURE 3.7).
  */
@@ -310,6 +478,11 @@ export type Commands = {
   list_set_window: { request: SetWindow; response: null; message: null };
   list_ack: { request: Ack; response: null; message: null };
   list_unsubscribe: { request: SubscriptionId; response: null; message: null };
+  object_open: { request: OpenObject; response: SubscriptionId; message: ObjectBatch };
+  object_set_parts: { request: SetParts; response: null; message: null };
+  object_ack: { request: Ack; response: null; message: null };
+  object_values: { request: GetValues; response: Array<string | null>; message: null };
+  object_close: { request: SubscriptionId; response: null; message: null };
   keyboard_layout_watch: { request: null; response: KeyboardLayout; message: KeyboardLayout };
   state_load: { request: null; response: StateSnapshot; message: null };
   state_set: { request: Array<StateEntry>; response: null; message: null };

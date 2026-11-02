@@ -7,8 +7,9 @@ use ts_rs::{Config, TS, TypeVisitor};
 use crate::command::{
     ClusterVersionGet, Command, ContextAuthWatch, ContextSignIn, ContextSignInCancel,
     ContextsWatch, ExecReviewGet, ExecTrust, KeyboardLayoutWatch, ListAck, ListSetWindow,
-    ListSubscribe, ListUnsubscribe, NamespacesList, ResourcesWatch, ShellEnvironmentRetry,
-    ShellEnvironmentWatch, SpaceOpen, SpacesList, StateLoad, StateSet, UrlOpen,
+    ListSubscribe, ListUnsubscribe, NamespacesList, ObjectAck, ObjectClose, ObjectOpen,
+    ObjectSetParts, ObjectValues, ResourcesWatch, ShellEnvironmentRetry, ShellEnvironmentWatch,
+    SpaceOpen, SpacesList, StateLoad, StateSet, UrlOpen,
 };
 
 /// The TypeScript module of `packages/protocol`: every type the commands
@@ -30,6 +31,11 @@ pub fn typescript() -> String {
     module.command::<ListSetWindow>();
     module.command::<ListAck>();
     module.command::<ListUnsubscribe>();
+    module.command::<ObjectOpen>();
+    module.command::<ObjectSetParts>();
+    module.command::<ObjectAck>();
+    module.command::<ObjectValues>();
+    module.command::<ObjectClose>();
     module.command::<KeyboardLayoutWatch>();
     module.command::<StateLoad>();
     module.command::<StateSet>();

@@ -1,0 +1,47 @@
+{
+  "events": [],
+  "object": {
+    "apiVersion": "v1",
+    "binaryData": {
+      "logo.png": "iVBORw0KGgo="
+    },
+    "data": {
+      "app.yaml": "listen: 8080\nlog: info\n",
+      "mode": "fast"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "creationTimestamp": "2026-11-02T21:04:52Z",
+      "managedFields": [
+        {
+          "apiVersion": "v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:binaryData": {
+              ".": {},
+              "f:logo.png": {}
+            },
+            "f:data": {
+              ".": {},
+              "f:app.yaml": {},
+              "f:mode": {}
+            }
+          },
+          "manager": "unknown",
+          "operation": "Update",
+          "time": "2026-11-02T21:04:52Z"
+        }
+      ],
+      "name": "settings",
+      "namespace": "overview",
+      "resourceVersion": "3794",
+      "uid": "df42c79f-5129-4f4c-b779-eb411fce5a6f"
+    }
+  },
+  "printed": [
+    {
+      "column": "Data",
+      "value": "3"
+    }
+  ]
+}

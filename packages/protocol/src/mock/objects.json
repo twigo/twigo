@@ -1,0 +1,2455 @@
+{
+  "configmap": {
+    "overview": {
+      "sections": [
+        {
+          "id": "core.metadata",
+          "title": "Metadata",
+          "blocks": [
+            {
+              "type": "fields",
+              "fields": [
+                {
+                  "label": "Name",
+                  "value": {
+                    "type": "text",
+                    "text": "settings"
+                  }
+                },
+                {
+                  "label": "Namespace",
+                  "value": {
+                    "type": "link",
+                    "target": {
+                      "group": "",
+                      "version": "v1",
+                      "kind": "Namespace",
+                      "namespace": null,
+                      "name": "overview"
+                    },
+                    "text": "overview"
+                  }
+                },
+                {
+                  "label": "Created",
+                  "value": {
+                    "type": "time",
+                    "at": "2026-11-02T21:04:52Z"
+                  }
+                },
+                {
+                  "label": "Managed by",
+                  "value": {
+                    "type": "text",
+                    "text": "unknown"
+                  }
+                },
+                {
+                  "label": "UID",
+                  "value": {
+                    "type": "text",
+                    "text": "df42c79f-5129-4f4c-b779-eb411fce5a6f"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.data",
+          "title": "Data",
+          "blocks": [
+            {
+              "type": "data",
+              "entries": [
+                {
+                  "key": "app.yaml",
+                  "bytes": 23,
+                  "binary": false
+                },
+                {
+                  "key": "logo.png",
+                  "bytes": 8,
+                  "binary": true
+                },
+                {
+                  "key": "mode",
+                  "bytes": 4,
+                  "binary": false
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.events",
+          "title": "Events",
+          "blocks": [
+            {
+              "type": "events",
+              "events": []
+            }
+          ]
+        }
+      ]
+    },
+    "manifest": "{\"apiVersion\":\"v1\",\"binaryData\":{\"logo.png\":\"iVBORw0KGgo=\"},\"data\":{\"app.yaml\":\"listen: 8080\\nlog: info\\n\",\"mode\":\"fast\"},\"kind\":\"ConfigMap\",\"metadata\":{\"creationTimestamp\":\"2026-11-02T21:04:52Z\",\"name\":\"settings\",\"namespace\":\"overview\",\"resourceVersion\":\"3794\",\"uid\":\"df42c79f-5129-4f4c-b779-eb411fce5a6f\"}}"
+  },
+  "deployment": {
+    "overview": {
+      "sections": [
+        {
+          "id": "core.metadata",
+          "title": "Metadata",
+          "blocks": [
+            {
+              "type": "fields",
+              "fields": [
+                {
+                  "label": "Name",
+                  "value": {
+                    "type": "text",
+                    "text": "web"
+                  }
+                },
+                {
+                  "label": "Namespace",
+                  "value": {
+                    "type": "link",
+                    "target": {
+                      "group": "",
+                      "version": "v1",
+                      "kind": "Namespace",
+                      "namespace": null,
+                      "name": "overview"
+                    },
+                    "text": "overview"
+                  }
+                },
+                {
+                  "label": "Created",
+                  "value": {
+                    "type": "time",
+                    "at": "2026-11-02T21:04:52Z"
+                  }
+                },
+                {
+                  "label": "Labels",
+                  "value": {
+                    "type": "labels",
+                    "labels": [
+                      {
+                        "key": "app",
+                        "value": "web"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "label": "Annotations",
+                  "value": {
+                    "type": "labels",
+                    "labels": [
+                      {
+                        "key": "deployment.kubernetes.io/revision",
+                        "value": "1"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "label": "Managed by",
+                  "value": {
+                    "type": "list",
+                    "items": [
+                      {
+                        "type": "text",
+                        "text": "kube-controller-manager"
+                      },
+                      {
+                        "type": "text",
+                        "text": "unknown"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "label": "UID",
+                  "value": {
+                    "type": "text",
+                    "text": "c3c9f25c-da7b-4941-b3ce-b7404644d3fa"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.summary",
+          "title": "Summary",
+          "blocks": [
+            {
+              "type": "fields",
+              "fields": [
+                {
+                  "label": "Ready",
+                  "value": {
+                    "type": "text",
+                    "text": "2/2"
+                  }
+                },
+                {
+                  "label": "Up-to-date",
+                  "value": {
+                    "type": "text",
+                    "text": "2"
+                  }
+                },
+                {
+                  "label": "Available",
+                  "value": {
+                    "type": "text",
+                    "text": "2"
+                  }
+                },
+                {
+                  "label": "Containers",
+                  "value": {
+                    "type": "text",
+                    "text": "app"
+                  }
+                },
+                {
+                  "label": "Images",
+                  "value": {
+                    "type": "text",
+                    "text": "registry.k8s.io/pause:3.10"
+                  }
+                },
+                {
+                  "label": "Selector",
+                  "value": {
+                    "type": "text",
+                    "text": "app=web"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.spec",
+          "title": "Spec",
+          "blocks": [
+            {
+              "type": "tree",
+              "nodes": [
+                {
+                  "key": "progressDeadlineSeconds",
+                  "value": "600",
+                  "children": []
+                },
+                {
+                  "key": "replicas",
+                  "value": "2",
+                  "children": []
+                },
+                {
+                  "key": "revisionHistoryLimit",
+                  "value": "10",
+                  "children": []
+                },
+                {
+                  "key": "selector",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "matchLabels",
+                      "value": null,
+                      "children": [
+                        {
+                          "key": "app",
+                          "value": "web",
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "key": "strategy",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "rollingUpdate",
+                      "value": null,
+                      "children": [
+                        {
+                          "key": "maxSurge",
+                          "value": "25%",
+                          "children": []
+                        },
+                        {
+                          "key": "maxUnavailable",
+                          "value": "25%",
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "key": "type",
+                      "value": "RollingUpdate",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "key": "template",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "metadata",
+                      "value": null,
+                      "children": [
+                        {
+                          "key": "labels",
+                          "value": null,
+                          "children": [
+                            {
+                              "key": "app",
+                              "value": "web",
+                              "children": []
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "key": "spec",
+                      "value": null,
+                      "children": [
+                        {
+                          "key": "containers",
+                          "value": null,
+                          "children": [
+                            {
+                              "key": "app",
+                              "value": null,
+                              "children": [
+                                {
+                                  "key": "image",
+                                  "value": "registry.k8s.io/pause:3.10",
+                                  "children": []
+                                },
+                                {
+                                  "key": "imagePullPolicy",
+                                  "value": "IfNotPresent",
+                                  "children": []
+                                },
+                                {
+                                  "key": "name",
+                                  "value": "app",
+                                  "children": []
+                                },
+                                {
+                                  "key": "ports",
+                                  "value": null,
+                                  "children": [
+                                    {
+                                      "key": "http",
+                                      "value": null,
+                                      "children": [
+                                        {
+                                          "key": "containerPort",
+                                          "value": "8080",
+                                          "children": []
+                                        },
+                                        {
+                                          "key": "name",
+                                          "value": "http",
+                                          "children": []
+                                        },
+                                        {
+                                          "key": "protocol",
+                                          "value": "TCP",
+                                          "children": []
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "key": "resources",
+                                  "value": null,
+                                  "children": [
+                                    {
+                                      "key": "requests",
+                                      "value": null,
+                                      "children": [
+                                        {
+                                          "key": "cpu",
+                                          "value": "10m",
+                                          "children": []
+                                        },
+                                        {
+                                          "key": "memory",
+                                          "value": "16Mi",
+                                          "children": []
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "key": "terminationMessagePath",
+                                  "value": "/dev/termination-log",
+                                  "children": []
+                                },
+                                {
+                                  "key": "terminationMessagePolicy",
+                                  "value": "File",
+                                  "children": []
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "key": "dnsPolicy",
+                          "value": "ClusterFirst",
+                          "children": []
+                        },
+                        {
+                          "key": "nodeSelector",
+                          "value": null,
+                          "children": [
+                            {
+                              "key": "kubernetes.io/hostname",
+                              "value": "twigo-editors-control-plane",
+                              "children": []
+                            }
+                          ]
+                        },
+                        {
+                          "key": "restartPolicy",
+                          "value": "Always",
+                          "children": []
+                        },
+                        {
+                          "key": "schedulerName",
+                          "value": "default-scheduler",
+                          "children": []
+                        },
+                        {
+                          "key": "securityContext",
+                          "value": "{}",
+                          "children": []
+                        },
+                        {
+                          "key": "terminationGracePeriodSeconds",
+                          "value": "30",
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.status",
+          "title": "Status",
+          "blocks": [
+            {
+              "type": "tree",
+              "nodes": [
+                {
+                  "key": "availableReplicas",
+                  "value": "2",
+                  "children": []
+                },
+                {
+                  "key": "observedGeneration",
+                  "value": "1",
+                  "children": []
+                },
+                {
+                  "key": "readyReplicas",
+                  "value": "2",
+                  "children": []
+                },
+                {
+                  "key": "replicas",
+                  "value": "2",
+                  "children": []
+                },
+                {
+                  "key": "terminatingReplicas",
+                  "value": "0",
+                  "children": []
+                },
+                {
+                  "key": "updatedReplicas",
+                  "value": "2",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.conditions",
+          "title": "Conditions",
+          "blocks": [
+            {
+              "type": "conditions",
+              "conditions": [
+                {
+                  "type": "Available",
+                  "status": "True",
+                  "tone": "success",
+                  "reason": "MinimumReplicasAvailable",
+                  "message": "Deployment has minimum availability.",
+                  "lastTransition": "2026-11-02T21:04:52Z"
+                },
+                {
+                  "type": "Progressing",
+                  "status": "True",
+                  "tone": "success",
+                  "reason": "NewReplicaSetAvailable",
+                  "message": "ReplicaSet \"web-8dc77bb87\" has successfully progressed.",
+                  "lastTransition": "2026-11-02T21:04:52Z"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.events",
+          "title": "Events",
+          "blocks": [
+            {
+              "type": "events",
+              "events": [
+                {
+                  "type": "Normal",
+                  "reason": "ScalingReplicaSet",
+                  "message": "Scaled up replica set web-8dc77bb87 from 0 to 2",
+                  "source": "deployment-controller",
+                  "count": 1,
+                  "first": "2026-11-02T21:04:52Z",
+                  "last": "2026-11-02T21:04:52Z",
+                  "fieldPath": null
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "manifest": "{\"apiVersion\":\"apps/v1\",\"kind\":\"Deployment\",\"metadata\":{\"annotations\":{\"deployment.kubernetes.io/revision\":\"1\"},\"creationTimestamp\":\"2026-11-02T21:04:52Z\",\"generation\":1,\"labels\":{\"app\":\"web\"},\"name\":\"web\",\"namespace\":\"overview\",\"resourceVersion\":\"3824\",\"uid\":\"c3c9f25c-da7b-4941-b3ce-b7404644d3fa\"},\"spec\":{\"progressDeadlineSeconds\":600,\"replicas\":2,\"revisionHistoryLimit\":10,\"selector\":{\"matchLabels\":{\"app\":\"web\"}},\"strategy\":{\"rollingUpdate\":{\"maxSurge\":\"25%\",\"maxUnavailable\":\"25%\"},\"type\":\"RollingUpdate\"},\"template\":{\"metadata\":{\"labels\":{\"app\":\"web\"}},\"spec\":{\"containers\":[{\"image\":\"registry.k8s.io/pause:3.10\",\"imagePullPolicy\":\"IfNotPresent\",\"name\":\"app\",\"ports\":[{\"containerPort\":8080,\"name\":\"http\",\"protocol\":\"TCP\"}],\"resources\":{\"requests\":{\"cpu\":\"10m\",\"memory\":\"16Mi\"}},\"terminationMessagePath\":\"/dev/termination-log\",\"terminationMessagePolicy\":\"File\"}],\"dnsPolicy\":\"ClusterFirst\",\"nodeSelector\":{\"kubernetes.io/hostname\":\"twigo-editors-control-plane\"},\"restartPolicy\":\"Always\",\"schedulerName\":\"default-scheduler\",\"securityContext\":{},\"terminationGracePeriodSeconds\":30}}},\"status\":{\"availableReplicas\":2,\"conditions\":[{\"lastTransitionTime\":\"2026-11-02T21:04:52Z\",\"lastUpdateTime\":\"2026-11-02T21:04:52Z\",\"message\":\"Deployment has minimum availability.\",\"reason\":\"MinimumReplicasAvailable\",\"status\":\"True\",\"type\":\"Available\"},{\"lastTransitionTime\":\"2026-11-02T21:04:52Z\",\"lastUpdateTime\":\"2026-11-02T21:04:52Z\",\"message\":\"ReplicaSet \\\"web-8dc77bb87\\\" has successfully progressed.\",\"reason\":\"NewReplicaSetAvailable\",\"status\":\"True\",\"type\":\"Progressing\"}],\"observedGeneration\":1,\"readyReplicas\":2,\"replicas\":2,\"terminatingReplicas\":0,\"updatedReplicas\":2}}"
+  },
+  "node": {
+    "overview": {
+      "sections": [
+        {
+          "id": "core.metadata",
+          "title": "Metadata",
+          "blocks": [
+            {
+              "type": "fields",
+              "fields": [
+                {
+                  "label": "Name",
+                  "value": {
+                    "type": "text",
+                    "text": "kwok-node-0"
+                  }
+                },
+                {
+                  "label": "Created",
+                  "value": {
+                    "type": "time",
+                    "at": "2026-11-02T20:44:20Z"
+                  }
+                },
+                {
+                  "label": "Labels",
+                  "value": {
+                    "type": "labels",
+                    "labels": [
+                      {
+                        "key": "beta.kubernetes.io/os",
+                        "value": "linux"
+                      },
+                      {
+                        "key": "kubernetes.io/hostname",
+                        "value": "kwok-node-0"
+                      },
+                      {
+                        "key": "kubernetes.io/os",
+                        "value": "linux"
+                      },
+                      {
+                        "key": "type",
+                        "value": "kwok"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "label": "Annotations",
+                  "value": {
+                    "type": "labels",
+                    "labels": [
+                      {
+                        "key": "kwok.x-k8s.io/node",
+                        "value": "fake"
+                      },
+                      {
+                        "key": "node.alpha.kubernetes.io/ttl",
+                        "value": "0"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "label": "Managed by",
+                  "value": {
+                    "type": "list",
+                    "items": [
+                      {
+                        "type": "text",
+                        "text": "kube-controller-manager"
+                      },
+                      {
+                        "type": "text",
+                        "text": "kubectl-client-side-apply"
+                      },
+                      {
+                        "type": "text",
+                        "text": "kwok"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "label": "UID",
+                  "value": {
+                    "type": "text",
+                    "text": "f545f5ea-082c-49a8-9e18-ae3265e8f2ff"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.summary",
+          "title": "Summary",
+          "blocks": [
+            {
+              "type": "fields",
+              "fields": [
+                {
+                  "label": "Status",
+                  "value": {
+                    "type": "text",
+                    "text": "Ready"
+                  }
+                },
+                {
+                  "label": "Roles",
+                  "value": {
+                    "type": "text",
+                    "text": "<none>"
+                  }
+                },
+                {
+                  "label": "Version",
+                  "value": {
+                    "type": "text",
+                    "text": "kwok-v0.8.0"
+                  }
+                },
+                {
+                  "label": "Internal-IP",
+                  "value": {
+                    "type": "text",
+                    "text": "10.244.0.5"
+                  }
+                },
+                {
+                  "label": "External-IP",
+                  "value": {
+                    "type": "text",
+                    "text": "<none>"
+                  }
+                },
+                {
+                  "label": "OS-Image",
+                  "value": {
+                    "type": "text",
+                    "text": "<unknown>"
+                  }
+                },
+                {
+                  "label": "Kernel-Version",
+                  "value": {
+                    "type": "text",
+                    "text": "kwok-v0.8.0 (amd64)"
+                  }
+                },
+                {
+                  "label": "Container-Runtime",
+                  "value": {
+                    "type": "text",
+                    "text": "kwok-v0.8.0"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.spec",
+          "title": "Spec",
+          "blocks": [
+            {
+              "type": "tree",
+              "nodes": [
+                {
+                  "key": "podCIDR",
+                  "value": "10.244.1.0/24",
+                  "children": []
+                },
+                {
+                  "key": "podCIDRs",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "0",
+                      "value": "10.244.1.0/24",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "key": "taints",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "0",
+                      "value": null,
+                      "children": [
+                        {
+                          "key": "effect",
+                          "value": "NoSchedule",
+                          "children": []
+                        },
+                        {
+                          "key": "key",
+                          "value": "kwok.x-k8s.io/node",
+                          "children": []
+                        },
+                        {
+                          "key": "value",
+                          "value": "fake",
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.status",
+          "title": "Status",
+          "blocks": [
+            {
+              "type": "tree",
+              "nodes": [
+                {
+                  "key": "addresses",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "0",
+                      "value": null,
+                      "children": [
+                        {
+                          "key": "address",
+                          "value": "10.244.0.5",
+                          "children": []
+                        },
+                        {
+                          "key": "type",
+                          "value": "InternalIP",
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "key": "allocatable",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "cpu",
+                      "value": "64",
+                      "children": []
+                    },
+                    {
+                      "key": "memory",
+                      "value": "512Gi",
+                      "children": []
+                    },
+                    {
+                      "key": "pods",
+                      "value": "1k",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "key": "capacity",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "cpu",
+                      "value": "64",
+                      "children": []
+                    },
+                    {
+                      "key": "memory",
+                      "value": "512Gi",
+                      "children": []
+                    },
+                    {
+                      "key": "pods",
+                      "value": "1k",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "key": "daemonEndpoints",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "kubeletEndpoint",
+                      "value": null,
+                      "children": [
+                        {
+                          "key": "Port",
+                          "value": "10247",
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "key": "nodeInfo",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "architecture",
+                      "value": "amd64",
+                      "children": []
+                    },
+                    {
+                      "key": "bootID",
+                      "value": "",
+                      "children": []
+                    },
+                    {
+                      "key": "containerRuntimeVersion",
+                      "value": "kwok-v0.8.0",
+                      "children": []
+                    },
+                    {
+                      "key": "kernelVersion",
+                      "value": "kwok-v0.8.0",
+                      "children": []
+                    },
+                    {
+                      "key": "kubeProxyVersion",
+                      "value": "kwok-v0.8.0",
+                      "children": []
+                    },
+                    {
+                      "key": "kubeletVersion",
+                      "value": "kwok-v0.8.0",
+                      "children": []
+                    },
+                    {
+                      "key": "machineID",
+                      "value": "",
+                      "children": []
+                    },
+                    {
+                      "key": "operatingSystem",
+                      "value": "linux",
+                      "children": []
+                    },
+                    {
+                      "key": "osImage",
+                      "value": "",
+                      "children": []
+                    },
+                    {
+                      "key": "systemUUID",
+                      "value": "",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "key": "phase",
+                  "value": "Running",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.conditions",
+          "title": "Conditions",
+          "blocks": [
+            {
+              "type": "conditions",
+              "conditions": [
+                {
+                  "type": "Ready",
+                  "status": "True",
+                  "tone": "success",
+                  "reason": "KubeletReady",
+                  "message": "kubelet is posting ready status",
+                  "lastTransition": "2026-11-02T20:44:20Z"
+                },
+                {
+                  "type": "MemoryPressure",
+                  "status": "False",
+                  "tone": "success",
+                  "reason": "KubeletHasSufficientMemory",
+                  "message": "kubelet has sufficient memory available",
+                  "lastTransition": "2026-11-02T20:44:20Z"
+                },
+                {
+                  "type": "DiskPressure",
+                  "status": "False",
+                  "tone": "success",
+                  "reason": "KubeletHasNoDiskPressure",
+                  "message": "kubelet has no disk pressure",
+                  "lastTransition": "2026-11-02T20:44:20Z"
+                },
+                {
+                  "type": "PIDPressure",
+                  "status": "False",
+                  "tone": "success",
+                  "reason": "KubeletHasSufficientPID",
+                  "message": "kubelet has sufficient PID available",
+                  "lastTransition": "2026-11-02T20:44:20Z"
+                },
+                {
+                  "type": "NetworkUnavailable",
+                  "status": "False",
+                  "tone": "success",
+                  "reason": "RouteCreated",
+                  "message": "RouteController created a route",
+                  "lastTransition": "2026-11-02T20:44:20Z"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.events",
+          "title": "Events",
+          "blocks": [
+            {
+              "type": "events",
+              "events": [
+                {
+                  "type": "Normal",
+                  "reason": "RegisteredNode",
+                  "message": "Node kwok-node-0 event: Registered Node kwok-node-0 in Controller",
+                  "source": "node-controller",
+                  "count": 1,
+                  "first": "2026-11-02T20:44:21Z",
+                  "last": "2026-11-02T20:44:21Z",
+                  "fieldPath": null
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "manifest": "{\"apiVersion\":\"v1\",\"kind\":\"Node\",\"metadata\":{\"annotations\":{\"kubectl.kubernetes.io/last-applied-configuration\":\"{\\\"apiVersion\\\":\\\"v1\\\",\\\"kind\\\":\\\"Node\\\",\\\"metadata\\\":{\\\"annotations\\\":{\\\"kwok.x-k8s.io/node\\\":\\\"fake\\\",\\\"node.alpha.kubernetes.io/ttl\\\":\\\"0\\\"},\\\"labels\\\":{\\\"kubernetes.io/hostname\\\":\\\"kwok-node-0\\\",\\\"kubernetes.io/os\\\":\\\"linux\\\",\\\"type\\\":\\\"kwok\\\"},\\\"name\\\":\\\"kwok-node-0\\\"},\\\"spec\\\":{\\\"taints\\\":[{\\\"effect\\\":\\\"NoSchedule\\\",\\\"key\\\":\\\"kwok.x-k8s.io/node\\\",\\\"value\\\":\\\"fake\\\"}]},\\\"status\\\":{\\\"allocatable\\\":{\\\"cpu\\\":\\\"64\\\",\\\"memory\\\":\\\"512Gi\\\",\\\"pods\\\":\\\"1000\\\"},\\\"capacity\\\":{\\\"cpu\\\":\\\"64\\\",\\\"memory\\\":\\\"512Gi\\\",\\\"pods\\\":\\\"1000\\\"}}}\\n\",\"kwok.x-k8s.io/node\":\"fake\",\"node.alpha.kubernetes.io/ttl\":\"0\"},\"creationTimestamp\":\"2026-11-02T20:44:20Z\",\"labels\":{\"beta.kubernetes.io/os\":\"linux\",\"kubernetes.io/hostname\":\"kwok-node-0\",\"kubernetes.io/os\":\"linux\",\"type\":\"kwok\"},\"name\":\"kwok-node-0\",\"resourceVersion\":\"3731\",\"uid\":\"f545f5ea-082c-49a8-9e18-ae3265e8f2ff\"},\"spec\":{\"podCIDR\":\"10.244.1.0/24\",\"podCIDRs\":[\"10.244.1.0/24\"],\"taints\":[{\"effect\":\"NoSchedule\",\"key\":\"kwok.x-k8s.io/node\",\"value\":\"fake\"}]},\"status\":{\"addresses\":[{\"address\":\"10.244.0.5\",\"type\":\"InternalIP\"}],\"allocatable\":{\"cpu\":\"64\",\"memory\":\"512Gi\",\"pods\":\"1k\"},\"capacity\":{\"cpu\":\"64\",\"memory\":\"512Gi\",\"pods\":\"1k\"},\"conditions\":[{\"lastHeartbeatTime\":\"2026-11-02T21:04:33Z\",\"lastTransitionTime\":\"2026-11-02T20:44:20Z\",\"message\":\"kubelet is posting ready status\",\"reason\":\"KubeletReady\",\"status\":\"True\",\"type\":\"Ready\"},{\"lastHeartbeatTime\":\"2026-11-02T21:04:33Z\",\"lastTransitionTime\":\"2026-11-02T20:44:20Z\",\"message\":\"kubelet has sufficient memory available\",\"reason\":\"KubeletHasSufficientMemory\",\"status\":\"False\",\"type\":\"MemoryPressure\"},{\"lastHeartbeatTime\":\"2026-11-02T21:04:33Z\",\"lastTransitionTime\":\"2026-11-02T20:44:20Z\",\"message\":\"kubelet has no disk pressure\",\"reason\":\"KubeletHasNoDiskPressure\",\"status\":\"False\",\"type\":\"DiskPressure\"},{\"lastHeartbeatTime\":\"2026-11-02T21:04:33Z\",\"lastTransitionTime\":\"2026-11-02T20:44:20Z\",\"message\":\"kubelet has sufficient PID available\",\"reason\":\"KubeletHasSufficientPID\",\"status\":\"False\",\"type\":\"PIDPressure\"},{\"lastHeartbeatTime\":\"2026-11-02T21:04:33Z\",\"lastTransitionTime\":\"2026-11-02T20:44:20Z\",\"message\":\"RouteController created a route\",\"reason\":\"RouteCreated\",\"status\":\"False\",\"type\":\"NetworkUnavailable\"}],\"daemonEndpoints\":{\"kubeletEndpoint\":{\"Port\":10247}},\"nodeInfo\":{\"architecture\":\"amd64\",\"bootID\":\"\",\"containerRuntimeVersion\":\"kwok-v0.8.0\",\"kernelVersion\":\"kwok-v0.8.0\",\"kubeProxyVersion\":\"kwok-v0.8.0\",\"kubeletVersion\":\"kwok-v0.8.0\",\"machineID\":\"\",\"operatingSystem\":\"linux\",\"osImage\":\"\",\"systemUUID\":\"\"},\"phase\":\"Running\"}}"
+  },
+  "pod": {
+    "overview": {
+      "sections": [
+        {
+          "id": "core.metadata",
+          "title": "Metadata",
+          "blocks": [
+            {
+              "type": "fields",
+              "fields": [
+                {
+                  "label": "Name",
+                  "value": {
+                    "type": "text",
+                    "text": "web-8dc77bb87-4789m"
+                  }
+                },
+                {
+                  "label": "Namespace",
+                  "value": {
+                    "type": "link",
+                    "target": {
+                      "group": "",
+                      "version": "v1",
+                      "kind": "Namespace",
+                      "namespace": null,
+                      "name": "overview"
+                    },
+                    "text": "overview"
+                  }
+                },
+                {
+                  "label": "Created",
+                  "value": {
+                    "type": "time",
+                    "at": "2026-11-02T21:04:52Z"
+                  }
+                },
+                {
+                  "label": "Controlled by",
+                  "value": {
+                    "type": "link",
+                    "target": {
+                      "group": "apps",
+                      "version": "v1",
+                      "kind": "ReplicaSet",
+                      "namespace": "overview",
+                      "name": "web-8dc77bb87"
+                    },
+                    "text": "ReplicaSet/web-8dc77bb87"
+                  }
+                },
+                {
+                  "label": "Labels",
+                  "value": {
+                    "type": "labels",
+                    "labels": [
+                      {
+                        "key": "app",
+                        "value": "web"
+                      },
+                      {
+                        "key": "pod-template-hash",
+                        "value": "8dc77bb87"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "label": "Managed by",
+                  "value": {
+                    "type": "list",
+                    "items": [
+                      {
+                        "type": "text",
+                        "text": "kube-controller-manager"
+                      },
+                      {
+                        "type": "text",
+                        "text": "kubelet"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "label": "UID",
+                  "value": {
+                    "type": "text",
+                    "text": "c84adae2-6088-4643-8984-80d61689fd78"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.summary",
+          "title": "Summary",
+          "blocks": [
+            {
+              "type": "fields",
+              "fields": [
+                {
+                  "label": "Ready",
+                  "value": {
+                    "type": "text",
+                    "text": "1/1"
+                  }
+                },
+                {
+                  "label": "Status",
+                  "value": {
+                    "type": "text",
+                    "text": "Running"
+                  }
+                },
+                {
+                  "label": "Restarts",
+                  "value": {
+                    "type": "text",
+                    "text": "0"
+                  }
+                },
+                {
+                  "label": "IP",
+                  "value": {
+                    "type": "text",
+                    "text": "10.244.0.8"
+                  }
+                },
+                {
+                  "label": "Node",
+                  "value": {
+                    "type": "text",
+                    "text": "twigo-editors-control-plane"
+                  }
+                },
+                {
+                  "label": "Nominated Node",
+                  "value": {
+                    "type": "text",
+                    "text": "<none>"
+                  }
+                },
+                {
+                  "label": "Readiness Gates",
+                  "value": {
+                    "type": "text",
+                    "text": "<none>"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.spec",
+          "title": "Spec",
+          "blocks": [
+            {
+              "type": "tree",
+              "nodes": [
+                {
+                  "key": "containers",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "app",
+                      "value": null,
+                      "children": [
+                        {
+                          "key": "image",
+                          "value": "registry.k8s.io/pause:3.10",
+                          "children": []
+                        },
+                        {
+                          "key": "imagePullPolicy",
+                          "value": "IfNotPresent",
+                          "children": []
+                        },
+                        {
+                          "key": "name",
+                          "value": "app",
+                          "children": []
+                        },
+                        {
+                          "key": "ports",
+                          "value": null,
+                          "children": [
+                            {
+                              "key": "http",
+                              "value": null,
+                              "children": [
+                                {
+                                  "key": "containerPort",
+                                  "value": "8080",
+                                  "children": []
+                                },
+                                {
+                                  "key": "name",
+                                  "value": "http",
+                                  "children": []
+                                },
+                                {
+                                  "key": "protocol",
+                                  "value": "TCP",
+                                  "children": []
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "key": "resources",
+                          "value": null,
+                          "children": [
+                            {
+                              "key": "requests",
+                              "value": null,
+                              "children": [
+                                {
+                                  "key": "cpu",
+                                  "value": "10m",
+                                  "children": []
+                                },
+                                {
+                                  "key": "memory",
+                                  "value": "16Mi",
+                                  "children": []
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "key": "terminationMessagePath",
+                          "value": "/dev/termination-log",
+                          "children": []
+                        },
+                        {
+                          "key": "terminationMessagePolicy",
+                          "value": "File",
+                          "children": []
+                        },
+                        {
+                          "key": "volumeMounts",
+                          "value": null,
+                          "children": [
+                            {
+                              "key": "kube-api-access-gf9dh",
+                              "value": null,
+                              "children": [
+                                {
+                                  "key": "mountPath",
+                                  "value": "/var/run/secrets/kubernetes.io/serviceaccount",
+                                  "children": []
+                                },
+                                {
+                                  "key": "name",
+                                  "value": "kube-api-access-gf9dh",
+                                  "children": []
+                                },
+                                {
+                                  "key": "readOnly",
+                                  "value": "true",
+                                  "children": []
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "key": "dnsPolicy",
+                  "value": "ClusterFirst",
+                  "children": []
+                },
+                {
+                  "key": "enableServiceLinks",
+                  "value": "true",
+                  "children": []
+                },
+                {
+                  "key": "nodeName",
+                  "value": "twigo-editors-control-plane",
+                  "children": []
+                },
+                {
+                  "key": "nodeSelector",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "kubernetes.io/hostname",
+                      "value": "twigo-editors-control-plane",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "key": "preemptionPolicy",
+                  "value": "PreemptLowerPriority",
+                  "children": []
+                },
+                {
+                  "key": "priority",
+                  "value": "0",
+                  "children": []
+                },
+                {
+                  "key": "restartPolicy",
+                  "value": "Always",
+                  "children": []
+                },
+                {
+                  "key": "schedulerName",
+                  "value": "default-scheduler",
+                  "children": []
+                },
+                {
+                  "key": "securityContext",
+                  "value": "{}",
+                  "children": []
+                },
+                {
+                  "key": "serviceAccount",
+                  "value": "default",
+                  "children": []
+                },
+                {
+                  "key": "serviceAccountName",
+                  "value": "default",
+                  "children": []
+                },
+                {
+                  "key": "terminationGracePeriodSeconds",
+                  "value": "30",
+                  "children": []
+                },
+                {
+                  "key": "tolerations",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "0",
+                      "value": null,
+                      "children": [
+                        {
+                          "key": "effect",
+                          "value": "NoExecute",
+                          "children": []
+                        },
+                        {
+                          "key": "key",
+                          "value": "node.kubernetes.io/not-ready",
+                          "children": []
+                        },
+                        {
+                          "key": "operator",
+                          "value": "Exists",
+                          "children": []
+                        },
+                        {
+                          "key": "tolerationSeconds",
+                          "value": "300",
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "key": "1",
+                      "value": null,
+                      "children": [
+                        {
+                          "key": "effect",
+                          "value": "NoExecute",
+                          "children": []
+                        },
+                        {
+                          "key": "key",
+                          "value": "node.kubernetes.io/unreachable",
+                          "children": []
+                        },
+                        {
+                          "key": "operator",
+                          "value": "Exists",
+                          "children": []
+                        },
+                        {
+                          "key": "tolerationSeconds",
+                          "value": "300",
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "key": "volumes",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "kube-api-access-gf9dh",
+                      "value": null,
+                      "children": [
+                        {
+                          "key": "name",
+                          "value": "kube-api-access-gf9dh",
+                          "children": []
+                        },
+                        {
+                          "key": "projected",
+                          "value": null,
+                          "children": [
+                            {
+                              "key": "defaultMode",
+                              "value": "420",
+                              "children": []
+                            },
+                            {
+                              "key": "sources",
+                              "value": null,
+                              "children": [
+                                {
+                                  "key": "0",
+                                  "value": null,
+                                  "children": [
+                                    {
+                                      "key": "serviceAccountToken",
+                                      "value": null,
+                                      "children": [
+                                        {
+                                          "key": "expirationSeconds",
+                                          "value": "3607",
+                                          "children": []
+                                        },
+                                        {
+                                          "key": "path",
+                                          "value": "token",
+                                          "children": []
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "key": "1",
+                                  "value": null,
+                                  "children": [
+                                    {
+                                      "key": "configMap",
+                                      "value": null,
+                                      "children": [
+                                        {
+                                          "key": "items",
+                                          "value": null,
+                                          "children": [
+                                            {
+                                              "key": "0",
+                                              "value": null,
+                                              "children": [
+                                                {
+                                                  "key": "key",
+                                                  "value": "ca.crt",
+                                                  "children": []
+                                                },
+                                                {
+                                                  "key": "path",
+                                                  "value": "ca.crt",
+                                                  "children": []
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "key": "name",
+                                          "value": "kube-root-ca.crt",
+                                          "children": []
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "key": "2",
+                                  "value": null,
+                                  "children": [
+                                    {
+                                      "key": "downwardAPI",
+                                      "value": null,
+                                      "children": [
+                                        {
+                                          "key": "items",
+                                          "value": null,
+                                          "children": [
+                                            {
+                                              "key": "0",
+                                              "value": null,
+                                              "children": [
+                                                {
+                                                  "key": "fieldRef",
+                                                  "value": null,
+                                                  "children": [
+                                                    {
+                                                      "key": "apiVersion",
+                                                      "value": "v1",
+                                                      "children": []
+                                                    },
+                                                    {
+                                                      "key": "fieldPath",
+                                                      "value": "metadata.namespace",
+                                                      "children": []
+                                                    }
+                                                  ]
+                                                },
+                                                {
+                                                  "key": "path",
+                                                  "value": "namespace",
+                                                  "children": []
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.status",
+          "title": "Status",
+          "blocks": [
+            {
+              "type": "tree",
+              "nodes": [
+                {
+                  "key": "allocatedResources",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "cpu",
+                      "value": "10m",
+                      "children": []
+                    },
+                    {
+                      "key": "memory",
+                      "value": "16Mi",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "key": "containerStatuses",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "app",
+                      "value": null,
+                      "children": [
+                        {
+                          "key": "allocatedResources",
+                          "value": null,
+                          "children": [
+                            {
+                              "key": "cpu",
+                              "value": "10m",
+                              "children": []
+                            },
+                            {
+                              "key": "memory",
+                              "value": "16Mi",
+                              "children": []
+                            }
+                          ]
+                        },
+                        {
+                          "key": "containerID",
+                          "value": "containerd://2795f5b23dba47ad66e838199a09e4d1218c5ecf3c80a62eabac9f1338271238",
+                          "children": []
+                        },
+                        {
+                          "key": "image",
+                          "value": "registry.k8s.io/pause:3.10",
+                          "children": []
+                        },
+                        {
+                          "key": "imageID",
+                          "value": "sha256:afb61768ce381961ca0beff95337601f29dc70ff3ed14e5e4b3e5699057e6aa8",
+                          "children": []
+                        },
+                        {
+                          "key": "lastState",
+                          "value": "{}",
+                          "children": []
+                        },
+                        {
+                          "key": "name",
+                          "value": "app",
+                          "children": []
+                        },
+                        {
+                          "key": "ready",
+                          "value": "true",
+                          "children": []
+                        },
+                        {
+                          "key": "resources",
+                          "value": null,
+                          "children": [
+                            {
+                              "key": "requests",
+                              "value": null,
+                              "children": [
+                                {
+                                  "key": "cpu",
+                                  "value": "10m",
+                                  "children": []
+                                },
+                                {
+                                  "key": "memory",
+                                  "value": "16Mi",
+                                  "children": []
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "key": "restartCount",
+                          "value": "0",
+                          "children": []
+                        },
+                        {
+                          "key": "started",
+                          "value": "true",
+                          "children": []
+                        },
+                        {
+                          "key": "state",
+                          "value": null,
+                          "children": [
+                            {
+                              "key": "running",
+                              "value": null,
+                              "children": [
+                                {
+                                  "key": "startedAt",
+                                  "value": "2026-11-02T21:04:52Z",
+                                  "children": []
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "key": "user",
+                          "value": null,
+                          "children": [
+                            {
+                              "key": "linux",
+                              "value": null,
+                              "children": [
+                                {
+                                  "key": "gid",
+                                  "value": "0",
+                                  "children": []
+                                },
+                                {
+                                  "key": "supplementalGroups",
+                                  "value": null,
+                                  "children": [
+                                    {
+                                      "key": "0",
+                                      "value": "0",
+                                      "children": []
+                                    }
+                                  ]
+                                },
+                                {
+                                  "key": "uid",
+                                  "value": "65535",
+                                  "children": []
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "key": "volumeMounts",
+                          "value": null,
+                          "children": [
+                            {
+                              "key": "kube-api-access-gf9dh",
+                              "value": null,
+                              "children": [
+                                {
+                                  "key": "mountPath",
+                                  "value": "/var/run/secrets/kubernetes.io/serviceaccount",
+                                  "children": []
+                                },
+                                {
+                                  "key": "name",
+                                  "value": "kube-api-access-gf9dh",
+                                  "children": []
+                                },
+                                {
+                                  "key": "readOnly",
+                                  "value": "true",
+                                  "children": []
+                                },
+                                {
+                                  "key": "recursiveReadOnly",
+                                  "value": "Disabled",
+                                  "children": []
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "key": "hostIP",
+                  "value": "172.18.0.2",
+                  "children": []
+                },
+                {
+                  "key": "hostIPs",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "0",
+                      "value": null,
+                      "children": [
+                        {
+                          "key": "ip",
+                          "value": "172.18.0.2",
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "key": "observedGeneration",
+                  "value": "1",
+                  "children": []
+                },
+                {
+                  "key": "phase",
+                  "value": "Running",
+                  "children": []
+                },
+                {
+                  "key": "podIP",
+                  "value": "10.244.0.8",
+                  "children": []
+                },
+                {
+                  "key": "podIPs",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "0",
+                      "value": null,
+                      "children": [
+                        {
+                          "key": "ip",
+                          "value": "10.244.0.8",
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "key": "qosClass",
+                  "value": "Burstable",
+                  "children": []
+                },
+                {
+                  "key": "resources",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "requests",
+                      "value": null,
+                      "children": [
+                        {
+                          "key": "cpu",
+                          "value": "10m",
+                          "children": []
+                        },
+                        {
+                          "key": "memory",
+                          "value": "16Mi",
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "key": "startTime",
+                  "value": "2026-11-02T21:04:52Z",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.conditions",
+          "title": "Conditions",
+          "blocks": [
+            {
+              "type": "conditions",
+              "conditions": [
+                {
+                  "type": "PodReadyToStartContainers",
+                  "status": "True",
+                  "tone": "success",
+                  "reason": null,
+                  "message": null,
+                  "lastTransition": "2026-11-02T21:04:52Z"
+                },
+                {
+                  "type": "Initialized",
+                  "status": "True",
+                  "tone": "success",
+                  "reason": null,
+                  "message": null,
+                  "lastTransition": "2026-11-02T21:04:52Z"
+                },
+                {
+                  "type": "Ready",
+                  "status": "True",
+                  "tone": "success",
+                  "reason": null,
+                  "message": null,
+                  "lastTransition": "2026-11-02T21:04:52Z"
+                },
+                {
+                  "type": "ContainersReady",
+                  "status": "True",
+                  "tone": "success",
+                  "reason": null,
+                  "message": null,
+                  "lastTransition": "2026-11-02T21:04:52Z"
+                },
+                {
+                  "type": "PodScheduled",
+                  "status": "True",
+                  "tone": "success",
+                  "reason": null,
+                  "message": null,
+                  "lastTransition": "2026-11-02T21:04:52Z"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.events",
+          "title": "Events",
+          "blocks": [
+            {
+              "type": "events",
+              "events": [
+                {
+                  "type": "Normal",
+                  "reason": "Pulled",
+                  "message": "Container image \"registry.k8s.io/pause:3.10\" already present on machine and can be accessed by the pod",
+                  "source": "kubelet",
+                  "count": 1,
+                  "first": "2026-11-02T21:04:52Z",
+                  "last": "2026-11-02T21:04:52Z",
+                  "fieldPath": "spec.containers{app}"
+                },
+                {
+                  "type": "Normal",
+                  "reason": "Started",
+                  "message": "Container started",
+                  "source": "kubelet",
+                  "count": 1,
+                  "first": "2026-11-02T21:04:52Z",
+                  "last": "2026-11-02T21:04:52Z",
+                  "fieldPath": "spec.containers{app}"
+                },
+                {
+                  "type": "Normal",
+                  "reason": "Created",
+                  "message": "Container created",
+                  "source": "kubelet",
+                  "count": 1,
+                  "first": "2026-11-02T21:04:52Z",
+                  "last": "2026-11-02T21:04:52Z",
+                  "fieldPath": "spec.containers{app}"
+                },
+                {
+                  "type": "Normal",
+                  "reason": "Scheduled",
+                  "message": "Successfully assigned overview/web-8dc77bb87-4789m to twigo-editors-control-plane",
+                  "source": "default-scheduler",
+                  "count": 1,
+                  "first": "2026-11-02T21:04:52Z",
+                  "last": "2026-11-02T21:04:52Z",
+                  "fieldPath": null
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "manifest": "{\"apiVersion\":\"v1\",\"kind\":\"Pod\",\"metadata\":{\"creationTimestamp\":\"2026-11-02T21:04:52Z\",\"generateName\":\"web-8dc77bb87-\",\"generation\":1,\"labels\":{\"app\":\"web\",\"pod-template-hash\":\"8dc77bb87\"},\"name\":\"web-8dc77bb87-4789m\",\"namespace\":\"overview\",\"ownerReferences\":[{\"apiVersion\":\"apps/v1\",\"blockOwnerDeletion\":true,\"controller\":true,\"kind\":\"ReplicaSet\",\"name\":\"web-8dc77bb87\",\"uid\":\"6e6768fe-14d9-4dc3-b63f-6c36517ec5c8\"}],\"resourceVersion\":\"3819\",\"uid\":\"c84adae2-6088-4643-8984-80d61689fd78\"},\"spec\":{\"containers\":[{\"image\":\"registry.k8s.io/pause:3.10\",\"imagePullPolicy\":\"IfNotPresent\",\"name\":\"app\",\"ports\":[{\"containerPort\":8080,\"name\":\"http\",\"protocol\":\"TCP\"}],\"resources\":{\"requests\":{\"cpu\":\"10m\",\"memory\":\"16Mi\"}},\"terminationMessagePath\":\"/dev/termination-log\",\"terminationMessagePolicy\":\"File\",\"volumeMounts\":[{\"mountPath\":\"/var/run/secrets/kubernetes.io/serviceaccount\",\"name\":\"kube-api-access-gf9dh\",\"readOnly\":true}]}],\"dnsPolicy\":\"ClusterFirst\",\"enableServiceLinks\":true,\"nodeName\":\"twigo-editors-control-plane\",\"nodeSelector\":{\"kubernetes.io/hostname\":\"twigo-editors-control-plane\"},\"preemptionPolicy\":\"PreemptLowerPriority\",\"priority\":0,\"restartPolicy\":\"Always\",\"schedulerName\":\"default-scheduler\",\"securityContext\":{},\"serviceAccount\":\"default\",\"serviceAccountName\":\"default\",\"terminationGracePeriodSeconds\":30,\"tolerations\":[{\"effect\":\"NoExecute\",\"key\":\"node.kubernetes.io/not-ready\",\"operator\":\"Exists\",\"tolerationSeconds\":300},{\"effect\":\"NoExecute\",\"key\":\"node.kubernetes.io/unreachable\",\"operator\":\"Exists\",\"tolerationSeconds\":300}],\"volumes\":[{\"name\":\"kube-api-access-gf9dh\",\"projected\":{\"defaultMode\":420,\"sources\":[{\"serviceAccountToken\":{\"expirationSeconds\":3607,\"path\":\"token\"}},{\"configMap\":{\"items\":[{\"key\":\"ca.crt\",\"path\":\"ca.crt\"}],\"name\":\"kube-root-ca.crt\"}},{\"downwardAPI\":{\"items\":[{\"fieldRef\":{\"apiVersion\":\"v1\",\"fieldPath\":\"metadata.namespace\"},\"path\":\"namespace\"}]}}]}}]},\"status\":{\"allocatedResources\":{\"cpu\":\"10m\",\"memory\":\"16Mi\"},\"conditions\":[{\"lastProbeTime\":null,\"lastTransitionTime\":\"2026-11-02T21:04:52Z\",\"observedGeneration\":1,\"status\":\"True\",\"type\":\"PodReadyToStartContainers\"},{\"lastProbeTime\":null,\"lastTransitionTime\":\"2026-11-02T21:04:52Z\",\"observedGeneration\":1,\"status\":\"True\",\"type\":\"Initialized\"},{\"lastProbeTime\":null,\"lastTransitionTime\":\"2026-11-02T21:04:52Z\",\"observedGeneration\":1,\"status\":\"True\",\"type\":\"Ready\"},{\"lastProbeTime\":null,\"lastTransitionTime\":\"2026-11-02T21:04:52Z\",\"observedGeneration\":1,\"status\":\"True\",\"type\":\"ContainersReady\"},{\"lastProbeTime\":null,\"lastTransitionTime\":\"2026-11-02T21:04:52Z\",\"observedGeneration\":1,\"status\":\"True\",\"type\":\"PodScheduled\"}],\"containerStatuses\":[{\"allocatedResources\":{\"cpu\":\"10m\",\"memory\":\"16Mi\"},\"containerID\":\"containerd://2795f5b23dba47ad66e838199a09e4d1218c5ecf3c80a62eabac9f1338271238\",\"image\":\"registry.k8s.io/pause:3.10\",\"imageID\":\"sha256:afb61768ce381961ca0beff95337601f29dc70ff3ed14e5e4b3e5699057e6aa8\",\"lastState\":{},\"name\":\"app\",\"ready\":true,\"resources\":{\"requests\":{\"cpu\":\"10m\",\"memory\":\"16Mi\"}},\"restartCount\":0,\"started\":true,\"state\":{\"running\":{\"startedAt\":\"2026-11-02T21:04:52Z\"}},\"user\":{\"linux\":{\"gid\":0,\"supplementalGroups\":[0],\"uid\":65535}},\"volumeMounts\":[{\"mountPath\":\"/var/run/secrets/kubernetes.io/serviceaccount\",\"name\":\"kube-api-access-gf9dh\",\"readOnly\":true,\"recursiveReadOnly\":\"Disabled\"}]}],\"hostIP\":\"172.18.0.2\",\"hostIPs\":[{\"ip\":\"172.18.0.2\"}],\"observedGeneration\":1,\"phase\":\"Running\",\"podIP\":\"10.244.0.8\",\"podIPs\":[{\"ip\":\"10.244.0.8\"}],\"qosClass\":\"Burstable\",\"resources\":{\"requests\":{\"cpu\":\"10m\",\"memory\":\"16Mi\"}},\"startTime\":\"2026-11-02T21:04:52Z\"}}"
+  },
+  "secret": {
+    "overview": {
+      "sections": [
+        {
+          "id": "core.metadata",
+          "title": "Metadata",
+          "blocks": [
+            {
+              "type": "fields",
+              "fields": [
+                {
+                  "label": "Name",
+                  "value": {
+                    "type": "text",
+                    "text": "credentials"
+                  }
+                },
+                {
+                  "label": "Namespace",
+                  "value": {
+                    "type": "link",
+                    "target": {
+                      "group": "",
+                      "version": "v1",
+                      "kind": "Namespace",
+                      "namespace": null,
+                      "name": "overview"
+                    },
+                    "text": "overview"
+                  }
+                },
+                {
+                  "label": "Created",
+                  "value": {
+                    "type": "time",
+                    "at": "2026-11-02T21:04:52Z"
+                  }
+                },
+                {
+                  "label": "Managed by",
+                  "value": {
+                    "type": "text",
+                    "text": "unknown"
+                  }
+                },
+                {
+                  "label": "UID",
+                  "value": {
+                    "type": "text",
+                    "text": "3b18ce49-9e24-4fb7-adaf-853fcfc6290e"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.data",
+          "title": "Data",
+          "blocks": [
+            {
+              "type": "fields",
+              "fields": [
+                {
+                  "label": "Type",
+                  "value": {
+                    "type": "text",
+                    "text": "Opaque"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "data",
+              "entries": [
+                {
+                  "key": "key.der",
+                  "bytes": 10,
+                  "binary": true
+                },
+                {
+                  "key": "password",
+                  "bytes": 13,
+                  "binary": false
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.events",
+          "title": "Events",
+          "blocks": [
+            {
+              "type": "events",
+              "events": []
+            }
+          ]
+        }
+      ]
+    },
+    "manifest": "{\"apiVersion\":\"v1\",\"data\":{\"key.der\":\"<10 bytes>\",\"password\":\"<13 bytes>\"},\"kind\":\"Secret\",\"metadata\":{\"creationTimestamp\":\"2026-11-02T21:04:52Z\",\"name\":\"credentials\",\"namespace\":\"overview\",\"resourceVersion\":\"3799\",\"uid\":\"3b18ce49-9e24-4fb7-adaf-853fcfc6290e\"},\"stringData\":null,\"type\":\"Opaque\"}"
+  },
+  "service": {
+    "overview": {
+      "sections": [
+        {
+          "id": "core.metadata",
+          "title": "Metadata",
+          "blocks": [
+            {
+              "type": "fields",
+              "fields": [
+                {
+                  "label": "Name",
+                  "value": {
+                    "type": "text",
+                    "text": "web"
+                  }
+                },
+                {
+                  "label": "Namespace",
+                  "value": {
+                    "type": "link",
+                    "target": {
+                      "group": "",
+                      "version": "v1",
+                      "kind": "Namespace",
+                      "namespace": null,
+                      "name": "overview"
+                    },
+                    "text": "overview"
+                  }
+                },
+                {
+                  "label": "Created",
+                  "value": {
+                    "type": "time",
+                    "at": "2026-11-02T21:04:52Z"
+                  }
+                },
+                {
+                  "label": "Managed by",
+                  "value": {
+                    "type": "text",
+                    "text": "unknown"
+                  }
+                },
+                {
+                  "label": "UID",
+                  "value": {
+                    "type": "text",
+                    "text": "7a51760a-e0fb-4829-91a6-bd3166c8182c"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.summary",
+          "title": "Summary",
+          "blocks": [
+            {
+              "type": "fields",
+              "fields": [
+                {
+                  "label": "Type",
+                  "value": {
+                    "type": "text",
+                    "text": "ClusterIP"
+                  }
+                },
+                {
+                  "label": "Cluster-IP",
+                  "value": {
+                    "type": "text",
+                    "text": "10.96.162.135"
+                  }
+                },
+                {
+                  "label": "External-IP",
+                  "value": {
+                    "type": "text",
+                    "text": "<none>"
+                  }
+                },
+                {
+                  "label": "Port(s)",
+                  "value": {
+                    "type": "text",
+                    "text": "80/TCP"
+                  }
+                },
+                {
+                  "label": "Selector",
+                  "value": {
+                    "type": "text",
+                    "text": "app=web"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.spec",
+          "title": "Spec",
+          "blocks": [
+            {
+              "type": "tree",
+              "nodes": [
+                {
+                  "key": "clusterIP",
+                  "value": "10.96.162.135",
+                  "children": []
+                },
+                {
+                  "key": "clusterIPs",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "0",
+                      "value": "10.96.162.135",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "key": "internalTrafficPolicy",
+                  "value": "Cluster",
+                  "children": []
+                },
+                {
+                  "key": "ipFamilies",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "0",
+                      "value": "IPv4",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "key": "ipFamilyPolicy",
+                  "value": "SingleStack",
+                  "children": []
+                },
+                {
+                  "key": "ports",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "http",
+                      "value": null,
+                      "children": [
+                        {
+                          "key": "name",
+                          "value": "http",
+                          "children": []
+                        },
+                        {
+                          "key": "port",
+                          "value": "80",
+                          "children": []
+                        },
+                        {
+                          "key": "protocol",
+                          "value": "TCP",
+                          "children": []
+                        },
+                        {
+                          "key": "targetPort",
+                          "value": "http",
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "key": "selector",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "app",
+                      "value": "web",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "key": "sessionAffinity",
+                  "value": "None",
+                  "children": []
+                },
+                {
+                  "key": "type",
+                  "value": "ClusterIP",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.status",
+          "title": "Status",
+          "blocks": [
+            {
+              "type": "tree",
+              "nodes": [
+                {
+                  "key": "loadBalancer",
+                  "value": "{}",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.events",
+          "title": "Events",
+          "blocks": [
+            {
+              "type": "events",
+              "events": []
+            }
+          ]
+        }
+      ]
+    },
+    "manifest": "{\"apiVersion\":\"v1\",\"kind\":\"Service\",\"metadata\":{\"creationTimestamp\":\"2026-11-02T21:04:52Z\",\"name\":\"web\",\"namespace\":\"overview\",\"resourceVersion\":\"3785\",\"uid\":\"7a51760a-e0fb-4829-91a6-bd3166c8182c\"},\"spec\":{\"clusterIP\":\"10.96.162.135\",\"clusterIPs\":[\"10.96.162.135\"],\"internalTrafficPolicy\":\"Cluster\",\"ipFamilies\":[\"IPv4\"],\"ipFamilyPolicy\":\"SingleStack\",\"ports\":[{\"name\":\"http\",\"port\":80,\"protocol\":\"TCP\",\"targetPort\":\"http\"}],\"selector\":{\"app\":\"web\"},\"sessionAffinity\":\"None\",\"type\":\"ClusterIP\"},\"status\":{\"loadBalancer\":{}}}"
+  },
+  "stage": {
+    "overview": {
+      "sections": [
+        {
+          "id": "core.metadata",
+          "title": "Metadata",
+          "blocks": [
+            {
+              "type": "fields",
+              "fields": [
+                {
+                  "label": "Name",
+                  "value": {
+                    "type": "text",
+                    "text": "pod-ready"
+                  }
+                },
+                {
+                  "label": "Created",
+                  "value": {
+                    "type": "time",
+                    "at": "2026-11-02T20:44:11Z"
+                  }
+                },
+                {
+                  "label": "Managed by",
+                  "value": {
+                    "type": "text",
+                    "text": "kubectl-client-side-apply"
+                  }
+                },
+                {
+                  "label": "UID",
+                  "value": {
+                    "type": "text",
+                    "text": "7f7b57fe-089a-4528-b961-73ff8c1720e1"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.spec",
+          "title": "Spec",
+          "blocks": [
+            {
+              "type": "tree",
+              "nodes": [
+                {
+                  "key": "next",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "statusSubresource",
+                      "value": "status",
+                      "children": []
+                    },
+                    {
+                      "key": "statusTemplate",
+                      "value": "{{ $now := Now }}\n\nconditions:\n- lastTransitionTime: {{ $now | Quote }}\n  status: \"True\"\n  type: Initialized\n- lastTransitionTime: {{ $now | Quote }}\n  status: \"True\"\n  type: Ready\n- lastTransitionTime: {{ $now | Quote }}\n  status: \"True\"\n  type: ContainersReady\n{{ range .spec.readinessGates }}\n- lastTransitionTime: {{ $now | Quote }}\n  status: \"True\"\n  type: {{ .conditionType | Quote }}\n{{ end }}\n\ncontainerStatuses:\n{{ range .spec.containers }}\n- image: {{ .image | Quote }}\n  name: {{ .name | Quote }}\n  ready: true\n  restartCount: 0\n  state:\n    running:\n      startedAt: {{ $now | Quote }}\n{{ end }}\n\ninitContainerStatuses:\n{{ range .spec.initContainers }}\n- image: {{ .image | Quote }}\n  name: {{ .name | Quote }}\n  ready: true\n  restartCount: 0\n  {{ if eq .restartPolicy \"Always\" }}\n  started: true\n  state:\n    running:\n      startedAt: {{ $now | Quote }}\n  {{ else }}\n  state:\n    terminated:\n      exitCode: 0\n      finishedAt: {{ $now | Quote }}\n      reason: Completed\n      startedAt: {{ $now | Quote }}\n  {{ end }}\n{{ end }}\n{{ $hostIPs := NodeIPsWith .spec.nodeName }}\n{{ with $hostIPs }}\nhostIP: {{ index . 0 | Quote }}\nhostIPs:\n{{ range . }}\n- ip: {{ . | Quote }}\n{{ end }}\n{{ end }}\n{{ $podIPs := PodIPsWith .spec.nodeName ( or .spec.hostNetwork false ) ( or .metadata.uid \"\" ) ( or .metadata.name \"\" ) ( or .metadata.namespace \"\" ) }}\n{{ with $podIPs }}\npodIP: {{ index . 0 | Quote }}\npodIPs:\n{{ range . }}\n- ip: {{ . | Quote }}\n{{ end }}\n{{ end }}\nphase: Running\nstartTime: {{ $now | Quote }}\n",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "key": "resourceRef",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "apiGroup",
+                      "value": "v1",
+                      "children": []
+                    },
+                    {
+                      "key": "kind",
+                      "value": "Pod",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "key": "selector",
+                  "value": null,
+                  "children": [
+                    {
+                      "key": "matchExpressions",
+                      "value": null,
+                      "children": [
+                        {
+                          "key": "0",
+                          "value": null,
+                          "children": [
+                            {
+                              "key": "key",
+                              "value": ".metadata.deletionTimestamp",
+                              "children": []
+                            },
+                            {
+                              "key": "operator",
+                              "value": "DoesNotExist",
+                              "children": []
+                            }
+                          ]
+                        },
+                        {
+                          "key": "1",
+                          "value": null,
+                          "children": [
+                            {
+                              "key": "key",
+                              "value": ".status.phase",
+                              "children": []
+                            },
+                            {
+                              "key": "operator",
+                              "value": "In",
+                              "children": []
+                            },
+                            {
+                              "key": "values",
+                              "value": null,
+                              "children": [
+                                {
+                                  "key": "0",
+                                  "value": "Pending",
+                                  "children": []
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "key": "2",
+                          "value": null,
+                          "children": [
+                            {
+                              "key": "key",
+                              "value": ".status.conditions.[] | select( .type == \"Ready\" ) | .status",
+                              "children": []
+                            },
+                            {
+                              "key": "operator",
+                              "value": "NotIn",
+                              "children": []
+                            },
+                            {
+                              "key": "values",
+                              "value": null,
+                              "children": [
+                                {
+                                  "key": "0",
+                                  "value": "True",
+                                  "children": []
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "key": "weight",
+                  "value": "0",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "core.events",
+          "title": "Events",
+          "blocks": [
+            {
+              "type": "events",
+              "events": []
+            }
+          ]
+        }
+      ]
+    },
+    "manifest": "{\"apiVersion\":\"kwok.x-k8s.io/v1alpha1\",\"kind\":\"Stage\",\"metadata\":{\"annotations\":{\"kubectl.kubernetes.io/last-applied-configuration\":\"{\\\"apiVersion\\\":\\\"kwok.x-k8s.io/v1alpha1\\\",\\\"kind\\\":\\\"Stage\\\",\\\"metadata\\\":{\\\"annotations\\\":{},\\\"name\\\":\\\"pod-ready\\\"},\\\"spec\\\":{\\\"next\\\":{\\\"statusTemplate\\\":\\\"{{ $now := Now }}\\\\n\\\\nconditions:\\\\n- lastTransitionTime: {{ $now | Quote }}\\\\n  status: \\\\\\\"True\\\\\\\"\\\\n  type: Initialized\\\\n- lastTransitionTime: {{ $now | Quote }}\\\\n  status: \\\\\\\"True\\\\\\\"\\\\n  type: Ready\\\\n- lastTransitionTime: {{ $now | Quote }}\\\\n  status: \\\\\\\"True\\\\\\\"\\\\n  type: ContainersReady\\\\n{{ range .spec.readinessGates }}\\\\n- lastTransitionTime: {{ $now | Quote }}\\\\n  status: \\\\\\\"True\\\\\\\"\\\\n  type: {{ .conditionType | Quote }}\\\\n{{ end }}\\\\n\\\\ncontainerStatuses:\\\\n{{ range .spec.containers }}\\\\n- image: {{ .image | Quote }}\\\\n  name: {{ .name | Quote }}\\\\n  ready: true\\\\n  restartCount: 0\\\\n  state:\\\\n    running:\\\\n      startedAt: {{ $now | Quote }}\\\\n{{ end }}\\\\n\\\\ninitContainerStatuses:\\\\n{{ range .spec.initContainers }}\\\\n- image: {{ .image | Quote }}\\\\n  name: {{ .name | Quote }}\\\\n  ready: true\\\\n  restartCount: 0\\\\n  {{ if eq .restartPolicy \\\\\\\"Always\\\\\\\" }}\\\\n  started: true\\\\n  state:\\\\n    running:\\\\n      startedAt: {{ $now | Quote }}\\\\n  {{ else }}\\\\n  state:\\\\n    terminated:\\\\n      exitCode: 0\\\\n      finishedAt: {{ $now | Quote }}\\\\n      reason: Completed\\\\n      startedAt: {{ $now | Quote }}\\\\n  {{ end }}\\\\n{{ end }}\\\\n{{ $hostIPs := NodeIPsWith .spec.nodeName }}\\\\n{{ with $hostIPs }}\\\\nhostIP: {{ index . 0 | Quote }}\\\\nhostIPs:\\\\n{{ range . }}\\\\n- ip: {{ . | Quote }}\\\\n{{ end }}\\\\n{{ end }}\\\\n{{ $podIPs := PodIPsWith .spec.nodeName ( or .spec.hostNetwork false ) ( or .metadata.uid \\\\\\\"\\\\\\\" ) ( or .metadata.name \\\\\\\"\\\\\\\" ) ( or .metadata.namespace \\\\\\\"\\\\\\\" ) }}\\\\n{{ with $podIPs }}\\\\npodIP: {{ index . 0 | Quote }}\\\\npodIPs:\\\\n{{ range . }}\\\\n- ip: {{ . | Quote }}\\\\n{{ end }}\\\\n{{ end }}\\\\nphase: Running\\\\nstartTime: {{ $now | Quote }}\\\\n\\\"},\\\"resourceRef\\\":{\\\"apiGroup\\\":\\\"v1\\\",\\\"kind\\\":\\\"Pod\\\"},\\\"selector\\\":{\\\"matchExpressions\\\":[{\\\"key\\\":\\\".metadata.deletionTimestamp\\\",\\\"operator\\\":\\\"DoesNotExist\\\"},{\\\"key\\\":\\\".status.phase\\\",\\\"operator\\\":\\\"In\\\",\\\"values\\\":[\\\"Pending\\\"]},{\\\"key\\\":\\\".status.conditions.[] | select( .type == \\\\\\\"Ready\\\\\\\" ) | .status\\\",\\\"operator\\\":\\\"NotIn\\\",\\\"values\\\":[\\\"True\\\"]}]}}}\\n\"},\"creationTimestamp\":\"2026-11-02T20:44:11Z\",\"generation\":1,\"name\":\"pod-ready\",\"resourceVersion\":\"550\",\"uid\":\"7f7b57fe-089a-4528-b961-73ff8c1720e1\"},\"spec\":{\"next\":{\"statusSubresource\":\"status\",\"statusTemplate\":\"{{ $now := Now }}\\n\\nconditions:\\n- lastTransitionTime: {{ $now | Quote }}\\n  status: \\\"True\\\"\\n  type: Initialized\\n- lastTransitionTime: {{ $now | Quote }}\\n  status: \\\"True\\\"\\n  type: Ready\\n- lastTransitionTime: {{ $now | Quote }}\\n  status: \\\"True\\\"\\n  type: ContainersReady\\n{{ range .spec.readinessGates }}\\n- lastTransitionTime: {{ $now | Quote }}\\n  status: \\\"True\\\"\\n  type: {{ .conditionType | Quote }}\\n{{ end }}\\n\\ncontainerStatuses:\\n{{ range .spec.containers }}\\n- image: {{ .image | Quote }}\\n  name: {{ .name | Quote }}\\n  ready: true\\n  restartCount: 0\\n  state:\\n    running:\\n      startedAt: {{ $now | Quote }}\\n{{ end }}\\n\\ninitContainerStatuses:\\n{{ range .spec.initContainers }}\\n- image: {{ .image | Quote }}\\n  name: {{ .name | Quote }}\\n  ready: true\\n  restartCount: 0\\n  {{ if eq .restartPolicy \\\"Always\\\" }}\\n  started: true\\n  state:\\n    running:\\n      startedAt: {{ $now | Quote }}\\n  {{ else }}\\n  state:\\n    terminated:\\n      exitCode: 0\\n      finishedAt: {{ $now | Quote }}\\n      reason: Completed\\n      startedAt: {{ $now | Quote }}\\n  {{ end }}\\n{{ end }}\\n{{ $hostIPs := NodeIPsWith .spec.nodeName }}\\n{{ with $hostIPs }}\\nhostIP: {{ index . 0 | Quote }}\\nhostIPs:\\n{{ range . }}\\n- ip: {{ . | Quote }}\\n{{ end }}\\n{{ end }}\\n{{ $podIPs := PodIPsWith .spec.nodeName ( or .spec.hostNetwork false ) ( or .metadata.uid \\\"\\\" ) ( or .metadata.name \\\"\\\" ) ( or .metadata.namespace \\\"\\\" ) }}\\n{{ with $podIPs }}\\npodIP: {{ index . 0 | Quote }}\\npodIPs:\\n{{ range . }}\\n- ip: {{ . | Quote }}\\n{{ end }}\\n{{ end }}\\nphase: Running\\nstartTime: {{ $now | Quote }}\\n\"},\"resourceRef\":{\"apiGroup\":\"v1\",\"kind\":\"Pod\"},\"selector\":{\"matchExpressions\":[{\"key\":\".metadata.deletionTimestamp\",\"operator\":\"DoesNotExist\"},{\"key\":\".status.phase\",\"operator\":\"In\",\"values\":[\"Pending\"]},{\"key\":\".status.conditions.[] | select( .type == \\\"Ready\\\" ) | .status\",\"operator\":\"NotIn\",\"values\":[\"True\"]}]},\"weight\":0}}"
+  }
+}

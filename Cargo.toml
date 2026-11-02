@@ -21,11 +21,13 @@ publish = false
 twigo-bench-ipc = { path = "bench/ipc" }
 twigo-cache = { path = "crates/twigo-cache" }
 twigo-core = { path = "crates/twigo-core" }
+twigo-describe = { path = "crates/twigo-describe" }
 twigo-env = { path = "crates/twigo-env" }
 twigo-ipc = { path = "crates/twigo-ipc" }
 twigo-keyboard = { path = "crates/twigo-keyboard" }
 twigo-kube = { path = "crates/twigo-kube" }
 twigo-netmon = { path = "crates/twigo-netmon" }
+twigo-policy = { path = "crates/twigo-policy" }
 
 atomic-write-file = "0.3.1"
 backon = { version = "1.6.0", default-features = false, features = ["std"] }

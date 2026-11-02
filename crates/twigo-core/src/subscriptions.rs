@@ -1,30 +1,38 @@
-//! The list subscriptions of every window (ARCHITECTURE 2.1, "Multiple
-//! windows"): keyed by the window and the subscription, so a window
-//! reaches only its own, and closing or reloading one drops its own.
+//! The subscriptions of every window, its lists or its open objects
+//! (ARCHITECTURE 2.1, "Multiple windows"): keyed by the window and the
+//! subscription, so a window reaches only its own, and closing or reloading
+//! one drops its own.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use twigo_cache::batcher::Batcher;
 use twigo_ipc::{ErrorKind, IpcError, SubscriptionId};
 
-#[derive(Default)]
-pub struct Lists {
-    inner: Mutex<Inner>,
+/// Each held `T` ends its subscription when dropped.
+pub struct Subscriptions<T> {
+    what: &'static str,
+    inner: Mutex<Inner<T>>,
 }
 
-#[derive(Default)]
-struct Inner {
+struct Inner<T> {
     next: u32,
-    windows: HashMap<String, Window>,
+    windows: HashMap<String, Window<T>>,
 }
 
-#[derive(Default)]
-struct Window {
+struct Window<T> {
     /// Counts the drops, so a subscription that a dropped page asked for
     /// and that answers after the drop is not kept.
     generation: u64,
-    lists: HashMap<SubscriptionId, Batcher>,
+    held: HashMap<SubscriptionId, T>,
+}
+
+impl<T> Default for Window<T> {
+    fn default() -> Self {
+        Self {
+            generation: 0,
+            held: HashMap::new(),
+        }
+    }
 }
 
 /// Where a window stood when it asked for a subscription.
@@ -33,16 +41,27 @@ pub struct Ticket {
     generation: u64,
 }
 
-fn missing(id: SubscriptionId) -> IpcError {
-    IpcError {
-        kind: ErrorKind::NotFound,
-        message: format!("no list subscription {}", id.0),
+impl<T> Subscriptions<T> {
+    /// `what` names a subscription in errors, such as "list".
+    pub fn new(what: &'static str) -> Self {
+        Self {
+            what,
+            inner: Mutex::new(Inner {
+                next: 0,
+                windows: HashMap::new(),
+            }),
+        }
     }
-}
 
-impl Lists {
-    fn inner(&self) -> std::sync::MutexGuard<'_, Inner> {
-        self.inner.lock().expect("lists lock")
+    fn inner(&self) -> std::sync::MutexGuard<'_, Inner<T>> {
+        self.inner.lock().expect("subscriptions lock")
+    }
+
+    fn missing(&self, id: SubscriptionId) -> IpcError {
+        IpcError {
+            kind: ErrorKind::NotFound,
+            message: format!("no {} subscription {}", self.what, id.0),
+        }
     }
 
     /// Taken before a subscription is built, which may wait on the network,
@@ -54,15 +73,15 @@ impl Lists {
             .inner()
             .windows
             .get(window)
-            .map_or(0, |held| held.generation);
+            .map_or(0, |window| window.generation);
         Ticket {
             window: window.to_owned(),
             generation,
         }
     }
 
-    /// Keeps the batcher, unless its window was dropped since the ticket.
-    pub fn keep(&self, ticket: Ticket, batcher: Batcher) -> Result<SubscriptionId, IpcError> {
+    /// Keeps `held`, unless its window was dropped since the ticket.
+    pub fn keep(&self, ticket: Ticket, held: T) -> Result<SubscriptionId, IpcError> {
         let mut inner = self.inner();
         inner.next += 1;
         let id = SubscriptionId(inner.next);
@@ -70,27 +89,26 @@ impl Lists {
         if window.generation != ticket.generation {
             return Err(IpcError {
                 kind: ErrorKind::Unavailable,
-                message: "the page that asked for the list is gone".to_owned(),
+                message: format!("the page that asked for the {} is gone", self.what),
             });
         }
-        window.lists.insert(id, batcher);
+        window.held.insert(id, held);
         Ok(id)
     }
 
-    pub fn with(
+    pub fn with<R>(
         &self,
         window: &str,
         id: SubscriptionId,
-        act: impl FnOnce(&Batcher),
-    ) -> Result<(), IpcError> {
+        act: impl FnOnce(&T) -> R,
+    ) -> Result<R, IpcError> {
         let inner = self.inner();
-        let batcher = inner
+        let held = inner
             .windows
             .get(window)
-            .and_then(|held| held.lists.get(&id))
-            .ok_or_else(|| missing(id))?;
-        act(batcher);
-        Ok(())
+            .and_then(|window| window.held.get(&id))
+            .ok_or_else(|| self.missing(id))?;
+        Ok(act(held))
     }
 
     pub fn remove(&self, window: &str, id: SubscriptionId) -> Result<(), IpcError> {
@@ -98,8 +116,8 @@ impl Lists {
             .inner()
             .windows
             .get_mut(window)
-            .and_then(|held| held.lists.remove(&id))
-            .ok_or_else(|| missing(id))?;
+            .and_then(|window| window.held.remove(&id))
+            .ok_or_else(|| self.missing(id))?;
         drop(removed);
         Ok(())
     }
@@ -108,9 +126,9 @@ impl Lists {
     pub fn drop_window(&self, window: &str) {
         let dropped = {
             let mut inner = self.inner();
-            let held = inner.windows.entry(window.to_owned()).or_default();
-            held.generation += 1;
-            std::mem::take(&mut held.lists)
+            let window = inner.windows.entry(window.to_owned()).or_default();
+            window.generation += 1;
+            std::mem::take(&mut window.held)
         };
         drop(dropped);
     }

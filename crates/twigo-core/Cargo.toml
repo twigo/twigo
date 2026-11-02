@@ -18,12 +18,15 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 twigo-cache.workspace = true
+twigo-describe.workspace = true
 twigo-env.workspace = true
 twigo-ipc.workspace = true
 twigo-kube.workspace = true
 twigo-netmon.workspace = true
+twigo-policy.workspace = true
 
 [dev-dependencies]
+k8s-openapi.workspace = true
 rcgen.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "time"] }

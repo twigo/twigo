@@ -22,6 +22,7 @@ import {
   type AuthScenario,
 } from "./auth";
 import { Cluster, podCells, podRow, type Pod } from "./cluster";
+import { MockObject } from "./objects";
 import {
   CONTEXTS,
   NAMESPACES,
@@ -157,6 +158,13 @@ export function createMockBackend(
     return found;
   };
 
+  const objects = new Map<number, MockObject>();
+  const object = (id: number) => {
+    const found = objects.get(id);
+    if (!found) throw new IpcError("notFound", `no object subscription ${id}`);
+    return found;
+  };
+
   const plain: {
     [C in PlainCommand]: (request: RequestOf<C>) => ResponseOf<C>;
   } = {
@@ -246,6 +254,20 @@ export function createMockBackend(
       subscription(id).ack(seq);
       return null;
     },
+    object_set_parts: ({ id, parts }) => {
+      object(id).setParts(parts);
+      return null;
+    },
+    object_ack: ({ id }) => {
+      object(id);
+      return null;
+    },
+    object_values: ({ id, keys }) => object(id).values(keys),
+    object_close: (id) => {
+      object(id);
+      objects.delete(id);
+      return null;
+    },
     list_unsubscribe: (id) => {
       subscription(id).close();
       subscriptions.delete(id);
@@ -311,6 +333,12 @@ export function createMockBackend(
             ? demoChurn()
             : steadyChurn(changesPerSecond);
       }
+      return id;
+    },
+    object_open: ({ object: query, parts }, onMessage) => {
+      space(query.space);
+      const id = nextId++;
+      objects.set(id, new MockObject(query, parts, onMessage));
       return id;
     },
     contexts_watch: () => CONTEXTS,

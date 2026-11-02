@@ -275,7 +275,10 @@ test("a list reopened with a health chip picked subscribes with that health's va
   });
   await settle();
   const values = subscribe.mock.calls.flatMap(([command, query]) =>
-    command === "list_subscribe" && typeof query === "object" && query
+    command === "list_subscribe" &&
+    typeof query === "object" &&
+    query !== null &&
+    "values" in query
       ? [query.values?.values]
       : [],
   );

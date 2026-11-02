@@ -26,8 +26,24 @@ export type {
   Gvr,
   KeyboardLayout,
   KeyMapping,
+  Block,
+  Condition,
+  DataEntry,
+  Field,
+  Label,
   ListBatch,
   ListQuery,
+  ObjectEvent,
+  ObjectParts,
+  ObjectQuery,
+  ObjectRef,
+  Overview,
+  Related,
+  RelatedObject,
+  Section,
+  Tone,
+  TreeNode,
+  Value,
   PluginStatus,
   Resource,
   ReviewedPlugin,
@@ -42,4 +58,5 @@ export type {
   ViewState,
 } from "./generated";
 export { INITIAL_SNAPSHOT, ListView, type ListSnapshot } from "./list";
+export { INITIAL_OBJECT, ObjectView, type ObjectSnapshot } from "./object";
 export { tauriBackend } from "./tauri";

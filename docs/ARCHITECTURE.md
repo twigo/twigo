@@ -488,7 +488,7 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     Twigo's MCP tools always return it masked.
     Reading Secrets through the policy proxy or `host-kube` is its own policy class, `secret-read` (6.4).
 - **Events for an object.**
-  A watch of `events.k8s.io/v1` with a field selector on the regarding object.
+  A watch of `events.k8s.io/v1` with a field selector on the regarding object: its `regarding.uid`, a node's `regarding.kind=Node,regarding.name=…`, since the kubelet reports a node's name as its uid, and a mirror pod's the uid of the pod it mirrors, as kubectl describe reads them ([research](research/details.md#events)).
   It runs only while the object's events are shown: the Events tab, or the events section of the drawer or the Overview.
   No field of an event is indexed and the API server keeps no watch cache for events by default, so such a query is filtered, by inference from the source, from the namespace's events in etcd ([research](research/details.md#events)).
 - **Metrics** (metrics-server).

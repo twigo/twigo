@@ -1,0 +1,259 @@
+{
+  "events": [
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-02T21:04:52Z",
+      "last": "2026-11-02T21:04:52Z",
+      "message": "Scaled up replica set web-8dc77bb87 from 0 to 2",
+      "reason": "ScalingReplicaSet",
+      "source": "deployment-controller",
+      "type": "Normal"
+    }
+  ],
+  "object": {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+      "annotations": {
+        "deployment.kubernetes.io/revision": "1"
+      },
+      "creationTimestamp": "2026-11-02T21:04:52Z",
+      "generation": 1,
+      "labels": {
+        "app": "web"
+      },
+      "managedFields": [
+        {
+          "apiVersion": "apps/v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:metadata": {
+              "f:annotations": {
+                ".": {},
+                "f:deployment.kubernetes.io/revision": {}
+              }
+            },
+            "f:status": {
+              "f:availableReplicas": {},
+              "f:conditions": {
+                ".": {},
+                "k:{\"type\":\"Available\"}": {
+                  ".": {},
+                  "f:lastTransitionTime": {},
+                  "f:lastUpdateTime": {},
+                  "f:message": {},
+                  "f:reason": {},
+                  "f:status": {},
+                  "f:type": {}
+                },
+                "k:{\"type\":\"Progressing\"}": {
+                  ".": {},
+                  "f:lastTransitionTime": {},
+                  "f:lastUpdateTime": {},
+                  "f:message": {},
+                  "f:reason": {},
+                  "f:status": {},
+                  "f:type": {}
+                }
+              },
+              "f:observedGeneration": {},
+              "f:readyReplicas": {},
+              "f:replicas": {},
+              "f:terminatingReplicas": {},
+              "f:updatedReplicas": {}
+            }
+          },
+          "manager": "kube-controller-manager",
+          "operation": "Update",
+          "subresource": "status",
+          "time": "2026-11-02T21:04:52Z"
+        },
+        {
+          "apiVersion": "apps/v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:metadata": {
+              "f:labels": {
+                ".": {},
+                "f:app": {}
+              }
+            },
+            "f:spec": {
+              "f:progressDeadlineSeconds": {},
+              "f:replicas": {},
+              "f:revisionHistoryLimit": {},
+              "f:selector": {},
+              "f:strategy": {
+                "f:rollingUpdate": {
+                  ".": {},
+                  "f:maxSurge": {},
+                  "f:maxUnavailable": {}
+                },
+                "f:type": {}
+              },
+              "f:template": {
+                "f:metadata": {
+                  "f:labels": {
+                    ".": {},
+                    "f:app": {}
+                  }
+                },
+                "f:spec": {
+                  "f:containers": {
+                    "k:{\"name\":\"app\"}": {
+                      ".": {},
+                      "f:image": {},
+                      "f:imagePullPolicy": {},
+                      "f:name": {},
+                      "f:ports": {
+                        ".": {},
+                        "k:{\"containerPort\":8080,\"protocol\":\"TCP\"}": {
+                          ".": {},
+                          "f:containerPort": {},
+                          "f:name": {},
+                          "f:protocol": {}
+                        }
+                      },
+                      "f:resources": {
+                        ".": {},
+                        "f:requests": {
+                          ".": {},
+                          "f:cpu": {},
+                          "f:memory": {}
+                        }
+                      },
+                      "f:terminationMessagePath": {},
+                      "f:terminationMessagePolicy": {}
+                    }
+                  },
+                  "f:dnsPolicy": {},
+                  "f:nodeSelector": {},
+                  "f:restartPolicy": {},
+                  "f:schedulerName": {},
+                  "f:securityContext": {},
+                  "f:terminationGracePeriodSeconds": {}
+                }
+              }
+            }
+          },
+          "manager": "unknown",
+          "operation": "Update",
+          "time": "2026-11-02T21:04:52Z"
+        }
+      ],
+      "name": "web",
+      "namespace": "overview",
+      "resourceVersion": "3824",
+      "uid": "c3c9f25c-da7b-4941-b3ce-b7404644d3fa"
+    },
+    "spec": {
+      "progressDeadlineSeconds": 600,
+      "replicas": 2,
+      "revisionHistoryLimit": 10,
+      "selector": {
+        "matchLabels": {
+          "app": "web"
+        }
+      },
+      "strategy": {
+        "rollingUpdate": {
+          "maxSurge": "25%",
+          "maxUnavailable": "25%"
+        },
+        "type": "RollingUpdate"
+      },
+      "template": {
+        "metadata": {
+          "labels": {
+            "app": "web"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "image": "registry.k8s.io/pause:3.10",
+              "imagePullPolicy": "IfNotPresent",
+              "name": "app",
+              "ports": [
+                {
+                  "containerPort": 8080,
+                  "name": "http",
+                  "protocol": "TCP"
+                }
+              ],
+              "resources": {
+                "requests": {
+                  "cpu": "10m",
+                  "memory": "16Mi"
+                }
+              },
+              "terminationMessagePath": "/dev/termination-log",
+              "terminationMessagePolicy": "File"
+            }
+          ],
+          "dnsPolicy": "ClusterFirst",
+          "nodeSelector": {
+            "kubernetes.io/hostname": "twigo-editors-control-plane"
+          },
+          "restartPolicy": "Always",
+          "schedulerName": "default-scheduler",
+          "securityContext": {},
+          "terminationGracePeriodSeconds": 30
+        }
+      }
+    },
+    "status": {
+      "availableReplicas": 2,
+      "conditions": [
+        {
+          "lastTransitionTime": "2026-11-02T21:04:52Z",
+          "lastUpdateTime": "2026-11-02T21:04:52Z",
+          "message": "Deployment has minimum availability.",
+          "reason": "MinimumReplicasAvailable",
+          "status": "True",
+          "type": "Available"
+        },
+        {
+          "lastTransitionTime": "2026-11-02T21:04:52Z",
+          "lastUpdateTime": "2026-11-02T21:04:52Z",
+          "message": "ReplicaSet \"web-8dc77bb87\" has successfully progressed.",
+          "reason": "NewReplicaSetAvailable",
+          "status": "True",
+          "type": "Progressing"
+        }
+      ],
+      "observedGeneration": 1,
+      "readyReplicas": 2,
+      "replicas": 2,
+      "terminatingReplicas": 0,
+      "updatedReplicas": 2
+    }
+  },
+  "printed": [
+    {
+      "column": "Ready",
+      "value": "2/2"
+    },
+    {
+      "column": "Up-to-date",
+      "value": "2"
+    },
+    {
+      "column": "Available",
+      "value": "2"
+    },
+    {
+      "column": "Containers",
+      "value": "app"
+    },
+    {
+      "column": "Images",
+      "value": "registry.k8s.io/pause:3.10"
+    },
+    {
+      "column": "Selector",
+      "value": "app=web"
+    }
+  ]
+}
