@@ -245,3 +245,69 @@ test("trusting signs in for the space the prompt was shown in", async () => {
   await trusting;
   expect(invoke).toHaveBeenCalledWith("context_sign_in", "prod-eu");
 });
+
+test("a sign-in that cannot start closes its panel and is reported", async () => {
+  const mock = createMockBackend("pluginFailed");
+  const backend: Backend = {
+    invoke: (command, request) =>
+      command === "context_sign_in"
+        ? Promise.reject(new Error("no plugin"))
+        : mock.invoke(command, request),
+    subscribe: (command, request, onMessage) =>
+      mock.subscribe(command, request, onMessage),
+  };
+  const workbench = await started("pluginFailed", backend);
+  const report = vi.spyOn(workbench, "report");
+  await workbench.credentials.signIn();
+  expect(workbench.credentials.panelOpen).toBe(false);
+  expect(report).toHaveBeenCalledWith(new Error("no plugin"));
+});
+
+test("a link Rust refuses to open is reported", async () => {
+  const workbench = await started("deviceCode");
+  const report = vi.spyOn(workbench, "report");
+  workbench.openUrl("http://example.com/login");
+  await vi.waitFor(() => {
+    expect(report).toHaveBeenCalled();
+  });
+});
+
+test("a panel closed for a run stays closed in another space that shares the plugin", async () => {
+  const mock = createMockBackend("ready");
+  const pushes = new Map<string, (auth: ContextAuth) => void>();
+  const backend: Backend = {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe: (command, request, onMessage) => {
+      if (command === "context_auth_watch" && typeof request === "string") {
+        pushes.set(request, onMessage);
+      }
+      return mock.subscribe(command, request, onMessage);
+    },
+  };
+  const workbench = await started("ready", backend);
+  const run: ContextAuth = {
+    state: "plugin",
+    plugin: {
+      command: "kubelogin",
+      args: [],
+      env: [],
+      digest: "shared",
+      signsIn: true,
+    },
+    status: {
+      state: "running",
+      since: "2026-11-02T00:00:00Z",
+      output: "enter the code ABC\n",
+    },
+  };
+  act(() => {
+    pushes.get("prod-eu")?.(run);
+  });
+  expect(workbench.credentials.panelOpen).toBe(true);
+  workbench.credentials.setPanelOpen(false);
+  await select(workbench, "staging");
+  act(() => {
+    pushes.get("staging")?.(run);
+  });
+  expect(workbench.credentials.panelOpen).toBe(false);
+});

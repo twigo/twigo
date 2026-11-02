@@ -89,12 +89,10 @@ export function CredentialsItem() {
         onOpenAutoFocus={(event) => {
           event.preventDefault();
         }}
-        // A run under way keeps its panel: the code must stay in view while
-        // the person types it elsewhere, Escape included.
+        // A run under way keeps its panel when the person clicks elsewhere,
+        // as into a browser's code field; Escape closes it like any popover,
+        // and the item opens it again.
         onInteractOutside={(event) => {
-          if (!failed) event.preventDefault();
-        }}
-        onEscapeKeyDown={(event) => {
           if (!failed) event.preventDefault();
         }}
         onCloseAutoFocus={(event) => {

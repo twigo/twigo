@@ -9,6 +9,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { MockScenario } from "@twigo/protocol/mock";
 import { inWorkbench, testWorkbench } from "../../testing";
 import { CredentialsItem } from "./CredentialsItem";
+import { SignInBody } from "./SignIn";
 import { TrustDialog } from "./TrustDialog";
 
 afterEach(cleanup);
@@ -80,11 +81,39 @@ test("the link opens through Rust and is no anchor the webview could follow", as
   );
 });
 
-test("Escape elsewhere leaves a running sign-in's panel open", async () => {
+test("Escape closes the panel like any popover and leaves the focus where it was", async () => {
   await show("deviceCode");
   expect(await screen.findByText("F3JQ7K9PL")).toBeTruthy();
-  fireEvent.keyDown(document.body, { key: "Escape" });
-  expect(screen.getByText("F3JQ7K9PL")).toBeTruthy();
+  const field = document.createElement("input");
+  document.body.append(field);
+  field.focus();
+  fireEvent.keyDown(field, { key: "Escape" });
+  expect(screen.queryByText("F3JQ7K9PL")).toBeNull();
+  await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  expect(document.activeElement).toBe(field);
+  field.remove();
+});
+
+test("the elapsed time counts from the run's start", async () => {
+  const workbench = await show("deviceCode");
+  await screen.findByText("F3JQ7K9PL");
+  const { auth } = workbench.credentials;
+  if (auth.state !== "plugin" || auth.status.state !== "running") {
+    throw new Error("a run under way");
+  }
+  cleanup();
+  render(
+    <SignInBody
+      plugin={auth.plugin}
+      context="prod-eu"
+      status={{
+        ...auth.status,
+        since: new Date(Date.now() - 65_000).toISOString(),
+      }}
+    />,
+    { wrapper: inWorkbench(workbench) },
+  );
+  expect(await screen.findByText("1:05")).toBeTruthy();
 });
 
 test("the output opens when the run fails after it printed", async () => {

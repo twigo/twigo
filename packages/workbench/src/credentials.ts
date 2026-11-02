@@ -27,7 +27,7 @@ export class Credentials {
   /** The plugin the open trust prompt shows; it closes if the kubeconfig changes it. */
   #prompt: ExecPlugin | undefined;
   #panelOpen = false;
-  /** The runs whose panel the person closed, by context and start, so it opens again only for the next. */
+  /** The runs whose panel the person closed, by plugin and start, so it opens again only for the next, in any space that shares the plugin. */
   readonly #dismissed = new Set<string>();
   #arming: ReturnType<typeof setTimeout> | undefined;
 
@@ -174,7 +174,7 @@ export class Credentials {
     if (auth.state !== "plugin" || auth.status.state !== "running") {
       return undefined;
     }
-    return `${this.#context ?? ""}\n${auth.status.since}`;
+    return `${auth.plugin.digest}\n${auth.status.since}`;
   }
 
   #show(): void {
@@ -182,15 +182,12 @@ export class Credentials {
     if (!run || !this.#dismissed.has(run)) this.#panelOpen = true;
   }
 
-  #arm(context: string): void {
+  /** Shows the panel in a moment if the run is still under way; a switch of space clears it. */
+  #arm(): void {
     clearTimeout(this.#arming);
     this.#arming = setTimeout(() => {
       const { auth } = this;
-      if (
-        context === this.#context &&
-        auth.state === "plugin" &&
-        auth.status.state === "running"
-      ) {
+      if (auth.state === "plugin" && auth.status.state === "running") {
         this.#show();
         this.changes.emit();
       }
@@ -238,7 +235,7 @@ export class Credentials {
       // moment without a credential: a browser flow often prints nothing.
       if (signsIn) {
         if (status.output.trim() !== "") this.#show();
-        else if (previous !== "running") this.#arm(context);
+        else if (previous !== "running") this.#arm();
       }
     } else {
       clearTimeout(this.#arming);

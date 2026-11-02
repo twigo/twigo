@@ -177,6 +177,12 @@ export function createMockBackend(
     exec_review: () => auth.review(),
     exec_trust: (digests) => auth.trust(digests),
     url_open: (url) => {
+      if (!signInLink(url)) {
+        throw new IpcError(
+          "invalidInput",
+          `Twigo opens only sign-in links: ${url}`,
+        );
+      }
       globalThis.open(url, "_blank", "noopener,noreferrer");
       return null;
     },
@@ -310,6 +316,22 @@ export function createMockBackend(
       return settle(() => streams[command](request, onMessage));
     },
   };
+}
+
+/** What Rust's `sign_in_url` lets through: https, or http to localhost or 127.0.0.1, without a user part. */
+function signInLink(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.username !== "" || parsed.password !== "") return false;
+  return (
+    parsed.protocol === "https:" ||
+    (parsed.protocol === "http:" &&
+      (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1"))
+  );
 }
 
 /** Answers asynchronously, as IPC does. */
