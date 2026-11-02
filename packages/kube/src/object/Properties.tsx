@@ -34,7 +34,7 @@ export function Properties({
               <dt className="truncate text-muted-foreground" title={node.key}>
                 {node.label}
               </dt>
-              <dd className="min-w-0 break-words">
+              <dd className="min-w-0 break-words whitespace-pre-wrap">
                 <Plain node={node} />
               </dd>
             </div>

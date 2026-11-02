@@ -198,3 +198,37 @@ test("events that cannot be listed say why instead of none", () => {
   expect(document.body.textContent).toContain("You may not list");
   expect(document.body.textContent).not.toContain("No events");
 });
+
+test("a multiline value keeps its lines", () => {
+  render(
+    <Overview
+      overview={{
+        sections: [
+          {
+            id: "core.spec",
+            title: "Spec",
+            blocks: [
+              {
+                type: "tree",
+                nodes: [
+                  {
+                    key: "statusTemplate",
+                    label: "Status template",
+                    value: {
+                      type: "scalar",
+                      text: "phase: Running\nready: true",
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }}
+      onOpen={() => undefined}
+    />,
+  );
+  const value = screen.getByText(/phase: Running/);
+  expect(value.textContent).toBe("phase: Running\nready: true");
+  expect(value.className).toContain("whitespace-pre-wrap");
+});

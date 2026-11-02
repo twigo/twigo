@@ -138,7 +138,9 @@ function ValueView({
 }): ReactNode {
   switch (value.type) {
     case "text":
-      return <span className="break-words">{value.text}</span>;
+      return (
+        <span className="break-words whitespace-pre-wrap">{value.text}</span>
+      );
     case "time":
       return <Time at={value.at} />;
     case "link":
