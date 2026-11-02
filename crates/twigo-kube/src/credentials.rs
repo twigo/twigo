@@ -12,6 +12,7 @@ mod source;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use exec::token_or_basic;
 pub use exec::{ApiVersion, Exec, ExecError, Mode};
 pub use oidc::{Oidc, OidcEntry, OidcError};
 pub use output::{Credential, OutputError};
@@ -31,13 +32,6 @@ impl Provider {
             Provider::Exec(source) => source.credential().await?,
             Provider::Oidc(oidc) => oidc.credential().await?,
         })
-    }
-
-    /// Notes that the server rejected the credential of a new run too.
-    pub(crate) fn rejected_again(&self) {
-        if let Provider::Exec(source) = self {
-            source.rejected_again();
-        }
     }
 
     /// Drops `used`, which the server rejected.

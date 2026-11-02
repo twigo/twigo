@@ -89,13 +89,8 @@ where
             let Some(mut again) = again else {
                 return Ok(response);
             };
-            let used = layer.authorize(&mut again).await?;
-            let response = inner.oneshot(again).await.map_err(Into::into)?;
-            if response.status() == StatusCode::UNAUTHORIZED {
-                layer.provider.reject(&used);
-                layer.provider.rejected_again();
-            }
-            Ok(response)
+            layer.authorize(&mut again).await?;
+            inner.oneshot(again).await.map_err(Into::into)
         })
     }
 }

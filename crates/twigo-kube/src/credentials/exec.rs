@@ -8,6 +8,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use kube::config::{AuthInfo, Cluster, ExecInteractiveMode};
 use ring::digest::{SHA256, digest};
+use secrecy::ExposeSecret;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
@@ -91,12 +92,15 @@ impl Exec {
         if user.auth_provider.is_some() {
             return Err(ExecError::WithAuthProvider(name.to_owned()));
         }
-        let has_token = user.token.is_some() || user.token_file.is_some();
-        let has_basic = user.username.is_some();
-        let has_cert = (user.client_certificate.is_some()
-            || user.client_certificate_data.is_some())
-            && (user.client_key.is_some() || user.client_key_data.is_some());
-        if has_token || has_basic || has_cert {
+        let set = |value: Option<&str>| value.is_some_and(|value| !value.is_empty());
+        let has_cert = (set(user.client_certificate.as_deref())
+            || set(user.client_certificate_data.as_deref()))
+            && (set(user.client_key.as_deref())
+                || user
+                    .client_key_data
+                    .as_ref()
+                    .is_some_and(|key| !key.expose_secret().is_empty()));
+        if token_or_basic(user) || has_cert {
             return Ok(None);
         }
         let command = exec
@@ -219,6 +223,17 @@ impl Exec {
         })
         .to_string()
     }
+}
+
+/// Whether the entry names a token or basic auth, which win over a plugin
+/// or a provider, set as client-go reads them: not empty.
+pub(crate) fn token_or_basic(user: &AuthInfo) -> bool {
+    let set = |value: Option<&str>| value.is_some_and(|value| !value.is_empty());
+    user.token
+        .as_ref()
+        .is_some_and(|token| !token.expose_secret().is_empty())
+        || set(user.token_file.as_deref())
+        || set(user.username.as_deref())
 }
 
 fn env_entry(user: &str, entry: &HashMap<String, String>) -> Result<(String, String), ExecError> {

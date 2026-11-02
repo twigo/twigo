@@ -91,13 +91,17 @@ struct Status {
 }
 
 /// Reads JSON or YAML, as client-go's universal decoder does, ignoring
-/// fields it does not know. An `apiVersion` that differs from the one
+/// fields it does not know and taking the last of a repeated key. An `apiVersion` that differs from the one
 /// configured is refused; a missing one is not.
 pub(super) fn parse(stdout: &[u8], configured: ApiVersion) -> Result<Credential, OutputError> {
+    let options = serde_saphyr::options! {
+        duplicate_keys: serde_saphyr::DuplicateKeyPolicy::LastWins,
+    };
     // serde-saphyr quotes the text around a fault, which holds the token.
-    let credential: ExecCredential = serde_saphyr::from_slice(stdout).map_err(|_| {
-        OutputError::Decode("it is neither JSON nor YAML of an ExecCredential".to_owned())
-    })?;
+    let credential: ExecCredential = serde_saphyr::from_slice_with_options(stdout, options)
+        .map_err(|_| {
+            OutputError::Decode("it is neither JSON nor YAML of an ExecCredential".to_owned())
+        })?;
     if let Some(returned) = credential.api_version.filter(|v| !v.is_empty())
         && returned != configured.as_str()
     {

@@ -24,11 +24,15 @@ impl Fingerprint {
         entry(&mut hasher, &without_oidc_tokens(user));
         let cluster = cluster.and_then(|named| named.cluster.as_ref());
         let user = user.and_then(|named| named.auth_info.as_ref());
+        let idp_ca = user
+            .and_then(|u| u.auth_provider.as_ref())
+            .and_then(|provider| provider.config.get("idp-certificate-authority"));
         let files = [
             cluster.and_then(|c| c.certificate_authority.as_deref()),
             user.and_then(|u| u.client_certificate.as_deref()),
             user.and_then(|u| u.client_key.as_deref()),
             user.and_then(|u| u.token_file.as_deref()),
+            idp_ca.map(String::as_str),
         ];
         for file in files.into_iter().flatten() {
             file.hash(&mut hasher);

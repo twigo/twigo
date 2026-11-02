@@ -156,6 +156,10 @@ struct State {
     /// The credential of `entry.id_token`, so a rejection names it.
     current: Option<Arc<Credential>>,
     style: Option<Style>,
+    /// The id-token is one this source's refresh got, so a rejection keeps
+    /// it rather than spend another refresh token and write the file again
+    /// on every request; client-go never refreshes on a 401.
+    fresh: bool,
     /// The id-token and refresh token the user's file held when this source
     /// last read or wrote it: only tokens someone else wrote since are taken
     /// from it, never ones it still holds after a failed write or a
@@ -187,6 +191,7 @@ impl Oidc {
                 entry,
                 current: None,
                 style: None,
+                fresh: false,
             }),
             refreshing: tokio::sync::Mutex::new(()),
         }
@@ -222,6 +227,7 @@ impl Oidc {
                 state.entry.refresh_token = Some(rotated.clone());
             }
             state.current = None;
+            state.fresh = true;
             drop(state);
             self.valid()
         };
@@ -261,13 +267,14 @@ impl Oidc {
     }
 
     /// Drops `used`, which the server rejected, so the next request
-    /// refreshes.
+    /// refreshes, unless a refresh just got it.
     pub fn reject(&self, used: &Arc<Credential>) {
         let mut state = self.state();
-        if state
-            .current
-            .as_ref()
-            .is_some_and(|current| Arc::ptr_eq(current, used))
+        if !state.fresh
+            && state
+                .current
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, used))
         {
             state.current = None;
             state.entry.id_token = None;
@@ -334,6 +341,7 @@ impl Oidc {
         if found.0.is_some() && found.0 != state.entry.id_token {
             state.entry.id_token.clone_from(&found.0);
             state.current = None;
+            state.fresh = false;
         }
         if found.1.is_some() {
             state.entry.refresh_token.clone_from(&found.1);

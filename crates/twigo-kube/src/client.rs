@@ -37,7 +37,7 @@ use dial::Dialer;
 use identity::Identity;
 use retry::RetryLayer;
 
-use crate::credentials::Provider;
+use crate::credentials::{Provider, token_or_basic};
 
 /// client-go's: its dialer's keepalive (`transport/cache.go`) and its
 /// HTTP/2 health check (`ReadIdleTimeout` and `PingTimeout` in
@@ -173,9 +173,7 @@ fn without_plugins(config: &Config, provided: bool) -> Result<Config, Error> {
     // client-go's bearer and basic round trippers wrap the provider's, which
     // passes on a request that carries a header already; kube reads the
     // provider first.
-    let user = &config.auth_info;
-    let static_auth = user.token.is_some() || user.token_file.is_some() || user.username.is_some();
-    if provided || static_auth {
+    if provided || token_or_basic(&config.auth_info) {
         config.auth_info.auth_provider = None;
     }
     Ok(config)

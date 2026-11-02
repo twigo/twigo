@@ -17,7 +17,7 @@ use kube::config::{Kubeconfig, KubeconfigError, NamedAuthInfo, NamedCluster, Nam
 use serde::Deserialize;
 use twigo_ipc::ContextColor;
 
-use crate::credentials::{Exec, ExecError, OidcEntry, OidcError};
+use crate::credentials::{Exec, ExecError, OidcEntry, OidcError, token_or_basic};
 
 pub use fingerprint::Fingerprint;
 pub use watch::Watch;
@@ -225,11 +225,7 @@ impl Entries {
         let info = user.auth_info.as_ref()?;
         let provider = info.auth_provider.as_ref()?;
         // A token or basic auth in the entry wins, as in client-go.
-        if provider.name != "oidc"
-            || info.token.is_some()
-            || info.token_file.is_some()
-            || info.username.is_some()
-        {
+        if provider.name != "oidc" || token_or_basic(info) {
             return None;
         }
         Some(OidcEntry::of(&provider.config).map(|entry| OidcUser {

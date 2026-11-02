@@ -478,4 +478,20 @@ fn refreshed_oidc_tokens_leave_the_fingerprint_alone() {
         &OIDC.replace("client-id: twigo", "client-id: other"),
     );
     assert_ne!(fingerprint(), before, "the provider itself changed");
+
+    let ca = write(dir.path(), "idp.pem", "first");
+    write(
+        dir.path(),
+        "config",
+        &OIDC.replace(
+            "client-id: twigo,",
+            &format!(
+                "client-id: twigo, idp-certificate-authority: '{}',",
+                ca.display()
+            ),
+        ),
+    );
+    let with_ca = fingerprint();
+    write(dir.path(), "idp.pem", "second");
+    assert_ne!(fingerprint(), with_ca, "the IdP's CA file changed in place");
 }

@@ -44,8 +44,6 @@ pub enum RunError {
     Output(#[from] OutputError),
     #[error("exec plugin cannot support interactive mode: standard input is not a terminal")]
     NeedsTerminal,
-    #[error("the cluster rejected the credential {0} gave")]
-    Rejected(String),
 }
 
 /// Runs `exec` once with `env`, the login shell's environment, tells
@@ -110,20 +108,29 @@ pub(super) async fn run(
         };
         if !closed {
             // Its error is the reader's, and the run is over.
-            let _ = tokio::time::timeout(STDERR_GRACE, complained).await;
+            closed = tokio::time::timeout(STDERR_GRACE, complained).await.is_ok();
         }
-        Ok(result)
+        Ok((result, closed))
     };
     let ended = tokio::select! {
         result = tokio::time::timeout(timeout, work) => match result {
-            Ok(Ok((printed, status))) => Ok((printed, status)),
+            Ok(Ok(((printed, status), closed))) => Ok((printed, status, closed)),
             Ok(Err(error)) => Err(error),
             Err(_) => Err(RunError::Timeout { command: command.clone(), after: timeout }),
         },
         () = cancel => Err(RunError::Cancelled(command.clone())),
     };
     let (printed, status) = match ended {
-        Ok(done) => done,
+        Ok((printed, status, closed)) => {
+            if !closed {
+                // Read to its end, so a helper that writes to it later
+                // gets no broken pipe.
+                tokio::spawn(async move {
+                    let _ = tokio::io::copy(&mut err, &mut tokio::io::sink()).await;
+                });
+            }
+            (printed, status)
+        }
         Err(error) => {
             // The plugin and whatever it started, such as gcloud under
             // gke-gcloud-auth-plugin.

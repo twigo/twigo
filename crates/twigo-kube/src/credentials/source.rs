@@ -269,21 +269,6 @@ impl Source {
         }
     }
 
-    /// Holds a plugin that may ask the person to sign in after the cluster
-    /// rejected the credential of a new run too: running it again by itself
-    /// would only open browser after browser.
-    pub(crate) fn rejected_again(&self) {
-        if !self.signs_in() {
-            return;
-        }
-        let error = RunError::Rejected(self.exec.command().to_owned());
-        self.state().held = Some(error.clone());
-        self.status.send_replace(Status::Failed {
-            error,
-            output: String::new(),
-        });
-    }
-
     fn kill(&self) {
         let group = self.state().run.as_ref().and_then(|run| run.group);
         if let Some(group) = group {

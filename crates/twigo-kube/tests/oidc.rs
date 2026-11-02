@@ -42,6 +42,8 @@ struct Issued {
     grants: Vec<(HashMap<String, String>, Option<String>)>,
     /// The issuer answers only a form that carries the client's secret.
     form_only: bool,
+    /// How long the id-tokens it issues last; an hour when unset.
+    lifetime: Option<SignedDuration>,
 }
 
 struct Issuer {
@@ -167,7 +169,7 @@ async fn answer(
                 (
                     200,
                     serde_json::json!({
-                        "id_token": jwt(SignedDuration::from_hours(1), n),
+                        "id_token": jwt(issued.lifetime.unwrap_or(SignedDuration::from_hours(1)), n),
                         "refresh_token": issued.refresh,
                         "token_type": "bearer",
                     }),
@@ -399,9 +401,10 @@ async fn after_a_failed_write_the_next_refresh_spends_the_rotated_token() {
         &jwt(SignedDuration::from_secs(-60), 0),
         Some("r1"),
     ));
+    issuer.issued.lock().unwrap().lifetime = Some(SignedDuration::from_millis(11_500));
     std::fs::write(lock(&setup.file), "").unwrap();
-    let first = setup.oidc.credential().await.unwrap();
-    setup.oidc.reject(&first);
+    setup.oidc.credential().await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     setup.oidc.credential().await.unwrap();
     let spent: Vec<String> = issuer
         .grants()
@@ -454,4 +457,21 @@ async fn a_corrected_client_secret_reaches_a_new_source() {
         .oidc(Some(setup.file.clone()), "dev", entry(&setup.file));
     assert!(!Arc::ptr_eq(&corrected, &setup.oidc));
     corrected.credential().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_refreshed_token_the_server_rejects_too_is_kept_until_it_expires() {
+    let issuer = Issuer::start("r1").await;
+    let setup = setup(&kubeconfig(
+        &issuer,
+        &jwt(SignedDuration::from_secs(-60), 0),
+        Some("r1"),
+    ));
+    let refreshed = setup.oidc.credential().await.unwrap();
+    for _ in 0..5 {
+        let used = setup.oidc.credential().await.unwrap();
+        assert_eq!(token(&used), token(&refreshed));
+        setup.oidc.reject(&used);
+    }
+    assert_eq!(issuer.grants().len(), 1);
 }

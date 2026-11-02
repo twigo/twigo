@@ -156,6 +156,12 @@ fn a_token_or_a_certificate_in_the_entry_wins_over_its_plugin() {
     let plugin = format!("    exec: {{ apiVersion: {V1}, interactiveMode: Never, command: aws }}");
     assert!(exec_of(&plugin).unwrap().is_some());
     assert_eq!(exec_of(&format!("{plugin}\n    token: t")), Ok(None));
+    assert!(
+        exec_of(&format!("{plugin}\n    token: ''"))
+            .unwrap()
+            .is_some(),
+        "an empty token is no token"
+    );
     assert_eq!(exec_of(&format!("{plugin}\n    username: admin")), Ok(None));
     assert_eq!(
         exec_of(&format!(
@@ -217,10 +223,10 @@ fn output_is_read_by_client_go_s_rules() {
         Some("2030-01-02T03:04:05.678Z".parse().unwrap())
     );
     let yaml = parse(&format!(
-        "apiVersion: {V1}\nstatus:\n  token: y\n  extra: ignored\n"
+        "apiVersion: {V1}\nstatus:\n  token: first\n  extra: ignored\n  token: y\n"
     ))
     .unwrap();
-    assert_eq!(token(&yaml), "y");
+    assert_eq!(token(&yaml), "y", "the last of a repeated key");
     assert!(
         parse(r#"{"status":{"token":"t"}}"#).is_ok(),
         "no apiVersion"
@@ -251,7 +257,7 @@ fn output_is_read_by_client_go_s_rules() {
         Err(OutputError::Expiry(_))
     ));
     let Err(OutputError::Decode(message)) =
-        parse("status:\n  token: s3cr3t-token\n  token: twice\n")
+        parse("status:\n  token: s3cr3t-token\n  expirationTimestamp: [1, 2]\n")
     else {
         panic!("broken output does not decode");
     };
@@ -753,10 +759,14 @@ async fn after_a_failed_sign_in_the_plugin_waits_to_be_asked_again() {
 #[tokio::test]
 async fn a_helper_left_holding_stderr_does_not_hold_the_credential() {
     let plugins = Plugins::new();
+    let survived = plugins.dir.path().join("survived");
     let script = plugins.script(
         "helper",
-        r#"sleep 5 >/dev/null &
-printf '{"status":{"token":"done"}}'"#,
+        &format!(
+            r#"(sleep 0.5; echo late >&2 && touch '{}') >/dev/null &
+printf '{{"status":{{"token":"done"}}}}'"#,
+            survived.display()
+        ),
     );
     let timeouts = Timeouts {
         unattended: Duration::from_secs(2),
@@ -764,6 +774,8 @@ printf '{"status":{"token":"done"}}'"#,
     };
     let source = Registry::new(env(&[]), focused(true), timeouts).source(exec(&script, ""));
     assert_eq!(token(&source.credential().await.unwrap()), "done");
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(survived.exists(), "the helper's late write met a reader");
 }
 
 #[tokio::test]

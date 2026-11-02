@@ -413,16 +413,24 @@ async fn a_new_certificate_seen_first_by_the_sessions_client_retires_the_api_s_c
 }
 
 #[tokio::test]
-async fn a_sign_in_plugin_whose_new_credential_is_rejected_too_waits_to_be_asked() {
+async fn a_token_in_the_entry_goes_out_rather_than_its_oidc_provider_s() {
     let server = Server::start().await;
-    let plugin = Plugin::new();
-    plugin.prints(serde_json::json!({"token": "never-accepted"}));
-    let clients = clients(&server, plugin.exec());
-    let Err(kube::Error::Api(status)) = get(&clients).await else {
-        panic!("the server rejects the token");
-    };
-    assert_eq!(status.code, 401);
-    assert_eq!(plugin.runs(), 2, "one new run after the first 401");
-    assert!(get(&clients).await.is_err());
-    assert_eq!(plugin.runs(), 2, "held, so the next request runs nothing");
+    server.accept_token("static");
+    let mut config = Config::new(
+        format!("https://localhost:{}", server.addr.port())
+            .parse()
+            .unwrap(),
+    );
+    config.root_cert = Some(vec![server.ca.to_vec()]);
+    config.auth_info.token = Some("static".to_owned().into());
+    config.auth_info.auth_provider = Some(kube::config::AuthProviderConfig {
+        name: "oidc".to_owned(),
+        config: [("id-token".to_owned(), "stale".to_owned())]
+            .into_iter()
+            .collect(),
+        other: Default::default(),
+    });
+    let clients = Clients::new(&config, Options::default()).unwrap();
+    assert_eq!(get(&clients).await.unwrap(), "ok");
+    assert_eq!(server.seen()[0].token.as_deref(), Some("static"));
 }
