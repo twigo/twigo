@@ -110,7 +110,10 @@ impl Discovery {
     /// The resources a client may list, those it cannot watch included,
     /// which the hub lists again instead (ARCHITECTURE 3.2), each at its
     /// group's most preferred version that serves it, as client-go's
-    /// `ServerPreferredResources` picks them; subresources aside.
+    /// `ServerPreferredResources` picks them; subresources aside. A version
+    /// an aggregated server left stale comes after the others, which
+    /// client-go drops, so its kinds stay, and their lists say why they
+    /// fail.
     pub fn resources(&self) -> Vec<Resource> {
         let mut seen = std::collections::HashSet::new();
         let mut resources = Vec::new();
@@ -121,7 +124,9 @@ impl Discovery {
                 .as_ref()
                 .and_then(|meta| meta.name.as_deref())
                 .unwrap_or_default();
-            for version in &group.versions {
+            let mut versions: Vec<_> = group.versions.iter().collect();
+            versions.sort_by_key(|version| version.freshness.as_deref() == Some("Stale"));
+            for version in versions {
                 let Some(version_name) = version.version.as_deref() else {
                     continue;
                 };
@@ -239,7 +244,60 @@ fn aggregated(content_type: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
+
+    #[test]
+    fn a_stale_version_serves_only_what_no_current_one_does() {
+        let resource = |plural: &str, kind: &str| {
+            json!({
+                "resource": plural,
+                "responseKind": { "group": "", "version": "", "kind": kind },
+                "scope": "Namespaced",
+                "verbs": ["list"],
+            })
+        };
+        let groups = json!({
+            "items": [{
+                "metadata": { "name": "example.com" },
+                "versions": [
+                    {
+                        "version": "v1",
+                        "freshness": "Stale",
+                        "resources": [resource("widgets", "Widget"), resource("gadgets", "Gadget")],
+                    },
+                    {
+                        "version": "v1beta1",
+                        "freshness": "Current",
+                        "resources": [resource("widgets", "Widget")],
+                    },
+                ],
+            }],
+        });
+        let discovery = Discovery {
+            core: Document {
+                etag: None,
+                list: APIGroupDiscoveryList::default(),
+            },
+            groups: Document {
+                etag: None,
+                list: serde_json::from_value(groups).unwrap(),
+            },
+        };
+        let versions: Vec<_> = discovery
+            .resources()
+            .into_iter()
+            .map(|r| (r.gvr.resource, r.gvr.version))
+            .collect();
+        assert_eq!(
+            versions,
+            [
+                ("widgets".to_owned(), "v1beta1".to_owned()),
+                ("gadgets".to_owned(), "v1".to_owned())
+            ]
+        );
+    }
 
     #[test]
     fn aggregated_media_types() {
