@@ -134,7 +134,9 @@ async fn an_api_server_restart_leaves_the_rows_after_a_stale_spell() {
     assert_eq!(names(&rows), ["p1", "p2", "p3"]);
 
     let apiserver = docker(&node, &["crictl", "ps", "--name", "kube-apiserver", "-q"]);
-    docker(&node, &["crictl", "stop", &apiserver]);
+    // crictl gives the stop 2 s by default, less than the API server's
+    // graceful shutdown takes on a CI runner.
+    docker(&node, &["crictl", "--timeout", "60s", "stop", &apiserver]);
     let mut seen = Vec::new();
     let back = async {
         loop {
