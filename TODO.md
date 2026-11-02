@@ -18,4 +18,7 @@ Findings that belong to no step yet.
   - A quit while refreshed oidc tokens are written back may leave `<file>.lock` beside the kubeconfig, which makes kubectl refuse its own write-back until the file is removed.
   - kube's loader turns an empty `tokenFile`, `client-certificate` or `client-key` into the kubeconfig's directory, so such a context fails where client-go skips the empty path.
   - A CA file the kubeconfig names, the cluster's or the IdP's, is read again only when a kubeconfig changes: the watcher follows the kubeconfig files, not the files they name.
-  - A failed unattended plugin runs again on every request, as in client-go, so once upstreams retry their watches (ARCHITECTURE 3.2) its status turns `running` on each retry and the sign-in panel loses the failure's fix while it runs; only `cluster_version` asks for a credential yet.
+- The watch hub (`twigo_cache::hub`, ARCHITECTURE 3.2):
+  - The access review that lets more than four namespaces share a cluster-wide upstream is kept with the context's clients, so a RoleBinding granted later counts only once they are rebuilt or Twigo restarts.
+  - A resumed watch reports `ready` on its `200`, before a `410 Gone` in its body turns it to `relisting`, so a view can flash ready for a moment.
+  - A streaming list of 5,000 pods allocates 44.2 MiB on its way to the 4.0 MiB it keeps, where ten pages of 500 allocate 12.7 MiB, since each event is a Table of its own (`examples/hub_memory.rs` and `table_memory.rs`, kind 1.37 with `bench/pods.sh` at 5,000, 2026-11-02); step 11's budgets say whether it matters.

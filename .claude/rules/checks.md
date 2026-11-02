@@ -22,6 +22,8 @@
 - The bench app alone: `pnpm tauri build --no-bundle --features bench --config src-tauri/tauri.bench.conf.json`, then `TWIGO_BENCH=<dir> target/release/twigo-bench launch target/release/twigo`.
 - State across ⌘Q and a restart, on macOS with the screen unlocked: `bench/restart.sh <kind kubeconfig>` after the debug build; it runs the app with a temporary `HOME` and presses keys through System Events, which needs the terminal's Accessibility permission.
 - The churn generator alone: `cargo run --release -p twigo-bench -- churn --kubeconfig <path> --rate 100 --seconds 60 --log churn.jsonl`.
+- The hub's live tests sit in the library (`crates/twigo-cache/src/hub/live.rs`) and run with the others under `--ignored`; `crates/twigo-cache/tests/restart_live.rs` restarts the API server of a kind cluster through `docker exec … crictl stop`, so it refuses kwok contexts and waits for the controller manager before it ends.
+- The hub's heap at 5,000 pods: `bench/pods.sh <kubeconfig> 5000`, then `TWIGO_TEST_KUBECONFIG=<kubeconfig> cargo run --release -p twigo-cache --example hub_memory`, next to `--example table_memory`.
 - Before a push, run only the checks the change affects.
   CI runs the rest, the live tests on every release when `twigo-cache`, `twigo-kube`, `twigo-core`, `bench/cluster.sh` or the Cargo files change, and the frame probe on WebKitGTK when `bench/ipc` or the Cargo files change.
 
@@ -33,6 +35,8 @@
   Keep both aliases.
 - The app reads the kubeconfigs kubectl reads, the user's real clusters among them, unless `TWIGO_KUBECONFIG` names one file: in debug and bench builds only that file's `kind-*` and `kwok-*` contexts count, so development and tests always set it.
   With a `HOME` of its own the app also keeps its state and window position apart, since Tauri finds the app-data directory through `HOME`.
+- The hub's unit tests run on paused time against `crates/twigo-cache/src/fake.rs`, over `Clients::over` (the `test-util` feature of twigo-kube): a wait without a bound loops forever there, as time jumps to the next idle timer, so every wait goes through `until`, which gives up after ten virtual minutes.
+  A state the fake passes through at once cannot be awaited: hold it there, as `hold_initial` holds a streaming list.
 - Kubernetes clients come only from `twigo_kube::client::Clients`: `api` speaks HTTP/2, `sessions` HTTP/1.1 for exec, attach and port-forward.
   `api` counts its streams, 24 watches at most by default, so a test or tool that opens more raises `Options::budgets`, or its watches wait.
   Never `Config::infer()`, `~/.kube/config` or the current context: tests and examples read `TWIGO_TEST_KUBECONFIG` and refuse contexts other than `kind-*` and `kwok-*`.
