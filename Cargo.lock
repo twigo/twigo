@@ -5590,6 +5590,7 @@ name = "twigo-env"
 version = "0.1.0"
 dependencies = [
  "fastrand",
+ "libc",
  "nix",
  "tempfile",
  "thiserror 2.0.21",

@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 
 use nix::sys::signal::{Signal, killpg};
-use nix::unistd::{Pid, Uid, User};
+use nix::unistd::{Pid, Uid, User, setsid};
 use tokio::io::AsyncReadExt;
 use tokio::net::unix::pipe;
 use tokio::process::Command;
@@ -220,8 +220,11 @@ async fn run(
     ))
 }
 
-/// The shell in its own process group, without input, its stdout and
-/// stderr on one pipe so that what it prints keeps its order.
+/// The shell in a session of its own, and so in a process group of its own
+/// and without a controlling terminal, without input, its stdout and stderr
+/// on one pipe so that what it prints keeps its order. An interactive shell
+/// in a mere process group of its own, started from a terminal as Twigo is
+/// by `pnpm tauri dev`, stops when it first touches the terminal.
 fn spawn(shell: &Path, call: &[&OsStr]) -> io::Result<(tokio::process::Child, pipe::Receiver)> {
     let (reader, writer) = io::pipe()?;
     let mut command = Command::new(shell);
@@ -229,8 +232,14 @@ fn spawn(shell: &Path, call: &[&OsStr]) -> io::Result<(tokio::process::Child, pi
         .args(Syntax::of(shell).args(call))
         .stdin(Stdio::null())
         .stdout(writer.try_clone()?)
-        .stderr(writer)
-        .process_group(0);
+        .stderr(writer);
+    // SAFETY: setsid is async-signal-safe.
+    unsafe {
+        command.pre_exec(|| {
+            setsid()?;
+            Ok(())
+        });
+    }
     let child = command.spawn()?;
     // The command holds the pipe's write end until it is dropped, and the
     // reader sees the end of the output only once every write end closed.
