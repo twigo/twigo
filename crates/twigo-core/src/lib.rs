@@ -210,7 +210,14 @@ impl Core {
     /// The resources a space's context serves, followed as they change.
     pub async fn follow_resources(&self, space: &str) -> Result<Follower, IpcError> {
         let context = self.context(space)?;
-        Ok(Follower::new(self.hub.clone(), Arc::clone(&self.discovery), context).await)
+        let entry = self.catalog.fingerprint(&context);
+        Ok(Follower::new(
+            self.hub.clone(),
+            Arc::clone(&self.discovery),
+            context,
+            entry,
+        )
+        .await)
     }
 
     /// The namespaces of a space's context, from its namespace index

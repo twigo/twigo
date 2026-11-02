@@ -30,10 +30,7 @@ export class Discovery {
   #watching: Promise<void> = Promise.resolve();
 
   constructor(
-    private readonly workbench: Pick<
-      Workbench,
-      "backend" | "spaces" | "catalog"
-    > & {
+    private readonly workbench: Pick<Workbench, "backend" | "spaces"> & {
       readonly credentials: Pick<Workbench["credentials"], "changes" | "ready">;
     },
   ) {
@@ -42,16 +39,13 @@ export class Discovery {
       this.#follow(workbench.spaces.active?.id);
     });
     // Rust stops following what the credential refused, as the hub stops
-    // its upstreams, so the space is followed again once a credential
-    // comes, whatever the last answer was, and once the kubeconfig
-    // changes, which may have fixed it.
+    // its upstreams, until the context's kubeconfig entry changes; so the
+    // space is followed again once a credential comes, whatever the last
+    // answer was.
     workbench.credentials.changes.subscribe(() => {
       const { ready } = workbench.credentials;
       if (ready === this.#ready) return;
       this.#ready = ready;
-      if (this.#space !== undefined) this.#watch(this.#space);
-    });
-    workbench.catalog.changes.subscribe(() => {
       if (this.#space !== undefined) this.#watch(this.#space);
     });
     this.#follow(workbench.spaces.active?.id);

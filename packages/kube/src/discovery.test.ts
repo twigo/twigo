@@ -30,7 +30,6 @@ async function following() {
   const discovery = new Discovery({
     backend,
     spaces: workbench.spaces,
-    catalog: workbench.catalog,
     credentials,
   });
   const push = (space: string, next: Discovered) => {
@@ -118,7 +117,6 @@ test("a space chosen while a watch is asked is followed after it, and one passed
   const discovery = new Discovery({
     backend,
     spaces: workbench.spaces,
-    catalog: workbench.catalog,
     credentials: { changes: new Changes(), ready: 0 },
   });
   await vi.waitFor(() => {
@@ -135,16 +133,4 @@ test("a space chosen while a watch is asked is followed after it, and one passed
   await expect(discovery.resources("dev")).resolves.toEqual(RESOURCES);
   expect(watched).toEqual(["prod-eu", "dev"]);
   expect(discovery.get("staging").state).toBe("loading");
-});
-
-test("the active space is followed again once the kubeconfig changes", async () => {
-  const { workbench, discovery, watched } = await following();
-  await discovery.resources("prod-eu");
-
-  act(() => {
-    workbench.catalog.changes.emit();
-  });
-  await vi.waitFor(() => {
-    expect(watched).toEqual(["prod-eu", "prod-eu"]);
-  });
 });

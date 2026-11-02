@@ -1,8 +1,9 @@
 //! What a context serves (ARCHITECTURE 3.6), followed: discovery comes from
 //! the disk cache revalidated with its ETags, and again after the CRDs or
 //! APIServices the hub lists change, every minute while the person may not
-//! list them, and after the hub's longest backoff while it fails, which
-//! keeps the resources the server last answered.
+//! list them, after the hub's longest backoff while it fails, which keeps
+//! the resources the server last answered, and once the context's entry in
+//! the kubeconfig changes, even after a failed credential stopped it.
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
@@ -12,6 +13,7 @@ use tokio::sync::watch;
 use tokio::time::{Instant, sleep_until};
 use twigo_ipc::{Discovered, ErrorKind, IpcError, ViewState};
 use twigo_kube::discovery::{Cache, Discovery, Error};
+use twigo_kube::kubeconfig::Fingerprint;
 
 use crate::hub::{Hub, Query, RETRY_WITHIN, Resource, RowFormat, Subscription};
 use crate::table::Row;
@@ -30,6 +32,8 @@ pub struct Follower {
     hub: Hub,
     cache: Arc<Cache>,
     context: String,
+    /// The context's fingerprint, whose change restarts the follower.
+    entry: watch::Receiver<Option<Fingerprint>>,
     indexes: [Index; 2],
     /// The discovery last answered, or cached, by the server's URL.
     known: Option<(String, Discovery)>,
@@ -51,8 +55,8 @@ pub struct Follower {
 enum Failed {
     Retry,
     /// The context's credential failed: retrying would run its plugin by
-    /// itself, so the next follower asks again, whose subscriptions also
-    /// restart the indexes that the failure ended (ARCHITECTURE 3.2).
+    /// itself, so it asks again once the person changes the context's
+    /// entry, or the next follower does (ARCHITECTURE 3.2).
     Stop,
 }
 
@@ -64,33 +68,19 @@ struct Index {
 }
 
 impl Follower {
-    pub async fn new(hub: Hub, cache: Arc<Cache>, context: String) -> Self {
-        let index = async |group: &str, resource: &str| {
-            let rows = hub
-                .rows(Query {
-                    context: context.clone(),
-                    resource: Resource {
-                        group: group.to_owned(),
-                        version: "v1".to_owned(),
-                        resource: resource.to_owned(),
-                        namespaced: false,
-                    },
-                    format: RowFormat::Metadata,
-                    namespaces: Vec::new(),
-                    field_selector: None,
-                })
-                .await
-                .expect("its names are path segments");
-            Index::new(rows)
-        };
-        let indexes = [
-            index("apiextensions.k8s.io", "customresourcedefinitions").await,
-            index("apiregistration.k8s.io", "apiservices").await,
-        ];
+    pub async fn new(
+        hub: Hub,
+        cache: Arc<Cache>,
+        context: String,
+        mut entry: watch::Receiver<Option<Fingerprint>>,
+    ) -> Self {
+        entry.borrow_and_update();
+        let indexes = indexes(&hub, &context).await;
         Self {
             hub,
             cache,
             context,
+            entry,
             indexes,
             known: None,
             confirmed: false,
@@ -119,7 +109,8 @@ impl Follower {
 
     async fn wait(&mut self) {
         if self.failed == Some(Failed::Stop) {
-            return std::future::pending().await;
+            edited(&mut self.entry).await;
+            return self.restart().await;
         }
         let retry = (self.failed == Some(Failed::Retry)).then(|| Instant::now() + RETRY_WITHIN);
         loop {
@@ -134,6 +125,7 @@ impl Follower {
                 () = sleep_until(retry.unwrap_or(self.poll)), if retry.is_some() => return,
                 () = sleep_until(self.poll), if refused => return,
                 () = replaced(&mut self.abandoned) => return,
+                () = edited(&mut self.entry) => return self.restart().await,
                 changed = crds.changed() => changed,
                 changed = apiservices.changed() => changed,
             };
@@ -145,6 +137,15 @@ impl Follower {
                     .collect();
             }
         }
+    }
+
+    /// Holds the indexes anew, which restarts those a failed credential
+    /// ended, as the hub restarts an ended upstream for a new subscription,
+    /// and forgets the failure and the fetches due.
+    async fn restart(&mut self) {
+        self.indexes = indexes(&self.hub, &self.context).await;
+        self.failed = None;
+        self.due.clear();
     }
 
     async fn fetch(&mut self) -> Discovered {
@@ -274,6 +275,40 @@ impl Index {
         }
         self.seen = seen;
         true
+    }
+}
+
+/// The CRDs and the APIServices of the context, as the hub lists their
+/// metadata.
+async fn indexes(hub: &Hub, context: &str) -> [Index; 2] {
+    let index = async |group: &str, resource: &str| {
+        let rows = hub
+            .rows(Query {
+                context: context.to_owned(),
+                resource: Resource {
+                    group: group.to_owned(),
+                    version: "v1".to_owned(),
+                    resource: resource.to_owned(),
+                    namespaced: false,
+                },
+                format: RowFormat::Metadata,
+                namespaces: Vec::new(),
+                field_selector: None,
+            })
+            .await
+            .expect("its names are path segments");
+        Index::new(rows)
+    };
+    [
+        index("apiextensions.k8s.io", "customresourcedefinitions").await,
+        index("apiregistration.k8s.io", "apiservices").await,
+    ]
+}
+
+/// Waits for the context's entry to change; never once nothing follows it.
+async fn edited(entry: &mut watch::Receiver<Option<Fingerprint>>) {
+    if entry.changed().await.is_err() {
+        std::future::pending::<()>().await;
     }
 }
 

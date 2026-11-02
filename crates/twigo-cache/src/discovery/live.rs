@@ -5,7 +5,7 @@ use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomRe
 use kube::Api;
 use kube::api::{DeleteParams, PostParams};
 use serde_json::json;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, watch};
 use tokio::time::{Instant, timeout};
 use twigo_ipc::Discovered;
 use twigo_kube::discovery::Cache;
@@ -42,7 +42,13 @@ async fn a_second_start_answers_from_the_cache_with_304() {
     let dir = tempfile::tempdir().unwrap();
     let cache = Arc::new(Cache::new(dir.path()));
     let (hub, clients) = live.hub(None);
-    let mut first = Follower::new(hub, Arc::clone(&cache), live.context.clone()).await;
+    let mut first = Follower::new(
+        hub,
+        Arc::clone(&cache),
+        live.context.clone(),
+        watch::channel(None).1,
+    )
+    .await;
     let discovered = next(&mut first).await;
     assert!(serves(&discovered, "", "pods"));
     assert!(serves(
@@ -70,7 +76,7 @@ async fn a_second_start_answers_from_the_cache_with_304() {
         "both roots answer the cached ETags with 304"
     );
     let (hub, _) = live.hub(None);
-    let mut second = Follower::new(hub, cache, live.context.clone()).await;
+    let mut second = Follower::new(hub, cache, live.context.clone(), watch::channel(None).1).await;
     assert_eq!(next(&mut second).await, discovered);
     assert_eq!(
         std::fs::metadata(file).unwrap().modified().unwrap(),
@@ -86,8 +92,13 @@ async fn a_crd_created_while_followed_comes_without_a_restart() {
     let live = live().await;
     let dir = tempfile::tempdir().unwrap();
     let (hub, _) = live.hub(None);
-    let mut follower =
-        Follower::new(hub, Arc::new(Cache::new(dir.path())), live.context.clone()).await;
+    let mut follower = Follower::new(
+        hub,
+        Arc::new(Cache::new(dir.path())),
+        live.context.clone(),
+        watch::channel(None).1,
+    )
+    .await;
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()

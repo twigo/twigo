@@ -2,10 +2,12 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use tokio::sync::watch;
 use tokio::time::{Instant, sleep, timeout};
 use twigo_ipc::{Discovered, ErrorKind, IpcError};
 use twigo_kube::client::{Budgets, Clients};
 use twigo_kube::discovery::Cache;
+use twigo_kube::kubeconfig::{Fingerprint, Sources};
 
 use super::*;
 use crate::fake::Fake;
@@ -25,7 +27,21 @@ async fn follower(fake: &Fake, cache: &Path) -> Follower {
 }
 
 async fn over(hub: Hub, cache: &Path) -> Follower {
-    Follower::new(hub, Arc::new(Cache::new(cache)), "kind-test".to_owned()).await
+    edited_over(hub, cache, watch::channel(None).1).await
+}
+
+async fn edited_over(
+    hub: Hub,
+    cache: &Path,
+    entry: watch::Receiver<Option<Fingerprint>>,
+) -> Follower {
+    Follower::new(
+        hub,
+        Arc::new(Cache::new(cache)),
+        "kind-test".to_owned(),
+        entry,
+    )
+    .await
 }
 
 async fn next(follower: &mut Follower) -> Discovered {
@@ -311,4 +327,58 @@ fn rebuild(current: &Current, next: Result<Arc<Clients>, IpcError>) {
     if let Ok(replaced) = replaced {
         replaced.connections().abandon();
     }
+}
+
+fn fingerprint(server: &str) -> Fingerprint {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("kubeconfig");
+    std::fs::write(
+        &file,
+        format!(
+            "clusters: [{{ name: c, cluster: {{ server: '{server}' }} }}]
+contexts: [{{ name: kind-test, context: {{ cluster: c }} }}]
+"
+        ),
+    )
+    .unwrap();
+    Sources::explicit(file).load().contexts[0].fingerprint
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stopped_follower_restarts_once_its_kubeconfig_entry_changes() {
+    let fake = fake();
+    fake.state()
+        .unauthorized
+        .extend(["/apis", CRDS, APISERVICES].map(str::to_owned));
+    let (edit, entry) = watch::channel(Some(fingerprint("https://a.example:6443")));
+    let cache = tempfile::tempdir().unwrap();
+    let mut follower = edited_over(fake.hub(Budgets::default()).0, cache.path(), entry).await;
+    assert_eq!(failure(&next(&mut follower).await), ErrorKind::Unauthorized);
+
+    fake.state().unauthorized.clear();
+    edit.send_replace(Some(fingerprint("https://b.example:6443")));
+    assert_eq!(names(&next(&mut follower).await), ["namespaces"]);
+
+    let start = Instant::now();
+    fake.state().serve("example.com", "gadgets", "Gadget");
+    fake.add("customresourcedefinitions", None, "gadgets.example.com");
+    assert_eq!(names(&next(&mut follower).await), ["namespaces", "gadgets"]);
+    assert!(start.elapsed() <= RECHECKS[1], "{:?}", start.elapsed());
+}
+
+#[tokio::test(start_paused = true)]
+async fn clients_refused_for_an_untrusted_plugin_come_once_the_entry_changes() {
+    let fake = fake();
+    let current = Arc::new(Mutex::new(Err(IpcError {
+        kind: ErrorKind::Unauthorized,
+        message: "Twigo runs aws only once you trust it".to_owned(),
+    })));
+    let (edit, entry) = watch::channel(Some(fingerprint("https://a.example:6443")));
+    let cache = tempfile::tempdir().unwrap();
+    let mut follower = edited_over(Hub::new(swapping(&current)), cache.path(), entry).await;
+    assert_eq!(failure(&next(&mut follower).await), ErrorKind::Unauthorized);
+
+    *current.lock().unwrap() = Ok(fake.clients(Budgets::default()));
+    edit.send_replace(Some(fingerprint("https://a.example:6443/other")));
+    assert_eq!(names(&next(&mut follower).await), ["namespaces"]);
 }
