@@ -244,6 +244,13 @@ export function ListEditor({
       {open && mine && (
         <Details
           selected={mine}
+          space={input.space}
+          namespaced={resource?.namespaced ?? false}
+          discovery={services.discovery}
+          onOpen={(object) => {
+            editors.pin(uri);
+            editors.open(object, { preview: true });
+          }}
           onClose={() => {
             setOpen(false);
           }}

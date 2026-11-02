@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { listUri, parseListUri } from "./uri";
+import { listUri, objectUri, parseListUri, parseObjectUri } from "./uri";
 
 const PODS = { group: "", version: "v1", resource: "pods" };
 const DEPLOYMENTS = { group: "apps", version: "v1", resource: "deployments" };
@@ -35,4 +35,38 @@ test.each([
   "k8s-list://prod-eu/a/b/c/d",
 ])("%s is no list", (uri) => {
   expect(parseListUri(uri)).toBeUndefined();
+});
+
+const STAGES = {
+  group: "kwok.x-k8s.io",
+  version: "v1alpha1",
+  resource: "stages",
+};
+
+test.each([
+  [
+    { space: "prod-eu", gvr: PODS, namespace: "payments", name: "api-0" },
+    "k8s://prod-eu//v1/pods/payments/api-0",
+  ],
+  [
+    { space: "prod-eu", gvr: STAGES, name: "pod-ready" },
+    "k8s://prod-eu/kwok.x-k8s.io/v1alpha1/stages/pod-ready",
+  ],
+  [
+    { space: "prod-eu", gvr: { ...PODS, resource: "nodes" }, name: "node-1" },
+    "k8s://prod-eu//v1/nodes/node-1",
+  ],
+])("the object %o round-trips through %s", (input, uri) => {
+  expect(objectUri(input)).toBe(uri);
+  expect(parseObjectUri(uri)).toEqual(input);
+});
+
+test("a core object in a namespace and a grouped cluster-scoped one differ", () => {
+  expect(parseObjectUri("k8s://s//v1/pods/payments/api-0")?.namespace).toBe(
+    "payments",
+  );
+  expect(
+    parseObjectUri("k8s://s/kwok.x-k8s.io/v1alpha1/stages/pod-ready")
+      ?.namespace,
+  ).toBeUndefined();
 });

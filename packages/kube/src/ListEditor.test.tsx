@@ -22,6 +22,7 @@ import {
   WorkbenchView,
   type QuickAccessContext,
 } from "@twigo/workbench";
+import { DWELL_MS } from "./Details";
 import { PODS } from "./kinds";
 import { registerKube } from "./register";
 import { cellTone } from "./tones";
@@ -403,4 +404,44 @@ test("a failed discovery shows its error instead of a list", async () => {
   const state = title.parentElement ?? title;
   expect(within(state).getByText("no route to the cluster")).toBeDefined();
   expect(screen.queryByRole("grid", { name: "Pods" })).toBeNull();
+});
+
+test("the details open the object once the selection rests on a row, not while it moves", async () => {
+  const backend = createMockBackend("ready");
+  const subscribe = vi.spyOn(backend, "subscribe");
+  await podsList(backend);
+  const opened = () =>
+    subscribe.mock.calls.filter(([command]) => command === "object_open");
+  const [first] = rows();
+  if (!first) throw new Error("no rows");
+  fireEvent.click(first);
+  act(() => {
+    screen.getByRole("grid").focus();
+  });
+  for (let i = 0; i < 5; i++) {
+    key("KeyJ");
+    await act(() => vi.advanceTimersByTimeAsync(DWELL_MS / 3));
+  }
+  expect(opened()).toHaveLength(0);
+  await settle();
+  expect(opened()).toHaveLength(1);
+  expect(
+    within(details() ?? document.body).getByRole("region", {
+      name: "Metadata",
+    }),
+  ).toBeDefined();
+});
+
+test("opening the object from the details keeps the list in a tab of its own", async () => {
+  const workbench = await podsList();
+  const [first] = rows();
+  if (!first) throw new Error("no rows");
+  fireEvent.click(first);
+  await settle();
+  fireEvent.click(screen.getByRole("button", { name: "Open in an editor" }));
+  await settle();
+  const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent.trim());
+  expect(tabs[0]).toBe("Pods");
+  expect(tabs).toHaveLength(2);
+  expect(workbench.editors.active).toMatch(/^k8s:\/\/prod-eu\/\/v1\/pods\//);
 });

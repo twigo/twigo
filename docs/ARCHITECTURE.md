@@ -647,7 +647,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 
 | URI                                                                 | Editor                                                                                                                        |
 | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `k8s://<ctx>/<group>/<version>/<resource>[/<ns>]/<name>`            | Resource editor with sub-tabs: Overview, YAML, Events, Related; plus Logs and Shell for pods and workloads                    |
+| `k8s://<space>/<group>/<version>/<resource>[/<ns>]/<name>`          | Resource editor with sub-tabs: Overview, YAML, Events, Related; plus Logs and Shell for pods and workloads                    |
 | `k8s-list://<space>/<gvr>?ns=…&q=…`                                 | Resource table as an editor, so one can pin "pods in payments where status≠Running" next to another list                      |
 | `logs://<ctx>/<ns>/<pod>[/<container>]?previous`                    | Log viewer                                                                                                                    |
 | `exec://<ctx>/<ns>/<pod>/<container>`                               | Terminal (xterm)                                                                                                              |
@@ -661,6 +661,11 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   After a 150 ms pause they hold the object's Object upstream and follow it, as an editor does ([research](research/details.md#following-the-object)).
   The upstreams it leaves behind linger as a list's do, and give way to any watch that waits for the budget (3.2).
   Opening the resource from its details opens a preview tab (italic title); editing it or double-clicking its tab pins it.
+  Opening an object from a list's details, or following a link in an object, pins the tab it came from, so the object opens beside it rather than in its place.
+- **Object URIs.**
+  The core group is an empty segment, `k8s://prod//v1/pods/payments/api-0`, so an object in a namespace has five path segments and a cluster-scoped one four.
+- **Sub-tabs.**
+  A resource editor's Overview, YAML, Events and Related switch at the right of its group's tab bar, where a list keeps its filters; Rust follows only the one shown.
 - **Working copies.**
   A YAML editor that the user has changed holds a working copy based on the opened `resourceVersion`.
   - When the live object changes underneath, the editor shows "changed on server" with Compare, Reload and Keep mine.
@@ -762,6 +767,7 @@ Extensions add commands, not prefixes.
   - The schema per model URI comes from the cluster's OpenAPI (3.6), so validation, completion and hover work for CRDs too.
   - The diff editor is Monaco's DiffEditor.
   - Monaco is bundled locally (no CDN loader) and loaded lazily on the first YAML or diff editor.
+    It is built from the tree-shakeable entry points of monaco-editor 0.57 (`monaco-editor/editor`, then each language and feature it needs), and its editor worker is a Vite `?worker` module served from the app.
   - CodeMirror 6 was rejected: its YAML schema support is weaker, and two editors would be waste.
 
 ### 4.7 Notifications and progress

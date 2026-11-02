@@ -1,29 +1,86 @@
-import { useState } from "react";
-import { X } from "lucide-react";
-import { Button } from "@twigo/ui";
+import { useEffect, useMemo, useState } from "react";
+import { SquareArrowOutUpRight, X } from "lucide-react";
+import type { ObjectQuery, ObjectRef } from "@twigo/protocol";
+import { Button, EmptyState } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
+import { useWorkbench } from "@twigo/workbench";
+import { useResources, type Discovery } from "./discovery";
 import { KindIcon } from "./KindIcon";
-import type { Selected } from "./selection";
+import { Overview } from "./object/Overview";
+import { refUri, useObject } from "./object/useObject";
+import { objectOf, type Selected } from "./selection";
+import { objectUri } from "./uri";
 import { useNow } from "./useNow";
 
 const MIN_WIDTH = 320;
 
+/** How long the selection rests on a row before its object opens (ARCHITECTURE 4.3). */
+export const DWELL_MS = 150;
+
+const OVERVIEW = {
+  overview: true,
+  manifest: false,
+  events: false,
+  related: false,
+};
+
 /**
  * A row's details sliding in over its list from the right, as Lens's
- * drawer (ARCHITECTURE 4.3): every column, wide ones included, without a
- * GET. Its left edge resizes it.
+ * drawer (ARCHITECTURE 4.3). Once the selection rests on the row, its
+ * object opens and follows its changes, shown as the editor's Overview;
+ * until then the row's cells stand in. Its left edge resizes it.
  */
 export function Details({
   selected,
+  space,
+  namespaced,
+  discovery,
+  onOpen,
   onClose,
 }: {
   selected: Selected;
+  space: string;
+  namespaced: boolean;
+  discovery: Discovery;
+  /** Opens an object's editor beside the list. */
+  onOpen: (uri: string) => void;
   onClose: () => void;
 }) {
-  const now = useNow(1000);
+  const { backend } = useWorkbench();
+  const resources = useResources(discovery, space);
   const [width, setWidth] = useState(440);
-  const { gvr, kind, columns, row } = selected;
-  const name = columns.findIndex((column) => column.name === "Name");
+  const { gvr, kind, row } = selected;
+  const { namespace, name } = objectOf(row);
+  const { group, version, resource } = gvr;
+  const query: ObjectQuery = useMemo(
+    () => ({
+      space,
+      gvr: { group, version, resource },
+      namespaced,
+      namespace: namespace ?? null,
+      name,
+    }),
+    [space, group, version, resource, namespaced, namespace, name],
+  );
+  const [rested, setRested] = useState<ObjectQuery | undefined>(undefined);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setRested(query);
+    }, DWELL_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [query]);
+  const { snapshot, values } = useObject(
+    backend,
+    rested === query ? query : undefined,
+    OVERVIEW,
+  );
+  const open = (target: ObjectRef) => {
+    if (resources.state !== "ready") return;
+    const uri = refUri(space, resources.value, target);
+    if (uri) onOpen(uri);
+  };
   return (
     <aside
       aria-label={`${kind} details`}
@@ -57,33 +114,69 @@ export function Details({
       <header className="flex h-8 shrink-0 items-center gap-1.5 border-b border-border-subtle pr-1 pl-3 text-[13px]">
         <KindIcon gvr={gvr} className="size-4 shrink-0 text-muted-foreground" />
         <span className="text-muted-foreground">{kind}</span>
-        <span className="truncate font-medium">
-          {String(row.cells[name] ?? row.id)}
-        </span>
+        <span className="truncate font-medium">{name}</span>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Open in an editor"
+          className="ml-auto"
+          onClick={() => {
+            onOpen(
+              objectUri({
+                space,
+                gvr,
+                ...(namespace !== undefined && { namespace }),
+                name,
+              }),
+            );
+          }}
+        >
+          <SquareArrowOutUpRight />
+        </Button>
         <Button
           variant="ghost"
           size="icon-sm"
           aria-label="Close details"
-          className="ml-auto"
           onClick={onClose}
         >
           <X />
         </Button>
       </header>
-      <dl className="grid grid-cols-[minmax(6rem,auto)_1fr] content-start gap-x-3 gap-y-1 overflow-auto p-3 text-[13px]">
-        {columns.map((column, index) => (
-          <div key={column.name} className="contents">
-            <dt className="text-muted-foreground">{column.name}</dt>
-            <dd className="truncate tabular-nums">
-              {column.kind === "age"
-                ? row.created
-                  ? humanDuration(now - Date.parse(row.created))
-                  : ""
-                : String(row.cells[index] ?? "")}
-            </dd>
-          </div>
-        ))}
-      </dl>
+      <div className="min-h-0 flex-1 overflow-auto">
+        {snapshot.status.state === "ready" && !snapshot.exists ? (
+          <EmptyState title="The object does not exist" className="py-8" />
+        ) : snapshot.overview ? (
+          <Overview
+            overview={snapshot.overview}
+            onOpen={open}
+            values={values}
+          />
+        ) : (
+          <Cells selected={selected} />
+        )}
+      </div>
     </aside>
+  );
+}
+
+/** The row's cells, wide columns included, until the object comes. */
+function Cells({ selected }: { selected: Selected }) {
+  const now = useNow(1000);
+  const { columns, row } = selected;
+  return (
+    <dl className="grid grid-cols-[minmax(6rem,auto)_1fr] content-start gap-x-3 gap-y-1 p-3 text-[13px]">
+      {columns.map((column, index) => (
+        <div key={column.name} className="contents">
+          <dt className="text-muted-foreground">{column.name}</dt>
+          <dd className="truncate tabular-nums">
+            {column.kind === "age"
+              ? row.created
+                ? humanDuration(now - Date.parse(row.created))
+                : ""
+              : String(row.cells[index] ?? "")}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }
