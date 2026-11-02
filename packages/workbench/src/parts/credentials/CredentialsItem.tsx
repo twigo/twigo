@@ -36,7 +36,7 @@ export function CredentialsItem() {
         }}
       >
         <ShieldAlert aria-hidden className="size-3.5" />
-        Trust {auth.plugin.command}?
+        Trust {base(auth.plugin.command)}?
       </button>
     );
   }

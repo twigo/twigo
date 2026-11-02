@@ -97,3 +97,13 @@ test("the output opens when the run fails after it printed", async () => {
     await screen.findByRole("button", { name: "Hide output" }),
   ).toBeTruthy();
 });
+
+test("the status bar names a plugin by its command's name, not its path", async () => {
+  const workbench = await show("review");
+  await act(() => workbench.credentials.answerReview([]));
+  await act(() => workbench.spaces.open("qa"));
+  fireEvent.click(await screen.findByRole("button", { name: "Not now" }));
+  expect(
+    await screen.findByRole("button", { name: "Trust tsh?" }),
+  ).toBeTruthy();
+});
