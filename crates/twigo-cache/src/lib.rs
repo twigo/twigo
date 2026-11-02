@@ -13,3 +13,4 @@ pub mod request;
 pub mod store;
 pub mod table;
 mod upstream;
+pub mod view;

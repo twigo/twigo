@@ -47,6 +47,7 @@ hyper = "1.12.0"
 hyper-rustls = { version = "0.27.10", default-features = false, features = ["http1", "http2", "ring", "rustls-platform-verifier", "tls12"] }
 hyper-timeout = "0.5.2"
 hyper-util = { version = "0.1.21", features = ["client-legacy", "client-proxy", "http1", "http2", "tokio"] }
+indexset = "0.16.0"
 ipnet = "2.12.2"
 jiff = "0.2.38"
 json-patch = "4.2.0"
@@ -63,6 +64,7 @@ objc2-io-kit = { version = "0.3.2", default-features = false, features = ["dispa
 objc2-system-configuration = { version = "0.3.2", default-features = false, features = ["SCDynamicStore", "SCDynamicStoreKey", "SCSchemaDefinitions", "dispatch2", "std"] }
 percent-encoding = "2.3.2"
 rcgen = "0.14.10"
+regex = "1.13.1"
 ring = "0.17.14"
 rustls = { version = "0.23.46", default-features = false }
 secrecy = "0.10.3"

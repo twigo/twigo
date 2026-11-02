@@ -1403,6 +1403,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ftree"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eeef4a9366aaf0ed0bb5292b7c489d80600a7431fca0d96271e10e23ac0bc2b0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "futures"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2218,6 +2227,15 @@ dependencies = [
  "hashbrown 0.17.1",
  "serde",
  "serde_core",
+]
+
+[[package]]
+name = "indexset"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38cade55ce06abcdbbc29e5f383d91b1744bc3ce18a508b065f9f8e71beec641"
+dependencies = [
+ "ftree",
 ]
 
 [[package]]
@@ -5521,15 +5539,18 @@ dependencies = [
  "backon",
  "bytes",
  "dhat",
+ "fastrand",
  "form_urlencoded",
  "futures",
  "http",
  "http-body",
  "http-body-util",
+ "indexset",
  "jiff",
  "k8s-openapi",
  "kube",
  "percent-encoding",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",
