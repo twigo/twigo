@@ -183,6 +183,7 @@ twigo/
 │  ├─ twigo-core/             app services: spaces, settings layers, catalog, command bus, approvals
 │  ├─ twigo-kube/             contexts, client factory, credential runner, discovery/OpenAPI cache, operations
 │  ├─ twigo-cache/            watch hub (upstreams, row stores, query views, batching), the discovery it follows
+│  ├─ twigo-describe/         describers by GroupKind: an object and its related facts → the Overview document (4.3)
 │  ├─ twigo-sessions/         logs, exec/attach, port-forward manager, pty terminal
 │  ├─ twigo-policy/           read-only modes, authorize(), policy proxy, approvals, audit log, redaction
 │  ├─ twigo-env/              login-shell environment resolution
@@ -211,6 +212,8 @@ Why these crates:
 - The core builds and tests without Tauri.
   Integration tests run the real crates against kind and kwok clusters.
 - `twigo mcp` reuses the IPC types.
+- `twigo-describe` is pure: describers name the related queries they need and turn the object and the answers into sections, while `twigo-core` runs the queries.
+  Its tests run on objects recorded from kind, and the UI and `twigo mcp` describe an object alike.
 - `twigo-policy` sits under everything that can reach a cluster.
 - `twigo-keyboard` keeps the OS's keyboard APIs out of `apps/desktop`.
   It needs no Tauri, and its tests read named layouts without a window.
@@ -486,7 +489,8 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     Reading Secrets through the policy proxy or `host-kube` is its own policy class, `secret-read` (6.4).
 - **Events for an object.**
   A watch of `events.k8s.io/v1` with a field selector on the regarding object.
-  It runs only while the Events tab is visible.
+  It runs only while the object's events are shown: the Events tab, or the events section of the drawer or the Overview.
+  No field of an event is indexed and the API server keeps no watch cache for events by default, so such a query is filtered, by inference from the source, from the namespace's events in etcd ([research](research/details.md#events)).
 - **Metrics** (metrics-server).
   - `metrics.k8s.io` cannot be watched, so it is polled every 15 s.
   - Only the namespaces of the rows currently in a visible window are polled, and only while a CPU or memory column is shown.
@@ -654,8 +658,8 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 
 - **Preview tabs.**
   A click or Enter on a row opens its details, sliding in over the list from the right, as Lens's drawer; arrows move them along and Esc closes them.
-  After a 150 ms pause they fetch the object once with a GET.
-  No watch starts until an editor opens.
+  After a 150 ms pause they hold the object's Object upstream and follow it, as an editor does ([research](research/details.md#following-the-object)).
+  The upstreams it leaves behind linger as a list's do, and give way to any watch that waits for the budget (3.2).
   Opening the resource from its details opens a preview tab (italic title); editing it or double-clicking its tab pins it.
 - **Working copies.**
   A YAML editor that the user has changed holds a working copy based on the opened `resourceVersion`.
@@ -663,9 +667,13 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   - Save runs the apply flow (6.5).
   - Unsaved working copies survive a restart (backups per space).
 - **Overview.**
-  - Core kinds get hand-made sections (Pod, Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, Ingress, Node, PVC, ConfigMap, Secret).
-  - Any kind, CRDs included, gets a generic overview: metadata, a `status.conditions` table when present, owners and children, events.
-  - Extensions add declarative sections per GVK (5.4).
+  One document per object, described in Rust by `twigo-describe` and rendered alike by the drawer, the Overview tab and MCP's describe-style summaries (6.6) ([research](research/details.md)).
+  - Sections have ids and an order: metadata first, then the kind's sections, conditions, extension sections, events last.
+    Each section holds blocks from a closed set (fields, tables, conditions, containers, data keys, live lists, events, a tree), which the webview renders with an exhaustive switch.
+  - Core kinds get describers (Pod, Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, Ingress, Node, PVC, ConfigMap, Secret): at least what `kubectl describe` prints, plus a Diagnostics section when something is wrong.
+  - Any kind, CRDs included, gets a generic overview: metadata, the server's printer columns, a `status.conditions` table when present, spec and status as a tree with the descriptions of their schema, events.
+  - A workload's pods, a CronJob's jobs and a node's pods are live resource tables inside the Overview, run by query views with an owner filter.
+  - Extensions add declarative sections per GVK (5.4), and replace a core section only by naming its id.
 
 ### 4.4 Resource tables and the keyboard
 
@@ -1043,7 +1051,7 @@ Contributions imply their activation events, as VS Code ≥ 1.74 does; `*` is fo
 | `commands`, `menus`, `keybindings`, `keymaps` | Actions anywhere in the UI                                                                        | `onCommand:<id>`            |
 | `configuration`                               | Settings schema, rendered in the settings UI                                                      | —                           |
 | `viewsContainers`, `views`                    | Declarative trees, tables and forms in any part; tier-2 frames                                    | `onView:<id>`               |
-| `resourceSections`                            | Declarative sections on a GVK's Overview (key/value, table, conditions, links)                    | `onResource:<group>/<kind>` |
+| `resourceSections`                            | Declarative sections on a GVK's Overview (fields, table, conditions, links; 4.3)                  | `onResource:<group>/<kind>` |
 | `columns`                                     | JSONPath columns for a GVK (turns on projection, 3.3)                                             | —                           |
 | `actions`                                     | k9s-style shell or kubectl actions with `scopes`, `confirm`, `dangerous`, `inputs` (tier 3, v1.x) | —                           |
 | `clusterProviders`                            | Catalog source, credential minting, lifecycle (create, delete, upgrade)                           | `onClusterProvider:<id>`    |
@@ -1051,6 +1059,9 @@ Contributions imply their activation events, as VS Code ≥ 1.74 does; `*` is fo
 | `crdSchemas`, `snippets`                      | YAML editor help for CRDs the cluster's OpenAPI describes poorly                                  | —                           |
 | `themes`, `iconThemes`                        | Look                                                                                              | —                           |
 | `uriHandlers`                                 | `twigo://ext/<id>/…` deep links (for example SSO callbacks)                                       | `onUri`                     |
+
+**Resource sections** are evaluated in Rust by the JSONPath evaluator of custom columns (3.3), so they reach the drawer, the Overview and MCP alike.
+A section takes over a core one only by naming its id in `replaces`, and its header names the extension; two extensions replacing one section is an error shown on both.
 
 **Actions** keep k9s's format and fix its injection flaw:
 
@@ -1360,7 +1371,7 @@ Destructive actions (delete, drain, scale to 0) use dry-run where the API suppor
 - **Tools in the MVP are read-only:**
   - list (Table rows), get (redacted), events;
   - logs (bounded by bytes, lines and time window);
-  - describe-style summaries;
+  - describe-style summaries: the Overview document as text (4.3);
   - a dry-run diff of a proposed manifest.
 
   Approved writes come in v1.x.
