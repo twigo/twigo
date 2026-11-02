@@ -7,17 +7,18 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import { inWorkbench, testWorkbench } from "../testing";
-import {
-  SHOW_SHELL_ENVIRONMENT,
-  ShellEnvironmentItem,
-} from "./ShellEnvironmentItem";
+import { useShellEnvironmentEntries } from "./shellEnvironment";
+import { SHOW_SHELL_ENVIRONMENT } from "./shellEnvironmentIds";
+import { StatusEntries } from "./StatusBar";
 
 afterEach(cleanup);
 
 async function show(scenario: "ready" | "shellTimeout") {
   const workbench = await testWorkbench(scenario);
   await act(() => workbench.shellEnvironment.watch());
-  render(<ShellEnvironmentItem />, { wrapper: inWorkbench(workbench) });
+  render(<StatusEntries useEntries={useShellEnvironmentEntries} />, {
+    wrapper: inWorkbench(workbench),
+  });
   return workbench;
 }
 

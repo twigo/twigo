@@ -32,7 +32,7 @@ export function TrustDialog() {
         <div className="flex items-start gap-2.5">
           <ShieldAlert
             aria-hidden
-            className="mt-0.5 size-4 shrink-0 text-warn"
+            className="mt-0.5 size-4 shrink-0 text-warn-foreground"
           />
           <div className="min-w-0 flex-1">
             <DialogTitle className="text-[13px] font-semibold">
@@ -94,7 +94,7 @@ export function ReviewDialog() {
         <div className="flex items-start gap-2.5">
           <ShieldAlert
             aria-hidden
-            className="mt-0.5 size-4 shrink-0 text-warn"
+            className="mt-0.5 size-4 shrink-0 text-warn-foreground"
           />
           <div className="min-w-0 flex-1">
             <DialogTitle className="text-[13px] font-semibold">

@@ -8,13 +8,14 @@ import {
   symbolsProvider,
 } from "./quickaccess/providers";
 import { LOCATION_TITLES, LOCATIONS, type Location } from "./views/registry";
-import { ChordItem } from "./parts/StatusItems";
+import { useChordEntries, useSpaceEntries } from "./parts/StatusItems";
+import { useShellEnvironmentEntries } from "./parts/shellEnvironment";
 import {
   RETRY_SHELL_ENVIRONMENT,
   SHOW_SHELL_ENVIRONMENT,
-  ShellEnvironmentItem,
-} from "./parts/ShellEnvironmentItem";
-import { CredentialsItem } from "./parts/credentials/CredentialsItem";
+} from "./parts/shellEnvironmentIds";
+import { useCredentialEntries } from "./parts/credentials/credentialEntries";
+import { registerListCommands } from "./lists/commands";
 
 const TOGGLES: readonly {
   location: Location;
@@ -215,6 +216,7 @@ export function registerCore(workbench: Workbench): void {
     if (key) rules.push({ key, command: id });
   }
 
+  registerListCommands(workbench, rules);
   keybindings.register("core", rules);
 
   const menubar: readonly [MenuId, string, readonly string[]][] = [
@@ -257,10 +259,16 @@ export function registerCore(workbench: Workbench): void {
   }
 
   views.registerStatusBarItem({
+    id: "workbench.space",
+    alignment: "left",
+    priority: 1000,
+    useEntries: useSpaceEntries,
+  });
+  views.registerStatusBarItem({
     id: "workbench.chord",
     alignment: "right",
     priority: 100,
-    component: ChordItem,
+    useEntries: useChordEntries,
   });
 
   const { shellEnvironment } = workbench;
@@ -284,12 +292,12 @@ export function registerCore(workbench: Workbench): void {
     id: "workbench.shellEnvironment",
     alignment: "left",
     priority: 200,
-    component: ShellEnvironmentItem,
+    useEntries: useShellEnvironmentEntries,
   });
   views.registerStatusBarItem({
     id: "workbench.credentials",
     alignment: "left",
     priority: 190,
-    component: CredentialsItem,
+    useEntries: useCredentialEntries,
   });
 }

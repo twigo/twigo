@@ -8,7 +8,8 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import type { MockScenario } from "@twigo/protocol/mock";
 import { inWorkbench, testWorkbench } from "../../testing";
-import { CredentialsItem } from "./CredentialsItem";
+import { StatusEntries } from "../StatusBar";
+import { useCredentialEntries } from "./credentialEntries";
 import { SignInBody } from "./SignIn";
 import { TrustDialog } from "./TrustDialog";
 
@@ -19,7 +20,7 @@ async function show(scenario: MockScenario) {
   await act(() => workbench.credentials.start());
   render(
     <>
-      <CredentialsItem />
+      <StatusEntries useEntries={useCredentialEntries} />
       <TrustDialog />
     </>,
     { wrapper: inWorkbench(workbench) },

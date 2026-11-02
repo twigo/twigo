@@ -1,14 +1,16 @@
 import type { CSSProperties, ReactNode } from "react";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
+import { Kbd } from "@twigo/ui";
 import type { Space } from "@twigo/protocol";
 import { useChanges, useWorkbench } from "../react";
 import { onlyColor } from "./spaceBadge";
 
 /**
  * Where you are (ARCHITECTURE 4.2): the space and its namespace scope as a
- * breadcrumb that opens their pickers, and a search button that opens
- * quick access. A space with one coloured context tints the bar's
- * left end, as JetBrains tints it with a project's colour.
+ * breadcrumb that opens their pickers, and in the middle the search that
+ * opens quick access, as VS Code's Command Center. A space with one
+ * coloured context tints the bar's left end, as JetBrains tints it with a
+ * project's colour.
  */
 export function TitleBar() {
   const { spaces, catalog } = useWorkbench();
@@ -25,9 +27,9 @@ export function TitleBar() {
         color &&
         ({ "--twigo-context": `var(--context-${color})` } as CSSProperties)
       }
-      className="twigo-titlebar flex h-9 shrink-0 items-center gap-3 border-b border-border bg-shell pr-2 pl-[92px]"
+      className="twigo-titlebar grid h-9 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 border-b border-border bg-shell pr-2 pl-[92px]"
     >
-      <div className="flex min-w-0 flex-1 items-center gap-0.5">
+      <div className="flex min-w-0 items-center gap-0.5">
         {space && <Breadcrumb space={space} />}
       </div>
       <CommandCenter space={space} />
@@ -92,15 +94,16 @@ function CommandCenter({ space }: { space: Space | undefined }) {
     <button
       type="button"
       aria-label={label}
-      title={
-        binding ? `${label} (${keybindings.label(binding.presses)})` : label
-      }
       onClick={() => {
         quickAccess.show("");
       }}
-      className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-row-hover hover:text-foreground"
+      className="flex h-6 w-[min(36vw,420px)] items-center gap-2 rounded-md bg-foreground/5 pr-1 pl-2 text-xs text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)] outline-none hover:bg-foreground/8 hover:text-foreground focus-visible:shadow-[var(--focus-ring)]"
     >
-      <Search aria-hidden className="size-4" />
+      <Search aria-hidden className="size-3.5 shrink-0" />
+      <span className="flex-1 truncate text-left">{label}</span>
+      {binding && (
+        <Kbd className="h-4 px-1">{keybindings.label(binding.presses)}</Kbd>
+      )}
     </button>
   );
 }

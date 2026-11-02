@@ -1,17 +1,21 @@
 import type { Backend, KeyboardLayout } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
-import { notify } from "@twigo/ui";
-import { Menus } from "./commands/menus";
+import { notify, type ActionGroups } from "@twigo/ui";
+import { menuActions } from "./commands/actions";
+import { Menus, type MenuId } from "./commands/menus";
 import { Commands } from "./commands/registry";
 import { ContextKeys } from "./contextkey/service";
 import { Editors } from "./editors/registry";
 import { ShellEnvironmentStatus } from "./environment";
 import type { Platform } from "./keybindings/chord";
 import { Credentials } from "./credentials";
+import type { Lookup } from "./contextkey/when";
 import { Keybindings } from "./keybindings/service";
+import { Lists } from "./lists/service";
 import { PartSizes } from "./parts/sizes";
 import { QuickAccess } from "./quickaccess/registry";
 import { Catalog } from "./spaces/catalog";
+import { SpaceStatus } from "./spaces/status";
 import { Spaces } from "./spaces/store";
 import { StateStore } from "./state/store";
 import { Views } from "./views/registry";
@@ -30,6 +34,8 @@ export class Workbench {
   readonly views = new Views();
   readonly editors = new Editors(this.keys);
   readonly quickAccess = new QuickAccess(this.keys);
+  readonly lists = new Lists();
+  readonly spaceStatus = new SpaceStatus();
   readonly keybindings: Keybindings;
   readonly catalog: Catalog;
   readonly spaces: Spaces;
@@ -65,6 +71,11 @@ export class Workbench {
     this.credentials = new Credentials(backend, this.spaces, (error) => {
       this.report(error);
     });
+  }
+
+  /** A menu's commands as actions to draw, run against `lookup`. */
+  actions(menu: MenuId, lookup: Lookup): ActionGroups {
+    return menuActions(this, menu, lookup);
   }
 
   /** Opens a sign-in link in the person's browser; Rust checks it first. */

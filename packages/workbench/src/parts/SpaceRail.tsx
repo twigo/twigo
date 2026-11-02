@@ -1,6 +1,13 @@
 import { Plus } from "lucide-react";
 import type { ContextColor, Space } from "@twigo/protocol";
-import { cn, Tooltip, TooltipContent, TooltipTrigger } from "@twigo/ui";
+import {
+  cn,
+  StatusDot,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@twigo/ui";
+import type { SpaceConnection } from "../spaces/status";
 import { useChanges, useWorkbench } from "../react";
 import { initials, onlyColor } from "./spaceBadge";
 
@@ -16,13 +23,16 @@ const TILE: Readonly<Record<ContextColor, string>> = {
 
 /**
  * The open spaces as tiles, Lens's hotbar (ARCHITECTURE 4.2): one per
- * cluster, ⌘1..9 by position, and a button that opens any context.
+ * cluster, each with its connection as a dot, ⌘1..9 by position, and a
+ * button that opens any context.
  */
 export function SpaceRail() {
-  const { spaces, catalog, keybindings, quickAccess } = useWorkbench();
+  const { spaces, catalog, keybindings, quickAccess, spaceStatus } =
+    useWorkbench();
   useChanges(spaces.changes);
   useChanges(catalog.changes);
   useChanges(keybindings.changes);
+  useChanges(spaceStatus.changes);
   const active = spaces.active?.id;
   return (
     <nav
@@ -38,6 +48,7 @@ export function SpaceRail() {
             key={space.id}
             space={space}
             color={onlyColor(space, catalog)}
+            state={spaceStatus.get(space.id)}
             selected={space.id === active}
             shortcut={binding && keybindings.label(binding.presses)}
             onSelect={() => {
@@ -68,12 +79,14 @@ export function SpaceRail() {
 function SpaceTile({
   space,
   color,
+  state,
   selected,
   shortcut,
   onSelect,
 }: {
   space: Space;
   color: ContextColor | undefined;
+  state: SpaceConnection | undefined;
   selected: boolean;
   shortcut: string | undefined;
   onSelect: () => void;
@@ -98,7 +111,7 @@ function SpaceTile({
           />
           <span
             className={cn(
-              "flex size-8 items-center justify-center rounded-md text-[11px] font-medium",
+              "relative flex size-8 items-center justify-center rounded-md text-[11px] font-medium",
               tint ?? "bg-card text-muted-foreground",
               selected
                 ? "ring-1 ring-foreground/60"
@@ -106,12 +119,21 @@ function SpaceTile({
             )}
           >
             {initials(space.name)}
+            {state && (
+              <StatusDot
+                tone={state.tone}
+                pulse={state.tone === "warn"}
+                size="md"
+                className="absolute -right-0.5 -bottom-0.5 ring-2 ring-shell"
+              />
+            )}
           </span>
         </button>
       </TooltipTrigger>
       <TooltipContent side="right" className="flex items-center gap-2">
         <span>{space.contexts.join(" + ")}</span>
         {shortcut && <span className="text-muted-foreground">{shortcut}</span>}
+        {state && <span className="text-muted-foreground">{state.label}</span>}
       </TooltipContent>
     </Tooltip>
   );

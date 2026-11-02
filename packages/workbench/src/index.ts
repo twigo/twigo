@@ -8,6 +8,8 @@ export {
 export type { Scope } from "./contextkey/service";
 export type { ContextValue } from "./contextkey/when";
 export type { EditorProps, EditorProvider } from "./editors/registry";
+export type { ListTarget } from "./lists/service";
+export { useListRegistration } from "./lists/react";
 export type { Platform } from "./keybindings/chord";
 export { platformOf } from "./keybindings/platform";
 export type { KeybindingRule } from "./keybindings/resolver";
@@ -20,9 +22,11 @@ export type {
 } from "./quickaccess/registry";
 export { createWorkbench, Workbench } from "./services";
 export { StateStore } from "./state/store";
+export type { SpaceConnection, SpaceStatusProvider } from "./spaces/status";
 export type {
   Location,
   StatusBarItem,
+  StatusEntry,
   View,
   ViewContainer,
 } from "./views/registry";

@@ -126,7 +126,10 @@ export function Shell() {
       <PanelBoundary
         label="Status bar"
         fallback={(crash) => (
-          <PartCrash crash={crash} className="h-6 bg-statusbar px-2" />
+          <PartCrash
+            crash={crash}
+            className="h-6 border-t border-border bg-shell px-2"
+          />
         )}
       >
         <StatusBar />
