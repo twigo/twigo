@@ -175,9 +175,9 @@ impl Clients {
         }
     }
 
-    /// The cluster they reach: its URL and the certificates they trust it
-    /// with, since a cluster recreated at the same address, as minikube's
-    /// or kind's on a fixed port, gets a CA of its own.
+    /// The cluster they reach: its URL, the name they check its certificate
+    /// against, and the certificates they trust it with, since a cluster
+    /// recreated at the same address may get a CA of its own.
     pub fn cluster(&self) -> &str {
         &self.cluster
     }
@@ -199,8 +199,8 @@ impl Clients {
     }
 }
 
-/// The cluster's URL with a digest of the CAs it is trusted with, or a word
-/// for the system's roots or any certificate.
+/// The cluster's URL, its `tls-server-name`, and a digest of the CAs it is
+/// trusted with, or a word for the system's roots or any certificate.
 fn cluster(config: &Config) -> String {
     let trust = match &config.root_cert {
         _ if config.accept_invalid_certs => "any certificate".to_owned(),
@@ -217,7 +217,10 @@ fn cluster(config: &Config) -> String {
                 .collect()
         }
     };
-    format!("{} trusting {trust}", config.cluster_url)
+    match &config.tls_server_name {
+        Some(name) => format!("{} as {name} trusting {trust}", config.cluster_url),
+        None => format!("{} trusting {trust}", config.cluster_url),
+    }
 }
 
 /// The config without what kube would get credentials from itself: the
@@ -348,6 +351,12 @@ mod tests {
             with(Some(vec![b"a".to_vec(), b"bc".to_vec()]), false)
         );
         assert!(with(None, false).ends_with("trusting the system's roots"));
+        let mut named = Config::new(http::Uri::from_static("https://192.168.49.2:8443"));
+        named.tls_server_name = Some("b.example".to_owned());
+        assert_eq!(
+            cluster(&named),
+            "https://192.168.49.2:8443/ as b.example trusting the system's roots"
+        );
         assert!(with(Some(vec![b"ca-1".to_vec()]), true).ends_with("trusting any certificate"));
     }
 }

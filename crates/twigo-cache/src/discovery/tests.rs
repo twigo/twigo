@@ -431,3 +431,59 @@ async fn a_cluster_recreated_at_the_same_address_shows_nothing_of_the_old_one() 
     edit.send_replace(Some(fingerprint("https://192.168.49.2:8443/recreated")));
     assert_eq!(failure(&next(&mut follower).await), ErrorKind::Unavailable);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_change_untold_at_a_restart_still_gets_its_rechecks() {
+    let fake = fake();
+    let (edit, entry) = watch::channel(Some(fingerprint("https://a.example:6443")));
+    let cache = tempfile::tempdir().unwrap();
+    let mut follower = edited_over(fake.hub(Budgets::default()).0, cache.path(), entry).await;
+    assert_eq!(names(&next(&mut follower).await), ["namespaces"]);
+    assert!(
+        timeout(Duration::from_secs(11), follower.next())
+            .await
+            .is_err()
+    );
+
+    let start = Instant::now();
+    fake.add("customresourcedefinitions", None, "gadgets.example.com");
+    sleep(Duration::from_millis(200)).await;
+    edit.send_replace(Some(fingerprint("https://a.example:6443/kubens")));
+    tokio::spawn({
+        let fake = fake.clone();
+        async move {
+            sleep(Duration::from_secs(1)).await;
+            fake.state().serve("example.com", "gadgets", "Gadget");
+        }
+    });
+    assert_eq!(names(&next(&mut follower).await), ["namespaces", "gadgets"]);
+    assert_eq!(start.elapsed(), Duration::from_millis(200) + RECHECKS[0]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_edit_that_keeps_the_cluster_keeps_its_list_through_an_outage() {
+    let up = fake();
+    up.state().serve("example.com", "widgets", "Widget");
+    let cluster = "https://a.example:6443 trusting ca-1";
+    let current = Arc::new(Mutex::new(Ok(
+        up.clients_reaching(Budgets::default(), cluster)
+    )));
+    let (edit, entry) = watch::channel(Some(fingerprint("https://a.example:6443")));
+    let cache = tempfile::tempdir().unwrap();
+    let mut follower = edited_over(Hub::new(swapping(&current)), cache.path(), entry).await;
+    assert_eq!(names(&next(&mut follower).await), ["namespaces", "widgets"]);
+
+    let down = fake();
+    down.state().unavailable = usize::MAX;
+    rebuild(
+        &current,
+        Ok(down.clients_reaching(Budgets::default(), cluster)),
+    );
+    edit.send_replace(Some(fingerprint("https://a.example:6443/kubens")));
+    assert!(
+        timeout(Duration::from_secs(60), follower.next())
+            .await
+            .is_err()
+    );
+    assert!(asked(&down, "/apis") > 0);
+}

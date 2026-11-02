@@ -119,35 +119,52 @@ impl Follower {
             let refused = self.indexes.iter().any(Index::refused);
             let due = self.due.first().copied();
             let [crds, apiservices] = &mut self.indexes;
+            // In order, so an edit restarts before a change its new
+            // subscriptions tell again.
             let changed = tokio::select! {
+                biased;
+                () = edited(&mut self.entry) => return self.restart().await,
+                () = replaced(&mut self.abandoned) => return,
                 () = sleep_until(due.unwrap_or(self.poll)), if due.is_some() => {
                     self.due.remove(0);
                     return;
                 }
                 () = sleep_until(retry.unwrap_or(self.poll)), if retry.is_some() => return,
                 () = sleep_until(self.poll), if refused => return,
-                () = replaced(&mut self.abandoned) => return,
-                () = edited(&mut self.entry) => return self.restart().await,
                 changed = crds.changed() => changed,
                 changed = apiservices.changed() => changed,
             };
             if changed {
-                let now = Instant::now();
-                self.due = std::iter::once(SETTLE)
-                    .chain(RECHECKS)
-                    .map(|after| now + after)
-                    .collect();
+                self.schedule();
             }
         }
     }
 
+    /// The fetches after a change, from now.
+    fn schedule(&mut self) {
+        let now = Instant::now();
+        self.due = std::iter::once(SETTLE)
+            .chain(RECHECKS)
+            .map(|after| now + after)
+            .collect();
+    }
+
     /// Holds the indexes anew, which restarts those a failed credential
     /// ended, as the hub restarts an ended upstream for a new subscription,
-    /// and forgets the failure; the fetches due after a change stay, since
-    /// the server's discovery may still lag it.
+    /// and forgets the failure. The fetches due after a change stay, since
+    /// the server's discovery may still lag it, and a change the old
+    /// subscriptions had not told yet is one too.
     async fn restart(&mut self) {
-        self.indexes = indexes(&self.hub, &self.context).await;
+        let indexes = indexes(&self.hub, &self.context).await;
+        let untold = indexes
+            .iter()
+            .zip(&self.indexes)
+            .any(|(new, old)| new.seen.is_some() && new.seen != old.seen);
+        self.indexes = indexes;
         self.failed = None;
+        if untold {
+            self.schedule();
+        }
     }
 
     async fn fetch(&mut self) -> Discovered {

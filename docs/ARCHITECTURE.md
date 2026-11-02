@@ -487,7 +487,8 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     Those that cannot be watched, as ComponentStatus, are listed again (3.2).
     A version that an aggregated server left stale comes after the others, where client-go drops it ([`convertAPIGroup`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/client-go/discovery/aggregated_discovery.go#L80-L82)), so its kinds stay and their lists say why they fail.
   - A disk cache in the app's cache directory holds each cluster's discovery with its ETags (`If-None-Match` → 304), so a start revalidates it rather than downloads it.
-    A cluster is named by its URL and the CAs its clients trust it with, so one recreated at the same address, as minikube's or kind's on a fixed port, gets a file of its own.
+    A cluster is named by its URL, its `tls-server-name` and the CAs its clients trust it with, so one recreated at the same address with a CA of its own gets a file of its own.
+    One recreated with the same CA shares the name, and only the server's ETags tell the two apart.
   - `resources_watch` follows the active space's discovery in `twigo-cache`, through the CRD and APIService metadata upstreams.
     It answers at once and sends the resources over its channel, since discovery may wait on the network or a sign-in, and the webview asks for the next space's watch only once the last one answered.
     The API server updates its discovery from such a change in a controller of its own, which may not be done when the change reaches Twigo: apiextensions' discovery controller waits for the CRD's `Established` condition through an informer of its own ([`sync`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiextensions-apiserver/pkg/apiserver/customresource_discovery_controller.go#L105)).
@@ -498,7 +499,7 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
   - A failed fetch keeps the resources the server last answered to the follower, and is tried again after 5 s, the hub's longest backoff.
     A copy from the disk cache counts only once the server has confirmed it, since only the server's ETags tell apart clusters at the same address with the same trust, as behind a load balancer; clients that cannot be built fail it rather than show another cluster's resources.
   - A fetch whose credential failed stops the follower, since retrying would run the plugin by itself, as for the upstreams (3.2), until the context's fingerprint changes.
-    Then it holds its CRD and APIService upstreams anew, which restarts those the failure ended, and fetches again; the fetches due after a change stay, since the server's discovery may still lag it.
+    Then it holds its CRD and APIService upstreams anew, which restarts those the failure ended, and fetches again; the fetches due after a change stay, since the server's discovery may still lag it, and a change that the new upstreams list but the old ones had not told yet gets its own.
     The fingerprint leaves out the oidc tokens that Twigo and kubelogin write back (6.2), and other contexts' entries, so neither sets off a fetch.
     The frontend follows the active space again whenever a credential comes after none or after a failed run.
     A run that a rejected credential sets off by itself does not count: against a server that keeps refusing fresh credentials, every view asking again would run the plugin again, forever.
