@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { KeyboardLayout, ListBatch, ListQuery } from "../generated";
 import { createMockBackend, type MockScenario } from "./index";
+import { natural } from "./query";
 
 function query(rest: Partial<ListQuery> = {}): ListQuery {
   return {
     space: "prod-eu",
     gvr: { group: "", version: "v1", resource: "pods" },
+    namespaced: true,
     namespaces: [],
     labelSelector: null,
     text: null,
@@ -25,7 +27,9 @@ async function open(scenario: MockScenario, q: ListQuery = query()) {
   );
   await vi.advanceTimersByTimeAsync(0);
   const id = await pending;
+  const windowed = backend.invoke("list_set_window", { id, start: 0, end: 0 });
   await vi.advanceTimersByTimeAsync(50);
+  await windowed;
   const ack = async () => {
     const latest = last(batches);
     if (!latest) return;
@@ -105,8 +109,15 @@ test("a live subscription connects, syncs and becomes ready with 5k pods; the ne
   const again = sub.backend.subscribe("list_subscribe", query(), (b) =>
     batches.push(b),
   );
+  await vi.advanceTimersByTimeAsync(0);
+  const id = await again;
+  const windowed = sub.backend.invoke("list_set_window", {
+    id,
+    start: 0,
+    end: 40,
+  });
   await vi.advanceTimersByTimeAsync(50);
-  await again;
+  await windowed;
   expect(batches[0]?.status.state).toBe("ready");
 });
 
@@ -127,6 +138,71 @@ test("no batch follows until the previous one is acknowledged, and the next carr
   expect(second?.window?.start).toBe(20);
   expect(second?.window?.ids).toHaveLength(10);
   expect(second?.upserts).toHaveLength(10);
+});
+
+test("nothing goes before the first window, as in Rust", async () => {
+  const backend = createMockBackend("ready");
+  const batches: ListBatch[] = [];
+  const pending = backend.subscribe("list_subscribe", query(), (b) =>
+    batches.push(b),
+  );
+  await vi.advanceTimersByTimeAsync(0);
+  const id = await pending;
+  await vi.advanceTimersByTimeAsync(500);
+  expect(batches).toEqual([]);
+  const windowed = backend.invoke("list_set_window", { id, start: 0, end: 5 });
+  await vi.advanceTimersByTimeAsync(10);
+  await windowed;
+  expect(batches[0]?.window?.ids).toHaveLength(5);
+});
+
+test("a window that moves past the end sends its start, though its rows stay none", async () => {
+  const { batches, ack, window } = await open(
+    "ready",
+    query({ text: "no-such-pod" }),
+  );
+  await ack();
+  await window(10, 20);
+  await vi.advanceTimersByTimeAsync(10);
+  expect(last(batches)?.window).toEqual({ start: 10, ids: [] });
+  await ack();
+  await window(20, 30);
+  await vi.advanceTimersByTimeAsync(10);
+  expect(last(batches)?.window).toEqual({ start: 20, ids: [] });
+});
+
+test("an ack with no moved window leaves the changes for the next tick", async () => {
+  const sub = await open("live");
+  await sub.window(0, 40);
+  for (let ms = 0; ms < 1500; ms += 50) {
+    await vi.advanceTimersByTimeAsync(50);
+    await sub.ack();
+  }
+  const ready = last(sub.batches)?.seq ?? 0;
+  for (let ms = 0; ms < 2000 && last(sub.batches)?.seq === ready; ms += 50) {
+    await vi.advanceTimersByTimeAsync(50);
+  }
+  const waiting = last(sub.batches)?.seq;
+  expect(waiting, "a change it does not ack").toBe(ready + 1);
+  await vi.advanceTimersByTimeAsync(1100);
+  expect(last(sub.batches)?.seq, "it waits for the ack").toBe(waiting);
+  await sub.ack();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(last(sub.batches)?.seq, "nothing before the tick").toBe(waiting);
+  await vi.advanceTimersByTimeAsync(60);
+  expect(last(sub.batches)?.seq, "the churn on the tick").toBe(ready + 2);
+});
+
+test("a window that moves while a batch waits goes out with the ack", async () => {
+  const { batches, ack, window } = await open("ready");
+  await window(0, 5);
+  const before = last(batches)?.seq;
+  await window(5, 10);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(last(batches)?.seq, "it waits for the ack").toBe(before);
+  await ack();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(last(batches)?.window?.start, "with the ack, not the tick").toBe(5);
 });
 
 test("a window change flushes at once, without waiting for the next tick", async () => {
@@ -176,11 +252,8 @@ test("rows come sorted by the query's column, and the first batch carries the co
   await sub.ack();
   await vi.advanceTimersByTimeAsync(50);
   const names = last(sub.batches)?.upserts.map((r) => String(r.cells[0]));
-  const natural = new Intl.Collator("en", { numeric: true });
   expect(names).toHaveLength(50);
-  expect(names).toEqual(
-    [...(names ?? [])].sort((a, b) => natural.compare(b, a)),
-  );
+  expect(names).toEqual([...(names ?? [])].sort((a, b) => natural(b, a)));
   expect(sub.batches[0]?.columns?.map((c) => c.name)).toEqual([
     "Name",
     "Namespace",
@@ -208,6 +281,22 @@ test("text filters match and negate", async () => {
   const total = (hit.batches[0]?.total ?? 0) + (miss.batches[0]?.total ?? 0);
   expect(hit.batches[0]?.total).toBeGreaterThan(0);
   expect(total).toBe(5000);
+});
+
+test("columns come once a list knows them, from its first page, as in Rust", async () => {
+  for (const [scenario, known] of [
+    ["queued", false],
+    ["connecting", false],
+    ["forbidden", false],
+    ["syncing", true],
+    ["ready", true],
+  ] as const) {
+    const sub = await open(scenario);
+    expect(
+      (sub.batches[0]?.columns?.length ?? 0) > 0,
+      `${scenario} knows its columns`,
+    ).toBe(known);
+  }
 });
 
 test("pinned states keep or drop rows as Rust does", async () => {
@@ -245,11 +334,32 @@ test("a choice for a column the list lacks does nothing", async () => {
   expect(one.batches[0]?.total).toBeGreaterThan(0);
 });
 
-test("an unknown groupBy column is refused at subscribe", async () => {
+test("a sort or groupBy column the list lacks does nothing", async () => {
+  const plain = await open("ready");
+  const odd = await open(
+    "ready",
+    query({ sort: { column: "Bogus", descending: true }, groupBy: "Bogus" }),
+  );
+  for (const sub of [plain, odd]) {
+    await sub.ack();
+    await sub.window(0, 10);
+    await vi.advanceTimersByTimeAsync(10);
+  }
+  const ids = last(plain.batches)?.window?.ids;
+  expect(ids).toHaveLength(10);
+  expect(last(odd.batches)?.window?.ids).toEqual(ids);
+  expect(odd.batches[0]?.groups).toEqual([]);
+});
+
+test("label selectors match the pods' labels, and one that does not parse is refused", async () => {
+  const labelled = await open("ready", query({ labelSelector: "!app" }));
+  expect(labelled.batches[0]?.total).toBe(5000);
+  const none = await open("ready", query({ labelSelector: "app=api" }));
+  expect(none.batches[0]?.total).toBe(0);
   const backend = createMockBackend();
   const pending = backend.subscribe(
     "list_subscribe",
-    query({ groupBy: "Bogus" }),
+    query({ labelSelector: "app in api" }),
     () => undefined,
   );
   const rejected = expect(pending).rejects.toMatchObject({
@@ -259,25 +369,11 @@ test("an unknown groupBy column is refused at subscribe", async () => {
   await rejected;
 });
 
-test("an unknown sort column is refused at subscribe", async () => {
+test("a regex that does not parse is refused at subscribe", async () => {
   const backend = createMockBackend();
   const pending = backend.subscribe(
     "list_subscribe",
-    query({ sort: { column: "Bogus", descending: false } }),
-    () => undefined,
-  );
-  const rejected = expect(pending).rejects.toMatchObject({
-    kind: "invalidInput",
-  });
-  await vi.advanceTimersByTimeAsync(0);
-  await rejected;
-});
-
-test("label selectors are refused, since the mock cannot match labels", async () => {
-  const backend = createMockBackend();
-  const pending = backend.subscribe(
-    "list_subscribe",
-    query({ labelSelector: "app=api" }),
+    query({ text: "/web-[/" }),
     () => undefined,
   );
   const rejected = expect(pending).rejects.toMatchObject({
@@ -401,18 +497,12 @@ test("values keep their rows, and the grouped counts stay those of every value",
   expect(picked.batches[0]?.groups).toEqual(counts);
 });
 
-test("values of an unknown column are refused at subscribe", async () => {
-  const backend = createMockBackend();
-  const pending = backend.subscribe(
-    "list_subscribe",
+test("values of a column the list lacks keep every row", async () => {
+  const { batches } = await open(
+    "ready",
     query({ values: { column: "Bogus", values: ["x"] } }),
-    () => undefined,
   );
-  const rejected = expect(pending).rejects.toMatchObject({
-    kind: "invalidInput",
-  });
-  await vi.advanceTimersByTimeAsync(0);
-  await rejected;
+  expect(batches[0]?.total).toBe(5000);
 });
 
 test("a request for an idle plugin's credential starts its run, and only sign-in links open", async () => {

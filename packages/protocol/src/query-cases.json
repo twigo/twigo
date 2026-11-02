@@ -1,0 +1,1089 @@
+{
+  "about": "Query cases that the mock (src/mock/query.test.ts) and Rust's query view (crates/twigo-cache/tests/query_cases.rs) both run, so they sort, filter, group and window alike (ARCHITECTURE 3.4). Rows hold the server's cells, null in Age columns; each list's rows pass through its namespaces first, as the hub's upstreams do. A case's query lists only what it sets; ids are in the window's order, and a case that expects `refused` expects the query refused with that error kind.",
+  "context": "kind-test",
+  "lists": [
+    {
+      "name": "pods",
+      "namespaced": true,
+      "columns": [
+        {
+          "name": "Name",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "Ready",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "Status",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "Restarts",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "Age",
+          "kind": "age",
+          "priority": 0
+        },
+        {
+          "name": "IP",
+          "kind": "string",
+          "priority": 1
+        }
+      ],
+      "rows": [
+        {
+          "namespace": "alpha",
+          "name": "web-1",
+          "created": "2026-11-01T10:00:00Z",
+          "labels": {
+            "app": "web",
+            "tier": "front"
+          },
+          "cells": ["web-1", "1/1", "Running", "0", null, "10.0.0.1"]
+        },
+        {
+          "namespace": "alpha",
+          "name": "web-2",
+          "created": "2026-11-01T11:00:00Z",
+          "labels": {
+            "app": "web",
+            "tier": "front",
+            "canary": "true"
+          },
+          "cells": [
+            "web-2",
+            "0/1",
+            "CrashLoopBackOff",
+            "12 (5m ago)",
+            null,
+            "10.0.0.2"
+          ]
+        },
+        {
+          "namespace": "alpha",
+          "name": "web-10",
+          "created": "2026-10-30T09:00:00Z",
+          "labels": {
+            "app": "web",
+            "tier": "front"
+          },
+          "cells": ["web-10", "1/2", "Running", "3 (1h ago)", null, "10.0.0.3"]
+        },
+        {
+          "namespace": "alpha",
+          "name": "db-1",
+          "created": "2026-10-01T00:00:00Z",
+          "labels": {
+            "app": "db",
+            "tier": "back",
+            "gen": "3"
+          },
+          "cells": ["db-1", "2/2", "Running", "3 (5m ago)", null, "10.0.1.1"]
+        },
+        {
+          "namespace": "beta",
+          "name": "web-09",
+          "created": "2026-11-02T08:00:00Z",
+          "labels": {
+            "app": "web"
+          },
+          "cells": ["web-09", "1/1", "Pending", "0", null, "10.0.2.1"]
+        },
+        {
+          "namespace": "beta",
+          "name": "Web-3",
+          "created": "2026-11-02T09:00:00Z",
+          "labels": {
+            "app": "web",
+            "gen": "1"
+          },
+          "cells": ["Web-3", "1/1", "Running", "1 (45s ago)", null, "10.0.2.2"]
+        },
+        {
+          "namespace": "beta",
+          "name": "api-1",
+          "created": "2026-11-02T07:00:00Z",
+          "labels": {
+            "app": "api",
+            "tier": "back"
+          },
+          "cells": ["api-1", "0/0", "Error", "0", null, "10.0.2.3"]
+        },
+        {
+          "namespace": "beta",
+          "name": "api-2",
+          "created": "2026-10-15T00:00:00Z",
+          "labels": {},
+          "cells": ["api-2", "0/3", "Completed", "2", null, "10.0.2.4"]
+        }
+      ],
+      "cases": [
+        {
+          "name": "by Name in natural order, with Namespace after Name",
+          "query": {},
+          "window": [0, 50],
+          "expect": {
+            "columns": [
+              "Name",
+              "Namespace",
+              "Ready",
+              "Status",
+              "Restarts",
+              "Age",
+              "IP"
+            ],
+            "total": 8,
+            "ids": [
+              "kind-test/beta/api-1",
+              "kind-test/beta/api-2",
+              "kind-test/alpha/db-1",
+              "kind-test/alpha/web-1",
+              "kind-test/alpha/web-2",
+              "kind-test/beta/Web-3",
+              "kind-test/beta/web-09",
+              "kind-test/alpha/web-10"
+            ]
+          }
+        },
+        {
+          "name": "Restarts by count, then by how long ago",
+          "query": {
+            "sort": {
+              "column": "Restarts",
+              "descending": false
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 8,
+            "ids": [
+              "kind-test/alpha/web-1",
+              "kind-test/beta/api-1",
+              "kind-test/beta/web-09",
+              "kind-test/beta/Web-3",
+              "kind-test/beta/api-2",
+              "kind-test/alpha/db-1",
+              "kind-test/alpha/web-10",
+              "kind-test/alpha/web-2"
+            ]
+          }
+        },
+        {
+          "name": "descending keeps ties in id order",
+          "query": {
+            "sort": {
+              "column": "Restarts",
+              "descending": true
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 8,
+            "ids": [
+              "kind-test/alpha/web-2",
+              "kind-test/alpha/web-10",
+              "kind-test/alpha/db-1",
+              "kind-test/beta/api-2",
+              "kind-test/beta/Web-3",
+              "kind-test/alpha/web-1",
+              "kind-test/beta/api-1",
+              "kind-test/beta/web-09"
+            ]
+          }
+        },
+        {
+          "name": "Ready by its fraction, then its total, 0/0 as whole",
+          "query": {
+            "sort": {
+              "column": "Ready",
+              "descending": false
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 8,
+            "ids": [
+              "kind-test/alpha/web-2",
+              "kind-test/beta/api-2",
+              "kind-test/alpha/web-10",
+              "kind-test/beta/api-1",
+              "kind-test/alpha/web-1",
+              "kind-test/beta/Web-3",
+              "kind-test/beta/web-09",
+              "kind-test/alpha/db-1"
+            ]
+          }
+        },
+        {
+          "name": "Age from the creation time, youngest first",
+          "query": {
+            "sort": {
+              "column": "Age",
+              "descending": false
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 8,
+            "ids": [
+              "kind-test/beta/Web-3",
+              "kind-test/beta/web-09",
+              "kind-test/beta/api-1",
+              "kind-test/alpha/web-2",
+              "kind-test/alpha/web-1",
+              "kind-test/alpha/web-10",
+              "kind-test/beta/api-2",
+              "kind-test/alpha/db-1"
+            ]
+          }
+        },
+        {
+          "name": "by the Namespace column Rust adds",
+          "query": {
+            "sort": {
+              "column": "Namespace",
+              "descending": true
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 8,
+            "ids": [
+              "kind-test/beta/api-1",
+              "kind-test/beta/api-2",
+              "kind-test/beta/Web-3",
+              "kind-test/beta/web-09",
+              "kind-test/alpha/db-1",
+              "kind-test/alpha/web-1",
+              "kind-test/alpha/web-2",
+              "kind-test/alpha/web-10"
+            ]
+          }
+        },
+        {
+          "name": "Status as text in natural order",
+          "query": {
+            "sort": {
+              "column": "Status",
+              "descending": false
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 8,
+            "ids": [
+              "kind-test/beta/api-2",
+              "kind-test/alpha/web-2",
+              "kind-test/beta/api-1",
+              "kind-test/beta/web-09",
+              "kind-test/alpha/db-1",
+              "kind-test/alpha/web-1",
+              "kind-test/alpha/web-10",
+              "kind-test/beta/Web-3"
+            ]
+          }
+        },
+        {
+          "name": "a sort by a column the list lacks sorts by Name",
+          "query": {
+            "sort": {
+              "column": "Nominated Node",
+              "descending": true
+            }
+          },
+          "window": [0, 3],
+          "expect": {
+            "total": 8,
+            "ids": [
+              "kind-test/beta/api-1",
+              "kind-test/beta/api-2",
+              "kind-test/alpha/db-1"
+            ]
+          }
+        },
+        {
+          "name": "a substring in any case",
+          "query": {
+            "text": "WEB"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 5,
+            "ids": [
+              "kind-test/alpha/web-1",
+              "kind-test/alpha/web-2",
+              "kind-test/beta/Web-3",
+              "kind-test/beta/web-09",
+              "kind-test/alpha/web-10"
+            ]
+          }
+        },
+        {
+          "name": "a bang negates",
+          "query": {
+            "text": "!web"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 3,
+            "ids": [
+              "kind-test/beta/api-1",
+              "kind-test/beta/api-2",
+              "kind-test/alpha/db-1"
+            ]
+          }
+        },
+        {
+          "name": "a regex between slashes, in any case",
+          "query": {
+            "text": "/^web-\\d$/"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 3,
+            "ids": [
+              "kind-test/alpha/web-1",
+              "kind-test/alpha/web-2",
+              "kind-test/beta/Web-3"
+            ]
+          }
+        },
+        {
+          "name": "a negated regex",
+          "query": {
+            "text": "!/-1$/"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 5,
+            "ids": [
+              "kind-test/beta/api-2",
+              "kind-test/alpha/web-2",
+              "kind-test/beta/Web-3",
+              "kind-test/beta/web-09",
+              "kind-test/alpha/web-10"
+            ]
+          }
+        },
+        {
+          "name": "the filter skips columns of a higher priority",
+          "query": {
+            "text": "10.0.2"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 0,
+            "ids": []
+          }
+        },
+        {
+          "name": "the filter reads a column the user shows",
+          "query": {
+            "text": "10.0.2",
+            "columns": {
+              "IP": true
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 4,
+            "ids": [
+              "kind-test/beta/api-1",
+              "kind-test/beta/api-2",
+              "kind-test/beta/Web-3",
+              "kind-test/beta/web-09"
+            ]
+          }
+        },
+        {
+          "name": "the filter skips a column the user hides, but never Name",
+          "query": {
+            "text": "web",
+            "columns": {
+              "Name": false,
+              "Status": false
+            }
+          },
+          "window": [0, 2],
+          "expect": {
+            "total": 5,
+            "ids": ["kind-test/alpha/web-1", "kind-test/alpha/web-2"]
+          }
+        },
+        {
+          "name": "the filter reads the Namespace column",
+          "query": {
+            "text": "alpha"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 4,
+            "ids": [
+              "kind-test/alpha/db-1",
+              "kind-test/alpha/web-1",
+              "kind-test/alpha/web-2",
+              "kind-test/alpha/web-10"
+            ]
+          }
+        },
+        {
+          "name": "under one namespace there is no Namespace column to match",
+          "query": {
+            "namespaces": ["alpha"],
+            "text": "alpha"
+          },
+          "window": [0, 50],
+          "expect": {
+            "columns": ["Name", "Ready", "Status", "Restarts", "Age", "IP"],
+            "total": 0,
+            "ids": []
+          }
+        },
+        {
+          "name": "namespaces",
+          "query": {
+            "namespaces": ["beta", "gamma"]
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 4,
+            "ids": [
+              "kind-test/beta/api-1",
+              "kind-test/beta/api-2",
+              "kind-test/beta/Web-3",
+              "kind-test/beta/web-09"
+            ]
+          }
+        },
+        {
+          "name": "a label equality",
+          "query": {
+            "labelSelector": "app=web"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 5,
+            "ids": [
+              "kind-test/alpha/web-1",
+              "kind-test/alpha/web-2",
+              "kind-test/beta/Web-3",
+              "kind-test/beta/web-09",
+              "kind-test/alpha/web-10"
+            ]
+          }
+        },
+        {
+          "name": "a label set and an absent label",
+          "query": {
+            "labelSelector": "tier in (front, back),!canary"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 4,
+            "ids": [
+              "kind-test/beta/api-1",
+              "kind-test/alpha/db-1",
+              "kind-test/alpha/web-1",
+              "kind-test/alpha/web-10"
+            ]
+          }
+        },
+        {
+          "name": "notin keeps rows without the label",
+          "query": {
+            "labelSelector": "tier notin (front)"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 5,
+            "ids": [
+              "kind-test/beta/api-1",
+              "kind-test/beta/api-2",
+              "kind-test/alpha/db-1",
+              "kind-test/beta/Web-3",
+              "kind-test/beta/web-09"
+            ]
+          }
+        },
+        {
+          "name": "a label compared as an integer",
+          "query": {
+            "labelSelector": "gen>2"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 1,
+            "ids": ["kind-test/alpha/db-1"]
+          }
+        },
+        {
+          "name": "groups count every match before values drop rows",
+          "query": {
+            "groupBy": "Status",
+            "values": {
+              "column": "Status",
+              "values": ["Error", "CrashLoopBackOff"]
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 2,
+            "ids": ["kind-test/beta/api-1", "kind-test/alpha/web-2"],
+            "groups": [
+              {
+                "value": "Running",
+                "count": 4
+              },
+              {
+                "value": "Completed",
+                "count": 1
+              },
+              {
+                "value": "CrashLoopBackOff",
+                "count": 1
+              },
+              {
+                "value": "Error",
+                "count": 1
+              },
+              {
+                "value": "Pending",
+                "count": 1
+              }
+            ]
+          }
+        },
+        {
+          "name": "groups count after the text and the labels",
+          "query": {
+            "groupBy": "Status",
+            "text": "web",
+            "labelSelector": "tier"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 3,
+            "ids": [
+              "kind-test/alpha/web-1",
+              "kind-test/alpha/web-2",
+              "kind-test/alpha/web-10"
+            ],
+            "groups": [
+              {
+                "value": "Running",
+                "count": 2
+              },
+              {
+                "value": "CrashLoopBackOff",
+                "count": 1
+              }
+            ]
+          }
+        },
+        {
+          "name": "a group or values for a column the list lacks do nothing",
+          "query": {
+            "groupBy": "Phase",
+            "values": {
+              "column": "Phase",
+              "values": ["Failed"]
+            }
+          },
+          "window": [0, 1],
+          "expect": {
+            "total": 8,
+            "ids": ["kind-test/beta/api-1"],
+            "groups": []
+          }
+        },
+        {
+          "name": "a window in the middle",
+          "query": {},
+          "window": [2, 4],
+          "expect": {
+            "total": 8,
+            "ids": ["kind-test/alpha/db-1", "kind-test/alpha/web-1"]
+          }
+        },
+        {
+          "name": "a window past the end",
+          "query": {},
+          "window": [7, 20],
+          "expect": {
+            "total": 8,
+            "ids": ["kind-test/alpha/web-10"]
+          }
+        },
+        {
+          "name": "a window after every row",
+          "query": {},
+          "window": [10, 20],
+          "expect": {
+            "total": 8,
+            "ids": []
+          }
+        },
+        {
+          "name": "a namespace named twice is one namespace",
+          "query": {
+            "namespaces": ["alpha", "alpha"]
+          },
+          "window": [0, 1],
+          "expect": {
+            "columns": ["Name", "Ready", "Status", "Restarts", "Age", "IP"],
+            "total": 4,
+            "ids": ["kind-test/alpha/db-1"]
+          }
+        },
+        {
+          "name": "a closed regex that does not parse is refused",
+          "query": {
+            "text": "/web-(/"
+          },
+          "window": [0, 1],
+          "expect": {
+            "refused": "invalidInput"
+          }
+        },
+        {
+          "name": "a selector apimachinery refuses is refused",
+          "query": {
+            "labelSelector": "app in web"
+          },
+          "window": [0, 1],
+          "expect": {
+            "refused": "invalidInput"
+          }
+        },
+        {
+          "name": "an integer past 64 bits is refused",
+          "query": {
+            "labelSelector": "gen>99999999999999999999"
+          },
+          "window": [0, 1],
+          "expect": {
+            "refused": "invalidInput"
+          }
+        },
+        {
+          "name": "ASCII whitespace around the text is trimmed",
+          "query": {
+            "text": " \t WEB-1 \n"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 2,
+            "ids": ["kind-test/alpha/web-1", "kind-test/alpha/web-10"]
+          }
+        },
+        {
+          "name": "only ASCII whitespace is trimmed, not a vertical tab or a no-break space",
+          "query": {
+            "text": "\u000b WEB-1"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 0,
+            "ids": []
+          }
+        },
+        {
+          "name": "a label named as an Object.prototype member is a label like any other",
+          "query": {
+            "labelSelector": "toString"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 0,
+            "ids": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "deployments",
+      "namespaced": true,
+      "columns": [
+        {
+          "name": "Name",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "Ready",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "Up-to-date",
+          "kind": "integer",
+          "priority": 0
+        },
+        {
+          "name": "Available",
+          "kind": "integer",
+          "priority": 0
+        },
+        {
+          "name": "Age",
+          "kind": "age",
+          "priority": 0
+        }
+      ],
+      "rows": [
+        {
+          "namespace": "alpha",
+          "name": "web",
+          "created": "2026-10-01T00:00:00Z",
+          "labels": {},
+          "cells": ["web", "3/3", 3, 3, null]
+        },
+        {
+          "namespace": "alpha",
+          "name": "api",
+          "created": "2026-10-02T00:00:00Z",
+          "labels": {},
+          "cells": ["api", "1/3", 3, 1, null]
+        },
+        {
+          "namespace": "alpha",
+          "name": "db",
+          "created": "2026-10-03T00:00:00Z",
+          "labels": {},
+          "cells": ["db", "0/1", 1, 0, null]
+        },
+        {
+          "namespace": "alpha",
+          "name": "cache",
+          "created": "2026-10-04T00:00:00Z",
+          "labels": {},
+          "cells": ["cache", "2/2", 2, 2, null]
+        }
+      ],
+      "cases": [
+        {
+          "name": "integers sort as numbers",
+          "query": {
+            "namespaces": ["alpha"],
+            "sort": {
+              "column": "Available",
+              "descending": true
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "columns": ["Name", "Ready", "Up-to-date", "Available", "Age"],
+            "total": 4,
+            "ids": [
+              "kind-test/alpha/web",
+              "kind-test/alpha/cache",
+              "kind-test/alpha/api",
+              "kind-test/alpha/db"
+            ]
+          }
+        },
+        {
+          "name": "the filter reads integers as text",
+          "query": {
+            "namespaces": ["alpha"],
+            "text": "3"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 2,
+            "ids": ["kind-test/alpha/api", "kind-test/alpha/web"]
+          }
+        },
+        {
+          "name": "groups and values read integers as text",
+          "query": {
+            "namespaces": ["alpha"],
+            "groupBy": "Available",
+            "values": {
+              "column": "Up-to-date",
+              "values": ["3"]
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 2,
+            "ids": ["kind-test/alpha/api", "kind-test/alpha/web"],
+            "groups": [
+              {
+                "value": "0",
+                "count": 1
+              },
+              {
+                "value": "1",
+                "count": 1
+              },
+              {
+                "value": "2",
+                "count": 1
+              },
+              {
+                "value": "3",
+                "count": 1
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "nodes",
+      "namespaced": false,
+      "columns": [
+        {
+          "name": "Name",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "Status",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "Roles",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "Age",
+          "kind": "age",
+          "priority": 0
+        },
+        {
+          "name": "Version",
+          "kind": "string",
+          "priority": 0
+        }
+      ],
+      "rows": [
+        {
+          "namespace": null,
+          "name": "node-a",
+          "created": "2026-09-01T00:00:00Z",
+          "labels": {},
+          "cells": ["node-a", "Ready", "control-plane", null, "v1.33.10"]
+        },
+        {
+          "namespace": null,
+          "name": "node-b",
+          "created": "2026-09-02T00:00:00Z",
+          "labels": {},
+          "cells": ["node-b", "NotReady", "<none>", null, "v1.33.9"]
+        },
+        {
+          "namespace": null,
+          "name": "node-c",
+          "created": "2026-09-03T00:00:00Z",
+          "labels": {},
+          "cells": [
+            "node-c",
+            "Ready,SchedulingDisabled",
+            "<none>",
+            null,
+            "v1.37.0"
+          ]
+        }
+      ],
+      "cases": [
+        {
+          "name": "a cluster-scoped resource ignores namespaces and has no Namespace column",
+          "query": {
+            "namespaces": ["alpha", "beta"]
+          },
+          "window": [0, 50],
+          "expect": {
+            "columns": ["Name", "Status", "Roles", "Age", "Version"],
+            "total": 3,
+            "ids": ["kind-test/node-a", "kind-test/node-b", "kind-test/node-c"]
+          }
+        },
+        {
+          "name": "versions in natural order",
+          "query": {
+            "sort": {
+              "column": "Version",
+              "descending": false
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 3,
+            "ids": ["kind-test/node-b", "kind-test/node-a", "kind-test/node-c"]
+          }
+        },
+        {
+          "name": "a negated substring",
+          "query": {
+            "text": "!notready"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 2,
+            "ids": ["kind-test/node-a", "kind-test/node-c"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "widgets",
+      "namespaced": false,
+      "columns": [
+        {
+          "name": "Name",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "Enabled",
+          "kind": "boolean",
+          "priority": 0
+        },
+        {
+          "name": "Weight",
+          "kind": "number",
+          "priority": 0
+        },
+        {
+          "name": "Took",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "Age",
+          "kind": "age",
+          "priority": 0
+        }
+      ],
+      "rows": [
+        {
+          "namespace": null,
+          "name": "w-a",
+          "created": "2026-11-01T00:00:00Z",
+          "labels": {},
+          "cells": ["w-a", true, 2, "1h5m", null]
+        },
+        {
+          "namespace": null,
+          "name": "w-b",
+          "created": "2026-11-01T00:00:00Z",
+          "labels": {},
+          "cells": ["w-b", false, 1.5, "45s", null]
+        },
+        {
+          "namespace": null,
+          "name": "w-c",
+          "created": "2026-11-01T00:00:00Z",
+          "labels": {},
+          "cells": ["w-c", true, 10, "2d", null]
+        },
+        {
+          "namespace": null,
+          "name": "w-d",
+          "created": "2026-11-01T00:00:00Z",
+          "labels": {},
+          "cells": ["w-d", false, 0.25, "5m", null]
+        }
+      ],
+      "cases": [
+        {
+          "name": "numbers sort by value",
+          "query": {
+            "sort": {
+              "column": "Weight",
+              "descending": false
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 4,
+            "ids": [
+              "kind-test/w-d",
+              "kind-test/w-b",
+              "kind-test/w-a",
+              "kind-test/w-c"
+            ]
+          }
+        },
+        {
+          "name": "booleans sort false before true",
+          "query": {
+            "sort": {
+              "column": "Enabled",
+              "descending": true
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 4,
+            "ids": [
+              "kind-test/w-a",
+              "kind-test/w-c",
+              "kind-test/w-b",
+              "kind-test/w-d"
+            ]
+          }
+        },
+        {
+          "name": "durations sort by their seconds",
+          "query": {
+            "sort": {
+              "column": "Took",
+              "descending": false
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 4,
+            "ids": [
+              "kind-test/w-b",
+              "kind-test/w-d",
+              "kind-test/w-a",
+              "kind-test/w-c"
+            ]
+          }
+        },
+        {
+          "name": "the filter reads numbers as text",
+          "query": {
+            "text": "1.5"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 1,
+            "ids": ["kind-test/w-b"]
+          }
+        },
+        {
+          "name": "the filter reads booleans as text",
+          "query": {
+            "text": "true",
+            "groupBy": "Enabled"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 2,
+            "ids": ["kind-test/w-a", "kind-test/w-c"],
+            "groups": [
+              {
+                "value": "true",
+                "count": 2
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

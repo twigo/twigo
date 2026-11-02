@@ -53,6 +53,7 @@ fn queries_use_camel_case_and_newtypes_are_bare() {
             version: "v1".into(),
             resource: "pods".into(),
         },
+        namespaced: true,
         namespaces: vec![],
         label_selector: Some("app=api".into()),
         text: None,
@@ -70,6 +71,7 @@ fn queries_use_camel_case_and_newtypes_are_bare() {
             values: vec!["Error".into()],
         }),
     };
+    assert_eq!(wire(&query)["namespaced"], json!(true));
     assert_eq!(wire(&query)["labelSelector"], json!("app=api"));
     assert_eq!(wire(&query)["groupBy"], json!("Status"));
     assert_eq!(

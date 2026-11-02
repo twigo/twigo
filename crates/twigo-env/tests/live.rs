@@ -5,10 +5,19 @@
 //! closes and the startup files read from stdin, so a shell that got the
 //! copy's stdin would wait until the timeout. The startup files also trace
 //! every command, so the marker passes through the shell's own output.
+//! Each shell runs twice: once as from a desktop, and once with a
+//! controlling terminal, as `pnpm tauri dev` in a terminal starts Twigo,
+//! where an interactive shell in a background process group stops at its
+//! first touch of the terminal.
 
 use std::ffi::{OsStr, OsString};
+use std::os::fd::AsRawFd;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
+
+use nix::pty::openpty;
+use nix::unistd::setsid;
 
 const SHELL: &str = "TWIGO_TEST_LOGIN_SHELL";
 
@@ -35,23 +44,41 @@ fn run_each() -> ExitCode {
         let exe = home.path().join(r"a b'c\d").join("twigo");
         std::fs::create_dir(exe.parent().expect("a parent")).expect("a directory");
         std::fs::copy(std::env::current_exe().expect("this binary"), &exe).expect("a copy");
-        let mut copy = Command::new(&exe)
-            .env(SHELL, &shell)
-            .env("HOME", home.path())
-            .env_remove("ZDOTDIR")
-            .stdin(Stdio::piped())
-            .spawn()
-            .expect("run the copy");
-        // `wait` closes the child's stdin, so the pipe is held apart.
-        let stdin = copy.stdin.take();
-        let status = copy.wait().expect("wait for the copy");
-        drop(stdin);
-        println!(
-            "{} {name} ({})",
-            if status.success() { "ok" } else { "FAILED" },
-            shell.display()
-        );
-        failed |= !status.success();
+        for terminal in [false, true] {
+            let mut copy = Command::new(&exe);
+            copy.env(SHELL, &shell)
+                .env("HOME", home.path())
+                .env_remove("ZDOTDIR")
+                .stdin(Stdio::piped());
+            // The pty's master stays open until the copy ends.
+            let pty = terminal.then(|| openpty(None, None).expect("a pty"));
+            if let Some(pty) = &pty {
+                let slave = pty.slave.as_raw_fd();
+                // SAFETY: setsid and ioctl are async-signal-safe.
+                unsafe {
+                    copy.pre_exec(move || {
+                        setsid()?;
+                        if libc::ioctl(slave, libc::TIOCSCTTY as _, 0) == -1 {
+                            return Err(std::io::Error::last_os_error());
+                        }
+                        Ok(())
+                    });
+                }
+            }
+            let mut copy = copy.spawn().expect("run the copy");
+            // `wait` closes the child's stdin, so the pipe is held apart.
+            let stdin = copy.stdin.take();
+            let status = copy.wait().expect("wait for the copy");
+            drop(stdin);
+            drop(pty);
+            println!(
+                "{} {name}{} ({})",
+                if status.success() { "ok" } else { "FAILED" },
+                if terminal { " under a terminal" } else { "" },
+                shell.display()
+            );
+            failed |= !status.success();
+        }
     }
     if failed {
         ExitCode::FAILURE

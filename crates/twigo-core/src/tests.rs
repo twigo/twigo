@@ -346,3 +346,104 @@ async fn a_credential_got_by_signing_in_outlives_a_reread_of_its_context() {
     );
     assert_eq!(plugins.runs(), 1);
 }
+
+fn pods(space: &str) -> ListQuery {
+    ListQuery {
+        space: space.to_owned(),
+        gvr: twigo_ipc::Gvr {
+            group: String::new(),
+            version: "v1".to_owned(),
+            resource: "pods".to_owned(),
+        },
+        namespaced: true,
+        namespaces: Vec::new(),
+        label_selector: None,
+        text: None,
+        columns: None,
+        sort: None,
+        group_by: None,
+        values: None,
+    }
+}
+
+#[tokio::test]
+async fn a_window_reaches_only_its_own_lists_and_a_reload_drops_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = Core::new(dir.path(), &dir.path().join("cache"));
+    let space = core.state.open_space("kind-test").id;
+    let (sender, mut batches) = tokio::sync::mpsc::unbounded_channel();
+    let id = core
+        .list_subscribe("main", pods(&space), move |batch| {
+            sender.send(batch).is_ok()
+        })
+        .await
+        .unwrap();
+    let window = SetWindow {
+        id,
+        start: 0,
+        end: 40,
+    };
+    core.list_set_window("main", window).unwrap();
+    let first = tokio::time::timeout(Duration::from_secs(5), batches.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.status, ViewState::Connecting);
+    let ack = Ack { id, seq: first.seq };
+    core.list_ack("main", ack).unwrap();
+    for refused in [
+        core.list_set_window("other", window),
+        core.list_ack("other", ack),
+        core.list_unsubscribe("other", id),
+    ] {
+        assert_eq!(refused.unwrap_err().kind, ErrorKind::NotFound);
+    }
+
+    let ticket = core.lists.ticket("main");
+    core.drop_lists("main");
+    assert_eq!(
+        core.list_ack("main", ack).unwrap_err().kind,
+        ErrorKind::NotFound
+    );
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while batches.recv().await.is_some() {}
+    })
+    .await
+    .expect("the batcher ended with its window");
+    let (sender, _batches) = tokio::sync::mpsc::unbounded_channel();
+    let late = core.hub.rows(Query {
+        context: "kind-test".to_owned(),
+        resource: Resource {
+            group: String::new(),
+            version: "v1".to_owned(),
+            resource: "pods".to_owned(),
+            namespaced: true,
+        },
+        format: RowFormat::Table,
+        namespaces: Vec::new(),
+        field_selector: None,
+    });
+    let late = Batcher::spawn(
+        late.await.unwrap(),
+        Spec::new("kind-test", &pods(&space)).unwrap(),
+        move |batch| sender.send(batch).is_ok(),
+    );
+    assert_eq!(
+        core.lists.keep(ticket, late).unwrap_err().kind,
+        ErrorKind::Unavailable,
+        "asked for before the reload, answered after"
+    );
+}
+
+#[tokio::test]
+async fn a_list_of_an_unknown_space_or_a_bad_selector_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = Core::new(dir.path(), &dir.path().join("cache"));
+    let refused = core.list_subscribe("main", pods("nowhere"), |_| true).await;
+    assert_eq!(refused.unwrap_err().kind, ErrorKind::NotFound);
+    let space = core.state.open_space("kind-test").id;
+    let mut bad = pods(&space);
+    bad.label_selector = Some("app in web".to_owned());
+    let refused = core.list_subscribe("main", bad, |_| true).await;
+    assert_eq!(refused.unwrap_err().kind, ErrorKind::InvalidInput);
+}

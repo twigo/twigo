@@ -11,13 +11,15 @@ use std::sync::{Arc, Mutex};
 
 use tauri::async_runtime::JoinHandle;
 use tauri::ipc::Channel;
+use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Manager, RunEvent, State, Webview, WindowEvent};
 use tauri_plugin_opener::OpenerExt;
 use twigo_core::Core;
 use twigo_env::Environment;
 use twigo_ipc::{
-    ClusterVersion, Context, ContextAuth, Discovered, ErrorKind, ExecReview, IpcError,
-    KeyboardLayout, ShellEnvironment, Space, StateEntry, StateSnapshot,
+    Ack, ClusterVersion, Context, ContextAuth, Discovered, ErrorKind, ExecReview, IpcError,
+    KeyboardLayout, ListBatch, ListQuery, SetWindow, ShellEnvironment, Space, StateEntry,
+    StateSnapshot, SubscriptionId,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
 
@@ -249,6 +251,49 @@ fn resources_watch(
 }
 
 #[tauri::command]
+async fn list_subscribe(
+    webview: Webview,
+    app: State<'_, App>,
+    request: ListQuery,
+    channel: Channel<ListBatch>,
+) -> Result<SubscriptionId, IpcError> {
+    app.core
+        .list_subscribe(webview.label(), request, move |batch| {
+            match channel.send(batch) {
+                Ok(()) => true,
+                Err(error) => {
+                    eprintln!("could not send a list batch: {error}");
+                    false
+                }
+            }
+        })
+        .await
+}
+
+#[tauri::command]
+fn list_set_window(
+    webview: Webview,
+    app: State<'_, App>,
+    request: SetWindow,
+) -> Result<(), IpcError> {
+    app.core.list_set_window(webview.label(), request)
+}
+
+#[tauri::command]
+fn list_ack(webview: Webview, app: State<'_, App>, request: Ack) -> Result<(), IpcError> {
+    app.core.list_ack(webview.label(), request)
+}
+
+#[tauri::command]
+fn list_unsubscribe(
+    webview: Webview,
+    app: State<'_, App>,
+    request: SubscriptionId,
+) -> Result<(), IpcError> {
+    app.core.list_unsubscribe(webview.label(), request)
+}
+
+#[tauri::command]
 async fn context_sign_in(app: State<'_, App>, request: String) -> Result<(), IpcError> {
     app.core.sign_in(&request).await
 }
@@ -373,12 +418,25 @@ fn main() {
             namespaces_list,
             context_auth_watch,
             resources_watch,
+            list_subscribe,
+            list_set_window,
+            list_ack,
+            list_unsubscribe,
             context_sign_in,
             context_sign_in_cancel,
             exec_review,
             exec_trust,
             url_open,
         ])
+        // A page that starts to load, as on a reload, has none of the
+        // subscriptions of the one it replaces.
+        .on_page_load(|webview, payload| {
+            if payload.event() == PageLoadEvent::Started
+                && let Some(app) = webview.try_state::<App>()
+            {
+                app.core.drop_lists(webview.label());
+            }
+        })
         .on_window_event(|window, event| {
             let focused = match event {
                 WindowEvent::Focused(focused) => *focused,
@@ -389,6 +447,10 @@ fn main() {
             // window's focus itself.
             if let Some(app) = window.app_handle().try_state::<App>() {
                 app.focus(window.label(), focused);
+                // A webview window's webview has the window's label.
+                if let WindowEvent::Destroyed = event {
+                    app.core.drop_lists(window.label());
+                }
             }
         })
         .build(tauri::generate_context!())

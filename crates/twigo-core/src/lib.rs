@@ -5,6 +5,7 @@ mod auth;
 pub mod catalog;
 pub mod connections;
 mod errors;
+pub mod lists;
 pub mod state;
 pub mod trust;
 
@@ -14,10 +15,15 @@ use std::sync::{Arc, Weak};
 
 use jiff::Timestamp;
 use tokio::sync::watch;
+use twigo_cache::batcher::Batcher;
 use twigo_cache::discovery::Follower;
 use twigo_cache::hub::{Connect, Hub, Query, Resource, RowFormat};
+use twigo_cache::view::Spec;
 use twigo_env::{ShellEnv, Status};
-use twigo_ipc::{ClusterVersion, ErrorKind, IpcError, ViewState};
+use twigo_ipc::{
+    Ack, ClusterVersion, ErrorKind, IpcError, ListBatch, ListQuery, SetWindow, SubscriptionId,
+    ViewState,
+};
 use twigo_kube::client::{Clients, ProxyEnv};
 use twigo_kube::credentials::{ExecError, OidcError, Provider, Registry, Source, Timeouts};
 use twigo_kube::discovery::Cache;
@@ -27,6 +33,7 @@ use twigo_netmon::Event;
 pub use auth::AuthFollower;
 use catalog::Catalog;
 use connections::Connections;
+use lists::Lists;
 use state::State;
 use trust::Trust;
 
@@ -36,6 +43,7 @@ pub struct Core {
     pub connections: Connections,
     pub trust: Trust,
     pub hub: Hub,
+    lists: Lists,
     discovery: Arc<Cache>,
     credentials: Registry,
     /// Whether a Twigo window has the focus, which a plugin that may ask
@@ -71,6 +79,7 @@ impl Core {
         let focused = watch::Sender::new(false);
         Arc::new_cyclic(|core| Self {
             hub: Hub::new(connect(core.clone())),
+            lists: Lists::default(),
             discovery: Arc::new(Cache::new(cache.join("discovery"))),
             state: State::open(data.join("state.json")),
             catalog: Catalog::default(),
@@ -260,6 +269,56 @@ impl Core {
                 message: "the cluster is unavailable".to_owned(),
             }),
         }
+    }
+
+    /// A list of a space's resource for a window, filtered, sorted and
+    /// windowed in Rust (ARCHITECTURE 3.4), whose batches go through `send`
+    /// until it says the window is gone.
+    pub async fn list_subscribe(
+        &self,
+        window: &str,
+        query: ListQuery,
+        send: impl FnMut(ListBatch) -> bool + Send + 'static,
+    ) -> Result<SubscriptionId, IpcError> {
+        let ticket = self.lists.ticket(window);
+        let context = self.context(&query.space)?;
+        let spec = Spec::new(&context, &query)?;
+        let rows = self
+            .hub
+            .rows(Query {
+                context,
+                resource: Resource {
+                    group: query.gvr.group,
+                    version: query.gvr.version,
+                    resource: query.gvr.resource,
+                    namespaced: query.namespaced,
+                },
+                format: RowFormat::Table,
+                namespaces: query.namespaces,
+                field_selector: None,
+            })
+            .await?;
+        self.lists.keep(ticket, Batcher::spawn(rows, spec, send))
+    }
+
+    pub fn list_set_window(&self, window: &str, request: SetWindow) -> Result<(), IpcError> {
+        self.lists.with(window, request.id, |list| {
+            list.set_window(request.start, request.end);
+        })
+    }
+
+    pub fn list_ack(&self, window: &str, request: Ack) -> Result<(), IpcError> {
+        self.lists
+            .with(window, request.id, |list| list.ack(request.seq))
+    }
+
+    pub fn list_unsubscribe(&self, window: &str, id: SubscriptionId) -> Result<(), IpcError> {
+        self.lists.remove(window, id)
+    }
+
+    /// Ends the lists of a window that reloads or closes.
+    pub fn drop_lists(&self, window: &str) {
+        self.lists.drop_window(window);
     }
 
     /// Retires every connection on wake, and those whose route moved on a

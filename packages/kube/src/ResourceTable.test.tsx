@@ -71,6 +71,7 @@ async function show(scenario: MockScenario, space = "prod-eu") {
       backend={createMockBackend(scenario)}
       space={space}
       gvr={PODS}
+      namespaced
       title="Pods"
       onStatus={onStatus}
     />,
@@ -177,6 +178,7 @@ test("under StrictMode the table subscribes once and shows rows", async () => {
         backend={backend}
         space="prod-eu"
         gvr={PODS}
+        namespaced
         title="Pods"
       />
     </StrictMode>,
@@ -235,6 +237,7 @@ test("a changed cell flashes through the next batch, and a storm flashes nothing
       backend={script.backend}
       space="s"
       gvr={PODS}
+      namespaced
       title="Pods"
     />,
   );
@@ -297,6 +300,7 @@ test("filters that match nothing say so and offer to clear them", async () => {
       backend={createMockBackend("ready")}
       space="prod-eu"
       gvr={PODS}
+      namespaced
       title="Pods"
       text="no-such-pod"
       onClearFilters={onClearFilters}
@@ -316,6 +320,7 @@ test("j moves on from the selected row after it scrolled out of the window", asy
       backend={createMockBackend("ready")}
       space="prod-eu"
       gvr={PODS}
+      namespaced
       title="Pods"
       register={(_, list) => {
         controller = list;
@@ -357,6 +362,7 @@ test.each([
         backend={createMockBackend("ready")}
         space="prod-eu"
         gvr={PODS}
+        namespaced
         title="Pods"
         text={text}
         choices={choices}
@@ -375,6 +381,7 @@ test("the first subscription already carries the column choices the text filter 
       backend={backend}
       space="prod-eu"
       gvr={PODS}
+      namespaced
       title="Pods"
       text="10.244."
       choices={{ IP: true }}

@@ -81,6 +81,8 @@ interface Props {
   backend: Backend;
   space: string;
   gvr: Gvr;
+  /** As discovery says; the table subscribes once it is known. */
+  namespaced: boolean | undefined;
   /** Plural, as the explorer names the kind: "Pods". */
   title: string;
   /** Empty or absent for every namespace the space covers. */
@@ -132,6 +134,7 @@ function ResourceList({
   backend,
   space,
   gvr,
+  namespaced,
   title,
   namespaces = [],
   text,
@@ -161,17 +164,23 @@ function ResourceList({
   // query and a column toggle does not resubscribe.
   const matched =
     text && Object.keys(choices).length > 0 ? { ...choices } : null;
-  const { snapshot, flash, setWindow } = useListView(backend, {
-    space,
-    gvr,
-    namespaces: [...namespaces],
-    labelSelector: labelSelector ?? null,
-    text: text ?? null,
-    columns: matched,
-    sort,
-    groupBy: statusColumn(gvr) ?? null,
-    values: values ?? null,
-  });
+  const { snapshot, flash, setWindow } = useListView(
+    backend,
+    namespaced === undefined
+      ? undefined
+      : {
+          space,
+          gvr,
+          namespaced,
+          namespaces: [...namespaces],
+          labelSelector: labelSelector ?? null,
+          text: text ?? null,
+          columns: matched,
+          sort,
+          groupBy: statusColumn(gvr) ?? null,
+          values: values ?? null,
+        },
+  );
   const now = useNow(1000);
   const [grid, setGrid] = useState<HTMLDivElement | null>(null);
   const { status } = snapshot;

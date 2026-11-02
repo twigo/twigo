@@ -254,7 +254,7 @@ function Tree({
             paddingLeft: (row.kind === "section" ? 8 : 12) + row.depth * 16,
           }}
           className={cn(
-            "relative flex h-[22px] cursor-default items-center gap-1 pr-2 text-[13px] select-none hover:bg-row-hover",
+            "relative flex h-[22px] items-center gap-1 pr-2 text-[13px] select-none hover:bg-row-hover",
             row.kind === "item" &&
               row.key === active &&
               "bg-selected-unfocused",

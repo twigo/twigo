@@ -1,64 +1,6 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { ListQuery, Sort } from "@twigo/protocol";
-import { createMockBackend } from "@twigo/protocol/mock";
-import { shows, SORTS, topRows } from "./driver";
-import { ListProbe, Probe } from "./probe";
-
-function query(sort: Sort | null): ListQuery {
-  return {
-    space: "prod-eu",
-    gvr: { group: "", version: "v1", resource: "pods" },
-    namespaces: [],
-    labelSelector: null,
-    text: null,
-    columns: null,
-    sort,
-    groupBy: null,
-    values: null,
-  };
-}
-
-async function firstRows(sort: Sort | null) {
-  const probe = new Probe(createMockBackend("ready"));
-  const opened = probe.next();
-  const subscribed = probe.backend.subscribe(
-    "list_subscribe",
-    query(sort),
-    () => undefined,
-  );
-  const list = await opened;
-  await vi.advanceTimersByTimeAsync(0);
-  const id = await subscribed;
-  const windowed = probe.backend.invoke("list_set_window", {
-    id,
-    start: 0,
-    end: 40,
-  });
-  await vi.advanceTimersByTimeAsync(50);
-  await windowed;
-  return topRows(list);
-}
-
-beforeEach(() => {
-  vi.useFakeTimers();
-});
-
-afterEach(() => {
-  vi.clearAllTimers();
-  vi.useRealTimers();
-});
-
-test("every sort changes the first rows on the mock", async () => {
-  let previous = await firstRows(null);
-  expect(previous).toHaveLength(10);
-  for (const sort of SORTS) {
-    const rows = await firstRows(sort);
-    expect(rows, `${sort.column} ${String(sort.descending)}`).not.toEqual(
-      previous,
-    );
-    previous = rows;
-  }
-});
+import { expect, test } from "vitest";
+import { shows, topRows } from "./driver";
+import { ListProbe } from "./probe";
 
 function table(rows: (readonly [string, string] | null)[]): HTMLElement {
   const grid = document.createElement("div");

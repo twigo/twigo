@@ -10,12 +10,14 @@ publish.workspace = true
 
 [dependencies]
 fastrand.workspace = true
-nix.workspace = true
+nix = { workspace = true, features = ["process"] }
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "sync", "time"] }
 twigo-ipc.workspace = true
 
 [dev-dependencies]
+libc.workspace = true
+nix = { workspace = true, features = ["process", "term"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt", "test-util"] }
 

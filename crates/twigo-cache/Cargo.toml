@@ -13,10 +13,12 @@ backon.workspace = true
 form_urlencoded.workspace = true
 futures.workspace = true
 http.workspace = true
+indexset.workspace = true
 jiff.workspace = true
 k8s-openapi.workspace = true
 kube.workspace = true
 percent-encoding.workspace = true
+regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -27,6 +29,7 @@ twigo-kube.workspace = true
 [dev-dependencies]
 bytes.workspace = true
 dhat.workspace = true
+fastrand.workspace = true
 http-body.workspace = true
 http-body-util.workspace = true
 kube = { workspace = true, features = ["runtime"] }
