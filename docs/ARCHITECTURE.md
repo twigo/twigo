@@ -170,7 +170,8 @@ The only extra processes Twigo needs are the ones it must run anyway: exec plugi
 
 **Multiple windows.**
 One core process serves every window.
-Subscriptions are keyed by `(window, view)`, so closing a window drops its watches.
+List subscriptions are keyed by `(window, view)`, so a window reaches only its own, and closing or reloading it drops them: a page that starts to load has none of the lists of the page it replaces.
+The followers of the catalog, the credentials, the resources, the shell and the keyboard are kept one per window and replaced when its next page subscribes.
 Detached editor windows (VS Code's auxiliary windows) come after the MVP.
 
 ### 2.2 Repository layout
@@ -416,18 +417,29 @@ The hub's row store adds about 130 bytes a row for its key and map, by `examples
 ### 3.4 Query views: Rust sorts, filters and windows
 
 The frontend never holds the full list.
-A subscription carries a `ListQuery { space, gvr, namespaces, labelSelector, text, columns, sort, groupBy, values }`.
+A subscription carries a `ListQuery { space, gvr, namespaced, namespaces, labelSelector, text, columns, sort, groupBy, values }`.
+`namespaced` comes from discovery, which the webview holds already, so a list subscribes once its space's resources are known: Rust needs the scope for the request's path and for the Namespace column, which a cluster-scoped kind never has.
 The webview then sends `setWindow(start, end)` as the user scrolls, covering the visible rows plus about two screens of overscan.
 
-- Rust keeps an incremental ordered index per query view.
+- Rust keeps an incremental ordered index per query view, indexset's two-level B-tree with a Fenwick tree over its nodes: a change finds its place in O(log n) and shifts at most a node of 1,024 entries, and one that fills or empties a node rebuilds the Fenwick tree, O(n/1,024).
   - Cells carry their column type, but many core columns are formatted strings: Pod Ready `1/2`, Restarts `3 (5m ago)`, Age.
-  - Rust derives sort keys: known formats are parsed (ratios, leading counts, durations, Age from `creationTimestamp`), and other strings sort naturally.
-- A change set updates the index in O(log n) per row and computes what changed **inside the window**.
-- Text filter: substring or fuzzy match on the columns the table shows, Name among them.
+  - Rust derives sort keys: a ratio by its fraction, then its total, `0/0` as whole; a count such as `3 (5m ago)` by the count, then the duration; durations such as `1h5m` in seconds; Age by `creationTimestamp`, the youngest first.
+    Other text sorts naturally: runs of ASCII digits by value, ASCII letters folded, ties by code points.
+    Empty cells come first, then numbers, ratios and text; rows with equal keys follow their ids, ascending in either direction.
+  - A sort, a group or values for a column the list lacks do nothing, and no sort sorts by Name.
+- Each reader of a row store has a feed of the keys changed since it last read, coalesced, and a key added since then and deleted again leaves it, so it holds no more keys than the reader held and the store holds, however long the reader waits.
+  A flush drains it, updates the index row by row and computes what changed **inside the window**; a relist, new columns or new upstreams send every row again.
+- Text filter on the columns the table shows, Name always among them: a substring in any case of ASCII letters; `!` before it keeps the rows without one; `/…/` is a case-insensitive regex, and `!/…/` its negation.
+  Until the closing slash the text stays a substring, so typing a regex never turns the list into an error; a closed regex that does not parse is refused.
+  Fuzzy matching belongs to Quick Access (4.5), not to tables.
   `columns` carries the user's choices by name, and Rust resolves them against its own columns, so the first batch already filters right and a choice for a column the list lacks, such as Namespace under one namespace, does nothing; without choices the columns of priority 0 count.
-  `/!` negates; a regex can be given explicitly, k9s style.
+- Label selectors are matched in Rust against each row's labels, with the grammar and checks of apimachinery's `labels.Parse`.
 - Values keep the rows whose column holds one of them, such as a pod's Status in CrashLoopBackOff or Error.
-  `groupBy` counts the rows before values drop any, so a filter by health keeps every health's count.
+  `groupBy` counts the rows that the labels and the text keep before values drop any, so a filter by health keeps every health's count.
+- A list sends rows only while it is ready, relisting or stale; in the other states its view shows the state, as 3.7 has it.
+- The mock backend sorts, filters and groups by the same rules, and `packages/protocol/src/query-cases.json` holds cases that both it and Rust's query view run.
+  Its regexes are the browser's, which agree with Rust's `regex` crate only where both the pattern and the text are ASCII, without carriage returns, in the syntax both have, since the crate's `\d`, `\w`, `\s` and case folding follow Unicode and its `.` matches a carriage return, and it prints numbers as JavaScript does, `1e-7` where Rust prints `0.0000001`: the shared cases keep to what both read alike.
+  It sends the pod columns once a list knows them, from its first page on, as Rust does.
 - Multi-context spaces (7.2): the query view merges the upstreams of several contexts and adds a Context column.
   Row identity is `context/namespace/name` already, so one-context spaces, all that M1 serves, need no change then.
 - Selections and bulk actions refer to row IDs, so "select all 5,000" never ships 5,000 rows.
@@ -441,17 +453,18 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
   Channels deliver in order.
   Payloads over 8 KB travel via the `ipc://` fetch path, not `eval`.
   Global events are used only for rare notices: catalog, settings, policy prompts.
-- Coalescing by uid inside a flush window:
+- Coalescing by uid inside a flush window, in the row store's feed (3.4), which holds the keys and reads each row as it is at the flush:
   - the latest version wins;
   - a delete wins;
   - add followed by delete sends nothing;
   - add followed by modify is sent as add.
-- Flush every 50 ms on a tokio interval (`MissedTickBehavior::Skip`), or sooner when the window changes.
+- One task per subscription flushes every 50 ms on a tokio interval (`MissedTickBehavior::Skip`), or sooner when the window changes.
+  A window that changes while a batch waits for its ack goes out with the ack, not on the next tick.
 - **Credit-based flow control.**
   - Channels have no backpressure, so the frontend acknowledges every `seq`.
   - Rust keeps at most one batch unacknowledged and keeps coalescing while it waits.
   - Memory stays bounded by the number of rows, and a slow frame merges updates instead of queueing them.
-- Delivery pauses while the window is hidden or minimised.
+- Delivery pauses while the window is hidden or minimised: the list client acks on an animation frame, which a hidden window does not run, so the batch in flight stays unacknowledged.
   The next flush carries everything that changed in between.
 - On macOS a Channel with this flow control carries 5,300 batches of 2 KB or 460 of 1 MB a second, and 20 subscriptions flushing on the same tick see 3.9 ms at p95 from send to ack ([isolation spike](spikes/tauri-isolation.md)).
 - Rows are serialized once in Rust.
