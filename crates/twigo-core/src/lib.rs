@@ -217,45 +217,26 @@ impl Core {
                 field_selector: None,
             })
             .await;
-        loop {
-            let names = || {
-                let mut names: Vec<String> = index
-                    .items()
-                    .iter()
-                    .map(|row| row.meta.name.to_string())
-                    .collect();
+        match index.whole().await {
+            Ok(rows) => {
+                let mut names: Vec<String> =
+                    rows.iter().map(|row| row.meta.name.to_string()).collect();
                 names.sort();
-                names
-            };
-            match index.state() {
-                ViewState::Ready | ViewState::Relisting => return Ok(names()),
-                ViewState::Stale => {
-                    let names = names();
-                    if names.is_empty() {
-                        return Err(IpcError {
-                            kind: ErrorKind::Unavailable,
-                            message: "the cluster does not answer".to_owned(),
-                        });
-                    }
-                    return Ok(names);
-                }
-                ViewState::Forbidden { verb, resource } => {
-                    return Err(IpcError {
-                        kind: ErrorKind::Forbidden,
-                        message: format!("you may not {verb} {resource}"),
-                    });
-                }
-                ViewState::Unauthorized => {
-                    return Err(IpcError {
-                        kind: ErrorKind::Unauthorized,
-                        message: "the cluster rejected the credentials".to_owned(),
-                    });
-                }
-                ViewState::Error { error } => return Err(error),
-                ViewState::Queued | ViewState::Connecting | ViewState::Syncing { .. } => {
-                    index.changed().await;
-                }
+                Ok(names)
             }
+            Err(ViewState::Forbidden { verb, resource }) => Err(IpcError {
+                kind: ErrorKind::Forbidden,
+                message: format!("you may not {verb} {resource}"),
+            }),
+            Err(ViewState::Unauthorized) => Err(IpcError {
+                kind: ErrorKind::Unauthorized,
+                message: "Twigo has no credentials this cluster accepts".to_owned(),
+            }),
+            Err(ViewState::Error { error }) => Err(error),
+            Err(_) => Err(IpcError {
+                kind: ErrorKind::Unavailable,
+                message: "the cluster is unavailable".to_owned(),
+            }),
         }
     }
 
@@ -289,7 +270,9 @@ impl Core {
                 };
                 if let Some(env) = env {
                     let var = |name: &str| env.get(name)?.to_str().map(str::to_owned);
-                    self.proxy_env.send_replace(Some(ProxyEnv::from_vars(var)));
+                    let proxy = ProxyEnv::from_vars(var);
+                    self.connections.follow_env(&proxy);
+                    self.proxy_env.send_replace(Some(proxy));
                     self.shell_env.send_replace(Some(Arc::clone(&env)));
                     if explicit.is_none() {
                         let home = env.get("HOME").map(Path::new);
@@ -309,7 +292,11 @@ impl Core {
                 if let Some(listed) = listed {
                     let names: HashSet<String> = listed.iter().map(|c| c.name.clone()).collect();
                     self.state.saw(&names, Timestamp::now());
-                    self.connections.keep(&names);
+                    let fingerprints = listed
+                        .iter()
+                        .map(|c| (c.name.clone(), c.fingerprint))
+                        .collect();
+                    self.connections.keep(&fingerprints);
                 }
                 if contexts.changed().await.is_err() {
                     return;

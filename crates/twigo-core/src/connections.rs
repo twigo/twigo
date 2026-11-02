@@ -3,7 +3,7 @@
 //! or the login shell's proxy variables change, which retires the
 //! connections of the clients they replace.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use kube::Config;
@@ -96,10 +96,46 @@ impl Connections {
         Ok(clients)
     }
 
-    /// Drops the clients of contexts no source lists any more.
-    pub fn keep(&self, names: &HashSet<String>) {
+    /// Follows what the sources list now, by context and fingerprint:
+    /// the clients of a context no source lists any more, or whose
+    /// fingerprint changed, are dropped and their connections retired, so
+    /// the watches over them re-open, over rebuilt clients if their
+    /// context is still listed.
+    pub fn keep(&self, listed: &HashMap<String, Fingerprint>) {
         let mut contexts = self.contexts.lock().expect("connections lock");
-        contexts.retain(|name, _| names.contains(name));
+        let mut gone = Vec::new();
+        contexts.retain(|name, slot| {
+            let mut built = slot.built.lock().expect("slot lock");
+            let current = listed.get(name);
+            if built
+                .as_ref()
+                .is_some_and(|built| current != Some(&built.fingerprint))
+            {
+                gone.extend(built.take().map(|built| built.clients));
+            }
+            current.is_some()
+        });
+        drop(contexts);
+        for clients in gone {
+            clients.connections().retire();
+        }
+    }
+
+    /// Drops the clients built with other proxy variables than `env`, the
+    /// login shell's now, and retires their connections.
+    pub fn follow_env(&self, env: &ProxyEnv) {
+        let contexts = self.contexts.lock().expect("connections lock");
+        let mut gone = Vec::new();
+        for slot in contexts.values() {
+            let mut built = slot.built.lock().expect("slot lock");
+            if built.as_ref().is_some_and(|built| built.env != *env) {
+                gone.extend(built.take().map(|built| built.clients));
+            }
+        }
+        drop(contexts);
+        for clients in gone {
+            clients.connections().retire();
+        }
     }
 
     /// Retires the connections of every context, as on wake from sleep.
@@ -245,6 +281,49 @@ contexts:
     }
 
     #[tokio::test]
+    async fn a_changed_context_or_proxy_retires_its_clients_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config"), KUBECONFIG).unwrap();
+        ca(
+            dir.path(),
+            &rcgen::generate_simple_self_signed(["a".to_owned()]).unwrap(),
+        );
+        let connections = Connections::default();
+        let env = ProxyEnv::default();
+        let catalog = load(dir.path());
+        let a = connections
+            .clients(find(&catalog, "kind-a"), &env, None)
+            .await
+            .unwrap();
+        let b = connections
+            .clients(find(&catalog, "kind-b"), &env, None)
+            .await
+            .unwrap();
+        let (a_retired, b_retired) = (a.connections().retired(), b.connections().retired());
+
+        ca(
+            dir.path(),
+            &rcgen::generate_simple_self_signed(["a".to_owned()]).unwrap(),
+        );
+        let catalog = load(dir.path());
+        let listed: HashMap<String, Fingerprint> = catalog
+            .contexts
+            .iter()
+            .map(|context| (context.name.clone(), context.fingerprint))
+            .collect();
+        connections.keep(&listed);
+        assert!(a_retired.has_changed().unwrap(), "its CA file changed");
+        assert!(!b_retired.has_changed().unwrap(), "it did not change");
+        connections.keep(&listed);
+
+        let proxied = ProxyEnv::from_vars(|name| {
+            (name == "HTTPS_PROXY").then(|| "http://proxy.example:3128".to_owned())
+        });
+        connections.follow_env(&proxied);
+        assert!(b_retired.has_changed().unwrap(), "the proxy changed");
+    }
+
+    #[tokio::test]
     async fn a_context_no_source_lists_loses_its_clients() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("config"), KUBECONFIG).unwrap();
@@ -260,7 +339,13 @@ contexts:
             .await
             .unwrap();
 
-        connections.keep(&HashSet::from(["kind-a".to_owned()]));
+        let retired = b.connections().retired();
+        let a = find(&catalog, "kind-a").fingerprint;
+        connections.keep(&HashMap::from([("kind-a".to_owned(), a)]));
+        assert!(
+            retired.has_changed().unwrap(),
+            "the watches over them re-open"
+        );
         let again = connections
             .clients(find(&catalog, "kind-b"), &env, None)
             .await
