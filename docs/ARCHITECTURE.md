@@ -549,17 +549,16 @@ Any page that repaints, a blank one with one changing number included, holds abo
 They are children of launchd, not of the app, so measuring per process under-reports a Tauri app by about half.
 
 `bench/harness.sh` measures them at 5k pods on macOS ([bench](bench.md)).
-It builds the app's bench mode in release, runs a churn generator at 100 changes/s against kwok, launches the app, whose webview driver opens, scrolls, sorts and watches the pod list, and prints one row per metric with its value, target, status and what it measured:
+It builds the app's bench mode in release, runs a churn generator at 100 changes/s against kwok, launches the app on the cluster's kubeconfig, whose webview driver opens the space of its one context, then opens, scrolls, sorts and watches the pod list, and prints one row per metric with its value, target, status and what it measured:
 
-- **First paint** runs from opening the list to its first rows painted.
-- **Change → painted cell** joins the churn generator's log of changes, in Unix ms, with the webview's paints.
-- **Scroll** is the mean fps of `requestAnimationFrame` over 5 s of scrolling at 4,000 px/s, and **sort** the p95 from a header click to the resorted rows painted, over ten sorts.
+- **First paint** runs from opening the list to its first rows painted; the space's discovery starts as the space opens, before the list, so only what remains of it counts.
+- **Change → painted cell** joins the churn generator's log of changes, by pod and restart count, with the webview's paints of the new count, through Unix ms on both sides, from the patch sent.
+- **Scroll** is the mean fps of `requestAnimationFrame` over 5 s of scrolling at 4,000 px/s, and **sort** the p95 from a header click to the resorted rows painted, over eight sorts.
 - **Core RSS** is the app process's resident size with the list open under churn.
 - **Webview memory** is the physical footprint of the WebKit processes the app is responsible for, the process macOS records as having asked for them, but the GPU process, which is shown apart and never judged; the harness starts the app responsible for itself, since one started from a terminal shares the terminal's.
 - **Idle CPU** is the CPU time of the app and those WebKit processes over 30 s with the window hidden, as a share of one core.
 
-Until M1 the webview runs on the mock backend, so first paint and change → painted cell are not measurable: only their webview halves, from a batch to its paint, are shown, apart and unjudged.
-Scroll, sort, memory and idle CPU are measured in the real app on the mock, which sorts and windows in JS in the webview, while the core holds no watch cache, so they are shown and not judged either: the report judges a metric, and fails the run on a missed target, only off the mock.
+The report judges every metric but the GPU process, and fails the run on a missed target.
 CI does not run the harness yet: it needs an unlocked GUI session, since WebKit paints nothing behind a locked screen, and Linux needs the sampler's WebKitGTK branch.
 
 The bench also replays the cases that broke other clients, and one that loopback cannot show:

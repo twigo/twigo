@@ -2,37 +2,46 @@ import type { ListBatch, Sort } from "@twigo/protocol";
 import type { Workbench } from "@twigo/workbench";
 import type { ListProbe, Probe } from "./probe";
 
-const PODS = "k8s-list://prod-eu/v1/pods";
 const SCROLL_SECONDS = 5;
 const SCROLL_PX_PER_SECOND = 4000;
 /**
- * Clicked in this order, from the default Name ascending, so that every click
- * changes the first rows on the mock; each column's second click descends.
+ * Clicked in this order, from the default order by Name, so that every click
+ * changes the first rows of the pods of `bench/pods.sh` on kwok, besides the
+ * cluster's own; each column's second click descends. They all run, so a
+ * Status sort would leave them in the order of their ids either way. The
+ * last, Restarts descending, leaves pods the churn changes on screen.
  */
 export const SORTS: readonly Sort[] = [
-  "Status",
   "Age",
-  "Restarts",
   "Namespace",
   "Name",
+  "Restarts",
 ].flatMap((column) => [
   { column, descending: false },
   { column, descending: true },
 ]);
 const TOP_ROWS = 10;
+const RESTARTS = "Restarts";
 /** The DOM carries no row ids, so rows are told apart by these cells. */
 const KEYS = ["Namespace", "Name"];
 const CHANGE_SECONDS = 60;
 const WAIT_MS = 5000;
+/** The list waits for the space's discovery, then lists every pod. */
+const FIRST_PAINT_WAIT_MS = 30_000;
 const PAINT_TIMEOUT_MS = 1000;
+
+/** A restart count the churn set, painted at `at`, in Unix milliseconds. */
+export interface Paint {
+  pod: string;
+  restarts: number;
+  at: number;
+}
 
 /** What `twigo-bench report` reads as webview.json. */
 export interface Results {
-  backend: string;
   rows: number;
-  changesPerSecond: number;
   refreshMs: number;
-  firstPaint: { batchToPaintMs: number };
+  firstPaintMs: number;
   scroll: {
     seconds: number;
     pxPerSecond: number;
@@ -42,7 +51,7 @@ export interface Results {
   sort: { column: string; descending: boolean; ms: number }[];
   changes: {
     seconds: number;
-    ms: number[];
+    painted: Paint[];
     offscreen: number;
     superseded: number;
     timedOut: number;
@@ -65,8 +74,12 @@ function rendered(): Promise<number> {
 }
 
 /** Checks `ready` on every frame, and resolves when the first frame where it holds is rendered. */
-async function paintedWhen(ready: () => boolean, what: string) {
-  const deadline = performance.now() + WAIT_MS;
+async function paintedWhen(
+  ready: () => boolean,
+  what: string,
+  waitMs = WAIT_MS,
+) {
+  const deadline = performance.now() + waitMs;
   for (;;) {
     await frame();
     if (ready()) return rendered();
@@ -160,39 +173,54 @@ export function shows(table: HTMLElement, expected: readonly string[]) {
   return same(shownRows(table, expected.length), expected);
 }
 
+/** Rejects when `promise` has not settled within `ms`, naming what it waited for. */
+function within<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`no ${what} within ${String(ms)} ms`));
+    }, ms);
+    promise.then(resolve, reject).finally(() => {
+      clearTimeout(timer);
+    });
+  });
+}
+
 function nextBatch(
   list: ListProbe,
   matches: (batch: ListBatch) => boolean,
+  what: string,
 ): Promise<number> {
-  return new Promise((resolve) => {
-    const stop = list.listen((at, batch) => {
+  let stop: () => void = () => undefined;
+  const matched = new Promise<number>((resolve) => {
+    stop = list.listen((at, batch) => {
       if (matches(batch)) {
         stop();
         resolve(at);
       }
     });
   });
+  return within(matched, WAIT_MS, what).finally(stop);
 }
 
-async function open(workbench: Workbench, probe: Probe) {
+/** Opens the space's pod list: from the click to its first rows painted. */
+async function open(workbench: Workbench, probe: Probe, space: string) {
   const opened = probe.next();
-  const deadline = performance.now() + WAIT_MS;
-  for (;;) {
-    try {
-      workbench.editors.open(PODS);
-      break;
-    } catch (error) {
-      if (performance.now() > deadline) throw error;
-      await frame();
-    }
-  }
-  const list = await opened;
-  const batchAt = await nextBatch(list, (batch) => batch.upserts.length > 0);
-  const paintedAt = await paintedWhen(() => {
-    const row = rowAt(grid(), 0);
-    return row !== null && cellText(row, 0) !== undefined;
-  }, "first rows");
-  return { list, batchToPaintMs: paintedAt - batchAt };
+  const clicked = performance.now();
+  workbench.editors.open(`k8s-list://${space}/v1/pods`);
+  const list = await within(
+    opened,
+    FIRST_PAINT_WAIT_MS,
+    "list subscription for the pods",
+  );
+  const paintedAt = await paintedWhen(
+    () => {
+      const row = rowAt(grid(), 0);
+      return row !== null && cellText(row, 0) !== undefined;
+    },
+    "first rows",
+    FIRST_PAINT_WAIT_MS,
+  );
+  return { list, firstPaintMs: paintedAt - clicked };
 }
 
 async function refresh(): Promise<number> {
@@ -249,13 +277,17 @@ async function sorts(probe: Probe): Promise<Results["sort"]> {
     const opened = probe.next();
     const clicked = performance.now();
     button.click();
-    const list = await opened;
+    const list = await within(opened, WAIT_MS, `list sorted by ${sorted}`);
     let expected: string[] = [];
-    await nextBatch(list, () => {
-      const first = topRows(list);
-      if (first) expected = first;
-      return first !== undefined;
-    });
+    await nextBatch(
+      list,
+      () => {
+        const first = topRows(list);
+        if (first) expected = first;
+        return first !== undefined;
+      },
+      `first rows sorted by ${sorted}`,
+    );
     if (same(expected, before)) {
       throw new Error(
         `sorting by ${sorted} leaves the first rows as they were`,
@@ -274,56 +306,68 @@ async function sorts(probe: Probe): Promise<Results["sort"]> {
   return samples;
 }
 
+/** The pod a row id names, its last part. */
+function podOf(id: string): string {
+  return id.slice(id.lastIndexOf("/") + 1);
+}
+
+/**
+ * Watches the Restarts cells of the rows on screen change for a minute, and
+ * records when each new count was painted, for the report to join with the
+ * churn's log of when it sent that count.
+ */
 async function changes(
   list: ListProbe,
   steady: () => Promise<void>,
 ): Promise<Results["changes"]> {
   const table = grid();
-  const positions = new Map(
-    headers(table).map((h, i) => [h.textContent, i] as const),
-  );
-  const pending = new Map<
-    string,
-    { at: number; id: string; position: number; text: string }
-  >();
+  const position = headers(table).findIndex((h) => h.textContent === RESTARTS);
+  if (position < 0) throw new Error(`no ${RESTARTS} header`);
+  const pending = new Map<string, string>();
   const result: Results["changes"] = {
     seconds: CHANGE_SECONDS,
-    ms: [],
+    painted: [],
     offscreen: 0,
     superseded: 0,
     timedOut: 0,
   };
+  const arrived = new Map<string, number>();
   const stop = list.listen((at, _, changed) => {
     for (const { id, column, text } of changed) {
-      const position = positions.get(column);
-      if (position === undefined) continue;
-      const key = `${id}\u0000${column}`;
-      if (pending.has(key)) result.superseded++;
-      pending.set(key, { at, id, position, text });
+      if (column !== RESTARTS) continue;
+      if (pending.has(id)) result.superseded++;
+      pending.set(id, text);
+      arrived.set(id, at);
     }
   });
   await steady();
   const end = performance.now() + CHANGE_SECONDS * 1000;
   while (performance.now() < end) {
     const now = await frame();
-    const shown: number[] = [];
-    for (const [key, change] of pending) {
-      const index = list.indexOf(change.id);
+    const shown: { id: string; text: string }[] = [];
+    for (const [id, text] of pending) {
+      const index = list.indexOf(id);
       const row = index < 0 ? null : rowAt(table, index);
       if (!row || !onScreen(table, row)) {
         result.offscreen++;
-        pending.delete(key);
-      } else if (cellText(row, change.position) === change.text) {
-        shown.push(change.at);
-        pending.delete(key);
-      } else if (now - change.at > PAINT_TIMEOUT_MS) {
+        pending.delete(id);
+      } else if (cellText(row, position) === text) {
+        shown.push({ id, text });
+        pending.delete(id);
+      } else if (now - (arrived.get(id) ?? now) > PAINT_TIMEOUT_MS) {
         result.timedOut++;
-        pending.delete(key);
+        pending.delete(id);
       }
     }
     if (shown.length > 0) {
-      const painted = await rendered();
-      for (const at of shown) result.ms.push(painted - at);
+      const at = performance.timeOrigin + (await rendered());
+      for (const { id, text } of shown) {
+        result.painted.push({
+          pod: podOf(id),
+          restarts: Number.parseInt(text, 10),
+          at,
+        });
+      }
     }
   }
   stop();
@@ -331,20 +375,16 @@ async function changes(
 }
 
 /**
- * Opens the pod list, then scrolls it, sorts it and watches it change,
- * timing each in the webview (ARCHITECTURE 3.8). `steady` runs once the
- * list is open under churn, for the harness to sample memory.
+ * Opens the space's pod list, then scrolls it, sorts it and watches it
+ * change, timing each in the webview (ARCHITECTURE 3.8). `steady` runs once
+ * the list is open under churn, for the harness to sample memory.
  */
 export async function drive(
   workbench: Workbench,
   probe: Probe,
-  {
-    backend,
-    changesPerSecond,
-    steady,
-  }: { backend: string; changesPerSecond: number; steady: () => Promise<void> },
+  { space, steady }: { space: string; steady: () => Promise<void> },
 ): Promise<Results> {
-  const first = await open(workbench, probe);
+  const first = await open(workbench, probe, space);
   await sleep(1000);
   const refreshMs = await refresh();
   const scrolled = await scroll();
@@ -353,11 +393,9 @@ export async function drive(
   await top();
   const changed = await changes(list, steady);
   return {
-    backend,
     rows: list.total,
-    changesPerSecond,
     refreshMs,
-    firstPaint: { batchToPaintMs: first.batchToPaintMs },
+    firstPaintMs: first.firstPaintMs,
     scroll: scrolled,
     sort: sorted,
     changes: changed,

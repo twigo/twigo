@@ -2,15 +2,19 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { registerKube } from "@twigo/kube";
-import { toIpcError } from "@twigo/protocol";
-import { createMockBackend } from "@twigo/protocol/mock";
-import { createWorkbench, platformOf, WorkbenchView } from "@twigo/workbench";
+import { tauriBackend, toIpcError } from "@twigo/protocol";
+import {
+  createWorkbench,
+  platformOf,
+  WorkbenchView,
+  type Workbench,
+} from "@twigo/workbench";
 import { installNativeMenu } from "../src/nativeMenu";
 import { drive } from "./driver";
 import { Probe } from "./probe";
 import "../src/index.css";
 
-const CHANGES_PER_SECOND = 100;
+const CATALOG_WAIT_MS = 30_000;
 
 const root = document.getElementById("root");
 if (!root) throw new Error("index.html has no #root");
@@ -51,9 +55,24 @@ function whileVisible<T>(work: () => Promise<T>): Promise<T> {
   });
 }
 
+/** The space of the one context TWIGO_KUBECONFIG names, the harness's cluster. */
+async function benchSpace(workbench: Workbench): Promise<string> {
+  const deadline = performance.now() + CATALOG_WAIT_MS;
+  while (workbench.catalog.list === undefined) {
+    if (performance.now() > deadline) throw new Error("no catalog");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  const [context, ...others] = workbench.catalog.list;
+  if (!context || others.length > 0) {
+    throw new Error(
+      `the bench needs one context, its cluster's; the catalog lists ${String(workbench.catalog.list.length)}`,
+    );
+  }
+  return (await workbench.spaces.open(context.name)).id;
+}
+
 async function run(container: HTMLElement) {
-  // @todo: replace the mock with tauriBackend once Rust serves the pod list (M1).
-  const probe = new Probe(createMockBackend("live", "us", CHANGES_PER_SECOND));
+  const probe = new Probe(tauriBackend);
   const workbench = await createWorkbench(
     probe.backend,
     platformOf(navigator.userAgent),
@@ -65,12 +84,9 @@ async function run(container: HTMLElement) {
       <WorkbenchView workbench={workbench} />
     </StrictMode>,
   );
+  const space = await benchSpace(workbench);
   const results = await whileVisible(() =>
-    drive(workbench, probe, {
-      backend: "mock",
-      changesPerSecond: CHANGES_PER_SECOND,
-      steady: () => write("steady", {}),
-    }),
+    drive(workbench, probe, { space, steady: () => write("steady", {}) }),
   );
   await write("webview", results);
 }

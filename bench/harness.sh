@@ -3,8 +3,8 @@
 #
 # ARCHITECTURE 3.8's six metrics at 5k pods, on macOS. Builds the app's bench mode in release,
 # runs the churn generator at 100 changes/s against a kwok cluster, launches the app with
-# TWIGO_BENCH, samples its memory with the pod list open and its CPU with the window hidden,
-# and prints the report. Without a kubeconfig it creates the cluster (bench/cluster.sh up bench,
+# TWIGO_BENCH and the cluster's kubeconfig as TWIGO_KUBECONFIG, samples its memory with the pod
+# list open and its CPU with the window hidden, and prints the report. Without a kubeconfig it creates the cluster (bench/cluster.sh up bench,
 # bench/pods.sh 5000) and deletes it at the end; a given one must hold the 5,000 pods already.
 # report.json and the files it is built from land in $TWIGO_BENCH_DIR/harness.
 set -euo pipefail
@@ -114,10 +114,13 @@ until [ -s "$out/churn.jsonl" ]; do
   sleep 1
 done
 
-# The bench build has an identifier of its own, so its window state starts fresh here and the
-# user's Twigo keeps its own and its single-instance lock.
-rm -f "$HOME/Library/Application Support/io.twigo.ide.bench/.window-state.json"
-TWIGO_BENCH=$out "$tool" launch "$target/release/twigo" >"$out/app.log" 2>&1 &
+# The bench build has an identifier of its own, so its window state and its state start fresh
+# here and the user's Twigo keeps its own and its single-instance lock: a pod list the last run
+# left open would subscribe before the driver opens it.
+bench_data="$HOME/Library/Application Support/io.twigo.ide.bench"
+rm -f "$bench_data/.window-state.json" "$bench_data/state.json"
+TWIGO_BENCH=$out TWIGO_KUBECONFIG=$kubeconfig "$tool" launch "$target/release/twigo" \
+  >"$out/app.log" 2>&1 &
 app=$!
 
 # The webview writes failure.json and then idle.json, so a failure is checked after the file.
