@@ -445,3 +445,23 @@ test("opening the object from the details keeps the list in a tab of its own", a
   expect(tabs).toHaveLength(2);
   expect(workbench.editors.active).toMatch(/^k8s:\/\/prod-eu\/\/v1\/pods\//);
 });
+
+test("the details say why the object cannot open, over the row's cells", async () => {
+  const backend = createMockBackend("ready");
+  const subscribe = backend.subscribe.bind(backend);
+  vi.spyOn(backend, "subscribe").mockImplementation(
+    (command, request, onMessage) =>
+      command === "object_open"
+        ? Promise.reject(new Error("Command object_open not allowed by ACL"))
+        : subscribe(command, request, onMessage),
+  );
+  await podsList(backend);
+  const [first] = rows();
+  if (!first) throw new Error("no rows");
+  fireEvent.click(first);
+  await settle();
+  expect(details()?.textContent).toContain(
+    "Command object_open not allowed by ACL",
+  );
+  expect(details()?.textContent).toContain("Ready");
+});

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { SquareArrowOutUpRight, X } from "lucide-react";
-import type { ObjectQuery, ObjectRef } from "@twigo/protocol";
+import type { ObjectQuery, ObjectRef, ViewState } from "@twigo/protocol";
 import { Button, EmptyState } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import { useWorkbench } from "@twigo/workbench";
@@ -152,10 +152,31 @@ export function Details({
             values={values}
           />
         ) : (
-          <Cells selected={selected} />
+          <>
+            <Failure status={snapshot.status} />
+            <Cells selected={selected} />
+          </>
         )}
       </div>
     </aside>
+  );
+}
+
+/** Why the object cannot come, if it cannot; the row's cells stay below. */
+function Failure({ status }: { status: ViewState }) {
+  const why =
+    status.state === "error"
+      ? status.error.message
+      : status.state === "forbidden"
+        ? `You may not ${status.verb} ${status.resource}.`
+        : status.state === "unauthorized"
+          ? "The cluster does not accept the credentials."
+          : undefined;
+  if (why === undefined) return null;
+  return (
+    <EmptyState variant="error" density="inline" className="px-3">
+      {why}
+    </EmptyState>
   );
 }
 
