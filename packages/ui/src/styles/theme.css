@@ -77,8 +77,6 @@
   --sidebar-foreground: oklch(0.32 0.004 250);
   --sidebar-border: oklch(0.915 0.003 250);
   --panel: oklch(0.975 0.002 250);
-  --statusbar: oklch(0.52 0.075 245);
-  --statusbar-foreground: oklch(0.98 0.006 245);
 
   /* Tones (ARCHITECTURE 4.9). --warn fills dots and edges; as text it is
      --warn-foreground, which reads at 4.5:1. */
@@ -152,8 +150,6 @@
   --sidebar-foreground: oklch(0.87 0.002 250);
   --sidebar-border: oklch(1 0 0 / 8%);
   --panel: oklch(0.218 0.002 250);
-  --statusbar: oklch(0.4 0.06 245);
-  --statusbar-foreground: oklch(0.94 0.012 245);
 
   --ok: oklch(0.72 0.15 150);
   --warn: oklch(0.78 0.15 75);
@@ -220,8 +216,6 @@
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-panel: var(--panel);
-  --color-statusbar: var(--statusbar);
-  --color-statusbar-foreground: var(--statusbar-foreground);
   --color-ok: var(--ok);
   --color-warn: var(--warn);
   --color-warn-foreground: var(--warn-foreground);
