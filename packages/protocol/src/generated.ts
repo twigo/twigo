@@ -283,7 +283,7 @@ export type Commands = {
   spaces_list: { request: null; response: Array<Space>; message: null };
   contexts_watch: { request: null; response: Array<Context>; message: Array<Context> };
   space_open: { request: string; response: Space; message: null };
-  resources_watch: { request: string; response: Discovered; message: Discovered };
+  resources_watch: { request: string; response: null; message: Discovered };
   namespaces_list: { request: string; response: Array<string>; message: null };
   cluster_version: { request: string; response: ClusterVersion; message: null };
   list_subscribe: { request: ListQuery; response: SubscriptionId; message: ListBatch };

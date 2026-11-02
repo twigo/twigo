@@ -222,26 +222,30 @@ async fn context_auth_watch(
 }
 
 #[tauri::command]
-async fn resources_watch(
+fn resources_watch(
     webview: Webview,
     app: State<'_, App>,
     request: String,
     channel: Channel<Discovered>,
-) -> Result<Discovered, IpcError> {
-    // As for the credentials, the webview waits for an answer before its
-    // next watch.
-    let mut resources = app.core.follow_resources(&request).await?;
-    let current = resources.next().await;
+) {
+    // Replaced in the order the webview asks, which waits for this answer
+    // before its next watch, so the follower is that of the last space.
+    let core = Arc::clone(&app.core);
     let follower = tauri::async_runtime::spawn(async move {
-        loop {
-            let next = resources.next().await;
+        let send = |next: Discovered| {
             if let Err(error) = channel.send(next) {
                 eprintln!("could not send the resources: {error}");
             }
+        };
+        let mut resources = match core.follow_resources(&request).await {
+            Ok(resources) => resources,
+            Err(error) => return send(Discovered::Failed { error }),
+        };
+        loop {
+            send(resources.next().await);
         }
     });
     app.resources.replace(&webview, follower);
-    Ok(current)
 }
 
 #[tauri::command]

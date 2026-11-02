@@ -62,9 +62,20 @@ test("another space is followed once active, and the one before keeps its answer
   expect(discovery.get("prod-eu").state).toBe("ready");
 });
 
-test("a failed discovery asks again once a credential comes", async () => {
+test("the active space is followed again once a credential comes, whatever it answered", async () => {
   const { credentials, discovery, watched, push } = await following();
   await discovery.resources("prod-eu");
+  const signedIn = () => {
+    credentials.ready++;
+    act(() => {
+      credentials.changes.emit();
+    });
+  };
+
+  signedIn();
+  await vi.waitFor(() => {
+    expect(watched).toEqual(["prod-eu", "prod-eu"]);
+  });
   push("prod-eu", {
     state: "failed",
     error: { kind: "unauthorized", message: "no credentials" },
@@ -72,27 +83,34 @@ test("a failed discovery asks again once a credential comes", async () => {
   await expect(discovery.resources("prod-eu")).rejects.toMatchObject({
     kind: "unauthorized",
   });
-
-  credentials.ready++;
-  act(() => {
-    credentials.changes.emit();
-  });
+  signedIn();
   await vi.waitFor(() => {
     expect(discovery.get("prod-eu").state).toBe("ready");
   });
-  expect(watched).toEqual(["prod-eu", "prod-eu"]);
+  expect(watched).toEqual(["prod-eu", "prod-eu", "prod-eu"]);
 });
 
-test("a change sent before the answer outlives the answer", async () => {
+test("a space chosen while a watch is asked is followed after it, and one passed over meanwhile never", async () => {
   const mock = createMockBackend("ready");
+  const watched: string[] = [];
+  const gate: { open?: () => void } = {};
   const backend: Backend = {
     invoke: (command, request) => mock.invoke(command, request),
     subscribe: (command, request, onMessage) => {
       const answer = mock.subscribe(command, request, onMessage);
-      if (command === "resources_watch") {
-        onMessage({ state: "ready", resources: [...PODS] });
+      if (command !== "resources_watch" || typeof request !== "string") {
+        return answer;
       }
-      return answer;
+      watched.push(request);
+      if (request !== "prod-eu") return answer;
+      return answer.then(
+        (value) =>
+          new Promise<typeof value>((resolve) => {
+            gate.open = () => {
+              resolve(value);
+            };
+          }),
+      );
     },
   };
   const workbench = await testWorkbench("ready", backend);
@@ -102,8 +120,17 @@ test("a change sent before the answer outlives the answer", async () => {
     credentials: { changes: new Changes(), ready: 0 },
   });
   await vi.waitFor(() => {
-    expect(discovery.get("prod-eu")).toEqual({ state: "ready", value: PODS });
+    expect(gate.open).toBeDefined();
+  });
+
+  act(() => {
+    workbench.spaces.select("staging");
+    workbench.spaces.select("dev");
   });
   await new Promise((resolve) => setTimeout(resolve, 50));
-  expect(discovery.get("prod-eu")).toEqual({ state: "ready", value: PODS });
+  expect(watched).toEqual(["prod-eu"]);
+  gate.open?.();
+  await expect(discovery.resources("dev")).resolves.toEqual(RESOURCES);
+  expect(watched).toEqual(["prod-eu", "dev"]);
+  expect(discovery.get("staging").state).toBe("loading");
 });

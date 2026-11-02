@@ -295,9 +295,10 @@ export function createMockBackend(
       return id;
     },
     contexts_watch: () => CONTEXTS,
-    resources_watch: (id) => {
+    resources_watch: (id, onMessage) => {
       space(id);
-      return { state: "ready", resources: RESOURCES };
+      onMessage({ state: "ready", resources: RESOURCES });
+      return null;
     },
     context_auth_watch: (context, onMessage) => auth.watch(context, onMessage),
     keyboard_layout_watch: () => LAYOUTS[layout],

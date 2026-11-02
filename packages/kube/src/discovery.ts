@@ -25,7 +25,7 @@ export class Discovery {
   #ready: number;
   /**
    * The last watch asked for, which the next waits on: Rust keeps one
-   * follower per webview, that of the watch that answered last.
+   * follower per webview, that of the watch it answered last, at once.
    */
   #watching: Promise<void> = Promise.resolve();
 
@@ -38,15 +38,14 @@ export class Discovery {
     workbench.spaces.changes.subscribe(() => {
       this.#follow(workbench.spaces.active?.id);
     });
-    // A discovery the credential refused asks again once it comes.
+    // Rust stops following what the credential refused, as the hub stops
+    // its upstreams, so the space is followed again once a credential
+    // comes, whatever the last answer was.
     workbench.credentials.changes.subscribe(() => {
       const { ready } = workbench.credentials;
       if (ready === this.#ready) return;
       this.#ready = ready;
-      const space = this.#space;
-      if (space !== undefined && this.get(space).state === "failed") {
-        this.#watch(space);
-      }
+      if (this.#space !== undefined) this.#watch(this.#space);
     });
     this.#follow(workbench.spaces.active?.id);
   }
@@ -90,23 +89,19 @@ export class Discovery {
   }
 
   #watch(space: string): void {
-    this.#watching = this.#watching.then(() => {
+    this.#watching = this.#watching.then(async () => {
       if (space !== this.#space) return;
-      // A change sent before the answer is newer than the answer.
-      const early = { changed: false };
-      return this.workbench.backend
-        .subscribe("resources_watch", space, (next) => {
-          early.changed = true;
-          this.#set(space, next);
-        })
-        .then(
-          (answer) => {
-            if (!early.changed) this.#set(space, answer);
-          },
-          (error: unknown) => {
-            this.#set(space, { state: "failed", error: toIpcError(error) });
+      try {
+        await this.workbench.backend.subscribe(
+          "resources_watch",
+          space,
+          (next) => {
+            this.#set(space, next);
           },
         );
+      } catch (error: unknown) {
+        this.#set(space, { state: "failed", error: toIpcError(error) });
+      }
     });
   }
 

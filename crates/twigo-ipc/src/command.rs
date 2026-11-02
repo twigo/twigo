@@ -49,14 +49,16 @@ impl Command for SpaceOpen {
     type Message = ();
 }
 
-/// Answers with the resources a space's context serves, by the space's id,
-/// then sends them again on every change (ARCHITECTURE 3.6).
+/// Follows the resources a space's context serves, by the space's id
+/// (ARCHITECTURE 3.6): answers at once, then sends them once discovery
+/// answers and again on every change. Discovery may wait on the network or
+/// a sign-in, which would hold up the watch of the next space.
 pub struct ResourcesWatch;
 
 impl Command for ResourcesWatch {
     const NAME: &'static str = "resources_watch";
     type Request = String;
-    type Response = Discovered;
+    type Response = ();
     type Message = Discovered;
 }
 
