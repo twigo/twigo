@@ -34,7 +34,7 @@ impl Provider {
         })
     }
 
-    /// Drops `used`, which the server rejected.
+    /// Tells the provider the server rejected `used`.
     pub(crate) fn reject(&self, used: &std::sync::Arc<Credential>) {
         match self {
             Provider::Exec(source) => source.reject(used),

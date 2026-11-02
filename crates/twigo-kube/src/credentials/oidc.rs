@@ -160,6 +160,10 @@ struct State {
     /// it rather than spend another refresh token and write the file again
     /// on every request; client-go never refreshes on a 401.
     fresh: bool,
+    /// The server rejected the fresh id-token: the next request reads the
+    /// user's file again, so a token the person got by signing in elsewhere
+    /// replaces it, without a refresh.
+    reread: bool,
     /// The id-token and refresh token the user's file held when this source
     /// last read or wrote it: only tokens someone else wrote since are taken
     /// from it, never ones it still holds after a failed write or a
@@ -192,6 +196,7 @@ impl Oidc {
                 current: None,
                 style: None,
                 fresh: false,
+                reread: false,
             }),
             refreshing: tokio::sync::Mutex::new(()),
         }
@@ -200,6 +205,13 @@ impl Oidc {
     /// The id-token while it lasts, else a refreshed one; one refresh at a
     /// time, so a rotated refresh token is never spent twice.
     pub async fn credential(&self) -> Result<Arc<Credential>, OidcError> {
+        if self.state().reread {
+            let _one = self.refreshing.lock().await;
+            let reread = std::mem::take(&mut self.state().reread);
+            if reread {
+                self.read_back();
+            }
+        }
         if let Some(credential) = self.valid() {
             return Ok(credential);
         }
@@ -267,15 +279,20 @@ impl Oidc {
     }
 
     /// Drops `used`, which the server rejected, so the next request
-    /// refreshes, unless a refresh just got it.
+    /// refreshes; one a refresh just got stays, unless the user's file holds
+    /// a newer one by the next request.
     pub fn reject(&self, used: &Arc<Credential>) {
         let mut state = self.state();
-        if !state.fresh
-            && state
-                .current
-                .as_ref()
-                .is_some_and(|current| Arc::ptr_eq(current, used))
+        if !state
+            .current
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, used))
         {
+            return;
+        }
+        if state.fresh {
+            state.reread = true;
+        } else {
             state.current = None;
             state.entry.id_token = None;
         }

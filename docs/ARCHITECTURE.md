@@ -1102,7 +1102,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   Each context has two shared hyper-util clients: an HTTP/2 one for requests, watches and logs, and an HTTP/1.1 one for exec, attach and port-forward (3.2).
   Every actor's kube clients are built over them with kube's base URI and header layers and Twigo's auth layer.
   The exec block is stripped from the config first, and the `gcp` and `azure` auth providers are refused with client-go's messages, since kube would run gcp's `cmd-path`.
-  A token, basic auth or a client certificate in the user entry wins over its plugin, as in client-go.
+  A token, basic auth or a client certificate in the user entry wins over its plugin, as in client-go, which reads an empty one as none.
 - **The credential runner.**
   - Uses `tokio::process` with the shell environment, then the entry's `env`, then `KUBERNETES_EXEC_INFO`; null stdin, its own process group, killed whole on a timeout, a cancel or the app's quit, and stdout capped at 1 MiB.
     It waits for stdout to close but not stderr, which a helper the plugin left running may hold, and reads stderr to its end in the background so that helper never meets a broken pipe; client-go hands stderr to the terminal.
@@ -1145,7 +1145,8 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     Only the two values change, through `yaml-edit`, under kubectl's `<file>.lock`, by a rename over the resolved file, so its hard links and ACLs do not carry over; kubectl writes in place.
   - One refresh runs at a time, and the file is read again first: tokens someone else wrote since, as kubectl does, are taken, never the ones it still holds after a failed write or a rejection.
     The new tokens go to memory before the file, so a failed write never loses the only valid refresh token.
-  - A 401 drops an id-token and refreshes once; one a refresh just got is kept until it expires, since client-go never refreshes on a 401 and every refresh rewrites the file.
+  - A 401 drops an id-token and refreshes once; one a refresh just got is kept until it expires, unless the user's file holds a newer one by the next request, since client-go never refreshes on a 401 and every refresh rewrites the file.
+    A request whose provider has no other credential goes unretried.
   - A token or basic auth in the entry wins over the provider, as in client-go.
   - The oidc tokens do not count in the fingerprint (6.3), so a refresh rebuilds no client.
 - **Client certificates and token files** work through kube.

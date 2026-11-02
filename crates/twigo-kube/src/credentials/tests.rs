@@ -836,3 +836,27 @@ async fn the_plugins_under_way_die_with_the_app() {
         .unwrap();
     assert!(ended.is_err());
 }
+
+#[tokio::test]
+async fn a_rejection_leaves_a_run_under_way_on_screen() {
+    let plugins = Plugins::new();
+    let script = plugins.script(
+        "second-hangs",
+        &format!(
+            r#"[ "$(wc -l < '{}')" -gt 1 ] && {{ echo 'enter the code ABC' >&2; exec sleep 1000; }}
+printf '{{"status":{{"token":"first"}}}}'"#,
+            plugins.runs_file().display()
+        ),
+    );
+    let source = registry().source(exec(&script, ""));
+    let first = source.credential().await.unwrap();
+    source.sign_in();
+    let mut status = source.status();
+    status
+        .wait_for(|status| matches!(status, Status::Running { output, .. } if !output.is_empty()))
+        .await
+        .unwrap();
+    source.reject(&first);
+    assert!(matches!(*source.status().borrow(), Status::Running { .. }));
+    source.cancel();
+}

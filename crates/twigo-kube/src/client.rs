@@ -22,6 +22,7 @@ use kube::{Client, Config};
 use rustls::client::Resumption;
 use rustls::pki_types::InvalidDnsNameError;
 use rustls::pki_types::ServerName;
+use secrecy::ExposeSecret;
 use tokio::sync::watch;
 use tower::timeout::TimeoutLayer;
 use tower::{BoxError, ServiceBuilder};
@@ -170,6 +171,19 @@ fn without_plugins(config: &Config, provided: bool) -> Result<Config, Error> {
     }
     let mut config = config.clone();
     config.auth_info.exec = None;
+    // client-go reads an empty token or username as none; kube would send
+    // `Bearer ` and leave a token file unread.
+    let user = &mut config.auth_info;
+    if user
+        .token
+        .as_ref()
+        .is_some_and(|token| token.expose_secret().is_empty())
+    {
+        user.token = None;
+    }
+    if user.username.as_deref() == Some("") {
+        user.username = None;
+    }
     // client-go's bearer and basic round trippers wrap the provider's, which
     // passes on a request that carries a header already; kube reads the
     // provider first.

@@ -296,7 +296,10 @@ impl Source {
             .is_some_and(|cached| Arc::ptr_eq(cached, used))
         {
             state.credential = None;
-            self.status.send_replace(Status::Idle);
+            // A run under way keeps its status: its code may be on screen.
+            if state.run.is_none() {
+                self.status.send_replace(Status::Idle);
+            }
         }
     }
 

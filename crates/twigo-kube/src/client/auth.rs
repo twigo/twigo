@@ -1,7 +1,8 @@
 //! The credential Twigo gets on each request (ARCHITECTURE 6.2): its token
 //! as the bearer, a plugin's certificate offered at the next handshake, and
-//! on a 401 one new credential and one retry. client-go only refreshes for
-//! the next request (`plugin/pkg/client/auth/exec/exec.go`, `RoundTrip`).
+//! on a 401 the provider's rejection and, when that gets another
+//! credential, one retry. client-go only refreshes for the next request
+//! (`plugin/pkg/client/auth/exec/exec.go`, `RoundTrip`).
 
 use std::future::Future;
 use std::pin::Pin;
@@ -89,7 +90,10 @@ where
             let Some(mut again) = again else {
                 return Ok(response);
             };
-            layer.authorize(&mut again).await?;
+            let next = layer.authorize(&mut again).await?;
+            if Arc::ptr_eq(&next, &used) {
+                return Ok(response);
+            }
             inner.oneshot(again).await.map_err(Into::into)
         })
     }

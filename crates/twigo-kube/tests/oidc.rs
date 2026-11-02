@@ -470,8 +470,31 @@ async fn a_refreshed_token_the_server_rejects_too_is_kept_until_it_expires() {
     let refreshed = setup.oidc.credential().await.unwrap();
     for _ in 0..5 {
         let used = setup.oidc.credential().await.unwrap();
-        assert_eq!(token(&used), token(&refreshed));
+        assert!(
+            Arc::ptr_eq(&used, &refreshed),
+            "the same credential, so no retry"
+        );
         setup.oidc.reject(&used);
     }
+    assert_eq!(issuer.grants().len(), 1);
+}
+
+#[tokio::test]
+async fn a_rejected_refreshed_token_gives_way_to_one_signed_in_elsewhere() {
+    let issuer = Issuer::start("r1").await;
+    let setup = setup(&kubeconfig(
+        &issuer,
+        &jwt(SignedDuration::from_secs(-60), 0),
+        Some("r1"),
+    ));
+    let refreshed = setup.oidc.credential().await.unwrap();
+    setup.oidc.reject(&refreshed);
+    let from_kubectl = jwt(SignedDuration::from_hours(1), 77);
+    std::fs::write(
+        &setup.file,
+        kubeconfig(&issuer, &from_kubectl, Some("r-kubectl")),
+    )
+    .unwrap();
+    assert_eq!(token(&setup.oidc.credential().await.unwrap()), from_kubectl);
     assert_eq!(issuer.grants().len(), 1);
 }

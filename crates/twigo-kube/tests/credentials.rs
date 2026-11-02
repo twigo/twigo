@@ -434,3 +434,22 @@ async fn a_token_in_the_entry_goes_out_rather_than_its_oidc_provider_s() {
     assert_eq!(get(&clients).await.unwrap(), "ok");
     assert_eq!(server.seen()[0].token.as_deref(), Some("static"));
 }
+
+#[tokio::test]
+async fn an_empty_token_leaves_the_token_file_to_be_read() {
+    let server = Server::start().await;
+    server.accept_token("from-file");
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("token");
+    std::fs::write(&file, "from-file").unwrap();
+    let mut config = Config::new(
+        format!("https://localhost:{}", server.addr.port())
+            .parse()
+            .unwrap(),
+    );
+    config.root_cert = Some(vec![server.ca.to_vec()]);
+    config.auth_info.token = Some(String::new().into());
+    config.auth_info.token_file = Some(file.display().to_string());
+    let clients = Clients::new(&config, Options::default()).unwrap();
+    assert_eq!(get(&clients).await.unwrap(), "ok");
+}
