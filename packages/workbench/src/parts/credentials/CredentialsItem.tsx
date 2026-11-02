@@ -1,5 +1,6 @@
-import { KeyRound, Loader2, ShieldAlert, TriangleAlert } from "lucide-react";
-import { Popover, PopoverContent, PopoverTrigger } from "@twigo/ui";
+import { useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { KeyRound, Loader2, ShieldAlert, TriangleAlert, X } from "lucide-react";
 import { useChanges, useWorkbench } from "../../react";
 import { SignInBody } from "./SignIn";
 import { useSignIn } from "./useSignIn";
@@ -17,6 +18,7 @@ export function CredentialsItem() {
   useChanges(credentials.changes);
   const { auth } = credentials;
   const run = useSignIn();
+  const anchor = useRef<HTMLButtonElement>(null);
 
   if (auth.state === "invalid") {
     return (
@@ -58,50 +60,82 @@ export function CredentialsItem() {
     : run.plugin.signsIn
       ? "Signing in…"
       : `Running ${base(run.plugin.command)}…`;
-  const trigger = (
-    <button
-      type="button"
-      className={ITEM}
-      onClick={() => {
-        credentials.setPanelOpen(!credentials.panelOpen);
-      }}
-    >
-      {failed ? (
-        <TriangleAlert aria-hidden className="size-3.5" />
-      ) : (
-        <Loader2 aria-hidden className="size-3.5 animate-spin" />
-      )}
-      {label}
-    </button>
-  );
   return (
-    <Popover
-      open={credentials.panelOpen}
-      onOpenChange={(open) => {
-        credentials.setPanelOpen(open);
-      }}
-    >
-      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-      <PopoverContent
-        side="top"
-        className="w-96 p-3"
-        // It opens by itself, so it leaves the focus where the person is.
-        onOpenAutoFocus={(event) => {
-          event.preventDefault();
-        }}
-        // A run under way keeps its panel when the person clicks elsewhere,
-        // as into a browser's code field; Escape closes it like any popover,
-        // and the item opens it again.
-        onInteractOutside={(event) => {
-          if (!failed) event.preventDefault();
-        }}
-        onCloseAutoFocus={(event) => {
-          event.preventDefault();
+    <>
+      <button
+        ref={anchor}
+        type="button"
+        className={ITEM}
+        aria-expanded={credentials.panelOpen}
+        onClick={() => {
+          credentials.setPanelOpen(!credentials.panelOpen);
         }}
       >
-        <SignInBody {...run} />
-      </PopoverContent>
-    </Popover>
+        {failed ? (
+          <TriangleAlert aria-hidden className="size-3.5" />
+        ) : (
+          <Loader2 aria-hidden className="size-3.5 animate-spin" />
+        )}
+        {label}
+      </button>
+      {credentials.panelOpen && (
+        <Panel anchor={anchor}>
+          <SignInBody {...run} />
+        </Panel>
+      )}
+    </>
+  );
+}
+
+/**
+ * The sign-in panel above its item. Not a popover: a popover's dismissable
+ * layer takes Escape for itself, and the code must stay in view while the
+ * person works elsewhere, in Twigo or a browser. Its close button, the item
+ * and a finished run close it; it takes no focus.
+ */
+function Panel({
+  anchor,
+  children,
+}: {
+  anchor: React.RefObject<HTMLButtonElement | null>;
+  children: React.ReactNode;
+}) {
+  const { credentials } = useWorkbench();
+  const [place, setPlace] = useState<{ left: number; bottom: number }>();
+  useLayoutEffect(() => {
+    const measure = () => {
+      const rect = anchor.current?.getBoundingClientRect();
+      if (!rect) return;
+      setPlace({
+        left: Math.max(8, Math.min(rect.left, window.innerWidth - 392)),
+        bottom: window.innerHeight - rect.top + 4,
+      });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => {
+      window.removeEventListener("resize", measure);
+    };
+  }, [anchor]);
+  return createPortal(
+    <section
+      aria-label="Sign in"
+      style={place}
+      className="fixed z-50 w-96 rounded-md border border-border bg-popover/90 p-3 text-popover-foreground shadow-lg backdrop-blur-xl"
+    >
+      <button
+        type="button"
+        aria-label="Hide"
+        className="absolute right-2 top-2 rounded p-1 text-muted-foreground hover:bg-accent"
+        onClick={() => {
+          credentials.setPanelOpen(false);
+        }}
+      >
+        <X className="size-3.5" />
+      </button>
+      {children}
+    </section>,
+    document.body,
   );
 }
 

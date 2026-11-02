@@ -318,7 +318,7 @@ export function createMockBackend(
   };
 }
 
-/** What Rust's `sign_in_url` lets through: https, or http to localhost or 127.0.0.1, without a user part. */
+/** Rust's `sign_in_url` rule: https, or http to localhost or 127.0.0.1, without a user part; WHATWG's URL parser may read an unusual link otherwise than Rust's. */
 function signInLink(url: string): boolean {
   let parsed: URL;
   try {

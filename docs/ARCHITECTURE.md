@@ -1125,10 +1125,10 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     With a warm cache it answers at once and nobody notices; while the window is in the background, the request waits for it to come back.
   - After a sign-in fails or is cancelled, it runs again only when the person asks, since retrying by itself would open browser after browser.
     A 401 still runs it once more, as any plugin; with its cache warm that run is silent.
-  - The sign-in panel is the popover of the status bar's credentials item (the owner's choice among a dialog and a corner card, 2026-11-01).
+  - The sign-in panel opens above the status bar's credentials item (the owner's choice among a dialog and a corner card, 2026-11-01).
     It opens once the plugin prints, after 2 s without a credential, since a browser flow often prints nothing, or when a sign-in fails while its space is active.
-    It leaves the focus where it was, opening and closing, and stays closed for a run the person closed it on, in any space that shares the plugin.
-    A click elsewhere, as into the browser's code field, leaves a running one open; Escape closes it like any popover, and the status bar item opens it again.
+    It is no popover: a popover's dismissable layer takes Escape, either from the app's keybindings or from the code the person still needs.
+    So it takes no focus, ignores Escape and clicks elsewhere, and closes from its close button, the item, or a finished run; a run the person closed it on keeps it closed, in any space that shares the plugin, until they open it again.
     It shows the device code and the link, the plugin's output, its elapsed time and Cancel; a failure shows the fix the plugin's message names, such as `aws sso login`.
     Rust opens the link through tauri-plugin-opener, only for https and the plugin's own server on localhost or 127.0.0.1, and never one with a user part.
   - Unattended runs time out at 120 s; sign-ins at 10 min, past int128/kubelogin's and tsh's own 180 s, since a tsh killed mid-login leaves a lock that breaks the cluster until `tsh login`.

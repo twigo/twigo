@@ -311,3 +311,54 @@ test("a panel closed for a run stays closed in another space that shares the plu
   });
   expect(workbench.credentials.panelOpen).toBe(false);
 });
+
+test("the next run of a plugin opens its panel again, and reopening one clears its dismissal", async () => {
+  const workbench = await started("deviceCode");
+  const { credentials, backend } = workbench;
+  credentials.setPanelOpen(false);
+  credentials.setPanelOpen(true);
+  await select(workbench, "staging");
+  await select(workbench, "prod-eu");
+  expect(credentials.panelOpen).toBe(true);
+
+  credentials.setPanelOpen(false);
+  await credentials.cancel();
+  await vi.advanceTimersByTimeAsync(10);
+  credentials.setPanelOpen(false);
+  await backend.invoke("context_sign_in", "prod-eu");
+  await vi.advanceTimersByTimeAsync(400);
+  expect(credentials.auth).toMatchObject({ status: { state: "running" } });
+  expect(credentials.panelOpen).toBe(true);
+});
+
+test("a timer armed in one space never opens the panel of another's run", async () => {
+  const workbench = await started("browser");
+  await vi.advanceTimersByTimeAsync(1500);
+  await workbench.backend.invoke("context_sign_in", "dev");
+  await select(workbench, "dev");
+  await vi.advanceTimersByTimeAsync(600);
+  expect(workbench.credentials.auth).toMatchObject({
+    status: { state: "running" },
+  });
+  expect(workbench.credentials.panelOpen).toBe(false);
+});
+
+test("a failed review or cancel is reported", async () => {
+  const mock = createMockBackend("review");
+  const backend: Backend = {
+    invoke: (command, request) =>
+      command === "exec_trust" || command === "context_sign_in_cancel"
+        ? Promise.reject(new Error(`${command} failed`))
+        : mock.invoke(command, request),
+    subscribe: (command, request, onMessage) =>
+      mock.subscribe(command, request, onMessage),
+  };
+  const workbench = await started("review", backend);
+  const report = vi.spyOn(workbench, "report");
+  await workbench.credentials.answerReview([]);
+  await workbench.credentials.cancel();
+  expect(report).toHaveBeenCalledWith(new Error("exec_trust failed"));
+  expect(report).toHaveBeenCalledWith(
+    new Error("context_sign_in_cancel failed"),
+  );
+});

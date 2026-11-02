@@ -72,7 +72,8 @@ export class Credentials {
   setPanelOpen(open: boolean): void {
     this.#panelOpen = open;
     const run = this.#run();
-    if (!open && run) this.#dismissed.add(run);
+    if (run && open) this.#dismissed.delete(run);
+    else if (run) this.#dismissed.add(run);
     this.changes.emit();
   }
 

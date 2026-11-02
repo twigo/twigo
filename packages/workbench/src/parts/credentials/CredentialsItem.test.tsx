@@ -81,15 +81,23 @@ test("the link opens through Rust and is no anchor the webview could follow", as
   );
 });
 
-test("Escape closes the panel like any popover and leaves the focus where it was", async () => {
+test("Escape goes to the app and leaves the panel, and the focus, where they were", async () => {
   await show("deviceCode");
   expect(await screen.findByText("F3JQ7K9PL")).toBeTruthy();
   const field = document.createElement("input");
   document.body.append(field);
   field.focus();
-  fireEvent.keyDown(field, { key: "Escape" });
+  const escape = new KeyboardEvent("keydown", {
+    key: "Escape",
+    bubbles: true,
+    cancelable: true,
+  });
+  field.dispatchEvent(escape);
+  expect(escape.defaultPrevented).toBe(false);
+  expect(screen.getByText("F3JQ7K9PL")).toBeTruthy();
+  expect(document.activeElement).toBe(field);
+  fireEvent.click(screen.getByRole("button", { name: "Hide" }));
   expect(screen.queryByText("F3JQ7K9PL")).toBeNull();
-  await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
   expect(document.activeElement).toBe(field);
   field.remove();
 });
