@@ -180,7 +180,7 @@ impl Core {
             .api
             .apiserver_version()
             .await
-            .map_err(|e| errors::request(&e))?;
+            .map_err(|e| twigo_kube::errors::request(&e))?;
         Ok(ClusterVersion {
             git_version: info.git_version,
         })

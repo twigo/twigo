@@ -17,7 +17,6 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync"] }
-tower.workspace = true
 twigo-env.workspace = true
 twigo-ipc.workspace = true
 twigo-kube.workspace = true

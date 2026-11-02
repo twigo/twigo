@@ -5546,7 +5546,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
- "tower",
  "twigo-env",
  "twigo-ipc",
  "twigo-kube",
