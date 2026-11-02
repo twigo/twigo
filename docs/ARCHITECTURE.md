@@ -496,9 +496,10 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     An aggregated server whose resources change while its APIService does not is seen with the next change, or once the space is followed again.
   - A failed fetch keeps the resources the server last answered to the follower, and is tried again after 5 s, the hub's longest backoff.
     A copy from the disk cache counts only once the server has confirmed it, since another cluster may have taken over its URL, and clients that cannot be built fail it rather than show another server's resources.
-  - A fetch whose credential failed waits for the space to be followed again, or for the clients to be rebuilt, since retrying would run the plugin by itself, as for the upstreams (3.2).
-    The frontend follows the active space again whenever a credential comes after none or after a failed run.
+  - A fetch whose credential failed waits for the space to be followed again, since retrying would run the plugin by itself, as for the upstreams (3.2); the new follower's subscriptions also restart the CRD and APIService upstreams that the failure ended.
+    The frontend follows the active space again whenever a credential comes after none or after a failed run, and whenever the kubeconfig changes, which may have fixed it.
     A run that a rejected credential sets off by itself does not count: against a server that keeps refusing fresh credentials, every view asking again would run the plugin again, forever.
+    A fix on the server's side, as a role binding for the identity, is seen once the space is followed again, as after switching to another space and back.
   - OpenAPI v3 documents are fetched lazily on the first edit of a group/version and cached forever under their `?hash=` URL, which is immutable.
     Rust converts them to JSON Schema for the YAML editor.
 - **Never pre-fetched.**

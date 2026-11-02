@@ -51,8 +51,8 @@ pub struct Follower {
 enum Failed {
     Retry,
     /// The context's credential failed: retrying would run its plugin by
-    /// itself, so the next follower asks again, as a subscription restarts
-    /// the hub's upstreams (ARCHITECTURE 3.2), or rebuilt clients.
+    /// itself, so the next follower asks again, whose subscriptions also
+    /// restart the indexes that the failure ended (ARCHITECTURE 3.2).
     Stop,
 }
 
@@ -119,7 +119,7 @@ impl Follower {
 
     async fn wait(&mut self) {
         if self.failed == Some(Failed::Stop) {
-            return replaced(&mut self.abandoned).await;
+            return std::future::pending().await;
         }
         let retry = (self.failed == Some(Failed::Retry)).then(|| Instant::now() + RETRY_WITHIN);
         loop {

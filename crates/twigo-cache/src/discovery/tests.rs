@@ -230,7 +230,7 @@ async fn a_refused_start_fails_rather_than_trust_the_cache() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_stopped_follower_asks_again_over_rebuilt_clients() {
+async fn a_stopped_follower_leaves_rebuilt_clients_to_the_next_one() {
     let fake = fake();
     fake.state().unauthorized.insert("/apis".to_owned());
     let current = Arc::new(Mutex::new(Ok(fake.clients(Budgets::default()))));
@@ -240,7 +240,13 @@ async fn a_stopped_follower_asks_again_over_rebuilt_clients() {
 
     fake.state().unauthorized.clear();
     rebuild(&current, Ok(fake.clients(Budgets::default())));
-    assert_eq!(names(&next(&mut follower).await), ["namespaces"]);
+    let before = asked(&fake, "/apis");
+    assert!(
+        timeout(Duration::from_secs(600), follower.next())
+            .await
+            .is_err()
+    );
+    assert_eq!(asked(&fake, "/apis"), before);
 }
 
 #[tokio::test(start_paused = true)]
