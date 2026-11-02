@@ -1,7 +1,8 @@
 //! A fake API server for the hub's tests on paused time: pods and
 //! namespaces as metadata, list pages, watches resumed from a
 //! `resourceVersion` or streaming their initial events, `410 Gone` below a
-//! compacted version, refusals, probes and access reviews.
+//! compacted version, refusals, probes, access reviews, and aggregated
+//! discovery with its ETags.
 
 use std::collections::{BTreeMap, HashSet};
 use std::convert::Infallible;
@@ -54,6 +55,11 @@ pub struct State {
     pub dead: bool,
     /// When each request came, with its path and query.
     pub requests: Vec<(Instant, String)>,
+    /// What discovery serves, by group, the core group as `""`: each
+    /// resource's plural and kind.
+    pub served: BTreeMap<String, Vec<(String, String)>>,
+    /// How many discovery requests got 304.
+    pub not_modified: usize,
 }
 
 struct Change {
@@ -79,7 +85,11 @@ struct Target {
 }
 
 fn target(path: &str) -> Target {
-    let parts: Vec<&str> = path.trim_start_matches("/api/v1/").split('/').collect();
+    let collection = match path.strip_prefix("/apis/") {
+        Some(rest) => rest.splitn(3, '/').nth(2).expect("a group and a version"),
+        None => path.trim_start_matches("/api/v1/"),
+    };
+    let parts: Vec<&str> = collection.split('/').collect();
     match parts[..] {
         ["namespaces", namespace, resource] => Target {
             resource: resource.to_owned(),
@@ -228,6 +238,10 @@ impl Fake {
     }
 
     fn respond(&self, request: Request<kube::client::Body>) -> Response<Body> {
+        let if_none_match = request
+            .headers()
+            .get(http::header::IF_NONE_MATCH)
+            .map(|value| value.to_str().unwrap().to_owned());
         let uri = request.uri().clone();
         let path = uri.path().to_owned();
         let query: Vec<(String, String)> =
@@ -266,6 +280,9 @@ impl Fake {
         }
         if state.unauthorized.contains(&path) {
             return status(StatusCode::UNAUTHORIZED, "Unauthorized");
+        }
+        if path == "/api" || path == "/apis" {
+            return state.discovery(path == "/api", if_none_match.as_deref());
         }
         let target = target(&path);
         if param("watch") != Some("true") {
@@ -374,6 +391,66 @@ impl Target {
 }
 
 impl State {
+    /// Serves `resource` from now on, cluster-scoped.
+    pub fn serve(&mut self, group: &str, resource: &str, kind: &str) {
+        self.served
+            .entry(group.to_owned())
+            .or_default()
+            .push((resource.to_owned(), kind.to_owned()));
+    }
+
+    fn discovery(&mut self, core: bool, if_none_match: Option<&str>) -> Response<Body> {
+        let items: Vec<Value> = self
+            .served
+            .iter()
+            .filter(|(group, _)| group.is_empty() == core)
+            .map(|(group, resources)| {
+                let resources: Vec<Value> = resources
+                    .iter()
+                    .map(|(resource, kind)| {
+                        json!({
+                            "resource": resource,
+                            "responseKind": { "group": "", "version": "", "kind": kind },
+                            "scope": "Cluster",
+                            "verbs": ["get", "list", "watch"],
+                        })
+                    })
+                    .collect();
+                json!({
+                    "metadata": { "name": group },
+                    "versions": [{ "version": "v1", "resources": resources, "freshness": "Current" }],
+                })
+            })
+            .collect();
+        let body = serde_json::to_vec(&json!({
+            "kind": "APIGroupDiscoveryList",
+            "apiVersion": "apidiscovery.k8s.io/v2",
+            "metadata": {},
+            "items": items,
+        }))
+        .unwrap();
+        let mut hasher = std::hash::DefaultHasher::new();
+        std::hash::Hash::hash(&body, &mut hasher);
+        let etag = format!("\"{:X}\"", std::hash::Hasher::finish(&hasher));
+        let (code, body) = if if_none_match == Some(etag.as_str()) {
+            self.not_modified += 1;
+            (StatusCode::NOT_MODIFIED, Bytes::new())
+        } else {
+            (StatusCode::OK, Bytes::from(body))
+        };
+        let mut response = Response::new(Full::new(body).boxed_unsync());
+        *response.status_mut() = code;
+        let headers = response.headers_mut();
+        headers.insert(http::header::ETAG, etag.parse().unwrap());
+        headers.insert(
+            http::header::CONTENT_TYPE,
+            http::HeaderValue::from_static(
+                "application/json;g=apidiscovery.k8s.io;v=v2;as=APIGroupDiscoveryList",
+            ),
+        );
+        response
+    }
+
     fn items(&self, target: &Target) -> Vec<Value> {
         self.objects
             .iter()

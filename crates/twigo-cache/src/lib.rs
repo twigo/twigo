@@ -3,6 +3,7 @@
 
 mod cluster;
 pub mod decode;
+pub mod discovery;
 #[cfg(test)]
 mod fake;
 pub mod hub;

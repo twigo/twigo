@@ -31,6 +31,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use twigo_ipc::{ErrorKind, IpcError, ViewState};
+use twigo_kube::client::Clients;
 
 use crate::cluster::Cluster;
 use crate::decode::Decode;
@@ -256,6 +257,11 @@ impl Hub {
                 registry: Mutex::default(),
             }),
         }
+    }
+
+    /// The context's clients, as its upstreams get them.
+    pub async fn clients(&self, context: &str) -> Result<Arc<Clients>, IpcError> {
+        (self.inner.connect)(context.to_owned()).await
     }
 
     /// The rows of a resource in the query's namespaces, unless a name
@@ -1028,6 +1034,6 @@ fn combine(states: impl Iterator<Item = ViewState>) -> ViewState {
 }
 
 #[cfg(test)]
-mod live;
+pub(crate) mod live;
 #[cfg(test)]
 mod tests;

@@ -13,7 +13,7 @@ mod state;
 mod typescript;
 
 pub use credentials::{ContextAuth, EnvVar, ExecPlugin, ExecReview, PluginStatus, ReviewedPlugin};
-pub use discovery::{ClusterVersion, Resource};
+pub use discovery::{ClusterVersion, Discovered, Resource};
 pub use environment::ShellEnvironment;
 pub use error::{ErrorKind, IpcError};
 pub use keyboard::{KeyMapping, KeyboardLayout};
