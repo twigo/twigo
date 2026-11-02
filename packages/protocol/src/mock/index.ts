@@ -9,10 +9,8 @@ import type {
 import { IpcError } from "../error";
 import type {
   Column,
-  GroupCount,
   KeyboardLayout,
   ListBatch,
-  ListQuery,
   RowId,
   ShellEnvironment,
   ViewState,
@@ -24,14 +22,28 @@ import {
   type AuthScenario,
 } from "./auth";
 import { Cluster, podCells, podRow, type Pod } from "./cluster";
-import { CONTEXTS, NAMESPACES, POD_COUNT, SPACES, VERSIONS } from "./fixtures";
+import {
+  CONTEXTS,
+  NAMESPACES,
+  POD_COLUMNS,
+  POD_COUNT,
+  SPACES,
+  VERSIONS,
+} from "./fixtures";
 import dvorak from "./layouts/dvorak.json";
 import french from "./layouts/french.json";
 import german from "./layouts/german.json";
 import ukrainian from "./layouts/ukrainian.json";
 import us from "./layouts/us.json";
 import RESOURCES from "./resources.json";
-import { checkQuery, podColumns, runQuery } from "./query";
+import {
+  compileQuery,
+  queryColumns,
+  runQuery,
+  type CompiledQuery,
+  type QueryResult,
+  type QueryRow,
+} from "./query";
 
 /** `live` connects, syncs and then changes pods every second; any other value pins that state. */
 type ListScenario = "live" | ViewState["state"];
@@ -279,12 +291,19 @@ export function createMockBackend(
       if (context === undefined) {
         throw new IpcError("notFound", `space ${query.space} has no context`);
       }
-      const columns = podColumns(query);
-      checkQuery(query, columns);
+      const { group, version, resource } = query.gvr;
+      if (group !== "" || version !== "v1" || resource !== "pods") {
+        throw new IpcError(
+          "notFound",
+          `the mock backend serves only pods, not ${resource}`,
+        );
+      }
+      const columns = queryColumns(POD_COLUMNS, query);
+      const compiled = compileQuery(query, columns);
       const id = nextId++;
       subscriptions.set(
         id,
-        new Subscription(query, columns, cluster(context), lists, onMessage),
+        new Subscription(compiled, columns, cluster(context), lists, onMessage),
       );
       if (lists === "live" && churn === undefined) {
         churn =
@@ -376,29 +395,54 @@ const PINNED: Readonly<Record<Exclude<ListScenario, "live">, ViewState>> = {
 /** States in which a view shows rows. */
 const SHOWS_ROWS = new Set<ViewState["state"]>(["ready", "relisting", "stale"]);
 
+/** States in which Rust knows the server's columns: from a list's first page on. */
+const KNOWS_COLUMNS = new Set<ViewState["state"]>([
+  "syncing",
+  "ready",
+  "relisting",
+  "stale",
+]);
+
+interface PodRow extends QueryRow {
+  readonly pod: Pod;
+}
+
 /** The batcher of one subscription: one unacknowledged batch at a time, the latest state wins. */
 class Subscription {
-  readonly #query: ListQuery;
+  readonly #query: CompiledQuery;
   readonly #cluster: Cluster;
   readonly #columns: Column[];
   readonly #onMessage: (batch: ListBatch) => void;
   readonly #timers: ReturnType<typeof setTimeout>[] = [];
   #status: ViewState;
-  #window: [number, number] = [0, 0];
+  /** Undefined until the webview sets one: nothing goes before it, as in Rust. */
+  #window: [number, number] | undefined;
+  /** The window moved since the last flush. */
+  #moved = false;
   #seq = 0;
   #acked = 0;
   #dirty = true;
-  #cache: { version: number; rows: Pod[]; counted: Pod[] } | undefined;
+  #cache: { version: number; result: QueryResult<PodRow> } | undefined;
   #sent: {
     total: number;
+    start: number;
     ids: readonly RowId[];
     versions: ReadonlyMap<RowId, number>;
     status: string;
     groups: string;
-  } = { total: -1, ids: [], versions: new Map(), status: "", groups: "" };
+    columns: boolean;
+  } = {
+    total: -1,
+    start: 0,
+    ids: [],
+    versions: new Map(),
+    status: "",
+    groups: "",
+    columns: false,
+  };
 
   constructor(
-    query: ListQuery,
+    query: CompiledQuery,
     columns: Column[],
     cluster: Cluster,
     scenario: ListScenario,
@@ -432,19 +476,29 @@ class Subscription {
     );
   }
 
-  /** Flushes at once rather than on the next tick, as Rust's batcher does (ARCHITECTURE 3.5). */
+  /**
+   * Flushes at once rather than on the next tick, or with the ack of the
+   * batch in flight, as Rust's batcher does (ARCHITECTURE 3.5).
+   */
   setWindow(start: number, end: number): void {
     this.#window = [start, end];
+    this.#moved = true;
     this.touch();
+    this.#flushSoon();
+  }
+
+  ack(seq: number): void {
+    if (seq !== this.#seq) return;
+    this.#acked = seq;
+    if (this.#moved) this.#flushSoon();
+  }
+
+  #flushSoon(): void {
     this.#timers.push(
       setTimeout(() => {
         this.#flush();
       }, 0),
     );
-  }
-
-  ack(seq: number): void {
-    if (seq === this.#seq) this.#acked = seq;
   }
 
   touch(): void {
@@ -470,29 +524,47 @@ class Subscription {
     );
   }
 
-  #pods(): { rows: Pod[]; counted: Pod[] } {
-    if (!SHOWS_ROWS.has(this.#status.state)) return { rows: [], counted: [] };
+  #rows(): QueryResult<PodRow> {
+    if (!SHOWS_ROWS.has(this.#status.state)) {
+      return {
+        rows: [],
+        groups: this.#query.query.groupBy === null ? null : [],
+      };
+    }
     const { version, pods } = this.#cluster;
     if (this.#cache?.version !== version) {
-      this.#cache = { version, ...runQuery(pods, this.#query, this.#columns) };
+      const withNamespace = this.#columns.some((c) => c.name === "Namespace");
+      const rows = pods.map((pod): PodRow => ({
+        id: pod.id,
+        namespace: pod.namespace,
+        created: pod.created,
+        labels: {},
+        cells: podCells(pod, withNamespace),
+        pod,
+      }));
+      this.#cache = { version, result: runQuery(rows, this.#query) };
     }
-    return this.#cache;
+    return this.#cache.result;
   }
 
   #flush(): void {
-    if (!this.#dirty || this.#seq !== this.#acked) return;
+    if (!this.#window || !this.#dirty || this.#seq !== this.#acked) return;
     this.#dirty = false;
-    const { rows: pods, counted } = this.#pods();
+    this.#moved = false;
+    const { rows, groups } = this.#rows();
+    const pods = rows.map((row) => row.pod);
     const [start, end] = this.#window;
     const visible = pods.slice(start, end);
     const ids = visible.map((pod) => pod.id);
     const status = JSON.stringify(this.#status);
-    const groups = this.#groups(counted);
     const groupsJson = JSON.stringify(groups);
     const groupsChanged = groupsJson !== this.#sent.groups;
     const first = this.#seq === 0;
+    const knows = KNOWS_COLUMNS.has(this.#status.state);
+    const columnsChanged = first || knows !== this.#sent.columns;
     const windowChanged =
       first ||
+      start !== this.#sent.start ||
       ids.length !== this.#sent.ids.length ||
       ids.some((id, i) => id !== this.#sent.ids[i]);
     const upserts = visible.filter(
@@ -503,6 +575,7 @@ class Subscription {
       upserts.length === 0 &&
       status === this.#sent.status &&
       !groupsChanged &&
+      !columnsChanged &&
       pods.length === this.#sent.total
     ) {
       return;
@@ -510,38 +583,22 @@ class Subscription {
     const withNamespace = this.#columns.some((c) => c.name === "Namespace");
     this.#sent = {
       total: pods.length,
+      start,
       ids,
       versions: new Map(visible.map((pod) => [pod.id, pod.version])),
       status,
       groups: groupsJson,
+      columns: knows,
     };
     this.#seq++;
     this.#onMessage({
       seq: this.#seq,
       total: pods.length,
-      columns: first ? this.#columns : null,
+      columns: columnsChanged ? (knows ? this.#columns : []) : null,
       window: windowChanged ? { start, ids } : null,
       upserts: upserts.map((pod) => podRow(pod, withNamespace)),
       status: this.#status,
       groups: groups && (first || groupsChanged) ? groups : null,
     });
-  }
-
-  /** The matching pods per value of the `groupBy` column, largest first. */
-  #groups(pods: readonly Pod[]): GroupCount[] | null {
-    const column = this.#query.groupBy;
-    if (column === null) return null;
-    const at = this.#columns.findIndex(
-      (candidate) => candidate.name === column,
-    );
-    const withNamespace = this.#columns.some((c) => c.name === "Namespace");
-    const counts = new Map<string, number>();
-    for (const pod of pods) {
-      const value = String(podCells(pod, withNamespace)[at] ?? "");
-      counts.set(value, (counts.get(value) ?? 0) + 1);
-    }
-    return [...counts]
-      .map(([value, count]) => ({ value, count }))
-      .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
   }
 }

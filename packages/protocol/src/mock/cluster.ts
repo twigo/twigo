@@ -141,7 +141,7 @@ export class Cluster {
   }
 }
 
-/** The cells of a pod, matching `podColumns`. */
+/** The cells of a pod, matching `queryColumns(POD_COLUMNS, query)`. */
 export function podCells(pod: Pod, withNamespace: boolean): Cell[] {
   return [
     pod.name,
