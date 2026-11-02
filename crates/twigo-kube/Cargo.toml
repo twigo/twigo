@@ -26,6 +26,7 @@ k8s-openapi.workspace = true
 kube.workspace = true
 nix.workspace = true
 notify-debouncer-full.workspace = true
+percent-encoding.workspace = true
 ring.workspace = true
 rustls.workspace = true
 secrecy.workspace = true

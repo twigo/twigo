@@ -1114,12 +1114,13 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   - Contexts whose entries name the same plugin share it, keyed as client-go keys its authenticators: the exec config, and the cluster when it is passed.
     Concurrent requests share one run, and its failure too.
   - Caches the credential until 60 s before it expires; without an expiry, until the server rejects it.
+    One that comes with less left, as a plugin's own cached token does near its end, is kept until it expires, since another run would only return it again.
     A 401 drops it, runs the plugin once more and retries the request once, its body rebuilt from the bytes kube holds; client-go only refreshes for the next request.
   - A certificate from the plugin is offered at each TLS handshake, and a new one retires the api client's connections, whichever client got it first, as client-go closes them; the sessions client keeps no idle connection, since each session upgrades its own.
     TLS resumption is off for these clients, since a resumed session keeps the certificate of the handshake it resumes.
 - **Plugins that may ask the person to sign in.**
   A cold cache makes them open a browser or print a device code, and none can be told to fail instead; `interactiveMode` does not tell them apart.
-  - Only plugins known never to ask run unattended: `aws eks get-token`, aws-iam-authenticator, gke-gcloud-auth-plugin, doctl without SSO, `oci`, `pinniped login static`, and Azure/kubelogin's non-interactive logins, with `AAD_LOGIN_METHOD` read from the login shell's environment and the entry's, as kubelogin gets it.
+  - Only plugins known never to ask run unattended: `aws eks get-token`, aws-iam-authenticator, gke-gcloud-auth-plugin, doctl without SSO, `oci`, `pinniped login static`, int128/kubelogin's client-credentials grant and its password grant given both the username and the password, and Azure/kubelogin's non-interactive logins, with `AAD_LOGIN_METHOD` read from the login shell's environment and the entry's, as kubelogin gets it.
     Every other plugin, an unknown command included, may ask.
   - One that may ask runs only while a Twigo window has the focus, so that its browser or code finds the person (the owner's choice, 2026-11-01).
     With a warm cache it answers at once and nobody notices; while the window is in the background, the request waits for it to come back.
@@ -1147,8 +1148,9 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     Only the two values change, through `yaml-edit`, under kubectl's `<file>.lock`, by a rename over the resolved file, so its hard links and ACLs do not carry over; kubectl writes in place.
   - One refresh runs at a time, and the file is read again first: tokens someone else wrote since, as kubectl does, are taken, never the ones it still holds after a failed write or a rejection.
     The new tokens go to memory before the file, so a failed write never loses the only valid refresh token.
-  - After a 401 the next request takes a newer token from the user's file, else refreshes once if a refresh can replace the rejected token: one from the file with a refresh token, not one a refresh just got.
-    The rejected token stays until something replaces it, a refused refresh included, since client-go never refreshes on a 401 and every refresh rewrites the file.
+  - After a 401 the next request takes a newer token from the user's file, else refreshes once if a refresh can replace the rejected token: one from the file with a refresh token, not one a refresh just got or one whose refresh the issuer refused.
+    The other requests that carried it are rejected too, so a refresh starts only while the rejected token is still the current one.
+    The rejected token stays until something replaces it, since client-go never refreshes on a 401 and every refresh rewrites the file.
     A request whose provider has no other credential goes unretried.
   - A token or basic auth in the entry wins over the provider, as in client-go.
   - The oidc tokens do not count in the fingerprint (6.3), so a refresh rebuilds no client.

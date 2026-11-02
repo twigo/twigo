@@ -22,6 +22,7 @@ use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use http::{StatusCode, Uri};
 use jiff::{SignedDuration, Timestamp};
 use kube::config::Kubeconfig;
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use ring::digest::{SHA256, digest};
 use secrecy::SecretString;
 use serde::Deserialize;
@@ -156,19 +157,23 @@ struct State {
     /// The credential of `entry.id_token`, so a rejection names it.
     current: Option<Arc<Credential>>,
     style: Option<Style>,
-    /// The id-token is one this source's refresh got, so a rejection keeps
-    /// it rather than spend another refresh token and write the file again
-    /// on every request; client-go never refreshes on a 401.
-    fresh: bool,
-    /// The server rejected an id-token that no refresh can replace, a fresh
+    /// The id-token has had its refresh: this source's refresh got it, or
+    /// the issuer refused to replace it after a rejection. A rejection then
+    /// keeps it rather than ask the issuer, spend another refresh token and
+    /// write the file again on every request; client-go never refreshes on
+    /// a 401.
+    spent: bool,
+    /// The server rejected an id-token that no refresh can replace, a spent
     /// one or one without a refresh token: the next request reads the
     /// user's file again, so a token the person got by signing in elsewhere
     /// replaces it.
     reread: bool,
-    /// The server rejected an id-token from the file: the next request reads
-    /// the file again, then refreshes once; if the issuer refuses, the
-    /// token stays while it lasts, as client-go keeps it.
-    retry: bool,
+    /// The id-token from the file the server rejected: the next request
+    /// reads the file again, then refreshes once if that token is still
+    /// current, since other requests that carried it are rejected too; if
+    /// the issuer refuses, the token stays while it lasts, as client-go
+    /// keeps it.
+    retry: Option<Arc<Credential>>,
     /// The id-token and refresh token the user's file held when this source
     /// last read or wrote it: only tokens someone else wrote since are taken
     /// from it, never ones it still holds after a failed write or a
@@ -200,9 +205,9 @@ impl Oidc {
                 entry,
                 current: None,
                 style: None,
-                fresh: false,
+                spent: false,
                 reread: false,
-                retry: false,
+                retry: None,
             }),
             refreshing: tokio::sync::Mutex::new(()),
         }
@@ -213,28 +218,35 @@ impl Oidc {
     pub async fn credential(&self) -> Result<Arc<Credential>, OidcError> {
         let pending = {
             let state = self.state();
-            state.reread || state.retry
+            state.reread || state.retry.is_some()
         };
         if pending {
             let _one = self.refreshing.lock().await;
             let (reread, retry) = {
                 let mut state = self.state();
-                (
-                    std::mem::take(&mut state.reread),
-                    std::mem::take(&mut state.retry),
-                )
+                (std::mem::take(&mut state.reread), state.retry.take())
             };
-            if reread || retry {
+            if reread || retry.is_some() {
                 self.read_back();
             }
-            // Reading back drops `current` when the file holds a newer token.
-            if retry && self.state().current.is_some() {
+            // Reading back drops `current` when the file holds a newer token,
+            // and a refresh meanwhile has replaced it.
+            let rejected = retry.is_some_and(|rejected| {
+                self.state()
+                    .current
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, &rejected))
+            });
+            if rejected {
                 match self.refresh_now().await {
                     Ok(credential) => return Ok(credential),
-                    Err(error) => eprintln!(
-                        "kept the rejected oidc token of {}, since its refresh failed: {error}",
-                        self.user
-                    ),
+                    Err(error) => {
+                        self.state().spent = true;
+                        eprintln!(
+                            "kept the rejected oidc token of {}, since its refresh failed: {error}",
+                            self.user
+                        );
+                    }
                 }
             }
         }
@@ -271,7 +283,7 @@ impl Oidc {
                 state.entry.refresh_token = Some(rotated.clone());
             }
             state.current = None;
-            state.fresh = true;
+            state.spent = true;
             drop(state);
             self.valid()
         };
@@ -322,10 +334,10 @@ impl Oidc {
         {
             return;
         }
-        if state.fresh || state.entry.refresh_token.is_none() {
+        if state.spent || state.entry.refresh_token.is_none() {
             state.reread = true;
         } else {
-            state.retry = true;
+            state.retry = Some(Arc::clone(used));
         }
     }
 
@@ -389,7 +401,7 @@ impl Oidc {
         if found.0.is_some() && found.0 != state.entry.id_token {
             state.entry.id_token.clone_from(&found.0);
             state.current = None;
-            state.fresh = false;
+            state.spent = false;
         }
         if found.1.is_some() {
             state.entry.refresh_token.clone_from(&found.1);
@@ -518,9 +530,18 @@ fn encode(pairs: &[(&str, &str)]) -> String {
 }
 
 /// Go's `url.QueryEscape`, which oauth2 applies to the client's id and
-/// secret in the header (RFC 6749 2.3.1).
-fn escape(value: &str) -> String {
-    form_urlencoded::byte_serialize(value.as_bytes()).collect()
+/// secret in the header (RFC 6749 2.3.1): `~` stays and `*` is escaped,
+/// where the form serializer does the opposite.
+pub(super) fn escape(value: &str) -> String {
+    const KEPT: &AsciiSet = &NON_ALPHANUMERIC
+        .remove(b'-')
+        .remove(b'_')
+        .remove(b'.')
+        .remove(b'~')
+        .remove(b' ');
+    utf8_percent_encode(value, KEPT)
+        .to_string()
+        .replace(' ', "+")
 }
 
 /// The start of a response, as client-go quotes it.

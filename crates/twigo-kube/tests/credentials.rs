@@ -470,3 +470,30 @@ async fn an_empty_username_leaves_the_token_to_be_sent() {
     let clients = Clients::new(&config, Options::default()).unwrap();
     assert_eq!(get(&clients).await.unwrap(), "ok");
 }
+
+#[tokio::test]
+async fn the_removed_gcp_and_azure_providers_are_refused_before_their_command_could_run() {
+    let dir = TempDir::new().unwrap();
+    let ran = dir.path().join("ran");
+    for (name, refused) in [
+        ("gcp", "The gcp auth plugin has been removed."),
+        ("azure", "The azure auth plugin has been removed."),
+    ] {
+        let mut config = Config::new("https://localhost:1".parse().unwrap());
+        config.auth_info.auth_provider = Some(kube::config::AuthProviderConfig {
+            name: name.to_owned(),
+            config: [
+                ("cmd-path".to_owned(), "/usr/bin/touch".to_owned()),
+                ("cmd-args".to_owned(), ran.display().to_string()),
+            ]
+            .into_iter()
+            .collect(),
+            other: Default::default(),
+        });
+        let error = Clients::new(&config, Options::default())
+            .err()
+            .expect("refused");
+        assert!(error.to_string().starts_with(refused), "{error}");
+    }
+    assert!(!ran.exists());
+}

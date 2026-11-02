@@ -376,7 +376,8 @@ async fn contexts_naming_the_same_plugin_share_its_credential() {
 }
 
 #[tokio::test]
-async fn a_credential_is_kept_until_a_minute_before_it_expires() {
+async fn a_credential_is_kept_until_a_minute_before_it_expires_or_till_it_expires_if_it_came_later()
+{
     let plugins = Plugins::new();
     let lasting = plugins.token(
         "lasting",
@@ -400,7 +401,20 @@ async fn a_credential_is_kept_until_a_minute_before_it_expires() {
     let source = registry().source(exec(&ending, ""));
     source.credential().await.unwrap();
     source.credential().await.unwrap();
+    assert_eq!(plugins.runs(), 2);
+
+    let nearly = plugins.token(
+        "nearly",
+        "t",
+        Some(Timestamp::now() + SignedDuration::from_secs(62)),
+    );
+    let source = registry().source(exec(&nearly, ""));
+    source.credential().await.unwrap();
+    source.credential().await.unwrap();
     assert_eq!(plugins.runs(), 3);
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    source.credential().await.unwrap();
+    assert_eq!(plugins.runs(), 4);
 }
 
 #[tokio::test]
@@ -859,4 +873,12 @@ printf '{{"status":{{"token":"first"}}}}'"#,
     source.reject(&first);
     assert!(matches!(*source.status().borrow(), Status::Running { .. }));
     source.cancel();
+}
+
+#[test]
+fn the_client_s_id_and_secret_are_escaped_as_go_s_query_escape_does() {
+    assert_eq!(
+        oidc::escape("a~b*c d+e/f:g!h'i(j)k"),
+        "a~b%2Ac+d%2Be%2Ff%3Ag%21h%27i%28j%29k"
+    );
 }

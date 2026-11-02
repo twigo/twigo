@@ -5627,6 +5627,7 @@ dependencies = [
  "kube",
  "nix",
  "notify-debouncer-full",
+ "percent-encoding",
  "rcgen",
  "ring",
  "rustls",

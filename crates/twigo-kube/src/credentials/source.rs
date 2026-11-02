@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
-use jiff::Timestamp;
+use jiff::{SignedDuration, Timestamp};
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
 use tokio::sync::{oneshot, watch};
@@ -25,6 +25,10 @@ use super::run::{self, RunError};
 
 /// How much of a plugin's stderr its status keeps, from its start and from
 /// its end: device codes and URLs come first, errors last.
+/// A credential counts as expired this long before it does, so that a
+/// request never carries one that expires on its way (ARCHITECTURE 6.2).
+const MARGIN: SignedDuration = SignedDuration::from_secs(60);
+
 const OUTPUT_HEAD: usize = 8 << 10;
 const OUTPUT_TAIL: usize = 8 << 10;
 
@@ -168,6 +172,11 @@ pub struct Source {
 #[derive(Default)]
 struct State {
     credential: Option<Arc<Credential>>,
+    /// When the cache gives `credential` up: `MARGIN` before it expires, or
+    /// when it expires if it came inside the margin, as a plugin's own
+    /// cached token does near its end, which another run would only return
+    /// again. Without an expiry, it lasts until the server rejects it.
+    kept_until: Option<Timestamp>,
     run: Option<Run>,
     /// Why the last sign-in failed, until the person signs in again.
     held: Option<RunError>,
@@ -215,11 +224,10 @@ impl Source {
         loop {
             let done = {
                 let mut state = self.state();
-                if let Some(credential) = state
-                    .credential
-                    .as_ref()
-                    .filter(|credential| credential.valid_at(Timestamp::now()))
-                {
+                let kept = state
+                    .kept_until
+                    .is_none_or(|until| Timestamp::now() < until);
+                if let Some(credential) = state.credential.as_ref().filter(|_| kept) {
                     return Ok(Arc::clone(credential));
                 }
                 match &state.run {
@@ -327,6 +335,14 @@ impl Source {
             match &result {
                 Ok(credential) => {
                     state.credential = Some(Arc::clone(credential));
+                    state.kept_until = credential.expires().map(|expires| {
+                        let early = expires - MARGIN;
+                        if Timestamp::now() < early {
+                            early
+                        } else {
+                            expires
+                        }
+                    });
                     source.status.send_replace(Status::Ready {
                         expires: credential.expires(),
                     });

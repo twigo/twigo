@@ -48,6 +48,7 @@ struct Issued {
     /// The bearer tokens of the requests to `/version`, which it answers
     /// with a 401, as an API server that rejects the token.
     rejected: Vec<Option<String>>,
+    token_delay: Option<std::time::Duration>,
 }
 
 struct Issuer {
@@ -167,6 +168,10 @@ async fn answer(
                 name.eq_ignore_ascii_case("authorization")
                     .then(|| value.trim().to_owned())
             });
+            let delay = issued.lock().unwrap().token_delay;
+            if let Some(delay) = delay {
+                tokio::time::sleep(delay).await;
+            }
             let mut issued = issued.lock().unwrap();
             issued.grants.push((form.clone(), basic.clone()));
             let client_ok = if issued.form_only {
@@ -544,7 +549,33 @@ async fn a_rejected_token_stays_while_the_issuer_refuses_its_refresh() {
     let tried = issuer.grants().len();
     assert!(tried > 0, "it tried to refresh");
     setup.oidc.credential().await.unwrap();
-    assert_eq!(issuer.grants().len(), tried, "one refresh per rejection");
+    setup.oidc.reject(&kept);
+    let again = setup.oidc.credential().await.unwrap();
+    assert!(Arc::ptr_eq(&again, &used));
+    assert_eq!(
+        issuer.grants().len(),
+        tried,
+        "one refresh per rejected token"
+    );
+}
+
+#[tokio::test]
+async fn rejections_of_a_token_whose_refresh_is_under_way_refresh_it_once() {
+    let issuer = Issuer::start("r1").await;
+    issuer.issued.lock().unwrap().token_delay = Some(std::time::Duration::from_millis(300));
+    let valid = jwt(SignedDuration::from_hours(1), 0);
+    let setup = setup(&kubeconfig(&issuer, &valid, Some("r1")));
+    let used = setup.oidc.credential().await.unwrap();
+    setup.oidc.reject(&used);
+    let oidc = Arc::clone(&setup.oidc);
+    let first = tokio::spawn(async move { oidc.credential().await });
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    setup.oidc.reject(&used);
+    let second = setup.oidc.credential().await.unwrap();
+    let first = first.await.unwrap().unwrap();
+    assert!(!Arc::ptr_eq(&first, &used));
+    assert!(Arc::ptr_eq(&first, &second));
+    assert_eq!(issuer.grants().len(), 1);
 }
 
 #[tokio::test]

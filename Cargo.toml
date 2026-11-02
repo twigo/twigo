@@ -60,6 +60,7 @@ objc2 = "0.6.5"
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFArray", "CFData", "CFDictionary", "CFNotificationCenter", "CFString"] }
 objc2-io-kit = { version = "0.3.2", default-features = false, features = ["dispatch2", "libc", "pwr_mgt", "std"] }
 objc2-system-configuration = { version = "0.3.2", default-features = false, features = ["SCDynamicStore", "SCDynamicStoreKey", "SCSchemaDefinitions", "dispatch2", "std"] }
+percent-encoding = "2.3.2"
 rcgen = "0.14.10"
 ring = "0.17.14"
 rustls = { version = "0.23.46", default-features = false }

@@ -1,17 +1,13 @@
 //! What a plugin prints: an `ExecCredential`, read by client-go's rules
 //! (`plugin/pkg/client/auth/exec/exec.go`, `refreshCredsLocked`).
 
-use jiff::{SignedDuration, Timestamp};
+use jiff::Timestamp;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use secrecy::SecretString;
 use serde::Deserialize;
 
 use super::exec::ApiVersion;
-
-/// A credential counts as expired this long before it does, so that a
-/// request never carries one that expires on its way (ARCHITECTURE 6.2).
-const MARGIN: SignedDuration = SignedDuration::from_secs(60);
 
 #[derive(Debug)]
 pub struct Credential {
@@ -41,11 +37,6 @@ impl Credential {
 
     pub fn expires(&self) -> Option<Timestamp> {
         self.expires
-    }
-
-    /// Without an expiry, a credential lasts until the server rejects it.
-    pub(super) fn valid_at(&self, now: Timestamp) -> bool {
-        self.expires.is_none_or(|expires| now + MARGIN < expires)
     }
 }
 
