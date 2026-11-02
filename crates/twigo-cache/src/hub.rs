@@ -321,6 +321,24 @@ impl Hub {
         namespace: Option<String>,
         name: &str,
     ) -> Result<Subscription<Object>, IpcError> {
+        self.selected(
+            context,
+            resource,
+            namespace,
+            format!("metadata.name={name}"),
+        )
+    }
+
+    /// The objects a field selector picks, in a namespace or, with none,
+    /// in every namespace, followed whole by an Object upstream, as an
+    /// object's events are.
+    pub fn selected(
+        &self,
+        context: &str,
+        resource: Resource,
+        namespace: Option<String>,
+        field_selector: String,
+    ) -> Result<Subscription<Object>, IpcError> {
         resource.check()?;
         if let Some(namespace) = &namespace {
             segment(namespace)?;
@@ -330,7 +348,7 @@ impl Hub {
             resource,
             format: Format::Object,
             scope: namespace.map_or(Scope::Cluster, Scope::Namespace),
-            field_selector: Some(format!("metadata.name={name}")),
+            field_selector: Some(field_selector),
         };
         let mut subscription = Subscription::new(key.clone(), &[]);
         let part = self.hold(&key, None);
@@ -1010,8 +1028,8 @@ impl Seen {
     }
 }
 
-impl Subscription<Row> {
-    /// The columns of a Table upstream.
+impl<T: Item> Subscription<T> {
+    /// The columns of a Table or Object upstream.
     pub fn columns(&self) -> Option<Arc<[Column]>> {
         let parts = self.inner.parts();
         parts.iter().find_map(|part| part.upstream.store.columns())
