@@ -100,13 +100,15 @@ export function ActionContextMenu({
 
 /**
  * The actions behind a trigger, such as a row's ⋯ or a toolbar's Group.
- * Checked actions keep the menu open, so several choices take one visit.
+ * With `keepOpen` the menu stays open as choices toggle, so several take
+ * one visit, as the choice of columns does.
  */
 export function ActionDropdown({
   actions,
   label,
   title,
   align = "end",
+  keepOpen = false,
   onOpen,
   children,
 }: {
@@ -116,6 +118,7 @@ export function ActionDropdown({
   /** A heading inside the menu. */
   title?: string;
   align?: "start" | "end";
+  keepOpen?: boolean;
   onOpen?: () => void;
   /** The trigger, rendered as the button itself. */
   children: ReactNode;
@@ -140,7 +143,7 @@ export function ActionDropdown({
                 disabled={action.disabled}
                 className={cn(action.danger && "text-error")}
                 onSelect={(event) => {
-                  if (action.checked !== undefined) event.preventDefault();
+                  if (keepOpen) event.preventDefault();
                   action.run();
                 }}
               >
