@@ -13,7 +13,6 @@ const ACCEPT_METADATA_LIST: &str =
     "application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1, application/json";
 const ACCEPT_METADATA: &str =
     "application/json;as=PartialObjectMetadata;g=meta.k8s.io;v=v1, application/json";
-const ACCEPT_OBJECT: &str = "application/json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Format {
@@ -21,7 +20,7 @@ pub enum Format {
     Table,
     /// The objects' metadata.
     Metadata,
-    /// Whole objects.
+    /// Rows with the server's columns and the whole object.
     Object,
 }
 
@@ -45,8 +44,14 @@ impl<'a> Collection<'a> {
 
     fn query(&self) -> form_urlencoded::Serializer<'static, String> {
         let mut query = form_urlencoded::Serializer::new(String::new());
-        if self.format == Format::Table {
-            query.append_pair("includeObject", "Metadata");
+        match self.format {
+            Format::Table => {
+                query.append_pair("includeObject", "Metadata");
+            }
+            Format::Object => {
+                query.append_pair("includeObject", "Object");
+            }
+            Format::Metadata => {}
         }
         if let Some(selector) = self.field_selector {
             query.append_pair("fieldSelector", selector);
@@ -73,9 +78,8 @@ pub fn list(
         query.append_pair("continue", token);
     }
     let accept = match collection.format {
-        Format::Table => ACCEPT_TABLE,
+        Format::Table | Format::Object => ACCEPT_TABLE,
         Format::Metadata => ACCEPT_METADATA_LIST,
-        Format::Object => ACCEPT_OBJECT,
     };
     get(collection.path, query.finish(), accept)
 }
@@ -99,9 +103,8 @@ pub fn watch(
         }
     }
     let accept = match collection.format {
-        Format::Table => ACCEPT_TABLE,
+        Format::Table | Format::Object => ACCEPT_TABLE,
         Format::Metadata => ACCEPT_METADATA,
-        Format::Object => ACCEPT_OBJECT,
     };
     get(collection.path, query.finish(), accept)
 }
@@ -176,8 +179,8 @@ mod tests {
         let request = watch(&pod, WatchFrom::ResourceVersion("7"), 290);
         assert_eq!(
             request.uri(),
-            "/api/v1/namespaces/a/pods?fieldSelector=metadata.name%3Dp&watch=true&allowWatchBookmarks=true&timeoutSeconds=290&resourceVersion=7"
+            "/api/v1/namespaces/a/pods?includeObject=Object&fieldSelector=metadata.name%3Dp&watch=true&allowWatchBookmarks=true&timeoutSeconds=290&resourceVersion=7"
         );
-        assert_eq!(request.headers()[ACCEPT], ACCEPT_OBJECT);
+        assert_eq!(request.headers()[ACCEPT], ACCEPT_TABLE);
     }
 }

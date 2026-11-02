@@ -75,7 +75,7 @@ impl TableDecoder {
         Self::default()
     }
 
-    fn update_columns(&mut self, definitions: Option<Vec<RawColumn>>) {
+    pub(crate) fn update_columns(&mut self, definitions: Option<Vec<RawColumn>>) {
         let Some(definitions) = definitions.filter(|definitions| !definitions.is_empty()) else {
             return;
         };
@@ -86,19 +86,19 @@ impl TableDecoder {
         }
     }
 
-    fn table_row(&self, row: RawRow) -> Result<Row, DecodeError> {
+    /// A Table row's cells, typed by the columns the decoder keeps.
+    pub(crate) fn cells(&self, mut cells: Vec<Cell>) -> Result<Box<[Cell]>, DecodeError> {
         let columns = self
             .columns
             .as_deref()
             .filter(|_| !self.synthetic)
             .ok_or(DecodeError::NoColumns)?;
-        if row.cells.len() != columns.len() {
+        if cells.len() != columns.len() {
             return Err(DecodeError::CellCount {
                 expected: columns.len(),
-                found: row.cells.len(),
+                found: cells.len(),
             });
         }
-        let mut cells = row.cells;
         for (cell, column) in cells.iter_mut().zip(columns) {
             match (column.kind, &*cell) {
                 (ColumnKind::Age, _) => *cell = Cell::Age,
@@ -107,20 +107,26 @@ impl TableDecoder {
                 _ => {}
             }
         }
+        Ok(cells.into_boxed_slice())
+    }
+
+    fn table_row(&self, row: RawRow) -> Result<Row, DecodeError> {
+        let cells = self.cells(row.cells)?;
         let object = row.object.ok_or(DecodeError::Missing("object"))?;
         Ok(Row {
             meta: object.metadata.into_meta()?,
-            cells: cells.into_boxed_slice(),
+            cells,
         })
     }
 
-    fn raw_row(&mut self, meta: Meta) -> Row {
+    /// The cells of a raw object the server sent instead of a Table row:
+    /// its name and age under the metadata columns.
+    pub(crate) fn raw_cells(&mut self, meta: &Meta) -> Box<[Cell]> {
         if self.columns.is_none() {
             self.columns = Some(metadata_columns());
             self.synthetic = true;
         }
-        let cells = self
-            .columns
+        self.columns
             .iter()
             .flat_map(|columns| columns.iter())
             .map(|column| match column.kind {
@@ -128,7 +134,11 @@ impl TableDecoder {
                 _ if &*column.format == "name" => Cell::Text(meta.name.clone()),
                 _ => Cell::Null,
             })
-            .collect();
+            .collect()
+    }
+
+    fn raw_row(&mut self, meta: Meta) -> Row {
+        let cells = self.raw_cells(&meta);
         Row { meta, cells }
     }
 }
@@ -250,7 +260,7 @@ struct TableObject {
 }
 
 #[derive(Deserialize)]
-struct RawColumn {
+pub(crate) struct RawColumn {
     name: Box<str>,
     #[serde(rename = "type")]
     kind: Box<str>,

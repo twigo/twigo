@@ -98,7 +98,6 @@ The issues are Headlamp's [#6973](https://github.com/kubernetes-sigs/headlamp/is
 - **Rancher** shows YAML; **k9s** shows the server's Table and kubectl's generic describe ([helpers.go](https://github.com/derailed/k9s/blob/v0.51.0/internal/model/helpers.go#L21-L45)).
 - **The API server answers a single GET as a Table too**: the GET handler hands its result to the same transform as a list, which converts it to a Table when asked, and `includeObject=Object` keeps the whole object in its row ([get.go](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/get.go#L82), [response.go](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/response.go#L264-L269), [asTable](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/response.go#L367-L393)).
   So one request brings the object with the printer columns the server computed.
-  Not run against a cluster yet.
 
 Lesson: the generic view is what most objects get, so it is a product of its own, not a fallback.
 
@@ -259,7 +258,7 @@ enum Value { Text(String), Time(String), Quantity(String), Ref(ResourceRef), Lab
 - **Embedded lists** are query views like any other list, so they follow their rows by construction.
 - **The Object upstream can ask for a Table with `includeObject=Object`.**
   The watch encoder runs every event through the same transform as a GET ([response.go](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/response.go#L74-L82)), so each event would bring the server's printer columns with the whole object.
-  Not run yet: step 8 checks it on kind before the Object decoder changes.
+  On kind 1.37 a list and a watch of one pod brought the whole object in every row, and the column definitions in the list and the first event only (`crates/twigo-cache/tests/fixtures/pod-object-table-*`, recorded 2026-11-02).
 
 ### Live lists inside the Overview
 
