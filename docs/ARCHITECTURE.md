@@ -264,6 +264,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
 ### 3.2 Upstreams: what is watched
 
 - **One upstream per `(context, GVR, scope, server-side selectors)` and kind (3.3), shared by every view.**
+  A name that can be no path segment, as Kubernetes' `IsValidPathSegmentName` has it, is refused before any request, since the API server decodes `%2F` before it routes.
   Subscribing increments a reference count.
   When the last subscriber leaves, the upstream lingers for 60 s so going back and forth costs nothing, then it stops.
 - **Watch only what is visible.**
@@ -310,7 +311,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
     Benchmarks tune each of them.
   - When the watch budget is full, the least recently used idle upstreams are evicted.
     The counter tells a watch that it waits, through an extension of its request, and that is when the hub evicts one: an idle upstream with a watch open, since evicting one in its backoff or in a paged list frees none.
-    The freed watch goes to the one that has waited longest, as the counter admits them in order.
+    The freed watch goes to the one that has waited longest, as the counter admits them in order, and an upstream whose watch waits while nobody shows it goes at once, so it takes none from one that is shown.
     When nothing is idle, the new subscription waits in the state `queued` and its view says why, until an upstream of the context lingers and makes way at once.
   - When the log or session budget is full, a new log stream, exec session or port-forward connection waits in `queued` the same way.
     Its tab says why, and the status bar lists open sessions so the user can close some.

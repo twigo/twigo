@@ -87,14 +87,14 @@ async fn an_upstream_lingers_after_its_last_subscription_then_stops() {
     let fake = Fake::default();
     fake.add("pods", Some("a"), "p1");
     let (hub, _clients) = fake.hub(Budgets::default());
-    let mut first = hub.rows(query(&["a"])).await;
+    let mut first = hub.rows(query(&["a"])).await.unwrap();
     ready(&mut first).await;
     assert_eq!(names(&first), ["p1"]);
     drop(first);
 
     sleep(LINGER - Duration::from_secs(1)).await;
     assert_eq!(hub.scopes(), [namespace("a")]);
-    let again = hub.rows(query(&["a"])).await;
+    let again = hub.rows(query(&["a"])).await.unwrap();
     assert_eq!(
         again.state(),
         ViewState::Ready,
@@ -117,16 +117,16 @@ async fn an_upstream_lingers_after_its_last_subscription_then_stops() {
 async fn a_watch_over_the_budget_evicts_the_least_recently_used_idle_upstream() {
     let fake = Fake::default();
     let (hub, clients) = fake.hub(budget(2));
-    let mut a = hub.rows(query(&["a"])).await;
+    let mut a = hub.rows(query(&["a"])).await.unwrap();
     ready(&mut a).await;
-    let mut b = hub.rows(query(&["b"])).await;
+    let mut b = hub.rows(query(&["b"])).await.unwrap();
     ready(&mut b).await;
     drop(a);
     sleep(Duration::from_secs(1)).await;
     drop(b);
 
     let asked = Instant::now();
-    let mut c = hub.rows(query(&["c"])).await;
+    let mut c = hub.rows(query(&["c"])).await.unwrap();
     ready(&mut c).await;
     assert!(
         asked.elapsed() < Duration::from_secs(1),
@@ -141,9 +141,9 @@ async fn a_watch_over_the_budget_evicts_the_least_recently_used_idle_upstream() 
 async fn with_nothing_idle_a_watch_stays_queued_until_one_lingers() {
     let fake = Fake::default();
     let (hub, _clients) = fake.hub(budget(1));
-    let mut a = hub.rows(query(&["a"])).await;
+    let mut a = hub.rows(query(&["a"])).await.unwrap();
     ready(&mut a).await;
-    let mut b = hub.rows(query(&["b"])).await;
+    let mut b = hub.rows(query(&["b"])).await.unwrap();
     until(&mut b, |state| *state == ViewState::Queued).await;
     sleep(Duration::from_secs(30)).await;
     assert_eq!(b.state(), ViewState::Queued, "nothing to evict");
@@ -166,12 +166,12 @@ async fn only_an_upstream_that_holds_a_watch_is_evicted() {
         .unauthorized
         .insert("/api/v1/namespaces/x/pods".to_owned());
     let (hub, _clients) = fake.hub(budget(1));
-    let mut x = hub.rows(query(&["x"])).await;
+    let mut x = hub.rows(query(&["x"])).await.unwrap();
     until(&mut x, |state| *state == ViewState::Unauthorized).await;
     drop(x);
-    let mut a = hub.rows(query(&["a"])).await;
+    let mut a = hub.rows(query(&["a"])).await.unwrap();
     ready(&mut a).await;
-    let mut b = hub.rows(query(&["b"])).await;
+    let mut b = hub.rows(query(&["b"])).await.unwrap();
     until(&mut b, |state| *state == ViewState::Queued).await;
     assert!(
         hub.scopes().contains(&namespace("x")),
@@ -188,11 +188,11 @@ async fn only_an_upstream_that_holds_a_watch_is_evicted() {
 async fn the_watch_that_waited_longest_gets_the_freed_one() {
     let fake = Fake::default();
     let (hub, _clients) = fake.hub(budget(1));
-    let mut held = hub.rows(query(&["a"])).await;
+    let mut held = hub.rows(query(&["a"])).await.unwrap();
     ready(&mut held).await;
     let mut waiting = Vec::new();
     for namespace in ["b", "c", "d", "e"] {
-        let mut next = hub.rows(query(&[namespace])).await;
+        let mut next = hub.rows(query(&[namespace])).await.unwrap();
         until(&mut next, |state| *state == ViewState::Queued).await;
         waiting.push(next);
         sleep(Duration::from_secs(1)).await;
@@ -213,12 +213,12 @@ async fn the_watch_that_waited_longest_gets_the_freed_one() {
 async fn a_queued_watch_nobody_shows_gives_up_its_place() {
     let fake = Fake::default();
     let (hub, _clients) = fake.hub(budget(1));
-    let mut a = hub.rows(query(&["a"])).await;
+    let mut a = hub.rows(query(&["a"])).await.unwrap();
     ready(&mut a).await;
-    let mut b = hub.rows(query(&["b"])).await;
+    let mut b = hub.rows(query(&["b"])).await.unwrap();
     until(&mut b, |state| *state == ViewState::Queued).await;
     drop(b);
-    let mut c = hub.rows(query(&["c"])).await;
+    let mut c = hub.rows(query(&["c"])).await.unwrap();
     until(&mut c, |state| *state == ViewState::Queued).await;
 
     let dropped = Instant::now();
@@ -233,19 +233,99 @@ async fn a_queued_watch_nobody_shows_gives_up_its_place() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_watch_that_queues_once_nobody_shows_it_gives_up_its_place() {
+    let fake = Fake::default();
+    let (hub, _clients) = fake.hub(budget(1));
+    let mut a = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut a).await;
+    let left = hub.rows(query(&["l"])).await.unwrap();
+    drop(left);
+    settle().await;
+    let mut b = hub.rows(query(&["b"])).await.unwrap();
+    until(&mut b, |state| *state == ViewState::Queued).await;
+
+    let dropped = Instant::now();
+    drop(a);
+    ready(&mut b).await;
+    assert!(
+        dropped.elapsed() < Duration::from_secs(1),
+        "l, which queued after its view left, took no watch"
+    );
+    settle().await;
+    assert_eq!(hub.scopes(), [namespace("b")]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_borrowed_upstream_that_waits_goes_with_its_last_borrower() {
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    let (hub, _clients) = fake.hub(budget(1));
+    let mut all = hub.rows(query(&[])).await.unwrap();
+    ready(&mut all).await;
+    let narrow = hub.rows(query(&["a"])).await.unwrap();
+    drop(all);
+    // Another resource, which no pods upstream serves.
+    let mut secrets = query(&["b"]);
+    secrets.resource.resource = "secrets".to_owned();
+    let mut b = hub.rows(secrets).await.unwrap();
+    until(&mut b, |state| *state == ViewState::Queued).await;
+    fake.end_watches();
+    ready(&mut b).await;
+    settle().await;
+    assert_eq!(
+        narrow.state(),
+        ViewState::Queued,
+        "its watch waits behind b's"
+    );
+    assert_eq!(hub.scopes(), [Scope::Cluster, namespace("b")]);
+
+    drop(narrow);
+    settle().await;
+    assert_eq!(hub.scopes(), [namespace("b")], "it goes at once");
+}
+
+/// On one worker, a run started inside a task takes the worker's next
+/// slot before the cancel of the run it replaces, so the old run's word
+/// that it stopped waiting comes after the new one's that it waits.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn a_stopped_run_does_not_speak_for_its_successor() {
+    let fake = Fake::default();
+    let (hub, _clients) = fake.hub(budget(1));
+    let mut a = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut a).await;
+    let mut k = hub.rows(query(&["k"])).await.unwrap();
+    until(&mut k, |state| *state == ViewState::Queued).await;
+    let again = tokio::spawn({
+        let hub = hub.clone();
+        async move {
+            drop(k);
+            hub.rows(query(&["k"])).await.unwrap()
+        }
+    });
+    let mut k = again.await.unwrap();
+    until(&mut k, |state| *state == ViewState::Queued).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    drop(a);
+    tokio::time::timeout(Duration::from_secs(3), ready(&mut k))
+        .await
+        .expect("a made way for the new run at once");
+}
+
+#[tokio::test(start_paused = true)]
 async fn the_linger_of_an_evicted_upstream_leaves_its_successor_alone() {
     let fake = Fake::default();
     let (hub, _clients) = fake.hub(budget(1));
-    let mut a = hub.rows(query(&["a"])).await;
+    let mut a = hub.rows(query(&["a"])).await.unwrap();
     ready(&mut a).await;
     drop(a);
     sleep(Duration::from_secs(1)).await;
-    let mut b = hub.rows(query(&["b"])).await;
+    let mut b = hub.rows(query(&["b"])).await.unwrap();
     ready(&mut b).await;
     assert_eq!(hub.scopes(), [namespace("b")], "b evicted a");
     drop(b);
     sleep(Duration::from_secs(1)).await;
-    let mut again = hub.rows(query(&["a"])).await;
+    let mut again = hub.rows(query(&["a"])).await.unwrap();
     ready(&mut again).await;
     sleep(Duration::from_secs(28)).await;
     drop(again);
@@ -267,7 +347,7 @@ async fn a_resource_the_server_cannot_watch_is_listed_again() {
     fake.state().unwatchable.insert("pods".to_owned());
     fake.add("pods", Some("a"), "p1");
     let (hub, _clients) = fake.hub(Budgets::default());
-    let mut pods = hub.rows(query(&["a"])).await;
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
     ready(&mut pods).await;
     assert_eq!(names(&pods), ["p1"]);
     fake.add("pods", Some("a"), "p2");
@@ -287,17 +367,17 @@ async fn a_lingering_cluster_wide_upstream_serves_narrower_subscriptions() {
     fake.add("pods", Some("a"), "p1");
     fake.add("pods", Some("b"), "p2");
     let (hub, _clients) = fake.hub(Budgets::default());
-    let mut all = hub.rows(query(&[])).await;
+    let mut all = hub.rows(query(&[])).await.unwrap();
     ready(&mut all).await;
     assert_eq!(names(&all), ["p1", "p2"]);
 
-    let mut narrow = hub.rows(query(&["a"])).await;
+    let mut narrow = hub.rows(query(&["a"])).await.unwrap();
     assert_eq!(narrow.state(), ViewState::Ready);
     assert_eq!(names(&narrow), ["p1"], "filtered in Rust");
     assert_eq!(hub.scopes(), [Scope::Cluster], "no upstream of its own");
 
     drop(all);
-    let back = hub.rows(query(&[])).await;
+    let back = hub.rows(query(&[])).await.unwrap();
     assert_eq!(back.state(), ViewState::Ready, "going back costs nothing");
     drop(back);
     fake.bookmark();
@@ -343,20 +423,20 @@ async fn more_than_four_namespaces_watch_cluster_wide_only_if_the_person_may_lis
     fake.add("pods", Some("f"), "p2");
     fake.state().may_list = true;
     let (hub, _clients) = fake.hub(Budgets::default());
-    let mut wide = hub.rows(query(&five)).await;
+    let mut wide = hub.rows(query(&five)).await.unwrap();
     ready(&mut wide).await;
     assert_eq!(hub.scopes(), [Scope::Cluster]);
     assert_eq!(names(&wide), ["p1"], "f is not among them");
 
     let fake = Fake::default();
     let (hub, _clients) = fake.hub(Budgets::default());
-    let mut narrow = hub.rows(query(&five)).await;
+    let mut narrow = hub.rows(query(&five)).await.unwrap();
     ready(&mut narrow).await;
     let scopes: Vec<Scope> = five.iter().map(|name| namespace(name)).collect();
     assert_eq!(hub.scopes(), scopes);
     assert_eq!(fake.count("selfsubjectaccessreviews"), 1);
     drop(narrow);
-    let again = hub.rows(query(&five)).await;
+    let again = hub.rows(query(&five)).await.unwrap();
     assert_eq!(again.state(), ViewState::Ready);
     assert_eq!(
         fake.count("selfsubjectaccessreviews"),
@@ -370,7 +450,7 @@ async fn failures_back_off_from_half_a_second_to_five_and_events_reset_it() {
     let fake = Fake::default();
     fake.state().unavailable = 6;
     let (hub, _clients) = fake.hub(Budgets::default());
-    let mut pods = hub.rows(query(&["a"])).await;
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
     ready(&mut pods).await;
     let gaps = |fake: &Fake| -> Vec<Duration> {
         let state = fake.state();
@@ -413,10 +493,10 @@ async fn a_quiet_watch_probes_the_connection_before_it_watches_again() {
     let fake = Fake::default();
     let (hub, clients) = fake.hub(Budgets::default());
     let retired = clients.connections().retired();
-    let mut a = hub.rows(query(&["a"])).await;
+    let mut a = hub.rows(query(&["a"])).await.unwrap();
     ready(&mut a).await;
     sleep(IDLE / 2).await;
-    let mut b = hub.rows(query(&["b"])).await;
+    let mut b = hub.rows(query(&["b"])).await.unwrap();
     ready(&mut b).await;
     let resumed = |namespace: &str| {
         fake.count(&format!("namespaces/{namespace}/pods?watch=true&allowWatchBookmarks=true&timeoutSeconds=290&resourceVersion="))
@@ -445,7 +525,7 @@ async fn a_watch_resumed_from_a_compacted_version_relists_with_its_rows() {
     let fake = Fake::default();
     fake.add("pods", Some("a"), "p1");
     let (hub, _clients) = fake.hub(Budgets::default());
-    let mut pods = hub.rows(query(&["a"])).await;
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
     ready(&mut pods).await;
 
     fake.add("pods", Some("a"), "p2");
@@ -477,10 +557,10 @@ async fn a_cluster_without_streaming_lists_is_listed_in_pages_once_it_said_so() 
     fake.state().no_streaming = true;
     fake.add("pods", Some("a"), "p1");
     let (hub, _clients) = fake.hub(Budgets::default());
-    let mut a = hub.rows(query(&["a"])).await;
+    let mut a = hub.rows(query(&["a"])).await.unwrap();
     ready(&mut a).await;
     assert_eq!(names(&a), ["p1"]);
-    let mut b = hub.rows(query(&["b"])).await;
+    let mut b = hub.rows(query(&["b"])).await.unwrap();
     ready(&mut b).await;
     assert_eq!(fake.count("sendInitialEvents"), 1);
     assert_eq!(fake.count("limit=500"), 2);
@@ -497,7 +577,7 @@ async fn a_list_in_pages_follows_its_continue_tokens() {
         fake.add("pods", Some("a"), &format!("p{index:04}"));
     }
     let (hub, _clients) = fake.hub(Budgets::default());
-    let mut pods = hub.rows(query(&["a"])).await;
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
     ready(&mut pods).await;
     assert_eq!(pods.items().len(), 1200);
     assert_eq!(fake.count("limit=500"), 3);
@@ -517,7 +597,7 @@ async fn a_forbidden_upstream_retries_until_it_is_allowed() {
         .forbidden
         .insert("/api/v1/namespaces/a/pods".to_owned());
     let (hub, _clients) = fake.hub(Budgets::default());
-    let mut pods = hub.rows(query(&["a"])).await;
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
     let forbidden = ViewState::Forbidden {
         verb: "watch".to_owned(),
         resource: "pods".to_owned(),
@@ -527,7 +607,11 @@ async fn a_forbidden_upstream_retries_until_it_is_allowed() {
     let tries = fake.count("namespaces/a/pods");
     assert!((6..=60).contains(&tries), "{tries} tries in 30 s");
     assert_eq!(pods.state(), forbidden);
-    let asking: Vec<_> = futures::future::join_all((0..10).map(|_| hub.rows(query(&["a"])))).await;
+    let asking: Vec<_> = futures::future::join_all((0..10).map(|_| hub.rows(query(&["a"]))))
+        .await
+        .into_iter()
+        .map(Result::unwrap)
+        .collect();
     assert!(asking.iter().all(|asked| asked.state() == forbidden));
     settle().await;
     assert_eq!(
@@ -548,7 +632,7 @@ async fn rejected_credentials_wait_to_be_subscribed_again() {
         .unauthorized
         .insert("/api/v1/namespaces/a/pods".to_owned());
     let (hub, _clients) = fake.hub(Budgets::default());
-    let mut pods = hub.rows(query(&["a"])).await;
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
     until(&mut pods, |state| *state == ViewState::Unauthorized).await;
     sleep(Duration::from_secs(30)).await;
     assert_eq!(
@@ -558,7 +642,7 @@ async fn rejected_credentials_wait_to_be_subscribed_again() {
     );
 
     fake.state().unauthorized.clear();
-    let mut again = hub.rows(query(&["a"])).await;
+    let mut again = hub.rows(query(&["a"])).await.unwrap();
     assert_eq!(
         again.state(),
         ViewState::Connecting,
@@ -583,7 +667,7 @@ async fn a_cluster_scoped_resource_ignores_namespaces() {
         namespaced: false,
         ..pods()
     };
-    let mut namespaces = hub.rows(query).await;
+    let mut namespaces = hub.rows(query).await.unwrap();
     ready(&mut namespaces).await;
     assert_eq!(hub.scopes(), [Scope::Cluster]);
     assert_eq!(names(&namespaces), ["a"]);
@@ -595,19 +679,19 @@ async fn whole_rows_wait_for_a_whole_list() {
     fake.add("pods", Some("a"), "p1");
     fake.state().unavailable = 1;
     let (hub, _clients) = fake.hub(Budgets::default());
-    let mut pods = hub.rows(query(&["a"])).await;
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
     let rows = pods.whole().await.expect("one 503 is ridden out");
     assert_eq!(rows.len(), 1);
 
     fake.state().hold_initial = true;
-    let mut partial = hub.rows(query(&["b"])).await;
+    let mut partial = hub.rows(query(&["b"])).await.unwrap();
     let asked = tokio::time::timeout(Duration::from_secs(30), partial.whole());
     assert!(asked.await.is_err(), "no answer before the list ends");
     fake.release_initial();
     assert!(partial.whole().await.unwrap().is_empty());
 
     fake.state().unavailable = usize::MAX;
-    let mut dead = hub.rows(query(&["c"])).await;
+    let mut dead = hub.rows(query(&["c"])).await.unwrap();
     let started = Instant::now();
     assert_eq!(dead.whole().await.unwrap_err(), ViewState::Stale);
     assert!(started.elapsed() >= 2 * RETRY_WITHIN);
@@ -616,7 +700,7 @@ async fn whole_rows_wait_for_a_whole_list() {
     fake.state()
         .forbidden
         .insert("/api/v1/namespaces/d/pods".to_owned());
-    let mut refused = hub.rows(query(&["d"])).await;
+    let mut refused = hub.rows(query(&["d"])).await.unwrap();
     assert!(matches!(
         refused.whole().await,
         Err(ViewState::Forbidden { .. })
@@ -644,7 +728,7 @@ async fn clients_abandoned_before_their_first_watch_are_left_at_once() {
         })
     };
     let hub = Hub::new(connect);
-    let mut pods = hub.rows(query(&["a"])).await;
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
     ready(&mut pods).await;
     assert_eq!(names(&pods), ["p1"]);
     assert_eq!(connects.load(std::sync::atomic::Ordering::Relaxed), 2);
@@ -656,10 +740,20 @@ async fn clients_abandoned_before_their_first_watch_are_left_at_once() {
     );
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_name_that_can_be_no_path_segment_is_refused() {
+    let (hub, _clients) = Fake::default().hub(Budgets::default());
+    for name in ["a/pods", "a%2Fb", "..", ""] {
+        let refused = hub.rows(query(&[name])).await.err().unwrap();
+        assert_eq!(refused.kind, twigo_ipc::ErrorKind::InvalidInput, "{name:?}");
+    }
+    assert!(hub.scopes().is_empty());
+}
+
 #[test]
-fn names_that_are_none_stay_in_their_segment() {
-    let path = pods().path(&Scope::Namespace("a/b?c<d".to_owned()));
-    assert_eq!(path, "/api/v1/namespaces/a%2Fb%3Fc%3Cd/pods");
+fn names_stay_in_their_segment() {
+    let path = pods().path(&Scope::Namespace("a?c<d".to_owned()));
+    assert_eq!(path, "/api/v1/namespaces/a%3Fc%3Cd/pods");
     let collection = crate::request::Collection::table(&path);
     let request = crate::request::list(&collection, 1, None);
     assert_eq!(request.uri().path(), path);

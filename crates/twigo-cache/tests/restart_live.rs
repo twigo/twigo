@@ -112,7 +112,8 @@ async fn an_api_server_restart_leaves_the_rows_after_a_stale_spell() {
             namespaces: vec![ns.clone()],
             field_selector: None,
         })
-        .await;
+        .await
+        .unwrap();
     let names = |rows: &twigo_cache::hub::Subscription<twigo_cache::table::Row>| {
         let mut names: Vec<String> = rows
             .items()

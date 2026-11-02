@@ -30,6 +30,6 @@ dhat.workspace = true
 http-body.workspace = true
 http-body-util.workspace = true
 kube = { workspace = true, features = ["runtime"] }
-tokio = { workspace = true, features = ["macros", "rt", "test-util", "time"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "test-util", "time"] }
 tower.workspace = true
 twigo-kube = { workspace = true, features = ["test-util"] }

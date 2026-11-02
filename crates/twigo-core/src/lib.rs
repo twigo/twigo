@@ -216,7 +216,7 @@ impl Core {
                 namespaces: Vec::new(),
                 field_selector: None,
             })
-            .await;
+            .await?;
         match index.whole().await {
             Ok(rows) => {
                 let mut names: Vec<String> =

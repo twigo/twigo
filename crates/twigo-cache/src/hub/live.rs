@@ -204,7 +204,7 @@ async fn lists_stream_from_1_34_and_come_in_pages_on_1_33() {
         live.pod(&namespace, name).await;
     }
     let (hub, clients) = live.hub(None);
-    let mut pods = hub.rows(live.query(&[&namespace])).await;
+    let mut pods = hub.rows(live.query(&[&namespace])).await.unwrap();
     until(&mut pods, ready).await;
     assert_eq!(names(&pods), ["p1", "p2", "p3"]);
     let columns: Vec<String> = pods
@@ -359,7 +359,7 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
 
     let (hub, _clients) = live.hub(Some(&config));
     let five: Vec<&str> = namespaces.iter().map(String::as_str).collect();
-    let mut pods = hub.rows(live.query(&five)).await;
+    let mut pods = hub.rows(live.query(&five)).await.unwrap();
     until(&mut pods, ready).await;
     let mut scopes: Vec<Scope> = namespaces
         .iter()
@@ -369,7 +369,7 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
     assert_eq!(hub.scopes(), scopes, "one upstream per namespace");
     assert_eq!(pods.items().len(), 5);
 
-    let mut all = hub.rows(live.query(&[])).await;
+    let mut all = hub.rows(live.query(&[])).await.unwrap();
     // 1.33 lists in pages, so its list is what the server refuses.
     let verb = if live.minor().await >= 34 {
         "watch"
@@ -436,7 +436,7 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
     tokio::time::timeout(Duration::from_secs(30), allowed)
         .await
         .expect("the binding counts within half a minute");
-    let mut wide = hub.rows(live.query(&five)).await;
+    let mut wide = hub.rows(live.query(&five)).await.unwrap();
     until(&mut wide, ready).await;
     assert_eq!(hub.scopes(), [Scope::Cluster], "the review allowed it");
     assert_eq!(wide.items().len(), 5, "filtered to the five");
@@ -462,7 +462,9 @@ async fn an_object_upstream_follows_an_edit() {
     live.pod(&namespace, "p1").await;
     let (hub, _clients) = live.hub(None);
     let resource = live.query(&[]).resource;
-    let mut pod = hub.object(&live.context, resource, Some(namespace.clone()), "p1");
+    let mut pod = hub
+        .object(&live.context, resource, Some(namespace.clone()), "p1")
+        .unwrap();
     until(&mut pod, |pod| ready(pod) && pod.items().len() == 1).await;
 
     let patch = json!({ "metadata": { "labels": { "edited": "yes" } } });

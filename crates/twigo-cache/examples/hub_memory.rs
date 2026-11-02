@@ -60,7 +60,8 @@ async fn main() {
             namespaces: vec![namespace.clone()],
             field_selector: None,
         })
-        .await;
+        .await
+        .unwrap();
     while pods.state() != ViewState::Ready {
         pods.changed().await;
     }

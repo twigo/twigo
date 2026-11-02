@@ -30,7 +30,7 @@ use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use twigo_ipc::ViewState;
+use twigo_ipc::{ErrorKind, IpcError, ViewState};
 
 use crate::cluster::Cluster;
 use crate::decode::Decode;
@@ -66,9 +66,29 @@ const SEGMENT: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'_')
     .remove(b'~');
 
+/// A name that can be no path segment, as Kubernetes' own
+/// `IsValidPathSegmentName` refuses it: the API server decodes `%2F`
+/// before it routes, so escaping would not keep it in its segment.
+fn segment(name: &str) -> Result<(), IpcError> {
+    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '%']) {
+        return Err(IpcError {
+            kind: ErrorKind::InvalidInput,
+            message: format!("{name:?} can be no name in a request's path"),
+        });
+    }
+    Ok(())
+}
+
 impl Resource {
-    /// Its collection's path, each name escaped, so a name that is none
-    /// gets the server's refusal rather than another path.
+    fn check(&self) -> Result<(), IpcError> {
+        if !self.group.is_empty() {
+            segment(&self.group)?;
+        }
+        segment(&self.version)?;
+        segment(&self.resource)
+    }
+
+    /// Its collection's path, each name escaped.
     fn path(&self, scope: &Scope) -> String {
         let segment = |name: &str| utf8_percent_encode(name, SEGMENT).to_string();
         let base = if self.group.is_empty() {
@@ -238,8 +258,13 @@ impl Hub {
         }
     }
 
-    /// The rows of a resource in the query's namespaces.
-    pub async fn rows(&self, query: Query) -> Subscription<Row> {
+    /// The rows of a resource in the query's namespaces, unless a name
+    /// can be no path segment.
+    pub async fn rows(&self, query: Query) -> Result<Subscription<Row>, IpcError> {
+        query.resource.check()?;
+        for namespace in &query.namespaces {
+            segment(namespace)?;
+        }
         let format = match query.format {
             RowFormat::Table => Format::Table,
             RowFormat::Metadata => Format::Metadata,
@@ -274,17 +299,22 @@ impl Hub {
             let parts = self.per_namespace(&key, namespaces);
             subscription.set_parts(parts);
         }
-        subscription
+        Ok(subscription)
     }
 
-    /// An object, followed by an Object upstream for its editor.
+    /// An object, followed by an Object upstream for its editor, unless a
+    /// name can be no path segment.
     pub fn object(
         &self,
         context: &str,
         resource: Resource,
         namespace: Option<String>,
         name: &str,
-    ) -> Subscription<Object> {
+    ) -> Result<Subscription<Object>, IpcError> {
+        resource.check()?;
+        if let Some(namespace) = &namespace {
+            segment(namespace)?;
+        }
         let key = Key {
             context: context.to_owned(),
             resource,
@@ -295,7 +325,7 @@ impl Hub {
         let mut subscription = Subscription::new(key.clone(), &[]);
         let part = self.hold(&key, None);
         subscription.set_parts(vec![part]);
-        subscription
+        Ok(subscription)
     }
 
     /// The scope of the upstream behind each key held, for tests.
@@ -550,6 +580,15 @@ impl Inner {
         entry.queued = queued.then(Instant::now);
         entry.served = false;
         if !queued {
+            return;
+        }
+        if entry.idle() {
+            // Nobody shows it: it would take a watch from one that is shown.
+            let task = registry.entries.remove(key).map(|entry| entry.task);
+            drop(registry);
+            if let Some(task) = task {
+                task.abort();
+            }
             return;
         }
         let evicted = evict(&mut registry, &key.context);
