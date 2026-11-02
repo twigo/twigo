@@ -58,6 +58,38 @@ async fn live() -> Live {
 }
 
 impl Live {
+    /// Changes `pod` until the server answers a watch of `path` from
+    /// version 1 with 410. The watch cache keeps every event since it
+    /// listed, near the start of a young cluster, until its buffer is full
+    /// while its oldest event is older than 75 s (`watch_cache_history.go`
+    /// of Kubernetes v1.37.0, `resizeCacheLocked` and `GetIntervalLocked`).
+    async fn expire_version_1(&self, namespace: &str, pod: &str, path: &str) {
+        let pods = Api::<Pod>::namespaced(self.admin.clone(), namespace);
+        let expired = async {
+            for round in 0u32.. {
+                let watch =
+                    request::watch(&Collection::table(path), WatchFrom::ResourceVersion("1"), 5);
+                let mut lines = Box::pin(self.admin.request_stream(watch).await.unwrap());
+                let mut first = Vec::new();
+                lines.read_until(b'\n', &mut first).await.unwrap();
+                if let Event::Error(status) = TableDecoder::new().decode_event(&first).unwrap() {
+                    assert_eq!(status.code, 410);
+                    return;
+                }
+                drop(lines);
+                for change in 0..100 {
+                    let patch = json!({ "metadata": { "labels": { "churn": format!("{round}-{change}") } } });
+                    pods.patch(pod, &PatchParams::default(), &Patch::Merge(&patch))
+                        .await
+                        .unwrap();
+                }
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(180), expired)
+            .await
+            .expect("the watch cache lets version 1 go within three minutes");
+    }
+
     /// The hub over clients of `config`, the admin's unless given.
     fn hub(&self, config: Option<&Config>) -> (Hub, Arc<Clients>) {
         let clients =
@@ -242,21 +274,8 @@ async fn a_watch_resumed_from_a_compacted_version_relists() {
         .expect("kwok lets the pod go within a minute");
 
     // What makes it a forced 410: the server answers a watch from "1" so.
-    let path = key.spec().path;
-    let watch = request::watch(
-        &Collection::table(&path),
-        WatchFrom::ResourceVersion("1"),
-        5,
-    );
-    let mut lines = Box::pin(live.admin.request_stream(watch).await.unwrap());
-    let mut first = Vec::new();
-    lines.read_until(b'\n', &mut first).await.unwrap();
-    let event = TableDecoder::new().decode_event(&first).unwrap();
-    assert!(
-        matches!(&event, Event::Error(status) if status.code == 410),
-        "{event:?}"
-    );
-    drop(lines);
+    live.expire_version_1(&namespace, "p1", &key.spec().path)
+        .await;
 
     let resumed = tokio::spawn(upstream::resume(
         env(),
