@@ -125,6 +125,10 @@ function Grid({
   } = useListView(backend, query);
   const now = useNow(1000);
   const [grid, setGrid] = useState<HTMLElement | null>(null);
+  // Rust groups nothing by a column the list lacks, such as Namespace in
+  // a list of one namespace, and then sends no groups.
+  const grouping =
+    shown?.groupBy && snapshot.groups.length > 0 ? shown.groupBy : undefined;
 
   const columns: readonly ShownColumn[] = snapshot.columns
     .map((column, index) => ({
@@ -136,7 +140,7 @@ function Grid({
     .filter(
       (column) =>
         column.name === "Name" ||
-        (column.name !== shown?.groupBy?.column &&
+        (column.name !== grouping?.column &&
           (preset.columns[column.name] ?? column.priority === 0)),
     );
   const byName = new Map(columns.map((column) => [column.name, column]));
@@ -151,11 +155,11 @@ function Grid({
   const items = useMemo(
     () =>
       sequence(
-        shown?.groupBy ? snapshot.groups : undefined,
-        new Set(shown?.groupBy?.collapsed),
+        grouping ? snapshot.groups : undefined,
+        new Set(grouping?.collapsed),
         snapshot.total,
       ),
-    [shown, snapshot.groups, snapshot.total],
+    [grouping, snapshot.groups, snapshot.total],
   );
   const statusIndex = countBy
     ? snapshot.columns.findIndex((column) => column.name === countBy)

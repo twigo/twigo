@@ -140,7 +140,9 @@ export function ListActions({
             className="inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground outline-none hover:bg-row-hover hover:text-foreground focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-hover"
           >
             <ListTree aria-hidden className="size-3.5" />
-            {preset.group ?? "Group"}
+            {groupable.some((candidate) => candidate.name === preset.group)
+              ? preset.group
+              : "Group"}
           </button>
         </ActionDropdown>
       )}
