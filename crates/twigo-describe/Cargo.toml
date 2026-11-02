@@ -1,0 +1,19 @@
+[package]
+name = "twigo-describe"
+description = "Describers by GroupKind: an object and its related facts into the Overview document"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64.workspace = true
+jiff.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+twigo-ipc.workspace = true
+
+[dev-dependencies]
+twigo-policy.workspace = true

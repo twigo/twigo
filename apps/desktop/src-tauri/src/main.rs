@@ -17,9 +17,9 @@ use tauri_plugin_opener::OpenerExt;
 use twigo_core::Core;
 use twigo_env::Environment;
 use twigo_ipc::{
-    Ack, ClusterVersion, Context, ContextAuth, Discovered, ErrorKind, ExecReview, IpcError,
-    KeyboardLayout, ListBatch, ListQuery, SetWindow, ShellEnvironment, Space, StateEntry,
-    StateSnapshot, SubscriptionId,
+    Ack, ClusterVersion, Context, ContextAuth, Discovered, ErrorKind, ExecReview, GetValues,
+    IpcError, KeyboardLayout, ListBatch, ListQuery, ObjectBatch, OpenObject, SetParts, SetWindow,
+    ShellEnvironment, Space, StateEntry, StateSnapshot, SubscriptionId,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
 
@@ -294,6 +294,58 @@ fn list_unsubscribe(
 }
 
 #[tauri::command]
+async fn object_open(
+    webview: Webview,
+    app: State<'_, App>,
+    request: OpenObject,
+    channel: Channel<ObjectBatch>,
+) -> Result<SubscriptionId, IpcError> {
+    app.core
+        .object_open(webview.label(), request, move |batch| {
+            match channel.send(batch) {
+                Ok(()) => true,
+                Err(error) => {
+                    eprintln!("could not send an object batch: {error}");
+                    false
+                }
+            }
+        })
+        .await
+}
+
+#[tauri::command]
+fn object_set_parts(
+    webview: Webview,
+    app: State<'_, App>,
+    request: SetParts,
+) -> Result<(), IpcError> {
+    app.core.object_set_parts(webview.label(), request)
+}
+
+#[tauri::command]
+fn object_ack(webview: Webview, app: State<'_, App>, request: Ack) -> Result<(), IpcError> {
+    app.core.object_ack(webview.label(), request)
+}
+
+#[tauri::command]
+fn object_values(
+    webview: Webview,
+    app: State<'_, App>,
+    request: GetValues,
+) -> Result<Vec<Option<String>>, IpcError> {
+    app.core.object_values(webview.label(), request)
+}
+
+#[tauri::command]
+fn object_close(
+    webview: Webview,
+    app: State<'_, App>,
+    request: SubscriptionId,
+) -> Result<(), IpcError> {
+    app.core.object_close(webview.label(), request)
+}
+
+#[tauri::command]
 async fn context_sign_in(app: State<'_, App>, request: String) -> Result<(), IpcError> {
     app.core.sign_in(&request).await
 }
@@ -422,6 +474,11 @@ fn main() {
             list_set_window,
             list_ack,
             list_unsubscribe,
+            object_open,
+            object_set_parts,
+            object_ack,
+            object_values,
+            object_close,
             context_sign_in,
             context_sign_in_cancel,
             exec_review,
@@ -434,7 +491,7 @@ fn main() {
             if payload.event() == PageLoadEvent::Started
                 && let Some(app) = webview.try_state::<App>()
             {
-                app.core.drop_lists(webview.label());
+                app.core.drop_window(webview.label());
             }
         })
         .on_window_event(|window, event| {
@@ -449,7 +506,7 @@ fn main() {
                 app.focus(window.label(), focused);
                 // A webview window's webview has the window's label.
                 if let WindowEvent::Destroyed = event {
-                    app.core.drop_lists(window.label());
+                    app.core.drop_window(window.label());
                 }
             }
         })

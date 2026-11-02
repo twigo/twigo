@@ -301,6 +301,7 @@ export function resourceProvider(
       selection.set(uri, {
         gvr: PODS,
         kind: "Pod",
+        namespaced: true,
         columns: pick.columns,
         row: pick.row,
         reveal: true,

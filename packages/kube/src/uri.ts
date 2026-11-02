@@ -53,3 +53,52 @@ export function parseListUri(uri: string): ListInput | undefined {
     ...(labels && { labels }),
   };
 }
+
+/**
+ * One object as an editor (ARCHITECTURE 4.3):
+ * `k8s://<space>/<group>/<version>/<resource>[/<namespace>]/<name>`, the core
+ * group an empty segment, so the path has five segments for an object in a
+ * namespace and four for a cluster-scoped one.
+ */
+export interface ObjectInput {
+  readonly space: string;
+  readonly gvr: Gvr;
+  readonly namespace?: string;
+  readonly name: string;
+}
+
+export const OBJECT_SCHEME = "k8s";
+
+export function objectUri({
+  space,
+  gvr,
+  namespace,
+  name,
+}: ObjectInput): string {
+  const path = [
+    gvr.group,
+    gvr.version,
+    gvr.resource,
+    ...(namespace === undefined ? [] : [namespace]),
+    name,
+  ]
+    .map(encodeURIComponent)
+    .join("/");
+  return `${OBJECT_SCHEME}://${encodeURIComponent(space)}/${path}`;
+}
+
+export function parseObjectUri(uri: string): ObjectInput | undefined {
+  const url = new URL(uri);
+  if (url.protocol !== `${OBJECT_SCHEME}:`) return undefined;
+  const parts = url.pathname.split("/").slice(1).map(decodeURIComponent);
+  if (parts.length !== 4 && parts.length !== 5) return undefined;
+  const [group = "", version = "", resource = ""] = parts;
+  const name = parts[parts.length - 1] ?? "";
+  if (!version || !resource || !name) return undefined;
+  return {
+    space: decodeURIComponent(url.host),
+    gvr: { group, version, resource },
+    ...(parts.length === 5 && { namespace: parts[3] }),
+    name,
+  };
+}

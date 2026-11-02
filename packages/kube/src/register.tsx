@@ -6,9 +6,11 @@ import { Explorer, EXPLORER_VIEW } from "./Explorer";
 import { FilterField } from "./FilterField";
 import { HealthFilter } from "./HealthFilter";
 import { ListFilters } from "./filters";
-import { ListIcon } from "./KindIcon";
+import { ListIcon, ObjectIcon } from "./KindIcon";
 import { ListEditor, type ListServices } from "./ListEditor";
 import { ListStatuses } from "./listStatus";
+import { ObjectEditor, ObjectTabSwitch } from "./object/ObjectEditor";
+import { ObjectTabs } from "./object/tabs";
 import { ClusterStatusItem, ListSummaryItem } from "./ListStatusItem";
 import { Lists } from "./lists";
 import {
@@ -18,7 +20,12 @@ import {
 } from "./quickaccess";
 import { registerResourceActions } from "./resourceActions";
 import { Selection } from "./selection";
-import { LIST_SCHEME, parseListUri } from "./uri";
+import {
+  LIST_SCHEME,
+  OBJECT_SCHEME,
+  parseListUri,
+  parseObjectUri,
+} from "./uri";
 
 /** Kubernetes in the workbench, through its registries only (ARCHITECTURE 2.3). */
 export function registerKube(workbench: Workbench): void {
@@ -111,6 +118,22 @@ export function registerKube(workbench: Workbench): void {
         <FilterField uri={uri} filters={services.filters} />
       </div>
     ),
+  });
+
+  const objectTabs = new ObjectTabs();
+  editors.register({
+    id: "kube.object",
+    scheme: OBJECT_SCHEME,
+    title: (uri) => parseObjectUri(uri.href)?.name ?? uri.href,
+    icon: ObjectIcon,
+    component: ({ uri }) => (
+      <ObjectEditor
+        uri={uri}
+        discovery={services.discovery}
+        tabs={objectTabs}
+      />
+    ),
+    actions: ({ uri }) => <ObjectTabSwitch uri={uri} tabs={objectTabs} />,
   });
 
   const moves: readonly {

@@ -1,0 +1,86 @@
+{
+  "events": [],
+  "object": {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "creationTimestamp": "2026-11-02T21:04:52Z",
+      "managedFields": [
+        {
+          "apiVersion": "v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:spec": {
+              "f:internalTrafficPolicy": {},
+              "f:ports": {
+                ".": {},
+                "k:{\"port\":80,\"protocol\":\"TCP\"}": {
+                  ".": {},
+                  "f:name": {},
+                  "f:port": {},
+                  "f:protocol": {},
+                  "f:targetPort": {}
+                }
+              },
+              "f:selector": {},
+              "f:sessionAffinity": {},
+              "f:type": {}
+            }
+          },
+          "manager": "unknown",
+          "operation": "Update",
+          "time": "2026-11-02T21:04:52Z"
+        }
+      ],
+      "name": "web",
+      "namespace": "overview",
+      "resourceVersion": "3785",
+      "uid": "7a51760a-e0fb-4829-91a6-bd3166c8182c"
+    },
+    "spec": {
+      "clusterIP": "10.96.162.135",
+      "clusterIPs": [
+        "10.96.162.135"
+      ],
+      "internalTrafficPolicy": "Cluster",
+      "ipFamilies": [
+        "IPv4"
+      ],
+      "ipFamilyPolicy": "SingleStack",
+      "ports": [
+        {
+          "name": "http",
+          "port": 80,
+          "protocol": "TCP",
+          "targetPort": "http"
+        }
+      ],
+      "selector": {
+        "app": "web"
+      },
+      "sessionAffinity": "None",
+      "type": "ClusterIP"
+    },
+    "status": {
+      "loadBalancer": {}
+    }
+  },
+  "printed": [
+    {
+      "column": "Type",
+      "value": "ClusterIP"
+    },
+    {
+      "column": "Cluster-IP",
+      "value": "10.96.162.135"
+    },
+    {
+      "column": "Port(s)",
+      "value": "80/TCP"
+    },
+    {
+      "column": "Selector",
+      "value": "app=web"
+    }
+  ]
+}

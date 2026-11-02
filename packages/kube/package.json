@@ -18,7 +18,9 @@
     "@twigo/utils": "workspace:*",
     "@twigo/workbench": "workspace:*",
     "lucide-react": "^1.65.0",
-    "valibot": "^1.5.0"
+    "monaco-editor": "^0.57.0",
+    "valibot": "^1.5.0",
+    "yaml": "^2.9.1"
   },
   "peerDependencies": {
     "react": "^19.3.1"

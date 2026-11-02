@@ -5,8 +5,9 @@ mod auth;
 pub mod catalog;
 pub mod connections;
 mod errors;
-pub mod lists;
+pub mod objects;
 pub mod state;
+pub mod subscriptions;
 pub mod trust;
 
 use std::collections::HashSet;
@@ -21,8 +22,8 @@ use twigo_cache::hub::{Connect, Hub, Query, Resource, RowFormat};
 use twigo_cache::view::Spec;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    Ack, ClusterVersion, ErrorKind, IpcError, ListBatch, ListQuery, SetWindow, SubscriptionId,
-    ViewState,
+    Ack, ClusterVersion, ErrorKind, GetValues, IpcError, ListBatch, ListQuery, ObjectBatch,
+    OpenObject, SetParts, SetWindow, SubscriptionId, ViewState,
 };
 use twigo_kube::client::{Clients, ProxyEnv};
 use twigo_kube::credentials::{ExecError, OidcError, Provider, Registry, Source, Timeouts};
@@ -33,8 +34,9 @@ use twigo_netmon::Event;
 pub use auth::AuthFollower;
 use catalog::Catalog;
 use connections::Connections;
-use lists::Lists;
+use objects::{Opened, Target};
 use state::State;
+use subscriptions::Subscriptions;
 use trust::Trust;
 
 pub struct Core {
@@ -43,7 +45,8 @@ pub struct Core {
     pub connections: Connections,
     pub trust: Trust,
     pub hub: Hub,
-    lists: Lists,
+    lists: Subscriptions<Batcher>,
+    objects: Subscriptions<Opened>,
     discovery: Arc<Cache>,
     credentials: Registry,
     /// Whether a Twigo window has the focus, which a plugin that may ask
@@ -79,7 +82,8 @@ impl Core {
         let focused = watch::Sender::new(false);
         Arc::new_cyclic(|core| Self {
             hub: Hub::new(connect(core.clone())),
-            lists: Lists::default(),
+            lists: Subscriptions::new("list"),
+            objects: Subscriptions::new("object"),
             discovery: Arc::new(Cache::new(cache.join("discovery"))),
             state: State::open(data.join("state.json")),
             catalog: Catalog::default(),
@@ -316,9 +320,68 @@ impl Core {
         self.lists.remove(window, id)
     }
 
-    /// Ends the lists of a window that reloads or closes.
-    pub fn drop_lists(&self, window: &str) {
+    /// An object of a space for a window: its Object upstream, and its
+    /// events and owned objects while the parts that show them do, whose
+    /// batches go through `send` until it says the window is gone.
+    pub async fn object_open(
+        &self,
+        window: &str,
+        request: OpenObject,
+        send: impl FnMut(ObjectBatch) -> bool + Send + 'static,
+    ) -> Result<SubscriptionId, IpcError> {
+        let ticket = self.objects.ticket(window);
+        let query = request.object;
+        let context = self.context(&query.space)?;
+        let resource = Resource {
+            group: query.gvr.group,
+            version: query.gvr.version,
+            resource: query.gvr.resource,
+            namespaced: query.namespaced,
+        };
+        if query.namespaced && query.namespace.is_none() {
+            return Err(IpcError {
+                kind: ErrorKind::InvalidInput,
+                message: format!("{} names no namespace", query.name),
+            });
+        }
+        let namespace = query.namespace.filter(|_| query.namespaced);
+        let object = self
+            .hub
+            .object(&context, resource, namespace.clone(), &query.name)?;
+        let target = Target { context, namespace };
+        self.objects.keep(
+            ticket,
+            Opened::spawn(self.hub.clone(), target, object, request.parts, send),
+        )
+    }
+
+    pub fn object_set_parts(&self, window: &str, request: SetParts) -> Result<(), IpcError> {
+        self.objects
+            .with(window, request.id, |object| object.set_parts(request.parts))
+    }
+
+    pub fn object_ack(&self, window: &str, request: Ack) -> Result<(), IpcError> {
+        self.objects
+            .with(window, request.id, |object| object.ack(request.seq))
+    }
+
+    pub fn object_values(
+        &self,
+        window: &str,
+        request: GetValues,
+    ) -> Result<Vec<Option<String>>, IpcError> {
+        self.objects
+            .with(window, request.id, |object| object.values(&request.keys))?
+    }
+
+    pub fn object_close(&self, window: &str, id: SubscriptionId) -> Result<(), IpcError> {
+        self.objects.remove(window, id)
+    }
+
+    /// Ends the lists and open objects of a window that reloads or closes.
+    pub fn drop_window(&self, window: &str) {
         self.lists.drop_window(window);
+        self.objects.drop_window(window);
     }
 
     /// Retires every connection on wake, and those whose route moved on a

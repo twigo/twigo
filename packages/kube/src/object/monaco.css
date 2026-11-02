@@ -1,0 +1,7 @@
+/* Monaco's built-in themes carry their own background; the editor takes the
+   app's editor surface instead, so the YAML tab matches the Overview. */
+.monaco-editor,
+.monaco-editor .margin,
+.monaco-editor-background {
+  background-color: var(--color-editor) !important;
+}

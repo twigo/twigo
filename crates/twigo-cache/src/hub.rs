@@ -37,7 +37,7 @@ use crate::cluster::Cluster;
 use crate::decode::Decode;
 use crate::meta::MetaDecoder;
 use crate::object::{Object, ObjectDecoder};
-use crate::request::Format;
+use crate::request::{Format, field_value};
 use crate::store::{Drained, Feed, Item, RowKey};
 use crate::table::{Column, Row, TableDecoder};
 use crate::upstream::{self, Env, Spec, Upstream};
@@ -312,14 +312,32 @@ impl Hub {
         Ok(subscription)
     }
 
-    /// An object, followed by an Object upstream for its editor, unless a
-    /// name can be no path segment.
+    /// An object, followed by an Object upstream for its editor, unless its
+    /// namespace can be no path segment.
     pub fn object(
         &self,
         context: &str,
         resource: Resource,
         namespace: Option<String>,
         name: &str,
+    ) -> Result<Subscription<Object>, IpcError> {
+        self.selected(
+            context,
+            resource,
+            namespace,
+            format!("metadata.name={}", field_value(name)),
+        )
+    }
+
+    /// The objects a field selector picks, in a namespace or, with none,
+    /// in every namespace, followed whole by an Object upstream, as an
+    /// object's events are.
+    pub fn selected(
+        &self,
+        context: &str,
+        resource: Resource,
+        namespace: Option<String>,
+        field_selector: String,
     ) -> Result<Subscription<Object>, IpcError> {
         resource.check()?;
         if let Some(namespace) = &namespace {
@@ -330,7 +348,7 @@ impl Hub {
             resource,
             format: Format::Object,
             scope: namespace.map_or(Scope::Cluster, Scope::Namespace),
-            field_selector: Some(format!("metadata.name={name}")),
+            field_selector: Some(field_selector),
         };
         let mut subscription = Subscription::new(key.clone(), &[]);
         let part = self.hold(&key, None);
@@ -349,6 +367,19 @@ impl Hub {
             .collect();
         scopes.sort_by_key(|scope| format!("{scope:?}"));
         scopes
+    }
+
+    /// The subscriptions that hold the upstreams of a resource, by its
+    /// plural, such as `events`, for tests of the hub's users.
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn subscribers(&self, resource: &str) -> usize {
+        self.inner
+            .registry()
+            .entries
+            .iter()
+            .filter(|(key, _)| key.resource.resource == resource)
+            .map(|(_, entry)| entry.subscribers)
+            .sum()
     }
 
     fn per_namespace<T: Item>(&self, key: &Key, namespaces: &[String]) -> Vec<Part<T>>
@@ -522,7 +553,7 @@ impl Spawn<Row> for Hub {
 
 impl Spawn<Object> for Hub {
     fn spawn(&self, key: &Key, upstream: Arc<Upstream<Object>>, run: u64) -> JoinHandle<()> {
-        self.start(key, ObjectDecoder, upstream, run)
+        self.start(key, ObjectDecoder::new(), upstream, run)
     }
 }
 
@@ -1010,8 +1041,8 @@ impl Seen {
     }
 }
 
-impl Subscription<Row> {
-    /// The columns of a Table upstream.
+impl<T: Item> Subscription<T> {
+    /// The columns of a Table or Object upstream.
     pub fn columns(&self) -> Option<Arc<[Column]>> {
         let parts = self.inner.parts();
         parts.iter().find_map(|part| part.upstream.store.columns())

@@ -400,7 +400,7 @@ async fn a_window_reaches_only_its_own_lists_and_a_reload_drops_them() {
     }
 
     let ticket = core.lists.ticket("main");
-    core.drop_lists("main");
+    core.drop_window("main");
     assert_eq!(
         core.list_ack("main", ack).unwrap_err().kind,
         ErrorKind::NotFound
@@ -445,5 +445,88 @@ async fn a_list_of_an_unknown_space_or_a_bad_selector_is_refused() {
     let mut bad = pods(&space);
     bad.label_selector = Some("app in web".to_owned());
     let refused = core.list_subscribe("main", bad, |_| true).await;
+    assert_eq!(refused.unwrap_err().kind, ErrorKind::InvalidInput);
+}
+
+fn pod(space: &str) -> twigo_ipc::OpenObject {
+    twigo_ipc::OpenObject {
+        object: twigo_ipc::ObjectQuery {
+            space: space.to_owned(),
+            gvr: twigo_ipc::Gvr {
+                group: String::new(),
+                version: "v1".to_owned(),
+                resource: "pods".to_owned(),
+            },
+            namespaced: true,
+            namespace: Some("default".to_owned()),
+            name: "web".to_owned(),
+        },
+        parts: twigo_ipc::ObjectParts {
+            overview: true,
+            ..Default::default()
+        },
+    }
+}
+
+#[tokio::test]
+async fn a_window_reaches_only_its_own_objects_and_a_reload_closes_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = Core::new(dir.path(), &dir.path().join("cache"));
+    let space = core.state.open_space("kind-test").id;
+    let (sender, mut batches) = tokio::sync::mpsc::unbounded_channel();
+    let id = core
+        .object_open("main", pod(&space), move |batch| sender.send(batch).is_ok())
+        .await
+        .unwrap();
+    let first = tokio::time::timeout(Duration::from_secs(5), batches.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.status, ViewState::Connecting);
+    assert!(!first.exists && first.overview.is_none());
+    let ack = Ack { id, seq: first.seq };
+    core.object_ack("main", ack).unwrap();
+    let parts = twigo_ipc::SetParts {
+        id,
+        parts: twigo_ipc::ObjectParts::default(),
+    };
+    let values = twigo_ipc::GetValues {
+        id,
+        keys: vec!["mode".to_owned()],
+    };
+    assert_eq!(
+        core.object_values("main", values.clone()).unwrap_err().kind,
+        ErrorKind::NotFound,
+        "nothing is listed yet"
+    );
+    for refused in [
+        core.object_set_parts("other", parts),
+        core.object_ack("other", ack),
+        core.object_values("other", values).map(drop),
+        core.object_close("other", id),
+    ] {
+        assert_eq!(refused.unwrap_err().kind, ErrorKind::NotFound);
+    }
+
+    core.drop_window("main");
+    assert_eq!(
+        core.object_ack("main", ack).unwrap_err().kind,
+        ErrorKind::NotFound
+    );
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while batches.recv().await.is_some() {}
+    })
+    .await
+    .expect("the object ended with its window");
+}
+
+#[tokio::test]
+async fn a_namespaced_object_without_a_namespace_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = Core::new(dir.path(), &dir.path().join("cache"));
+    let space = core.state.open_space("kind-test").id;
+    let mut nowhere = pod(&space);
+    nowhere.object.namespace = None;
+    let refused = core.object_open("main", nowhere, |_| true).await;
     assert_eq!(refused.unwrap_err().kind, ErrorKind::InvalidInput);
 }

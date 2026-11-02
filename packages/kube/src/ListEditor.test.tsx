@@ -22,6 +22,7 @@ import {
   WorkbenchView,
   type QuickAccessContext,
 } from "@twigo/workbench";
+import { DWELL_MS } from "./Details";
 import { PODS } from "./kinds";
 import { registerKube } from "./register";
 import { cellTone } from "./tones";
@@ -275,7 +276,10 @@ test("a list reopened with a health chip picked subscribes with that health's va
   });
   await settle();
   const values = subscribe.mock.calls.flatMap(([command, query]) =>
-    command === "list_subscribe" && typeof query === "object" && query
+    command === "list_subscribe" &&
+    typeof query === "object" &&
+    query !== null &&
+    "values" in query
       ? [query.values?.values]
       : [],
   );
@@ -400,4 +404,105 @@ test("a failed discovery shows its error instead of a list", async () => {
   const state = title.parentElement ?? title;
   expect(within(state).getByText("no route to the cluster")).toBeDefined();
   expect(screen.queryByRole("grid", { name: "Pods" })).toBeNull();
+});
+
+test("the details open the object once the selection rests on a row, not while it moves", async () => {
+  const backend = createMockBackend("ready");
+  const subscribe = vi.spyOn(backend, "subscribe");
+  await podsList(backend);
+  const opened = () =>
+    subscribe.mock.calls.filter(([command]) => command === "object_open");
+  const [first] = rows();
+  if (!first) throw new Error("no rows");
+  fireEvent.click(first);
+  act(() => {
+    screen.getByRole("grid").focus();
+  });
+  for (let i = 0; i < 5; i++) {
+    key("KeyJ");
+    await act(() => vi.advanceTimersByTimeAsync(DWELL_MS / 3));
+  }
+  expect(opened()).toHaveLength(0);
+  await settle();
+  expect(opened()).toHaveLength(1);
+  const shown = rows().find(
+    (row) => row.getAttribute("aria-selected") === "true",
+  );
+  expect(opened()[0]?.[1]).toMatchObject({
+    object: {
+      namespaced: true,
+      namespace: shown?.children[1]?.textContent,
+      name: shown?.children[0]?.textContent,
+    },
+  });
+  expect(
+    within(details() ?? document.body).getByRole("region", {
+      name: "Metadata",
+    }),
+  ).toBeDefined();
+});
+
+test("opening the object from the details keeps the list in a tab of its own", async () => {
+  const workbench = await podsList();
+  act(() => {
+    workbench.editors.close("k8s-list://prod-eu/v1/pods");
+  });
+  act(() => {
+    workbench.editors.open("k8s-list://prod-eu/v1/pods", { preview: true });
+  });
+  await settle();
+  const [first] = rows();
+  if (!first) throw new Error("no rows");
+  fireEvent.click(first);
+  await settle();
+  fireEvent.click(screen.getByRole("button", { name: "Open in an editor" }));
+  await settle();
+  const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent.trim());
+  expect(tabs[0]).toBe("Pods");
+  expect(tabs).toHaveLength(2);
+  expect(workbench.editors.active).toMatch(/^k8s:\/\/prod-eu\/\/v1\/pods\//);
+});
+
+test("the details say why the object cannot open, over the row's cells", async () => {
+  const mock = createMockBackend("ready");
+  const backend: typeof mock = {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe(command, request, onMessage) {
+      if (command === "object_open")
+        return Promise.reject(
+          new Error("Command object_open not allowed by ACL"),
+        );
+      return mock.subscribe(command, request, onMessage);
+    },
+  };
+  await podsList(backend);
+  const [first] = rows();
+  if (!first) throw new Error("no rows");
+  fireEvent.click(first);
+  await settle();
+  expect(details()?.textContent).toContain(
+    "Command object_open not allowed by ACL",
+  );
+  expect(details()?.textContent).toContain("Ready");
+});
+
+test("the details show the document of the row the selection rests on", async () => {
+  await podsList();
+  const [first, second] = rows();
+  if (!first || !second) throw new Error("no rows");
+  const nameOf = (row: HTMLElement) => row.children[0]?.textContent ?? "?";
+  fireEvent.click(first);
+  await settle();
+  const metadata = () =>
+    within(details() ?? document.body).getByRole("region", {
+      name: "Metadata",
+    }).textContent;
+  expect(metadata()).toContain(nameOf(first));
+  act(() => {
+    screen.getByRole("grid").focus();
+  });
+  key("KeyJ");
+  await settle();
+  expect(metadata()).toContain(nameOf(second));
+  expect(metadata()).not.toContain(nameOf(first));
 });

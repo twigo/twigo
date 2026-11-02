@@ -5571,6 +5571,7 @@ dependencies = [
  "atomic-write-file",
  "http",
  "jiff",
+ "k8s-openapi",
  "kube",
  "rcgen",
  "serde",
@@ -5579,10 +5580,24 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "twigo-cache",
+ "twigo-describe",
  "twigo-env",
  "twigo-ipc",
  "twigo-kube",
  "twigo-netmon",
+ "twigo-policy",
+]
+
+[[package]]
+name = "twigo-describe"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "jiff",
+ "serde",
+ "serde_json",
+ "twigo-ipc",
+ "twigo-policy",
 ]
 
 [[package]]
@@ -5702,6 +5717,10 @@ dependencies = [
 [[package]]
 name = "twigo-policy"
 version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "serde_json",
+]
 
 [[package]]
 name = "twigo-sessions"

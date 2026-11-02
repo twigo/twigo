@@ -487,3 +487,112 @@ async fn an_object_upstream_follows_an_edit() {
     assert_eq!(json["spec"]["nodeName"], "kwok-node-0");
     live.delete_namespace(&namespace).await;
 }
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn an_events_upstream_follows_the_events_of_one_object() {
+    let live = live().await;
+    let namespace = live.namespace("hub-events").await;
+    live.pod(&namespace, "p1").await;
+    live.pod(&namespace, "p2").await;
+    let pods = Api::<Pod>::namespaced(live.admin.clone(), &namespace);
+    let uid = |pod: Pod| pod.metadata.uid.unwrap();
+    let (first, second) = (
+        uid(pods.get("p1").await.unwrap()),
+        uid(pods.get("p2").await.unwrap()),
+    );
+    let events: Api<kube::api::DynamicObject> = Api::namespaced_with(
+        live.admin.clone(),
+        &namespace,
+        &kube::api::ApiResource {
+            group: "events.k8s.io".to_owned(),
+            version: "v1".to_owned(),
+            api_version: "events.k8s.io/v1".to_owned(),
+            kind: "Event".to_owned(),
+            plural: "events".to_owned(),
+        },
+    );
+    let report = |name: &str, pod: &str, uid: &str| {
+        serde_json::from_value::<kube::api::DynamicObject>(json!({
+            "apiVersion": "events.k8s.io/v1",
+            "kind": "Event",
+            "metadata": { "name": name },
+            "eventTime": "2026-11-02T10:00:00.000000Z",
+            "reportingController": "twigo.io/test",
+            "reportingInstance": "test",
+            "action": "Probe",
+            "reason": "Probed",
+            "type": "Normal",
+            "note": format!("about {pod}"),
+            "regarding": { "apiVersion": "v1", "kind": "Pod", "namespace": namespace, "name": pod, "uid": uid },
+        }))
+        .unwrap()
+    };
+    events
+        .create(&PostParams::default(), &report("e1", "p1", &first))
+        .await
+        .unwrap();
+    let (hub, _clients) = live.hub(None);
+    let resource = Resource {
+        group: "events.k8s.io".to_owned(),
+        version: "v1".to_owned(),
+        resource: "events".to_owned(),
+        namespaced: true,
+    };
+    let mut selected = hub
+        .selected(
+            &live.context,
+            resource,
+            Some(namespace.clone()),
+            format!("regarding.uid={first}"),
+        )
+        .unwrap();
+    until(&mut selected, |events| {
+        ready(events) && events.items().len() == 1
+    })
+    .await;
+
+    events
+        .create(&PostParams::default(), &report("e2", "p2", &second))
+        .await
+        .unwrap();
+    events
+        .create(&PostParams::default(), &report("e3", "p1", &first))
+        .await
+        .unwrap();
+    until(&mut selected, |events| events.items().len() == 2).await;
+    let mut names: Vec<String> = selected
+        .items()
+        .iter()
+        .map(|event| event.meta.name.to_string())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["e1", "e3"], "only the first pod's");
+    live.delete_namespace(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn an_object_whose_name_a_selector_would_split_opens() {
+    let live = live().await;
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .subsec_nanos();
+    let name = format!("twigo-probe-{nanos},reader=x");
+    let roles = Api::<ClusterRole>::all(live.admin.clone());
+    let role: ClusterRole =
+        serde_json::from_value(json!({ "metadata": { "name": name }, "rules": [] })).unwrap();
+    roles.create(&PostParams::default(), &role).await.unwrap();
+    let (hub, _clients) = live.hub(None);
+    let resource = Resource {
+        group: "rbac.authorization.k8s.io".to_owned(),
+        version: "v1".to_owned(),
+        resource: "clusterroles".to_owned(),
+        namespaced: false,
+    };
+    let mut opened = hub.object(&live.context, resource, None, &name).unwrap();
+    until(&mut opened, |role| ready(role) && role.items().len() == 1).await;
+    assert_eq!(&*opened.items()[0].meta.name, name);
+    roles.delete(&name, &DeleteParams::default()).await.unwrap();
+}
