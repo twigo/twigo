@@ -209,7 +209,7 @@ impl Layout {
         ipc::Row {
             id: RowId(id.to_owned()),
             created: row.meta.created.map(|created| created.to_string()),
-            generated: None,
+            generated: row.meta.generated,
             cells,
         }
     }
@@ -640,7 +640,10 @@ fn uncount(counts: &mut HashMap<Box<str>, u32>, value: &str) {
 
 /// Nothing the webview shows of the row changed.
 fn unchanged(sent: &Arc<Row>, row: &Arc<Row>) -> bool {
-    Arc::ptr_eq(sent, row) || (sent.cells == row.cells && sent.meta.created == row.meta.created)
+    Arc::ptr_eq(sent, row)
+        || (sent.cells == row.cells
+            && sent.meta.created == row.meta.created
+            && sent.meta.generated == row.meta.generated)
 }
 
 #[cfg(test)]

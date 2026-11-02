@@ -122,6 +122,7 @@ fn row(row: &CaseRow, columns: &[Column], at: usize) -> Row {
                 .collect(),
             owners: Box::default(),
             created: row.created,
+            generated: None,
         },
         cells,
     }

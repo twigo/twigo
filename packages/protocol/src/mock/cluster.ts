@@ -5,6 +5,10 @@ export interface Pod {
   id: RowId;
   namespace: string;
   name: string;
+  /** Its ReplicaSet's name and a dash. */
+  generateName: string;
+  /** Its ReplicaSet's `pod-template-hash`. */
+  templateHash: string;
   containers: number;
   ready: number;
   status: string;
@@ -95,11 +99,14 @@ export class Cluster {
     const random = this.#random;
     const namespace = pick(NAMESPACES, random);
     const workload = pick(WORKLOADS, random);
-    const replicaSet = Math.floor(random() * 0xffffffff).toString(36);
+    const templateHash = Math.floor(random() * 0xffffffff)
+      .toString(36)
+      .slice(0, 8);
     const suffix = Math.floor(random() * 36 ** 5)
       .toString(36)
       .padStart(5, "0");
-    const name = `${namespace.split("-")[0] ?? namespace}-${workload}-${replicaSet.slice(0, 8)}-${suffix}`;
+    const generateName = `${namespace.split("-")[0] ?? namespace}-${workload}-${templateHash}-`;
+    const name = `${generateName}${suffix}`;
     const containers = 1 + Math.floor(random() * random() * 3);
     let status = "Running";
     let roll = random();
@@ -121,6 +128,8 @@ export class Cluster {
       id: `${this.context}/${namespace}/${name}`,
       namespace,
       name,
+      generateName,
+      templateHash,
       containers,
       ready:
         status === "Running"
@@ -161,9 +170,33 @@ export function podRow(pod: Pod, withNamespace: boolean): Row {
   return {
     id: pod.id,
     created: new Date(pod.created).toISOString(),
-    generated: null,
+    generated: generatedAt(pod.name, pod.generateName, {
+      "pod-template-hash": pod.templateHash,
+    }),
     cells: podCells(pod, withNamespace),
   };
+}
+
+/** The characters the API server appends to a `generateName`. */
+const GENERATED_LENGTH = 5;
+
+/**
+ * Where the generated part of a name starts, as Rust's row metadata finds
+ * it: after `generateName` when the API server appended its characters to
+ * it, or at the `pod-template-hash` that ends `generateName`.
+ */
+export function generatedAt(
+  name: string,
+  generateName: string | null,
+  labels: Readonly<Record<string, string>>,
+): number | null {
+  if (!generateName || !name.startsWith(generateName)) return null;
+  const suffix = name.slice(generateName.length);
+  if (Array.from(suffix).length !== GENERATED_LENGTH) return null;
+  const hash = labels["pod-template-hash"];
+  return hash && generateName.endsWith(`-${hash}-`)
+    ? generateName.length - hash.length - 1
+    : generateName.length;
 }
 
 function pick<T>(items: readonly T[], random: () => number): T {

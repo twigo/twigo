@@ -36,6 +36,7 @@ fn pod(namespace: &str, name: &str, status: &str, restarts: &str) -> Row {
             labels: Box::new([("app".into(), name.split('-').next().unwrap_or(name).into())]),
             owners: Box::default(),
             created: Some(jiff::Timestamp::UNIX_EPOCH),
+            generated: None,
         },
         cells: Box::new([
             Cell::Text(name.into()),
@@ -389,6 +390,19 @@ fn only_a_list_that_shows_rows_sends_them() {
     assert_eq!(ready.total, 1);
     assert_eq!(ids(&ready), ["kind-test/a/web-1"]);
     assert_eq!(groups(&ready), [("Running", 1)]);
+}
+
+#[test]
+fn a_row_says_where_its_name_was_generated() {
+    let mut rig = Rig::new(&query());
+    let mut row = pod("a", "web-1", "Running", "0");
+    rig.store.upsert(row.clone());
+    assert_eq!(rig.flush().unwrap().upserts[0].generated, None);
+    row.meta.generated = Some(4);
+    row.meta.resource_version = "2".into();
+    rig.store.upsert(row);
+    let batch = rig.flush().expect("the generated part changed");
+    assert_eq!(batch.upserts[0].generated, Some(4));
 }
 
 #[test]

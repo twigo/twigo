@@ -26,6 +26,9 @@ pub struct Meta {
     pub labels: Labels,
     pub owners: Box<[Owner]>,
     pub created: Option<Timestamp>,
+    /// Where the generated part of the name starts, in UTF-16 units: after
+    /// `generateName`, or at the `pod-template-hash` that ends it.
+    pub generated: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -96,6 +99,7 @@ pub(crate) struct RawObject {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RawMeta {
     name: Option<Box<str>>,
+    generate_name: Option<Box<str>>,
     namespace: Option<Box<str>>,
     uid: Option<Box<str>>,
     pub resource_version: Option<Box<str>>,
@@ -115,14 +119,17 @@ pub(crate) struct RawMeta {
 
 impl RawMeta {
     pub fn into_meta(self) -> Result<Meta, DecodeError> {
+        let name = self.name.ok_or(DecodeError::Missing("metadata.name"))?;
+        let generated = generated(&name, self.generate_name.as_deref(), &self.labels);
         Ok(Meta {
-            name: self.name.ok_or(DecodeError::Missing("metadata.name"))?,
+            name,
             namespace: self.namespace,
             uid: self.uid,
             resource_version: self.resource_version.unwrap_or_default(),
             labels: self.labels,
             owners: self.owner_references.into_iter().map(Owner::from).collect(),
             created: self.creation_timestamp,
+            generated,
         })
     }
 
@@ -144,6 +151,39 @@ impl RawMeta {
             EventKind::Error => Err(DecodeError::UnexpectedKind(object_kind.into())),
         }
     }
+}
+
+/// The characters the API server appends to a `generateName`
+/// (`randomLength` in k8s.io/apiserver v0.37.1, pkg/storage/names/generate.go).
+const GENERATED_LENGTH: usize = 5;
+
+const POD_TEMPLATE_HASH: &str = "pod-template-hash";
+
+/// Where the generated part of `name` starts, in UTF-16 units as the
+/// webview indexes text: after `generate_name` when the API server
+/// appended its characters to it, or at the `pod-template-hash` that ends
+/// `generate_name`, since a Deployment generates its ReplicaSet's name.
+/// A StatefulSet's pod has its set's name and a dash as `generate_name`
+/// too (`GetPodFromTemplate` in kubernetes v1.37.1,
+/// pkg/controller/controller_utils.go), but its controller names it,
+/// with an ordinal rather than the API server's characters.
+fn generated(name: &str, generate_name: Option<&str>, labels: &Labels) -> Option<u32> {
+    let base = generate_name.filter(|base| !base.is_empty())?;
+    let suffix = name.strip_prefix(base)?;
+    if suffix.chars().count() != GENERATED_LENGTH {
+        return None;
+    }
+    let start = labels
+        .iter()
+        .find(|(key, _)| &**key == POD_TEMPLATE_HASH)
+        .filter(|(_, hash)| !hash.is_empty())
+        .and_then(|(_, hash)| {
+            base.strip_suffix('-')?
+                .strip_suffix(&**hash)?
+                .strip_suffix('-')
+        })
+        .map_or(base.len(), |before| before.len() + 1);
+    u32::try_from(name[..start].encode_utf16().count()).ok()
 }
 
 #[derive(Deserialize)]
@@ -266,5 +306,80 @@ impl<'de> Visitor<'de> for StrIs {
 
     fn visit_str<E>(self, v: &str) -> Result<bool, E> {
         Ok(v == self.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use super::*;
+
+    fn decoded(metadata: Value) -> Option<u32> {
+        serde_json::from_value::<RawMeta>(metadata)
+            .unwrap()
+            .into_meta()
+            .unwrap()
+            .generated
+    }
+
+    #[test]
+    fn a_deployment_pod_is_generated_from_its_template_hash() {
+        let pod = json!({
+            "name": "api-7f9c8d6b5-x2kq9",
+            "generateName": "api-7f9c8d6b5-",
+            "labels": { "app": "api", "pod-template-hash": "7f9c8d6b5" },
+        });
+        assert_eq!(decoded(pod), Some(4));
+    }
+
+    #[test]
+    fn a_daemon_set_pod_is_generated_after_its_generate_name() {
+        let pod = json!({
+            "name": "agent-x7k2p",
+            "generateName": "agent-",
+            "labels": {
+                "app": "agent",
+                "controller-revision-hash": "6b8c7d9f4",
+                "pod-template-generation": "1",
+            },
+        });
+        assert_eq!(decoded(pod), Some(6));
+    }
+
+    #[test]
+    fn a_stateful_set_pod_has_no_generated_part() {
+        let pod = json!({
+            "name": "db-0",
+            "generateName": "db-",
+            "labels": {
+                "app": "db",
+                "controller-revision-hash": "db-5d8f7c6b9",
+                "statefulset.kubernetes.io/pod-name": "db-0",
+            },
+        });
+        assert_eq!(decoded(pod), None);
+    }
+
+    #[test]
+    fn a_name_that_does_not_start_with_its_generate_name_has_none() {
+        let other = json!({ "name": "web-x2kq9", "generateName": "api-" });
+        assert_eq!(decoded(other), None);
+        let base = format!("{}-", "a".repeat(59));
+        let cut = json!({ "name": format!("{}x2kq9", &base[..58]), "generateName": base });
+        assert_eq!(decoded(cut), None, "the API server cut the base to 58");
+        assert_eq!(decoded(json!({ "name": "web-x2kq9" })), None);
+        let hash = json!({
+            "name": "api-x2kq9",
+            "generateName": "api-",
+            "labels": { "pod-template-hash": "7f9c8d6b5" },
+        });
+        assert_eq!(decoded(hash), Some(4), "a hash the base does not end with");
+    }
+
+    #[test]
+    fn the_start_counts_utf16_units() {
+        let role = json!({ "name": "rôle-x2kq9", "generateName": "rôle-" });
+        assert_eq!(decoded(role), Some(5));
     }
 }

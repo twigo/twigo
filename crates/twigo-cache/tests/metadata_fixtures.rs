@@ -110,3 +110,24 @@ fn a_metadata_watch_carries_each_change() {
             .any(|(key, value)| &**key == "touched" && &**value == "yes")
     );
 }
+
+#[test]
+fn pods_say_where_the_cluster_generated_their_names() {
+    let page = MetaDecoder
+        .decode_list(include_bytes!("fixtures/pods-metadata-controllers.json"))
+        .unwrap();
+    let generated: Vec<(&str, Option<u32>)> = page
+        .items
+        .iter()
+        .map(|row| (&*row.meta.name, row.meta.generated))
+        .collect();
+    assert_eq!(
+        generated,
+        [
+            ("agent-dmqxq", Some(6)),
+            ("agent-sdrpn", Some(6)),
+            ("api-69ffc99665-v7hhw", Some(4)),
+            ("db-0", None),
+        ]
+    );
+}
