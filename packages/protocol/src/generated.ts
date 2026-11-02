@@ -451,12 +451,18 @@ export type SubscriptionId = number;
 
 export type Tone = "neutral" | "success" | "warning" | "danger";
 
-export type TreeNode = { key: string, 
+export type TreeNode = { 
 /**
- * A scalar as text; None for a map or a list, whose entries are its
- * children.
+ * A map's key, or a list item's name, else its index.
  */
-value: string | null, children: Array<TreeNode>, };
+key: string, 
+/**
+ * The key as people read it: a field's name in words, such as
+ * "Termination grace period seconds"; other keys as they are.
+ */
+label: string, value: TreeValue, };
+
+export type TreeValue = { "type": "scalar", text: string, } | { "type": "map", entries: Array<TreeNode>, } | { "type": "list", items: Array<TreeNode>, };
 
 export type Value = { "type": "text", text: string, } | { "type": "time", at: string, } | { "type": "link", target: ObjectRef, text: string, } | { "type": "labels", labels: Array<Label>, } | { "type": "list", items: Array<Value>, };
 

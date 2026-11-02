@@ -153,11 +153,11 @@
           "manager": "kwok",
           "operation": "Update",
           "subresource": "status",
-          "time": "2026-11-02T21:04:33Z"
+          "time": "2026-11-02T21:24:38Z"
         }
       ],
       "name": "kwok-node-0",
-      "resourceVersion": "3731",
+      "resourceVersion": "6658",
       "uid": "f545f5ea-082c-49a8-9e18-ae3265e8f2ff"
     },
     "spec": {
@@ -192,7 +192,7 @@
       },
       "conditions": [
         {
-          "lastHeartbeatTime": "2026-11-02T21:04:33Z",
+          "lastHeartbeatTime": "2026-11-02T21:24:38Z",
           "lastTransitionTime": "2026-11-02T20:44:20Z",
           "message": "kubelet is posting ready status",
           "reason": "KubeletReady",
@@ -200,7 +200,7 @@
           "type": "Ready"
         },
         {
-          "lastHeartbeatTime": "2026-11-02T21:04:33Z",
+          "lastHeartbeatTime": "2026-11-02T21:24:38Z",
           "lastTransitionTime": "2026-11-02T20:44:20Z",
           "message": "kubelet has sufficient memory available",
           "reason": "KubeletHasSufficientMemory",
@@ -208,7 +208,7 @@
           "type": "MemoryPressure"
         },
         {
-          "lastHeartbeatTime": "2026-11-02T21:04:33Z",
+          "lastHeartbeatTime": "2026-11-02T21:24:38Z",
           "lastTransitionTime": "2026-11-02T20:44:20Z",
           "message": "kubelet has no disk pressure",
           "reason": "KubeletHasNoDiskPressure",
@@ -216,7 +216,7 @@
           "type": "DiskPressure"
         },
         {
-          "lastHeartbeatTime": "2026-11-02T21:04:33Z",
+          "lastHeartbeatTime": "2026-11-02T21:24:38Z",
           "lastTransitionTime": "2026-11-02T20:44:20Z",
           "message": "kubelet has sufficient PID available",
           "reason": "KubeletHasSufficientPID",
@@ -224,7 +224,7 @@
           "type": "PIDPressure"
         },
         {
-          "lastHeartbeatTime": "2026-11-02T21:04:33Z",
+          "lastHeartbeatTime": "2026-11-02T21:24:38Z",
           "lastTransitionTime": "2026-11-02T20:44:20Z",
           "message": "RouteController created a route",
           "reason": "RouteCreated",
@@ -258,20 +258,12 @@
       "value": "Ready"
     },
     {
-      "column": "Roles",
-      "value": "<none>"
-    },
-    {
       "column": "Version",
       "value": "kwok-v0.8.0"
     },
     {
       "column": "Internal-IP",
       "value": "10.244.0.5"
-    },
-    {
-      "column": "External-IP",
-      "value": "<none>"
     },
     {
       "column": "OS-Image",

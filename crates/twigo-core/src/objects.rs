@@ -348,7 +348,8 @@ fn drained<T: twigo_cache::store::Item>(subscription: &Subscription<T>) -> bool 
 }
 
 /// The cells the server printed for the object, as text: Name, Namespace
-/// and Age are the metadata section's, and empty cells say nothing.
+/// and Age are the metadata section's, and empty cells and the printers'
+/// `<none>` say nothing.
 pub fn printed(columns: &[Column], cells: &[Cell]) -> Vec<Printed> {
     columns
         .iter()
@@ -364,7 +365,7 @@ pub fn printed(columns: &[Column], cells: &[Cell]) -> Vec<Printed> {
                 Cell::Bool(value) => value.to_string(),
                 Cell::Int(value) => value.to_string(),
                 Cell::Number(value) => value.to_string(),
-                Cell::Text(text) if text.is_empty() => return None,
+                Cell::Text(text) if text.is_empty() || &**text == "<none>" => return None,
                 Cell::Text(text) => text.to_string(),
             };
             Some(Printed {

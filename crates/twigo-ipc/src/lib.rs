@@ -25,7 +25,7 @@ pub use list::{
 pub use object::{
     Block, Condition, DataEntry, Field, GetValues, Label, ObjectBatch, ObjectEvent, ObjectParts,
     ObjectQuery, ObjectRef, OpenObject, Overview, Related, RelatedObject, Section, SetParts, Tone,
-    TreeNode, Value,
+    TreeNode, TreeValue, Value,
 };
 pub use space::{Context, ContextColor, Space};
 pub use state::{StateEntry, StateSnapshot};

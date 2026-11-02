@@ -15,16 +15,6 @@
       "fieldPath": "spec.containers{app}",
       "first": "2026-11-02T21:04:52Z",
       "last": "2026-11-02T21:04:52Z",
-      "message": "Container started",
-      "reason": "Started",
-      "source": "kubelet",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": "spec.containers{app}",
-      "first": "2026-11-02T21:04:52Z",
-      "last": "2026-11-02T21:04:52Z",
       "message": "Container created",
       "reason": "Created",
       "source": "kubelet",
@@ -38,6 +28,16 @@
       "message": "Successfully assigned overview/web-8dc77bb87-4789m to twigo-editors-control-plane",
       "reason": "Scheduled",
       "source": "default-scheduler",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": "spec.containers{app}",
+      "first": "2026-11-02T21:04:52Z",
+      "last": "2026-11-02T21:04:52Z",
+      "message": "Container started",
+      "reason": "Started",
+      "source": "kubelet",
       "type": "Normal"
     }
   ],
@@ -174,7 +174,6 @@
                 ".": {},
                 "f:requests": {
                   ".": {},
-                  "f:cpu": {},
                   "f:memory": {}
                 }
               },
@@ -199,7 +198,7 @@
           "uid": "6e6768fe-14d9-4dc3-b63f-6c36517ec5c8"
         }
       ],
-      "resourceVersion": "3819",
+      "resourceVersion": "4041",
       "uid": "c84adae2-6088-4643-8984-80d61689fd78"
     },
     "spec": {
@@ -404,7 +403,6 @@
       "qosClass": "Burstable",
       "resources": {
         "requests": {
-          "cpu": "10m",
           "memory": "16Mi"
         }
       },
@@ -431,14 +429,6 @@
     {
       "column": "Node",
       "value": "twigo-editors-control-plane"
-    },
-    {
-      "column": "Nominated Node",
-      "value": "<none>"
-    },
-    {
-      "column": "Readiness Gates",
-      "value": "<none>"
     }
   ]
 }

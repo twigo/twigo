@@ -180,11 +180,20 @@ pub struct DataEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct TreeNode {
+    /// A map's key, or a list item's name, else its index.
     pub key: String,
-    /// A scalar as text; None for a map or a list, whose entries are its
-    /// children.
-    pub value: Option<String>,
-    pub children: Vec<TreeNode>,
+    /// The key as people read it: a field's name in words, such as
+    /// "Termination grace period seconds"; other keys as they are.
+    pub label: String,
+    pub value: TreeValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum TreeValue {
+    Scalar { text: String },
+    Map { entries: Vec<TreeNode> },
+    List { items: Vec<TreeNode> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
