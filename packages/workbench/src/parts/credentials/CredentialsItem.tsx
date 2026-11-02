@@ -89,10 +89,16 @@ export function CredentialsItem() {
         onOpenAutoFocus={(event) => {
           event.preventDefault();
         }}
+        // A run under way keeps its panel: the code must stay in view while
+        // the person types it elsewhere, Escape included.
         onInteractOutside={(event) => {
-          // A run under way keeps its panel: the code must stay in view
-          // while the person types it elsewhere.
           if (!failed) event.preventDefault();
+        }}
+        onEscapeKeyDown={(event) => {
+          if (!failed) event.preventDefault();
+        }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
         }}
       >
         <SignInBody {...run} />

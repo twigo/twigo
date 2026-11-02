@@ -121,7 +121,10 @@ interface Entry {
 
 const inAnHour = () => new Date(Date.now() + 3_600_000).toISOString();
 
-/** The credential commands of the mock backend. */
+/**
+ * The credential commands of the mock backend. It knows no window focus,
+ * so it never sends `waiting`.
+ */
 export class MockAuth {
   readonly #entries = new Map<string, Entry>();
   readonly #trusted = new Set<string>();

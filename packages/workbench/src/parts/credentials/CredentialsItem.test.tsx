@@ -5,7 +5,7 @@ import {
   render,
   screen,
 } from "@testing-library/react";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import type { MockScenario } from "@twigo/protocol/mock";
 import { inWorkbench, testWorkbench } from "../../testing";
 import { CredentialsItem } from "./CredentialsItem";
@@ -64,4 +64,36 @@ test("the trust prompt shows the whole command before anything runs", async () =
   fireEvent.click(screen.getByRole("button", { name: "Not now" }));
   expect(screen.queryByText("Run this command for prod-eu?")).toBeNull();
   expect(screen.getByRole("button", { name: "Trust kubelogin?" })).toBeTruthy();
+});
+
+test("the link opens through Rust and is no anchor the webview could follow", async () => {
+  const workbench = await show("deviceCode");
+  const invoke = vi.spyOn(workbench.backend, "invoke");
+  const link = await screen.findByRole("button", {
+    name: "https://microsoft.com/devicelogin",
+  });
+  expect(document.querySelector("a[href]")).toBeNull();
+  fireEvent.click(link);
+  expect(invoke).toHaveBeenCalledWith(
+    "url_open",
+    "https://microsoft.com/devicelogin",
+  );
+});
+
+test("Escape elsewhere leaves a running sign-in's panel open", async () => {
+  await show("deviceCode");
+  expect(await screen.findByText("F3JQ7K9PL")).toBeTruthy();
+  fireEvent.keyDown(document.body, { key: "Escape" });
+  expect(screen.getByText("F3JQ7K9PL")).toBeTruthy();
+});
+
+test("the output opens when the run fails after it printed", async () => {
+  const workbench = await show("deviceCode");
+  expect(
+    await screen.findByRole("button", { name: "Show output" }),
+  ).toBeTruthy();
+  await act(() => workbench.credentials.cancel());
+  expect(
+    await screen.findByRole("button", { name: "Hide output" }),
+  ).toBeTruthy();
 });

@@ -136,20 +136,21 @@ export function SignInBody({
   );
 }
 
+/** A button, not an anchor: a link the webview could follow would put the sign-in page in Twigo's own window. */
 function Link({ url }: { url: string }) {
   const workbench = useWorkbench();
   return (
     <div className="flex items-center gap-1">
-      <a
-        href={url}
+      <button
+        type="button"
         className="min-w-0 truncate font-mono text-[11px] text-brand underline-offset-2 hover:underline"
-        onClick={(event) => {
-          event.preventDefault();
+        title={`Open ${url}`}
+        onClick={() => {
           workbench.openUrl(url);
         }}
       >
         {url}
-      </a>
+      </button>
       <ExternalLink aria-hidden className="size-3 shrink-0 text-brand" />
       <CopyButton text={url} label="Copy link" />
     </div>

@@ -1,6 +1,7 @@
 import type {
   Backend,
   ContextAuth,
+  ExecPlugin,
   ExecReview,
   ReviewedPlugin,
 } from "@twigo/protocol";
@@ -23,10 +24,11 @@ export class Credentials {
   #review: readonly ReviewedPlugin[] = [];
   /** The context whose untrusted plugin the trust prompt shows, once per activation. */
   #prompted: string | undefined;
-  #trustOpen = false;
+  /** The plugin the open trust prompt shows; it closes if the kubeconfig changes it. */
+  #prompt: ExecPlugin | undefined;
   #panelOpen = false;
-  /** The person closed the panel of this run, so it opens again only for the next. */
-  #dismissed = false;
+  /** The runs whose panel the person closed, by context and start, so it opens again only for the next. */
+  readonly #dismissed = new Set<string>();
   #arming: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
@@ -52,8 +54,9 @@ export class Credentials {
     return this.#review;
   }
 
-  get trustOpen(): boolean {
-    return this.#trustOpen && this.#auth.state === "untrusted";
+  /** The plugin the open trust prompt shows, if it is open. */
+  get prompt(): ExecPlugin | undefined {
+    return this.#prompt;
   }
 
   get panelOpen(): boolean {
@@ -61,13 +64,15 @@ export class Credentials {
   }
 
   setTrustOpen(open: boolean): void {
-    this.#trustOpen = open;
+    this.#prompt =
+      open && this.#auth.state === "untrusted" ? this.#auth.plugin : undefined;
     this.changes.emit();
   }
 
   setPanelOpen(open: boolean): void {
     this.#panelOpen = open;
-    this.#dismissed = !open;
+    const run = this.#run();
+    if (!open && run) this.#dismissed.add(run);
     this.changes.emit();
   }
 
@@ -119,7 +124,7 @@ export class Credentials {
     ) {
       return;
     }
-    this.#trustOpen = false;
+    this.#prompt = undefined;
     this.changes.emit();
     try {
       await this.backend.invoke("exec_trust", [digest]);
@@ -153,7 +158,6 @@ export class Credentials {
   async #signIn(context: string): Promise<void> {
     if (context === this.#context) {
       this.#panelOpen = true;
-      this.#dismissed = false;
       this.changes.emit();
     }
     try {
@@ -164,8 +168,18 @@ export class Credentials {
     }
   }
 
+  /** The run under way, as a key of `#dismissed`. */
+  #run(): string | undefined {
+    const auth = this.#auth;
+    if (auth.state !== "plugin" || auth.status.state !== "running") {
+      return undefined;
+    }
+    return `${this.#context ?? ""}\n${auth.status.since}`;
+  }
+
   #show(): void {
-    if (!this.#dismissed) this.#panelOpen = true;
+    const run = this.#run();
+    if (!run || !this.#dismissed.has(run)) this.#panelOpen = true;
   }
 
   #arm(context: string): void {
@@ -190,7 +204,7 @@ export class Credentials {
     this.#context = context;
     this.#auth = { state: "none" };
     this.#panelOpen = false;
-    this.#dismissed = false;
+    this.#prompt = undefined;
     clearTimeout(this.#arming);
     this.#prompted = undefined;
     this.changes.emit();
@@ -220,7 +234,6 @@ export class Credentials {
     const signsIn = next.state === "plugin" && next.plugin.signsIn;
     const previous = was.state === "plugin" ? was.status.state : undefined;
     if (status?.state === "running") {
-      if (previous !== "running") this.#dismissed = false;
       // A plugin that may ask shows the panel once it prints, or after a
       // moment without a credential: a browser flow often prints nothing.
       if (signsIn) {
@@ -230,18 +243,31 @@ export class Credentials {
     } else {
       clearTimeout(this.#arming);
     }
-    // A sign-in that failed shows why, however fast it failed.
-    if (status?.state === "failed" && signsIn && previous !== "failed") {
-      this.#show();
+    // A sign-in seen to fail in this activation shows why, however fast it
+    // failed; one that failed before shows in the status bar.
+    if (
+      status?.state === "failed" &&
+      signsIn &&
+      previous !== undefined &&
+      previous !== "failed"
+    ) {
+      this.#panelOpen = true;
     }
     if (status?.state === "ready") {
       this.#panelOpen = false;
-      this.#dismissed = false;
       if (previous !== "ready") this.#ready++;
+    }
+    // A prompt whose plugin the kubeconfig changed closes rather than show
+    // another command under the person's hand.
+    if (
+      this.#prompt &&
+      (next.state !== "untrusted" || next.plugin.digest !== this.#prompt.digest)
+    ) {
+      this.#prompt = undefined;
     }
     if (next.state === "untrusted" && this.#prompted !== context) {
       this.#prompted = context;
-      this.#trustOpen = this.#review.length === 0;
+      if (this.#review.length === 0) this.#prompt = next.plugin;
     }
     this.changes.emit();
   }

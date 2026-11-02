@@ -19,11 +19,11 @@ import { useChanges, useWorkbench } from "../../react";
 export function TrustDialog() {
   const { credentials } = useWorkbench();
   useChanges(credentials.changes);
-  const { auth, context } = credentials;
-  if (auth.state !== "untrusted" || context === undefined) return null;
+  const { prompt, context } = credentials;
+  if (!prompt || context === undefined) return null;
   return (
     <Dialog
-      open={credentials.trustOpen}
+      open
       onOpenChange={(open) => {
         credentials.setTrustOpen(open);
       }}
@@ -44,7 +44,7 @@ export function TrustDialog() {
             </DialogDescription>
           </div>
         </div>
-        <Command plugin={auth.plugin} />
+        <Command plugin={prompt} />
         <DialogFooter>
           <Button
             size="sm"
@@ -58,7 +58,7 @@ export function TrustDialog() {
           <Button
             size="sm"
             onClick={() => {
-              void credentials.trust(auth.plugin.digest);
+              void credentials.trust(prompt.digest);
             }}
           >
             Trust and connect
