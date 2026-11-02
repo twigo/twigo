@@ -71,7 +71,7 @@ fn contains(haystack: &str, needle: &str) -> bool {
             .any(|window| window.eq_ignore_ascii_case(needle))
 }
 
-/// A cell as the filter, the values and the groups read it: empty when it
+/// A cell as the filter, the values and the counts read it: empty when it
 /// is null or an Age, which the webview renders.
 pub fn text(cell: &Cell) -> std::borrow::Cow<'_, str> {
     match cell {

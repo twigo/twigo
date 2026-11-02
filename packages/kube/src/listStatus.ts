@@ -1,4 +1,4 @@
-import type { GroupCount, ViewState } from "@twigo/protocol";
+import type { ValueCount, ViewState } from "@twigo/protocol";
 import { Changes } from "@twigo/workbench";
 
 export interface ListStatus {
@@ -6,7 +6,7 @@ export interface ListStatus {
   readonly total: number;
   readonly status: ViewState;
   /** Rows per value of the list's status column, when it has one. */
-  readonly groups: readonly GroupCount[];
+  readonly groups: readonly ValueCount[];
 }
 
 /** What each open list editor shows, by URI, for the status bar. */

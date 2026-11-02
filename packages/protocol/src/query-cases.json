@@ -1,5 +1,5 @@
 {
-  "about": "Query cases that the mock (src/mock/query.test.ts) and Rust's query view (crates/twigo-cache/tests/query_cases.rs) both run, so they sort, filter, group and window alike (ARCHITECTURE 3.4). Rows hold the server's cells, null in Age columns; each list's rows pass through its namespaces first, as the hub's upstreams do. A case's query lists only what it sets; ids are in the window's order, and a case that expects `refused` expects the query refused with that error kind.",
+  "about": "Query cases that the mock (src/mock/query.test.ts) and Rust's query view (crates/twigo-cache/tests/query_cases.rs) both run, so they sort, filter, count and window alike (ARCHITECTURE 3.4). Rows hold the server's cells, null in Age columns; each list's rows pass through its namespaces first, as the hub's upstreams do. A case's query lists only what it sets; ids are in the window's order, and a case that expects `refused` expects the query refused with that error kind.",
   "context": "kind-test",
   "lists": [
     {
@@ -524,9 +524,9 @@
           }
         },
         {
-          "name": "groups count every match before values drop rows",
+          "name": "counts take every match before values drop rows",
           "query": {
-            "groupBy": "Status",
+            "countBy": "Status",
             "values": {
               "column": "Status",
               "values": ["Error", "CrashLoopBackOff"]
@@ -536,7 +536,7 @@
           "expect": {
             "total": 2,
             "ids": ["kind-test/beta/api-1", "kind-test/alpha/web-2"],
-            "groups": [
+            "counts": [
               {
                 "value": "Running",
                 "count": 4
@@ -561,9 +561,9 @@
           }
         },
         {
-          "name": "groups count after the text and the labels",
+          "name": "counts come after the text and the labels",
           "query": {
-            "groupBy": "Status",
+            "countBy": "Status",
             "text": "web",
             "labelSelector": "tier"
           },
@@ -575,7 +575,7 @@
               "kind-test/alpha/web-2",
               "kind-test/alpha/web-10"
             ],
-            "groups": [
+            "counts": [
               {
                 "value": "Running",
                 "count": 2
@@ -588,9 +588,9 @@
           }
         },
         {
-          "name": "a group or values for a column the list lacks do nothing",
+          "name": "a count or values for a column the list lacks do nothing",
           "query": {
-            "groupBy": "Phase",
+            "countBy": "Phase",
             "values": {
               "column": "Phase",
               "values": ["Failed"]
@@ -600,7 +600,7 @@
           "expect": {
             "total": 8,
             "ids": ["kind-test/beta/api-1"],
-            "groups": []
+            "counts": []
           }
         },
         {
@@ -802,10 +802,10 @@
           }
         },
         {
-          "name": "groups and values read integers as text",
+          "name": "counts and values read integers as text",
           "query": {
             "namespaces": ["alpha"],
-            "groupBy": "Available",
+            "countBy": "Available",
             "values": {
               "column": "Up-to-date",
               "values": ["3"]
@@ -815,7 +815,7 @@
           "expect": {
             "total": 2,
             "ids": ["kind-test/alpha/api", "kind-test/alpha/web"],
-            "groups": [
+            "counts": [
               {
                 "value": "0",
                 "count": 1
@@ -1069,13 +1069,13 @@
           "name": "the filter reads booleans as text",
           "query": {
             "text": "true",
-            "groupBy": "Enabled"
+            "countBy": "Enabled"
           },
           "window": [0, 50],
           "expect": {
             "total": 2,
             "ids": ["kind-test/w-a", "kind-test/w-c"],
-            "groups": [
+            "counts": [
               {
                 "value": "true",
                 "count": 2

@@ -20,7 +20,7 @@ function batch(rest: Partial<ListBatch>): ListBatch {
     window: null,
     upserts: [],
     status: { state: "ready" },
-    groups: null,
+    counts: null,
     ...rest,
   };
 }

@@ -65,7 +65,7 @@ fn queries_use_camel_case_and_newtypes_are_bare() {
             column: "Age".into(),
             descending: true,
         }),
-        group_by: Some("Status".into()),
+        count_by: Some("Status".into()),
         values: Some(ColumnValues {
             column: "Status".into(),
             values: vec!["Error".into()],
@@ -73,7 +73,7 @@ fn queries_use_camel_case_and_newtypes_are_bare() {
     };
     assert_eq!(wire(&query)["namespaced"], json!(true));
     assert_eq!(wire(&query)["labelSelector"], json!("app=api"));
-    assert_eq!(wire(&query)["groupBy"], json!("Status"));
+    assert_eq!(wire(&query)["countBy"], json!("Status"));
     assert_eq!(
         wire(&query)["columns"],
         json!({ "IP": true, "Namespace": false })

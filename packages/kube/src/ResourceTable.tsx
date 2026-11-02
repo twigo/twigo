@@ -21,12 +21,12 @@ import type {
   Cell,
   Column,
   ColumnValues,
-  GroupCount,
   Gvr,
   ListSnapshot,
   Row,
   RowId,
   Sort,
+  ValueCount,
   ViewState,
 } from "@twigo/protocol";
 import {
@@ -106,7 +106,7 @@ interface Props {
   onStatus?: (
     total: number,
     status: ViewState,
-    groups: readonly GroupCount[],
+    groups: readonly ValueCount[],
   ) => void;
   /** Columns the user showed or hid; the rest follow their priority. */
   choices?: ColumnChoices;
@@ -177,7 +177,7 @@ function ResourceList({
           text: text ?? null,
           columns: matched,
           sort,
-          groupBy: statusColumn(gvr) ?? null,
+          countBy: statusColumn(gvr) ?? null,
           values: values ?? null,
         },
   );
@@ -267,8 +267,8 @@ function ResourceList({
   }, [onSelect, selectedRow, snapshot.columns]);
 
   useEffect(() => {
-    onStatus?.(snapshot.total, status, snapshot.groups);
-  }, [onStatus, snapshot.total, status, snapshot.groups]);
+    onStatus?.(snapshot.total, status, snapshot.counts);
+  }, [onStatus, snapshot.total, status, snapshot.counts]);
 
   const [widths, setWidths] = useState<Readonly<Record<string, number>>>({});
   const widthOf = (column: Column) =>

@@ -10,7 +10,7 @@ use twigo_cache::hub::Delta;
 use twigo_cache::meta::Meta;
 use twigo_cache::table::{Cell, Column, ColumnKind, Row};
 use twigo_cache::view::{QueryView, Spec};
-use twigo_ipc::{ColumnValues, ErrorKind, GroupCount, Gvr, ListQuery, Sort, ViewState};
+use twigo_ipc::{ColumnValues, ErrorKind, Gvr, ListQuery, Sort, ValueCount, ViewState};
 
 const CASES: &str = include_str!("../../../packages/protocol/src/query-cases.json");
 
@@ -54,7 +54,7 @@ struct CaseQuery {
     text: Option<String>,
     columns: Option<BTreeMap<String, bool>>,
     sort: Option<Sort>,
-    group_by: Option<String>,
+    count_by: Option<String>,
     values: Option<ColumnValues>,
 }
 
@@ -65,7 +65,7 @@ struct Expect {
     columns: Option<Vec<String>>,
     total: u32,
     ids: Vec<String>,
-    groups: Option<Vec<GroupCount>>,
+    counts: Option<Vec<ValueCount>>,
 }
 
 fn column(column: &twigo_ipc::Column) -> Column {
@@ -143,7 +143,7 @@ fn the_query_cases_pass() {
                 text: case.query.text.clone(),
                 columns: case.query.columns.clone(),
                 sort: case.query.sort.clone(),
-                group_by: case.query.group_by.clone(),
+                count_by: case.query.count_by.clone(),
                 values: case.query.values.clone(),
             };
             // The hub's upstreams serve only the query's namespaces.
@@ -204,11 +204,11 @@ fn the_query_cases_pass() {
                     .columns
                     .as_ref()
                     .is_some_and(|columns| *columns != names)
-                || expect.groups.is_some() && batch.groups != expect.groups;
+                || expect.counts.is_some() && batch.counts != expect.counts;
             if wrong {
                 failed.push(format!(
-                    "{}: {}: total {}, ids {ids:?}, columns {names:?}, groups {:?}",
-                    list.name, case.name, batch.total, batch.groups
+                    "{}: {}: total {}, ids {ids:?}, columns {names:?}, counts {:?}",
+                    list.name, case.name, batch.total, batch.counts
                 ));
             }
         }

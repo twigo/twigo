@@ -25,7 +25,7 @@ test("only the choices' own keys count, not Object.prototype's", () => {
     text: "x",
     columns: {},
     sort: null,
-    groupBy: null,
+    countBy: null,
     values: null,
   };
   const rows: QueryRow[] = [
@@ -47,7 +47,7 @@ for (const list of CASES.lists) {
         text: null,
         columns: null,
         sort: null,
-        groupBy: null,
+        countBy: null,
         values: null,
         ...(partial as Partial<ListQuery>),
       };
@@ -80,7 +80,7 @@ for (const list of CASES.lists) {
       if ("columns" in wanted) {
         expect(columns.map((column) => column.name)).toEqual(wanted.columns);
       }
-      if ("groups" in wanted) expect(result.groups).toEqual(wanted.groups);
+      if ("counts" in wanted) expect(result.counts).toEqual(wanted.counts);
     });
   }
 }

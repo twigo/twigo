@@ -17,8 +17,8 @@ import {
 import { StrictMode } from "react";
 import type {
   Backend,
-  GroupCount,
   ListBatch,
+  ValueCount,
   ViewState,
 } from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
@@ -64,7 +64,7 @@ async function settle(steps = 6) {
 async function show(scenario: MockScenario, space = "prod-eu") {
   const onStatus =
     vi.fn<
-      (total: number, status: ViewState, groups: readonly GroupCount[]) => void
+      (total: number, status: ViewState, groups: readonly ValueCount[]) => void
     >();
   render(
     <ResourceTable
@@ -226,7 +226,7 @@ function batch(
       cells: [id, value],
     })),
     status: { state: "ready" },
-    groups: null,
+    counts: null,
   };
 }
 

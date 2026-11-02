@@ -62,7 +62,7 @@ fn query() -> ListQuery {
         text: None,
         columns: None,
         sort: None,
-        group_by: None,
+        count_by: None,
         values: None,
     }
 }
@@ -280,7 +280,7 @@ fn columns_the_list_lacks_do_nothing() {
         column: "Nominated".to_owned(),
         descending: true,
     });
-    odd.group_by = Some("Phase".to_owned());
+    odd.count_by = Some("Phase".to_owned());
     odd.values = Some(ColumnValues {
         column: "Phase".to_owned(),
         values: vec!["Failed".to_owned()],
@@ -294,7 +294,7 @@ fn columns_the_list_lacks_do_nothing() {
         ["kind-test/a/web-1", "kind-test/a/web-2"],
         "by Name"
     );
-    assert_eq!(batch.groups, Some(Vec::new()));
+    assert_eq!(batch.counts, Some(Vec::new()));
 }
 
 #[test]
@@ -320,9 +320,9 @@ fn the_filter_reads_the_shown_columns_and_name() {
 }
 
 #[test]
-fn groups_count_before_values_drop_rows() {
+fn counts_come_before_values_drop_rows() {
     let mut health = query();
-    health.group_by = Some("Status".to_owned());
+    health.count_by = Some("Status".to_owned());
     health.values = Some(ColumnValues {
         column: "Status".to_owned(),
         values: vec!["Error".to_owned()],
@@ -335,24 +335,24 @@ fn groups_count_before_values_drop_rows() {
     rig.store.upsert(pod("a", "db-1", "Error", "0"));
     let batch = rig.flush().unwrap();
     assert_eq!(ids(&batch), ["kind-test/a/web-2"]);
-    let groups = |batch: &ListBatch| {
+    let counts = |batch: &ListBatch| {
         batch
-            .groups
+            .counts
             .clone()
             .unwrap()
             .into_iter()
-            .map(|group| (group.value, group.count))
+            .map(|count| (count.value, count.count))
             .collect::<Vec<_>>()
     };
     assert_eq!(
-        groups(&batch),
+        counts(&batch),
         [("Running".to_owned(), 2), ("Error".to_owned(), 1)]
     );
 
     rig.store.upsert(pod("a", "web-1", "Error", "1"));
     let batch = rig.flush().unwrap();
     assert_eq!(
-        groups(&batch),
+        counts(&batch),
         [("Error".to_owned(), 2), ("Running".to_owned(), 1)]
     );
     rig.store.upsert(pod("a", "web-3", "Running", "1"));
@@ -365,9 +365,9 @@ fn groups_count_before_values_drop_rows() {
 
 #[test]
 fn only_a_list_that_shows_rows_sends_them() {
-    let mut grouped = query();
-    grouped.group_by = Some("Status".to_owned());
-    let mut rig = Rig::new(&grouped);
+    let mut counted = query();
+    counted.count_by = Some("Status".to_owned());
+    let mut rig = Rig::new(&counted);
     rig.store.upsert(pod("a", "web-1", "Running", "0"));
     let delta = match rig.store.drain(&rig.feed) {
         Drained::Reset { items, columns } => Delta::Reset {
@@ -378,7 +378,7 @@ fn only_a_list_that_shows_rows_sends_them() {
     };
     rig.view.apply(delta);
     let syncing = rig.view.batch(ViewState::Syncing { loaded: 1 }).unwrap();
-    assert_eq!((syncing.total, syncing.groups), (0, Some(Vec::new())));
+    assert_eq!((syncing.total, syncing.counts), (0, Some(Vec::new())));
     assert!(syncing.window.unwrap().ids.is_empty());
     let ready = rig.view.batch(ViewState::Ready).unwrap();
     assert_eq!(ready.total, 1);
@@ -397,11 +397,11 @@ fn a_status_change_alone_is_a_batch() {
 
 /// What the index must hold: every row the query keeps, sorted from
 /// scratch.
-fn naive(rows: &HashMap<String, Row>, query: &ListQuery) -> (Vec<String>, Vec<GroupCount>) {
+fn naive(rows: &HashMap<String, Row>, query: &ListQuery) -> (Vec<String>, Vec<ValueCount>) {
     let spec = Spec::new("kind-test", query).unwrap();
     let layout = Layout::new(&spec, pod_columns());
     let mut kept = Vec::new();
-    let mut groups: HashMap<String, u32> = HashMap::new();
+    let mut counts: HashMap<String, u32> = HashMap::new();
     for row in rows.values() {
         if spec
             .labels
@@ -414,8 +414,8 @@ fn naive(rows: &HashMap<String, Row>, query: &ListQuery) -> (Vec<String>, Vec<Gr
         if spec.text.as_ref().is_some_and(|t| !t.keeps(texts)) {
             continue;
         }
-        if let Some(at) = layout.group {
-            *groups.entry(layout.text(row, at).into_owned()).or_default() += 1;
+        if let Some(at) = layout.count {
+            *counts.entry(layout.text(row, at).into_owned()).or_default() += 1;
         }
         if let Some((at, values)) = &layout.values
             && !values.contains(&*layout.text(row, *at))
@@ -438,12 +438,12 @@ fn naive(rows: &HashMap<String, Row>, query: &ListQuery) -> (Vec<String>, Vec<Gr
         };
         order.then_with(|| natural(x, y))
     });
-    let mut groups: Vec<GroupCount> = groups
+    let mut counts: Vec<ValueCount> = counts
         .into_iter()
-        .map(|(value, count)| GroupCount { value, count })
+        .map(|(value, count)| ValueCount { value, count })
         .collect();
-    groups.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.value.cmp(&b.value)));
-    (kept.into_iter().map(|(_, id)| id).collect(), groups)
+    counts.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.value.cmp(&b.value)));
+    (kept.into_iter().map(|(_, id)| id).collect(), counts)
 }
 
 /// What the webview holds, applied as `ListView` applies batches.
@@ -486,7 +486,7 @@ fn random_change_sets(seeds: std::ops::Range<u64>, names: usize, rounds: usize, 
         query.text = random
             .bool()
             .then(|| TEXTS[random.usize(..TEXTS.len())].to_owned());
-        query.group_by = random.bool().then(|| "Status".to_owned());
+        query.count_by = random.bool().then(|| "Status".to_owned());
         query.values = random.bool().then(|| ColumnValues {
             column: "Status".to_owned(),
             values: vec!["Running".to_owned(), "Error".to_owned()],
@@ -526,7 +526,7 @@ fn random_change_sets(seeds: std::ops::Range<u64>, names: usize, rounds: usize, 
             if let Some(batch) = rig.flush() {
                 mirror.apply(batch);
             }
-            let (expected, groups) = naive(&rows, &query);
+            let (expected, counts) = naive(&rows, &query);
             let (start, end) = rig.view.window;
             let window: Vec<&str> = expected
                 .iter()
@@ -537,8 +537,8 @@ fn random_change_sets(seeds: std::ops::Range<u64>, names: usize, rounds: usize, 
             let shown: Vec<&str> = rig.view.sent.ids.iter().map(|id| &**id).collect();
             assert_eq!(shown, window, "seed {seed}: {query:?}");
             assert_eq!(rig.view.sent.total as usize, expected.len(), "seed {seed}");
-            if query.group_by.is_some() {
-                assert_eq!(rig.view.sent.groups.as_ref(), Some(&groups), "seed {seed}");
+            if query.count_by.is_some() {
+                assert_eq!(rig.view.sent.counts.as_ref(), Some(&counts), "seed {seed}");
             }
             let every: Vec<&str> = rig.view.index.iter().map(|entry| &*entry.id).collect();
             assert_eq!(every, expected, "seed {seed}: the whole index");

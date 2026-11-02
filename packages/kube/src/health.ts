@@ -1,4 +1,4 @@
-import type { GroupCount, Gvr } from "@twigo/protocol";
+import type { Gvr, ValueCount } from "@twigo/protocol";
 import { cellTone, type Tone } from "./tones";
 
 /** A row's health by its status column: healthy, or the tone of an abnormal state. */
@@ -15,14 +15,14 @@ export const HEALTH: Readonly<
 export interface HealthCount {
   readonly health: Health;
   readonly count: number;
-  readonly values: readonly GroupCount[];
+  readonly values: readonly ValueCount[];
 }
 
 /** The status column's values by health, each with its rows. */
 export function byHealth(
   gvr: Gvr,
   column: string,
-  groups: readonly GroupCount[],
+  groups: readonly ValueCount[],
 ): Readonly<Record<Health, HealthCount>> {
   const counts: Record<Health, HealthCount> = {
     ok: { health: "ok", count: 0, values: [] },

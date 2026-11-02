@@ -457,7 +457,7 @@ class Subscription {
     ids: readonly RowId[];
     versions: ReadonlyMap<RowId, number>;
     status: string;
-    groups: string;
+    counts: string;
     columns: boolean;
   } = {
     total: -1,
@@ -465,7 +465,7 @@ class Subscription {
     ids: [],
     versions: new Map(),
     status: "",
-    groups: "",
+    counts: "",
     columns: false,
   };
 
@@ -556,7 +556,7 @@ class Subscription {
     if (!SHOWS_ROWS.has(this.#status.state)) {
       return {
         rows: [],
-        groups: this.#query.query.groupBy === null ? null : [],
+        counts: this.#query.query.countBy === null ? null : [],
       };
     }
     const { version, pods } = this.#cluster;
@@ -579,14 +579,14 @@ class Subscription {
     if (!this.#window || !this.#dirty || this.#seq !== this.#acked) return;
     this.#dirty = false;
     this.#moved = false;
-    const { rows, groups } = this.#rows();
+    const { rows, counts } = this.#rows();
     const pods = rows.map((row) => row.pod);
     const [start, end] = this.#window;
     const visible = pods.slice(start, end);
     const ids = visible.map((pod) => pod.id);
     const status = JSON.stringify(this.#status);
-    const groupsJson = JSON.stringify(groups);
-    const groupsChanged = groupsJson !== this.#sent.groups;
+    const countsJson = JSON.stringify(counts);
+    const countsChanged = countsJson !== this.#sent.counts;
     const first = this.#seq === 0;
     const knows = KNOWS_COLUMNS.has(this.#status.state);
     const columnsChanged = first || knows !== this.#sent.columns;
@@ -602,7 +602,7 @@ class Subscription {
       !windowChanged &&
       upserts.length === 0 &&
       status === this.#sent.status &&
-      !groupsChanged &&
+      !countsChanged &&
       !columnsChanged &&
       pods.length === this.#sent.total
     ) {
@@ -615,7 +615,7 @@ class Subscription {
       ids,
       versions: new Map(visible.map((pod) => [pod.id, pod.version])),
       status,
-      groups: groupsJson,
+      counts: countsJson,
       columns: knows,
     };
     this.#seq++;
@@ -626,7 +626,7 @@ class Subscription {
       window: windowChanged ? { start, ids } : null,
       upserts: upserts.map((pod) => podRow(pod, withNamespace)),
       status: this.#status,
-      groups: groups && (first || groupsChanged) ? groups : null,
+      counts: counts && (first || countsChanged) ? counts : null,
     });
   }
 }

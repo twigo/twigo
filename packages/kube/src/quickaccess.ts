@@ -270,7 +270,7 @@ export function resourceProvider(
           text: filter.trim() === "" ? null : filter.trim(),
           columns: null,
           sort: null,
-          groupBy: null,
+          countBy: null,
           values: null,
         }),
       );

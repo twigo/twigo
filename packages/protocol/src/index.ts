@@ -23,7 +23,6 @@ export type {
   ErrorKind,
   ExecPlugin,
   ExecReview,
-  GroupCount,
   Gvr,
   KeyboardLayout,
   KeyMapping,
@@ -57,6 +56,7 @@ export type {
   StateEntry,
   StateSnapshot,
   SubscriptionId,
+  ValueCount,
   ViewState,
 } from "./generated";
 export { INITIAL_SNAPSHOT, ListView, type ListSnapshot } from "./list";

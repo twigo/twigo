@@ -19,8 +19,8 @@ pub use environment::ShellEnvironment;
 pub use error::{ErrorKind, IpcError};
 pub use keyboard::{KeyMapping, KeyboardLayout};
 pub use list::{
-    Ack, Cell, Column, ColumnKind, ColumnValues, GroupCount, Gvr, ListBatch, ListQuery, Row, RowId,
-    SetWindow, Sort, SubscriptionId, ViewState, Window,
+    Ack, Cell, Column, ColumnKind, ColumnValues, Gvr, ListBatch, ListQuery, Row, RowId, SetWindow,
+    Sort, SubscriptionId, ValueCount, ViewState, Window,
 };
 pub use object::{
     Block, Condition, DataEntry, EventList, Field, GetValues, Label, ObjectBatch, ObjectEvent,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CircleAlert } from "lucide-react";
-import type { Column, GroupCount, Row, ViewState } from "@twigo/protocol";
+import type { Column, Row, ValueCount, ViewState } from "@twigo/protocol";
 import { EmptyState } from "@twigo/ui";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { Details } from "./Details";
@@ -147,7 +147,7 @@ export function ListEditor({
 
   const column = input && statusColumn(input.gvr);
   const onStatus = useCallback(
-    (total: number, status: ViewState, groups: readonly GroupCount[]) => {
+    (total: number, status: ViewState, groups: readonly ValueCount[]) => {
       statuses.set(uri, { title: title ?? uri, total, status, groups });
       const picked = filters.health(uri);
       if (input && column && picked && SHOWS_ROWS.has(status.state)) {

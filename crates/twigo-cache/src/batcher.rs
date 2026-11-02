@@ -173,7 +173,7 @@ mod tests {
             text: None,
             columns: None,
             sort: None,
-            group_by: None,
+            count_by: None,
             values: None,
         };
         let (sender, batches) = mpsc::unbounded_channel();

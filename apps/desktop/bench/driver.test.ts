@@ -70,7 +70,7 @@ test("the list's first rows are named as the screen's are, once its window start
       { id: "b", created: null, cells: ["api-2", "payments"] },
     ],
     status: { state: "ready" },
-    groups: null,
+    counts: null,
   });
   expect(topRows(list)).toEqual(["payments/api-2", "payments/api-1"]);
   list.record(1, {
@@ -80,7 +80,7 @@ test("the list's first rows are named as the screen's are, once its window start
     window: { start: 1, ids: ["a", "b"] },
     upserts: [],
     status: { state: "ready" },
-    groups: null,
+    counts: null,
   });
   expect(topRows(list)).toBeUndefined();
 });

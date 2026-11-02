@@ -42,9 +42,9 @@ pub struct ListQuery {
     pub sort: Option<Sort>,
     /// A column to count the matching rows by, such as a pod's Status; one
     /// the list lacks counts nothing.
-    pub group_by: Option<String>,
+    pub count_by: Option<String>,
     /// Keeps the rows whose column holds one of the values, read as text.
-    /// The counts of `group_by` come before it, so the values it drops keep
+    /// The counts of `count_by` come before it, so the values it drops keep
     /// theirs; a column the list lacks keeps every row.
     pub values: Option<ColumnValues>,
 }
@@ -95,13 +95,13 @@ pub struct ListBatch {
     /// Rows that entered the window or changed.
     pub upserts: Vec<Row>,
     pub status: ViewState,
-    /// With `group_by`: the matching rows per value of that column, present
+    /// With `count_by`: the matching rows per value of that column, present
     /// in the first batch and whenever a count changes.
-    pub groups: Option<Vec<GroupCount>>,
+    pub counts: Option<Vec<ValueCount>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-pub struct GroupCount {
+pub struct ValueCount {
     pub value: String,
     pub count: u32,
 }

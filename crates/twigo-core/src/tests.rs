@@ -361,7 +361,7 @@ fn pods(space: &str) -> ListQuery {
         text: None,
         columns: None,
         sort: None,
-        group_by: None,
+        count_by: None,
         values: None,
     }
 }

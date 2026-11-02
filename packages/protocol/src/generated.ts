@@ -122,8 +122,6 @@ export type Field = { label: string, value: Value, };
  */
 export type GetValues = { id: SubscriptionId, keys: Array<string>, };
 
-export type GroupCount = { value: string, count: number, };
-
 export type Gvr = { 
 /**
  * Empty for the core group.
@@ -187,10 +185,10 @@ window: Window | null,
  */
 upserts: Array<Row>, status: ViewState, 
 /**
- * With `group_by`: the matching rows per value of that column, present
+ * With `count_by`: the matching rows per value of that column, present
  * in the first batch and whenever a count changes.
  */
-groups: Array<GroupCount> | null, };
+counts: Array<ValueCount> | null, };
 
 export type ListQuery = { space: string, gvr: Gvr, 
 /**
@@ -225,10 +223,10 @@ sort: Sort | null,
  * A column to count the matching rows by, such as a pod's Status; one
  * the list lacks counts nothing.
  */
-groupBy: string | null, 
+countBy: string | null, 
 /**
  * Keeps the rows whose column holds one of the values, read as text.
- * The counts of `group_by` come before it, so the values it drops keep
+ * The counts of `count_by` come before it, so the values it drops keep
  * theirs; a column the list lacks keeps every row.
  */
 values: ColumnValues | null, };
@@ -483,6 +481,8 @@ label: string, value: TreeValue, };
 export type TreeValue = { "type": "scalar", text: string, } | { "type": "map", entries: Array<TreeNode>, } | { "type": "list", items: Array<TreeNode>, };
 
 export type Value = { "type": "text", text: string, } | { "type": "time", at: string, } | { "type": "link", target: ObjectRef, text: string, } | { "type": "labels", labels: Array<Label>, } | { "type": "list", items: Array<Value>, };
+
+export type ValueCount = { value: string, count: number, };
 
 /**
  * The state of the upstream behind a subscription (ARCHITECTURE 3.7).

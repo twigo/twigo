@@ -1,5 +1,5 @@
 import { IpcError } from "../error";
-import type { Cell, Column, GroupCount, ListQuery, RowId } from "../generated";
+import type { Cell, Column, ListQuery, RowId, ValueCount } from "../generated";
 import { parseSelector, type Selector } from "./selector";
 
 /** A row as a query reads it: the webview's cells, Namespace included. */
@@ -38,7 +38,7 @@ export interface CompiledQuery {
   readonly text: TextFilter | null;
   readonly textColumns: readonly number[];
   readonly sort: { at: number; descending: boolean; age: boolean } | null;
-  readonly group: number | null;
+  readonly count: number | null;
   readonly values: { at: number; values: ReadonlySet<string> } | null;
 }
 
@@ -77,7 +77,7 @@ export function compileQuery(
             descending: sorted !== null && (query.sort?.descending ?? false),
             age: columns[at]?.kind === "age",
           },
-    group: query.groupBy === null ? null : find(query.groupBy),
+    count: query.countBy === null ? null : find(query.countBy),
     values:
       valuesAt === null || query.values === null
         ? null
@@ -88,8 +88,8 @@ export function compileQuery(
 export interface QueryResult<R> {
   /** The matching rows, sorted. */
   readonly rows: R[];
-  /** With `groupBy`: the rows the text and the labels keep, per value. */
-  readonly groups: GroupCount[] | null;
+  /** With `countBy`: the rows the text and the labels keep, per value. */
+  readonly counts: ValueCount[] | null;
 }
 
 /**
@@ -103,7 +103,7 @@ export function runQuery<R extends QueryRow>(
 ): QueryResult<R> {
   const { query } = compiled;
   const namespaces = new Set(query.namespaces);
-  const counts = new Map<string, number>();
+  const counted = new Map<string, number>();
   const kept: R[] = [];
   for (const row of rows) {
     if (
@@ -122,9 +122,9 @@ export function runQuery<R extends QueryRow>(
     ) {
       continue;
     }
-    if (compiled.group !== null) {
-      const value = cellText(row.cells[compiled.group]);
-      counts.set(value, (counts.get(value) ?? 0) + 1);
+    if (compiled.count !== null) {
+      const value = cellText(row.cells[compiled.count]);
+      counted.set(value, (counted.get(value) ?? 0) + 1);
     }
     if (
       compiled.values &&
@@ -143,16 +143,16 @@ export function runQuery<R extends QueryRow>(
     const order = compareKeys(a.key, b.key);
     return (sort?.descending ? -order : order) || natural(a.row.id, b.row.id);
   });
-  const groups =
-    query.groupBy === null
+  const counts =
+    query.countBy === null
       ? null
-      : [...counts]
+      : [...counted]
           .map(([value, count]) => ({ value, count }))
           .sort((a, b) => b.count - a.count || codePoints(a.value, b.value));
-  return { rows: keyed.map(({ row }) => row), groups };
+  return { rows: keyed.map(({ row }) => row), counts };
 }
 
-/** A cell as the filter, the values and the groups read it. */
+/** A cell as the filter, the values and the counts read it. */
 function cellText(cell: Cell | undefined): string {
   return cell === null || cell === undefined ? "" : String(cell);
 }

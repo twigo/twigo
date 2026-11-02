@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use indexset::BTreeSet;
-use twigo_ipc::{self as ipc, GroupCount, IpcError, ListBatch, ListQuery, RowId, ViewState};
+use twigo_ipc::{self as ipc, IpcError, ListBatch, ListQuery, RowId, ValueCount, ViewState};
 
 use crate::hub::Delta;
 use crate::store::RowKey;
@@ -39,7 +39,7 @@ pub struct Spec {
     text: Option<TextFilter>,
     choices: Option<BTreeMap<String, bool>>,
     sort: Option<ipc::Sort>,
-    group_by: Option<String>,
+    count_by: Option<String>,
     values: Option<(String, HashSet<String>)>,
 }
 
@@ -61,7 +61,7 @@ impl Spec {
             },
             choices: query.columns.clone(),
             sort: query.sort.clone(),
-            group_by: query.group_by.clone(),
+            count_by: query.count_by.clone(),
             values: query.values.as_ref().map(|values| {
                 (
                     values.column.clone(),
@@ -80,7 +80,7 @@ enum Source {
 }
 
 /// The query resolved against the server's columns: a choice, a sort, a
-/// group or values for a column the list lacks does nothing.
+/// count or values for a column the list lacks does nothing.
 struct Layout {
     server: Arc<[Column]>,
     wire: Vec<ipc::Column>,
@@ -89,7 +89,7 @@ struct Layout {
     text: Vec<usize>,
     sort: Option<usize>,
     descending: bool,
-    group: Option<usize>,
+    count: Option<usize>,
     values: Option<(usize, HashSet<String>)>,
 }
 
@@ -135,7 +135,7 @@ impl Layout {
             Some((at, descending)) => (Some(at), descending),
             None => (find(NAME), false),
         };
-        let group = spec.group_by.as_deref().and_then(find);
+        let count = spec.count_by.as_deref().and_then(find);
         let values = spec
             .values
             .as_ref()
@@ -147,7 +147,7 @@ impl Layout {
             text,
             sort,
             descending,
-            group,
+            count,
             values,
         }
     }
@@ -245,12 +245,12 @@ impl PartialEq for Entry {
 
 impl Eq for Entry {}
 
-/// A row that passes the labels and the text: it counts in the groups,
-/// and is in the index unless the values drop it.
+/// A row that passes the labels and the text: it is counted, and is in the
+/// index unless the values drop it.
 struct Tracked {
     row: Arc<Row>,
     id: Arc<str>,
-    group: Option<Box<str>>,
+    count: Option<Box<str>>,
     entry: Option<Entry>,
 }
 
@@ -263,7 +263,7 @@ struct Sent {
     rows: HashMap<Arc<str>, Arc<Row>>,
     total: u32,
     status: Option<ViewState>,
-    groups: Option<Vec<GroupCount>>,
+    counts: Option<Vec<ValueCount>>,
 }
 
 pub struct QueryView {
@@ -271,7 +271,7 @@ pub struct QueryView {
     layout: Layout,
     rows: HashMap<RowKey, Tracked>,
     index: BTreeSet<Entry>,
-    groups: HashMap<Box<str>, u32>,
+    counts: HashMap<Box<str>, u32>,
     window: (u32, u32),
     sent: Sent,
     seq: u32,
@@ -285,7 +285,7 @@ impl QueryView {
             layout,
             rows: HashMap::new(),
             index: BTreeSet::new(),
-            groups: HashMap::new(),
+            counts: HashMap::new(),
             window: (0, 0),
             sent: Sent::default(),
             seq: 0,
@@ -301,7 +301,7 @@ impl QueryView {
                 }
                 self.rows.clear();
                 self.index.clear();
-                self.groups.clear();
+                self.counts.clear();
                 for row in rows {
                     self.insert(row);
                 }
@@ -344,9 +344,9 @@ impl QueryView {
         {
             return;
         }
-        let group: Option<Box<str>> = layout.group.map(|at| layout.text(&row, at).into());
-        if let Some(group) = &group {
-            *self.groups.entry(group.clone()).or_default() += 1;
+        let count: Option<Box<str>> = layout.count.map(|at| layout.text(&row, at).into());
+        if let Some(count) = &count {
+            *self.counts.entry(count.clone()).or_default() += 1;
         }
         let kept = match &layout.values {
             Some((at, values)) => values.contains(&*layout.text(&row, *at)),
@@ -368,7 +368,7 @@ impl QueryView {
             Tracked {
                 row,
                 id,
-                group,
+                count,
                 entry,
             },
         );
@@ -378,12 +378,12 @@ impl QueryView {
         let Some(tracked) = self.rows.remove(key) else {
             return;
         };
-        if let Some(group) = tracked.group
-            && let Some(count) = self.groups.get_mut(&group)
+        if let Some(value) = tracked.count
+            && let Some(count) = self.counts.get_mut(&value)
         {
             *count -= 1;
             if *count == 0 {
-                self.groups.remove(&group);
+                self.counts.remove(&value);
             }
         }
         if let Some(entry) = tracked.entry {
@@ -391,27 +391,27 @@ impl QueryView {
         }
     }
 
-    /// The matching rows per value of the group column, largest first;
+    /// The matching rows per value of the count column, largest first;
     /// none while the list has no rows to show.
-    fn groups(&self, shows: bool) -> Option<Vec<GroupCount>> {
-        self.spec.group_by.as_ref()?;
-        let mut groups: Vec<GroupCount> = self
-            .groups
+    fn counts(&self, shows: bool) -> Option<Vec<ValueCount>> {
+        self.spec.count_by.as_ref()?;
+        let mut counts: Vec<ValueCount> = self
+            .counts
             .iter()
             .filter(|_| shows)
-            .map(|(value, count)| GroupCount {
+            .map(|(value, count)| ValueCount {
                 value: value.to_string(),
                 count: *count,
             })
             .collect();
-        groups.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.value.cmp(&b.value)));
-        Some(groups)
+        counts.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.value.cmp(&b.value)));
+        Some(counts)
     }
 
     /// What changed for the webview since the last batch, if anything did:
     /// the window when its rows or their order changed, the rows that
     /// entered it or changed, and the total, the status, the columns and
-    /// the groups when they changed. Only a list that is ready, relisting
+    /// the counts when they changed. Only a list that is ready, relisting
     /// or stale has rows to show; the others show their state.
     pub fn batch(&mut self, status: ViewState) -> Option<ListBatch> {
         let first = self.seq == 0;
@@ -452,11 +452,11 @@ impl QueryView {
             rows.insert(Arc::clone(&entry.id), Arc::clone(&tracked.row));
         }
         let total = u32::try_from(total).unwrap_or(u32::MAX);
-        let groups = self.groups(shows);
-        let groups_changed = first || groups != self.sent.groups;
+        let counts = self.counts(shows);
+        let counts_changed = first || counts != self.sent.counts;
         if !window_changed
             && !columns_changed
-            && !groups_changed
+            && !counts_changed
             && upserts.is_empty()
             && total == self.sent.total
             && self.sent.status.as_ref() == Some(&status)
@@ -474,7 +474,7 @@ impl QueryView {
             }),
             upserts,
             status: status.clone(),
-            groups: if groups_changed { groups.clone() } else { None },
+            counts: if counts_changed { counts.clone() } else { None },
         };
         self.sent = Sent {
             columns: Some(Arc::clone(&self.layout.server)),
@@ -483,7 +483,7 @@ impl QueryView {
             rows,
             total,
             status: Some(status),
-            groups,
+            counts,
         };
         Some(batch)
     }

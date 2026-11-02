@@ -13,7 +13,7 @@ function query(rest: Partial<ListQuery> = {}): ListQuery {
     text: null,
     columns: null,
     sort: null,
-    groupBy: null,
+    countBy: null,
     values: null,
     ...rest,
   };
@@ -336,11 +336,11 @@ test("a choice for a column the list lacks does nothing", async () => {
   expect(one.batches[0]?.total).toBeGreaterThan(0);
 });
 
-test("a sort or groupBy column the list lacks does nothing", async () => {
+test("a sort or countBy column the list lacks does nothing", async () => {
   const plain = await open("ready");
   const odd = await open(
     "ready",
-    query({ sort: { column: "Bogus", descending: true }, groupBy: "Bogus" }),
+    query({ sort: { column: "Bogus", descending: true }, countBy: "Bogus" }),
   );
   for (const sub of [plain, odd]) {
     await sub.ack();
@@ -350,7 +350,7 @@ test("a sort or groupBy column the list lacks does nothing", async () => {
   const ids = last(plain.batches)?.window?.ids;
   expect(ids).toHaveLength(10);
   expect(last(odd.batches)?.window?.ids).toEqual(ids);
-  expect(odd.batches[0]?.groups).toEqual([]);
+  expect(odd.batches[0]?.counts).toEqual([]);
 });
 
 test("label selectors match the pods' labels, and one that does not parse is refused", async () => {
@@ -446,21 +446,21 @@ test("state loads what was stored, all of a set or none", async () => {
   });
 });
 
-test("grouped counts follow the rows once a live list syncs", async () => {
-  const { batches, ack } = await open("live", query({ groupBy: "Status" }));
+test("counts follow the rows once a live list syncs", async () => {
+  const { batches, ack } = await open("live", query({ countBy: "Status" }));
   for (let i = 0; i < 40; i++) {
     await ack();
     await vi.advanceTimersByTimeAsync(50);
   }
-  const groups = batches.flatMap((batch) =>
-    batch.groups ? [batch.groups] : [],
+  const counts = batches.flatMap((batch) =>
+    batch.counts ? [batch.counts] : [],
   );
-  const latest = groups[groups.length - 1] ?? [];
-  expect(latest.reduce((sum, group) => sum + group.count, 0)).toBe(5000);
+  const latest = counts[counts.length - 1] ?? [];
+  expect(latest.reduce((sum, value) => sum + value.count, 0)).toBe(5000);
 });
 
-test("a change of counts alone sends a batch with the new groups", async () => {
-  const { batches, ack } = await open("live", query({ groupBy: "Status" }));
+test("a change of counts alone sends a batch with the new counts", async () => {
+  const { batches, ack } = await open("live", query({ countBy: "Status" }));
   for (let ms = 0; ms < 4000; ms += 50) {
     await ack();
     await vi.advanceTimersByTimeAsync(50);
@@ -469,34 +469,34 @@ test("a change of counts alone sends a batch with the new groups", async () => {
   const after = batches.slice(ready + 1);
   expect(ready).toBeGreaterThan(0);
   expect(after.length).toBeGreaterThan(0);
-  expect(after.every((batch) => batch.groups !== null)).toBe(true);
+  expect(after.every((batch) => batch.counts !== null)).toBe(true);
   after.forEach((batch, i) => {
-    expect(batch.groups).not.toEqual(batches[ready + i]?.groups);
+    expect(batch.counts).not.toEqual(batches[ready + i]?.counts);
   });
 });
 
-test("no groupBy, no groups", async () => {
+test("no countBy, no counts", async () => {
   const { batches } = await open("ready");
-  expect(batches.every((batch) => batch.groups === null)).toBe(true);
+  expect(batches.every((batch) => batch.counts === null)).toBe(true);
 });
 
-test("values keep their rows, and the grouped counts stay those of every value", async () => {
-  const all = await open("ready", query({ groupBy: "Status" }));
+test("values keep their rows, and the counts stay those of every value", async () => {
+  const all = await open("ready", query({ countBy: "Status" }));
   const picked = await open(
     "ready",
     query({
-      groupBy: "Status",
+      countBy: "Status",
       values: { column: "Status", values: ["CrashLoopBackOff", "Error"] },
     }),
   );
-  const counts = all.batches[0]?.groups ?? [];
+  const counts = all.batches[0]?.counts ?? [];
   const count = (value: string) =>
-    counts.find((group) => group.value === value)?.count ?? 0;
+    counts.find((counted) => counted.value === value)?.count ?? 0;
   expect(picked.batches[0]?.total).toBe(
     count("CrashLoopBackOff") + count("Error"),
   );
   expect(picked.batches[0]?.total).toBeGreaterThan(0);
-  expect(picked.batches[0]?.groups).toEqual(counts);
+  expect(picked.batches[0]?.counts).toEqual(counts);
 });
 
 test("values of a column the list lacks keep every row", async () => {
