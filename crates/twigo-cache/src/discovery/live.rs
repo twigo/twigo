@@ -5,12 +5,15 @@ use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomRe
 use kube::Api;
 use kube::api::{DeleteParams, PostParams};
 use serde_json::json;
+use tokio::sync::Mutex;
 use tokio::time::{Instant, timeout};
 use twigo_ipc::Discovered;
 use twigo_kube::discovery::Cache;
 
 use super::*;
 use crate::hub::live::live;
+
+static CLUSTER_DISCOVERY: Mutex<()> = Mutex::const_new(());
 
 fn resources(discovered: &Discovered) -> &[twigo_ipc::Resource] {
     match discovered {
@@ -34,6 +37,7 @@ async fn next(follower: &mut Follower) -> Discovered {
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
 async fn a_second_start_answers_from_the_cache_with_304() {
+    let _unchanged = CLUSTER_DISCOVERY.lock().await;
     let live = live().await;
     let dir = tempfile::tempdir().unwrap();
     let cache = Arc::new(Cache::new(dir.path()));
@@ -78,6 +82,7 @@ async fn a_second_start_answers_from_the_cache_with_304() {
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
 async fn a_crd_created_while_followed_comes_without_a_restart() {
+    let _changing = CLUSTER_DISCOVERY.lock().await;
     let live = live().await;
     let dir = tempfile::tempdir().unwrap();
     let (hub, _) = live.hub(None);
