@@ -1,9 +1,11 @@
 import type { Gvr } from "@twigo/protocol";
+import type { Health } from "./columns";
 
 /**
  * A resource table as an editor (ARCHITECTURE 4.3):
- * `k8s-list://<space>/[<group>/]<version>/<resource>?ns=a,b&q=text&l=selector`.
- * Without `ns` the table follows the space's namespace scope.
+ * `k8s-list://<space>/[<group>/]<version>/<resource>?ns=a,b&q=text&l=selector&h=error`.
+ * Without `ns` the table follows the space's namespace scope; `q` and `h`
+ * are the filters it opens with.
  */
 export interface ListInput {
   readonly space: string;
@@ -11,7 +13,10 @@ export interface ListInput {
   readonly namespaces?: readonly string[];
   readonly text?: string;
   readonly labels?: string;
+  readonly health?: Health;
 }
+
+const HEALTHS: readonly Health[] = ["ok", "warn", "error"];
 
 export const LIST_SCHEME = "k8s-list";
 
@@ -21,6 +26,7 @@ export function listUri({
   namespaces,
   text,
   labels,
+  health,
 }: ListInput): string {
   const path = [gvr.group, gvr.version, gvr.resource]
     .filter((part) => part !== "")
@@ -31,6 +37,7 @@ export function listUri({
     query.set("ns", namespaces.join(","));
   if (text) query.set("q", text);
   if (labels) query.set("l", labels);
+  if (health) query.set("h", health);
   const search = query.toString();
   return `${LIST_SCHEME}://${encodeURIComponent(space)}/${path}${search ? `?${search}` : ""}`;
 }
@@ -45,12 +52,14 @@ export function parseListUri(uri: string): ListInput | undefined {
   const ns = url.searchParams.get("ns");
   const text = url.searchParams.get("q");
   const labels = url.searchParams.get("l");
+  const health = HEALTHS.find((h) => h === url.searchParams.get("h"));
   return {
     space: decodeURIComponent(url.host),
     gvr: { group, version, resource },
     ...(ns && { namespaces: ns.split(",").filter(Boolean) }),
     ...(text && { text }),
     ...(labels && { labels }),
+    ...(health && { health }),
   };
 }
 

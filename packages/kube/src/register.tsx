@@ -1,25 +1,19 @@
 import { FolderTree } from "lucide-react";
-import type { Workbench } from "@twigo/workbench";
-import { ColumnPresets } from "./columnPresets";
-import { Discovery } from "./discovery";
-import { Explorer, EXPLORER_VIEW } from "./Explorer";
-import { FilterField } from "./FilterField";
-import { HealthFilter } from "./HealthFilter";
-import { ListFilters } from "./filters";
+import { Changes, type Workbench } from "@twigo/workbench";
+import { Explorer, EXPLORER_VIEW } from "./explorer/Explorer";
 import { ListIcon, ObjectIcon } from "./KindIcon";
-import { ListEditor, type ListServices } from "./ListEditor";
-import { ListStatuses } from "./listStatus";
+import { ListActions } from "./list/ListActions";
+import { ListEditor } from "./list/ListEditor";
+import { clusterEntries, listEntries } from "./list/statusEntries";
 import { ObjectEditor, ObjectTabSwitch } from "./object/ObjectEditor";
 import { ObjectTabs } from "./object/tabs";
-import { ClusterStatusItem, ListSummaryItem } from "./ListStatusItem";
-import { Lists } from "./lists";
 import {
   listProvider,
   namespaceProvider,
   resourceProvider,
 } from "./quickaccess";
 import { registerResourceActions } from "./resourceActions";
-import { Selection } from "./selection";
+import { createServices, type ListServices } from "./services";
 import {
   LIST_SCHEME,
   OBJECT_SCHEME,
@@ -29,15 +23,9 @@ import {
 
 /** Kubernetes in the workbench, through its registries only (ARCHITECTURE 2.3). */
 export function registerKube(workbench: Workbench): void {
-  const services: ListServices = {
-    discovery: new Discovery(workbench),
-    lists: new Lists(),
-    filters: new ListFilters(),
-    columns: new ColumnPresets(workbench.state),
-    selection: new Selection(),
-    statuses: new ListStatuses(),
-  };
-  const { views, editors, commands, keybindings, quickAccess } = workbench;
+  const services = createServices(workbench);
+  const { views, editors, commands, keybindings, quickAccess, menus } =
+    workbench;
 
   quickAccess.register(listProvider(workbench, services.discovery));
   quickAccess.register(namespaceProvider(workbench));
@@ -54,11 +42,7 @@ export function registerKube(workbench: Workbench): void {
         quickAccess.show(prefix);
       },
     });
-    workbench.menus.append("menubar/go", {
-      command: id,
-      group: "3_kubernetes",
-      order,
-    });
+    menus.append("menubar/go", { command: id, group: "3_kubernetes", order });
   });
 
   views.registerContainer({
@@ -72,32 +56,21 @@ export function registerKube(workbench: Workbench): void {
     id: EXPLORER_VIEW,
     title: "Resources",
     container: "kube.explorer",
-    component: () => (
-      <Explorer discovery={services.discovery} lists={services.lists} />
-    ),
+    component: () => <Explorer services={services} />,
   });
   views.registerStatusBarItem({
     id: "kube.cluster",
     alignment: "left",
-    priority: 100,
-    component: () => (
-      <ClusterStatusItem
-        statuses={services.statuses}
-        discovery={services.discovery}
-      />
-    ),
+    priority: 900,
+    useEntries: clusterEntries(services.statuses, services.discovery),
   });
   views.registerStatusBarItem({
     id: "kube.list",
     alignment: "right",
     priority: 100,
-    component: () => (
-      <ListSummaryItem
-        statuses={services.statuses}
-        filters={services.filters}
-      />
-    ),
+    useEntries: listEntries(services),
   });
+  registerSpaceStatus(workbench, services);
 
   editors.register({
     id: "kube.list",
@@ -108,16 +81,7 @@ export function registerKube(workbench: Workbench): void {
     },
     icon: ListIcon,
     component: ({ uri }) => <ListEditor uri={uri} services={services} />,
-    actions: ({ uri }) => (
-      <div className="flex items-center gap-2">
-        <HealthFilter
-          uri={uri}
-          filters={services.filters}
-          statuses={services.statuses}
-        />
-        <FilterField uri={uri} filters={services.filters} />
-      </div>
-    ),
+    actions: ({ uri }) => <ListActions uri={uri} services={services} />,
   });
 
   const objectTabs = new ObjectTabs();
@@ -136,79 +100,47 @@ export function registerKube(workbench: Workbench): void {
     actions: ({ uri }) => <ObjectTabSwitch uri={uri} tabs={objectTabs} />,
   });
 
-  const moves: readonly {
-    id: string;
-    title: string;
-    keys: string[];
-    when?: string;
-    run: () => void;
-  }[] = [
-    {
-      id: "list.focusDown",
-      title: "Focus Next Row",
-      keys: ["j", "down"],
-      run: () => services.lists.focused()?.move(1),
-    },
-    {
-      id: "list.focusUp",
-      title: "Focus Previous Row",
-      keys: ["k", "up"],
-      run: () => services.lists.focused()?.move(-1),
-    },
-    {
-      id: "list.focusFirst",
-      title: "Focus First Row",
-      keys: ["home"],
-      run: () => services.lists.focused()?.moveToEdge("first"),
-    },
-    {
-      id: "list.focusLast",
-      title: "Focus Last Row",
-      keys: ["end", "shift+g"],
-      run: () => services.lists.focused()?.moveToEdge("last"),
-    },
-    {
-      id: "list.open",
-      title: "Open",
-      keys: ["enter"],
-      run: () => services.lists.focused()?.activate(),
-    },
-    {
-      id: "k8s.details.close",
-      title: "Close Details",
-      keys: ["escape"],
-      when: "detailsOpen",
-      run: () => services.lists.focused()?.closeDetails?.(),
-    },
-    {
-      id: "k8s.list.filter",
-      title: "Filter Rows",
-      keys: ["/", "mod+f"],
-      run: () => services.lists.focused()?.filter?.(),
-    },
-    {
-      id: "list.collapse",
-      title: "Collapse",
-      keys: ["left"],
-      when: "treeFocus",
-      run: () => services.lists.focused()?.collapse?.(),
-    },
-    {
-      id: "list.expand",
-      title: "Expand",
-      keys: ["right"],
-      when: "treeFocus",
-      run: () => services.lists.focused()?.expand?.(),
-    },
-  ];
-  for (const { id, title, when = "listFocus", run } of moves) {
-    commands.register({ id, title, category: "List", enablement: when, run });
-  }
-  keybindings.register(
-    "core",
-    moves.flatMap(({ id, keys, when = "listFocus" }) =>
-      keys.map((key) => ({ key, command: id, when })),
-    ),
-  );
+  commands.register({
+    id: "k8s.details.close",
+    title: "Close Details",
+    category: "Resource",
+    enablement: "detailsOpen",
+    run: () => workbench.lists.focused("close")?.close(),
+  });
+  keybindings.register("core", [
+    { key: "escape", command: "k8s.details.close", when: "detailsOpen" },
+  ]);
   registerResourceActions(workbench, services);
+}
+
+/**
+ * Each space's connection on its rail tile (ARCHITECTURE 4.2), as
+ * discovery last answered: Rust follows the active space only, so a space
+ * left behind shows idle until it is active again, or the failure it had.
+ */
+function registerSpaceStatus(
+  workbench: Workbench,
+  { discovery }: ListServices,
+): void {
+  const changes = new Changes();
+  discovery.changes.subscribe(() => {
+    changes.emit();
+  });
+  workbench.spaces.changes.subscribe(() => {
+    changes.emit();
+  });
+  workbench.spaceStatus.register({
+    changes,
+    status: (space) => {
+      const last = discovery.last(space);
+      const active = workbench.spaces.active?.id === space;
+      if (last?.state === "failed")
+        return { tone: "error", label: last.error.message };
+      if (!active)
+        return last ? { tone: "idle", label: "In the background" } : undefined;
+      return last?.state === "ready"
+        ? { tone: "ok", label: "Connected" }
+        : { tone: "warn", label: "Connecting" };
+    },
+  });
 }

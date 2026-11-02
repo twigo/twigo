@@ -1,10 +1,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { TreeNode } from "@twigo/protocol";
-
-/** The label column of every property grid in the Overview, so they align. */
-export const GRID =
-  "grid grid-cols-[fit-content(14rem)_minmax(0,1fr)] gap-x-4 gap-y-1.5";
+import { Chip, PropertyList } from "@twigo/ui";
 
 /**
  * A part of an object as a property grid: its plain fields as rows, then
@@ -28,18 +25,18 @@ export function Properties({
   return (
     <div className="flex flex-col gap-2">
       {plain.length > 0 && (
-        <dl className={GRID}>
-          {plain.map((node) => (
-            <div key={node.key} className="contents">
-              <dt className="truncate text-muted-foreground" title={node.key}>
-                {node.label}
-              </dt>
-              <dd className="min-w-0 break-words whitespace-pre-wrap">
+        <PropertyList
+          items={plain.map((node) => ({
+            key: node.key,
+            label: node.label,
+            title: node.key,
+            value: (
+              <span className="whitespace-pre-wrap">
                 <Plain node={node} />
-              </dd>
-            </div>
-          ))}
-        </dl>
+              </span>
+            ),
+          }))}
+        />
       )}
       {nested.map((node) => (
         <Group key={node.key} node={node} depth={depth} />
@@ -54,11 +51,10 @@ function Plain({ node }: { node: TreeNode }) {
   return (
     <ul className="flex flex-wrap gap-1">
       {node.value.items.map((item, index) => (
-        <li
-          key={index}
-          className="max-w-full rounded bg-muted px-1.5 py-px text-xs break-all"
-        >
-          {item.value.type === "scalar" ? item.value.text : item.key}
+        <li key={index} className="max-w-full">
+          <Chip>
+            {item.value.type === "scalar" ? item.value.text : item.key}
+          </Chip>
         </li>
       ))}
     </ul>

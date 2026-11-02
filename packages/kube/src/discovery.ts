@@ -59,6 +59,11 @@ export class Discovery {
     return this.#spaces.get(space) ?? { state: "loading" };
   }
 
+  /** Whether the space's resources came, or why not; undefined until Rust answered. */
+  last(space: string): Loaded<readonly Resource[]> | undefined {
+    return this.#spaces.get(space);
+  }
+
   /** The space's resources once they come, or why they did not. */
   resources(space: string): Promise<readonly Resource[]> {
     return new Promise((resolve, reject) => {

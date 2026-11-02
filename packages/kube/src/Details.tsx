@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { SquareArrowOutUpRight, X } from "lucide-react";
-import type { ObjectQuery, ObjectRef, ViewState } from "@twigo/protocol";
-import { Button, EmptyState } from "@twigo/ui";
+import type { ObjectQuery, ObjectRef } from "@twigo/protocol";
+import { EmptyState, IconButton, PropertyList } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import { useWorkbench } from "@twigo/workbench";
 import { useResources, type Discovery } from "./discovery";
@@ -11,6 +11,7 @@ import { refUri, useObject } from "./object/useObject";
 import { objectOf, type Selected } from "./selection";
 import { objectUri } from "./uri";
 import { useNow } from "./useNow";
+import { ViewStatus } from "./ViewStatus";
 
 const MIN_WIDTH = 320;
 
@@ -113,10 +114,9 @@ export function Details({
         <KindIcon gvr={gvr} className="size-4 shrink-0 text-muted-foreground" />
         <span className="text-muted-foreground">{kind}</span>
         <span className="truncate font-medium">{name}</span>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Open in an editor"
+        <IconButton
+          icon={SquareArrowOutUpRight}
+          label="Open in an editor"
           className="ml-auto"
           onClick={() => {
             onOpen(
@@ -128,17 +128,13 @@ export function Details({
               }),
             );
           }}
-        >
-          <SquareArrowOutUpRight />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Close details"
+        />
+        <IconButton
+          icon={X}
+          label="Close details"
+          keys="esc"
           onClick={onClose}
-        >
-          <X />
-        </Button>
+        />
       </header>
       <div className="min-h-0 flex-1 overflow-auto">
         {snapshot.status.state === "ready" && !snapshot.exists ? (
@@ -151,7 +147,7 @@ export function Details({
           />
         ) : (
           <>
-            <Failure status={snapshot.status} />
+            <ViewStatus status={snapshot.status} what="the object" inline />
             <Cells selected={selected} />
           </>
         )}
@@ -160,42 +156,23 @@ export function Details({
   );
 }
 
-/** Why the object cannot come, if it cannot; the row's cells stay below. */
-function Failure({ status }: { status: ViewState }) {
-  const why =
-    status.state === "error"
-      ? status.error.message
-      : status.state === "forbidden"
-        ? `You may not ${status.verb} ${status.resource}.`
-        : status.state === "unauthorized"
-          ? "The cluster does not accept the credentials."
-          : undefined;
-  if (why === undefined) return null;
-  return (
-    <EmptyState variant="error" density="inline" className="px-3">
-      {why}
-    </EmptyState>
-  );
-}
-
 /** The row's cells, wide columns included, until the object comes. */
 function Cells({ selected }: { selected: Selected }) {
   const now = useNow(1000);
   const { columns, row } = selected;
   return (
-    <dl className="grid grid-cols-[minmax(6rem,auto)_1fr] content-start gap-x-3 gap-y-1 p-3 text-[13px]">
-      {columns.map((column, index) => (
-        <div key={column.name} className="contents">
-          <dt className="text-muted-foreground">{column.name}</dt>
-          <dd className="truncate tabular-nums">
-            {column.kind === "age"
-              ? row.created
-                ? humanDuration(now - Date.parse(row.created))
-                : ""
-              : String(row.cells[index] ?? "")}
-          </dd>
-        </div>
-      ))}
-    </dl>
+    <PropertyList
+      className="p-3 text-[13px]"
+      items={columns.map((column, index) => ({
+        key: column.name,
+        label: column.name,
+        value:
+          column.kind === "age"
+            ? row.created
+              ? humanDuration(now - Date.parse(row.created))
+              : ""
+            : String(row.cells[index] ?? ""),
+      }))}
+    />
   );
 }

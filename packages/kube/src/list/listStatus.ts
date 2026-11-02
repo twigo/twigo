@@ -1,15 +1,16 @@
-import type { ValueCount, ViewState } from "@twigo/protocol";
+import type { Column, ValueCount, ViewState } from "@twigo/protocol";
 import { Changes } from "@twigo/workbench";
 
 export interface ListStatus {
   readonly title: string;
   readonly total: number;
   readonly status: ViewState;
+  readonly columns: readonly Column[];
   /** Rows per value of the list's status column, when it has one. */
-  readonly groups: readonly ValueCount[];
+  readonly counts: readonly ValueCount[];
 }
 
-/** What each open list editor shows, by URI, for the status bar. */
+/** What each open list editor shows, by URI, for the status bar, the explorer and its own title. */
 export class ListStatuses {
   readonly changes = new Changes();
   readonly #lists = new Map<string, ListStatus>();

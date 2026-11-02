@@ -6,18 +6,13 @@ import type {
   Related,
   RelatedObject,
 } from "@twigo/protocol";
-import {
-  EmptyState,
-  Skeleton,
-  cn,
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@twigo/ui";
+import { cn, EmptyState, LinkButton, Segmented, Skeleton } from "@twigo/ui";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { sameGvr, useResources, type Discovery } from "../discovery";
 import { parseObjectUri } from "../uri";
 import { Manifest } from "./Manifest";
-import { Events, LINK, Overview } from "./Overview";
+import { ViewStatus } from "../ViewStatus";
+import { Events, Overview } from "./Overview";
 import { OBJECT_TABS, type ObjectTab, type ObjectTabs } from "./tabs";
 import { refUri, useObject } from "./useObject";
 
@@ -116,18 +111,13 @@ function Shown({
   children: ReactNode;
 }) {
   const { status } = snapshot;
-  if (status.state === "error")
-    return (
-      <EmptyState variant="error" title="Cannot open the object">
-        {status.error.message}
-      </EmptyState>
-    );
-  if (status.state === "forbidden")
-    return (
-      <EmptyState title="Not allowed">
-        You may not {status.verb} {status.resource}.
-      </EmptyState>
-    );
+  const problem = <ViewStatus status={status} what="the object" />;
+  if (
+    status.state === "error" ||
+    status.state === "forbidden" ||
+    status.state === "unauthorized"
+  )
+    return problem;
   if (status.state === "ready" && !snapshot.exists)
     return <EmptyState title="The object does not exist" />;
   if (!has)
@@ -191,15 +181,14 @@ function RelatedList({
               <span className="w-28 shrink-0 text-muted-foreground">
                 {target.kind}
               </span>
-              <button
-                type="button"
+              <LinkButton
                 onClick={() => {
                   onOpen(target);
                 }}
-                className={`truncate text-left ${LINK}`}
+                className="truncate"
               >
                 {target.name}
-              </button>
+              </LinkButton>
               {controller && (
                 <span className="text-xs text-muted-foreground">
                   controller
@@ -223,19 +212,13 @@ export function ObjectTabSwitch({
 }) {
   useChanges(tabs.changes);
   return (
-    <ToggleGroup
-      type="single"
-      aria-label="Views of the object"
+    <Segmented<ObjectTab>
+      label="Views of the object"
+      items={OBJECT_TABS.map(({ id, title }) => ({ value: id, label: title }))}
       value={tabs.get(uri)}
-      onValueChange={(value) => {
-        if (value) tabs.set(uri, value as ObjectTab);
+      onChange={(value) => {
+        tabs.set(uri, value);
       }}
-    >
-      {OBJECT_TABS.map(({ id, title }) => (
-        <ToggleGroupItem key={id} value={id}>
-          {title}
-        </ToggleGroupItem>
-      ))}
-    </ToggleGroup>
+    />
   );
 }

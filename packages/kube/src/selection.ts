@@ -1,4 +1,4 @@
-import type { Column, Gvr, Row } from "@twigo/protocol";
+import type { Column, Gvr, Row, RowId } from "@twigo/protocol";
 import { Changes } from "@twigo/workbench";
 
 export interface Selected {
@@ -31,11 +31,13 @@ export function objectOf({ row, namespaced }: Selected): {
 /**
  * Per list editor URI, the row last selected in its table (ARCHITECTURE
  * 4.3), so a list that mounts again selects it again, and two lists of one
- * space keep their own.
+ * space keep their own; and the rows the user marked (4.4), which commands
+ * of the `resource/marked` menu act on.
  */
 export class Selection {
   readonly changes = new Changes();
   readonly #lists = new Map<string, Selected>();
+  readonly #marks = new Map<string, ReadonlySet<RowId>>();
 
   get(uri: string): Selected | undefined {
     return this.#lists.get(uri);
@@ -46,4 +48,20 @@ export class Selection {
     this.#lists.set(uri, selected);
     this.changes.emit();
   }
+
+  marks(uri: string): ReadonlySet<RowId> {
+    return this.#marks.get(uri) ?? NONE;
+  }
+
+  mark(uri: string, ids: readonly RowId[], marked: boolean): void {
+    const next = new Set(this.marks(uri));
+    for (const id of ids) {
+      if (marked) next.add(id);
+      else next.delete(id);
+    }
+    this.#marks.set(uri, next);
+    this.changes.emit();
+  }
 }
+
+const NONE: ReadonlySet<RowId> = new Set();

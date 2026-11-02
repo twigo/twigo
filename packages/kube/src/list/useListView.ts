@@ -16,6 +16,7 @@ import { FlashTracker } from "./flash";
 interface Live {
   view: ListView;
   flash: FlashTracker;
+  query: ListQuery;
 }
 
 const idle = () => INITIAL_SNAPSHOT;
@@ -36,7 +37,8 @@ export function useListView(backend: Backend, query: ListQuery | undefined) {
 
   useEffect(() => {
     if (key === undefined) return;
-    const view = new ListView(backend, JSON.parse(key) as ListQuery);
+    const query = JSON.parse(key) as ListQuery;
+    const view = new ListView(backend, query);
     const flash = new FlashTracker();
     newest.current = view;
     view.setWindow(...window.current);
@@ -45,12 +47,12 @@ export function useListView(backend: Backend, query: ListQuery | undefined) {
       flash.record(view.getSnapshot(), performance.now());
       if (!shown) {
         shown = true;
-        setLive({ view, flash });
+        setLive({ view, flash, query });
       }
     });
     if (!shownOnce.current) {
       shownOnce.current = true;
-      setLive({ view, flash });
+      setLive({ view, flash, query });
     }
     return () => {
       record();
@@ -67,5 +69,6 @@ export function useListView(backend: Backend, query: ListQuery | undefined) {
     live?.view.subscribe ?? never,
     live?.view.getSnapshot ?? idle,
   );
-  return { snapshot, flash: live?.flash, setWindow };
+  /** `query` is the one the snapshot answers, which trails a new query until its first batch. */
+  return { snapshot, flash: live?.flash, query: live?.query, setWindow };
 }

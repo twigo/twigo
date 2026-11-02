@@ -11,13 +11,10 @@ import type {
   Value,
 } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
-import { cn } from "@twigo/ui";
+import { Chip, cn, LinkButton, PropertyList, Section } from "@twigo/ui";
 import { formatBytes, humanDuration } from "@twigo/utils";
 import { useNow } from "../useNow";
-import { GRID, Properties } from "./Properties";
-
-/** How a link to another object looks. */
-export const LINK = "text-brand hover:underline";
+import { Properties } from "./Properties";
 
 export interface OverviewProps {
   readonly overview: Document;
@@ -38,42 +35,29 @@ export function Overview({ overview, onOpen, values }: OverviewProps) {
       {overview.sections.map((section) => {
         const open = !folded.has(section.id);
         return (
-          <section
+          <Section
             key={section.id}
-            aria-label={section.title}
+            title={section.title}
+            open={open}
+            onToggle={() => {
+              const next = new Set(folded);
+              if (open) next.add(section.id);
+              else next.delete(section.id);
+              setFolded(next);
+            }}
             className="border-b border-border-subtle last:border-b-0"
           >
-            <button
-              type="button"
-              aria-expanded={open}
-              onClick={() => {
-                const next = new Set(folded);
-                if (open) next.add(section.id);
-                else next.delete(section.id);
-                setFolded(next);
-              }}
-              className="flex h-8 w-full items-center gap-1 px-2 text-left font-semibold"
-            >
-              {open ? (
-                <ChevronDown className="size-3.5 text-muted-foreground" />
-              ) : (
-                <ChevronRight className="size-3.5 text-muted-foreground" />
-              )}
-              {section.title}
-            </button>
-            {open && (
-              <div className="flex flex-col gap-3 px-3 pb-4">
-                {section.blocks.map((block, index) => (
-                  <BlockView
-                    key={index}
-                    block={block}
-                    onOpen={onOpen}
-                    values={values}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
+            <div className="flex flex-col gap-3 px-3 pb-4">
+              {section.blocks.map((block, index) => (
+                <BlockView
+                  key={index}
+                  block={block}
+                  onOpen={onOpen}
+                  values={values}
+                />
+              ))}
+            </div>
+          </Section>
         );
       })}
     </div>
@@ -116,16 +100,13 @@ function Fields({
   onOpen: (target: ObjectRef) => void;
 }) {
   return (
-    <dl className={GRID}>
-      {fields.map((field) => (
-        <div key={field.label} className="contents">
-          <dt className="text-muted-foreground">{field.label}</dt>
-          <dd className="min-w-0">
-            <ValueView value={field.value} onOpen={onOpen} />
-          </dd>
-        </div>
-      ))}
-    </dl>
+    <PropertyList
+      items={fields.map((field) => ({
+        key: field.label,
+        label: field.label,
+        value: <ValueView value={field.value} onOpen={onOpen} />,
+      }))}
+    />
   );
 }
 
@@ -145,15 +126,14 @@ function ValueView({
       return <Time at={value.at} />;
     case "link":
       return (
-        <button
-          type="button"
+        <LinkButton
           onClick={() => {
             onOpen(value.target);
           }}
-          className={cn("text-left break-all", LINK)}
+          className="break-all"
         >
           {value.text}
-        </button>
+        </LinkButton>
       );
     case "labels":
       return (
@@ -188,8 +168,8 @@ function LabelChip({ name, value }: { name: string; value: string }) {
   );
   if (!long)
     return (
-      <li className="max-w-full rounded bg-muted px-1.5 py-px text-xs break-all">
-        {chip}
+      <li className="max-w-full">
+        <Chip>{chip}</Chip>
       </li>
     );
   return (
@@ -238,7 +218,7 @@ function Age({ at }: { at: string | null }) {
 const TONE_TEXT = {
   neutral: "text-muted-foreground",
   success: "",
-  warning: "text-warn",
+  warning: "text-warn-foreground",
   danger: "text-error",
 } as const;
 
@@ -388,12 +368,17 @@ export function Events({ list }: { list: EventList }) {
               aria-label={warning ? "Warning" : undefined}
               className={cn(
                 "mt-0.5 size-3.5 shrink-0",
-                warning ? "text-warn" : "invisible",
+                warning ? "text-warn-foreground" : "invisible",
               )}
             />
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-2">
-                <span className={cn("font-medium", warning && "text-warn")}>
+                <span
+                  className={cn(
+                    "font-medium",
+                    warning && "text-warn-foreground",
+                  )}
+                >
                   {event.reason}
                 </span>
                 {event.count > 1 && (
