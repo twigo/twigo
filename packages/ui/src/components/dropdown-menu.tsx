@@ -43,7 +43,7 @@ function DropdownMenuContent({
 }
 
 const ITEM = cn(
-  "relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none transition-colors duration-100 ease-[var(--ease-out)]",
+  "relative flex select-none items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none transition-colors duration-100 ease-[var(--ease-out)]",
   "focus:bg-accent focus:text-accent-foreground",
   "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
   "[&_svg]:size-3.5 [&_svg]:shrink-0",
