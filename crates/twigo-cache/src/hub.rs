@@ -840,4 +840,6 @@ fn combine(states: impl Iterator<Item = ViewState>) -> ViewState {
 }
 
 #[cfg(test)]
+mod live;
+#[cfg(test)]
 mod tests;

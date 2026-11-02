@@ -142,6 +142,32 @@ pub(crate) async fn run<D: Decode>(
 ) where
     D::Item: Item,
 {
+    start(env, spec, decoder, upstream, Next::List).await;
+}
+
+/// Runs the upstream as if its watch had stopped at `from`.
+#[cfg(test)]
+pub(crate) async fn resume<D: Decode>(
+    env: Env,
+    spec: Spec,
+    decoder: D,
+    upstream: Arc<Upstream<D::Item>>,
+    from: &str,
+) where
+    D::Item: Item,
+{
+    start(env, spec, decoder, upstream, Next::Watch(from.into())).await;
+}
+
+async fn start<D: Decode>(
+    env: Env,
+    spec: Spec,
+    decoder: D,
+    upstream: Arc<Upstream<D::Item>>,
+    next: Next,
+) where
+    D::Item: Item,
+{
     upstream.update(|status| {
         status.queued = false;
         status.phase = if status.listed {
@@ -160,7 +186,7 @@ pub(crate) async fn run<D: Decode>(
         clients: None,
         backoff: backoff(),
     };
-    if let Err(view) = run.run().await {
+    if let Err(view) = run.run(next).await {
         run.upstream.update(|status| {
             status.queued = false;
             status.phase = Phase::Failed(view);
@@ -247,8 +273,7 @@ impl<D: Decode> Run<D>
 where
     D::Item: Item,
 {
-    async fn run(&mut self) -> Result<(), ViewState> {
-        let mut next = Next::List;
+    async fn run(&mut self, mut next: Next) -> Result<(), ViewState> {
         loop {
             let clients = (self.env.connect)(self.spec.context.clone())
                 .await

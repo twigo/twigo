@@ -8,7 +8,7 @@ use twigo_env::{ShellEnv, Status};
 
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
-async fn the_cluster_version_comes_from_the_cluster() {
+async fn the_namespaces_and_the_version_come_from_the_cluster() {
     let path = std::env::var_os("TWIGO_TEST_KUBECONFIG")
         .expect("TWIGO_TEST_KUBECONFIG must name the kubeconfig of a kind or kwok cluster");
     let context = Kubeconfig::read_from(&path)
@@ -27,6 +27,17 @@ async fn the_cluster_version_comes_from_the_cluster() {
         let core = Arc::clone(&core);
         async move { core.run(followed, Some(path.into())).await }
     });
+
+    let space = core.state.open_space(&context);
+    let namespaces = core.namespaces(&space.id).await.unwrap();
+    assert!(
+        ["default", "kube-system"]
+            .iter()
+            .all(|name| namespaces.iter().any(|listed| listed == name)),
+        "{namespaces:?}"
+    );
+    let unknown = core.namespaces("no-such-space").await.unwrap_err();
+    assert_eq!(unknown.kind, twigo_ipc::ErrorKind::NotFound);
 
     let version = core.cluster_version(&context).await.unwrap();
     assert!(version.git_version.starts_with("v1."), "{version:?}");
