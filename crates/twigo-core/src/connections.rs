@@ -14,7 +14,27 @@ use twigo_kube::kubeconfig::{self, Fingerprint};
 
 #[derive(Default)]
 pub struct Connections {
+    /// Taken before the others, so a build stores its clients only while
+    /// what they were built from is still current.
+    latest: Mutex<Latest>,
     contexts: Mutex<HashMap<String, Arc<Slot>>>,
+}
+
+/// The last proxy variables and fingerprints followed.
+#[derive(Default)]
+struct Latest {
+    env: Option<ProxyEnv>,
+    fingerprints: Option<HashMap<String, Fingerprint>>,
+}
+
+impl Latest {
+    fn current(&self, context: &kubeconfig::Context, env: &ProxyEnv) -> bool {
+        self.env.as_ref().is_none_or(|latest| latest == env)
+            && self
+                .fingerprints
+                .as_ref()
+                .is_none_or(|latest| latest.get(&context.name) == Some(&context.fingerprint))
+    }
 }
 
 /// A context's clients, which retiring reaches while new ones are built.
@@ -83,11 +103,20 @@ impl Connections {
                 ..Options::default()
             },
         )?);
+        let latest = self.latest.lock().expect("latest lock");
+        if !latest.current(context, env) {
+            // Built from a context or proxy variables that changed meanwhile:
+            // its watches re-open at once, over clients built from the new.
+            drop(latest);
+            clients.connections().retire();
+            return Ok(clients);
+        }
         let replaced = slot.built.lock().expect("slot lock").replace(Built {
             fingerprint: context.fingerprint,
             env: env.clone(),
             clients: Arc::clone(&clients),
         });
+        drop(latest);
         if let Some(replaced) = replaced {
             // Its watches re-open over the new clients, which may reach
             // another server.
@@ -102,6 +131,8 @@ impl Connections {
     /// the watches over them re-open, over rebuilt clients if their
     /// context is still listed.
     pub fn keep(&self, listed: &HashMap<String, Fingerprint>) {
+        let mut latest = self.latest.lock().expect("latest lock");
+        latest.fingerprints = Some(listed.clone());
         let mut contexts = self.contexts.lock().expect("connections lock");
         let mut gone = Vec::new();
         contexts.retain(|name, slot| {
@@ -116,6 +147,7 @@ impl Connections {
             current.is_some()
         });
         drop(contexts);
+        drop(latest);
         for clients in gone {
             clients.connections().retire();
         }
@@ -124,6 +156,8 @@ impl Connections {
     /// Drops the clients built with other proxy variables than `env`, the
     /// login shell's now, and retires their connections.
     pub fn follow_env(&self, env: &ProxyEnv) {
+        let mut latest = self.latest.lock().expect("latest lock");
+        latest.env = Some(env.clone());
         let contexts = self.contexts.lock().expect("connections lock");
         let mut gone = Vec::new();
         for slot in contexts.values() {
@@ -133,6 +167,7 @@ impl Connections {
             }
         }
         drop(contexts);
+        drop(latest);
         for clients in gone {
             clients.connections().retire();
         }
@@ -315,12 +350,62 @@ contexts:
         assert!(a_retired.has_changed().unwrap(), "its CA file changed");
         assert!(!b_retired.has_changed().unwrap(), "it did not change");
         connections.keep(&listed);
+        connections.follow_env(&env);
+        assert!(
+            !b_retired.has_changed().unwrap(),
+            "the same contexts and proxy retire nothing"
+        );
 
         let proxied = ProxyEnv::from_vars(|name| {
             (name == "HTTPS_PROXY").then(|| "http://proxy.example:3128".to_owned())
         });
         connections.follow_env(&proxied);
         assert!(b_retired.has_changed().unwrap(), "the proxy changed");
+    }
+
+    #[tokio::test]
+    async fn clients_built_from_what_changed_meanwhile_are_retired_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config"), KUBECONFIG).unwrap();
+        ca(
+            dir.path(),
+            &rcgen::generate_simple_self_signed(["a".to_owned()]).unwrap(),
+        );
+        let connections = Connections::default();
+        let env = ProxyEnv::default();
+        let before = load(dir.path());
+        ca(
+            dir.path(),
+            &rcgen::generate_simple_self_signed(["a".to_owned()]).unwrap(),
+        );
+        let after = load(dir.path());
+        connections.keep(
+            &after
+                .contexts
+                .iter()
+                .map(|context| (context.name.clone(), context.fingerprint))
+                .collect(),
+        );
+
+        let stale = connections
+            .clients(find(&before, "kind-a"), &env, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            *stale.connections().retired().borrow(),
+            1,
+            "retired at once"
+        );
+        let current = connections
+            .clients(find(&after, "kind-a"), &env, None)
+            .await
+            .unwrap();
+        assert_eq!(*current.connections().retired().borrow(), 0);
+        let again = connections
+            .clients(find(&after, "kind-a"), &env, None)
+            .await
+            .unwrap();
+        assert!(Arc::ptr_eq(&current, &again), "the current ones are kept");
     }
 
     #[tokio::test]

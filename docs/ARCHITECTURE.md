@@ -348,7 +348,8 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   - The capability is learnt once per cluster, from its first streaming list: 1.33 refuses `sendInitialEvents` with 422 on that field ([`validateWatchOptions`](https://github.com/kubernetes/kubernetes/blob/v1.33.12/staging/src/k8s.io/apimachinery/pkg/apis/meta/internalversion/validation/validation.go#L53-L62)).
     The answer, and the access reviews of the scope, are kept with the context's clients, so clients rebuilt for another server learn them again.
   - A relist, after `410 Gone` or over rebuilt clients, keeps the rows on screen and replaces them with its own once it ends.
-  - A changed fingerprint or proxy variables, or a context no source lists any more, retire the connections of its clients at once, so every watch re-opens over rebuilt clients and relists.
+  - A changed fingerprint or proxy variables, or a context no source lists any more, retire the connections of its clients at once, so its watches re-open over rebuilt clients and relist, or show that no source lists the context.
+    Clients a build finishes after such a change are retired as it stores them.
   - A resource the server cannot watch, which answers a watch with 405 as ComponentStatus and metrics do ([`handleWatch`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/get.go#L268-L270)), is listed in pages again every 15 s, the interval of metrics (3.6).
 - **Backoff.**
   UI-friendly: 0.5–5 s with jitter, reset on every event.

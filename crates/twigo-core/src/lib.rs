@@ -230,7 +230,7 @@ impl Core {
             }),
             Err(ViewState::Unauthorized) => Err(IpcError {
                 kind: ErrorKind::Unauthorized,
-                message: "Twigo has no credentials this cluster accepts".to_owned(),
+                message: "no credentials Twigo may use for this context".to_owned(),
             }),
             Err(ViewState::Error { error }) => Err(error),
             Err(_) => Err(IpcError {
@@ -271,8 +271,10 @@ impl Core {
                 if let Some(env) = env {
                     let var = |name: &str| env.get(name)?.to_str().map(str::to_owned);
                     let proxy = ProxyEnv::from_vars(var);
+                    // Published first, so a watch the retire re-opens builds
+                    // with the new variables.
+                    self.proxy_env.send_replace(Some(proxy.clone()));
                     self.connections.follow_env(&proxy);
-                    self.proxy_env.send_replace(Some(proxy));
                     self.shell_env.send_replace(Some(Arc::clone(&env)));
                     if explicit.is_none() {
                         let home = env.get("HOME").map(Path::new);
