@@ -144,6 +144,9 @@ export function listProvider(
   };
 }
 
+/** A namespace's name is an RFC 1123 label. */
+const NAMESPACE = /^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$/;
+
 /** The namespaces of a space, or none when the person may not list them. */
 async function listNamespaces(
   backend: Backend,
@@ -173,7 +176,7 @@ export function namespaceProvider(workbench: Workbench): QuickAccessProvider {
       if (!space) return [];
       const search = filter.trim();
       const listed = await listNamespaces(backend, space.id);
-      const typed = listed === undefined && search !== "" && search !== ALL;
+      const typed = listed === undefined && NAMESPACE.test(search);
       const current = spaces.state(space.id).namespaces;
       const items = [ALL, ...(listed ?? (typed ? [search] : []))].map(
         (name) => ({

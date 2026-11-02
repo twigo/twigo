@@ -133,6 +133,13 @@ test("ns takes a typed name where namespaces may not be listed", async () => {
   if (!typed) throw new Error("no typed item");
   await act(() => resolved.provider.accept(typed, resolved.filter, NOWHERE));
   expect(workbench.spaces.state("prod-eu").namespaces).toEqual(["team-a"]);
+
+  for (const invalid of ["Team A", "a/b", "-a"]) {
+    const asked = workbench.quickAccess.resolve(`ns ${invalid}`);
+    if (!asked) throw new Error("no ns provider");
+    const offered = await asked.provider.items(asked.filter, NOWHERE);
+    expect(offered.map((item) => item.label)).not.toContain(invalid);
+  }
 });
 
 test("no prefix finds pods by name and opens the pick's list with its details", async () => {
