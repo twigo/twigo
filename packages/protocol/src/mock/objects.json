@@ -77,7 +77,8 @@
                   "bytes": 4,
                   "binary": false
                 }
-              ]
+              ],
+              "readable": true
             }
           ]
         },
@@ -2558,7 +2559,8 @@
                   "bytes": 13,
                   "binary": false
                 }
-              ]
+              ],
+              "readable": false
             }
           ]
         },

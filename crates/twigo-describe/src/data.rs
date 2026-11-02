@@ -32,7 +32,10 @@ pub(crate) fn config_map(object: &Value) -> Vec<Section> {
     );
     entries.sort_by(|a, b| a.key.cmp(&b.key));
     let mut blocks = immutable(object);
-    blocks.push(Block::Data { entries });
+    blocks.push(Block::Data {
+        entries,
+        readable: true,
+    });
     vec![Section {
         id: "core.data".to_owned(),
         title: "Data".to_owned(),
@@ -64,7 +67,10 @@ pub(crate) fn secret(object: &Value) -> Vec<Section> {
         })
         .collect();
     entries.sort_by(|a, b| a.key.cmp(&b.key));
-    blocks.push(Block::Data { entries });
+    blocks.push(Block::Data {
+        entries,
+        readable: false,
+    });
     vec![Section {
         id: "core.data".to_owned(),
         title: "Data".to_owned(),

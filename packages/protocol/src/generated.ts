@@ -2,7 +2,12 @@
 
 export type Ack = { id: SubscriptionId, seq: number, };
 
-export type Block = { "type": "fields", fields: Array<Field>, } | { "type": "conditions", conditions: Array<Condition>, } | { "type": "data", entries: Array<DataEntry>, } | { "type": "tree", nodes: Array<TreeNode>, } | { "type": "events", events: Array<ObjectEvent>, };
+export type Block = { "type": "fields", fields: Array<Field>, } | { "type": "conditions", conditions: Array<Condition>, } | { "type": "data", entries: Array<DataEntry>, 
+/**
+ * Whether [`GetValues`] sends their values: a ConfigMap's text
+ * values, never a Secret's.
+ */
+readable: boolean, } | { "type": "tree", nodes: Array<TreeNode>, } | { "type": "events", events: Array<ObjectEvent>, };
 
 export type Cell = null | boolean | number | number | string;
 

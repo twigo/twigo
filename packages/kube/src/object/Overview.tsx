@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, TriangleAlert } from "lucide-react";
 import type {
   Block,
@@ -10,6 +10,7 @@ import type {
   Overview as Document,
   Value,
 } from "@twigo/protocol";
+import { toIpcError } from "@twigo/protocol";
 import { cn } from "@twigo/ui";
 import { formatBytes, humanDuration } from "@twigo/utils";
 import { useNow } from "../useNow";
@@ -94,7 +95,12 @@ function BlockView({
     case "conditions":
       return <Conditions conditions={block.conditions} />;
     case "data":
-      return <Data entries={block.entries} values={values} />;
+      return (
+        <Data
+          entries={block.entries}
+          values={block.readable ? values : undefined}
+        />
+      );
     case "tree":
       return <Properties nodes={block.nodes} depth={0} />;
     case "events":
@@ -289,6 +295,12 @@ function Data({
   );
 }
 
+/** What a key's value read gave, the last read standing while the next runs. */
+type Read =
+  | { readonly state: "reading" }
+  | { readonly state: "read"; readonly text: string | null }
+  | { readonly state: "failed"; readonly message: string };
+
 function DataRow({
   entry,
   values,
@@ -296,9 +308,25 @@ function DataRow({
   entry: DataEntry;
   values: OverviewProps["values"];
 }) {
-  const [value, setValue] = useState<string | null | undefined>(undefined);
   const [open, setOpen] = useState(false);
+  const [read, setRead] = useState<Read>({ state: "reading" });
   const opens = values !== undefined && !entry.binary;
+  useEffect(() => {
+    if (!open || !values) return;
+    let current = true;
+    values([entry.key]).then(
+      ([text]) => {
+        if (current) setRead({ state: "read", text: text ?? null });
+      },
+      (error: unknown) => {
+        if (current)
+          setRead({ state: "failed", message: toIpcError(error).message });
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [open, values, entry]);
   const size = (
     <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
       {entry.binary && "binary, "}
@@ -319,10 +347,6 @@ function DataRow({
         aria-expanded={open}
         onClick={() => {
           setOpen(!open);
-          if (!open && value === undefined)
-            void values([entry.key]).then(([read]) => {
-              setValue(read ?? null);
-            });
         }}
         className="flex h-6 items-center gap-1 text-left hover:text-foreground"
       >
@@ -334,11 +358,14 @@ function DataRow({
         <span className="truncate font-mono text-xs">{entry.key}</span>
         {size}
       </button>
-      {open && (
-        <pre className="mb-1 ml-4.5 max-h-80 overflow-auto rounded bg-muted p-2 font-mono text-xs whitespace-pre-wrap">
-          {value ?? ""}
-        </pre>
-      )}
+      {open &&
+        (read.state === "failed" ? (
+          <p className="mb-1 ml-4.5 text-xs text-error">{read.message}</p>
+        ) : (
+          <pre className="mb-1 ml-4.5 max-h-80 overflow-auto rounded bg-muted p-2 font-mono text-xs whitespace-pre-wrap">
+            {read.state === "read" ? read.text : ""}
+          </pre>
+        ))}
     </li>
   );
 }

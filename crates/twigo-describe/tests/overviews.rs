@@ -116,7 +116,11 @@ fn a_secret_shows_its_keys_and_sizes_and_no_value() {
     let described = described();
     let secret = &described["secret"];
     assert_eq!(ids(secret), ["core.metadata", "core.data", "core.events"]);
-    let Block::Data { entries } = &secret.sections[1].blocks[1] else {
+    let Block::Data {
+        entries,
+        readable: false,
+    } = &secret.sections[1].blocks[1]
+    else {
         panic!("the data block: {:?}", secret.sections[1].blocks);
     };
     let entries: Vec<(&str, u64, bool)> = entries
@@ -133,7 +137,11 @@ fn a_secret_shows_its_keys_and_sizes_and_no_value() {
 #[test]
 fn a_config_map_lists_text_and_binary_keys_with_their_sizes() {
     let described = described();
-    let Block::Data { entries } = &described["configmap"].sections[1].blocks[0] else {
+    let Block::Data {
+        entries,
+        readable: true,
+    } = &described["configmap"].sections[1].blocks[0]
+    else {
         panic!("the data block");
     };
     let entries: Vec<(&str, u64, bool)> = entries

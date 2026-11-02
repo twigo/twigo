@@ -1,5 +1,5 @@
 import type { Backend } from "./backend";
-import { toIpcError } from "./error";
+import { IpcError, toIpcError } from "./error";
 import type {
   ObjectBatch,
   ObjectEvent,
@@ -88,7 +88,10 @@ export class ObjectView {
 
   /** The values of a ConfigMap's keys; null for a key it lacks or holds as binary data. */
   values(keys: readonly string[]): Promise<(string | null)[]> {
-    if (this.#id === undefined) return Promise.resolve(keys.map(() => null));
+    if (this.#id === undefined)
+      return Promise.reject(
+        new IpcError("unavailable", "the object is not open yet"),
+      );
     return this.#backend.invoke("object_values", {
       id: this.#id,
       keys: [...keys],

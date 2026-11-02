@@ -24,6 +24,7 @@ function configMap(): Document {
         blocks: [
           {
             type: "data",
+            readable: true,
             entries: Array.from({ length: KEYS }, (_, index) => ({
               key: `key-${index}`,
               bytes: 12,
@@ -100,4 +101,75 @@ test("a section folds by its title", () => {
   expect(screen.getByText("key-0")).toBeDefined();
   fireEvent.click(screen.getByRole("button", { name: "Data" }));
   expect(screen.queryByText("key-0")).toBeNull();
+});
+
+function data(readable: boolean, bytes = 3): Document {
+  return {
+    sections: [
+      {
+        id: "core.data",
+        title: "Data",
+        blocks: [
+          {
+            type: "data",
+            readable,
+            entries: [{ key: "mode", bytes, binary: false }],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+test("an open value is read again when the object changes", async () => {
+  let current = "old";
+  const values = vi.fn(() => Promise.resolve([current]));
+  const { rerender } = render(
+    <Overview overview={data(true)} onOpen={() => undefined} values={values} />,
+  );
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: /mode/ }));
+    await Promise.resolve();
+  });
+  expect(document.body.textContent).toContain("old");
+  current = "newer";
+  await act(async () => {
+    rerender(
+      <Overview
+        overview={data(true, 5)}
+        onOpen={() => undefined}
+        values={values}
+      />,
+    );
+    await Promise.resolve();
+  });
+  expect(values).toHaveBeenCalledTimes(2);
+  expect(document.body.textContent).toContain("newer");
+});
+
+test("a value that cannot be read says why", async () => {
+  const values = vi.fn(() =>
+    Promise.reject(new Error("the object is not open yet")),
+  );
+  render(
+    <Overview overview={data(true)} onOpen={() => undefined} values={values} />,
+  );
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: /mode/ }));
+    await Promise.resolve();
+  });
+  expect(document.body.textContent).toContain("the object is not open yet");
+});
+
+test("a Secret's keys do not open", () => {
+  const values = vi.fn(() => Promise.resolve([null]));
+  render(
+    <Overview
+      overview={data(false)}
+      onOpen={() => undefined}
+      values={values}
+    />,
+  );
+  expect(screen.queryByRole("button", { name: /mode/ })).toBeNull();
+  expect(screen.getByText("mode")).toBeDefined();
 });

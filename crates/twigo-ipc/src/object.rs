@@ -98,10 +98,12 @@ pub enum Block {
     Conditions {
         conditions: Vec<Condition>,
     },
-    /// A ConfigMap's or Secret's keys with their sizes; values are asked for
-    /// with [`GetValues`], a Secret's never.
+    /// A ConfigMap's or Secret's keys with their sizes.
     Data {
         entries: Vec<DataEntry>,
+        /// Whether [`GetValues`] sends their values: a ConfigMap's text
+        /// values, never a Secret's.
+        readable: bool,
     },
     /// A part of the object, such as its spec, as nested keys.
     Tree {

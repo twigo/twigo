@@ -146,3 +146,23 @@ test("the mock answers with the recorded pod under the name asked for", async ()
   });
   expect(view.getSnapshot().related?.owners[0]?.target.kind).toBe("ReplicaSet");
 });
+
+test("a batch that comes before the id is acked once the id does", async () => {
+  const fake = fakeBackend();
+  new ObjectView(fake.backend, POD, OVERVIEW);
+  fake.send(batch(1, { overview: DOCUMENT }));
+  await vi.runAllTimersAsync();
+  expect(fake.calls.some(([command]) => command === "object_ack")).toBe(false);
+  fake.resolve(9);
+  await vi.runAllTimersAsync();
+  expect(fake.calls).toContainEqual(["object_ack", { id: 9, seq: 1 }]);
+});
+
+test("a view closed before its id comes closes the object once it does", async () => {
+  const fake = fakeBackend();
+  const view = new ObjectView(fake.backend, POD, OVERVIEW);
+  view.close();
+  fake.resolve(4);
+  await vi.runAllTimersAsync();
+  expect(fake.calls).toContainEqual(["object_close", 4]);
+});
