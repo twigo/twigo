@@ -110,6 +110,11 @@ impl<T: Item> Upstream<T> {
         self.status().listed
     }
 
+    /// Rejected credentials ended its run.
+    pub fn ended(&self) -> bool {
+        matches!(self.status().phase, Phase::Failed(_))
+    }
+
     pub fn watching(&self) -> bool {
         self.watching.load(Ordering::Relaxed)
     }

@@ -5529,6 +5529,7 @@ dependencies = [
  "jiff",
  "k8s-openapi",
  "kube",
+ "percent-encoding",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

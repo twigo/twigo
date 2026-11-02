@@ -210,6 +210,29 @@ async fn the_watch_that_waited_longest_gets_the_freed_one() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_queued_watch_nobody_shows_gives_up_its_place() {
+    let fake = Fake::default();
+    let (hub, _clients) = fake.hub(budget(1));
+    let mut a = hub.rows(query(&["a"])).await;
+    ready(&mut a).await;
+    let mut b = hub.rows(query(&["b"])).await;
+    until(&mut b, |state| *state == ViewState::Queued).await;
+    drop(b);
+    let mut c = hub.rows(query(&["c"])).await;
+    until(&mut c, |state| *state == ViewState::Queued).await;
+
+    let dropped = Instant::now();
+    drop(a);
+    ready(&mut c).await;
+    assert!(
+        dropped.elapsed() < Duration::from_secs(1),
+        "b, which nobody shows, did not take the freed watch"
+    );
+    settle().await;
+    assert_eq!(hub.scopes(), [namespace("c")]);
+}
+
+#[tokio::test(start_paused = true)]
 async fn the_linger_of_an_evicted_upstream_leaves_its_successor_alone() {
     let fake = Fake::default();
     let (hub, _clients) = fake.hub(budget(1));
@@ -598,6 +621,25 @@ async fn whole_rows_wait_for_a_whole_list() {
         refused.whole().await,
         Err(ViewState::Forbidden { .. })
     ));
+}
+
+#[test]
+fn names_that_are_none_stay_in_their_segment() {
+    let path = pods().path(&Scope::Namespace("a/b?c<d".to_owned()));
+    assert_eq!(path, "/api/v1/namespaces/a%2Fb%3Fc%3Cd/pods");
+    let collection = crate::request::Collection::table(&path);
+    let request = crate::request::list(&collection, 1, None);
+    assert_eq!(request.uri().path(), path);
+    let crd = Resource {
+        group: "test.twigo.io".to_owned(),
+        version: "v1".to_owned(),
+        resource: "widgets".to_owned(),
+        namespaced: true,
+    };
+    assert_eq!(
+        crd.path(&Scope::Namespace("team-a".to_owned())),
+        "/apis/test.twigo.io/v1/namespaces/team-a/widgets"
+    );
 }
 
 #[test]

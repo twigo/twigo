@@ -26,6 +26,7 @@ use k8s_openapi::api::authorization::v1::{
 };
 use kube::Api;
 use kube::api::PostParams;
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
@@ -57,17 +58,29 @@ pub struct Resource {
     pub namespaced: bool,
 }
 
+/// What a path segment keeps as it is: the unreserved characters of
+/// RFC 3986, which every Kubernetes name is made of.
+const SEGMENT: &AsciiSet = &NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'.')
+    .remove(b'_')
+    .remove(b'~');
+
 impl Resource {
+    /// Its collection's path, each name escaped, so a name that is none
+    /// gets the server's refusal rather than another path.
     fn path(&self, scope: &Scope) -> String {
+        let segment = |name: &str| utf8_percent_encode(name, SEGMENT).to_string();
         let base = if self.group.is_empty() {
-            format!("/api/{}", self.version)
+            format!("/api/{}", segment(&self.version))
         } else {
-            format!("/apis/{}/{}", self.group, self.version)
+            format!("/apis/{}/{}", segment(&self.group), segment(&self.version))
         };
+        let resource = segment(&self.resource);
         match scope {
-            Scope::Cluster => format!("{base}/{}", self.resource),
+            Scope::Cluster => format!("{base}/{resource}"),
             Scope::Namespace(namespace) => {
-                format!("{base}/namespaces/{namespace}/{}", self.resource)
+                format!("{base}/namespaces/{}/{resource}", segment(namespace))
             }
         }
     }
@@ -150,12 +163,16 @@ struct Registry {
     /// Numbers every linger, so the timer of one that ended does nothing,
     /// in this entry or in one created for the same key since.
     next_linger: u64,
+    /// Numbers every run, so what an aborted one says when it goes is not
+    /// taken for its successor's.
+    next_run: u64,
 }
 
 struct Entry {
     upstream: Arc<dyn Running>,
     state: watch::Receiver<ViewState>,
     task: JoinHandle<()>,
+    run: u64,
     subscribers: usize,
     /// Subscriptions it serves without being held, each told to move off
     /// once it has lingered.
@@ -322,19 +339,28 @@ impl Hub {
                         .into_any()
                         .downcast::<Upstream<T>>()
                         .expect("a key's form fixes its upstream's items");
-                    if entry.task.is_finished() {
+                    if upstream.ended() {
                         upstream.restart();
-                        let task = self.spawn(key, Arc::clone(&upstream));
+                        registry.next_run += 1;
+                        let run = registry.next_run;
+                        let Some(entry) = registry.entries.get_mut(key) else {
+                            unreachable!("found under the same lock");
+                        };
+                        entry.run = run;
+                        let task = self.spawn(key, Arc::clone(&upstream), run);
                         abort = Some(std::mem::replace(&mut entry.task, task));
                     }
                     upstream
                 }
                 None => {
                     let upstream = Arc::new(Upstream::<T>::new());
+                    registry.next_run += 1;
+                    let run = registry.next_run;
                     let entry = Entry {
                         upstream: Arc::clone(&upstream) as Arc<dyn Running>,
                         state: upstream.state(),
-                        task: self.spawn(key, Arc::clone(&upstream)),
+                        task: self.spawn(key, Arc::clone(&upstream), run),
+                        run,
                         subscribers: 1,
                         borrowers: HashMap::new(),
                         idle_since: None,
@@ -439,22 +465,22 @@ impl Hub {
 
 /// Starts the run of an upstream with the decoder of its items.
 trait Spawn<T> {
-    fn spawn(&self, key: &Key, upstream: Arc<Upstream<T>>) -> JoinHandle<()>;
+    fn spawn(&self, key: &Key, upstream: Arc<Upstream<T>>, run: u64) -> JoinHandle<()>;
 }
 
 impl Spawn<Row> for Hub {
-    fn spawn(&self, key: &Key, upstream: Arc<Upstream<Row>>) -> JoinHandle<()> {
+    fn spawn(&self, key: &Key, upstream: Arc<Upstream<Row>>, run: u64) -> JoinHandle<()> {
         match key.format {
-            Format::Table => self.start(key, TableDecoder::new(), upstream),
-            Format::Metadata => self.start(key, MetaDecoder, upstream),
+            Format::Table => self.start(key, TableDecoder::new(), upstream, run),
+            Format::Metadata => self.start(key, MetaDecoder, upstream, run),
             Format::Object => unreachable!("an Object upstream keeps objects"),
         }
     }
 }
 
 impl Spawn<Object> for Hub {
-    fn spawn(&self, key: &Key, upstream: Arc<Upstream<Object>>) -> JoinHandle<()> {
-        self.start(key, ObjectDecoder, upstream)
+    fn spawn(&self, key: &Key, upstream: Arc<Upstream<Object>>, run: u64) -> JoinHandle<()> {
+        self.start(key, ObjectDecoder, upstream, run)
     }
 }
 
@@ -464,6 +490,7 @@ impl Hub {
         key: &Key,
         decoder: D,
         upstream: Arc<Upstream<D::Item>>,
+        run: u64,
     ) -> JoinHandle<()>
     where
         D::Item: Item,
@@ -475,7 +502,7 @@ impl Hub {
             cluster: self.inner.cluster(&key.context),
             waiting: Arc::new(move |queued| {
                 if let Some(hub) = hub.upgrade() {
-                    hub.waiting(&waiting, queued);
+                    hub.waiting(&waiting, run, queued);
                 }
             }),
         };
@@ -510,10 +537,14 @@ impl Inner {
             .is_some_and(|entry| entry.expired)
     }
 
-    /// A watch of `key` waits for the budget, or stops waiting.
-    fn waiting(&self, key: &Key, queued: bool) {
+    /// A watch of `key`'s `run` waits for the budget, or stops waiting.
+    fn waiting(&self, key: &Key, run: u64, queued: bool) {
         let mut registry = self.registry();
-        let Some(entry) = registry.entries.get_mut(key) else {
+        let Some(entry) = registry
+            .entries
+            .get_mut(key)
+            .filter(|entry| entry.run == run)
+        else {
             return;
         };
         entry.queued = queued.then(Instant::now);
@@ -535,6 +566,16 @@ impl Inner {
         };
         entry.subscribers -= 1;
         if entry.subscribers > 0 {
+            return;
+        }
+        if entry.borrowers.is_empty() && entry.queued.is_some() {
+            // Nobody shows it, and it would take the next free watch from
+            // one that is shown.
+            let task = registry.entries.remove(key).map(|entry| entry.task);
+            drop(registry);
+            if let Some(task) = task {
+                task.abort();
+            }
             return;
         }
         entry.idle_since = Some(Instant::now());
@@ -588,7 +629,7 @@ impl Inner {
             return;
         };
         entry.borrowers.remove(&id);
-        let task = if entry.expired && entry.idle() {
+        let task = if entry.idle() && (entry.expired || entry.queued.is_some()) {
             serve(&mut registry, &key.context, key);
             registry.entries.remove(key).map(|entry| entry.task)
         } else {
@@ -881,13 +922,20 @@ where
     let listed = async {
         for part in &parts {
             // A refusal moves it too: the cluster-wide upstream would show
-            // what these may not list. Ends with the upstream, which the
-            // part holds.
-            let _ = part
-                .upstream
-                .state()
-                .wait_for(|state| part.upstream.listed() || failed(state))
-                .await;
+            // what these may not list. `listed` takes the upstream's lock,
+            // which its updates hold while they send: never read it while
+            // the state is borrowed.
+            let mut state = part.upstream.state();
+            loop {
+                let refused = failed(&state.borrow_and_update());
+                if refused || part.upstream.listed() {
+                    break;
+                }
+                // Ends with the upstream, which the part holds.
+                if state.changed().await.is_err() {
+                    break;
+                }
+            }
         }
     };
     let ended = async { while swapped.changed().await.is_ok() {} };
