@@ -217,8 +217,10 @@ test("a window change flushes at once, without waiting for the next tick", async
 test("with a rate, a live list changes that many pods a second and no more", async () => {
   const backend = createMockBackend("live", "us", 100);
   const batches: ListBatch[] = [];
-  const pending = backend.subscribe("list_subscribe", query(), (b) =>
-    batches.push(b),
+  const pending = backend.subscribe(
+    "list_subscribe",
+    query({ space: "staging" }),
+    (b) => batches.push(b),
   );
   await vi.advanceTimersByTimeAsync(0);
   const id = await pending;
@@ -226,7 +228,7 @@ test("with a rate, a live list changes that many pods a second and no more", asy
     const latest = last(batches);
     if (latest) await call(backend.invoke("list_ack", { id, seq: latest.seq }));
   };
-  await call(backend.invoke("list_set_window", { id, start: 0, end: 5000 }));
+  await call(backend.invoke("list_set_window", { id, start: 0, end: 800 }));
   for (let ms = 0; ms < 2000; ms += 50) {
     await ack();
     await vi.advanceTimersByTimeAsync(50);
@@ -240,7 +242,7 @@ test("with a rate, a live list changes that many pods a second and no more", asy
   const changed = batches.slice(from).flatMap((b) => b.upserts);
   expect(changed.length).toBeGreaterThanOrEqual(190);
   expect(changed.length).toBeLessThanOrEqual(210);
-  expect(last(batches)?.total).toBe(5000);
+  expect(last(batches)?.total).toBe(800);
 });
 
 test("rows come sorted by the query's column, and the first batch carries the columns", async () => {
