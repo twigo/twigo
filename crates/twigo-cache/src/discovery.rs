@@ -2,7 +2,7 @@
 //! the disk cache revalidated with its ETags, and again after the CRDs or
 //! APIServices the hub lists change, every minute while the person may not
 //! list them, and after the hub's longest backoff while it fails, which
-//! keeps the resources last known of the server.
+//! keeps the resources the server last answered.
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
@@ -31,8 +31,12 @@ pub struct Follower {
     cache: Arc<Cache>,
     context: String,
     indexes: [Index; 2],
-    /// The discovery last answered, by the server that answered it.
+    /// The discovery last answered, or cached, by the server's URL.
     known: Option<(String, Discovery)>,
+    /// Whether the server answered `known` to this follower: a cached copy
+    /// may be another cluster's that took over the URL, which only the
+    /// server's ETags tell apart.
+    confirmed: bool,
     /// Whether the clients of the last fetch were replaced.
     abandoned: Option<watch::Receiver<bool>>,
     /// The fetches due after a change, soonest first.
@@ -48,7 +52,7 @@ enum Failed {
     Retry,
     /// The context's credential failed: retrying would run its plugin by
     /// itself, so the next follower asks again, as a subscription restarts
-    /// the hub's upstreams (ARCHITECTURE 3.2).
+    /// the hub's upstreams (ARCHITECTURE 3.2), or rebuilt clients.
     Stop,
 }
 
@@ -89,6 +93,7 @@ impl Follower {
             context,
             indexes,
             known: None,
+            confirmed: false,
             abandoned: None,
             due: Vec::new(),
             poll: Instant::now() + POLL,
@@ -114,7 +119,7 @@ impl Follower {
 
     async fn wait(&mut self) {
         if self.failed == Some(Failed::Stop) {
-            return std::future::pending().await;
+            return replaced(&mut self.abandoned).await;
         }
         let retry = (self.failed == Some(Failed::Retry)).then(|| Instant::now() + RETRY_WITHIN);
         loop {
@@ -146,7 +151,9 @@ impl Follower {
         let clients = match self.hub.clients(&self.context).await {
             Ok(clients) => clients,
             Err(error) => {
+                // Whatever server the context now reaches, it is not known.
                 self.abandoned = None;
+                self.known = None;
                 let stop = error.kind == ErrorKind::Unauthorized;
                 return self.failure(error, stop);
             }
@@ -162,13 +169,15 @@ impl Follower {
                 .load(&server)
                 .await
                 .map(|found| (server.clone(), found));
+            self.confirmed = false;
         }
         let cached = self.known.as_ref().map(|(_, discovery)| discovery);
         match Discovery::refresh(&clients.api, cached).await {
-            Ok(None) => {}
+            Ok(None) => self.confirmed = true,
             Ok(Some(discovery)) => {
                 self.store(&server, &discovery).await;
                 self.known = Some((server, discovery));
+                self.confirmed = true;
             }
             Err(error) => {
                 let stop = match &error {
@@ -188,15 +197,15 @@ impl Follower {
         }
     }
 
-    /// The resources last known of the server, a failed refresh
-    /// notwithstanding, or the failure when none are.
+    /// The resources the server last answered, a failed refresh
+    /// notwithstanding, or the failure when it answered none.
     fn failure(&mut self, error: IpcError, stop: bool) -> Discovered {
         self.failed = Some(if stop { Failed::Stop } else { Failed::Retry });
         match &self.known {
-            Some((_, discovery)) => Discovered::Ready {
+            Some((_, discovery)) if self.confirmed => Discovered::Ready {
                 resources: discovery.resources(),
             },
-            None => Discovered::Failed { error },
+            _ => Discovered::Failed { error },
         }
     }
 

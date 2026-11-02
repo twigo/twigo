@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::time::{Instant, sleep, timeout};
-use twigo_ipc::{Discovered, ErrorKind};
+use twigo_ipc::{Discovered, ErrorKind, IpcError};
 use twigo_kube::client::{Budgets, Clients};
 use twigo_kube::discovery::Cache;
 
@@ -163,25 +163,14 @@ async fn unauthorized_discovery_waits_for_another_follower() {
 #[tokio::test(start_paused = true)]
 async fn replaced_clients_ask_again_at_once() {
     let fake = fake();
-    let current = Arc::new(Mutex::new(fake.clients(Budgets::default())));
-    let connect: Connect = {
-        let current = Arc::clone(&current);
-        Arc::new(move |_context| {
-            let clients: Arc<Clients> = Arc::clone(&current.lock().unwrap());
-            Box::pin(async move { Ok(clients) })
-        })
-    };
+    let current = Arc::new(Mutex::new(Ok(fake.clients(Budgets::default()))));
     let cache = tempfile::tempdir().unwrap();
-    let mut follower = over(Hub::new(connect), cache.path()).await;
+    let mut follower = over(Hub::new(swapping(&current)), cache.path()).await;
     assert_eq!(names(&next(&mut follower).await), ["namespaces"]);
 
     let start = Instant::now();
     fake.state().serve("example.com", "gadgets", "Gadget");
-    let replaced = std::mem::replace(
-        &mut *current.lock().unwrap(),
-        fake.clients(Budgets::default()),
-    );
-    replaced.connections().abandon();
+    rebuild(&current, Ok(fake.clients(Budgets::default())));
     assert_eq!(names(&next(&mut follower).await), ["namespaces", "gadgets"]);
     assert_eq!(start.elapsed(), Duration::ZERO);
 }
@@ -227,7 +216,7 @@ async fn a_failed_refresh_keeps_the_resources_it_knew() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_start_the_server_refuses_answers_from_the_cache() {
+async fn a_refused_start_fails_rather_than_trust_the_cache() {
     let fake = fake();
     fake.state().serve("example.com", "widgets", "Widget");
     let cache = tempfile::tempdir().unwrap();
@@ -237,5 +226,83 @@ async fn a_start_the_server_refuses_answers_from_the_cache() {
 
     fake.state().forbidden.insert("/apis".to_owned());
     let mut second = follower(&fake, cache.path()).await;
-    assert_eq!(names(&next(&mut second).await), ["namespaces", "widgets"]);
+    assert_eq!(failure(&next(&mut second).await), ErrorKind::Forbidden);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stopped_follower_asks_again_over_rebuilt_clients() {
+    let fake = fake();
+    fake.state().unauthorized.insert("/apis".to_owned());
+    let current = Arc::new(Mutex::new(Ok(fake.clients(Budgets::default()))));
+    let cache = tempfile::tempdir().unwrap();
+    let mut follower = over(Hub::new(swapping(&current)), cache.path()).await;
+    assert_eq!(failure(&next(&mut follower).await), ErrorKind::Unauthorized);
+
+    fake.state().unauthorized.clear();
+    rebuild(&current, Ok(fake.clients(Budgets::default())));
+    assert_eq!(names(&next(&mut follower).await), ["namespaces"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_untrusted_plugin_stops_the_follower() {
+    let connects = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let connect: Connect = {
+        let connects = Arc::clone(&connects);
+        Arc::new(move |_context| {
+            connects.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Box::pin(async {
+                Err(IpcError {
+                    kind: ErrorKind::Unauthorized,
+                    message: "Twigo runs aws only once you trust it".to_owned(),
+                })
+            })
+        })
+    };
+    let cache = tempfile::tempdir().unwrap();
+    let mut follower = over(Hub::new(connect), cache.path()).await;
+    assert_eq!(failure(&next(&mut follower).await), ErrorKind::Unauthorized);
+
+    sleep(Duration::from_secs(1)).await;
+    let before = connects.load(std::sync::atomic::Ordering::Relaxed);
+    assert!(
+        timeout(Duration::from_secs(600), follower.next())
+            .await
+            .is_err()
+    );
+    assert_eq!(connects.load(std::sync::atomic::Ordering::Relaxed), before);
+}
+
+#[tokio::test(start_paused = true)]
+async fn clients_that_cannot_be_built_fail_rather_than_show_the_last_server() {
+    let fake = fake();
+    let current = Arc::new(Mutex::new(Ok(fake.clients(Budgets::default()))));
+    let cache = tempfile::tempdir().unwrap();
+    let mut follower = over(Hub::new(swapping(&current)), cache.path()).await;
+    assert_eq!(names(&next(&mut follower).await), ["namespaces"]);
+
+    rebuild(
+        &current,
+        Err(IpcError {
+            kind: ErrorKind::Unavailable,
+            message: "no such file: ca.pem".to_owned(),
+        }),
+    );
+    assert_eq!(failure(&next(&mut follower).await), ErrorKind::Unavailable);
+}
+
+type Current = Arc<Mutex<Result<Arc<Clients>, IpcError>>>;
+
+fn swapping(current: &Current) -> Connect {
+    let current = Arc::clone(current);
+    Arc::new(move |_context| {
+        let clients = current.lock().unwrap().clone();
+        Box::pin(async move { clients })
+    })
+}
+
+fn rebuild(current: &Current, next: Result<Arc<Clients>, IpcError>) {
+    let replaced = std::mem::replace(&mut *current.lock().unwrap(), next);
+    if let Ok(replaced) = replaced {
+        replaced.connections().abandon();
+    }
 }
