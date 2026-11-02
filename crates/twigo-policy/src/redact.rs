@@ -24,7 +24,7 @@ pub fn for_view(mut object: Value) -> Value {
     }
     if secret {
         for (field, encoded) in [("data", true), ("stringData", false)] {
-            let Some(values) = object[field].as_object_mut() else {
+            let Some(values) = object.get_mut(field).and_then(Value::as_object_mut) else {
                 continue;
             };
             for value in values.values_mut() {
@@ -74,6 +74,25 @@ mod tests {
             json!({ "team": "payments" })
         );
         assert!(shown["metadata"].get("managedFields").is_none());
+    }
+
+    #[test]
+    fn a_secret_gains_no_field_it_lacks() {
+        let shown = for_view(json!({
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": { "name": "empty" },
+            "type": "Opaque",
+        }));
+        assert_eq!(
+            shown,
+            json!({
+                "apiVersion": "v1",
+                "kind": "Secret",
+                "metadata": { "name": "empty" },
+                "type": "Opaque",
+            })
+        );
     }
 
     #[test]
