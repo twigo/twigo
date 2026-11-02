@@ -7,6 +7,7 @@ import { ListView } from "./list";
 const QUERY: ListQuery = {
   space: "s",
   gvr: { group: "", version: "v1", resource: "pods" },
+  namespaced: true,
   namespaces: [],
   labelSelector: null,
   text: null,

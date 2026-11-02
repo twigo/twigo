@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CircleAlert } from "lucide-react";
 import type { Column, GroupCount, Row, ViewState } from "@twigo/protocol";
+import { EmptyState } from "@twigo/ui";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { Details } from "./Details";
 import type { ColumnPresets } from "./columnPresets";
@@ -41,9 +43,18 @@ export function ListEditor({
   useChanges(spaces.changes);
   const input = useMemo(() => parseListUri(uri), [uri]);
   const resources = useResources(services.discovery, input?.space ?? "");
+  // Discovery names each group's preferred version; a list of another
+  // version that the cluster serves has the same kind and scope.
   const resource =
     input && resources.state === "ready"
-      ? resources.value.find((candidate) => sameGvr(candidate.gvr, input.gvr))
+      ? (resources.value.find((candidate) =>
+          sameGvr(candidate.gvr, input.gvr),
+        ) ??
+        resources.value.find(
+          (candidate) =>
+            candidate.gvr.group === input.gvr.group &&
+            candidate.gvr.resource === input.gvr.resource,
+        ))
       : undefined;
   const { lists, selection, statuses, filters, columns } = services;
   useChanges(filters.changes);
@@ -150,6 +161,31 @@ export function ListEditor({
   );
 
   if (!input) return null;
+  const { group, resource: plural } = input.gvr;
+  const named = group ? `${plural}.${group}` : plural;
+  if (resources.state === "failed") {
+    return (
+      <EmptyState
+        icon={CircleAlert}
+        variant="error"
+        title={`Could not load ${named}`}
+        className="h-full"
+      >
+        <p className="max-w-md text-muted-foreground">
+          {resources.error.message}
+        </p>
+      </EmptyState>
+    );
+  }
+  if (resources.state === "ready" && !resource) {
+    return (
+      <EmptyState
+        icon={CircleAlert}
+        title={`The cluster does not serve ${named}`}
+        className="h-full"
+      />
+    );
+  }
   const namespaces = input.namespaces ?? spaces.state(input.space).namespaces;
   const text = filters.text(uri) ?? input.text;
   const lookup = keys.lookup(grid);
@@ -182,6 +218,7 @@ export function ListEditor({
         backend={backend}
         space={input.space}
         gvr={input.gvr}
+        namespaced={resource?.namespaced}
         title={title ?? input.gvr.resource}
         namespaces={namespaces}
         text={text === "" ? undefined : text}

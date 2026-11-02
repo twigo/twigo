@@ -21,21 +21,31 @@ pub struct Gvr {
 pub struct ListQuery {
     pub space: String,
     pub gvr: Gvr,
+    /// Whether the resource lives in namespaces, as discovery says: one
+    /// that does not ignores `namespaces`, and one that does gets a
+    /// Namespace column unless `namespaces` names one.
+    pub namespaced: bool,
     /// Empty for every namespace the space covers.
     pub namespaces: Vec<String>,
     pub label_selector: Option<String>,
+    /// A substring of a shown cell in any case of ASCII letters, `!` before
+    /// it to keep the rows without one, or a regex between slashes, also in
+    /// any case: `/^web-\d+/`, negated as `!/…/`.
     pub text: Option<String>,
-    /// The user's column choices by name, which the text filter follows:
-    /// true shows a column, false hides it, and the rest show by priority 0.
-    /// The server resolves them against its own columns, so a choice for a
-    /// column the list lacks, such as Namespace under one namespace, does
-    /// nothing. Null shows the columns of priority 0.
+    /// The user's column choices by name, which the text filter follows
+    /// besides Name: true shows a column, false hides it, and the rest show
+    /// by priority 0. The server resolves them against its own columns, so
+    /// a choice for a column the list lacks, such as Namespace under one
+    /// namespace, does nothing. Null shows the columns of priority 0.
     pub columns: Option<BTreeMap<String, bool>>,
+    /// Null, or a column the list lacks, sorts by Name.
     pub sort: Option<Sort>,
-    /// A column to count the matching rows by, such as a pod's Status.
+    /// A column to count the matching rows by, such as a pod's Status; one
+    /// the list lacks counts nothing.
     pub group_by: Option<String>,
-    /// Keeps the rows whose column holds one of the values. The counts of
-    /// `group_by` come before it, so the values it drops keep theirs.
+    /// Keeps the rows whose column holds one of the values, read as text.
+    /// The counts of `group_by` come before it, so the values it drops keep
+    /// theirs; a column the list lacks keeps every row.
     pub values: Option<ColumnValues>,
 }
 

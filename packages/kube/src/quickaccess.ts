@@ -264,6 +264,7 @@ export function resourceProvider(
         new ListView(backend, {
           space: space.id,
           gvr: PODS,
+          namespaced: true,
           namespaces: [...spaces.state(space.id).namespaces],
           labelSelector: null,
           text: filter.trim() === "" ? null : filter.trim(),

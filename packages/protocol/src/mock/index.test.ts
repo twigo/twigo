@@ -6,6 +6,7 @@ function query(rest: Partial<ListQuery> = {}): ListQuery {
   return {
     space: "prod-eu",
     gvr: { group: "", version: "v1", resource: "pods" },
+    namespaced: true,
     namespaces: [],
     labelSelector: null,
     text: null,

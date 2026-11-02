@@ -22,18 +22,20 @@ const idle = () => INITIAL_SNAPSHOT;
 const never = () => () => undefined;
 
 /**
- * Subscribes while mounted. A new query means a new subscription; until its
- * first batch the previous one stays on screen, so a sort does not blank the
- * table. The window always goes to the newest subscription.
+ * Subscribes while mounted, once there is a query. A new query means a new
+ * subscription; until its first batch the previous one stays on screen, so
+ * a sort does not blank the table. The window always goes to the newest
+ * subscription.
  */
-export function useListView(backend: Backend, query: ListQuery) {
-  const key = JSON.stringify(query);
+export function useListView(backend: Backend, query: ListQuery | undefined) {
+  const key = query && JSON.stringify(query);
   const [live, setLive] = useState<Live>();
   const shownOnce = useRef(false);
   const window = useRef<readonly [number, number]>([0, 40]);
   const newest = useRef<ListView>(undefined);
 
   useEffect(() => {
+    if (key === undefined) return;
     const view = new ListView(backend, JSON.parse(key) as ListQuery);
     const flash = new FlashTracker();
     newest.current = view;

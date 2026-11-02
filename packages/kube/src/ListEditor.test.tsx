@@ -317,3 +317,87 @@ test("going to a pod again shows its details again after they were closed", asyn
   );
   expect(selected.map(nameOf)).toEqual([name]);
 });
+
+test("a list subscribes with the scope discovery gives, and waits for it", async () => {
+  const mock = createMockBackend("ready");
+  const queries: unknown[] = [];
+  let answer: (() => void) | undefined;
+  const backend: typeof mock = {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe(command, request, onMessage) {
+      if (command === "list_subscribe") queries.push(request);
+      if (command !== "resources_watch") {
+        return mock.subscribe(command, request, onMessage);
+      }
+      answer = () => void mock.subscribe(command, request, onMessage);
+      return Promise.resolve(null as never);
+    },
+  };
+  await podsList(backend);
+  expect(queries).toEqual([]);
+  act(() => answer?.());
+  await settle();
+  expect(queries).toMatchObject([{ namespaced: true }]);
+  expect(rows().length).toBeGreaterThan(0);
+});
+
+test("a kind the cluster does not serve says so instead of a list", async () => {
+  const workbench = await podsList();
+  act(() => {
+    workbench.editors.open("k8s-list://prod-eu/example.com/v1/widgets");
+  });
+  await settle();
+  expect(
+    screen.getByText("The cluster does not serve widgets.example.com"),
+  ).toBeDefined();
+});
+
+test("a list of a version discovery does not prefer subscribes with that resource's scope", async () => {
+  const mock = createMockBackend("ready");
+  const queries: unknown[] = [];
+  const backend: typeof mock = {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe(command, request, onMessage) {
+      if (command === "list_subscribe") queries.push(request);
+      return mock.subscribe(command, request, onMessage);
+    },
+  };
+  const workbench = await podsList(backend);
+  queries.length = 0;
+  act(() => {
+    workbench.editors.open(
+      "k8s-list://prod-eu/autoscaling/v1/horizontalpodautoscalers",
+    );
+  });
+  await settle();
+  expect(queries).toMatchObject([
+    {
+      gvr: { group: "autoscaling", version: "v1" },
+      namespaced: true,
+    },
+  ]);
+});
+
+test("a failed discovery shows its error instead of a list", async () => {
+  const mock = createMockBackend("ready");
+  const backend: typeof mock = {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe(command, request, onMessage) {
+      if (command !== "resources_watch") {
+        return mock.subscribe(command, request, onMessage);
+      }
+      setTimeout(() => {
+        (onMessage as (message: unknown) => void)({
+          state: "failed",
+          error: { kind: "unavailable", message: "no route to the cluster" },
+        });
+      }, 0);
+      return Promise.resolve(null as never);
+    },
+  };
+  await podsList(backend);
+  const title = screen.getByText("Could not load pods");
+  const state = title.parentElement ?? title;
+  expect(within(state).getByText("no route to the cluster")).toBeDefined();
+  expect(screen.queryByRole("grid", { name: "Pods" })).toBeNull();
+});

@@ -150,24 +150,42 @@ groups: Array<GroupCount> | null, };
 
 export type ListQuery = { space: string, gvr: Gvr, 
 /**
+ * Whether the resource lives in namespaces, as discovery says: one
+ * that does not ignores `namespaces`, and one that does gets a
+ * Namespace column unless `namespaces` names one.
+ */
+namespaced: boolean, 
+/**
  * Empty for every namespace the space covers.
  */
-namespaces: Array<string>, labelSelector: string | null, text: string | null, 
+namespaces: Array<string>, labelSelector: string | null, 
 /**
- * The user's column choices by name, which the text filter follows:
- * true shows a column, false hides it, and the rest show by priority 0.
- * The server resolves them against its own columns, so a choice for a
- * column the list lacks, such as Namespace under one namespace, does
- * nothing. Null shows the columns of priority 0.
+ * A substring of a shown cell in any case of ASCII letters, `!` before
+ * it to keep the rows without one, or a regex between slashes, also in
+ * any case: `/^web-\d+/`, negated as `!/…/`.
  */
-columns: { [key in string]: boolean } | null, sort: Sort | null, 
+text: string | null, 
 /**
- * A column to count the matching rows by, such as a pod's Status.
+ * The user's column choices by name, which the text filter follows
+ * besides Name: true shows a column, false hides it, and the rest show
+ * by priority 0. The server resolves them against its own columns, so
+ * a choice for a column the list lacks, such as Namespace under one
+ * namespace, does nothing. Null shows the columns of priority 0.
+ */
+columns: { [key in string]: boolean } | null, 
+/**
+ * Null, or a column the list lacks, sorts by Name.
+ */
+sort: Sort | null, 
+/**
+ * A column to count the matching rows by, such as a pod's Status; one
+ * the list lacks counts nothing.
  */
 groupBy: string | null, 
 /**
- * Keeps the rows whose column holds one of the values. The counts of
- * `group_by` come before it, so the values it drops keep theirs.
+ * Keeps the rows whose column holds one of the values, read as text.
+ * The counts of `group_by` come before it, so the values it drops keep
+ * theirs; a column the list lacks keeps every row.
  */
 values: ColumnValues | null, };
 
