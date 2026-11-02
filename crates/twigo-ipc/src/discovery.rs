@@ -21,9 +21,9 @@ pub struct Resource {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "state", rename_all = "camelCase")]
 pub enum Discovered {
-    /// Sent first, once the context's clients are built, before discovery
-    /// answers: a space shown again keeps its last resources only while
-    /// they are of this cluster.
+    /// Sent first, and again whenever an edit moves the context to another
+    /// cluster, once its clients are built and before discovery is asked:
+    /// a space keeps its resources only while they are of this cluster.
     Pending {
         cluster: String,
     },

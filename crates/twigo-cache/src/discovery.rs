@@ -113,12 +113,17 @@ impl Follower {
     /// cluster named first again whenever an edit moves the context to
     /// another.
     pub async fn next(&mut self) -> Discovered {
+        let mut wait = !matches!(self.last, None | Some(Discovered::Pending { .. }));
         loop {
-            if !matches!(self.last, None | Some(Discovered::Pending { .. })) {
+            if wait {
                 self.wait().await;
             }
+            wait = true;
             self.burst = None;
-            let discovered = self.fetch().await;
+            let Some(discovered) = self.fetch().await else {
+                wait = false;
+                continue;
+            };
             self.poll = Instant::now() + POLL;
             if self.last.as_ref() != Some(&discovered) {
                 self.last = Some(discovered.clone());
@@ -186,7 +191,9 @@ impl Follower {
         }
     }
 
-    async fn fetch(&mut self) -> Discovered {
+    /// The cluster when the clients reach another than the one named last,
+    /// else discovery; none when an edit came while it was asked.
+    async fn fetch(&mut self) -> Option<Discovered> {
         let clients = match self.hub.clients(&self.context).await {
             Ok(clients) => clients,
             Err(error) => {
@@ -194,14 +201,14 @@ impl Follower {
                 self.abandoned = None;
                 self.known = None;
                 let stop = error.kind == ErrorKind::Unauthorized;
-                return self.failure(error, stop);
+                return Some(self.failure(error, stop));
             }
         };
         self.abandoned = Some(clients.connections().abandoned());
         let cluster = clients.cluster().to_owned();
         if self.named.as_ref() != Some(&cluster) {
             self.named = Some(cluster.clone());
-            return Discovered::Pending { cluster };
+            return Some(Discovered::Pending { cluster });
         }
         if self
             .known
@@ -215,7 +222,18 @@ impl Follower {
             self.confirmed = false;
         }
         let cached = self.known.as_ref().map(|(_, discovery)| discovery);
-        match Discovery::refresh(&clients.api, cached).await {
+        let refreshed = tokio::select! {
+            biased;
+            () = edited(&mut self.entry) => None,
+            refreshed = Discovery::refresh(&clients.api, cached) => Some(refreshed),
+        };
+        let Some(refreshed) = refreshed else {
+            // The request may wait on the old cluster's timeout or sign-in,
+            // while the edit may have moved the context to another one.
+            self.restart().await;
+            return None;
+        };
+        match refreshed {
             Ok(None) => self.confirmed = true,
             Ok(Some(discovery)) => {
                 self.store(&cluster, &discovery).await;
@@ -230,15 +248,15 @@ impl Follower {
                     }
                     Error::NotAggregated { .. } | Error::Decode { .. } => false,
                 };
-                return self.failure(IpcError::from(&error), stop);
+                return Some(self.failure(IpcError::from(&error), stop));
             }
         }
         self.failed = None;
         let (cluster, discovery) = self.known.as_ref().expect("refreshed or revalidated");
-        Discovered::Ready {
+        Some(Discovered::Ready {
             cluster: cluster.clone(),
             resources: discovery.resources(),
-        }
+        })
     }
 
     /// The resources the server last answered, a failed refresh

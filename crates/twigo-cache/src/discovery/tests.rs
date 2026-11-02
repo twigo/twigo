@@ -600,3 +600,37 @@ async fn an_edit_that_moves_the_context_names_the_new_cluster_first() {
     assert_eq!(asked(&y, "/apis"), 0);
     assert_eq!(names(&next(&mut follower).await), ["namespaces", "gadgets"]);
 }
+
+#[tokio::test(start_paused = true)]
+async fn an_edit_interrupts_a_request_that_hangs() {
+    let x = fake();
+    let current = Arc::new(Mutex::new(Ok(
+        x.clients_reaching(Budgets::default(), "https://x.example:6443 trusting ca-x")
+    )));
+    let (edit, entry) = watch::channel(Some(fingerprint("https://x.example:6443")));
+    let cache = tempfile::tempdir().unwrap();
+    let mut follower = edited_over(Hub::new(swapping(&current)), cache.path(), entry).await;
+    assert_eq!(names(&next(&mut follower).await), ["namespaces"]);
+
+    let start = Instant::now();
+    x.state().discovery_hangs = true;
+    x.add("customresourcedefinitions", None, "gadgets.example.com");
+    let y = fake();
+    let moved = async {
+        sleep(Duration::from_secs(1)).await;
+        rebuild(
+            &current,
+            Ok(y.clients_reaching(Budgets::default(), "https://y.example:6443 trusting ca-y")),
+        );
+        edit.send_replace(Some(fingerprint("https://y.example:6443")));
+    };
+    let (answer, ()) = tokio::join!(timeout(Duration::from_secs(600), follower.next()), moved);
+    assert_eq!(
+        answer.expect("an answer within ten minutes"),
+        Discovered::Pending {
+            cluster: "https://y.example:6443 trusting ca-y".to_owned()
+        }
+    );
+    assert_eq!(start.elapsed(), Duration::from_secs(1));
+    assert_eq!(names(&next(&mut follower).await), ["namespaces"]);
+}

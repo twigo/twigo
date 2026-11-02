@@ -56,6 +56,8 @@ pub struct State {
     pub dead: bool,
     /// Every other request fails as when the credential plugin timed out.
     pub plugin_timed_out: bool,
+    /// Discovery requests never answer.
+    pub discovery_hangs: bool,
     /// When each request came, with its path and query.
     pub requests: Vec<(Instant, String)>,
     /// What discovery serves, by group, the core group as `""`: each
@@ -241,6 +243,12 @@ impl Fake {
         request: Request<kube::client::Body>,
     ) -> Result<Response<Body>, BoxError> {
         let path = request.uri().path();
+        if (path == "/api" || path == "/apis") && self.state().discovery_hangs {
+            self.state()
+                .requests
+                .push((Instant::now(), request.uri().to_string()));
+            return std::future::pending().await;
+        }
         let dead = if path == "/version" {
             self.state().dead
         } else {
