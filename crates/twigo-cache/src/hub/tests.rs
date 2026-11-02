@@ -333,7 +333,7 @@ async fn a_cluster_without_streaming_lists_is_listed_in_pages_once_it_said_so() 
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_forbidden_upstream_waits_to_be_subscribed_again() {
+async fn a_forbidden_upstream_retries_until_it_is_allowed() {
     let fake = Fake::default();
     fake.state()
         .forbidden
@@ -346,9 +346,31 @@ async fn a_forbidden_upstream_waits_to_be_subscribed_again() {
     };
     until(&mut pods, |state| *state == forbidden).await;
     sleep(Duration::from_secs(30)).await;
-    assert_eq!(fake.count("namespaces/a/pods"), 1, "no retries");
+    let tries = fake.count("namespaces/a/pods");
+    assert!((6..=60).contains(&tries), "{tries} tries in 30 s");
+    assert_eq!(pods.state(), forbidden);
 
     fake.state().forbidden.clear();
+    ready(&mut pods).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn rejected_credentials_wait_to_be_subscribed_again() {
+    let fake = Fake::default();
+    fake.state()
+        .unauthorized
+        .insert("/api/v1/namespaces/a/pods".to_owned());
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut pods = hub.rows(query(&["a"])).await;
+    until(&mut pods, |state| *state == ViewState::Unauthorized).await;
+    sleep(Duration::from_secs(30)).await;
+    assert_eq!(
+        fake.count("namespaces/a/pods"),
+        1,
+        "no retry, which would run a plugin by itself"
+    );
+
+    fake.state().unauthorized.clear();
     let mut again = hub.rows(query(&["a"])).await;
     ready(&mut again).await;
     assert_eq!(

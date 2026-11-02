@@ -1,7 +1,8 @@
 //! One upstream's list and watch (ARCHITECTURE 3.2, 3.7): the initial list,
 //! streamed where the cluster can, then a watch resumed from its last
 //! `resourceVersion`, a relist on `410 Gone`, a probe when it goes quiet,
-//! and a backoff after failures.
+//! and a backoff after failures, refusals included; only rejected
+//! credentials stop it.
 //!
 //! Each line of a watch is decoded and stored as it arrives, so a slow
 //! reader never holds the connection back.
@@ -63,7 +64,10 @@ enum Phase {
     Ready,
     Relisting,
     Stale,
-    /// Retried only when someone subscribes again.
+    /// Refused, `forbidden` or an error, while it retries.
+    Refused(ViewState),
+    /// `unauthorized`, retried only when someone subscribes again: a retry
+    /// by itself would run a credential plugin again.
     Failed(ViewState),
 }
 
@@ -104,6 +108,7 @@ impl<T: Item> Upstream<T> {
         let view = match (&status.phase, status.queued) {
             (Phase::Failed(view), _) => view.clone(),
             (_, true) => ViewState::Queued,
+            (Phase::Refused(view), _) => view.clone(),
             (Phase::Connecting, _) => ViewState::Connecting,
             (Phase::Syncing(loaded), _) => ViewState::Syncing { loaded: *loaded },
             (Phase::Ready, _) => ViewState::Ready,
@@ -132,8 +137,8 @@ pub(crate) struct Env {
     pub waiting: Arc<dyn Fn(bool) + Send + Sync>,
 }
 
-/// Runs the upstream until it fails for good; the hub aborts it to stop
-/// it. A run after a failure starts from the items the store kept.
+/// Runs the upstream until the server rejects its credentials; the hub
+/// aborts it to stop it. A run after a failure starts from the items the store kept.
 pub(crate) async fn run<D: Decode>(
     env: Env,
     spec: Spec,
@@ -275,12 +280,16 @@ where
 {
     async fn run(&mut self, mut next: Next) -> Result<(), ViewState> {
         loop {
-            let clients = (self.env.connect)(self.spec.context.clone())
-                .await
-                .map_err(|error| match error.kind {
-                    ErrorKind::Unauthorized => ViewState::Unauthorized,
-                    _ => ViewState::Error { error },
-                })?;
+            let clients = match (self.env.connect)(self.spec.context.clone()).await {
+                Ok(clients) => clients,
+                Err(error) if error.kind == ErrorKind::Unauthorized => {
+                    return Err(ViewState::Unauthorized);
+                }
+                Err(error) => {
+                    self.refused(ViewState::Error { error }).await;
+                    continue;
+                }
+            };
             if self
                 .clients
                 .as_ref()
@@ -325,12 +334,12 @@ where
                     next
                 }
                 Outcome::Undecodable(error) => {
-                    return Err(ViewState::Error {
-                        error: IpcError {
-                            kind: ErrorKind::Internal,
-                            message: format!("could not decode the server's answer: {error}"),
-                        },
-                    });
+                    let error = IpcError {
+                        kind: ErrorKind::Internal,
+                        message: format!("could not decode the server's answer: {error}"),
+                    };
+                    self.refused(ViewState::Error { error }).await;
+                    Next::List
                 }
                 Outcome::Failed { error, verb, next } => {
                     match failure(&error, verb, &self.spec.resource) {
@@ -340,7 +349,11 @@ where
                             self.pause().await;
                             next
                         }
-                        Failure::Terminal(view) => return Err(view),
+                        Failure::Refused(view) => {
+                            self.refused(view).await;
+                            next
+                        }
+                        Failure::Unauthorized => return Err(ViewState::Unauthorized),
                     }
                 }
             };
@@ -570,6 +583,13 @@ where
         self.upstream.update(|status| status.phase = phase);
     }
 
+    /// Shows why the server refused, then waits to try again: an API server
+    /// that just restarted refuses for a while what it allows.
+    async fn refused(&mut self, view: ViewState) {
+        self.set_phase(Phase::Refused(view));
+        self.pause().await;
+    }
+
     async fn pause(&mut self) {
         let delay = self
             .backoff
@@ -622,12 +642,13 @@ fn refuses_streaming(status: &kube::core::Status) -> bool {
 enum Failure {
     Gone,
     Transient,
-    Terminal(ViewState),
+    Refused(ViewState),
+    Unauthorized,
 }
 
 fn failure(error: &kube::Error, verb: &str, resource: &str) -> Failure {
     if twigo_kube::errors::no_credential(error) {
-        return Failure::Terminal(ViewState::Unauthorized);
+        return Failure::Unauthorized;
     }
     match error {
         kube::Error::Api(status) if status.code == 410 => return Failure::Gone,
@@ -638,11 +659,11 @@ fn failure(error: &kube::Error, verb: &str, resource: &str) -> Failure {
     let error = twigo_kube::errors::request(error);
     match error.kind {
         ErrorKind::Unavailable | ErrorKind::Timeout => Failure::Transient,
-        ErrorKind::Unauthorized => Failure::Terminal(ViewState::Unauthorized),
-        ErrorKind::Forbidden => Failure::Terminal(ViewState::Forbidden {
+        ErrorKind::Unauthorized => Failure::Unauthorized,
+        ErrorKind::Forbidden => Failure::Refused(ViewState::Forbidden {
             verb: verb.to_owned(),
             resource: resource.to_owned(),
         }),
-        _ => Failure::Terminal(ViewState::Error { error }),
+        _ => Failure::Refused(ViewState::Error { error }),
     }
 }

@@ -332,8 +332,14 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
     assert_eq!(pods.items().len(), 5);
 
     let mut all = hub.rows(live.query(&[])).await;
+    // 1.33 lists in pages, so its list is what the server refuses.
+    let verb = if live.minor().await >= 34 {
+        "watch"
+    } else {
+        "list"
+    };
     let forbidden = ViewState::Forbidden {
-        verb: "watch".to_owned(),
+        verb: verb.to_owned(),
         resource: "pods".to_owned(),
     };
     until(&mut all, |all| all.state() == forbidden).await;

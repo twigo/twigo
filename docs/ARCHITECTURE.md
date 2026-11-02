@@ -352,8 +352,9 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   UI-friendly: 0.5–5 s with jitter, reset on every event.
   kube-runtime's default of 0.8–30 s leaves lists stale for a long time after an API-server restart.
   A watch the server ends without sending anything reopens after the backoff too.
-- **Failures retrying cannot fix**, `forbidden`, `unauthorized` (a 401 the auth layer's retry did not cure, or a credential plugin that failed) and other errors, stop the upstream until a subscription asks for it again.
-  So a failing plugin runs again only when the person or a view asks.
+- **Refusals retry too.**
+  A `forbidden` or another error shows in the view while the upstream keeps trying with the backoff: a kind 1.33 API server answered a watch it had allowed with 403 for a while after a restart (`restart_live`, 2026-11-02).
+  Only `unauthorized`, a 401 the auth layer's retry did not cure or a credential plugin that failed, stops the upstream until a subscription asks for it again, since retrying would run the plugin by itself.
 
 ### 3.3 Three upstream kinds
 

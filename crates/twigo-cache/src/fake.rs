@@ -44,6 +44,8 @@ pub struct State {
     pub unavailable: usize,
     /// Paths that answer `403`.
     pub forbidden: HashSet<String>,
+    /// Paths that answer `401`.
+    pub unauthorized: HashSet<String>,
     /// The person may list pods cluster-wide.
     pub may_list: bool,
     /// `/version` fails as over a dead connection.
@@ -254,6 +256,9 @@ impl Fake {
         }
         if state.forbidden.contains(&path) {
             return status(StatusCode::FORBIDDEN, "Forbidden");
+        }
+        if state.unauthorized.contains(&path) {
+            return status(StatusCode::UNAUTHORIZED, "Unauthorized");
         }
         let target = target(&path);
         if param("watch") != Some("true") {
