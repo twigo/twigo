@@ -634,3 +634,33 @@ async fn an_edit_interrupts_a_request_that_hangs() {
     assert_eq!(start.elapsed(), Duration::from_secs(1));
     assert_eq!(names(&next(&mut follower).await), ["namespaces"]);
 }
+
+#[tokio::test(start_paused = true)]
+async fn an_edit_that_drops_a_request_fetches_again_at_once() {
+    let fake = fake();
+    let (edit, entry) = watch::channel(Some(fingerprint("https://a.example:6443")));
+    let cache = tempfile::tempdir().unwrap();
+    let mut follower = edited_over(fake.hub(Budgets::default()).0, cache.path(), entry).await;
+    assert_eq!(names(&next(&mut follower).await), ["namespaces"]);
+    assert!(
+        timeout(Duration::from_secs(11), follower.next())
+            .await
+            .is_err()
+    );
+
+    let start = Instant::now();
+    fake.state().discovery_hangs = true;
+    fake.add("customresourcedefinitions", None, "gadgets.example.com");
+    let edited = async {
+        sleep(Duration::from_secs(1)).await;
+        {
+            let mut state = fake.state();
+            state.discovery_hangs = false;
+            state.serve("example.com", "gadgets", "Gadget");
+        }
+        edit.send_replace(Some(fingerprint("https://a.example:6443/kubens")));
+    };
+    let (answer, ()) = tokio::join!(next(&mut follower), edited);
+    assert_eq!(names(&answer), ["namespaces", "gadgets"]);
+    assert_eq!(start.elapsed(), Duration::from_secs(1));
+}
