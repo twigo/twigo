@@ -4,9 +4,10 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use futures::AsyncBufReadExt;
 use k8s_openapi::api::authentication::v1::TokenRequest;
 use k8s_openapi::api::core::v1::{Namespace, Pod, ServiceAccount};
-use k8s_openapi::api::rbac::v1::{Role, RoleBinding};
+use k8s_openapi::api::rbac::v1::{ClusterRole, ClusterRoleBinding, Role, RoleBinding};
 use kube::api::{DeleteParams, Patch, PatchParams, PostParams};
 use kube::config::{AuthInfo, KubeConfigOptions, Kubeconfig};
 use kube::{Api, Config};
@@ -14,7 +15,8 @@ use serde_json::json;
 use twigo_kube::client::{Clients, Options};
 
 use super::*;
-use crate::request::Format;
+use crate::decode::{Decode, Event};
+use crate::request::{self, Collection, Format, WatchFrom};
 use crate::upstream::{self, Upstream};
 
 const POD_COLUMNS: [&str; 9] = [
@@ -239,6 +241,23 @@ async fn a_watch_resumed_from_a_compacted_version_relists() {
         .await
         .expect("kwok lets the pod go within a minute");
 
+    // What makes it a forced 410: the server answers a watch from "1" so.
+    let path = key.spec().path;
+    let watch = request::watch(
+        &Collection::table(&path),
+        WatchFrom::ResourceVersion("1"),
+        5,
+    );
+    let mut lines = Box::pin(live.admin.request_stream(watch).await.unwrap());
+    let mut first = Vec::new();
+    lines.read_until(b'\n', &mut first).await.unwrap();
+    let event = TableDecoder::new().decode_event(&first).unwrap();
+    assert!(
+        matches!(&event, Event::Error(status) if status.code == 410),
+        "{event:?}"
+    );
+    drop(lines);
+
     let resumed = tokio::spawn(upstream::resume(
         env(),
         key.spec(),
@@ -343,6 +362,74 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
         resource: "pods".to_owned(),
     };
     until(&mut all, |all| all.state() == forbidden).await;
+
+    // One that may list pods everywhere shares one cluster-wide upstream.
+    let lister: ServiceAccount =
+        serde_json::from_value(json!({ "metadata": { "name": "lister" } })).unwrap();
+    accounts
+        .create(&PostParams::default(), &lister)
+        .await
+        .unwrap();
+    let everywhere = format!("{home}-pods");
+    let role: ClusterRole = serde_json::from_value(json!({
+        "metadata": { "name": everywhere },
+        "rules": [{ "apiGroups": [""], "resources": ["pods"], "verbs": ["list", "watch"] }]
+    }))
+    .unwrap();
+    let roles = Api::<ClusterRole>::all(live.admin.clone());
+    roles.create(&PostParams::default(), &role).await.unwrap();
+    let binding: ClusterRoleBinding = serde_json::from_value(json!({
+        "metadata": { "name": everywhere },
+        "roleRef": { "apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": everywhere },
+        "subjects": [{ "kind": "ServiceAccount", "name": "lister", "namespace": home }]
+    }))
+    .unwrap();
+    let bindings = Api::<ClusterRoleBinding>::all(live.admin.clone());
+    bindings
+        .create(&PostParams::default(), &binding)
+        .await
+        .unwrap();
+    let token = accounts
+        .create_token_request("lister", &PostParams::default(), &request)
+        .await
+        .unwrap()
+        .status
+        .unwrap()
+        .token
+        .expect("a token");
+    let mut config = live.config.clone();
+    config.auth_info = AuthInfo {
+        token: Some(token.into()),
+        ..AuthInfo::default()
+    };
+    let (hub, clients) = live.hub(Some(&config));
+    // The authorizer learns of the binding a moment later.
+    let allowed = async {
+        let all = Api::<Pod>::all(clients.api.clone());
+        while all
+            .list(&kube::api::ListParams::default().limit(1))
+            .await
+            .is_err()
+        {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(30), allowed)
+        .await
+        .expect("the binding counts within half a minute");
+    let mut wide = hub.rows(live.query(&five)).await;
+    until(&mut wide, ready).await;
+    assert_eq!(hub.scopes(), [Scope::Cluster], "the review allowed it");
+    assert_eq!(wide.items().len(), 5, "filtered to the five");
+
+    bindings
+        .delete(&everywhere, &DeleteParams::default())
+        .await
+        .unwrap();
+    roles
+        .delete(&everywhere, &DeleteParams::default())
+        .await
+        .unwrap();
     for namespace in &namespaces {
         live.delete_namespace(namespace).await;
     }

@@ -53,6 +53,18 @@ impl Plugins {
             .unwrap_or(0)
     }
 
+    /// Waits until the scripts have started `runs` times in all.
+    async fn until_runs(&self, runs: usize) {
+        let started = async {
+            while self.runs() < runs {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(5), started)
+            .await
+            .expect("the plugin starts within five seconds");
+    }
+
     fn token(&self, name: &str, token: &str, expires: Option<Timestamp>) -> PathBuf {
         let expiry = expires
             .map(|at| format!(r#","expirationTimestamp":"{at}""#))
@@ -778,7 +790,7 @@ async fn an_unattended_plugin_that_failed_runs_again_with_its_failure_shown() {
         &plugins,
         &format!(
             r#"if [ -e '{}' ]; then printf '{{"status":{{"token":"fixed"}}}}'; exit; fi
-echo 'run aws sso login' >&2; sleep 0.5; exit 1"#,
+echo 'run aws sso login' >&2; sleep 2; exit 1"#,
             fixed.display()
         ),
     );
@@ -791,8 +803,7 @@ echo 'run aws sso login' >&2; sleep 0.5; exit 1"#,
         let source = Arc::clone(&source);
         async move { source.credential().await }
     });
-    tokio::time::sleep(Duration::from_millis(250)).await;
-    assert_eq!(plugins.runs(), 2);
+    plugins.until_runs(2).await;
     assert_eq!(*source.status().borrow(), failed, "the fix stays on screen");
     assert!(again.await.unwrap().is_err());
     assert_eq!(*source.status().borrow(), failed);
@@ -801,12 +812,16 @@ echo 'run aws sso login' >&2; sleep 0.5; exit 1"#,
         let source = Arc::clone(&source);
         async move { source.credential().await }
     });
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    plugins.until_runs(3).await;
     source.sign_in();
-    assert!(
-        matches!(&*source.status().borrow(), Status::Running { output, .. } if output == "run aws sso login\n"),
-        "asking shows the run under way, with what it printed"
+    let mut status = source.status();
+    let shown = status.wait_for(
+        |status| matches!(status, Status::Running { output, .. } if output == "run aws sso login\n"),
     );
+    tokio::time::timeout(Duration::from_secs(2), shown)
+        .await
+        .expect("asking shows the run under way, with what it prints")
+        .unwrap();
     assert!(asked.await.unwrap().is_err());
     assert_eq!(plugins.runs(), 3, "asking joined the run");
 
