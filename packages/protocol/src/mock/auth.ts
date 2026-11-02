@@ -117,6 +117,8 @@ interface Entry {
   plugin: ExecPlugin;
   status: PluginStatus;
   timer?: ReturnType<typeof setTimeout>;
+  /** How every run of the plugin ends, as an expired SSO session does. */
+  fails?: PluginStatus & { state: "failed" };
 }
 
 const inAnHour = () => new Date(Date.now() + 3_600_000).toISOString();
@@ -163,12 +165,13 @@ export class MockAuth {
         };
         break;
       case "pluginFailed":
-        prod.status = {
+        prod.fails = {
           state: "failed",
           error: "exec: executable aws failed with exit code 255",
           output: AWS_SSO_EXPIRED,
           installHint: null,
         };
+        prod.status = prod.fails;
         break;
       case undefined:
         break;
@@ -202,7 +205,10 @@ export class MockAuth {
         this.#emit(context);
         entry.timer = setTimeout(
           () => {
-            entry.status = { state: "ready", expires: inAnHour() };
+            entry.status = entry.fails ?? {
+              state: "ready",
+              expires: inAnHour(),
+            };
             this.#emit(context);
           },
           signsIn ? SIGN_IN_MS : 0,
@@ -228,15 +234,20 @@ export class MockAuth {
   }
 
   /**
-   * A request's credential: an idle plugin starts a run, as in Rust, but the
-   * request fails at once where Rust's would wait for the run; the
-   * workbench asks again once the credential is ready.
+   * A request's credential: an idle plugin starts a run, as in Rust, and so
+   * does one that failed, unless it signs in, since Rust holds only a
+   * sign-in's failure; but the request fails at once where Rust's would
+   * wait for the run, and the workbench asks again once the credential is
+   * ready.
    */
   check(context: string): void {
     const auth = this.#auth(context);
     if (auth.state === "untrusted") this.#trustedEntry(context);
     if (auth.state !== "plugin" || auth.status.state === "ready") return;
-    if (auth.status.state === "idle") this.signIn(context);
+    const { state } = auth.status;
+    if (state === "idle" || (state === "failed" && !auth.plugin.signsIn)) {
+      this.signIn(context);
+    }
     throw new IpcError(
       "unauthorized",
       `${auth.plugin.command} gave no credential yet`,

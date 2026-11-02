@@ -198,6 +198,9 @@ async fn context_auth_watch(
     request: String,
     channel: Channel<ContextAuth>,
 ) -> Result<ContextAuth, IpcError> {
+    // Commands run concurrently, so the follower replaced last is that of
+    // the watch that answered last: the webview waits for an answer before
+    // its next watch.
     let mut auth = app.core.follow_auth(request);
     let current = auth.next().await;
     let follower = tauri::async_runtime::spawn(async move {

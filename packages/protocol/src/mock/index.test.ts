@@ -436,3 +436,19 @@ test("a request for an idle plugin's credential starts its run, and only sign-in
     backend.invoke("url_open", "http://localhost:1@example.com/"),
   ).rejects.toThrow("only sign-in links");
 });
+
+test("a request runs a failed unattended plugin again, as Rust holds only a sign-in's failure", async () => {
+  vi.useRealTimers();
+  const backend = createMockBackend("pluginFailed");
+  const seen: string[] = [];
+  await backend.subscribe("context_auth_watch", "prod-eu", (auth) => {
+    if (auth.state === "plugin") seen.push(auth.status.state);
+  });
+  await expect(backend.invoke("cluster_version", "prod-eu")).rejects.toThrow(
+    "gave no credential yet",
+  );
+  expect(seen).toEqual(["running"]);
+  await vi.waitFor(() => {
+    expect(seen).toEqual(["running", "running", "failed"]);
+  });
+});

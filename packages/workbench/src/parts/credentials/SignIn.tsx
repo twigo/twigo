@@ -158,6 +158,7 @@ function Link({ url }: { url: string }) {
 }
 
 function CopyButton({ text, label }: { text: string; label: string }) {
+  const workbench = useWorkbench();
   const [copied, setCopied] = useState(false);
   return (
     <Button
@@ -166,12 +167,17 @@ function CopyButton({ text, label }: { text: string; label: string }) {
       aria-label={label}
       title={label}
       onClick={() => {
-        void navigator.clipboard.writeText(text).then(() => {
-          setCopied(true);
-          setTimeout(() => {
-            setCopied(false);
-          }, 1500);
-        });
+        navigator.clipboard.writeText(text).then(
+          () => {
+            setCopied(true);
+            setTimeout(() => {
+              setCopied(false);
+            }, 1500);
+          },
+          (error: unknown) => {
+            workbench.report(error);
+          },
+        );
       }}
     >
       {copied ? <Check /> : <Copy />}

@@ -83,6 +83,84 @@ test("a sign-in that prints a code shows the panel at once, a silent one after a
   expect(silent.credentials.panelOpen).toBe(true);
 });
 
+test("a silent sign-in found past its moment shows the panel at once", async () => {
+  const mock = createMockBackend("ready");
+  const pushes = new Map<string, (auth: ContextAuth) => void>();
+  const backend: Backend = {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe: (command, request, onMessage) => {
+      if (command === "context_auth_watch" && typeof request === "string") {
+        pushes.set(request, onMessage);
+      }
+      return mock.subscribe(command, request, onMessage);
+    },
+  };
+  const { credentials } = await started("ready", backend);
+  act(() => {
+    pushes.get("prod-eu")?.({
+      state: "plugin",
+      plugin: {
+        command: "kubelogin",
+        args: [],
+        env: [],
+        digest: "browser",
+        signsIn: true,
+      },
+      status: {
+        state: "running",
+        since: new Date(Date.now() - 300_000).toISOString(),
+        output: "",
+      },
+    });
+  });
+  await vi.advanceTimersByTimeAsync(1);
+  expect(credentials.panelOpen).toBe(true);
+});
+
+test("a watch waits for the one before it to answer, since Rust keeps the follower that answered last", async () => {
+  const mock = createMockBackend("ready");
+  const watched: string[] = [];
+  const gate: { release?: () => void } = {};
+  const backend: Backend = {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe: (command, request, onMessage) => {
+      const answer = mock.subscribe(command, request, onMessage);
+      if (command !== "context_auth_watch" || typeof request !== "string") {
+        return answer;
+      }
+      watched.push(request);
+      if (request !== "staging") return answer;
+      return answer.then(
+        (value) =>
+          new Promise<typeof value>((resolve) => {
+            gate.release = () => {
+              resolve(value);
+            };
+          }),
+      );
+    },
+  };
+  const workbench = await started("ready", backend);
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  await vi.waitFor(() => {
+    expect(gate.release).toBeDefined();
+  });
+  act(() => {
+    workbench.spaces.select("dev");
+  });
+  await vi.advanceTimersByTimeAsync(10);
+  expect(watched).toEqual(["prod-eu", "staging"]);
+
+  gate.release?.();
+  await vi.waitFor(() => {
+    expect(workbench.credentials.auth.state).not.toBe("none");
+  });
+  expect(watched).toEqual(["prod-eu", "staging", "dev"]);
+  expect(workbench.credentials.context).toBe("dev");
+});
+
 test("a cancelled sign-in stays on screen with its failure", async () => {
   const { credentials } = await started("deviceCode");
   await credentials.cancel();

@@ -81,12 +81,16 @@ test("the link opens through Rust and is no anchor the webview could follow", as
   );
 });
 
-test("Escape goes to the app and leaves the panel, and the focus, where they were", async () => {
+test("Escape and clicks go to the app and leave the panel, and the focus, where they were", async () => {
   await show("deviceCode");
   expect(await screen.findByText("F3JQ7K9PL")).toBeTruthy();
   const field = document.createElement("input");
   document.body.append(field);
+  fireEvent.pointerDown(field);
+  fireEvent.mouseDown(field);
+  fireEvent.click(field);
   field.focus();
+  expect(screen.getByText("F3JQ7K9PL")).toBeTruthy();
   const escape = new KeyboardEvent("keydown", {
     key: "Escape",
     bubbles: true,
@@ -143,6 +147,21 @@ test("the status bar names a plugin by its command's name, not its path", async 
   expect(
     await screen.findByRole("button", { name: "Trust tsh?" }),
   ).toBeTruthy();
+});
+
+test("a copy the clipboard refuses is reported", async () => {
+  const writeText = vi.fn(() => Promise.reject(new Error("denied")));
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  const workbench = await show("deviceCode");
+  const report = vi.spyOn(workbench, "report");
+  fireEvent.click(await screen.findByRole("button", { name: "Copy code" }));
+  await vi.waitFor(() => {
+    expect(report).toHaveBeenCalledWith(new Error("denied"));
+  });
+  expect(writeText).toHaveBeenCalledWith("F3JQ7K9PL");
 });
 
 test("the panel sits with its item, which closes and opens it", async () => {

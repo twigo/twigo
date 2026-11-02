@@ -30,6 +30,11 @@ export class Credentials {
   /** The runs whose panel the person closed, by plugin and start, so it opens again only for the next, in any space that shares the plugin. */
   readonly #dismissed = new Set<string>();
   #arming: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * The last watch asked for, which the next waits on: Rust keeps one
+   * follower per webview, that of the watch that answered last.
+   */
+  #watching: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly backend: Backend,
@@ -183,16 +188,20 @@ export class Credentials {
     if (!run || !this.#dismissed.has(run)) this.#panelOpen = true;
   }
 
-  /** Shows the panel in a moment if the run is still under way; a switch of space clears it. */
-  #arm(): void {
+  /** Shows the panel once the run has gone on for a moment; a switch of space clears it. */
+  #arm(since: string): void {
     clearTimeout(this.#arming);
-    this.#arming = setTimeout(() => {
-      const { auth } = this;
-      if (auth.state === "plugin" && auth.status.state === "running") {
-        this.#show();
-        this.changes.emit();
-      }
-    }, SHOW_AFTER_MS);
+    const left = Date.parse(since) + SHOW_AFTER_MS - Date.now();
+    this.#arming = setTimeout(
+      () => {
+        const { auth } = this;
+        if (auth.state === "plugin" && auth.status.state === "running") {
+          this.#show();
+          this.changes.emit();
+        }
+      },
+      Math.max(0, left),
+    );
   }
 
   #follow(): void {
@@ -207,9 +216,15 @@ export class Credentials {
     this.#prompted = undefined;
     this.changes.emit();
     if (context === undefined) return;
+    this.#watching = this.#watching.then(() =>
+      context === this.#context ? this.#watch(context) : undefined,
+    );
+  }
+
+  #watch(context: string): Promise<void> {
     // A change sent before the answer is newer than the answer.
     const early = { changed: false };
-    this.backend
+    return this.backend
       .subscribe("context_auth_watch", context, (next) => {
         early.changed = true;
         this.#set(context, next);
@@ -236,7 +251,7 @@ export class Credentials {
       // moment without a credential: a browser flow often prints nothing.
       if (signsIn) {
         if (status.output.trim() !== "") this.#show();
-        else if (previous !== "running") this.#arm();
+        else if (previous !== "running") this.#arm(status.since);
       }
     } else {
       clearTimeout(this.#arming);

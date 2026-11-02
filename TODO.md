@@ -18,3 +18,4 @@ Findings that belong to no step yet.
   - A quit while refreshed oidc tokens are written back may leave `<file>.lock` beside the kubeconfig, which makes kubectl refuse its own write-back until the file is removed.
   - kube's loader turns an empty `tokenFile`, `client-certificate` or `client-key` into the kubeconfig's directory, so such a context fails where client-go skips the empty path.
   - A CA file the kubeconfig names, the cluster's or the IdP's, is read again only when a kubeconfig changes: the watcher follows the kubeconfig files, not the files they name.
+  - A failed unattended plugin runs again on every request, as in client-go, so once upstreams retry their watches (ARCHITECTURE 3.2) its status turns `running` on each retry and the sign-in panel loses the failure's fix while it runs; only `cluster_version` asks for a credential yet.
