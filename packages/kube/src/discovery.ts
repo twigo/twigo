@@ -15,13 +15,14 @@ export type Loaded<T> =
 /**
  * The resources of the active space, as Rust follows them (ARCHITECTURE
  * 3.6), and each context's version. A space shown again keeps its last
- * answer until its new follower's first, so it shows at once; that answer
- * may be of another cluster if the space's kubeconfig entry changed
- * meanwhile.
+ * resources, so it shows at once, while the cluster its context reaches is
+ * still theirs, which Rust tells before it asks the cluster anything.
  */
 export class Discovery {
   readonly changes = new Changes();
   readonly #spaces = new Map<string, Loaded<readonly Resource[]>>();
+  /** The cluster each space's resources came from. */
+  readonly #clusters = new Map<string, string>();
   readonly #versions = new Map<string, Promise<string>>();
   #space: string | undefined;
   #ready: number;
@@ -109,12 +110,27 @@ export class Discovery {
   }
 
   #set(space: string, discovered: Discovered): void {
-    this.#spaces.set(
-      space,
-      discovered.state === "ready"
-        ? { state: "ready", value: discovered.resources }
-        : { state: "failed", error: toIpcError(discovered.error) },
-    );
+    switch (discovered.state) {
+      case "pending":
+        if (this.#clusters.get(space) === discovered.cluster) return;
+        this.#spaces.delete(space);
+        this.#clusters.delete(space);
+        break;
+      case "ready":
+        this.#spaces.set(space, {
+          state: "ready",
+          value: discovered.resources,
+        });
+        this.#clusters.set(space, discovered.cluster);
+        break;
+      case "failed":
+        this.#spaces.set(space, {
+          state: "failed",
+          error: toIpcError(discovered.error),
+        });
+        this.#clusters.delete(space);
+        break;
+    }
     this.changes.emit();
   }
 }

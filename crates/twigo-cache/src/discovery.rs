@@ -105,10 +105,20 @@ impl Follower {
         follower
     }
 
-    /// The context's resources at first, then each time they change.
+    /// The cluster the context reaches at first, as soon as its clients
+    /// are built, then its resources, then each time they change.
     pub async fn next(&mut self) -> Discovered {
+        if self.last.is_none()
+            && let Ok(clients) = self.hub.clients(&self.context).await
+        {
+            let pending = Discovered::Pending {
+                cluster: clients.cluster().to_owned(),
+            };
+            self.last = Some(pending.clone());
+            return pending;
+        }
         loop {
-            if self.last.is_some() {
+            if !matches!(self.last, None | Some(Discovered::Pending { .. })) {
                 self.wait().await;
             }
             self.burst = None;
@@ -224,8 +234,9 @@ impl Follower {
             }
         }
         self.failed = None;
-        let (_, discovery) = self.known.as_ref().expect("refreshed or revalidated");
+        let (cluster, discovery) = self.known.as_ref().expect("refreshed or revalidated");
         Discovered::Ready {
+            cluster: cluster.clone(),
             resources: discovery.resources(),
         }
     }
@@ -235,7 +246,8 @@ impl Follower {
     fn failure(&mut self, error: IpcError, stop: bool) -> Discovered {
         self.failed = Some(if stop { Failed::Stop } else { Failed::Retry });
         match &self.known {
-            Some((_, discovery)) if self.confirmed => Discovered::Ready {
+            Some((cluster, discovery)) if self.confirmed => Discovered::Ready {
+                cluster: cluster.clone(),
                 resources: discovery.resources(),
             },
             _ => Discovered::Failed { error },

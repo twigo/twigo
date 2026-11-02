@@ -45,25 +45,35 @@ async fn edited_over(
 }
 
 async fn next(follower: &mut Follower) -> Discovered {
-    timeout(Duration::from_secs(600), follower.next())
+    let answered = async {
+        loop {
+            match follower.next().await {
+                Discovered::Pending { .. } => {}
+                answer => return answer,
+            }
+        }
+    };
+    timeout(Duration::from_secs(600), answered)
         .await
         .expect("discovery within ten minutes")
 }
 
 fn names(discovered: &Discovered) -> Vec<&str> {
     match discovered {
-        Discovered::Ready { resources } => resources
+        Discovered::Ready { resources, .. } => resources
             .iter()
             .map(|resource| resource.gvr.resource.as_str())
             .collect(),
         Discovered::Failed { error } => panic!("discovery failed: {error:?}"),
+        Discovered::Pending { cluster } => panic!("discovery pending on {cluster}"),
     }
 }
 
 fn failure(discovered: &Discovered) -> ErrorKind {
     match discovered {
         Discovered::Failed { error } => error.kind,
-        Discovered::Ready { resources } => panic!("discovery answered {resources:?}"),
+        Discovered::Ready { resources, .. } => panic!("discovery answered {resources:?}"),
+        Discovered::Pending { cluster } => panic!("discovery pending on {cluster}"),
     }
 }
 
@@ -543,4 +553,22 @@ async fn steady_changes_put_discovery_off_by_the_first_recheck_at_most() {
     assert_eq!(names(&next(&mut follower).await), ["namespaces", "gadgets"]);
     assert_eq!(start.elapsed(), RECHECKS[0]);
     churn.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_cluster_comes_first_before_any_request() {
+    let fake = fake();
+    let cache = tempfile::tempdir().unwrap();
+    let mut follower = follower(&fake, cache.path()).await;
+    assert_eq!(
+        follower.next().await,
+        Discovered::Pending {
+            cluster: "https://fake.invalid".to_owned()
+        }
+    );
+    assert_eq!(asked(&fake, "/apis"), 0);
+    match follower.next().await {
+        Discovered::Ready { cluster, .. } => assert_eq!(cluster, "https://fake.invalid"),
+        other => panic!("expected the resources, got {other:?}"),
+    }
 }

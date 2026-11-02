@@ -297,7 +297,11 @@ export function createMockBackend(
     contexts_watch: () => CONTEXTS,
     resources_watch: (id, onMessage) => {
       space(id);
-      onMessage({ state: "ready", resources: RESOURCES });
+      onMessage({
+        state: "ready",
+        cluster: `mock://${id}`,
+        resources: RESOURCES,
+      });
       return null;
     },
     context_auth_watch: (context, onMessage) => auth.watch(context, onMessage),

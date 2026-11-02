@@ -16,11 +16,24 @@ pub struct Resource {
 }
 
 /// A context's resources as discovery last answered, or why it did not.
+/// `cluster` names the cluster the context reaches: its URL, its
+/// `tls-server-name` and the CAs it is trusted with.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "state", rename_all = "camelCase")]
 pub enum Discovered {
-    Ready { resources: Vec<Resource> },
-    Failed { error: IpcError },
+    /// Sent first, once the context's clients are built, before discovery
+    /// answers: a space shown again keeps its last resources only while
+    /// they are of this cluster.
+    Pending {
+        cluster: String,
+    },
+    Ready {
+        cluster: String,
+        resources: Vec<Resource>,
+    },
+    Failed {
+        error: IpcError,
+    },
 }
 
 /// What the API server says about itself, from `/version`.

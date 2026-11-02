@@ -45,7 +45,11 @@ test("the active space's resources come, then each change of them", async () => 
   expect(watched).toEqual(["prod-eu"]);
   await expect(discovery.resources("prod-eu")).resolves.toEqual(RESOURCES);
 
-  push("prod-eu", { state: "ready", resources: [...PODS] });
+  push("prod-eu", {
+    state: "ready",
+    cluster: "mock://prod-eu",
+    resources: [...PODS],
+  });
   expect(discovery.get("prod-eu")).toEqual({ state: "ready", value: PODS });
 });
 
@@ -133,4 +137,32 @@ test("a space chosen while a watch is asked is followed after it, and one passed
   await expect(discovery.resources("dev")).resolves.toEqual(RESOURCES);
   expect(watched).toEqual(["prod-eu", "dev"]);
   expect(discovery.get("staging").state).toBe("loading");
+});
+
+test("a space shown again keeps its resources while its cluster is the same, and waits for them when it changed", async () => {
+  const { workbench, discovery, push } = await following();
+  await discovery.resources("prod-eu");
+  const select = (space: string) => {
+    act(() => {
+      workbench.spaces.select(space);
+    });
+  };
+
+  select("staging");
+  await discovery.resources("staging");
+  select("prod-eu");
+  push("prod-eu", { state: "pending", cluster: "mock://prod-eu" });
+  expect(discovery.get("prod-eu")).toEqual({
+    state: "ready",
+    value: RESOURCES,
+  });
+
+  push("prod-eu", { state: "pending", cluster: "https://y.example:6443" });
+  expect(discovery.get("prod-eu").state).toBe("loading");
+  push("prod-eu", {
+    state: "ready",
+    cluster: "https://y.example:6443",
+    resources: [...PODS],
+  });
+  expect(discovery.get("prod-eu")).toEqual({ state: "ready", value: PODS });
 });

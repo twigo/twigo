@@ -17,8 +17,9 @@ static CLUSTER_DISCOVERY: Mutex<()> = Mutex::const_new(());
 
 fn resources(discovered: &Discovered) -> &[twigo_ipc::Resource] {
     match discovered {
-        Discovered::Ready { resources } => resources,
+        Discovered::Ready { resources, .. } => resources,
         Discovered::Failed { error } => panic!("discovery failed: {error:?}"),
+        Discovered::Pending { cluster } => panic!("discovery pending on {cluster}"),
     }
 }
 
@@ -29,7 +30,15 @@ fn serves(discovered: &Discovered, group: &str, resource: &str) -> bool {
 }
 
 async fn next(follower: &mut Follower) -> Discovered {
-    timeout(Duration::from_secs(60), follower.next())
+    let answered = async {
+        loop {
+            match follower.next().await {
+                Discovered::Pending { .. } => {}
+                answer => return answer,
+            }
+        }
+    };
+    timeout(Duration::from_secs(60), answered)
         .await
         .expect("discovery within a minute")
 }

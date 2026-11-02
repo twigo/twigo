@@ -45,8 +45,10 @@ export type ContextColor = "red" | "orange" | "yellow" | "green" | "blue" | "pur
 
 /**
  * A context's resources as discovery last answered, or why it did not.
+ * `cluster` names the cluster the context reaches: its URL, its
+ * `tls-server-name` and the CAs it is trusted with.
  */
-export type Discovered = { "state": "ready", resources: Array<Resource>, } | { "state": "failed", error: IpcError, };
+export type Discovered = { "state": "pending", cluster: string, } | { "state": "ready", cluster: string, resources: Array<Resource>, } | { "state": "failed", error: IpcError, };
 
 export type EnvVar = { name: string, value: string, };
 
