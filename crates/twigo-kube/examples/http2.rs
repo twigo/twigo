@@ -18,8 +18,9 @@ use kube::config::{KubeConfigOptions, Kubeconfig};
 use kube::{Api, Client, Config};
 use serde_json::json;
 use tokio::task::JoinHandle;
+use twigo_cache::decode::Decode;
+use twigo_cache::request::{self, Collection, WatchFrom};
 use twigo_cache::table::TableDecoder;
-use twigo_cache::table::request::{self, WatchFrom};
 use twigo_kube::client::{Budgets, Clients, Options};
 
 const WATCHES: usize = 50;
@@ -35,7 +36,7 @@ struct Watches {
 
 async fn resource_version(client: &Client, path: &str) -> Box<str> {
     let body = client
-        .request_text(request::list(path, 1, None))
+        .request_text(request::list(&Collection::table(path), 1, None))
         .await
         .unwrap();
     TableDecoder::new()
@@ -47,7 +48,11 @@ async fn resource_version(client: &Client, path: &str) -> Box<str> {
 impl Watches {
     async fn open(client: &Client, path: &str, version: &str, count: usize) -> Self {
         let streams = join_all((0..count).map(|_| {
-            let watch = request::watch(path, WatchFrom::ResourceVersion(version), 600);
+            let watch = request::watch(
+                &Collection::table(path),
+                WatchFrom::ResourceVersion(version),
+                600,
+            );
             client.request_stream(watch)
         }))
         .await;

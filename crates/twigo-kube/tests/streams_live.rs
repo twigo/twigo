@@ -6,7 +6,7 @@ use kube::api::{DeleteParams, PostParams};
 use kube::config::{KubeConfigOptions, Kubeconfig};
 use kube::{Api, Client, Config};
 use serde_json::json;
-use twigo_cache::table::request::{self, WatchFrom};
+use twigo_cache::request::{self, Collection, WatchFrom};
 use twigo_kube::client::{Budgets, Clients, Options};
 
 async fn api() -> (Client, u16) {
@@ -100,7 +100,11 @@ async fn requests_wait_for_a_free_stream() {
     let opened = tokio::time::timeout(Duration::from_secs(30), async {
         let mut watches = Vec::new();
         for _ in 0..100 {
-            let watch = request::watch(&path, WatchFrom::ResourceVersion("0"), 120);
+            let watch = request::watch(
+                &Collection::table(&path),
+                WatchFrom::ResourceVersion("0"),
+                120,
+            );
             watches.push(api.request_stream(watch).await.unwrap());
         }
         watches

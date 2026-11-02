@@ -1,13 +1,17 @@
-use std::borrow::Cow;
+//! The Table decoder (ARCHITECTURE 3.3): rows with the server's columns,
+//! for every list.
+
 use std::fmt;
 use std::sync::Arc;
 
-use jiff::Timestamp;
 use serde::Deserialize;
-use serde::de::{self, DeserializeSeed, Deserializer, IgnoredAny, MapAccess, Visitor};
-use serde_json::value::RawValue;
+use serde::de::{self, Deserializer, IgnoredAny, MapAccess, Visitor};
 
-pub mod request;
+use crate::decode::{
+    self, Decode, DecodeError, Event, EventKind, Kind, ListMeta, Page, RawEvent, nullable,
+    peek_kind,
+};
+use crate::meta::{Meta, RawList, RawObject};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Column {
@@ -46,68 +50,14 @@ pub struct Row {
     pub cells: Box<[Cell]>,
 }
 
-pub type Labels = Box<[(Box<str>, Box<str>)]>;
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Meta {
-    pub name: Box<str>,
-    pub namespace: Option<Box<str>>,
-    /// None for objects the server builds without one, such as ComponentStatus
-    /// and metrics-server's metrics.
-    pub uid: Option<Box<str>>,
-    pub resource_version: Box<str>,
-    pub labels: Labels,
-    pub owners: Box<[Owner]>,
-    pub created: Option<Timestamp>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Owner {
-    pub kind: Box<str>,
-    pub name: Box<str>,
-    pub uid: Box<str>,
-    pub controller: bool,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Page {
-    pub rows: Vec<Row>,
-    pub resource_version: Box<str>,
-    pub continue_token: Option<Box<str>>,
-}
-
-#[derive(Debug, PartialEq)]
-pub enum Event {
-    Upsert(Row),
-    Delete(Row),
-    Bookmark {
-        resource_version: Box<str>,
-        initial_events_end: bool,
-    },
-    Error(Status),
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Status {
-    pub code: u16,
-    pub reason: Box<str>,
-    pub message: Box<str>,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum DecodeError {
-    #[error("invalid JSON: {0}")]
-    Json(#[from] serde_json::Error),
-    #[error("rows arrived before any column definitions")]
-    NoColumns,
-    #[error("a row has {found} cells for {expected} columns")]
-    CellCount { expected: usize, found: usize },
-    #[error("a watch event carries {0} rows instead of one")]
-    RowCount(usize),
-    #[error("an object has no {0}")]
-    Missing(&'static str),
-    #[error("unexpected object kind {0:?}")]
-    UnexpectedKind(Box<str>),
+impl Row {
+    /// A Metadata upstream's row.
+    pub fn without_cells(meta: Meta) -> Self {
+        Row {
+            meta,
+            cells: Box::default(),
+        }
+    }
 }
 
 /// Decodes the Table responses of one upstream: its list pages and the events
@@ -123,109 +73,6 @@ pub struct TableDecoder {
 impl TableDecoder {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// The current columns. They are the metadata columns, Name and Age, while
-    /// the server has sent raw objects only.
-    pub fn columns(&self) -> Option<&Arc<[Column]>> {
-        self.columns.as_ref()
-    }
-
-    pub fn decode_list(&mut self, body: &[u8]) -> Result<Page, DecodeError> {
-        match peek_kind(body)? {
-            Kind::Table => {
-                let table: TableObject = serde_json::from_slice(body)?;
-                self.update_columns(table.column_definitions);
-                let rows = table
-                    .rows
-                    .into_iter()
-                    .map(|row| self.table_row(row))
-                    .collect::<Result<_, _>>()?;
-                Ok(Page {
-                    rows,
-                    resource_version: table.metadata.resource_version.unwrap_or_default(),
-                    continue_token: table
-                        .metadata
-                        .continue_token
-                        .filter(|token| !token.is_empty()),
-                })
-            }
-            Kind::Other(kind) if kind.ends_with("List") => {
-                let list: RawList = serde_json::from_slice(body)?;
-                let rows = list
-                    .items
-                    .into_iter()
-                    .map(|item| self.raw_row(item.metadata))
-                    .collect::<Result<_, _>>()?;
-                Ok(Page {
-                    rows,
-                    resource_version: list.metadata.resource_version.unwrap_or_default(),
-                    continue_token: list
-                        .metadata
-                        .continue_token
-                        .filter(|token| !token.is_empty()),
-                })
-            }
-            Kind::Status => Err(DecodeError::UnexpectedKind("Status".into())),
-            Kind::Other(kind) => Err(DecodeError::UnexpectedKind(kind.into())),
-        }
-    }
-
-    pub fn decode_event(&mut self, line: &[u8]) -> Result<Event, DecodeError> {
-        let event: RawEvent<'_> = serde_json::from_slice(line)?;
-        let body = event.object.get().as_bytes();
-        match peek_kind(body)? {
-            Kind::Status => {
-                let status: StatusObject = serde_json::from_slice(body)?;
-                Ok(Event::Error(Status {
-                    code: status.code,
-                    reason: status.reason,
-                    message: status.message,
-                }))
-            }
-            Kind::Table => {
-                let mut table: TableObject = serde_json::from_slice(body)?;
-                self.update_columns(table.column_definitions);
-                if table.rows.len() != 1 {
-                    return Err(DecodeError::RowCount(table.rows.len()));
-                }
-                let Some(row) = table.rows.pop() else {
-                    return Err(DecodeError::RowCount(0));
-                };
-                match event.kind {
-                    EventKind::Bookmark => {
-                        let metadata = row.object.unwrap_or_default().metadata;
-                        Ok(Event::Bookmark {
-                            resource_version: non_empty(
-                                metadata
-                                    .resource_version
-                                    .or(table.metadata.resource_version),
-                            )?,
-                            initial_events_end: metadata.initial_events_end,
-                        })
-                    }
-                    EventKind::Added | EventKind::Modified => {
-                        self.table_row(row).map(Event::Upsert)
-                    }
-                    EventKind::Deleted => self.table_row(row).map(Event::Delete),
-                    EventKind::Error => Err(DecodeError::UnexpectedKind("Table".into())),
-                }
-            }
-            Kind::Other(kind) => {
-                let object: RawObject = serde_json::from_slice(body)?;
-                match event.kind {
-                    EventKind::Bookmark => Ok(Event::Bookmark {
-                        resource_version: non_empty(object.metadata.resource_version)?,
-                        initial_events_end: object.metadata.initial_events_end,
-                    }),
-                    EventKind::Added | EventKind::Modified => {
-                        self.raw_row(object.metadata).map(Event::Upsert)
-                    }
-                    EventKind::Deleted => self.raw_row(object.metadata).map(Event::Delete),
-                    EventKind::Error => Err(DecodeError::UnexpectedKind(kind.into())),
-                }
-            }
-        }
     }
 
     fn update_columns(&mut self, definitions: Option<Vec<RawColumn>>) {
@@ -267,8 +114,7 @@ impl TableDecoder {
         })
     }
 
-    fn raw_row(&mut self, metadata: RawMeta) -> Result<Row, DecodeError> {
-        let meta = metadata.into_meta()?;
+    fn raw_row(&mut self, meta: Meta) -> Row {
         if self.columns.is_none() {
             self.columns = Some(metadata_columns());
             self.synthetic = true;
@@ -283,14 +129,96 @@ impl TableDecoder {
                 _ => Cell::Null,
             })
             .collect();
-        Ok(Row { meta, cells })
+        Row { meta, cells }
     }
 }
 
-fn non_empty(resource_version: Option<Box<str>>) -> Result<Box<str>, DecodeError> {
-    resource_version
-        .filter(|version| !version.is_empty())
-        .ok_or(DecodeError::Missing("metadata.resourceVersion"))
+impl Decode for TableDecoder {
+    type Item = Row;
+
+    fn decode_list(&mut self, body: &[u8]) -> Result<Page, DecodeError> {
+        match peek_kind(body)? {
+            Kind::Table => {
+                let table: TableObject = serde_json::from_slice(body)?;
+                self.update_columns(table.column_definitions);
+                let rows = table
+                    .rows
+                    .into_iter()
+                    .map(|row| self.table_row(row))
+                    .collect::<Result<_, _>>()?;
+                Ok(table.metadata.into_page(rows))
+            }
+            Kind::Other(kind) if kind.ends_with("List") => {
+                let list: RawList = serde_json::from_slice(body)?;
+                let rows = list
+                    .items
+                    .into_iter()
+                    .map(|item| Ok(self.raw_row(item.metadata.into_meta()?)))
+                    .collect::<Result<_, DecodeError>>()?;
+                Ok(list.metadata.into_page(rows))
+            }
+            Kind::Status => Err(DecodeError::UnexpectedKind("Status".into())),
+            Kind::Other(kind) => Err(DecodeError::UnexpectedKind(kind.into())),
+        }
+    }
+
+    fn decode_event(&mut self, line: &[u8]) -> Result<Event, DecodeError> {
+        let event: RawEvent<'_> = serde_json::from_slice(line)?;
+        let body = event.object.get().as_bytes();
+        match peek_kind(body)? {
+            Kind::Status => Ok(Event::Error(decode::status(body)?)),
+            Kind::Table => {
+                let mut table: TableObject = serde_json::from_slice(body)?;
+                self.update_columns(table.column_definitions);
+                if table.rows.len() != 1 {
+                    return Err(DecodeError::RowCount(table.rows.len()));
+                }
+                let Some(row) = table.rows.pop() else {
+                    return Err(DecodeError::RowCount(0));
+                };
+                match event.kind {
+                    EventKind::Bookmark => {
+                        let metadata = row.object.unwrap_or_default().metadata;
+                        Ok(Event::Bookmark {
+                            resource_version: decode::non_empty(
+                                metadata
+                                    .resource_version
+                                    .or(table.metadata.resource_version),
+                            )?,
+                            initial_events_end: metadata.initial_events_end,
+                        })
+                    }
+                    EventKind::Added | EventKind::Modified => {
+                        self.table_row(row).map(Event::Upsert)
+                    }
+                    EventKind::Deleted => self.table_row(row).map(Event::Delete),
+                    EventKind::Error => Err(DecodeError::UnexpectedKind("Table".into())),
+                }
+            }
+            Kind::Other(kind) => {
+                let object: RawObject = serde_json::from_slice(body)?;
+                let event = object.metadata.into_event(event.kind, &kind, |meta| meta)?;
+                Ok(match event {
+                    Event::Upsert(meta) => Event::Upsert(self.raw_row(meta)),
+                    Event::Delete(meta) => Event::Delete(self.raw_row(meta)),
+                    Event::Bookmark {
+                        resource_version,
+                        initial_events_end,
+                    } => Event::Bookmark {
+                        resource_version,
+                        initial_events_end,
+                    },
+                    Event::Error(status) => Event::Error(status),
+                })
+            }
+        }
+    }
+
+    /// The metadata columns, Name and Age, while the server has sent raw
+    /// objects only.
+    fn columns(&self) -> Option<&Arc<[Column]>> {
+        self.columns.as_ref()
+    }
 }
 
 fn metadata_columns() -> Arc<[Column]> {
@@ -310,46 +238,6 @@ fn metadata_columns() -> Arc<[Column]> {
     ])
 }
 
-enum Kind<'a> {
-    Table,
-    Status,
-    Other(Cow<'a, str>),
-}
-
-fn peek_kind(body: &[u8]) -> Result<Kind<'_>, DecodeError> {
-    #[derive(Deserialize)]
-    struct Peek<'a> {
-        #[serde(borrow)]
-        kind: Option<Cow<'a, str>>,
-    }
-    let kind = serde_json::from_slice::<Peek<'_>>(body)?
-        .kind
-        .ok_or(DecodeError::Missing("kind"))?;
-    Ok(match &*kind {
-        "Table" => Kind::Table,
-        "Status" => Kind::Status,
-        _ => Kind::Other(kind),
-    })
-}
-
-#[derive(Deserialize)]
-struct RawEvent<'a> {
-    #[serde(rename = "type")]
-    kind: EventKind,
-    #[serde(borrow)]
-    object: &'a RawValue,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
-enum EventKind {
-    Added,
-    Modified,
-    Deleted,
-    Bookmark,
-    Error,
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TableObject {
@@ -359,38 +247,6 @@ struct TableObject {
     column_definitions: Option<Vec<RawColumn>>,
     #[serde(default, deserialize_with = "nullable")]
     rows: Vec<RawRow>,
-}
-
-#[derive(Deserialize)]
-struct RawList {
-    #[serde(default)]
-    metadata: ListMeta,
-    #[serde(default, deserialize_with = "nullable")]
-    items: Vec<RawObject>,
-}
-
-#[derive(Default, Deserialize)]
-struct RawObject {
-    #[serde(default)]
-    metadata: RawMeta,
-}
-
-#[derive(Deserialize)]
-struct StatusObject {
-    #[serde(default)]
-    code: u16,
-    #[serde(default)]
-    reason: Box<str>,
-    #[serde(default)]
-    message: Box<str>,
-}
-
-#[derive(Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ListMeta {
-    resource_version: Option<Box<str>>,
-    #[serde(rename = "continue")]
-    continue_token: Option<Box<str>>,
 }
 
 #[derive(Deserialize)]
@@ -435,63 +291,6 @@ struct RawRow {
     cells: Vec<Cell>,
     #[serde(default)]
     object: Option<RawObject>,
-}
-
-/// Object metadata as a row keeps it. Fields it does not name, managedFields
-/// and annotations' values among them, are skipped without being allocated.
-#[derive(Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RawMeta {
-    name: Option<Box<str>>,
-    namespace: Option<Box<str>>,
-    uid: Option<Box<str>>,
-    resource_version: Option<Box<str>>,
-    #[serde(default, deserialize_with = "labels")]
-    labels: Labels,
-    #[serde(default, deserialize_with = "nullable")]
-    owner_references: Vec<RawOwner>,
-    #[serde(default, deserialize_with = "timestamp")]
-    creation_timestamp: Option<Timestamp>,
-    #[serde(
-        default,
-        rename = "annotations",
-        deserialize_with = "initial_events_end"
-    )]
-    initial_events_end: bool,
-}
-
-impl RawMeta {
-    fn into_meta(self) -> Result<Meta, DecodeError> {
-        Ok(Meta {
-            name: self.name.ok_or(DecodeError::Missing("metadata.name"))?,
-            namespace: self.namespace,
-            uid: self.uid,
-            resource_version: self.resource_version.unwrap_or_default(),
-            labels: self.labels,
-            owners: self.owner_references.into_iter().map(Owner::from).collect(),
-            created: self.creation_timestamp,
-        })
-    }
-}
-
-#[derive(Deserialize)]
-struct RawOwner {
-    kind: Box<str>,
-    name: Box<str>,
-    uid: Box<str>,
-    #[serde(default)]
-    controller: Option<bool>,
-}
-
-impl From<RawOwner> for Owner {
-    fn from(raw: RawOwner) -> Self {
-        Owner {
-            kind: raw.kind,
-            name: raw.name,
-            uid: raw.uid,
-            controller: raw.controller.unwrap_or(false),
-        }
-    }
 }
 
 impl<'de> Deserialize<'de> for Cell {
@@ -545,117 +344,5 @@ impl<'de> Deserialize<'de> for Cell {
         }
 
         deserializer.deserialize_any(CellVisitor)
-    }
-}
-
-/// Go encodes a nil slice as `null`.
-fn nullable<'de, D, T>(deserializer: D) -> Result<T, D::Error>
-where
-    D: Deserializer<'de>,
-    T: Deserialize<'de> + Default,
-{
-    Ok(Option::deserialize(deserializer)?.unwrap_or_default())
-}
-
-fn labels<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Labels, D::Error> {
-    struct LabelsVisitor;
-
-    impl<'de> Visitor<'de> for LabelsVisitor {
-        type Value = Labels;
-
-        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            f.write_str("a label map")
-        }
-
-        fn visit_unit<E>(self) -> Result<Self::Value, E> {
-            Ok(Box::default())
-        }
-
-        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-            let mut labels = Vec::with_capacity(map.size_hint().unwrap_or(0));
-            while let Some(label) = map.next_entry::<Box<str>, Box<str>>()? {
-                labels.push(label);
-            }
-            Ok(labels.into_boxed_slice())
-        }
-    }
-
-    deserializer.deserialize_any(LabelsVisitor)
-}
-
-fn timestamp<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Timestamp>, D::Error> {
-    struct TimestampVisitor;
-
-    impl<'de> Visitor<'de> for TimestampVisitor {
-        type Value = Option<Timestamp>;
-
-        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            f.write_str("an RFC 3339 timestamp")
-        }
-
-        fn visit_unit<E>(self) -> Result<Self::Value, E> {
-            Ok(None)
-        }
-
-        fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
-            v.parse().map(Some).map_err(E::custom)
-        }
-    }
-
-    deserializer.deserialize_any(TimestampVisitor)
-}
-
-const INITIAL_EVENTS_END: &str = "k8s.io/initial-events-end";
-
-fn initial_events_end<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
-    struct AnnotationsVisitor;
-
-    impl<'de> Visitor<'de> for AnnotationsVisitor {
-        type Value = bool;
-
-        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            f.write_str("an annotation map")
-        }
-
-        fn visit_unit<E>(self) -> Result<bool, E> {
-            Ok(false)
-        }
-
-        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<bool, A::Error> {
-            let mut found = false;
-            while let Some(matches) = map.next_key_seed(StrIs(INITIAL_EVENTS_END))? {
-                if matches {
-                    found = map.next_value_seed(StrIs("true"))?;
-                } else {
-                    map.next_value::<IgnoredAny>()?;
-                }
-            }
-            Ok(found)
-        }
-    }
-
-    deserializer.deserialize_any(AnnotationsVisitor)
-}
-
-/// Compares a string with an expected value without allocating it.
-struct StrIs(&'static str);
-
-impl<'de> DeserializeSeed<'de> for StrIs {
-    type Value = bool;
-
-    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<bool, D::Error> {
-        deserializer.deserialize_str(self)
-    }
-}
-
-impl<'de> Visitor<'de> for StrIs {
-    type Value = bool;
-
-    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("a string")
-    }
-
-    fn visit_str<E>(self, v: &str) -> Result<bool, E> {
-        Ok(v == self.0)
     }
 }

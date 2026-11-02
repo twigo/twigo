@@ -1,0 +1,196 @@
+{
+  "kind": "PartialObjectMetadataList",
+  "apiVersion": "meta.k8s.io/v1",
+  "metadata": {
+    "resourceVersion": "922"
+  },
+  "items": [
+    {
+      "kind": "PartialObjectMetadata",
+      "apiVersion": "meta.k8s.io/v1",
+      "metadata": {
+        "name": "default",
+        "uid": "6287114f-e6c4-46f1-9dd2-9331a8016b81",
+        "resourceVersion": "22",
+        "creationTimestamp": "2026-11-02T09:27:13Z",
+        "labels": {
+          "kubernetes.io/metadata.name": "default"
+        },
+        "managedFields": [
+          {
+            "manager": "kube-apiserver",
+            "operation": "Update",
+            "apiVersion": "v1",
+            "time": "2026-11-02T09:27:13Z",
+            "fieldsType": "FieldsV1",
+            "fieldsV1": {
+              "f:metadata": {
+                "f:labels": {
+                  ".": {},
+                  "f:kubernetes.io/metadata.name": {}
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "kind": "PartialObjectMetadata",
+      "apiVersion": "meta.k8s.io/v1",
+      "metadata": {
+        "name": "kube-node-lease",
+        "uid": "6f89b3b6-4f05-4160-8e9d-4de4c4deb035",
+        "resourceVersion": "29",
+        "creationTimestamp": "2026-11-02T09:27:13Z",
+        "labels": {
+          "kubernetes.io/metadata.name": "kube-node-lease"
+        },
+        "managedFields": [
+          {
+            "manager": "kube-apiserver",
+            "operation": "Update",
+            "apiVersion": "v1",
+            "time": "2026-11-02T09:27:13Z",
+            "fieldsType": "FieldsV1",
+            "fieldsV1": {
+              "f:metadata": {
+                "f:labels": {
+                  ".": {},
+                  "f:kubernetes.io/metadata.name": {}
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "kind": "PartialObjectMetadata",
+      "apiVersion": "meta.k8s.io/v1",
+      "metadata": {
+        "name": "kube-public",
+        "uid": "6bf40620-0aed-477a-bb40-8f58600fd4f9",
+        "resourceVersion": "14",
+        "creationTimestamp": "2026-11-02T09:27:13Z",
+        "labels": {
+          "kubernetes.io/metadata.name": "kube-public"
+        },
+        "managedFields": [
+          {
+            "manager": "kube-apiserver",
+            "operation": "Update",
+            "apiVersion": "v1",
+            "time": "2026-11-02T09:27:13Z",
+            "fieldsType": "FieldsV1",
+            "fieldsV1": {
+              "f:metadata": {
+                "f:labels": {
+                  ".": {},
+                  "f:kubernetes.io/metadata.name": {}
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "kind": "PartialObjectMetadata",
+      "apiVersion": "meta.k8s.io/v1",
+      "metadata": {
+        "name": "kube-system",
+        "uid": "78f7174a-7288-43ed-9a28-51fa19506ce6",
+        "resourceVersion": "8",
+        "creationTimestamp": "2026-11-02T09:27:13Z",
+        "labels": {
+          "kubernetes.io/metadata.name": "kube-system"
+        },
+        "managedFields": [
+          {
+            "manager": "kube-apiserver",
+            "operation": "Update",
+            "apiVersion": "v1",
+            "time": "2026-11-02T09:27:13Z",
+            "fieldsType": "FieldsV1",
+            "fieldsV1": {
+              "f:metadata": {
+                "f:labels": {
+                  ".": {},
+                  "f:kubernetes.io/metadata.name": {}
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "kind": "PartialObjectMetadata",
+      "apiVersion": "meta.k8s.io/v1",
+      "metadata": {
+        "name": "local-path-storage",
+        "uid": "e4c20c9d-5d9d-4c84-b60f-e4dca743dc20",
+        "resourceVersion": "359",
+        "creationTimestamp": "2026-11-02T09:27:17Z",
+        "labels": {
+          "kubernetes.io/metadata.name": "local-path-storage"
+        },
+        "annotations": {
+          "kubectl.kubernetes.io/last-applied-configuration": "{\"apiVersion\":\"v1\",\"kind\":\"Namespace\",\"metadata\":{\"annotations\":{},\"name\":\"local-path-storage\"}}\n"
+        },
+        "managedFields": [
+          {
+            "manager": "kubectl-client-side-apply",
+            "operation": "Update",
+            "apiVersion": "v1",
+            "time": "2026-11-02T09:27:17Z",
+            "fieldsType": "FieldsV1",
+            "fieldsV1": {
+              "f:metadata": {
+                "f:annotations": {
+                  ".": {},
+                  "f:kubectl.kubernetes.io/last-applied-configuration": {}
+                },
+                "f:labels": {
+                  ".": {},
+                  "f:kubernetes.io/metadata.name": {}
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "kind": "PartialObjectMetadata",
+      "apiVersion": "meta.k8s.io/v1",
+      "metadata": {
+        "name": "probe",
+        "uid": "64cc9bb1-0a88-411c-83cf-f774c65eabf9",
+        "resourceVersion": "920",
+        "creationTimestamp": "2026-11-02T09:28:47Z",
+        "labels": {
+          "kubernetes.io/metadata.name": "probe"
+        },
+        "managedFields": [
+          {
+            "manager": "kubectl-create",
+            "operation": "Update",
+            "apiVersion": "v1",
+            "time": "2026-11-02T09:28:47Z",
+            "fieldsType": "FieldsV1",
+            "fieldsV1": {
+              "f:metadata": {
+                "f:labels": {
+                  ".": {},
+                  "f:kubernetes.io/metadata.name": {}
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
