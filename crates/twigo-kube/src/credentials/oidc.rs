@@ -279,8 +279,9 @@ impl Oidc {
     }
 
     /// Drops `used`, which the server rejected, so the next request
-    /// refreshes; one a refresh just got stays, unless the user's file holds
-    /// a newer one by the next request.
+    /// refreshes; one a refresh just got, or one with no refresh token to
+    /// replace it, stays, unless the user's file holds a newer one by the
+    /// next request.
     pub fn reject(&self, used: &Arc<Credential>) {
         let mut state = self.state();
         if !state
@@ -290,7 +291,7 @@ impl Oidc {
         {
             return;
         }
-        if state.fresh {
+        if state.fresh || state.entry.refresh_token.is_none() {
             state.reread = true;
         } else {
             state.current = None;

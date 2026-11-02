@@ -453,3 +453,20 @@ async fn an_empty_token_leaves_the_token_file_to_be_read() {
     let clients = Clients::new(&config, Options::default()).unwrap();
     assert_eq!(get(&clients).await.unwrap(), "ok");
 }
+
+#[tokio::test]
+async fn an_empty_username_leaves_the_token_to_be_sent() {
+    let server = Server::start().await;
+    server.accept_token("t");
+    let mut config = Config::new(
+        format!("https://localhost:{}", server.addr.port())
+            .parse()
+            .unwrap(),
+    );
+    config.root_cert = Some(vec![server.ca.to_vec()]);
+    config.auth_info.username = Some(String::new());
+    config.auth_info.password = Some("p".to_owned().into());
+    config.auth_info.token = Some("t".to_owned().into());
+    let clients = Clients::new(&config, Options::default()).unwrap();
+    assert_eq!(get(&clients).await.unwrap(), "ok");
+}

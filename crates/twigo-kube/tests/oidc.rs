@@ -13,7 +13,8 @@ use futures::future::join_all;
 use jiff::{SignedDuration, Timestamp};
 use kube::config::Kubeconfig;
 use rcgen::{BasicConstraints, CertificateParams, CertifiedIssuer, IsCa, KeyPair};
-use rustls::pki_types::PrivateKeyDer;
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use secrecy::ExposeSecret;
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -44,6 +45,9 @@ struct Issued {
     form_only: bool,
     /// How long the id-tokens it issues last; an hour when unset.
     lifetime: Option<SignedDuration>,
+    /// The bearer tokens of the requests to `/version`, which it answers
+    /// with a 401, as an API server that rejects the token.
+    rejected: Vec<Option<String>>,
 }
 
 struct Issuer {
@@ -137,7 +141,18 @@ async fn answer(
                 Ok(n) => buffer.extend_from_slice(&chunk[..n]),
             }
         };
-        let (status, json) = if head.starts_with("GET /.well-known/openid-configuration ") {
+        let (status, json) = if head.starts_with("GET /version ") {
+            let bearer = head.lines().find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("authorization")
+                    .then(|| value.trim().strip_prefix("Bearer ").map(str::to_owned))?
+            });
+            issued.lock().unwrap().rejected.push(bearer);
+            (
+                401,
+                serde_json::json!({"kind": "Status", "apiVersion": "v1", "status": "Failure", "code": 401}),
+            )
+        } else if head.starts_with("GET /.well-known/openid-configuration ") {
             let url = format!("https://localhost:{}", addr.port());
             (
                 200,
@@ -497,4 +512,48 @@ async fn a_rejected_refreshed_token_gives_way_to_one_signed_in_elsewhere() {
     .unwrap();
     assert_eq!(token(&setup.oidc.credential().await.unwrap()), from_kubectl);
     assert_eq!(issuer.grants().len(), 1);
+}
+
+#[tokio::test]
+async fn without_a_refresh_token_a_rejection_keeps_the_token_it_cannot_replace() {
+    let issuer = Issuer::start("r1").await;
+    let valid = jwt(SignedDuration::from_hours(1), 0);
+    let setup = setup(&kubeconfig(&issuer, &valid, None));
+    let used = setup.oidc.credential().await.unwrap();
+    setup.oidc.reject(&used);
+    assert_eq!(token(&setup.oidc.credential().await.unwrap()), valid);
+}
+
+#[tokio::test]
+async fn a_request_whose_refreshed_token_is_rejected_goes_unretried() {
+    let issuer = Issuer::start("r1").await;
+    let setup = setup(&kubeconfig(
+        &issuer,
+        &jwt(SignedDuration::from_secs(-60), 0),
+        Some("r1"),
+    ));
+    let mut config = kube::Config::new(issuer.url().parse().unwrap());
+    config.root_cert = Some(vec![
+        CertificateDer::from_pem_slice(issuer.ca_pem.as_bytes())
+            .unwrap()
+            .to_vec(),
+    ]);
+    let clients = twigo_kube::client::Clients::new(
+        &config,
+        twigo_kube::client::Options {
+            provider: Some(twigo_kube::credentials::Provider::Oidc(Arc::clone(
+                &setup.oidc,
+            ))),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let request = http::Request::get("/version").body(Vec::new()).unwrap();
+    assert!(clients.api.request_text(request).await.is_err());
+    let rejected = issuer.issued.lock().unwrap().rejected.clone();
+    assert_eq!(
+        rejected.len(),
+        1,
+        "the same token again would only be rejected again"
+    );
 }
