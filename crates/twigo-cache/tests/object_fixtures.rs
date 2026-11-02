@@ -19,6 +19,19 @@ fn an_object_list_keeps_the_whole_object() {
         (&"Pod".into(), &"v1".into()),
         "the list's, as a watch's objects carry their own"
     );
+    #[derive(serde::Deserialize)]
+    struct Items<'a> {
+        #[serde(borrow)]
+        items: Vec<&'a serde_json::value::RawValue>,
+    }
+    let fixture = include_str!("fixtures/pod-object-list.json");
+    let items: Items<'_> = serde_json::from_str(fixture).unwrap();
+    let item = items.items[0].get();
+    assert_eq!(
+        pod.json.get(),
+        format!(r#"{{"kind":"Pod","apiVersion":"v1",{}"#, &item[1..]),
+        "first, as in a watch, and the item's own bytes after"
+    );
     assert!(
         json["metadata"]["managedFields"].is_array(),
         "managedFields stay in Rust"

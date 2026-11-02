@@ -68,17 +68,38 @@ impl Decode for ObjectDecoder {
     }
 }
 
+/// A listed item, its kind and apiVersion put first as the server puts
+/// them in a watch's objects, and its bytes otherwise as they came.
 fn object(json: &RawValue, kind: &str, api_version: &str) -> Result<Object, DecodeError> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Typed {
+        kind: Option<serde::de::IgnoredAny>,
+        api_version: Option<serde::de::IgnoredAny>,
+    }
     let parsed: RawObject = serde_json::from_str(json.get())?;
-    let mut whole: serde_json::Map<String, serde_json::Value> = serde_json::from_str(json.get())?;
-    whole
-        .entry("kind")
-        .or_insert_with(|| kind.to_owned().into());
-    whole
-        .entry("apiVersion")
-        .or_insert_with(|| api_version.to_owned().into());
+    let typed: Typed = serde_json::from_str(json.get())?;
+    let text = json.get().trim_start();
+    let rest = text
+        .strip_prefix('{')
+        .ok_or(DecodeError::Missing("an object"))?;
+    let mut whole = String::with_capacity(text.len() + kind.len() + api_version.len() + 32);
+    whole.push('{');
+    if typed.kind.is_none() {
+        whole.push_str(&format!(r#""kind":{},"#, serde_json::to_string(kind)?));
+    }
+    if typed.api_version.is_none() {
+        whole.push_str(&format!(
+            r#""apiVersion":{},"#,
+            serde_json::to_string(api_version)?
+        ));
+    }
+    if rest.trim_start().starts_with('}') && whole.ends_with(',') {
+        whole.pop();
+    }
+    whole.push_str(rest);
     Ok(Object {
         meta: parsed.metadata.into_meta()?,
-        json: serde_json::value::to_raw_value(&whole)?,
+        json: RawValue::from_string(whole)?,
     })
 }
