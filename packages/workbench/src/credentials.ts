@@ -19,8 +19,15 @@ export class Credentials {
   readonly changes = new Changes();
   #context: string | undefined;
   #auth: ContextAuth = { state: "none" };
-  /** Counts the times a credential became ready, so views that failed ask again. */
+  /**
+   * Counts the times a credential came after none or after a failed run, so
+   * views that failed ask again. A run that a rejected credential set off by
+   * itself does not count: against a server that keeps refusing fresh
+   * credentials, asking again would run the plugin again, forever.
+   */
   #ready = 0;
+  /** How the active plugin's last run ended, if one did since it became active. */
+  #settled: "ready" | "failed" | undefined;
   #review: readonly ReviewedPlugin[] = [];
   /** The context whose untrusted plugin the trust prompt shows, once per activation. */
   #prompted: string | undefined;
@@ -210,6 +217,7 @@ export class Credentials {
     if (context === this.#context) return;
     this.#context = context;
     this.#auth = { state: "none" };
+    this.#settled = undefined;
     this.#panelOpen = false;
     this.#prompt = undefined;
     clearTimeout(this.#arming);
@@ -266,10 +274,19 @@ export class Credentials {
     ) {
       this.#panelOpen = true;
     }
+    // Another plugin, or none, has had no run yet.
+    if (
+      next.state !== "plugin" ||
+      (was.state === "plugin" && was.plugin.digest !== next.plugin.digest)
+    ) {
+      this.#settled = undefined;
+    }
     if (status?.state === "ready") {
       this.#panelOpen = false;
-      if (previous !== "ready") this.#ready++;
+      if (this.#settled !== "ready") this.#ready++;
+      this.#settled = "ready";
     }
+    if (status?.state === "failed") this.#settled = "failed";
     // A prompt whose plugin the kubeconfig changed closes rather than show
     // another command under the person's hand.
     if (
