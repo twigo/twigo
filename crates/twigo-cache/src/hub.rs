@@ -211,10 +211,14 @@ impl Hub {
             scope: Scope::Cluster,
             field_selector: query.field_selector.clone(),
         };
-        let namespaces = &query.namespaces;
-        let cluster_wide = !query.resource.namespaced
-            || namespaces.is_empty()
-            || (namespaces.len() > NAMESPACES && self.may_list(&query).await);
+        // A cluster-scoped resource has no namespaces to filter by.
+        let namespaces: &[String] = if query.resource.namespaced {
+            &query.namespaces
+        } else {
+            &[]
+        };
+        let cluster_wide =
+            namespaces.is_empty() || (namespaces.len() > NAMESPACES && self.may_list(&query).await);
         let mut subscription = Subscription::new(key.clone(), namespaces);
         if cluster_wide {
             let part = self.hold(&key, subscription.filter());

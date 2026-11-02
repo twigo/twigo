@@ -380,6 +380,23 @@ async fn rejected_credentials_wait_to_be_subscribed_again() {
     );
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_cluster_scoped_resource_ignores_namespaces() {
+    let fake = Fake::default();
+    fake.add("namespaces", None, "a");
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut query = query(&["a", "b"]);
+    query.resource = Resource {
+        resource: "namespaces".to_owned(),
+        namespaced: false,
+        ..pods()
+    };
+    let mut namespaces = hub.rows(query).await;
+    ready(&mut namespaces).await;
+    assert_eq!(hub.scopes(), [Scope::Cluster]);
+    assert_eq!(names(&namespaces), ["a"]);
+}
+
 #[test]
 fn parts_combine_into_their_least_ready_state() {
     let syncing = |loaded| ViewState::Syncing { loaded };
