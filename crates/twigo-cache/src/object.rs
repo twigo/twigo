@@ -21,20 +21,26 @@ impl Decode for ObjectDecoder {
 
     fn decode_list(&mut self, body: &[u8]) -> Result<Page<Object>, DecodeError> {
         #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
         struct List<'a> {
+            #[serde(default)]
+            api_version: String,
             #[serde(default)]
             metadata: ListMeta,
             #[serde(borrow, default)]
             items: Option<Vec<&'a RawValue>>,
         }
         match peek_kind(body)? {
-            Kind::Other(_) => {
+            Kind::Other(kind) => {
                 let list: List<'_> = serde_json::from_slice(body)?;
+                // A list's items carry no kind or apiVersion of their own,
+                // while a watch's objects do: they get the list's.
+                let item_kind = kind.strip_suffix("List").unwrap_or(&kind);
                 let objects = list
                     .items
                     .unwrap_or_default()
                     .into_iter()
-                    .map(object)
+                    .map(|item| object(item, item_kind, &list.api_version))
                     .collect::<Result<_, _>>()?;
                 Ok(list.metadata.into_page(objects))
             }
@@ -62,10 +68,17 @@ impl Decode for ObjectDecoder {
     }
 }
 
-fn object(json: &RawValue) -> Result<Object, DecodeError> {
+fn object(json: &RawValue, kind: &str, api_version: &str) -> Result<Object, DecodeError> {
     let parsed: RawObject = serde_json::from_str(json.get())?;
+    let mut whole: serde_json::Map<String, serde_json::Value> = serde_json::from_str(json.get())?;
+    whole
+        .entry("kind")
+        .or_insert_with(|| kind.to_owned().into());
+    whole
+        .entry("apiVersion")
+        .or_insert_with(|| api_version.to_owned().into());
     Ok(Object {
         meta: parsed.metadata.into_meta()?,
-        json: json.to_owned(),
+        json: serde_json::value::to_raw_value(&whole)?,
     })
 }

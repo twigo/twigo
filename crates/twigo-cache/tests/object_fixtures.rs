@@ -14,6 +14,11 @@ fn an_object_list_keeps_the_whole_object() {
     assert_eq!(pod.meta.namespace.as_deref(), Some("probe"));
     let json: serde_json::Value = serde_json::from_str(pod.json.get()).unwrap();
     assert_eq!(json["spec"]["nodeName"], "kwok-node-0");
+    assert_eq!(
+        (&json["kind"], &json["apiVersion"]),
+        (&"Pod".into(), &"v1".into()),
+        "the list's, as a watch's objects carry their own"
+    );
     assert!(
         json["metadata"]["managedFields"].is_array(),
         "managedFields stay in Rust"
