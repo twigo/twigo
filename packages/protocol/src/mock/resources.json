@@ -3,6 +3,19 @@
     "gvr": {
       "group": "",
       "version": "v1",
+      "resource": "componentstatuses"
+    },
+    "kind": "ComponentStatus",
+    "singular": "componentstatus",
+    "shortNames": [
+      "cs"
+    ],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "",
+      "version": "v1",
       "resource": "configmaps"
     },
     "kind": "ConfigMap",
@@ -777,6 +790,17 @@
     "gvr": {
       "group": "kwok.x-k8s.io",
       "version": "v1alpha1",
+      "resource": "clusterexecs"
+    },
+    "kind": "ClusterExec",
+    "singular": "clusterexec",
+    "shortNames": [],
+    "namespaced": false
+  },
+  {
+    "gvr": {
+      "group": "kwok.x-k8s.io",
+      "version": "v1alpha1",
       "resource": "clusterlogs"
     },
     "kind": "ClusterLogs",
@@ -810,6 +834,17 @@
     "gvr": {
       "group": "kwok.x-k8s.io",
       "version": "v1alpha1",
+      "resource": "execs"
+    },
+    "kind": "Exec",
+    "singular": "exec",
+    "shortNames": [],
+    "namespaced": true
+  },
+  {
+    "gvr": {
+      "group": "kwok.x-k8s.io",
+      "version": "v1alpha1",
       "resource": "logs"
     },
     "kind": "Logs",
@@ -836,28 +871,6 @@
     },
     "kind": "PortForward",
     "singular": "portforward",
-    "shortNames": [],
-    "namespaced": true
-  },
-  {
-    "gvr": {
-      "group": "kwok.x-k8s.io",
-      "version": "v1alpha1",
-      "resource": "clusterexecs"
-    },
-    "kind": "ClusterExec",
-    "singular": "clusterexec",
-    "shortNames": [],
-    "namespaced": false
-  },
-  {
-    "gvr": {
-      "group": "kwok.x-k8s.io",
-      "version": "v1alpha1",
-      "resource": "execs"
-    },
-    "kind": "Exec",
-    "singular": "exec",
     "shortNames": [],
     "namespaced": true
   },

@@ -9,6 +9,7 @@
 - The UI on the mock backend: `pnpm --filter @twigo/desktop dev`, then http://localhost:1420/ in a browser; `?scenario=forbidden` pins a view state (`MOCK_SCENARIOS` in `packages/protocol/src/mock`), `?scenario=deviceCode`, `browser`, `pluginFailed`, `untrusted` or `review` pins prod-eu's credentials, and `?layout=french` picks a keyboard layout (`MOCK_LAYOUTS`).
 - The TypeScript of the IPC types: `TWIGO_UPDATE_TYPESCRIPT=1 cargo test -p twigo-ipc --test typescript`.
 - The mock's keyboard layouts: `cargo run -p twigo-keyboard --example record` on a Mac reads installed layouts without selecting them and rewrites `packages/protocol/src/mock/layouts`.
+- The mock's resources: `TWIGO_TEST_KUBECONFIG=<kind kubeconfig> cargo run -p twigo-kube --example record_discovery` rewrites `packages/protocol/src/mock/resources.json` from the cluster's discovery, as `resources_watch` answers it.
 - twigo-keyboard on Linux: `crates/twigo-keyboard/linux/run.sh` runs its tests in Docker, the live X11 test under Xvfb and the live Wayland test under a headless sway included; given a command, such as `cargo clippy -p twigo-keyboard --all-targets -- -D warnings`, it runs that instead.
 - twigo-netmon on Linux: `crates/twigo-netmon/linux.sh` runs its tests in Docker, the ignored ones included; CI runs the netlink one as root in a network namespace of its own.
 - twigo-keyboard on Windows: after `rustup target add x86_64-pc-windows-msvc`, `cargo clippy -p twigo-keyboard --target x86_64-pc-windows-msvc --all-targets -- -D warnings` checks the code; nothing runs it yet (D2).
@@ -49,6 +50,7 @@
 - Under the isolation pattern a `frame-src` must list the isolation frame's scheme, or every invoke waits forever.
   Tauri names it `isolation-<uuid>` anew on every build and adds it to `default-src` only, so `bench/ipc/isolation/src/main.rs` adds it to `frame-src` at startup from `Context::pattern()`.
 - Files under `crates/*/tests/fixtures` are recorded server responses: never reformat or edit them by hand.
+- `packages/protocol/src/mock/resources.json` is recorded by the `record_discovery` example from a cluster of `bench/cluster.sh up <name> 1.37`, which installs kwok's CRDs: never edit it by hand.
 - `packages/protocol/src/mock/layouts/*.json` are recorded by `cargo run -p twigo-keyboard --example record`: never reformat or edit them by hand.
   `UCKeyTranslate` takes the keyboard type (`LMGetKbdType`), so a Mac with another keyboard may record other characters; the committed ones come from an ANSI keyboard, type 91 (2026-10-31).
 - The live X11 test changes the X server's keymap and group, so it runs only where `TWIGO_TEST_X11_DISPLAY` equals `DISPLAY`, as under `xvfb-run`.
