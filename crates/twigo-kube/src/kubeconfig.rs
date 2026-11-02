@@ -224,8 +224,10 @@ impl Entries {
         let user = self.config.auth_infos.first()?;
         let info = user.auth_info.as_ref()?;
         let provider = info.auth_provider.as_ref()?;
-        // A token or basic auth in the entry wins, as in client-go.
-        if provider.name != "oidc" || token_or_basic(info) {
+        // A token or basic auth in the entry wins, as in client-go, and an
+        // exec plugin beside it makes the entry one client-go refuses, as
+        // `Exec::of` does.
+        if provider.name != "oidc" || token_or_basic(info) || info.exec.is_some() {
             return None;
         }
         Some(OidcEntry::of(&provider.config).map(|entry| OidcUser {

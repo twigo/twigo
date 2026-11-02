@@ -443,6 +443,26 @@ fn a_user_entry_knows_the_first_file_that_names_it() {
 }
 
 #[test]
+fn an_oidc_provider_beside_an_exec_plugin_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = write(
+        dir.path(),
+        "config",
+        &OIDC.replace(
+            "    auth-provider:",
+            "    exec: { apiVersion: client.authentication.k8s.io/v1, interactiveMode: Never, command: aws }\n    auth-provider:",
+        ),
+    );
+    let catalog = kubectl(&[&file]).load();
+    let entries = &context(&catalog, "kind-oidc").entries;
+    assert!(entries.oidc().is_none());
+    assert!(matches!(
+        entries.exec(),
+        Err(crate::credentials::ExecError::WithAuthProvider(_))
+    ));
+}
+
+#[test]
 fn a_token_in_the_entry_wins_over_its_oidc_provider() {
     let dir = tempfile::tempdir().unwrap();
     let file = write(

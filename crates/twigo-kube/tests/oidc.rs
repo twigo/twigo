@@ -521,7 +521,30 @@ async fn without_a_refresh_token_a_rejection_keeps_the_token_it_cannot_replace()
     let setup = setup(&kubeconfig(&issuer, &valid, None));
     let used = setup.oidc.credential().await.unwrap();
     setup.oidc.reject(&used);
-    assert_eq!(token(&setup.oidc.credential().await.unwrap()), valid);
+    let kept = setup.oidc.credential().await.unwrap();
+    assert!(
+        Arc::ptr_eq(&kept, &used),
+        "the same credential, so no retry"
+    );
+    setup.oidc.reject(&kept);
+    let from_kubectl = jwt(SignedDuration::from_hours(1), 78);
+    std::fs::write(&setup.file, kubeconfig(&issuer, &from_kubectl, None)).unwrap();
+    assert_eq!(token(&setup.oidc.credential().await.unwrap()), from_kubectl);
+}
+
+#[tokio::test]
+async fn a_rejected_token_stays_while_the_issuer_refuses_its_refresh() {
+    let issuer = Issuer::start("not-r1").await;
+    let valid = jwt(SignedDuration::from_hours(1), 0);
+    let setup = setup(&kubeconfig(&issuer, &valid, Some("r1")));
+    let used = setup.oidc.credential().await.unwrap();
+    setup.oidc.reject(&used);
+    let kept = setup.oidc.credential().await.unwrap();
+    assert!(Arc::ptr_eq(&kept, &used));
+    let tried = issuer.grants().len();
+    assert!(tried > 0, "it tried to refresh");
+    setup.oidc.credential().await.unwrap();
+    assert_eq!(issuer.grants().len(), tried, "one refresh per rejection");
 }
 
 #[tokio::test]

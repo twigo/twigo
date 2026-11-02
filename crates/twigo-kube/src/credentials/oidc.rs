@@ -160,10 +160,15 @@ struct State {
     /// it rather than spend another refresh token and write the file again
     /// on every request; client-go never refreshes on a 401.
     fresh: bool,
-    /// The server rejected the fresh id-token: the next request reads the
+    /// The server rejected an id-token that no refresh can replace, a fresh
+    /// one or one without a refresh token: the next request reads the
     /// user's file again, so a token the person got by signing in elsewhere
-    /// replaces it, without a refresh.
+    /// replaces it.
     reread: bool,
+    /// The server rejected an id-token from the file: the next request reads
+    /// the file again, then refreshes once; if the issuer refuses, the
+    /// token stays while it lasts, as client-go keeps it.
+    retry: bool,
     /// The id-token and refresh token the user's file held when this source
     /// last read or wrote it: only tokens someone else wrote since are taken
     /// from it, never ones it still holds after a failed write or a
@@ -197,6 +202,7 @@ impl Oidc {
                 style: None,
                 fresh: false,
                 reread: false,
+                retry: false,
             }),
             refreshing: tokio::sync::Mutex::new(()),
         }
@@ -205,11 +211,31 @@ impl Oidc {
     /// The id-token while it lasts, else a refreshed one; one refresh at a
     /// time, so a rotated refresh token is never spent twice.
     pub async fn credential(&self) -> Result<Arc<Credential>, OidcError> {
-        if self.state().reread {
+        let pending = {
+            let state = self.state();
+            state.reread || state.retry
+        };
+        if pending {
             let _one = self.refreshing.lock().await;
-            let reread = std::mem::take(&mut self.state().reread);
-            if reread {
+            let (reread, retry) = {
+                let mut state = self.state();
+                (
+                    std::mem::take(&mut state.reread),
+                    std::mem::take(&mut state.retry),
+                )
+            };
+            if reread || retry {
                 self.read_back();
+            }
+            // Reading back drops `current` when the file holds a newer token.
+            if retry && self.state().current.is_some() {
+                match self.refresh_now().await {
+                    Ok(credential) => return Ok(credential),
+                    Err(error) => eprintln!(
+                        "kept the rejected oidc token of {}, since its refresh failed: {error}",
+                        self.user
+                    ),
+                }
             }
         }
         if let Some(credential) = self.valid() {
@@ -223,6 +249,12 @@ impl Oidc {
         if let Some(credential) = self.valid() {
             return Ok(credential);
         }
+        self.refresh_now().await
+    }
+
+    /// Refreshes, keeps the new tokens and writes them back; the caller
+    /// holds `refreshing`.
+    async fn refresh_now(&self) -> Result<Arc<Credential>, OidcError> {
         let entry = self.state().entry.clone();
         let refresh_token = entry
             .refresh_token
@@ -278,10 +310,9 @@ impl Oidc {
             .ok_or_else(|| OidcError::Invalid("the issuer returned an expired id-token".to_owned()))
     }
 
-    /// Drops `used`, which the server rejected, so the next request
-    /// refreshes; one a refresh just got, or one with no refresh token to
-    /// replace it, stays, unless the user's file holds a newer one by the
-    /// next request.
+    /// Notes that the server rejected `used`: the next request takes a newer
+    /// token from the user's file, else refreshes once if a refresh can
+    /// replace it; `used` stays until something does.
     pub fn reject(&self, used: &Arc<Credential>) {
         let mut state = self.state();
         if !state
@@ -294,8 +325,7 @@ impl Oidc {
         if state.fresh || state.entry.refresh_token.is_none() {
             state.reread = true;
         } else {
-            state.current = None;
-            state.entry.id_token = None;
+            state.retry = true;
         }
     }
 
