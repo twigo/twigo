@@ -503,7 +503,7 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     A copy from the disk cache counts only once the server has confirmed it, since only the server's ETags tell apart clusters at the same address with the same trust, as behind a load balancer; clients that cannot be built fail it rather than show another cluster's resources.
   - A fetch whose credential failed stops the follower, since retrying would run the plugin by itself, as for the upstreams (3.2), until the context's fingerprint changes.
     Then it holds its CRD and APIService upstreams anew, which restarts those the failure ended, and fetches again; the fetches due after a change stay, since the server's discovery may still lag it, and a change that the new upstreams list but the old ones had not told yet gets its own.
-    The fingerprint leaves out the oidc tokens that Twigo and kubelogin write back (6.2), and other contexts' entries, so neither sets off a fetch.
+    The fingerprint is taken once the catalog's sources have been read, so their first read at a start is no change, and it leaves out the oidc tokens that Twigo and kubelogin write back (6.2) and other contexts' entries, so neither sets off a fetch.
     The frontend follows the active space again whenever a credential comes after none or after a failed run.
     A run that a rejected credential sets off by itself does not count: against a server that keeps refusing fresh credentials, every view asking again would run the plugin again, forever.
     A fix on the server's side, as a role binding for the identity, and new oidc tokens are seen once the space is followed again, as after switching to another space and back.

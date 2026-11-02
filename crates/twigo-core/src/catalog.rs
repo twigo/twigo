@@ -132,9 +132,15 @@ impl Catalog {
     /// A context's fingerprint, followed while the receiver lives: it
     /// changes with what the context's clients are built from, but not
     /// with the oidc tokens that Twigo and kubelogin write back (ARCHITECTURE
-    /// 6.2), nor with other contexts. None while no source lists it.
-    pub fn fingerprint(&self, context: &str) -> watch::Receiver<Option<Fingerprint>> {
+    /// 6.2), nor with other contexts. None while no source lists it. It
+    /// starts once the sources have been read, so the catalog's first read
+    /// is no change.
+    pub async fn fingerprint(&self, context: &str) -> watch::Receiver<Option<Fingerprint>> {
         let mut contexts = self.subscribe();
+        contexts
+            .wait_for(Option::is_some)
+            .await
+            .expect("the catalog outlives its subscribers");
         let context = context.to_owned();
         let read = move |contexts: &Option<Arc<Contexts>>| {
             contexts

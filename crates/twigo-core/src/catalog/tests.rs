@@ -120,7 +120,7 @@ contexts: [{{ name: kind-a, context: {{ cluster: c, user: u }} }}, {{ name: kind
     let catalog = Catalog::default();
     catalog.follow(kubeconfig("one", "https://a.example:6443", "x", "t1"));
     catalog.contexts().await;
-    let mut fingerprint = catalog.fingerprint("kind-a");
+    let mut fingerprint = catalog.fingerprint("kind-a").await;
     let first = fingerprint.borrow_and_update().expect("kind-a is listed");
 
     catalog.follow(kubeconfig("two", "https://a.example:6443", "y", "t2"));
@@ -134,4 +134,30 @@ contexts: [{{ name: kind-a, context: {{ cluster: c, user: u }} }}, {{ name: kind
         .expect("a new server changes it")
         .unwrap();
     assert_ne!(*fingerprint.borrow(), Some(first));
+}
+
+#[tokio::test]
+async fn a_fingerprint_starts_from_the_catalog_once_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("kubeconfig");
+    fs::write(
+        &file,
+        "clusters: [{ name: c, cluster: { server: 'https://a.example:6443' } }]
+contexts: [{ name: kind-a, context: { cluster: c } }]
+",
+    )
+    .unwrap();
+    let catalog = Arc::new(Catalog::default());
+    let waiting = tokio::spawn({
+        let catalog = Arc::clone(&catalog);
+        async move { catalog.fingerprint("kind-a").await }
+    });
+    tokio::task::yield_now().await;
+    catalog.follow(Sources::explicit(file));
+
+    let mut fingerprint = waiting.await.unwrap();
+    assert!(fingerprint.borrow_and_update().is_some());
+    let quiet =
+        tokio::time::timeout(std::time::Duration::from_secs(1), fingerprint.changed()).await;
+    assert!(quiet.is_err(), "the first read is no change");
 }

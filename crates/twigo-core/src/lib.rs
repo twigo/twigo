@@ -210,7 +210,7 @@ impl Core {
     /// The resources a space's context serves, followed as they change.
     pub async fn follow_resources(&self, space: &str) -> Result<Follower, IpcError> {
         let context = self.context(space)?;
-        let entry = self.catalog.fingerprint(&context);
+        let entry = self.catalog.fingerprint(&context).await;
         Ok(Follower::new(
             self.hub.clone(),
             Arc::clone(&self.discovery),
