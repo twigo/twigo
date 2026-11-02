@@ -144,3 +144,14 @@ test("the status bar names a plugin by its command's name, not its path", async 
     await screen.findByRole("button", { name: "Trust tsh?" }),
   ).toBeTruthy();
 });
+
+test("the panel sits with its item, which closes and opens it", async () => {
+  await show("deviceCode");
+  const panel = await screen.findByRole("region", { name: "Sign in" });
+  const item = screen.getByRole("button", { name: "Signing in…" });
+  expect(panel.parentElement).toBe(item.parentElement);
+  fireEvent.click(item);
+  expect(screen.queryByRole("region", { name: "Sign in" })).toBeNull();
+  fireEvent.click(item);
+  expect(screen.getByRole("region", { name: "Sign in" })).toBeTruthy();
+});

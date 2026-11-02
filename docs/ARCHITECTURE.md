@@ -1128,7 +1128,8 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   - The sign-in panel opens above the status bar's credentials item (the owner's choice among a dialog and a corner card, 2026-11-01).
     It opens once the plugin prints, after 2 s without a credential, since a browser flow often prints nothing, or when a sign-in fails while its space is active.
     It is no popover: a popover's dismissable layer takes Escape, either from the app's keybindings or from the code the person still needs.
-    So it takes no focus, ignores Escape and clicks elsewhere, and closes from its close button, the item, or a finished run; a run the person closed it on keeps it closed, in any space that shares the plugin, until they open it again.
+    So it takes no focus, ignores Escape and clicks elsewhere, and closes from its close button, the item, or a run that succeeds.
+    A run the person closed it on keeps it closed, in any space that shares the plugin, until they open it again or see that run fail, since a failure seen in the space opens it again.
     It shows the device code and the link, the plugin's output, its elapsed time and Cancel; a failure shows the fix the plugin's message names, such as `aws sso login`.
     Rust opens the link through tauri-plugin-opener, only for https and the plugin's own server on localhost or 127.0.0.1, and never one with a user part.
   - Unattended runs time out at 120 s; sign-ins at 10 min, past int128/kubelogin's and tsh's own 180 s, since a tsh killed mid-login leaves a lock that breaks the cluster until `tsh login`.
