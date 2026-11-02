@@ -19,6 +19,7 @@
     "allow-state-load",
     "allow-state-set",
     "allow-cluster-version",
+    "allow-namespaces-list",
     "allow-context-auth-watch",
     "allow-context-sign-in",
     "allow-context-sign-in-cancel",

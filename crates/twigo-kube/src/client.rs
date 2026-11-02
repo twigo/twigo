@@ -28,7 +28,7 @@ use tower::timeout::TimeoutLayer;
 use tower::{BoxError, ServiceBuilder};
 
 pub use connections::Connections;
-pub use counter::{Budgets, Class, Slots, Usage};
+pub use counter::{Budgets, Class, Slots, Usage, Waiting};
 pub use proxy::{Proxy, ProxyEnv, ProxyError, proxy_for};
 
 use auth::AuthLayer;
@@ -142,6 +142,33 @@ impl Clients {
             counter,
             connections,
         })
+    }
+
+    /// Clients over `service` in place of a server, with the stream counter
+    /// of `budgets` and connections that nothing dials: for the tests of
+    /// what runs over them.
+    #[cfg(feature = "test-util")]
+    pub fn over<S, B>(service: S, budgets: Budgets) -> Self
+    where
+        S: tower::Service<http::Request<Body>, Response = http::Response<B>>
+            + Clone
+            + Send
+            + 'static,
+        S::Future: Send + 'static,
+        S::Error: Into<BoxError>,
+        B: http_body::Body<Data = bytes::Bytes> + Send + Unpin + 'static,
+        B::Error: Into<BoxError>,
+    {
+        let counter = Counter::new(budgets);
+        let api = ServiceBuilder::new()
+            .layer(CounterLayer(counter.clone()))
+            .service(service.clone());
+        Clients {
+            api: Client::new(api, "default"),
+            sessions: Client::new(service, "default"),
+            counter,
+            connections: Connections::default(),
+        }
     }
 
     pub fn usage(&self) -> watch::Receiver<Usage> {

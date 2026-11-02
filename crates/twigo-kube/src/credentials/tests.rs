@@ -53,6 +53,18 @@ impl Plugins {
             .unwrap_or(0)
     }
 
+    /// Waits until the scripts have started `runs` times in all.
+    async fn until_runs(&self, runs: usize) {
+        let started = async {
+            while self.runs() < runs {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(5), started)
+            .await
+            .expect("the plugin starts within five seconds");
+    }
+
     fn token(&self, name: &str, token: &str, expires: Option<Timestamp>) -> PathBuf {
         let expiry = expires
             .map(|at| format!(r#","expirationTimestamp":"{at}""#))
@@ -768,6 +780,54 @@ async fn after_a_failed_sign_in_the_plugin_waits_to_be_asked_again() {
     assert!(source.credential().await.is_err());
     assert!(source.credential().await.is_err());
     assert_eq!(plugins.runs(), 4, "an unattended plugin runs again at once");
+}
+
+#[tokio::test]
+async fn an_unattended_plugin_that_failed_runs_again_with_its_failure_shown() {
+    let plugins = Plugins::new();
+    let fixed = plugins.dir.path().join("fixed");
+    let script = unattended(
+        &plugins,
+        &format!(
+            r#"if [ -e '{}' ]; then printf '{{"status":{{"token":"fixed"}}}}'; exit; fi
+echo 'run aws sso login' >&2; sleep 2; exit 1"#,
+            fixed.display()
+        ),
+    );
+    let source = registry().source(exec(&script, ""));
+    assert!(source.credential().await.is_err());
+    let failed = source.status().borrow().clone();
+    assert!(matches!(&failed, Status::Failed { output, .. } if output == "run aws sso login\n"));
+
+    let again = tokio::spawn({
+        let source = Arc::clone(&source);
+        async move { source.credential().await }
+    });
+    plugins.until_runs(2).await;
+    assert_eq!(*source.status().borrow(), failed, "the fix stays on screen");
+    assert!(again.await.unwrap().is_err());
+    assert_eq!(*source.status().borrow(), failed);
+
+    let asked = tokio::spawn({
+        let source = Arc::clone(&source);
+        async move { source.credential().await }
+    });
+    plugins.until_runs(3).await;
+    source.sign_in();
+    let mut status = source.status();
+    let shown = status.wait_for(
+        |status| matches!(status, Status::Running { output, .. } if output == "run aws sso login\n"),
+    );
+    tokio::time::timeout(Duration::from_secs(2), shown)
+        .await
+        .expect("asking shows the run under way, with what it prints")
+        .unwrap();
+    assert!(asked.await.unwrap().is_err());
+    assert_eq!(plugins.runs(), 3, "asking joined the run");
+
+    std::fs::write(&fixed, "").unwrap();
+    assert_eq!(token(&source.credential().await.unwrap()), "fixed");
+    assert!(matches!(*source.status().borrow(), Status::Ready { .. }));
 }
 
 #[tokio::test]

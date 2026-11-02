@@ -48,7 +48,7 @@ async fn the_catalog_follows_the_login_shell_and_tells_the_store() {
     )
     .unwrap();
     let state_file = dir.path().join("state.json");
-    let core = Arc::new(Core::new(dir.path()));
+    let core = Core::new(dir.path());
     core.state.open_space("kind-process");
     let (status, followed) = watch::channel(Status::Resolving);
     tokio::spawn({
@@ -146,7 +146,7 @@ impl Plugins {
 
     async fn core(&self) -> (Arc<Core>, tempfile::TempDir) {
         let data = tempfile::tempdir().unwrap();
-        let core = Arc::new(Core::new(data.path()));
+        let core = Core::new(data.path());
         let env = Arc::new(ShellEnv::from_iter(Vec::<(OsString, OsString)>::new()));
         let (status, followed) = watch::channel(Status::Resolved(env));
         tokio::spawn({

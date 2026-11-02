@@ -192,6 +192,11 @@ async fn cluster_version(app: State<'_, App>, request: String) -> Result<Cluster
 }
 
 #[tauri::command]
+async fn namespaces_list(app: State<'_, App>, request: String) -> Result<Vec<String>, IpcError> {
+    app.core.namespaces(&request).await
+}
+
+#[tauri::command]
 async fn context_auth_watch(
     webview: Webview,
     app: State<'_, App>,
@@ -299,7 +304,7 @@ fn main() {
                 let environment = Arc::clone(&environment);
                 async move { environment.resolve().await }
             });
-            let core = Arc::new(Core::new(&app.path().app_data_dir()?));
+            let core = Core::new(&app.path().app_data_dir()?);
             tauri::async_runtime::spawn({
                 let core = Arc::clone(&core);
                 let environment = Arc::clone(&environment);
@@ -336,6 +341,7 @@ fn main() {
             state_load,
             state_set,
             cluster_version,
+            namespaces_list,
             context_auth_watch,
             context_sign_in,
             context_sign_in_cancel,

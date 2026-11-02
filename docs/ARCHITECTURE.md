@@ -263,7 +263,8 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
 
 ### 3.2 Upstreams: what is watched
 
-- **One upstream per `(context, GVR, scope, server-side selectors)`, shared by every view.**
+- **One upstream per `(context, GVR, scope, server-side selectors)` and kind (3.3), shared by every view.**
+  A name that can be no path segment, as Kubernetes' `IsValidPathSegmentName` has it, is refused before any request, since the API server decodes `%2F` before it routes.
   Subscribing increments a reference count.
   When the last subscriber leaves, the upstream lingers for 60 s so going back and forth costs nothing, then it stops.
 - **Watch only what is visible.**
@@ -273,9 +274,10 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   - Coming back resumes from the last `resourceVersion`, or relists on `410 Gone`.
 - **Scope follows the namespace selection.**
   - One upstream per selected namespace, so looking at 200 pods in one namespace never watches the cluster's 50k.
-  - "All namespaces", or more than a few selected namespaces (default 4), switches to one cluster-wide upstream, if the user may list the kind cluster-wide (one SelfSubjectAccessReview, cached per space).
+  - "All namespaces", or more than a few selected namespaces (default 4), switches to one cluster-wide upstream, if the user may list the kind cluster-wide (one SelfSubjectAccessReview, kept with the context's clients).
     Rust then filters by namespace.
-  - Hysteresis: while a cluster-wide upstream lingers, it keeps serving narrower selections, so toggling back and forth costs nothing.
+  - Hysteresis: while a cluster-wide upstream runs or lingers, it serves narrower selections too, without holding it, so toggling back and forth costs nothing.
+    Once it has lingered out, those selections move to upstreams per namespace, and keep its rows until theirs are listed.
   - Users who may not list namespaces type them in.
     The context's default namespace is preselected.
 - **Label selectors** are applied in Rust, because labels are in the row metadata.
@@ -308,22 +310,24 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   - A proxy or server that answers HTTP/1.1 turns every stream back into a connection; the budgets stay the same.
     Benchmarks tune each of them.
   - When the watch budget is full, the least recently used idle upstreams are evicted.
-    When nothing is idle, the new subscription waits in the state `queued` and its view says why.
+    The counter tells a watch that it waits, through an extension of its request, and that is when the hub evicts one: an idle upstream with a watch open, since evicting one in its backoff or in a paged list frees none.
+    The freed watch goes to the one that has waited longest, as the counter admits them in order, and an upstream whose watch waits while nobody shows it goes at once, so it takes none from one that is shown.
+    When nothing is idle, the new subscription waits in the state `queued` and its view says why, until an upstream of the context lingers and makes way at once.
   - When the log or session budget is full, a new log stream, exec session or port-forward connection waits in `queued` the same way.
     Its tab says why, and the status bar lists open sessions so the user can close some.
   - Nothing fails silently.
 - **Dead connections.**
   kube 4.0 removed the global read timeout, and a watch can stall silently after sleep or a network change.
-  - Every watch sets `timeoutSeconds` and uses TCP keepalive.
+  - Every watch sets `timeoutSeconds`, kube's 290 ([`params.rs`](https://github.com/kube-rs/kube/blob/4.2.0/kube-core/src/params.rs#L381)), and uses TCP keepalive.
   - The HTTP/2 connection sends keep-alive pings, while idle too, since one dead connection now stalls every watch of the cluster.
     A failed ping closes it.
     Both take client-go's timings: keepalive after 30 s, and a ping once the connection has read nothing for 30 s, answered within 15 s.
   - A request the server never processed is retried once, whatever its method (RFC 9113, 8.7): a stream above the last one a GOAWAY names, whatever its code, or one refused with `REFUSED_STREAM`.
     The streams below that id run on, and fail if the connection closes under them.
-  - An idle timer expects an event or a bookmark every couple of minutes.
-    When it fires, a probe request goes over the shared connection first.
-    If the probe answers, only that upstream re-watches.
-    If it fails, the connection is retired and every upstream re-watches, as on wake.
+  - An idle timer expects an event or a bookmark within 120 s: the watch cache sends a bookmark roughly every minute ([`nextBookmarkTime`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/storage/cacher/cache_watcher.go#L233-L264)), so two are missing.
+    When it fires, a probe, `GET /version`, goes over the shared connection first.
+    If the probe gets any answer, only that upstream re-watches.
+    If it gets none, the connection is retired and every upstream re-watches, as on wake; idle upstreams whose probes fail together retire it once.
   - On wake from sleep, every connection is retired and every upstream re-watches.
     `twigo-netmon` hears of it from IOKit's system power notifications on macOS, as Chromium's and Firefox's power monitors do, and from logind's `PrepareForSleep(false)` on Linux.
   - On a network change, a connection is retired only when its route moved: the kernel would now send to its server, or its proxy, from another address, or not at all.
@@ -342,18 +346,29 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   - Streaming lists (`sendInitialEvents=true`) on 1.34 and later.
     The WatchList gate is off in 1.33, and kube-rs has no fallback.
   - Otherwise a paginated list followed by a watch from its exact `resourceVersion`.
-  - The capability is probed once per cluster and cached.
+  - The capability is learnt once per cluster, from its first streaming list: 1.33 refuses `sendInitialEvents` with 422 on that field ([`validateWatchOptions`](https://github.com/kubernetes/kubernetes/blob/v1.33.12/staging/src/k8s.io/apimachinery/pkg/apis/meta/internalversion/validation/validation.go#L53-L62)).
+    The answer, and the access reviews of the scope, are kept with the context's clients, so clients rebuilt for another server learn them again.
+  - A relist, after `410 Gone` or over rebuilt clients, keeps the rows on screen and replaces them with its own once it ends.
+  - A changed fingerprint or proxy variables, or a context no source lists any more, retire the connections of its clients at once, so its watches re-open over rebuilt clients and relist, or show that no source lists the context.
+    Such clients are abandoned, not only retired: a watch that starts on them later still learns that they were replaced, which a count of retirements, followed from the moment it subscribes, would not tell it; so are clients a build finishes after such a change.
+  - A resource the server cannot watch, which answers a watch with 405 as ComponentStatus and metrics do ([`handleWatch`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/get.go#L268-L270)), is listed in pages again every 15 s, the interval of metrics (3.6).
 - **Backoff.**
   UI-friendly: 0.5–5 s with jitter, reset on every event.
   kube-runtime's default of 0.8–30 s leaves lists stale for a long time after an API-server restart.
+  A watch the server ends without sending anything reopens after the backoff too.
+- **Refusals retry too.**
+  A `forbidden` or another error shows in the view while the upstream keeps trying with the backoff: a kind 1.33 API server answered a watch it had allowed with 403 for a while after a restart (`restart_live`, 2026-11-02).
+  Only `unauthorized`, a 401 the auth layer's retry did not cure or a credential plugin that failed, stops the upstream until a subscription asks for it again, since retrying would run the plugin by itself.
 
 ### 3.3 Three upstream kinds
 
 | Kind         | Request                                                                                                                                                                                 | Used for                                                                                                                         |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | **Table**    | `GET …?watch=true&allowWatchBookmarks=true&includeObject=Metadata` with `Accept: application/json;as=Table;v=v1;g=meta.k8s.io, application/json`, read through `Client::request_stream` | Every list, for built-in kinds and CRDs alike. The server computes the columns, the same as `kubectl get -w`.                    |
-| **Metadata** | `Api<PartialObjectMeta<K>>` + `watcher`, with managedFields cleared                                                                                                                     | Indexes: namespaces (for the picker), CRDs and APIServices (discovery invalidation), and owner references for the "Related" tab. |
-| **Object**   | `GET` + `watch` with `fieldSelector=metadata.name=…`                                                                                                                                    | An open editor: live YAML, overview, conflict detection.                                                                         |
+| **Metadata** | List and watch with `Accept: application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1` and `…as=PartialObjectMetadata…`, managedFields skipped at deserialisation               | Indexes: namespaces (for the picker), CRDs and APIServices (discovery invalidation), and owner references for the "Related" tab. |
+| **Object**   | List and watch with `fieldSelector=metadata.name=…`, whole objects                                                                                                                      | An open editor: live YAML, overview, conflict detection.                                                                         |
+
+All three run on the hub's own list and watch rather than kube-runtime's `watcher`, which 4.2 cannot start from a `resourceVersion` once it is recreated, nor tell to re-watch on wake or after a probe: it reopens a quiet watch only after `timeoutSeconds` and 5 s, without a probe ([`next_with_idle_timeout`](https://github.com/kube-rs/kube/blob/4.2.0/kube-runtime/src/watcher.rs#L483-L505)).
 
 Table details that the decoder handles, checked on kind clusters from 1.33 to 1.37 ([Table decoder spike](spikes/table-decoder.md)):
 
@@ -393,8 +408,10 @@ Memory for 5,000 pods on kind 1.37 with kwok (`bench/pods.sh`), counting allocat
 | `PartialObjectMeta<Pod>`                       | 60 MiB  |
 | `PartialObjectMeta<Pod>` without managedFields | 7.4 MiB |
 | Table row                                      | 3.4 MiB |
+| The hub with one Table upstream                | 4.0 MiB |
 
 A Table row takes about 700 bytes, half of a `PartialObjectMeta<Pod>` without managedFields.
+The hub's row store adds about 130 bytes a row for its key and map, by `examples/hub_memory.rs` on the same cluster (2026-11-02, three runs alike).
 
 ### 3.4 Query views: Rust sorts, filters and windows
 
@@ -479,13 +496,14 @@ Each upstream reports one of:
 - `syncing` (with a progress count)
 - `ready`
 - `relisting`
-- `stale` (no event or bookmark in time; reconnecting)
+- `stale` (no event or bookmark in time, or the stream broke; reconnecting)
 - `forbidden` (verb and resource from the 403)
 - `unauthorized` (a sign-in action is offered)
 - `error` (a typed kind plus a retry)
 
 Every view header and the status bar render these states.
 A blank table is never an error state.
+A view of several upstreams, one per namespace, shows the least ready of their states.
 
 ### 3.8 Performance budgets and the benchmark
 
@@ -1113,6 +1131,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     An error names no output, since the parser would quote the token.
   - Contexts whose entries name the same plugin share it, keyed as client-go keys its authenticators: the exec config, and the cluster when it is passed.
     Concurrent requests share one run, and its failure too.
+    An unattended plugin that failed runs again for the next request, as in client-go, but its status keeps the failure until that run ends, so the sign-in panel keeps the fix on screen; asking to run it shows the run under way.
   - Caches the credential until 60 s before it expires; without an expiry, until the server rejects it.
     One that comes with less left, as a plugin's own cached token does near its end, is kept until it expires, since another run would only return it again.
     A 401 drops it, runs the plugin once more and retries the request once, its body rebuilt from the bytes kube holds; client-go only refreshes for the next request.

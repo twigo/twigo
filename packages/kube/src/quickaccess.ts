@@ -1,5 +1,7 @@
 import {
   ListView,
+  toIpcError,
+  type Backend,
   type Column,
   type ListSnapshot,
   type Resource,
@@ -142,7 +144,26 @@ export function listProvider(
   };
 }
 
-/** `ns `: the active space's namespace scope (ARCHITECTURE 4.2). */
+/** A namespace's name is an RFC 1123 label. */
+const NAMESPACE = /^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$/;
+
+/** The namespaces of a space, or none when the person may not list them. */
+async function listNamespaces(
+  backend: Backend,
+  space: string,
+): Promise<readonly string[] | undefined> {
+  try {
+    return await backend.invoke("namespaces_list", space);
+  } catch (error) {
+    if (toIpcError(error).kind === "forbidden") return undefined;
+    throw error;
+  }
+}
+
+/**
+ * `ns `: the active space's namespace scope (ARCHITECTURE 4.2). Whoever may
+ * not list namespaces types one in.
+ */
 export function namespaceProvider(workbench: Workbench): QuickAccessProvider {
   const { spaces, backend } = workbench;
   const ALL = "all namespaces";
@@ -153,18 +174,26 @@ export function namespaceProvider(workbench: Workbench): QuickAccessProvider {
     async items(filter) {
       const space = spaces.active;
       if (!space) return [];
-      const namespaces = await backend.invoke("namespaces_list", space.id);
-      const current = spaces.state(space.id).namespaces;
-      const items = [ALL, ...namespaces].map((name) => ({
-        id: name,
-        label: name,
-        ...(((name === ALL && current.length === 0) ||
-          current.includes(name)) && {
-          description: "current",
-        }),
-      }));
       const search = filter.trim();
-      return search === ""
+      const listed = await listNamespaces(backend, space.id);
+      const typed = listed === undefined && NAMESPACE.test(search);
+      const current = spaces.state(space.id).namespaces;
+      const items = [ALL, ...(listed ?? (typed ? [search] : []))].map(
+        (name) => ({
+          id: name,
+          label: name,
+          ...(((name === ALL && current.length === 0) ||
+            current.includes(name)) && {
+            description: "current",
+          }),
+          ...(typed &&
+            name === search &&
+            !current.includes(name) && {
+              description: "you may not list namespaces",
+            }),
+        }),
+      );
+      return search === "" || typed
         ? items
         : items.filter((item) => commandScore(item.label, search, []) > 0);
     },

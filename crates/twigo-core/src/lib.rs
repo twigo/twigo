@@ -10,12 +10,13 @@ pub mod trust;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use jiff::Timestamp;
 use tokio::sync::watch;
+use twigo_cache::hub::{Connect, Hub, Query, Resource, RowFormat};
 use twigo_env::{ShellEnv, Status};
-use twigo_ipc::{ClusterVersion, IpcError};
+use twigo_ipc::{ClusterVersion, ErrorKind, IpcError, ViewState};
 use twigo_kube::client::{Clients, ProxyEnv};
 use twigo_kube::credentials::{ExecError, OidcError, Provider, Registry, Source, Timeouts};
 use twigo_kube::kubeconfig;
@@ -32,6 +33,7 @@ pub struct Core {
     pub catalog: Catalog,
     pub connections: Connections,
     pub trust: Trust,
+    pub hub: Hub,
     credentials: Registry,
     /// Whether a Twigo window has the focus, which a plugin that may ask
     /// the person to sign in waits for.
@@ -60,10 +62,11 @@ pub enum ClientsError {
 impl Core {
     /// The core whose state and trusted plugins live in `data`, the app's
     /// data directory.
-    pub fn new(data: &Path) -> Self {
+    pub fn new(data: &Path) -> Arc<Self> {
         let shell_env = watch::Sender::new(None);
         let focused = watch::Sender::new(false);
-        Self {
+        Arc::new_cyclic(|core| Self {
+            hub: Hub::new(connect(core.clone())),
             state: State::open(data.join("state.json")),
             catalog: Catalog::default(),
             connections: Connections::default(),
@@ -76,7 +79,7 @@ impl Core {
             focused,
             proxy_env: watch::Sender::new(None),
             shell_env,
-        }
+        })
     }
 
     pub fn set_focused(&self, focused: bool) {
@@ -180,10 +183,61 @@ impl Core {
             .api
             .apiserver_version()
             .await
-            .map_err(|e| errors::request(&e))?;
+            .map_err(|e| twigo_kube::errors::request(&e))?;
         Ok(ClusterVersion {
             git_version: info.git_version,
         })
+    }
+
+    /// The namespaces of a space's context, from its namespace index
+    /// (ARCHITECTURE 3.3), which lingers a while after each answer.
+    pub async fn namespaces(&self, space: &str) -> Result<Vec<String>, IpcError> {
+        let context = self
+            .state
+            .spaces()
+            .into_iter()
+            .find(|candidate| candidate.id == space)
+            .and_then(|space| space.contexts.into_iter().next())
+            .ok_or_else(|| IpcError {
+                kind: ErrorKind::NotFound,
+                message: format!("no space {space:?}"),
+            })?;
+        let mut index = self
+            .hub
+            .rows(Query {
+                context,
+                resource: Resource {
+                    group: String::new(),
+                    version: "v1".to_owned(),
+                    resource: "namespaces".to_owned(),
+                    namespaced: false,
+                },
+                format: RowFormat::Metadata,
+                namespaces: Vec::new(),
+                field_selector: None,
+            })
+            .await?;
+        match index.whole().await {
+            Ok(rows) => {
+                let mut names: Vec<String> =
+                    rows.iter().map(|row| row.meta.name.to_string()).collect();
+                names.sort();
+                Ok(names)
+            }
+            Err(ViewState::Forbidden { verb, resource }) => Err(IpcError {
+                kind: ErrorKind::Forbidden,
+                message: format!("you may not {verb} {resource}"),
+            }),
+            Err(ViewState::Unauthorized) => Err(IpcError {
+                kind: ErrorKind::Unauthorized,
+                message: "no credentials for this context that the cluster accepts".to_owned(),
+            }),
+            Err(ViewState::Error { error }) => Err(error),
+            Err(_) => Err(IpcError {
+                kind: ErrorKind::Unavailable,
+                message: "the cluster is unavailable".to_owned(),
+            }),
+        }
     }
 
     /// Retires every connection on wake, and those whose route moved on a
@@ -216,7 +270,11 @@ impl Core {
                 };
                 if let Some(env) = env {
                     let var = |name: &str| env.get(name)?.to_str().map(str::to_owned);
-                    self.proxy_env.send_replace(Some(ProxyEnv::from_vars(var)));
+                    let proxy = ProxyEnv::from_vars(var);
+                    // Published first, so a watch the retire re-opens builds
+                    // with the new variables.
+                    self.proxy_env.send_replace(Some(proxy.clone()));
+                    self.connections.follow_env(&proxy);
                     self.shell_env.send_replace(Some(Arc::clone(&env)));
                     if explicit.is_none() {
                         let home = env.get("HOME").map(Path::new);
@@ -236,7 +294,7 @@ impl Core {
                 if let Some(listed) = listed {
                     let names: HashSet<String> = listed.iter().map(|c| c.name.clone()).collect();
                     self.state.saw(&names, Timestamp::now());
-                    self.connections.keep(&names);
+                    self.connections.keep(listed.iter());
                 }
                 if contexts.changed().await.is_err() {
                     return;
@@ -245,6 +303,24 @@ impl Core {
         };
         tokio::join!(sources, seen);
     }
+}
+
+/// How the hub gets a context's clients: through the core, while it lives.
+fn connect(core: Weak<Core>) -> Connect {
+    Arc::new(move |context| {
+        let core = core.clone();
+        Box::pin(async move {
+            let Some(core) = core.upgrade() else {
+                return Err(IpcError {
+                    kind: ErrorKind::Unavailable,
+                    message: "Twigo is quitting".to_owned(),
+                });
+            };
+            core.clients(&context)
+                .await
+                .map_err(|error| IpcError::from(&error))
+        })
+    })
 }
 
 /// A link the sign-in panel may open: https, or a plugin's own server on

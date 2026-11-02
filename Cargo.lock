@@ -5518,17 +5518,24 @@ dependencies = [
 name = "twigo-cache"
 version = "0.1.0"
 dependencies = [
+ "backon",
+ "bytes",
  "dhat",
  "form_urlencoded",
  "futures",
  "http",
+ "http-body",
+ "http-body-util",
  "jiff",
  "k8s-openapi",
  "kube",
+ "percent-encoding",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
+ "tower",
+ "twigo-ipc",
  "twigo-kube",
 ]
 
@@ -5546,7 +5553,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
- "tower",
+ "twigo-cache",
  "twigo-env",
  "twigo-ipc",
  "twigo-kube",

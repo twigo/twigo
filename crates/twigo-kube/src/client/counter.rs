@@ -85,6 +85,12 @@ impl Usage {
     }
 }
 
+/// A request's extension, told `true` when the request starts waiting for
+/// its class's budget and `false` once the counter admits it or it is given
+/// up: how a watch learns that it is `queued` (ARCHITECTURE 3.7).
+#[derive(Clone)]
+pub struct Waiting(pub Arc<dyn Fn(bool) + Send + Sync>);
+
 #[derive(Clone)]
 pub struct Counter(Arc<Inner>);
 
@@ -110,8 +116,8 @@ impl Counter {
     }
 
     /// Waits until the class has a free stream; a stream that has to wait
-    /// counts as queued meanwhile.
-    pub async fn admit(&self, class: Class) -> Permit {
+    /// counts as queued meanwhile, and tells `waiting`.
+    pub async fn admit(&self, class: Class, waiting: Option<&Waiting>) -> Permit {
         let semaphore = match class {
             Class::Watch => &self.0.watches,
             Class::Log => &self.0.logs,
@@ -120,7 +126,7 @@ impl Counter {
         let permit = match Arc::clone(semaphore).try_acquire_owned() {
             Ok(permit) => permit,
             Err(_) => {
-                let _queued = Queued::new(self, class);
+                let _queued = Queued::new(self, class, waiting);
                 Arc::clone(semaphore)
                     .acquire_owned()
                     .await
@@ -140,22 +146,34 @@ impl Counter {
     }
 }
 
-/// Counts a waiting stream until it is admitted or given up.
+/// Counts a waiting stream until it is admitted or given up, and tells its
+/// request.
 struct Queued<'a> {
     counter: &'a Counter,
     class: Class,
+    waiting: Option<&'a Waiting>,
 }
 
 impl<'a> Queued<'a> {
-    fn new(counter: &'a Counter, class: Class) -> Self {
+    fn new(counter: &'a Counter, class: Class, waiting: Option<&'a Waiting>) -> Self {
         counter.change(class, |slots| slots.queued += 1);
-        Self { counter, class }
+        if let Some(waiting) = waiting {
+            (waiting.0)(true);
+        }
+        Self {
+            counter,
+            class,
+            waiting,
+        }
     }
 }
 
 impl Drop for Queued<'_> {
     fn drop(&mut self) {
         self.counter.change(self.class, |slots| slots.queued -= 1);
+        if let Some(waiting) = self.waiting {
+            (waiting.0)(false);
+        }
     }
 }
 
@@ -211,7 +229,10 @@ where
         let counter = self.counter.clone();
         let inner = self.inner.clone();
         Box::pin(async move {
-            let permit = counter.admit(Class::of(request.uri())).await;
+            let waiting = request.extensions().get::<Waiting>().cloned();
+            let permit = counter
+                .admit(Class::of(request.uri()), waiting.as_ref())
+                .await;
             let response = inner.oneshot(request).await.map_err(Into::into)?;
             Ok(response.map(|body| Permitted {
                 body,
@@ -358,6 +379,42 @@ mod tests {
         assert_eq!(usage.borrow().requests, Slots::default());
         drop((third, log));
         assert_eq!(usage.borrow().logs, Slots::default());
+    }
+
+    #[tokio::test]
+    async fn a_request_learns_that_it_waits() {
+        let counter = Counter::new(Budgets {
+            watches: 1,
+            logs: 1,
+            requests: 1,
+        });
+        let service = counted(&counter);
+        let told = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let waiting = |request: &mut Request<()>| {
+            let told = Arc::clone(&told);
+            request
+                .extensions_mut()
+                .insert(Waiting(Arc::new(move |queued| {
+                    told.lock().unwrap().push(queued);
+                })));
+        };
+        let mut first = request("/w?watch=1");
+        waiting(&mut first);
+        let first = service.clone().oneshot(first).await.unwrap();
+        assert!(told.lock().unwrap().is_empty(), "admitted at once");
+
+        let mut second = request("/w?watch=1");
+        waiting(&mut second);
+        let second = tokio::spawn(service.oneshot(second));
+        let mut usage = counter.usage();
+        usage
+            .wait_for(|usage| usage.watches.queued == 1)
+            .await
+            .unwrap();
+        assert_eq!(*told.lock().unwrap(), [true]);
+        drop(first);
+        second.await.unwrap().unwrap();
+        assert_eq!(*told.lock().unwrap(), [true, false]);
     }
 
     #[tokio::test]

@@ -7,7 +7,9 @@ use k8s_openapi::api::core::v1::Pod;
 use kube::api::ListParams;
 use kube::config::{KubeConfigOptions, Kubeconfig};
 use kube::{Api, Config};
-use twigo_cache::table::{Row, TableDecoder, request};
+use twigo_cache::decode::Decode;
+use twigo_cache::request::{self, Collection};
+use twigo_cache::table::{Row, TableDecoder};
 use twigo_kube::client::{Clients, Options};
 
 #[global_allocator]
@@ -45,7 +47,11 @@ async fn main() {
     let mut token: Option<Box<str>> = None;
     loop {
         let body = client
-            .request_text(request::list(&collection, PAGE, token.as_deref()))
+            .request_text(request::list(
+                &Collection::table(&collection),
+                PAGE,
+                token.as_deref(),
+            ))
             .await
             .unwrap();
         token = TableDecoder::new()
@@ -63,7 +69,7 @@ async fn main() {
     let mut decoder = TableDecoder::new();
     let mut rows: Vec<Row> = Vec::new();
     for body in &bodies {
-        rows.extend(decoder.decode_list(body.as_bytes()).unwrap().rows);
+        rows.extend(decoder.decode_list(body.as_bytes()).unwrap().items);
     }
     rows.shrink_to_fit();
     let after = heap();

@@ -5,6 +5,10 @@
 //! window has the focus, so that a browser it opens or a code it prints
 //! finds them, and after a run that failed or was cancelled only when they
 //! ask again: retrying by itself would open browser after browser.
+//!
+//! An unattended plugin that failed runs again for the next request, as in
+//! client-go, but its status keeps the failure until that run ends, so the
+//! fix stays on screen while requests retry.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
@@ -145,7 +149,8 @@ pub enum Status {
         expires: Option<Timestamp>,
     },
     /// For a plugin that may ask the person to sign in, it stays so until
-    /// they sign in again.
+    /// they sign in again; for an unattended one, until a run the next
+    /// request starts ends, or they ask to run it now.
     Failed {
         error: RunError,
         output: String,
@@ -189,6 +194,12 @@ struct Run {
     cancel: Option<oneshot::Sender<()>>,
     /// The plugin's process group, once it started.
     group: Option<Pid>,
+    since: Timestamp,
+    /// What it printed on stderr so far, in the status while it is shown.
+    output: String,
+    /// The status says it runs: false for an unattended plugin's run after
+    /// a failure, until the person asks to run it.
+    shown: bool,
 }
 
 impl std::fmt::Debug for Source {
@@ -237,13 +248,16 @@ impl Source {
                             return Err(CredentialError::SignInFailed(error.clone()));
                         }
                         if *focused.borrow_and_update() {
-                            Some(self.start(&mut state))
+                            Some(self.start(&mut state, true))
                         } else {
                             self.status.send_replace(Status::Waiting);
                             None
                         }
                     }
-                    None => Some(self.start(&mut state)),
+                    None => {
+                        let failed = matches!(*self.status.borrow(), Status::Failed { .. });
+                        Some(self.start(&mut state, !failed))
+                    }
                 }
             };
             match done {
@@ -262,8 +276,18 @@ impl Source {
     pub fn sign_in(self: &Arc<Self>) {
         let mut state = self.state();
         state.held = None;
-        if state.run.is_none() {
-            self.start(&mut state);
+        match state.run.as_mut() {
+            None => {
+                self.start(&mut state, true);
+            }
+            Some(run) if !run.shown => {
+                run.shown = true;
+                self.status.send_replace(Status::Running {
+                    since: run.since,
+                    output: run.output.clone(),
+                });
+            }
+            Some(_) => {}
         }
     }
 
@@ -315,23 +339,30 @@ impl Source {
         self.state.lock().expect("source lock")
     }
 
-    fn start(self: &Arc<Self>, state: &mut State) -> watch::Receiver<Outcome> {
+    /// Starts a run, which the status shows if `shown`.
+    fn start(self: &Arc<Self>, state: &mut State, shown: bool) -> watch::Receiver<Outcome> {
         let (done, outcome) = watch::channel(None);
         let (cancel, cancelled) = oneshot::channel();
+        let since = Timestamp::now();
         state.run = Some(Run {
             done: outcome.clone(),
             cancel: Some(cancel),
             group: None,
-        });
-        self.status.send_replace(Status::Running {
-            since: Timestamp::now(),
+            since,
             output: String::new(),
+            shown,
         });
+        if shown {
+            self.status.send_replace(Status::Running {
+                since,
+                output: String::new(),
+            });
+        }
         let source = Arc::clone(self);
         tokio::spawn(async move {
             let result = source.run(cancelled).await.map(Arc::new);
             let mut state = source.state();
-            state.run = None;
+            let output = state.run.take().map(|run| run.output).unwrap_or_default();
             match &result {
                 Ok(credential) => {
                     state.credential = Some(Arc::clone(credential));
@@ -350,15 +381,9 @@ impl Source {
                     if source.signs_in() {
                         state.held = Some(error.clone());
                     }
-                    source.status.send_modify(|status| {
-                        let output = match status {
-                            Status::Running { output, .. } => std::mem::take(output),
-                            _ => String::new(),
-                        };
-                        *status = Status::Failed {
-                            error: error.clone(),
-                            output,
-                        };
+                    source.status.send_replace(Status::Failed {
+                        error: error.clone(),
+                        output,
                     });
                 }
             }
@@ -416,11 +441,18 @@ impl Source {
                 output.push_str("\n…\n");
             }
             output.push_str(&String::from_utf8_lossy(&tail));
-            self.status.send_modify(|status| {
-                if let Status::Running { output: shown, .. } = status {
-                    *shown = output;
-                }
-            });
+            let mut state = self.state();
+            let Some(run) = state.run.as_mut() else {
+                return;
+            };
+            if run.shown {
+                self.status.send_modify(|status| {
+                    if let Status::Running { output: shown, .. } = status {
+                        shown.clone_from(&output);
+                    }
+                });
+            }
+            run.output = output;
         })
         .await
     }

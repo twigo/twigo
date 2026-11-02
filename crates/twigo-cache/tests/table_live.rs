@@ -11,8 +11,9 @@ use kube::api::{
 use kube::config::{KubeConfigOptions, Kubeconfig};
 use kube::{Api, Client, Config};
 use serde_json::json;
-use twigo_cache::table::request::{self, WatchFrom};
-use twigo_cache::table::{Cell, ColumnKind, Event, Row, TableDecoder};
+use twigo_cache::decode::{Decode, Event};
+use twigo_cache::request::{self, Collection, WatchFrom};
+use twigo_cache::table::{Cell, ColumnKind, Row, TableDecoder};
 use twigo_kube::client::{Clients, Options};
 
 const POD_COLUMNS: [&str; 9] = [
@@ -122,7 +123,7 @@ async fn pods_list_and_watch() {
     let path = format!("/api/v1/namespaces/{ns}/pods");
 
     let body = client
-        .request_text(request::list(&path, 500, None))
+        .request_text(request::list(&Collection::table(&path), 500, None))
         .await
         .unwrap();
     assert!(body.contains("\"managedFields\""));
@@ -134,9 +135,9 @@ async fn pods_list_and_watch() {
     assert_eq!(columns[4].kind, ColumnKind::Age);
     let priorities: Vec<i32> = columns.iter().map(|column| column.priority).collect();
     assert_eq!(priorities, [0, 0, 0, 0, 0, 1, 1, 1, 1]);
-    assert_eq!(page.rows.len(), 2);
+    assert_eq!(page.items.len(), 2);
     assert!(
-        page.rows
+        page.items
             .iter()
             .all(|row| row.cells[4] == Cell::Age && row.meta.created.is_some())
     );
@@ -144,7 +145,7 @@ async fn pods_list_and_watch() {
     let mut watch = Lines::open(
         &client,
         request::watch(
-            &path,
+            &Collection::table(&path),
             WatchFrom::ResourceVersion(&page.resource_version),
             60,
         ),
@@ -189,7 +190,11 @@ async fn pods_list_and_watch() {
 
     let mut again = Lines::open(
         &client,
-        request::watch(&path, WatchFrom::ResourceVersion(&last_version), 60),
+        request::watch(
+            &Collection::table(&path),
+            WatchFrom::ResourceVersion(&last_version),
+            60,
+        ),
     )
     .await;
     label(&pods, "p1", "twice").await;
@@ -215,7 +220,7 @@ async fn streaming_lists_depend_on_the_release() {
     create_pod(&pods, "p1").await;
     let path = format!("/api/v1/namespaces/{ns}/pods");
 
-    let request = request::watch(&path, WatchFrom::InitialEvents, 60);
+    let request = request::watch(&Collection::table(&path), WatchFrom::InitialEvents, 60);
     if minor == 33 {
         let Err(kube::Error::Api(status)) = client.request_stream(request).await else {
             panic!("1.33 ships WatchList off and must reject a streaming list");
@@ -343,7 +348,7 @@ async fn crd_printer_columns() {
 
     let path = format!("/apis/test.twigo.io/v1/namespaces/{ns}/widgets");
     let body = client
-        .request_text(request::list(&path, 500, None))
+        .request_text(request::list(&Collection::table(&path), 500, None))
         .await
         .unwrap();
     let mut decoder = TableDecoder::new();
@@ -368,7 +373,7 @@ async fn crd_printer_columns() {
     );
     assert_eq!(decoder.columns().unwrap()[3].priority, 1);
     let full = page
-        .rows
+        .items
         .iter()
         .find(|row| &*row.meta.name == "full")
         .unwrap();
@@ -378,7 +383,7 @@ async fn crd_printer_columns() {
     assert_eq!(full.cells[5], Cell::Text("10d".into()));
     assert_eq!(full.cells[6], Cell::Age);
     let empty = page
-        .rows
+        .items
         .iter()
         .find(|row| &*row.meta.name == "empty")
         .unwrap();

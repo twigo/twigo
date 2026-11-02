@@ -1,4 +1,5 @@
-use twigo_cache::table::{Cell, Column, ColumnKind, DecodeError, Event, Row, TableDecoder};
+use twigo_cache::decode::{Decode, DecodeError, Event};
+use twigo_cache::table::{Cell, Column, ColumnKind, Row, TableDecoder};
 
 fn lines(fixture: &str) -> impl Iterator<Item = &[u8]> {
     fixture.lines().map(str::as_bytes)
@@ -44,8 +45,8 @@ fn pod_list_keeps_typed_columns_and_metadata() {
 
     assert_eq!(page.resource_version.as_ref(), "946");
     assert_eq!(page.continue_token, None);
-    assert_eq!(page.rows.len(), 2);
-    let row = &page.rows[0];
+    assert_eq!(page.items.len(), 2);
+    let row = &page.items[0];
     assert_eq!(row.meta.name.as_ref(), "p1");
     assert_eq!(row.meta.namespace.as_deref(), Some("probe"));
     assert_eq!(row.meta.uid.as_deref().map(str::len), Some(36));
@@ -198,7 +199,7 @@ fn crd_printer_columns_decode_by_json_type() {
     assert_eq!(columns[3].priority, 1);
 
     let full = page
-        .rows
+        .items
         .iter()
         .find(|row| &*row.meta.name == "full")
         .unwrap();
@@ -215,7 +216,7 @@ fn crd_printer_columns_decode_by_json_type() {
         ]
     );
     let empty = page
-        .rows
+        .items
         .iter()
         .find(|row| &*row.meta.name == "empty")
         .unwrap();
@@ -248,9 +249,9 @@ fn a_server_without_table_gets_metadata_columns() {
         .unwrap();
     assert_eq!(names(decoder.columns().unwrap()), ["Name", "Age"]);
     assert_eq!(page.resource_version.as_ref(), "7");
-    assert_eq!(page.rows.len(), 2);
+    assert_eq!(page.items.len(), 2);
     assert_eq!(
-        page.rows[0].cells.as_ref(),
+        page.items[0].cells.as_ref(),
         [Cell::Text("t1".into()), Cell::Age]
     );
 
@@ -313,7 +314,7 @@ fn metrics_server_rows_have_no_uid() {
         names(decoder.columns().unwrap()),
         ["Name", "cpu", "memory", "Window"]
     );
-    let row = &page.rows[0];
+    let row = &page.items[0];
     assert_eq!(row.meta.name.as_ref(), "p1");
     assert_eq!(row.meta.uid, None);
     assert_eq!(row.meta.resource_version.as_ref(), "");
@@ -325,8 +326,8 @@ fn component_statuses_have_no_uid() {
     let page = TableDecoder::new()
         .decode_list(include_bytes!("fixtures/componentstatuses-list.json"))
         .unwrap();
-    assert_eq!(page.rows.len(), 3);
-    assert!(page.rows.iter().all(|row| row.meta.uid.is_none()));
+    assert_eq!(page.items.len(), 3);
+    assert!(page.items.iter().all(|row| row.meta.uid.is_none()));
 }
 
 #[test]
@@ -335,7 +336,7 @@ fn an_empty_table_may_send_null() {
     let page = decoder
         .decode_list(include_bytes!("fixtures/metrics-empty.json"))
         .unwrap();
-    assert!(page.rows.is_empty());
+    assert!(page.items.is_empty());
     assert!(decoder.columns().is_none());
 }
 
@@ -354,7 +355,7 @@ fn an_integral_number_stays_a_number() {
         &format!(r#"[{{"cells":["w",1],"object":{OBJECT}}}]"#),
     );
     let page = TableDecoder::new().decode_list(body.as_bytes()).unwrap();
-    assert_eq!(page.rows[0].cells[1], Cell::Number(1.0));
+    assert_eq!(page.items[0].cells[1], Cell::Number(1.0));
 }
 
 #[test]
@@ -366,7 +367,7 @@ fn an_age_column_is_found_under_any_capitalisation() {
     let mut decoder = TableDecoder::new();
     let page = decoder.decode_list(body.as_bytes()).unwrap();
     assert_eq!(decoder.columns().unwrap()[1].kind, ColumnKind::Age);
-    assert_eq!(page.rows[0].cells[1], Cell::Age);
+    assert_eq!(page.items[0].cells[1], Cell::Age);
 }
 
 #[test]
