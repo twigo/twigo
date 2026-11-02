@@ -38,7 +38,7 @@ use crate::decode::Decode;
 use crate::meta::MetaDecoder;
 use crate::object::{Object, ObjectDecoder};
 use crate::request::Format;
-use crate::store::Item;
+use crate::store::{Drained, Feed, Item, RowKey};
 use crate::table::{Column, Row, TableDecoder};
 use crate::upstream::{self, Env, Spec, Upstream};
 
@@ -282,12 +282,16 @@ impl Hub {
             scope: Scope::Cluster,
             field_selector: query.field_selector.clone(),
         };
-        // A cluster-scoped resource has no namespaces to filter by.
-        let namespaces: &[String] = if query.resource.namespaced {
-            &query.namespaces
+        // A cluster-scoped resource has no namespaces to filter by, and a
+        // namespace named twice gets one part.
+        let mut namespaces = if query.resource.namespaced {
+            query.namespaces.clone()
         } else {
-            &[]
+            Vec::new()
         };
+        namespaces.sort();
+        namespaces.dedup();
+        let namespaces = &namespaces[..];
         let cluster_wide =
             namespaces.is_empty() || (namespaces.len() > NAMESPACES && self.may_list(&query).await);
         let mut subscription = Subscription::new(key.clone(), namespaces);
@@ -414,6 +418,7 @@ impl Hub {
             task.abort();
         }
         Part {
+            feed: upstream.store.feed(),
             upstream,
             filter,
             guard: Guard::Hold {
@@ -454,6 +459,7 @@ impl Hub {
         registry.next_borrower += 1;
         drop(registry);
         Some(Part {
+            feed: upstream.store.feed(),
             upstream,
             filter: subscription.filter(),
             guard: Guard::Borrow {
@@ -764,6 +770,8 @@ struct Part<T> {
     upstream: Arc<Upstream<T>>,
     /// The namespaces a cluster-wide upstream serves this subscription.
     filter: Option<Arc<HashSet<String>>>,
+    /// What changed in the upstream's store since [`Subscription::drain`].
+    feed: Feed,
     guard: Guard,
 }
 
@@ -771,6 +779,40 @@ impl<T> Part<T> {
     fn borrowed_from(&self, key: &Key) -> bool {
         matches!(&self.guard, Guard::Borrow { key: borrowed, .. } if borrowed == key)
     }
+}
+
+impl<T: Item> Part<T> {
+    fn serves(&self, item: &T) -> bool {
+        match &self.filter {
+            Some(namespaces) => item
+                .meta()
+                .namespace
+                .as_deref()
+                .is_some_and(|namespace| namespaces.contains(namespace)),
+            None => true,
+        }
+    }
+
+    fn items(&self) -> Vec<Arc<T>> {
+        self.upstream.store.items(|item| self.serves(item))
+    }
+}
+
+/// What changed in a subscription's rows since it was last drained.
+pub enum Delta<T> {
+    /// Every row, which replaces what the reader holds, and the columns of
+    /// a Table upstream: the first drain, and the one after a relist, new
+    /// columns or new parts.
+    Reset {
+        rows: Vec<Arc<T>>,
+        columns: Option<Arc<[Column]>>,
+    },
+    Changed {
+        upserted: Vec<Arc<T>>,
+        /// Rows gone, and rows of namespaces the subscription does not
+        /// show, which it never held.
+        removed: Vec<RowKey>,
+    },
 }
 
 /// A view's subscription: the upstreams its namespaces need, whose rows
@@ -869,21 +911,52 @@ impl<T: Item> Subscription<T> {
 
     /// Its rows, from every part.
     pub fn items(&self) -> Vec<Arc<T>> {
+        self.inner.parts().iter().flat_map(Part::items).collect()
+    }
+
+    /// What changed in its rows since the last drain: each part's changes
+    /// coalesced by key, or every row once any part was reset, as a new
+    /// part always is. Each part's rows are read under its store's lock
+    /// together with its feed, so the feed holds what the reader holds: a
+    /// second read of the items would see changes the feed then drops.
+    pub fn drain(&self) -> Delta<T> {
         let parts = self.inner.parts();
-        let mut items = Vec::new();
-        for part in parts.iter() {
-            items.extend(part.upstream.store.items(|item| {
-                match &part.filter {
-                    Some(namespaces) => item
-                        .meta()
-                        .namespace
-                        .as_deref()
-                        .is_some_and(|namespace| namespaces.contains(namespace)),
-                    None => true,
-                }
-            }));
+        let drained: Vec<_> = parts
+            .iter()
+            .map(|part| part.upstream.store.drain(&part.feed))
+            .collect();
+        if drained.iter().any(|d| matches!(d, Drained::Reset { .. })) {
+            let (mut rows, mut columns) = (Vec::new(), None);
+            for (part, drained) in parts.iter().zip(drained) {
+                let drained = match drained {
+                    Drained::Changed(_) => part.upstream.store.reread(&part.feed),
+                    reset => reset,
+                };
+                let Drained::Reset {
+                    items,
+                    columns: read,
+                } = drained
+                else {
+                    unreachable!("a reread resets");
+                };
+                columns = columns.or(read);
+                rows.extend(items.into_iter().filter(|item| part.serves(item)));
+            }
+            return Delta::Reset { rows, columns };
         }
-        items
+        let (mut upserted, mut removed) = (Vec::new(), Vec::new());
+        for (part, drained) in parts.iter().zip(drained) {
+            let Drained::Changed(changes) = drained else {
+                unreachable!("no part was reset");
+            };
+            for (key, item) in changes {
+                match item {
+                    Some(item) if part.serves(&item) => upserted.push(item),
+                    _ => removed.push(key),
+                }
+            }
+        }
+        Delta::Changed { upserted, removed }
     }
 
     /// Waits for a change of its rows, its columns or its state.

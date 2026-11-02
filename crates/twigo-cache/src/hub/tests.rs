@@ -415,6 +415,62 @@ async fn a_lingering_cluster_wide_upstream_serves_narrower_subscriptions() {
     until_rows(&mut narrow, &["p1", "p3"]).await;
 }
 
+fn drained(delta: Delta<Row>) -> (bool, Vec<String>, usize) {
+    let (reset, mut rows, removed) = match delta {
+        Delta::Reset { rows, .. } => (true, rows, 0),
+        Delta::Changed { upserted, removed } => (false, upserted, removed.len()),
+    };
+    rows.sort_by(|a, b| a.meta.name.cmp(&b.meta.name));
+    let names = rows.iter().map(|row| row.meta.name.to_string()).collect();
+    (reset, names, removed)
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_drain_takes_what_changed_since_the_last_and_every_row_after_a_move() {
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    fake.add("pods", Some("b"), "p2");
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut all = hub.rows(query(&[])).await.unwrap();
+    ready(&mut all).await;
+    let mut narrow = hub.rows(query(&["a"])).await.unwrap();
+    assert_eq!(drained(narrow.drain()), (true, vec!["p1".to_owned()], 0));
+    assert_eq!(drained(narrow.drain()), (false, vec![], 0));
+
+    fake.add("pods", Some("a"), "p3");
+    fake.add("pods", Some("b"), "p4");
+    fake.add("pods", Some("a"), "p5");
+    fake.delete("pods", Some("a"), "p5");
+    until_rows(&mut narrow, &["p1", "p3"]).await;
+    until_rows(&mut all, &["p1", "p2", "p3", "p4"]).await;
+    assert_eq!(
+        drained(narrow.drain()),
+        (false, vec!["p3".to_owned()], 1),
+        "p4 of the namespace it does not show counts as removed; p5, added and deleted since, not at all"
+    );
+
+    drop(all);
+    fake.bookmark();
+    sleep(LINGER + Duration::from_secs(1)).await;
+    until(&mut narrow, |_| hub.scopes() == [namespace("a")]).await;
+    assert_eq!(
+        drained(narrow.drain()),
+        (true, vec!["p1".to_owned(), "p3".to_owned()], 0),
+        "the parts it moved to start with every row"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_namespace_named_twice_gets_one_part() {
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut twice = hub.rows(query(&["a", "a"])).await.unwrap();
+    ready(&mut twice).await;
+    assert_eq!(hub.scopes(), [namespace("a")]);
+    assert_eq!(drained(twice.drain()), (true, vec!["p1".to_owned()], 0));
+}
+
 #[tokio::test(start_paused = true)]
 async fn more_than_four_namespaces_watch_cluster_wide_only_if_the_person_may_list() {
     let five = ["a", "b", "c", "d", "e"];
