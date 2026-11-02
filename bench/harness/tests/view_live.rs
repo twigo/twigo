@@ -52,6 +52,7 @@ fn query(context: &str) -> ListQuery {
             descending: true,
         }),
         count_by: Some("Status".to_owned()),
+        group_by: None,
         values: None,
     }
 }

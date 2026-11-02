@@ -223,10 +223,12 @@ function batch(
     upserts: Object.entries(restarts).map(([id, value]) => ({
       id,
       created: null,
+      generated: null,
       cells: [id, value],
     })),
     status: { state: "ready" },
     counts: null,
+    groups: null,
   };
 }
 

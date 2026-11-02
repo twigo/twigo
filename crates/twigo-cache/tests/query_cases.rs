@@ -144,6 +144,7 @@ fn the_query_cases_pass() {
                 columns: case.query.columns.clone(),
                 sort: case.query.sort.clone(),
                 count_by: case.query.count_by.clone(),
+                group_by: None,
                 values: case.query.values.clone(),
             };
             // The hub's upstreams serve only the query's namespaces.

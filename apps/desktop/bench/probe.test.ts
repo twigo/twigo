@@ -9,7 +9,7 @@ const COLUMNS: Column[] = [
 ];
 
 function row(id: string, cells: Cell[]): Row {
-  return { id, created: null, cells };
+  return { id, created: null, generated: null, cells };
 }
 
 function batch(rest: Partial<ListBatch>): ListBatch {
@@ -21,6 +21,7 @@ function batch(rest: Partial<ListBatch>): ListBatch {
     upserts: [],
     status: { state: "ready" },
     counts: null,
+    groups: null,
     ...rest,
   };
 }

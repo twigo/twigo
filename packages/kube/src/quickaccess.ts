@@ -271,6 +271,7 @@ export function resourceProvider(
           columns: null,
           sort: null,
           countBy: null,
+          groupBy: null,
           values: null,
         }),
       );

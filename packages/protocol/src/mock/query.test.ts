@@ -26,6 +26,7 @@ test("only the choices' own keys count, not Object.prototype's", () => {
     columns: {},
     sort: null,
     countBy: null,
+    groupBy: null,
     values: null,
   };
   const rows: QueryRow[] = [
@@ -48,6 +49,7 @@ for (const list of CASES.lists) {
         columns: null,
         sort: null,
         countBy: null,
+        groupBy: null,
         values: null,
         ...(partial as Partial<ListQuery>),
       };

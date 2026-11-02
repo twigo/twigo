@@ -192,6 +192,7 @@ impl Layout {
         ipc::Row {
             id: RowId(id.to_owned()),
             created: row.meta.created.map(|created| created.to_string()),
+            generated: None,
             cells,
         }
     }
@@ -475,6 +476,7 @@ impl QueryView {
             upserts,
             status: status.clone(),
             counts: if counts_changed { counts.clone() } else { None },
+            groups: None,
         };
         self.sent = Sent {
             columns: Some(Arc::clone(&self.layout.server)),

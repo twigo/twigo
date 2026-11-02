@@ -174,6 +174,7 @@ mod tests {
             columns: None,
             sort: None,
             count_by: None,
+            group_by: None,
             values: None,
         };
         let (sender, batches) = mpsc::unbounded_channel();

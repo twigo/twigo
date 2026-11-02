@@ -14,6 +14,7 @@ function query(rest: Partial<ListQuery> = {}): ListQuery {
     columns: null,
     sort: null,
     countBy: null,
+    groupBy: null,
     values: null,
     ...rest,
   };

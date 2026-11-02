@@ -43,10 +43,27 @@ pub struct ListQuery {
     /// A column to count the matching rows by, such as a pod's Status; one
     /// the list lacks counts nothing.
     pub count_by: Option<String>,
+    /// A column to group the matching rows by; one the list lacks groups
+    /// nothing.
+    pub group_by: Option<Grouping>,
     /// Keeps the rows whose column holds one of the values, read as text.
     /// The counts of `count_by` come before it, so the values it drops keep
     /// theirs; a column the list lacks keeps every row.
     pub values: Option<ColumnValues>,
+}
+
+/// The rows grouped by the text of a column: the groups in the natural
+/// order of their values, runs of ASCII digits by their value and ASCII
+/// letters folded, the empty value last, and the rows of each group in
+/// the query's sort.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct Grouping {
+    /// A column name from [`ListBatch::columns`].
+    pub column: String,
+    /// The values of the groups the window skips. Their rows still count
+    /// in `total`, in `counts` and in their group's `rows`; a value no
+    /// group has does nothing.
+    pub collapsed: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -66,6 +83,8 @@ pub struct Sort {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 pub struct SubscriptionId(pub u32);
 
+/// `start` and `end` index the rows a window reads: every matching row,
+/// or with `group_by` those of the groups not collapsed, in group order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct SetWindow {
     pub id: SubscriptionId,
@@ -85,7 +104,8 @@ pub struct Ack {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct ListBatch {
     pub seq: u32,
-    /// Rows matching the query, in or out of the window.
+    /// Rows matching the query, in or out of the window, those of collapsed
+    /// groups included.
     pub total: u32,
     /// Present in the first batch and whenever the server's columns change.
     pub columns: Option<Vec<Column>>,
@@ -98,6 +118,11 @@ pub struct ListBatch {
     /// With `count_by`: the matching rows per value of that column, present
     /// in the first batch and whenever a count changes.
     pub counts: Option<Vec<ValueCount>>,
+    /// With `group_by`: the groups that hold matching rows, in group order,
+    /// present in the first batch and whenever a group appears, disappears
+    /// or moves, or its rows or counts change. Empty once the list no
+    /// longer has the column.
+    pub groups: Option<Vec<RowGroup>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -107,7 +132,20 @@ pub struct ValueCount {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct RowGroup {
+    /// The column's text; empty for the rows that have none.
+    pub value: String,
+    /// The group's matching rows, collapsed or not.
+    pub rows: u32,
+    /// With `count_by`: the group's rows per value of that column, counted
+    /// before `values` drops any and ordered as the list's counts are,
+    /// largest first; empty without it.
+    pub counts: Vec<ValueCount>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct Window {
+    /// An index into the rows the window reads, as in [`SetWindow`].
     pub start: u32,
     pub ids: Vec<RowId>,
 }
@@ -121,6 +159,12 @@ pub struct Row {
     pub id: RowId,
     /// RFC 3339; the webview renders Age columns from it.
     pub created: Option<String>,
+    /// Where the generated part of the object's name starts, in UTF-16
+    /// units: after its `metadata.generateName`, or at a pod's
+    /// `pod-template-hash` within it, so `api-7f9c8d6b5-x2kq9` reads `api-`
+    /// before what was generated. Null for a name the API server did not
+    /// generate.
+    pub generated: Option<u32>,
     /// One per column; null in Age columns.
     pub cells: Vec<Cell>,
 }

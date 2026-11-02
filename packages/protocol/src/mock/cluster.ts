@@ -161,6 +161,7 @@ export function podRow(pod: Pod, withNamespace: boolean): Row {
   return {
     id: pod.id,
     created: new Date(pod.created).toISOString(),
+    generated: null,
     cells: podCells(pod, withNamespace),
   };
 }

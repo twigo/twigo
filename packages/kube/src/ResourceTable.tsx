@@ -178,6 +178,7 @@ function ResourceList({
           columns: matched,
           sort,
           countBy: statusColumn(gvr) ?? null,
+          groupBy: null,
           values: values ?? null,
         },
   );

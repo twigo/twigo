@@ -627,6 +627,7 @@ class Subscription {
       upserts: upserts.map((pod) => podRow(pod, withNamespace)),
       status: this.#status,
       counts: counts && (first || countsChanged) ? counts : null,
+      groups: null,
     });
   }
 }
