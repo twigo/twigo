@@ -5532,6 +5532,7 @@ dependencies = [
  "percent-encoding",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tower",
@@ -5616,6 +5617,7 @@ dependencies = [
 name = "twigo-kube"
 version = "0.1.0"
 dependencies = [
+ "atomic-write-file",
  "base64 0.23.1",
  "bytes",
  "form_urlencoded",

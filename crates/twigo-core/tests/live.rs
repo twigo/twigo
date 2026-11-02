@@ -20,7 +20,7 @@ async fn the_namespaces_and_the_version_come_from_the_cluster() {
         "refusing context {context:?}: only kind and kwok clusters"
     );
     let dir = tempfile::tempdir().unwrap();
-    let core = Core::new(dir.path());
+    let core = Core::new(dir.path(), &dir.path().join("cache"));
     let env = ShellEnv::from_iter(Vec::<(OsString, OsString)>::new());
     let (_status, followed) = watch::channel(Status::Resolved(Arc::new(env)));
     tokio::spawn({

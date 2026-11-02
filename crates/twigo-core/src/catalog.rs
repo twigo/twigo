@@ -11,7 +11,7 @@ use std::sync::atomic::{self, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::watch;
-use twigo_kube::kubeconfig::{self, Sources, Watch};
+use twigo_kube::kubeconfig::{self, Fingerprint, Sources, Watch};
 
 /// The contexts, ordered by their `order`, those without one last, then by
 /// name.
@@ -127,6 +127,43 @@ impl Catalog {
 
     pub fn subscribe(&self) -> watch::Receiver<Option<Arc<Contexts>>> {
         self.contexts.subscribe()
+    }
+
+    /// A context's fingerprint, followed while the receiver lives: it
+    /// changes with what the context's clients are built from, but not
+    /// with the oidc tokens that Twigo and kubelogin write back (ARCHITECTURE
+    /// 6.2), nor with other contexts. None while no source lists it. It
+    /// starts once the sources have been read, so the catalog's first read
+    /// is no change.
+    pub async fn fingerprint(&self, context: &str) -> watch::Receiver<Option<Fingerprint>> {
+        let mut contexts = self.subscribe();
+        contexts
+            .wait_for(Option::is_some)
+            .await
+            .expect("the catalog outlives its subscribers");
+        let context = context.to_owned();
+        let read = move |contexts: &Option<Arc<Contexts>>| {
+            contexts
+                .as_ref()
+                .and_then(|contexts| contexts.find(&context))
+                .map(|found| found.fingerprint)
+        };
+        let (sender, receiver) = watch::channel(read(&contexts.borrow_and_update()));
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    () = sender.closed() => return,
+                    changed = contexts.changed() => if changed.is_err() { return },
+                }
+                let next = read(&contexts.borrow_and_update());
+                sender.send_if_modified(|current| {
+                    let modified = *current != next;
+                    *current = next;
+                    modified
+                });
+            }
+        });
+        receiver
     }
 
     /// The contexts, once the sources have been read.

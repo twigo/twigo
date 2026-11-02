@@ -14,11 +14,13 @@ use std::sync::{Arc, Weak};
 
 use jiff::Timestamp;
 use tokio::sync::watch;
+use twigo_cache::discovery::Follower;
 use twigo_cache::hub::{Connect, Hub, Query, Resource, RowFormat};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{ClusterVersion, ErrorKind, IpcError, ViewState};
 use twigo_kube::client::{Clients, ProxyEnv};
 use twigo_kube::credentials::{ExecError, OidcError, Provider, Registry, Source, Timeouts};
+use twigo_kube::discovery::Cache;
 use twigo_kube::kubeconfig;
 use twigo_netmon::Event;
 
@@ -34,6 +36,7 @@ pub struct Core {
     pub connections: Connections,
     pub trust: Trust,
     pub hub: Hub,
+    discovery: Arc<Cache>,
     credentials: Registry,
     /// Whether a Twigo window has the focus, which a plugin that may ask
     /// the person to sign in waits for.
@@ -61,12 +64,14 @@ pub enum ClientsError {
 
 impl Core {
     /// The core whose state and trusted plugins live in `data`, the app's
-    /// data directory.
-    pub fn new(data: &Path) -> Arc<Self> {
+    /// data directory, and its clusters' discovery in `cache`, its cache
+    /// directory.
+    pub fn new(data: &Path, cache: &Path) -> Arc<Self> {
         let shell_env = watch::Sender::new(None);
         let focused = watch::Sender::new(false);
         Arc::new_cyclic(|core| Self {
             hub: Hub::new(connect(core.clone())),
+            discovery: Arc::new(Cache::new(cache.join("discovery"))),
             state: State::open(data.join("state.json")),
             catalog: Catalog::default(),
             connections: Connections::default(),
@@ -189,11 +194,9 @@ impl Core {
         })
     }
 
-    /// The namespaces of a space's context, from its namespace index
-    /// (ARCHITECTURE 3.3), which lingers a while after each answer.
-    pub async fn namespaces(&self, space: &str) -> Result<Vec<String>, IpcError> {
-        let context = self
-            .state
+    /// The context of a space: M1 serves one-context spaces (ARCHITECTURE 4.2).
+    fn context(&self, space: &str) -> Result<String, IpcError> {
+        self.state
             .spaces()
             .into_iter()
             .find(|candidate| candidate.id == space)
@@ -201,7 +204,26 @@ impl Core {
             .ok_or_else(|| IpcError {
                 kind: ErrorKind::NotFound,
                 message: format!("no space {space:?}"),
-            })?;
+            })
+    }
+
+    /// The resources a space's context serves, followed as they change.
+    pub async fn follow_resources(&self, space: &str) -> Result<Follower, IpcError> {
+        let context = self.context(space)?;
+        let entry = self.catalog.fingerprint(&context).await;
+        Ok(Follower::new(
+            self.hub.clone(),
+            Arc::clone(&self.discovery),
+            context,
+            entry,
+        )
+        .await)
+    }
+
+    /// The namespaces of a space's context, from its namespace index
+    /// (ARCHITECTURE 3.3), which lingers a while after each answer.
+    pub async fn namespaces(&self, space: &str) -> Result<Vec<String>, IpcError> {
+        let context = self.context(space)?;
         let mut index = self
             .hub
             .rows(Query {

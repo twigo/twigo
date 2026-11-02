@@ -43,6 +43,13 @@ export type ContextAuth = { "state": "none" } | { "state": "invalid", message: s
 
 export type ContextColor = "red" | "orange" | "yellow" | "green" | "blue" | "purple";
 
+/**
+ * A context's resources as discovery last answered, or why it did not.
+ * `cluster` names the cluster the context reaches: its URL, its
+ * `tls-server-name` and the CAs it is trusted with.
+ */
+export type Discovered = { "state": "pending", cluster: string, } | { "state": "ready", cluster: string, resources: Array<Resource>, } | { "state": "failed", error: IpcError, };
+
 export type EnvVar = { name: string, value: string, };
 
 export type ErrorKind = "invalidInput" | "notFound" | "conflict" | "forbidden" | "unauthorized" | "timeout" | "unavailable" | "internal";
@@ -278,7 +285,7 @@ export type Commands = {
   spaces_list: { request: null; response: Array<Space>; message: null };
   contexts_watch: { request: null; response: Array<Context>; message: Array<Context> };
   space_open: { request: string; response: Space; message: null };
-  resources_list: { request: string; response: Array<Resource>; message: null };
+  resources_watch: { request: string; response: null; message: Discovered };
   namespaces_list: { request: string; response: Array<string>; message: null };
   cluster_version: { request: string; response: ClusterVersion; message: null };
   list_subscribe: { request: ListQuery; response: SubscriptionId; message: ListBatch };

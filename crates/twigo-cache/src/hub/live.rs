@@ -31,13 +31,13 @@ const POD_COLUMNS: [&str; 9] = [
     "Readiness Gates",
 ];
 
-struct Live {
-    config: Config,
-    context: String,
-    admin: kube::Client,
+pub(crate) struct Live {
+    pub(crate) config: Config,
+    pub(crate) context: String,
+    pub(crate) admin: kube::Client,
 }
 
-async fn live() -> Live {
+pub(crate) async fn live() -> Live {
     let path = std::env::var_os("TWIGO_TEST_KUBECONFIG")
         .expect("TWIGO_TEST_KUBECONFIG must name the kubeconfig of a kind or kwok cluster");
     let kubeconfig = Kubeconfig::read_from(path).unwrap();
@@ -91,7 +91,7 @@ impl Live {
     }
 
     /// The hub over clients of `config`, the admin's unless given.
-    fn hub(&self, config: Option<&Config>) -> (Hub, Arc<Clients>) {
+    pub(crate) fn hub(&self, config: Option<&Config>) -> (Hub, Arc<Clients>) {
         let clients =
             Arc::new(Clients::new(config.unwrap_or(&self.config), Options::default()).unwrap());
         let connect: Connect = {

@@ -6,7 +6,6 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { Resource } from "@twigo/protocol";
-import { toIpcError } from "@twigo/protocol";
 import { cn, EmptyState, Skeleton } from "@twigo/ui";
 import { useChanges, useWorkbench } from "@twigo/workbench";
 import { useResources, type Discovery } from "./discovery";
@@ -67,7 +66,7 @@ function SpaceExplorer({
   if (resources.state === "failed") {
     return (
       <EmptyState icon={CircleAlert} variant="error" density="inline">
-        {toIpcError(resources.error).message}
+        {resources.error.message}
       </EmptyState>
     );
   }

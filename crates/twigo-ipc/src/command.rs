@@ -5,8 +5,8 @@
 use ts_rs::TS;
 
 use crate::{
-    Ack, ClusterVersion, Context, ContextAuth, ExecReview, KeyboardLayout, ListBatch, ListQuery,
-    Resource, SetWindow, ShellEnvironment, Space, StateEntry, StateSnapshot, SubscriptionId,
+    Ack, ClusterVersion, Context, ContextAuth, Discovered, ExecReview, KeyboardLayout, ListBatch,
+    ListQuery, SetWindow, ShellEnvironment, Space, StateEntry, StateSnapshot, SubscriptionId,
 };
 
 pub trait Command {
@@ -49,14 +49,17 @@ impl Command for SpaceOpen {
     type Message = ();
 }
 
-/// The resources a space serves, by its id.
-pub struct ResourcesList;
+/// Follows the resources a space's context serves, by the space's id
+/// (ARCHITECTURE 3.6): answers at once, then sends them once discovery
+/// answers and again on every change. Discovery may wait on the network or
+/// a sign-in, which would hold up the watch of the next space.
+pub struct ResourcesWatch;
 
-impl Command for ResourcesList {
-    const NAME: &'static str = "resources_list";
+impl Command for ResourcesWatch {
+    const NAME: &'static str = "resources_watch";
     type Request = String;
-    type Response = Vec<Resource>;
-    type Message = ();
+    type Response = ();
+    type Message = Discovered;
 }
 
 /// A context's Kubernetes version, by the context's name.

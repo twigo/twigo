@@ -6,7 +6,7 @@ use ts_rs::{Config, TS, TypeVisitor};
 use crate::command::{
     ClusterVersionGet, Command, ContextAuthWatch, ContextSignIn, ContextSignInCancel,
     ContextsWatch, ExecReviewGet, ExecTrust, KeyboardLayoutWatch, ListAck, ListSetWindow,
-    ListSubscribe, ListUnsubscribe, NamespacesList, ResourcesList, ShellEnvironmentRetry,
+    ListSubscribe, ListUnsubscribe, NamespacesList, ResourcesWatch, ShellEnvironmentRetry,
     ShellEnvironmentWatch, SpaceOpen, SpacesList, StateLoad, StateSet, UrlOpen,
 };
 
@@ -21,7 +21,7 @@ pub fn typescript() -> String {
     module.command::<SpacesList>();
     module.command::<ContextsWatch>();
     module.command::<SpaceOpen>();
-    module.command::<ResourcesList>();
+    module.command::<ResourcesWatch>();
     module.command::<NamespacesList>();
     module.command::<ClusterVersionGet>();
     module.command::<ListSubscribe>();

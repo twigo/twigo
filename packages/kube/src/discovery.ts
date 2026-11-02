@@ -1,28 +1,84 @@
-import { useEffect, useState } from "react";
-import type { Backend, Gvr, Resource } from "@twigo/protocol";
+import {
+  toIpcError,
+  type Discovered,
+  type Gvr,
+  type IpcError,
+  type Resource,
+} from "@twigo/protocol";
+import { Changes, useChanges, type Workbench } from "@twigo/workbench";
 
-/** The resources each space serves, asked once per space. */
+export type Loaded<T> =
+  | { readonly state: "loading" }
+  | { readonly state: "ready"; readonly value: T }
+  | { readonly state: "failed"; readonly error: IpcError };
+
+/**
+ * The resources of the active space, as Rust follows them (ARCHITECTURE
+ * 3.6), and each context's version. A space shown again keeps its last
+ * resources, so it shows at once, while the cluster its context reaches is
+ * still theirs, which Rust tells before it asks the cluster for its
+ * discovery.
+ */
 export class Discovery {
-  readonly #spaces = new Map<string, Promise<readonly Resource[]>>();
+  readonly changes = new Changes();
+  readonly #spaces = new Map<string, Loaded<readonly Resource[]>>();
+  /** The cluster each space's resources came from. */
+  readonly #clusters = new Map<string, string>();
   readonly #versions = new Map<string, Promise<string>>();
+  #space: string | undefined;
+  #ready: number;
+  /**
+   * The last watch asked for, which the next waits on: Rust keeps one
+   * follower per webview, that of the watch it answered last, at once.
+   */
+  #watching: Promise<void> = Promise.resolve();
 
-  constructor(private readonly backend: Backend) {}
+  constructor(
+    private readonly workbench: Pick<Workbench, "backend" | "spaces"> & {
+      readonly credentials: Pick<Workbench["credentials"], "changes" | "ready">;
+    },
+  ) {
+    this.#ready = workbench.credentials.ready;
+    workbench.spaces.changes.subscribe(() => {
+      this.#follow(workbench.spaces.active?.id);
+    });
+    // Rust stops following what the credential refused, as the hub stops
+    // its upstreams, until the context's kubeconfig entry changes; so the
+    // space is followed again once a credential comes, whatever the last
+    // answer was.
+    workbench.credentials.changes.subscribe(() => {
+      const { ready } = workbench.credentials;
+      if (ready === this.#ready) return;
+      this.#ready = ready;
+      if (this.#space !== undefined) this.#watch(this.#space);
+    });
+    this.#follow(workbench.spaces.active?.id);
+  }
 
+  get(space: string): Loaded<readonly Resource[]> {
+    return this.#spaces.get(space) ?? { state: "loading" };
+  }
+
+  /** The space's resources once they come, or why they did not. */
   resources(space: string): Promise<readonly Resource[]> {
-    let pending = this.#spaces.get(space);
-    if (!pending) {
-      pending = this.backend.invoke("resources_list", space);
-      pending.catch(() => this.#spaces.delete(space));
-      this.#spaces.set(space, pending);
-    }
-    return pending;
+    return new Promise((resolve, reject) => {
+      const settle = () => {
+        const loaded = this.get(space);
+        if (loaded.state === "loading") return;
+        unsubscribe();
+        if (loaded.state === "ready") resolve(loaded.value);
+        else reject(loaded.error);
+      };
+      const unsubscribe = this.changes.subscribe(settle);
+      settle();
+    });
   }
 
   /** A context's Kubernetes version, asked once. */
   version(context: string): Promise<string> {
     let pending = this.#versions.get(context);
     if (!pending) {
-      pending = this.backend
+      pending = this.workbench.backend
         .invoke("cluster_version", context)
         .then((version) => version.gitVersion);
       pending.catch(() => this.#versions.delete(context));
@@ -30,36 +86,62 @@ export class Discovery {
     }
     return pending;
   }
-}
 
-export type Loaded<T> =
-  | { readonly state: "loading" }
-  | { readonly state: "ready"; readonly value: T }
-  | { readonly state: "failed"; readonly error: unknown };
+  #follow(space: string | undefined): void {
+    if (space === this.#space) return;
+    this.#space = space;
+    if (space !== undefined) this.#watch(space);
+  }
+
+  #watch(space: string): void {
+    this.#watching = this.#watching.then(async () => {
+      if (space !== this.#space) return;
+      try {
+        await this.workbench.backend.subscribe(
+          "resources_watch",
+          space,
+          (next) => {
+            this.#set(space, next);
+          },
+        );
+      } catch (error: unknown) {
+        this.#set(space, { state: "failed", error: toIpcError(error) });
+      }
+    });
+  }
+
+  #set(space: string, discovered: Discovered): void {
+    switch (discovered.state) {
+      case "pending":
+        if (this.#clusters.get(space) === discovered.cluster) return;
+        this.#spaces.delete(space);
+        this.#clusters.delete(space);
+        break;
+      case "ready":
+        this.#spaces.set(space, {
+          state: "ready",
+          value: discovered.resources,
+        });
+        this.#clusters.set(space, discovered.cluster);
+        break;
+      case "failed":
+        this.#spaces.set(space, {
+          state: "failed",
+          error: toIpcError(discovered.error),
+        });
+        this.#clusters.delete(space);
+        break;
+    }
+    this.changes.emit();
+  }
+}
 
 export function useResources(
   discovery: Discovery,
   space: string,
 ): Loaded<readonly Resource[]> {
-  const [loaded, setLoaded] = useState<{
-    space: string;
-    result: Loaded<readonly Resource[]>;
-  }>();
-  useEffect(() => {
-    let live = true;
-    discovery.resources(space).then(
-      (value) => {
-        if (live) setLoaded({ space, result: { state: "ready", value } });
-      },
-      (error: unknown) => {
-        if (live) setLoaded({ space, result: { state: "failed", error } });
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [discovery, space]);
-  return loaded?.space === space ? loaded.result : { state: "loading" };
+  useChanges(discovery.changes);
+  return discovery.get(space);
 }
 
 export function sameGvr(a: Gvr, b: Gvr): boolean {

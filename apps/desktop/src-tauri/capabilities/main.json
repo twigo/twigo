@@ -21,6 +21,7 @@
     "allow-cluster-version",
     "allow-namespaces-list",
     "allow-context-auth-watch",
+    "allow-resources-watch",
     "allow-context-sign-in",
     "allow-context-sign-in-cancel",
     "allow-exec-review",

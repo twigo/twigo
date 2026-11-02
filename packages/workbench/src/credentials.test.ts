@@ -1,6 +1,6 @@
 import { act } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { Backend, ContextAuth } from "@twigo/protocol";
+import type { Backend, ContextAuth, PluginStatus } from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import { testWorkbench } from "./testing";
 
@@ -439,4 +439,51 @@ test("a failed review or cancel is reported", async () => {
   expect(report).toHaveBeenCalledWith(
     new Error("context_sign_in_cancel failed"),
   );
+});
+
+test("a credential comes after none or a failed run, not after a run its own rejection set off", async () => {
+  const mock = createMockBackend("ready");
+  const pushes = new Map<string, (auth: ContextAuth) => void>();
+  const backend: Backend = {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe: (command, request, onMessage) => {
+      if (command === "context_auth_watch" && typeof request === "string") {
+        pushes.set(request, onMessage);
+      }
+      return mock.subscribe(command, request, onMessage);
+    },
+  };
+  const { credentials } = await started("ready", backend);
+  const run = (digest: string, ...statuses: PluginStatus[]) => {
+    for (const status of statuses) {
+      act(() => {
+        pushes.get("prod-eu")?.({
+          state: "plugin",
+          plugin: { command: "aws", args: [], env: [], digest, signsIn: false },
+          status,
+        });
+      });
+    }
+  };
+  const running: PluginStatus = {
+    state: "running",
+    since: new Date().toISOString(),
+    output: "",
+  };
+  const ready: PluginStatus = { state: "ready", expires: null };
+  run("aws", running, ready);
+  const counted = credentials.ready;
+
+  run("aws", { state: "idle" }, running, ready);
+  expect(credentials.ready).toBe(counted);
+  run(
+    "aws",
+    running,
+    { state: "failed", error: "exit 255", output: "", installHint: null },
+    running,
+    ready,
+  );
+  expect(credentials.ready).toBe(counted + 1);
+  run("aws-other-profile", running, ready);
+  expect(credentials.ready).toBe(counted + 2);
 });

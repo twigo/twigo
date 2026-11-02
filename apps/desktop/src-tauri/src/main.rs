@@ -16,8 +16,8 @@ use tauri_plugin_opener::OpenerExt;
 use twigo_core::Core;
 use twigo_env::Environment;
 use twigo_ipc::{
-    ClusterVersion, Context, ContextAuth, ErrorKind, ExecReview, IpcError, KeyboardLayout,
-    ShellEnvironment, Space, StateEntry, StateSnapshot,
+    ClusterVersion, Context, ContextAuth, Discovered, ErrorKind, ExecReview, IpcError,
+    KeyboardLayout, ShellEnvironment, Space, StateEntry, StateSnapshot,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
 
@@ -104,12 +104,13 @@ async fn shell_environment_retry(shell: State<'_, Shell>) -> Result<(), IpcError
     Ok(())
 }
 
-/// The core and the followers of its catalog and of the active context's
-/// credentials.
+/// The core and the followers of its catalog, of the active context's
+/// credentials and of the active space's resources.
 struct App {
     core: Arc<Core>,
     contexts: Followers,
     auth: Followers,
+    resources: Followers,
     /// The labels of the windows that have the focus, which moves from one
     /// to the next in either order of their events.
     focused: Mutex<HashSet<String>>,
@@ -221,6 +222,33 @@ async fn context_auth_watch(
 }
 
 #[tauri::command]
+fn resources_watch(
+    webview: Webview,
+    app: State<'_, App>,
+    request: String,
+    channel: Channel<Discovered>,
+) {
+    // Replaced in the order the webview asks, which waits for this answer
+    // before its next watch, so the follower is that of the last space.
+    let core = Arc::clone(&app.core);
+    let follower = tauri::async_runtime::spawn(async move {
+        let send = |next: Discovered| {
+            if let Err(error) = channel.send(next) {
+                eprintln!("could not send the resources: {error}");
+            }
+        };
+        let mut resources = match core.follow_resources(&request).await {
+            Ok(resources) => resources,
+            Err(error) => return send(Discovered::Failed { error }),
+        };
+        loop {
+            send(resources.next().await);
+        }
+    });
+    app.resources.replace(&webview, follower);
+}
+
+#[tauri::command]
 async fn context_sign_in(app: State<'_, App>, request: String) -> Result<(), IpcError> {
     app.core.sign_in(&request).await
 }
@@ -304,7 +332,7 @@ fn main() {
                 let environment = Arc::clone(&environment);
                 async move { environment.resolve().await }
             });
-            let core = Core::new(&app.path().app_data_dir()?);
+            let core = Core::new(&app.path().app_data_dir()?, &app.path().app_cache_dir()?);
             tauri::async_runtime::spawn({
                 let core = Arc::clone(&core);
                 let environment = Arc::clone(&environment);
@@ -323,6 +351,7 @@ fn main() {
                 core,
                 contexts: Followers::default(),
                 auth: Followers::default(),
+                resources: Followers::default(),
                 focused: Mutex::default(),
             };
             if let Some(window) = app.get_webview_window("main") {
@@ -343,6 +372,7 @@ fn main() {
             cluster_version,
             namespaces_list,
             context_auth_watch,
+            resources_watch,
             context_sign_in,
             context_sign_in_cancel,
             exec_review,

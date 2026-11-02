@@ -11,6 +11,7 @@ fn main() {
         "cluster_version",
         "namespaces_list",
         "context_auth_watch",
+        "resources_watch",
         "context_sign_in",
         "context_sign_in_cancel",
         "exec_review",
