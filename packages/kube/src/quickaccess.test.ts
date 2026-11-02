@@ -122,6 +122,19 @@ test("ns scopes the active space", async () => {
   expect(workbench.spaces.state("prod-eu").namespaces).toEqual(["payments"]);
 });
 
+test("ns takes a typed name where namespaces may not be listed", async () => {
+  const workbench = await testWorkbench("forbidden");
+  registerKube(workbench);
+  const resolved = workbench.quickAccess.resolve("ns team-a");
+  if (!resolved) throw new Error("no ns provider");
+  const items = await resolved.provider.items(resolved.filter, NOWHERE);
+  expect(items.map((item) => item.label)).toEqual(["all namespaces", "team-a"]);
+  const [, typed] = items;
+  if (!typed) throw new Error("no typed item");
+  await act(() => resolved.provider.accept(typed, resolved.filter, NOWHERE));
+  expect(workbench.spaces.state("prod-eu").namespaces).toEqual(["team-a"]);
+});
+
 test("no prefix finds pods by name and opens the pick's list with its details", async () => {
   const { workbench, run } = await kube();
   const open = vi

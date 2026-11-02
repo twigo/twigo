@@ -188,6 +188,9 @@ export function createMockBackend(
     },
     namespaces_list: (id) => {
       space(id);
+      if (lists === "forbidden") {
+        throw new IpcError("forbidden", "you may not list namespaces");
+      }
       return [...NAMESPACES].sort();
     },
     shell_environment_retry: () => {

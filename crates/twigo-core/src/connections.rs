@@ -1,6 +1,7 @@
 //! The clients of each context (ARCHITECTURE 3.2, 6.3): built when first
 //! asked for, rebuilt for every actor at once when the context's fingerprint
-//! or the login shell's proxy variables change.
+//! or the login shell's proxy variables change, which retires the
+//! connections of the clients they replace.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -82,11 +83,16 @@ impl Connections {
                 ..Options::default()
             },
         )?);
-        *slot.built.lock().expect("slot lock") = Some(Built {
+        let replaced = slot.built.lock().expect("slot lock").replace(Built {
             fingerprint: context.fingerprint,
             env: env.clone(),
             clients: Arc::clone(&clients),
         });
+        if let Some(replaced) = replaced {
+            // Its watches re-open over the new clients, which may reach
+            // another server.
+            replaced.clients.connections().retire();
+        }
         Ok(clients)
     }
 
@@ -190,11 +196,16 @@ contexts:
             &rcgen::generate_simple_self_signed(["a".to_owned()]).unwrap(),
         );
         let catalog = load(dir.path());
+        let retired = a.connections().retired();
         let rebuilt = connections
             .clients(find(&catalog, "kind-a"), &env, None)
             .await
             .unwrap();
         assert!(!Arc::ptr_eq(&a, &rebuilt), "the CA file changed");
+        assert!(
+            retired.has_changed().unwrap(),
+            "the replaced clients' watches re-open"
+        );
         let same = connections
             .clients(find(&catalog, "kind-b"), &env, None)
             .await

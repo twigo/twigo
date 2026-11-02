@@ -9,6 +9,7 @@ fn main() {
         "state_load",
         "state_set",
         "cluster_version",
+        "namespaces_list",
         "context_auth_watch",
         "context_sign_in",
         "context_sign_in_cancel",
