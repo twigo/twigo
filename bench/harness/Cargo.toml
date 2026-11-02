@@ -23,4 +23,7 @@ libc.workspace = true
 mach2.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["test-util"] }
+futures.workspace = true
+tokio = { workspace = true, features = ["process", "test-util"] }
+twigo-cache.workspace = true
+twigo-ipc.workspace = true

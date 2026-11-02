@@ -5493,6 +5493,7 @@ name = "twigo-bench"
 version = "0.1.0"
 dependencies = [
  "fastrand",
+ "futures",
  "json-patch",
  "k8s-openapi",
  "kube",
@@ -5501,6 +5502,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "twigo-cache",
+ "twigo-ipc",
  "twigo-kube",
 ]
 
