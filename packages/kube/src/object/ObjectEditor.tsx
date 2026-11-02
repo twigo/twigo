@@ -90,13 +90,16 @@ export function ObjectEditor({
       )}
       {tab === "events" && (
         <Shown snapshot={snapshot} has={snapshot.events !== undefined}>
-          <Events events={snapshot.events ?? []} />
+          {snapshot.events && <Events list={snapshot.events} />}
         </Shown>
       )}
       {tab === "related" && (
         <Shown snapshot={snapshot} has={snapshot.related !== undefined}>
           {snapshot.related && (
             <div className="flex flex-col gap-4">
+              {snapshot.related.unavailable !== null && (
+                <p className="text-error">{snapshot.related.unavailable}</p>
+              )}
               <RelatedList
                 title="Owners"
                 objects={snapshot.related.owners}

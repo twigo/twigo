@@ -25,4 +25,3 @@ Findings that belong to no step yet.
   - Listing and storing 5,000 pods by a streaming list allocates 44.2 MiB in all, HTTP/2 reads and body chunks included, to keep 4.0 MiB (`examples/hub_memory.rs`, kind 1.37 with `bench/pods.sh` at 5,000, 2026-11-02); a paged list of the same pods was not measured the same way, and step 11's budgets say whether it matters.
 - Open objects (`twigo_core::objects`, ARCHITECTURE 4.3):
   - The Related tab lists the objects that the core controllers own (`twigo_describe::owned`); a custom resource's owned objects need an owner index across kinds.
-  - An object's events and owned objects that cannot be listed, as for a person who may not list events, show as none: their upstreams' states reach no view.

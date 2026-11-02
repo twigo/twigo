@@ -60,6 +60,20 @@ impl<'a> Collection<'a> {
     }
 }
 
+/// A literal value in a field selector, its `\`, `,` and `=` escaped with
+/// a backslash, as apimachinery's `fields.EscapeValue` escapes them
+/// (kubernetes v1.37.0, `staging/src/k8s.io/apimachinery/pkg/fields/selector.go`).
+pub fn field_value(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for c in value.chars() {
+        if matches!(c, '\\' | ',' | '=') {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
+}
+
 pub enum WatchFrom<'a> {
     ResourceVersion(&'a str),
     /// A streaming list, ended by a bookmark annotated
@@ -123,6 +137,12 @@ fn get(path: &str, query: String, accept: &'static str) -> Request<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_field_value_escapes_what_a_selector_would_read() {
+        assert_eq!(field_value("web-0"), "web-0");
+        assert_eq!(field_value(r"a,b=c\d"), r"a\,b\=c\\d");
+    }
 
     #[test]
     fn list_asks_for_a_table_page() {

@@ -7,7 +7,7 @@ export type Block = { "type": "fields", fields: Array<Field>, } | { "type": "con
  * Whether [`GetValues`] sends their values: a ConfigMap's text
  * values, never a Secret's.
  */
-readable: boolean, } | { "type": "tree", nodes: Array<TreeNode>, } | { "type": "events", events: Array<ObjectEvent>, };
+readable: boolean, } | { "type": "tree", nodes: Array<TreeNode>, } | { "type": "events" } & EventList;
 
 export type Cell = null | boolean | number | number | string;
 
@@ -77,6 +77,16 @@ export type Discovered = { "state": "pending", cluster: string, } | { "state": "
 export type EnvVar = { name: string, value: string, };
 
 export type ErrorKind = "invalidInput" | "notFound" | "conflict" | "forbidden" | "unauthorized" | "timeout" | "unavailable" | "internal";
+
+/**
+ * An object's events, newest first.
+ */
+export type EventList = { events: Array<ObjectEvent>, 
+/**
+ * Why they cannot be listed, as when the person may not list events;
+ * None while they are listed or still coming.
+ */
+unavailable: string | null, };
 
 /**
  * An exec credential plugin as the kubeconfig names it (ARCHITECTURE 6.2).
@@ -243,10 +253,9 @@ overview: Overview | null,
  */
 manifest: string | null, 
 /**
- * Newest first; present when they changed, while the events part is
- * shown.
+ * Present when they changed, while the events part is shown.
  */
-events: Array<ObjectEvent> | null, 
+events: EventList | null, 
 /**
  * Present when it changed, while the related part is shown.
  */
@@ -350,7 +359,11 @@ expires: string | null, } | { "state": "failed", error: string, output: string,
  */
 installHint: string | null, };
 
-export type Related = { owners: Array<RelatedObject>, owned: Array<RelatedObject>, };
+export type Related = { owners: Array<RelatedObject>, owned: Array<RelatedObject>, 
+/**
+ * Why some owned objects cannot be listed.
+ */
+unavailable: string | null, };
 
 export type RelatedObject = { target: ObjectRef, 
 /**

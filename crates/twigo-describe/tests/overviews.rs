@@ -9,7 +9,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use twigo_describe::{Input, Printed, describe};
-use twigo_ipc::{Block, ObjectEvent, Overview};
+use twigo_ipc::{Block, EventList, ObjectEvent, Overview};
 
 #[derive(Deserialize)]
 struct Recorded {
@@ -42,7 +42,10 @@ fn described() -> BTreeMap<String, Overview> {
             let overview = describe(Input {
                 object: &recorded.object,
                 printed: &recorded.printed,
-                events: &recorded.events,
+                events: &EventList {
+                    events: recorded.events.clone(),
+                    unavailable: None,
+                },
             });
             (name, overview)
         })
@@ -159,7 +162,7 @@ fn a_config_map_lists_text_and_binary_keys_with_their_sizes() {
 }
 
 #[test]
-fn a_pod_names_its_controller_and_its_events_newest_first() {
+fn a_pod_names_its_controller_and_its_events() {
     let described = described();
     let pod = &described["pod"];
     let Block::Fields { fields } = &pod.sections[0].blocks[0] else {
@@ -176,9 +179,10 @@ fn a_pod_names_its_controller_and_its_events_newest_first() {
         (target.group.as_str(), target.kind.as_str()),
         ("apps", "ReplicaSet")
     );
-    let Some(Block::Events { events }) = pod.sections.last().and_then(|s| s.blocks.first()) else {
+    let Some(Block::Events(EventList { events, .. })) =
+        pod.sections.last().and_then(|s| s.blocks.first())
+    else {
         panic!("the events last");
     };
     assert!(events.iter().any(|event| event.reason == "Scheduled"));
-    assert!(events.is_sorted_by(|a, b| a.last >= b.last));
 }

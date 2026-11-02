@@ -338,6 +338,12 @@ impl Core {
             resource: query.gvr.resource,
             namespaced: query.namespaced,
         };
+        if query.namespaced && query.namespace.is_none() {
+            return Err(IpcError {
+                kind: ErrorKind::InvalidInput,
+                message: format!("{} names no namespace", query.name),
+            });
+        }
         let namespace = query.namespace.filter(|_| query.namespaced);
         let object = self
             .hub

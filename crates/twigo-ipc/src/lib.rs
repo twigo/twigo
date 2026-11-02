@@ -23,9 +23,9 @@ pub use list::{
     SetWindow, Sort, SubscriptionId, ViewState, Window,
 };
 pub use object::{
-    Block, Condition, DataEntry, Field, GetValues, Label, ObjectBatch, ObjectEvent, ObjectParts,
-    ObjectQuery, ObjectRef, OpenObject, Overview, Related, RelatedObject, Section, SetParts, Tone,
-    TreeNode, TreeValue, Value,
+    Block, Condition, DataEntry, EventList, Field, GetValues, Label, ObjectBatch, ObjectEvent,
+    ObjectParts, ObjectQuery, ObjectRef, OpenObject, Overview, Related, RelatedObject, Section,
+    SetParts, Tone, TreeNode, TreeValue, Value,
 };
 pub use space::{Context, ContextColor, Space};
 pub use state::{StateEntry, StateSnapshot};

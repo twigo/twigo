@@ -1,5 +1,6 @@
 import { IpcError } from "../error";
 import type {
+  EventList,
   ObjectBatch,
   ObjectParts,
   ObjectQuery,
@@ -62,7 +63,11 @@ export class MockObject {
     manifest.metadata.name = query.name;
     if (query.namespace !== null) manifest.metadata.namespace = query.namespace;
     this.#manifest = JSON.stringify(manifest);
-    this.#related = { owners: owners(this.#overview), owned: [] };
+    this.#related = {
+      owners: owners(this.#overview),
+      owned: [],
+      unavailable: null,
+    };
     this.#onMessage = onMessage;
     this.#parts = parts;
     setTimeout(() => {
@@ -140,13 +145,14 @@ function renamed(overview: Overview, query: ObjectQuery): Overview {
   };
 }
 
-function events(overview: Overview) {
+function events(overview: Overview): EventList {
   for (const section of overview.sections) {
     for (const block of section.blocks) {
-      if (block.type === "events") return block.events;
+      if (block.type === "events")
+        return { events: block.events, unavailable: block.unavailable };
     }
   }
-  return [];
+  return { events: [], unavailable: null };
 }
 
 /** The owners the metadata section links to. */

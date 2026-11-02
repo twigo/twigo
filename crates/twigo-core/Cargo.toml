@@ -26,6 +26,7 @@ twigo-netmon.workspace = true
 twigo-policy.workspace = true
 
 [dev-dependencies]
+twigo-cache = { workspace = true, features = ["test-util"] }
 k8s-openapi.workspace = true
 rcgen.workspace = true
 tempfile.workspace = true

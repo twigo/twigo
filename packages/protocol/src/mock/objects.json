@@ -88,7 +88,8 @@
           "blocks": [
             {
               "type": "events",
-              "events": []
+              "events": [],
+              "unavailable": null
             }
           ]
         }
@@ -671,7 +672,8 @@
                   "last": "2026-11-02T21:04:52Z",
                   "fieldPath": null
                 }
-              ]
+              ],
+              "unavailable": null
             }
           ]
         }
@@ -1207,7 +1209,8 @@
                   "last": "2026-11-02T20:44:21Z",
                   "fieldPath": null
                 }
-              ]
+              ],
+              "unavailable": null
             }
           ]
         }
@@ -2466,7 +2469,8 @@
                   "last": "2026-11-02T21:04:52Z",
                   "fieldPath": "spec.containers{app}"
                 }
-              ]
+              ],
+              "unavailable": null
             }
           ]
         }
@@ -2570,13 +2574,14 @@
           "blocks": [
             {
               "type": "events",
-              "events": []
+              "events": [],
+              "unavailable": null
             }
           ]
         }
       ]
     },
-    "manifest": "{\"apiVersion\":\"v1\",\"data\":{\"key.der\":\"<10 bytes>\",\"password\":\"<13 bytes>\"},\"kind\":\"Secret\",\"metadata\":{\"creationTimestamp\":\"2026-11-02T21:04:52Z\",\"name\":\"credentials\",\"namespace\":\"overview\",\"resourceVersion\":\"3799\",\"uid\":\"3b18ce49-9e24-4fb7-adaf-853fcfc6290e\"},\"stringData\":null,\"type\":\"Opaque\"}"
+    "manifest": "{\"apiVersion\":\"v1\",\"data\":{\"key.der\":\"<10 bytes>\",\"password\":\"<13 bytes>\"},\"kind\":\"Secret\",\"metadata\":{\"creationTimestamp\":\"2026-11-02T21:04:52Z\",\"name\":\"credentials\",\"namespace\":\"overview\",\"resourceVersion\":\"3799\",\"uid\":\"3b18ce49-9e24-4fb7-adaf-853fcfc6290e\"},\"type\":\"Opaque\"}"
   },
   "service": {
     "overview": {
@@ -2831,7 +2836,8 @@
           "blocks": [
             {
               "type": "events",
-              "events": []
+              "events": [],
+              "unavailable": null
             }
           ]
         }
@@ -3083,7 +3089,8 @@
           "blocks": [
             {
               "type": "events",
-              "events": []
+              "events": [],
+              "unavailable": null
             }
           ]
         }

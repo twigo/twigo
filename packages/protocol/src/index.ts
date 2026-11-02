@@ -19,6 +19,7 @@ export type {
   ContextColor,
   Discovered,
   EnvVar,
+  EventList,
   ErrorKind,
   ExecPlugin,
   ExecReview,

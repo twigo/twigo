@@ -67,9 +67,8 @@ pub struct ObjectBatch {
     /// replaced by their sizes; present when it changed, while the manifest
     /// part is shown.
     pub manifest: Option<String>,
-    /// Newest first; present when they changed, while the events part is
-    /// shown.
-    pub events: Option<Vec<ObjectEvent>>,
+    /// Present when they changed, while the events part is shown.
+    pub events: Option<EventList>,
     /// Present when it changed, while the related part is shown.
     pub related: Option<Related>,
 }
@@ -109,9 +108,16 @@ pub enum Block {
     Tree {
         nodes: Vec<TreeNode>,
     },
-    Events {
-        events: Vec<ObjectEvent>,
-    },
+    Events(EventList),
+}
+
+/// An object's events, newest first.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct EventList {
+    pub events: Vec<ObjectEvent>,
+    /// Why they cannot be listed, as when the person may not list events;
+    /// None while they are listed or still coming.
+    pub unavailable: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -232,10 +238,12 @@ pub struct ObjectRef {
     pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct Related {
     pub owners: Vec<RelatedObject>,
     pub owned: Vec<RelatedObject>,
+    /// Why some owned objects cannot be listed.
+    pub unavailable: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

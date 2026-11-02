@@ -15,7 +15,7 @@ mod tree;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use twigo_ipc::{Block, Condition, Field, ObjectEvent, Overview, Section, Tone};
+use twigo_ipc::{Block, Condition, EventList, Field, Overview, Section, Tone};
 
 pub use events::{event, newest_first};
 pub use owned::{Owned, owned};
@@ -26,8 +26,7 @@ pub struct Input<'a> {
     pub object: &'a Value,
     /// The server's printer columns for it, Name, Namespace and Age left out.
     pub printed: &'a [Printed],
-    /// Newest first.
-    pub events: &'a [ObjectEvent],
+    pub events: &'a EventList,
 }
 
 /// A cell the server printed for the object, as text.
@@ -56,9 +55,7 @@ pub fn describe(input: Input<'_>) -> Overview {
     sections.push(Section {
         id: "core.events".to_owned(),
         title: "Events".to_owned(),
-        blocks: vec![Block::Events {
-            events: input.events.to_vec(),
-        }],
+        blocks: vec![Block::Events(input.events.clone())],
     });
     Overview { sections }
 }

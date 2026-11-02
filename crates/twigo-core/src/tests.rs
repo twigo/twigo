@@ -519,3 +519,14 @@ async fn a_window_reaches_only_its_own_objects_and_a_reload_closes_them() {
     .await
     .expect("the object ended with its window");
 }
+
+#[tokio::test]
+async fn a_namespaced_object_without_a_namespace_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = Core::new(dir.path(), &dir.path().join("cache"));
+    let space = core.state.open_space("kind-test").id;
+    let mut nowhere = pod(&space);
+    nowhere.object.namespace = None;
+    let refused = core.object_open("main", nowhere, |_| true).await;
+    assert_eq!(refused.unwrap_err().kind, ErrorKind::InvalidInput);
+}

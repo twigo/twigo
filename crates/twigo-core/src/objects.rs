@@ -13,11 +13,12 @@ use tokio::time::MissedTickBehavior;
 use twigo_cache::batcher::FLUSH;
 use twigo_cache::hub::{Delta, Hub, Query, Resource, RowFormat, Subscription};
 use twigo_cache::object::Object;
+use twigo_cache::request::field_value;
 use twigo_cache::table::{Cell, Column, ColumnKind, Row};
 use twigo_describe::{Input, Owned, Printed};
 use twigo_ipc::{
-    ErrorKind, IpcError, ObjectBatch, ObjectEvent, ObjectParts, ObjectRef, Related, RelatedObject,
-    ViewState,
+    ErrorKind, EventList, IpcError, ObjectBatch, ObjectEvent, ObjectParts, ObjectRef, Related,
+    RelatedObject, ViewState,
 };
 
 /// An open object: dropping it ends its task and its upstreams.
@@ -82,17 +83,22 @@ impl Opened {
             kind: ErrorKind::Internal,
             message: format!("the object does not parse: {error}"),
         })?;
-        if json["apiVersion"] != "v1" || json["kind"] != "ConfigMap" {
-            return Err(IpcError {
-                kind: ErrorKind::Forbidden,
-                message: "only a ConfigMap's values are sent".to_owned(),
-            });
-        }
-        Ok(keys
-            .iter()
-            .map(|key| json["data"][key].as_str().map(str::to_owned))
-            .collect())
+        values_of(&json, keys)
     }
+}
+
+/// A ConfigMap's text values; any other kind's refused, a Secret's above all.
+fn values_of(object: &Value, keys: &[String]) -> Result<Vec<Option<String>>, IpcError> {
+    if object["apiVersion"] != "v1" || object["kind"] != "ConfigMap" {
+        return Err(IpcError {
+            kind: ErrorKind::Forbidden,
+            message: "only a ConfigMap's values are sent".to_owned(),
+        });
+    }
+    Ok(keys
+        .iter()
+        .map(|key| object["data"][key].as_str().map(str::to_owned))
+        .collect())
 }
 
 impl Drop for Opened {
@@ -145,11 +151,8 @@ async fn run(
     let mut current: Option<Arc<Object>> = None;
     let mut columns: Option<Arc<[Column]>> = None;
     let mut around: Option<Around> = None;
-    let mut events: Vec<ObjectEvent> = Vec::new();
-    let mut related = Related {
-        owners: Vec::new(),
-        owned: Vec::new(),
-    };
+    let mut events = EventList::default();
+    let mut related = Related::default();
     loop {
         let ticked = tokio::select! {
             _ = interval.tick() => true,
@@ -212,8 +215,8 @@ async fn run(
         let uid = current.as_ref().and_then(|object| object.meta.uid.clone());
         if around.as_ref().map(|held| &held.uid) != uid.as_ref() {
             around = None;
-            events.clear();
-            related.owned.clear();
+            events = EventList::default();
+            related = Related::default();
             dirty.overview = true;
             dirty.events = true;
             dirty.related = true;
@@ -234,28 +237,37 @@ async fn run(
             } else if !parts.related {
                 held.owned = None;
             }
-            if let Some(subscription) = &held.events
-                && drained(subscription)
-            {
-                events = subscription
-                    .items()
-                    .iter()
-                    .filter_map(|event| serde_json::from_str(event.json.get()).ok())
-                    .map(|event: Value| twigo_describe::event(&event))
-                    .collect();
-                twigo_describe::newest_first(&mut events);
-                dirty.overview = true;
-                dirty.events = true;
+            if let Some(subscription) = &held.events {
+                let unavailable = unavailable(&subscription.state());
+                if drained(subscription) || unavailable != events.unavailable {
+                    let mut listed: Vec<ObjectEvent> = subscription
+                        .items()
+                        .iter()
+                        .filter_map(|event| serde_json::from_str(event.json.get()).ok())
+                        .map(|event: Value| twigo_describe::event(&event))
+                        .collect();
+                    twigo_describe::newest_first(&mut listed);
+                    events = EventList {
+                        events: listed,
+                        unavailable,
+                    };
+                    dirty.overview = true;
+                    dirty.events = true;
+                }
             }
             let owned = held.owned.as_deref().unwrap_or_default();
             let mut owned_changed = false;
             for (_, subscription) in owned {
                 owned_changed |= drained(subscription);
             }
-            if owned_changed || changed {
+            let owned_unavailable = owned
+                .iter()
+                .find_map(|(_, subscription)| unavailable(&subscription.state()));
+            if owned_changed || changed || owned_unavailable != related.unavailable {
                 related = Related {
                     owners: owners(json, target.namespace.as_deref()),
                     owned: owned_by(owned, uid, target.namespace.as_deref()),
+                    unavailable: owned_unavailable,
                 };
                 dirty.related = true;
             }
@@ -302,7 +314,7 @@ struct Shown<'a> {
     dirty: &'a Dirty,
     object: Option<&'a Value>,
     printed: &'a [Printed],
-    events: &'a [ObjectEvent],
+    events: &'a EventList,
     related: &'a Related,
 }
 
@@ -333,9 +345,20 @@ impl Shown<'_> {
             manifest: object
                 .filter(|_| parts.manifest && dirty.manifest)
                 .map(|object| twigo_policy::redact::for_view(object.clone()).to_string()),
-            events: (parts.events && dirty.events).then(|| events.to_vec()),
+            events: (parts.events && dirty.events).then(|| (*events).clone()),
             related: (parts.related && dirty.related).then(|| (*related).clone()),
         }
+    }
+}
+
+/// Why an upstream's objects cannot be listed, in its state; None while
+/// they are listed or still coming.
+fn unavailable(state: &ViewState) -> Option<String> {
+    match state {
+        ViewState::Forbidden { verb, resource } => Some(format!("You may not {verb} {resource}.")),
+        ViewState::Unauthorized => Some("The cluster does not accept the credentials.".to_owned()),
+        ViewState::Error { error } => Some(error.message.clone()),
+        _ => None,
     }
 }
 
@@ -390,11 +413,11 @@ fn events_of(
     let selector = if object["apiVersion"] == "v1" && object["kind"] == "Node" {
         format!(
             "regarding.kind=Node,regarding.name={}",
-            object["metadata"]["name"].as_str().unwrap_or_default()
+            field_value(object["metadata"]["name"].as_str().unwrap_or_default())
         )
     } else {
         let mirrored = object["metadata"]["annotations"]["kubernetes.io/config.mirror"].as_str();
-        format!("regarding.uid={}", mirrored.unwrap_or(uid))
+        format!("regarding.uid={}", field_value(mirrored.unwrap_or(uid)))
     };
     hub.selected(
         &target.context,
@@ -509,10 +532,7 @@ mod tests {
             "type": "Opaque",
             "data": { "password": "aHVudGVyMg==" },
         });
-        let related = Related {
-            owners: Vec::new(),
-            owned: Vec::new(),
-        };
+        let related = Related::default();
         let shown = Shown {
             parts: ObjectParts {
                 overview: true,
@@ -526,7 +546,7 @@ mod tests {
                 column: "Type".to_owned(),
                 value: "Opaque".to_owned(),
             }],
-            events: &[],
+            events: &EventList::default(),
             related: &related,
         };
         let batch = shown.batch(1, ViewState::Ready);
@@ -536,6 +556,32 @@ mod tests {
         assert!(
             !sent.contains("hunter2") && !sent.contains("aHVudGVyMg"),
             "{sent}"
+        );
+    }
+
+    #[test]
+    fn values_come_from_a_config_map_only() {
+        let keys = [
+            "password".to_owned(),
+            "mode".to_owned(),
+            "logo.png".to_owned(),
+        ];
+        let secret = json!({
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "data": { "password": "aHVudGVyMg==" },
+        });
+        let refused = values_of(&secret, &keys).unwrap_err();
+        assert_eq!(refused.kind, ErrorKind::Forbidden);
+        let config = json!({
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "data": { "mode": "fast" },
+            "binaryData": { "logo.png": "iVBORw0KGgo=" },
+        });
+        assert_eq!(
+            values_of(&config, &keys).unwrap(),
+            [None, Some("fast".to_owned()), None]
         );
     }
 }

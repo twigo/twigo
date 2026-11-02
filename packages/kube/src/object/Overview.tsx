@@ -4,8 +4,8 @@ import type {
   Block,
   Condition,
   DataEntry,
+  EventList,
   Field,
-  ObjectEvent,
   ObjectRef,
   Overview as Document,
   Value,
@@ -104,7 +104,7 @@ function BlockView({
     case "tree":
       return <Properties nodes={block.nodes} depth={0} />;
     case "events":
-      return <Events events={block.events} />;
+      return <Events list={block} />;
   }
 }
 
@@ -370,7 +370,10 @@ function DataRow({
   );
 }
 
-export function Events({ events }: { events: readonly ObjectEvent[] }) {
+/** An object's events, newest first, or why they cannot be listed. */
+export function Events({ list }: { list: EventList }) {
+  const { events, unavailable } = list;
+  if (unavailable !== null) return <p className="text-error">{unavailable}</p>;
   if (events.length === 0)
     return <p className="text-muted-foreground">No events</p>;
   return (

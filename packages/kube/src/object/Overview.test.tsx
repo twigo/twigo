@@ -173,3 +173,28 @@ test("a Secret's keys do not open", () => {
   expect(screen.queryByRole("button", { name: /mode/ })).toBeNull();
   expect(screen.getByText("mode")).toBeDefined();
 });
+
+test("events that cannot be listed say why instead of none", () => {
+  render(
+    <Overview
+      overview={{
+        sections: [
+          {
+            id: "core.events",
+            title: "Events",
+            blocks: [
+              {
+                type: "events",
+                events: [],
+                unavailable: "You may not list events.events.k8s.io.",
+              },
+            ],
+          },
+        ],
+      }}
+      onOpen={() => undefined}
+    />,
+  );
+  expect(document.body.textContent).toContain("You may not list");
+  expect(document.body.textContent).not.toContain("No events");
+});

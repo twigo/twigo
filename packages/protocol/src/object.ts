@@ -1,8 +1,8 @@
 import type { Backend } from "./backend";
 import { IpcError, toIpcError } from "./error";
 import type {
+  EventList,
   ObjectBatch,
-  ObjectEvent,
   ObjectParts,
   ObjectQuery,
   Overview,
@@ -19,7 +19,7 @@ export interface ObjectSnapshot {
   readonly overview: Overview | undefined;
   /** The object's JSON, managedFields dropped and a Secret's values replaced by their sizes. */
   readonly manifest: string | undefined;
-  readonly events: readonly ObjectEvent[] | undefined;
+  readonly events: EventList | undefined;
   readonly related: Related | undefined;
 }
 
