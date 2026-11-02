@@ -410,15 +410,6 @@ fn events_of(
     object: &Value,
     uid: &str,
 ) -> Result<Subscription<Object>, IpcError> {
-    let selector = if object["apiVersion"] == "v1" && object["kind"] == "Node" {
-        format!(
-            "regarding.kind=Node,regarding.name={}",
-            field_value(object["metadata"]["name"].as_str().unwrap_or_default())
-        )
-    } else {
-        let mirrored = object["metadata"]["annotations"]["kubernetes.io/config.mirror"].as_str();
-        format!("regarding.uid={}", field_value(mirrored.unwrap_or(uid)))
-    };
     hub.selected(
         &target.context,
         Resource {
@@ -428,8 +419,20 @@ fn events_of(
             namespaced: true,
         },
         target.namespace.clone(),
-        selector,
+        events_selector(object, uid),
     )
+}
+
+fn events_selector(object: &Value, uid: &str) -> String {
+    if object["apiVersion"] == "v1" && object["kind"] == "Node" {
+        format!(
+            "regarding.kind=Node,regarding.name={}",
+            field_value(object["metadata"]["name"].as_str().unwrap_or_default())
+        )
+    } else {
+        let mirrored = object["metadata"]["annotations"]["kubernetes.io/config.mirror"].as_str();
+        format!("regarding.uid={}", field_value(mirrored.unwrap_or(uid)))
+    }
 }
 
 /// The metadata of the kinds the object's kind owns, in its namespace.
@@ -582,6 +585,23 @@ mod tests {
         assert_eq!(
             values_of(&config, &keys).unwrap(),
             [None, Some("fast".to_owned()), None]
+        );
+    }
+
+    #[test]
+    fn events_are_selected_by_uid_a_node_by_name_and_a_mirror_pod_by_its_pod() {
+        let pod = json!({ "apiVersion": "v1", "kind": "Pod", "metadata": { "name": "web" } });
+        assert_eq!(events_selector(&pod, "5c2f"), "regarding.uid=5c2f");
+        let mirror = json!({
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": { "annotations": { "kubernetes.io/config.mirror": "a,b=c" } },
+        });
+        assert_eq!(events_selector(&mirror, "5c2f"), r"regarding.uid=a\,b\=c");
+        let node = json!({ "apiVersion": "v1", "kind": "Node", "metadata": { "name": "n=1" } });
+        assert_eq!(
+            events_selector(&node, "9d1e"),
+            r"regarding.kind=Node,regarding.name=n\=1"
         );
     }
 }

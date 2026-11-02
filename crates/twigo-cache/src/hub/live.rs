@@ -570,3 +570,29 @@ async fn an_events_upstream_follows_the_events_of_one_object() {
     assert_eq!(names, ["e1", "e3"], "only the first pod's");
     live.delete_namespace(&namespace).await;
 }
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn an_object_whose_name_a_selector_would_split_opens() {
+    let live = live().await;
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .subsec_nanos();
+    let name = format!("twigo-probe-{nanos},reader=x");
+    let roles = Api::<ClusterRole>::all(live.admin.clone());
+    let role: ClusterRole =
+        serde_json::from_value(json!({ "metadata": { "name": name }, "rules": [] })).unwrap();
+    roles.create(&PostParams::default(), &role).await.unwrap();
+    let (hub, _clients) = live.hub(None);
+    let resource = Resource {
+        group: "rbac.authorization.k8s.io".to_owned(),
+        version: "v1".to_owned(),
+        resource: "clusterroles".to_owned(),
+        namespaced: false,
+    };
+    let mut opened = hub.object(&live.context, resource, None, &name).unwrap();
+    until(&mut opened, |role| ready(role) && role.items().len() == 1).await;
+    assert_eq!(&*opened.items()[0].meta.name, name);
+    roles.delete(&name, &DeleteParams::default()).await.unwrap();
+}

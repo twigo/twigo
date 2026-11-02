@@ -1,13 +1,18 @@
-//! An open object against a kind or kwok cluster: its batches wait for
-//! their acks, it follows an edit and its events, and it holds its events'
-//! upstream only while a view shows them.
+//! Open objects against a kind or kwok cluster: their batches wait for their
+//! acks, they follow an edit and their events, they hold their events'
+//! upstream only while a view shows them, they say why events cannot be
+//! listed, and a deleted object keeps no owners.
 //!
 //! TWIGO_TEST_KUBECONFIG=… cargo test -p twigo-core --test objects_live -- --ignored
 
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use k8s_openapi::api::core::v1::{Namespace, Pod};
+use k8s_openapi::api::authentication::v1::TokenRequest;
+use k8s_openapi::api::core::v1::{ConfigMap, Namespace, Pod, ServiceAccount};
+use k8s_openapi::api::rbac::v1::{Role, RoleBinding};
 use kube::api::{ApiResource, DeleteParams, DynamicObject, Patch, PatchParams, PostParams};
 use kube::config::Kubeconfig;
 use kube::{Api, Config};
@@ -16,11 +21,160 @@ use tokio::sync::{mpsc, watch};
 use twigo_core::Core;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    Ack, Block, Gvr, ObjectBatch, ObjectParts, ObjectQuery, OpenObject, SetParts, SubscriptionId,
-    Value,
+    Ack, Block, EventList, Gvr, ObjectBatch, ObjectParts, ObjectQuery, OpenObject, Related,
+    SetParts, SubscriptionId, Value, ViewState,
 };
 
 const WAIT: Duration = Duration::from_secs(30);
+
+/// The test cluster: its kubeconfig, its context and an admin client.
+struct Cluster {
+    path: PathBuf,
+    kubeconfig: Kubeconfig,
+    context: String,
+    admin: kube::Client,
+}
+
+impl Cluster {
+    async fn connect() -> Self {
+        let path: PathBuf = std::env::var_os("TWIGO_TEST_KUBECONFIG")
+            .expect("TWIGO_TEST_KUBECONFIG")
+            .into();
+        let kubeconfig = Kubeconfig::read_from(&path).unwrap();
+        let context = kubeconfig.current_context.clone().unwrap_or_default();
+        assert!(
+            context.starts_with("kind-") || context.starts_with("kwok-"),
+            "refusing context {context:?}: only kind and kwok clusters"
+        );
+        let config = Config::from_custom_kubeconfig(kubeconfig.clone(), &Default::default())
+            .await
+            .unwrap();
+        let admin = kube::Client::try_from(config).unwrap();
+        Cluster {
+            path,
+            kubeconfig,
+            context,
+            admin,
+        }
+    }
+
+    async fn namespace(&self, prefix: &str) -> String {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos();
+        let namespace = format!("core-objects-{prefix}-{nanos}");
+        Api::<Namespace>::all(self.admin.clone())
+            .create(
+                &PostParams::default(),
+                &serde_json::from_value(json!({ "metadata": { "name": namespace } })).unwrap(),
+            )
+            .await
+            .unwrap();
+        namespace
+    }
+
+    async fn delete(&self, namespace: &str) {
+        Api::<Namespace>::all(self.admin.clone())
+            .delete(namespace, &DeleteParams::default())
+            .await
+            .unwrap();
+    }
+
+    /// A pod on a kwok node, its owner references `owners`; its uid.
+    async fn pod(&self, namespace: &str, owners: serde_json::Value) -> String {
+        let pod: Pod = serde_json::from_value(json!({
+            "metadata": { "name": "p1", "ownerReferences": owners },
+            "spec": { "nodeName": "kwok-node-0", "containers": [{ "name": "app", "image": "fake" }] },
+        }))
+        .unwrap();
+        Api::<Pod>::namespaced(self.admin.clone(), namespace)
+            .create(&PostParams::default(), &pod)
+            .await
+            .unwrap()
+            .metadata
+            .uid
+            .unwrap()
+    }
+
+    /// A kubeconfig in `dir` for a service account of `namespace` that may
+    /// get, list and watch pods there and nothing else; and its context.
+    async fn pod_reader(&self, namespace: &str, dir: &Path) -> (PathBuf, String) {
+        let accounts = Api::<ServiceAccount>::namespaced(self.admin.clone(), namespace);
+        accounts
+            .create(
+                &PostParams::default(),
+                &serde_json::from_value(json!({ "metadata": { "name": "reader" } })).unwrap(),
+            )
+            .await
+            .unwrap();
+        let role: Role = serde_json::from_value(json!({
+            "metadata": { "name": "pods" },
+            "rules": [{ "apiGroups": [""], "resources": ["pods"], "verbs": ["get", "list", "watch"] }],
+        }))
+        .unwrap();
+        Api::<Role>::namespaced(self.admin.clone(), namespace)
+            .create(&PostParams::default(), &role)
+            .await
+            .unwrap();
+        let binding: RoleBinding = serde_json::from_value(json!({
+            "metadata": { "name": "reader-pods" },
+            "roleRef": { "apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "pods" },
+            "subjects": [{ "kind": "ServiceAccount", "name": "reader", "namespace": namespace }],
+        }))
+        .unwrap();
+        Api::<RoleBinding>::namespaced(self.admin.clone(), namespace)
+            .create(&PostParams::default(), &binding)
+            .await
+            .unwrap();
+        let request: TokenRequest =
+            serde_json::from_value(json!({ "spec": { "audiences": [] } })).unwrap();
+        let token = accounts
+            .create_token_request("reader", &PostParams::default(), &request)
+            .await
+            .unwrap()
+            .status
+            .unwrap()
+            .token;
+        let cluster = self.kubeconfig.clusters[0]
+            .cluster
+            .clone()
+            .expect("the test cluster");
+        let context = "kind-pod-reader".to_owned();
+        let kubeconfig = json!({
+            "apiVersion": "v1",
+            "kind": "Config",
+            "clusters": [{ "name": "test", "cluster": {
+                "server": cluster.server,
+                "certificate-authority-data": cluster.certificate_authority_data,
+            } }],
+            "users": [{ "name": "reader", "user": { "token": token } }],
+            "contexts": [{ "name": context, "context": { "cluster": "test", "user": "reader" } }],
+            "current-context": context,
+        });
+        let path = dir.join("reader.kubeconfig");
+        std::fs::write(&path, kubeconfig.to_string()).unwrap();
+        (path, context)
+    }
+}
+
+/// A core that reads only `kubeconfig`, with a space for `context`.
+fn core(dir: &Path, kubeconfig: &Path, context: &str) -> (Arc<Core>, String) {
+    let core = Core::new(dir, &dir.join("cache"));
+    let space = core.state.open_space(context).id;
+    let (status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
+        std::iter::empty::<(OsString, OsString)>(),
+    ))));
+    tokio::spawn({
+        let core = Arc::clone(&core);
+        let kubeconfig = kubeconfig.to_owned();
+        async move {
+            let _status = status;
+            core.run(followed, Some(kubeconfig)).await;
+        }
+    });
+    (core, space)
+}
 
 struct Opened {
     core: Arc<Core>,
@@ -29,6 +183,32 @@ struct Opened {
 }
 
 impl Opened {
+    async fn pod(core: &Arc<Core>, space: String, namespace: &str, parts: ObjectParts) -> Self {
+        let (sender, batches) = mpsc::unbounded_channel();
+        let object = ObjectQuery {
+            space,
+            gvr: Gvr {
+                group: String::new(),
+                version: "v1".to_owned(),
+                resource: "pods".to_owned(),
+            },
+            namespaced: true,
+            namespace: Some(namespace.to_owned()),
+            name: "p1".to_owned(),
+        };
+        let id = core
+            .object_open("main", OpenObject { object, parts }, move |batch| {
+                sender.send(batch).is_ok()
+            })
+            .await
+            .unwrap();
+        Opened {
+            core: Arc::clone(core),
+            id,
+            batches,
+        }
+    }
+
     /// The next batch, acknowledged.
     async fn next(&mut self) -> ObjectBatch {
         let batch = tokio::time::timeout(WAIT, self.batches.recv())
@@ -71,100 +251,36 @@ fn fields(batch: &ObjectBatch, label: &str) -> Option<Value> {
         })
 }
 
-fn has_event(batch: &ObjectBatch, reason: &str) -> bool {
-    batch.overview.as_ref().is_some_and(|overview| {
-        overview.sections.iter().any(|section| {
-            section.blocks.iter().any(|block| match block {
-                Block::Events(list) => list.events.iter().any(|event| event.reason == reason),
-                _ => false,
+fn events(batch: &ObjectBatch) -> Option<&EventList> {
+    batch
+        .overview
+        .as_ref()?
+        .sections
+        .iter()
+        .find_map(|section| {
+            section.blocks.iter().find_map(|block| match block {
+                Block::Events(list) => Some(list),
+                _ => None,
             })
         })
-    })
 }
+
+const OVERVIEW: ObjectParts = ObjectParts {
+    overview: true,
+    manifest: false,
+    events: false,
+    related: false,
+};
 
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
 async fn an_open_object_follows_an_edit_and_its_events_while_they_are_shown() {
-    let path = std::env::var_os("TWIGO_TEST_KUBECONFIG").expect("TWIGO_TEST_KUBECONFIG");
-    let kubeconfig = Kubeconfig::read_from(&path).unwrap();
-    let context = kubeconfig.current_context.clone().unwrap_or_default();
-    assert!(
-        context.starts_with("kind-") || context.starts_with("kwok-"),
-        "refusing context {context:?}: only kind and kwok clusters"
-    );
-    let config = Config::from_custom_kubeconfig(kubeconfig, &Default::default())
-        .await
-        .unwrap();
-    let admin = kube::Client::try_from(config).unwrap();
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .subsec_nanos();
-    let namespace = format!("core-objects-{nanos}");
-    Api::<Namespace>::all(admin.clone())
-        .create(
-            &PostParams::default(),
-            &serde_json::from_value(json!({ "metadata": { "name": namespace } })).unwrap(),
-        )
-        .await
-        .unwrap();
-    let pods = Api::<Pod>::namespaced(admin.clone(), &namespace);
-    let pod: Pod = serde_json::from_value(json!({
-        "metadata": { "name": "p1" },
-        "spec": { "nodeName": "kwok-node-0", "containers": [{ "name": "app", "image": "fake" }] },
-    }))
-    .unwrap();
-    let uid = pods
-        .create(&PostParams::default(), &pod)
-        .await
-        .unwrap()
-        .metadata
-        .uid
-        .unwrap();
-
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("follow").await;
+    let uid = cluster.pod(&namespace, json!([])).await;
     let dir = tempfile::tempdir().unwrap();
-    let core = Core::new(dir.path(), &dir.path().join("cache"));
-    let space = core.state.open_space(&context).id;
-    let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
-        std::iter::empty::<(std::ffi::OsString, std::ffi::OsString)>(),
-    ))));
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        let path = path.clone().into();
-        async move { core.run(followed, Some(path)).await }
-    });
-    let (sender, batches) = mpsc::unbounded_channel();
-    let query = ObjectQuery {
-        space,
-        gvr: Gvr {
-            group: String::new(),
-            version: "v1".to_owned(),
-            resource: "pods".to_owned(),
-        },
-        namespaced: true,
-        namespace: Some(namespace.clone()),
-        name: "p1".to_owned(),
-    };
-    let overview = ObjectParts {
-        overview: true,
-        ..ObjectParts::default()
-    };
-    let id = core
-        .object_open(
-            "main",
-            OpenObject {
-                object: query,
-                parts: overview,
-            },
-            move |batch| sender.send(batch).is_ok(),
-        )
-        .await
-        .unwrap();
-    let mut opened = Opened {
-        core: Arc::clone(&core),
-        id,
-        batches,
-    };
+    let (core, space) = core(dir.path(), &cluster.path, &cluster.context);
+    let mut opened = Opened::pod(&core, space, &namespace, OVERVIEW).await;
 
     let first = tokio::time::timeout(WAIT, opened.batches.recv())
         .await
@@ -175,6 +291,7 @@ async fn an_open_object_follows_an_edit_and_its_events_while_they_are_shown() {
         opened.batches.try_recv().is_err(),
         "no second batch before the first is acknowledged"
     );
+    let id = opened.id;
     core.object_ack("main", Ack { id, seq: first.seq }).unwrap();
     opened
         .until(|batch| {
@@ -190,8 +307,8 @@ async fn an_open_object_follows_an_edit_and_its_events_while_they_are_shown() {
         "the overview shows events"
     );
 
-    let events: Api<DynamicObject> = Api::namespaced_with(
-        admin.clone(),
+    let api: Api<DynamicObject> = Api::namespaced_with(
+        cluster.admin.clone(),
         &namespace,
         &ApiResource {
             group: "events.k8s.io".to_owned(),
@@ -215,11 +332,16 @@ async fn an_open_object_follows_an_edit_and_its_events_while_they_are_shown() {
         "regarding": { "apiVersion": "v1", "kind": "Pod", "namespace": namespace, "name": "p1", "uid": uid },
     }))
     .unwrap();
-    events.create(&PostParams::default(), &event).await.unwrap();
-    opened.until(|batch| has_event(batch, "Probed")).await;
+    api.create(&PostParams::default(), &event).await.unwrap();
+    opened
+        .until(|batch| {
+            events(batch).is_some_and(|list| list.events.iter().any(|e| e.reason == "Probed"))
+        })
+        .await;
 
     let patch = json!({ "metadata": { "labels": { "edited": "yes" } } });
-    pods.patch("p1", &PatchParams::default(), &Patch::Merge(&patch))
+    Api::<Pod>::namespaced(cluster.admin.clone(), &namespace)
+        .patch("p1", &PatchParams::default(), &Patch::Merge(&patch))
         .await
         .unwrap();
     opened
@@ -251,8 +373,73 @@ async fn an_open_object_follows_an_edit_and_its_events_while_they_are_shown() {
     );
 
     core.object_close("main", id).unwrap();
-    Api::<Namespace>::all(admin)
-        .delete(&namespace, &DeleteParams::default())
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn events_that_may_not_be_listed_say_why() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("forbidden").await;
+    cluster.pod(&namespace, json!([])).await;
+    let dir = tempfile::tempdir().unwrap();
+    let (kubeconfig, context) = cluster.pod_reader(&namespace, dir.path()).await;
+    let (core, space) = core(dir.path(), &kubeconfig, &context);
+    let mut opened = Opened::pod(&core, space, &namespace, OVERVIEW).await;
+    let batch = opened
+        .until(|batch| events(batch).is_some_and(|list| list.unavailable.is_some()))
+        .await;
+    let reason = events(&batch).and_then(|list| list.unavailable.clone());
+    assert!(
+        reason.as_deref().is_some_and(|why| why.contains("events")),
+        "{reason:?}"
+    );
+    assert!(batch.exists, "the pod itself may be read");
+    core.object_close("main", opened.id).unwrap();
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_deleted_object_keeps_no_owners() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("deleted").await;
+    let owner: ConfigMap =
+        serde_json::from_value(json!({ "metadata": { "name": "owner" } })).unwrap();
+    let owner = Api::<ConfigMap>::namespaced(cluster.admin.clone(), &namespace)
+        .create(&PostParams::default(), &owner)
         .await
         .unwrap();
+    let owners = json!([{
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "name": "owner",
+        "uid": owner.metadata.uid,
+    }]);
+    cluster.pod(&namespace, owners).await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, space) = core(dir.path(), &cluster.path, &cluster.context);
+    let parts = ObjectParts {
+        related: true,
+        ..OVERVIEW
+    };
+    let mut opened = Opened::pod(&core, space, &namespace, parts).await;
+    opened
+        .until(|batch| {
+            batch
+                .related
+                .as_ref()
+                .is_some_and(|related| related.owners.len() == 1)
+        })
+        .await;
+    Api::<Pod>::namespaced(cluster.admin.clone(), &namespace)
+        .delete("p1", &DeleteParams::default().grace_period(0))
+        .await
+        .unwrap();
+    let gone = opened
+        .until(|batch| !batch.exists && batch.status == ViewState::Ready)
+        .await;
+    assert_eq!(gone.related, Some(Related::default()));
+    core.object_close("main", opened.id).unwrap();
+    cluster.delete(&namespace).await;
 }
