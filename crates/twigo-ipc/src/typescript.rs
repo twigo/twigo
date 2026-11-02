@@ -1,4 +1,5 @@
-use std::collections::BTreeMap;
+use std::any::TypeId;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write;
 
 use ts_rs::{Config, TS, TypeVisitor};
@@ -15,6 +16,7 @@ use crate::command::{
 pub fn typescript() -> String {
     let mut module = Module {
         cfg: Config::new().with_large_int("number"),
+        seen: HashSet::new(),
         declarations: BTreeMap::new(),
         commands: String::new(),
     };
@@ -56,6 +58,10 @@ pub fn typescript() -> String {
 
 struct Module {
     cfg: Config,
+    /// Every type visited, wrappers such as `Vec<T>` too: a wrapper visits
+    /// its parameter's dependencies directly, so a recursive type would
+    /// recurse forever through it.
+    seen: HashSet<TypeId>,
     declarations: BTreeMap<String, String>,
     commands: String,
 }
@@ -80,11 +86,11 @@ impl Module {
 
 impl TypeVisitor for Module {
     fn visit<T: TS + 'static + ?Sized>(&mut self) {
+        if !self.seen.insert(TypeId::of::<T>()) {
+            return;
+        }
         if T::output_path().is_some() {
             let name = T::ident(&self.cfg);
-            if self.declarations.contains_key(&name) {
-                return;
-            }
             let declaration = format!(
                 "{}export {}",
                 T::docs().unwrap_or_default(),
