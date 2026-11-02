@@ -497,8 +497,8 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     On kind 1.37 a CRD came with the first of these, 0.52 to 0.54 s after its creation, in four runs of `a_crd_created_while_followed_comes_without_a_restart` (2026-11-02).
   - Users who may not list CRDs or may not list APIServices poll discovery with its ETags every minute, the interval at which kube-aggregator refreshes an aggregated server's discovery ([`discoveryRefreshInterval`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/kube-aggregator/pkg/apiserver/handler_discovery.go#L58)).
     An aggregated server whose resources change while its APIService does not is seen with the next change, or once the space is followed again.
-  - A follower first sends the name of the cluster its context reaches, as soon as its clients are built from the kubeconfig and before any request.
-    A space shown again keeps its last resources in the explorer while that name is the same, so a switch shows it at once, and shows a placeholder until the new cluster answers when the name changed.
+  - A follower first sends the name of the cluster its context reaches, as soon as its clients are built from the kubeconfig and before it asks for discovery, and again whenever an edit moves the context to another cluster.
+    A space keeps its last resources in the explorer while that name is the same, so a switch shows it at once, and shows a placeholder until the new cluster answers when the name changed.
   - A failed fetch keeps the resources the server last answered to the follower, and is tried again after 5 s, the hub's longest backoff.
     A copy from the disk cache counts only once the server has confirmed it, since only the server's ETags tell apart clusters at the same address with the same trust, as behind a load balancer; clients that cannot be built fail it rather than show another cluster's resources.
   - A fetch whose credential failed stops the follower, since retrying would run the plugin by itself, as for the upstreams (3.2), until the context's fingerprint changes.

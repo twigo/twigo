@@ -53,6 +53,8 @@ pub struct Follower {
     poll: Instant,
     /// What the last fetch's failure asks for.
     failed: Option<Failed>,
+    /// The cluster the last `Pending` named.
+    named: Option<String>,
     last: Option<Discovered>,
 }
 
@@ -95,6 +97,7 @@ impl Follower {
             burst: None,
             poll: Instant::now() + POLL,
             failed: None,
+            named: None,
             last: None,
         };
         // Indexes that another follower left listed have told it changes
@@ -106,17 +109,10 @@ impl Follower {
     }
 
     /// The cluster the context reaches at first, as soon as its clients
-    /// are built, then its resources, then each time they change.
+    /// are built, then its resources, then each time they change, with the
+    /// cluster named first again whenever an edit moves the context to
+    /// another.
     pub async fn next(&mut self) -> Discovered {
-        if self.last.is_none()
-            && let Ok(clients) = self.hub.clients(&self.context).await
-        {
-            let pending = Discovered::Pending {
-                cluster: clients.cluster().to_owned(),
-            };
-            self.last = Some(pending.clone());
-            return pending;
-        }
         loop {
             if !matches!(self.last, None | Some(Discovered::Pending { .. })) {
                 self.wait().await;
@@ -203,6 +199,10 @@ impl Follower {
         };
         self.abandoned = Some(clients.connections().abandoned());
         let cluster = clients.cluster().to_owned();
+        if self.named.as_ref() != Some(&cluster) {
+            self.named = Some(cluster.clone());
+            return Discovered::Pending { cluster };
+        }
         if self
             .known
             .as_ref()

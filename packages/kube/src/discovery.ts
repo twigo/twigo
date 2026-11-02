@@ -16,7 +16,8 @@ export type Loaded<T> =
  * The resources of the active space, as Rust follows them (ARCHITECTURE
  * 3.6), and each context's version. A space shown again keeps its last
  * resources, so it shows at once, while the cluster its context reaches is
- * still theirs, which Rust tells before it asks the cluster anything.
+ * still theirs, which Rust tells before it asks the cluster for its
+ * discovery.
  */
 export class Discovery {
   readonly changes = new Changes();

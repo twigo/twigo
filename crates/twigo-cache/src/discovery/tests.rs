@@ -556,7 +556,7 @@ async fn steady_changes_put_discovery_off_by_the_first_recheck_at_most() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn the_cluster_comes_first_before_any_request() {
+async fn the_cluster_comes_before_discovery_asks_it() {
     let fake = fake();
     let cache = tempfile::tempdir().unwrap();
     let mut follower = follower(&fake, cache.path()).await;
@@ -571,4 +571,32 @@ async fn the_cluster_comes_first_before_any_request() {
         Discovered::Ready { cluster, .. } => assert_eq!(cluster, "https://fake.invalid"),
         other => panic!("expected the resources, got {other:?}"),
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_edit_that_moves_the_context_names_the_new_cluster_first() {
+    let x = fake();
+    let current = Arc::new(Mutex::new(Ok(
+        x.clients_reaching(Budgets::default(), "https://x.example:6443 trusting ca-x")
+    )));
+    let (edit, entry) = watch::channel(Some(fingerprint("https://x.example:6443")));
+    let cache = tempfile::tempdir().unwrap();
+    let mut follower = edited_over(Hub::new(swapping(&current)), cache.path(), entry).await;
+    assert_eq!(names(&next(&mut follower).await), ["namespaces"]);
+
+    let y = fake();
+    y.state().serve("example.com", "gadgets", "Gadget");
+    rebuild(
+        &current,
+        Ok(y.clients_reaching(Budgets::default(), "https://y.example:6443 trusting ca-y")),
+    );
+    edit.send_replace(Some(fingerprint("https://y.example:6443")));
+    assert_eq!(
+        follower.next().await,
+        Discovered::Pending {
+            cluster: "https://y.example:6443 trusting ca-y".to_owned()
+        }
+    );
+    assert_eq!(asked(&y, "/apis"), 0);
+    assert_eq!(names(&next(&mut follower).await), ["namespaces", "gadgets"]);
 }
