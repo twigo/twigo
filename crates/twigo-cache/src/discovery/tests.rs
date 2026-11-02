@@ -185,3 +185,57 @@ async fn replaced_clients_ask_again_at_once() {
     assert_eq!(names(&next(&mut follower).await), ["namespaces", "gadgets"]);
     assert_eq!(start.elapsed(), Duration::ZERO);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_timed_out_credential_plugin_waits_for_another_follower() {
+    let fake = fake();
+    fake.state().plugin_timed_out = true;
+    let cache = tempfile::tempdir().unwrap();
+    let mut follower = follower(&fake, cache.path()).await;
+    assert_eq!(failure(&next(&mut follower).await), ErrorKind::Timeout);
+
+    fake.state().plugin_timed_out = false;
+    let before = asked(&fake, "/apis");
+    assert!(
+        timeout(Duration::from_secs(600), follower.next())
+            .await
+            .is_err()
+    );
+    assert_eq!(asked(&fake, "/apis"), before);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_refresh_keeps_the_resources_it_knew() {
+    let fake = fake();
+    let cache = tempfile::tempdir().unwrap();
+    let mut follower = follower(&fake, cache.path()).await;
+    assert_eq!(names(&next(&mut follower).await), ["namespaces"]);
+
+    let start = Instant::now();
+    fake.state().forbidden.insert("/apis".to_owned());
+    fake.state().serve("example.com", "gadgets", "Gadget");
+    fake.add("customresourcedefinitions", None, "gadgets.example.com");
+    tokio::spawn({
+        let fake = fake.clone();
+        async move {
+            sleep(Duration::from_secs(3)).await;
+            fake.state().forbidden.clear();
+        }
+    });
+    assert_eq!(names(&next(&mut follower).await), ["namespaces", "gadgets"]);
+    assert_eq!(start.elapsed(), RECHECKS[0] + RETRY_WITHIN);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_start_the_server_refuses_answers_from_the_cache() {
+    let fake = fake();
+    fake.state().serve("example.com", "widgets", "Widget");
+    let cache = tempfile::tempdir().unwrap();
+    let mut first = follower(&fake, cache.path()).await;
+    assert_eq!(names(&next(&mut first).await), ["namespaces", "widgets"]);
+    drop(first);
+
+    fake.state().forbidden.insert("/apis".to_owned());
+    let mut second = follower(&fake, cache.path()).await;
+    assert_eq!(names(&next(&mut second).await), ["namespaces", "widgets"]);
+}

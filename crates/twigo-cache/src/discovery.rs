@@ -1,7 +1,8 @@
 //! What a context serves (ARCHITECTURE 3.6), followed: discovery comes from
 //! the disk cache revalidated with its ETags, and again after the CRDs or
 //! APIServices the hub lists change, every minute while the person may not
-//! list them, and after the hub's longest backoff while it fails.
+//! list them, and after the hub's longest backoff while it fails, which
+//! keeps the resources last known of the server.
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
@@ -10,7 +11,7 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tokio::time::{Instant, sleep_until};
 use twigo_ipc::{Discovered, ErrorKind, IpcError, ViewState};
-use twigo_kube::discovery::{Cache, Discovery};
+use twigo_kube::discovery::{Cache, Discovery, Error};
 
 use crate::hub::{Hub, Query, RETRY_WITHIN, Resource, RowFormat, Subscription};
 use crate::table::Row;
@@ -37,7 +38,18 @@ pub struct Follower {
     /// The fetches due after a change, soonest first.
     due: Vec<Instant>,
     poll: Instant,
+    /// What the last fetch's failure asks for.
+    failed: Option<Failed>,
     last: Option<Discovered>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Failed {
+    Retry,
+    /// The context's credential failed: retrying would run its plugin by
+    /// itself, so the next follower asks again, as a subscription restarts
+    /// the hub's upstreams (ARCHITECTURE 3.2).
+    Stop,
 }
 
 /// CRDs or APIServices, as the hub lists their metadata.
@@ -80,6 +92,7 @@ impl Follower {
             abandoned: None,
             due: Vec::new(),
             poll: Instant::now() + POLL,
+            failed: None,
             last: None,
         }
     }
@@ -100,15 +113,10 @@ impl Follower {
     }
 
     async fn wait(&mut self) {
-        if let Some(Discovered::Failed { error }) = &self.last
-            && error.kind == ErrorKind::Unauthorized
-        {
-            // Retrying would run the context's credential plugin by itself,
-            // as for the hub's upstreams (ARCHITECTURE 3.2).
+        if self.failed == Some(Failed::Stop) {
             return std::future::pending().await;
         }
-        let retry = matches!(self.last, Some(Discovered::Failed { .. }))
-            .then(|| Instant::now() + RETRY_WITHIN);
+        let retry = (self.failed == Some(Failed::Retry)).then(|| Instant::now() + RETRY_WITHIN);
         loop {
             let refused = self.indexes.iter().any(Index::refused);
             let due = self.due.first().copied();
@@ -139,7 +147,8 @@ impl Follower {
             Ok(clients) => clients,
             Err(error) => {
                 self.abandoned = None;
-                return Discovered::Failed { error };
+                let stop = error.kind == ErrorKind::Unauthorized;
+                return self.failure(error, stop);
             }
         };
         self.abandoned = Some(clients.connections().abandoned());
@@ -162,14 +171,32 @@ impl Follower {
                 self.known = Some((server, discovery));
             }
             Err(error) => {
-                return Discovered::Failed {
-                    error: IpcError::from(&error),
+                let stop = match &error {
+                    Error::Request(request) => {
+                        twigo_kube::errors::no_credential(request)
+                            || twigo_kube::errors::request(request).kind == ErrorKind::Unauthorized
+                    }
+                    Error::NotAggregated { .. } | Error::Decode { .. } => false,
                 };
+                return self.failure(IpcError::from(&error), stop);
             }
         }
+        self.failed = None;
         let (_, discovery) = self.known.as_ref().expect("refreshed or revalidated");
         Discovered::Ready {
             resources: discovery.resources(),
+        }
+    }
+
+    /// The resources last known of the server, a failed refresh
+    /// notwithstanding, or the failure when none are.
+    fn failure(&mut self, error: IpcError, stop: bool) -> Discovered {
+        self.failed = Some(if stop { Failed::Stop } else { Failed::Retry });
+        match &self.known {
+            Some((_, discovery)) => Discovered::Ready {
+                resources: discovery.resources(),
+            },
+            None => Discovered::Failed { error },
         }
     }
 

@@ -19,6 +19,7 @@ use tokio::time::Instant;
 use tower::BoxError;
 use twigo_ipc::IpcError;
 use twigo_kube::client::{Budgets, Clients};
+use twigo_kube::credentials::{CredentialError, RunError};
 
 use crate::hub::{Connect, Hub};
 
@@ -53,6 +54,8 @@ pub struct State {
     pub may_list: bool,
     /// `/version` fails as over a dead connection.
     pub dead: bool,
+    /// Every other request fails as when the credential plugin timed out.
+    pub plugin_timed_out: bool,
     /// When each request came, with its path and query.
     pub requests: Vec<(Instant, String)>,
     /// What discovery serves, by group, the core group as `""`: each
@@ -228,11 +231,23 @@ impl Fake {
         &self,
         request: Request<kube::client::Body>,
     ) -> Result<Response<Body>, BoxError> {
-        if request.uri().path() == "/version" && self.state().dead {
+        let path = request.uri().path();
+        let dead = if path == "/version" {
+            self.state().dead
+        } else {
+            self.state().plugin_timed_out
+        };
+        if dead {
             self.state()
                 .requests
                 .push((Instant::now(), request.uri().to_string()));
-            return Err("the connection is dead".into());
+            if path == "/version" {
+                return Err("the connection is dead".into());
+            }
+            return Err(Box::new(CredentialError::Run(RunError::Timeout {
+                command: "aws".to_owned(),
+                after: std::time::Duration::from_secs(120),
+            })));
         }
         Ok(self.respond(request))
     }
