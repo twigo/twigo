@@ -1,28 +1,80 @@
-import { useEffect, useState } from "react";
-import type { Backend, Gvr, Resource } from "@twigo/protocol";
+import {
+  toIpcError,
+  type Discovered,
+  type Gvr,
+  type IpcError,
+  type Resource,
+} from "@twigo/protocol";
+import { Changes, useChanges, type Workbench } from "@twigo/workbench";
 
-/** The resources each space serves, asked once per space. */
+export type Loaded<T> =
+  | { readonly state: "loading" }
+  | { readonly state: "ready"; readonly value: T }
+  | { readonly state: "failed"; readonly error: IpcError };
+
+/**
+ * The resources of the active space, as Rust follows them (ARCHITECTURE
+ * 3.6), and each context's version. A space shown before keeps its last
+ * answer until it is followed again.
+ */
 export class Discovery {
-  readonly #spaces = new Map<string, Promise<readonly Resource[]>>();
+  readonly changes = new Changes();
+  readonly #spaces = new Map<string, Loaded<readonly Resource[]>>();
   readonly #versions = new Map<string, Promise<string>>();
+  #space: string | undefined;
+  #ready: number;
+  /**
+   * The last watch asked for, which the next waits on: Rust keeps one
+   * follower per webview, that of the watch that answered last.
+   */
+  #watching: Promise<void> = Promise.resolve();
 
-  constructor(private readonly backend: Backend) {}
+  constructor(
+    private readonly workbench: Pick<Workbench, "backend" | "spaces"> & {
+      readonly credentials: Pick<Workbench["credentials"], "changes" | "ready">;
+    },
+  ) {
+    this.#ready = workbench.credentials.ready;
+    workbench.spaces.changes.subscribe(() => {
+      this.#follow(workbench.spaces.active?.id);
+    });
+    // A discovery the credential refused asks again once it comes.
+    workbench.credentials.changes.subscribe(() => {
+      const { ready } = workbench.credentials;
+      if (ready === this.#ready) return;
+      this.#ready = ready;
+      const space = this.#space;
+      if (space !== undefined && this.get(space).state === "failed") {
+        this.#watch(space);
+      }
+    });
+    this.#follow(workbench.spaces.active?.id);
+  }
 
+  get(space: string): Loaded<readonly Resource[]> {
+    return this.#spaces.get(space) ?? { state: "loading" };
+  }
+
+  /** The space's resources once they come, or why they did not. */
   resources(space: string): Promise<readonly Resource[]> {
-    let pending = this.#spaces.get(space);
-    if (!pending) {
-      pending = this.backend.invoke("resources_list", space);
-      pending.catch(() => this.#spaces.delete(space));
-      this.#spaces.set(space, pending);
-    }
-    return pending;
+    return new Promise((resolve, reject) => {
+      const settle = () => {
+        const loaded = this.get(space);
+        if (loaded.state === "loading") return;
+        unsubscribe();
+        if (loaded.state === "ready") resolve(loaded.value);
+        else reject(loaded.error);
+      };
+      const unsubscribe = this.changes.subscribe(settle);
+      settle();
+    });
   }
 
   /** A context's Kubernetes version, asked once. */
   version(context: string): Promise<string> {
     let pending = this.#versions.get(context);
     if (!pending) {
-      pending = this.backend
+      pending = this.workbench.backend
         .invoke("cluster_version", context)
         .then((version) => version.gitVersion);
       pending.catch(() => this.#versions.delete(context));
@@ -30,36 +82,51 @@ export class Discovery {
     }
     return pending;
   }
-}
 
-export type Loaded<T> =
-  | { readonly state: "loading" }
-  | { readonly state: "ready"; readonly value: T }
-  | { readonly state: "failed"; readonly error: unknown };
+  #follow(space: string | undefined): void {
+    if (space === this.#space) return;
+    this.#space = space;
+    if (space !== undefined) this.#watch(space);
+  }
+
+  #watch(space: string): void {
+    this.#watching = this.#watching.then(() => {
+      if (space !== this.#space) return;
+      // A change sent before the answer is newer than the answer.
+      const early = { changed: false };
+      return this.workbench.backend
+        .subscribe("resources_watch", space, (next) => {
+          early.changed = true;
+          this.#set(space, next);
+        })
+        .then(
+          (answer) => {
+            if (!early.changed) this.#set(space, answer);
+          },
+          (error: unknown) => {
+            this.#set(space, { state: "failed", error: toIpcError(error) });
+          },
+        );
+    });
+  }
+
+  #set(space: string, discovered: Discovered): void {
+    this.#spaces.set(
+      space,
+      discovered.state === "ready"
+        ? { state: "ready", value: discovered.resources }
+        : { state: "failed", error: toIpcError(discovered.error) },
+    );
+    this.changes.emit();
+  }
+}
 
 export function useResources(
   discovery: Discovery,
   space: string,
 ): Loaded<readonly Resource[]> {
-  const [loaded, setLoaded] = useState<{
-    space: string;
-    result: Loaded<readonly Resource[]>;
-  }>();
-  useEffect(() => {
-    let live = true;
-    discovery.resources(space).then(
-      (value) => {
-        if (live) setLoaded({ space, result: { state: "ready", value } });
-      },
-      (error: unknown) => {
-        if (live) setLoaded({ space, result: { state: "failed", error } });
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [discovery, space]);
-  return loaded?.space === space ? loaded.result : { state: "loading" };
+  useChanges(discovery.changes);
+  return discovery.get(space);
 }
 
 export function sameGvr(a: Gvr, b: Gvr): boolean {

@@ -23,7 +23,7 @@ import { LIST_SCHEME, parseListUri } from "./uri";
 /** Kubernetes in the workbench, through its registries only (ARCHITECTURE 2.3). */
 export function registerKube(workbench: Workbench): void {
   const services: ListServices = {
-    discovery: new Discovery(workbench.backend),
+    discovery: new Discovery(workbench),
     lists: new Lists(),
     filters: new ListFilters(),
     columns: new ColumnPresets(workbench.state),

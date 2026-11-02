@@ -185,15 +185,18 @@ async fn fetch(
     if status == StatusCode::NOT_MODIFIED && cached.is_some() {
         return Ok(None);
     }
-    let header = |name| {
-        response
-            .headers()
-            .get(name)
-            .and_then(|value: &HeaderValue| value.to_str().ok())
-            .map(str::to_owned)
+    // A block, so the closure's borrow of the response, whose body is not
+    // `Sync`, ends before the body is read.
+    let (content_type, etag) = {
+        let header = |name| {
+            response
+                .headers()
+                .get(name)
+                .and_then(|value: &HeaderValue| value.to_str().ok())
+                .map(str::to_owned)
+        };
+        (header(CONTENT_TYPE).unwrap_or_default(), header(ETAG))
     };
-    let content_type = header(CONTENT_TYPE).unwrap_or_default();
-    let etag = header(ETAG);
     let body = response.into_body().collect().await?.to_bytes();
     if status.is_client_error() || status.is_server_error() {
         return Err(Error::Request(api_error(status, &body)));

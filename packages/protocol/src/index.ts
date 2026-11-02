@@ -17,6 +17,7 @@ export type {
   ClusterVersion,
   ContextAuth,
   ContextColor,
+  Discovered,
   EnvVar,
   ErrorKind,
   ExecPlugin,

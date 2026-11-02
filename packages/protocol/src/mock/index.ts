@@ -162,10 +162,6 @@ export function createMockBackend(
       spaces.push(created);
       return created;
     },
-    resources_list: (id) => {
-      space(id);
-      return RESOURCES;
-    },
     cluster_version: (name) => {
       const version = VERSIONS[name];
       if (!version) throw new IpcError("notFound", `no context ${name}`);
@@ -299,6 +295,10 @@ export function createMockBackend(
       return id;
     },
     contexts_watch: () => CONTEXTS,
+    resources_watch: (id) => {
+      space(id);
+      return { state: "ready", resources: RESOURCES };
+    },
     context_auth_watch: (context, onMessage) => auth.watch(context, onMessage),
     keyboard_layout_watch: () => LAYOUTS[layout],
     shell_environment_watch: (_request, onMessage) => {

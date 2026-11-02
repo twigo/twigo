@@ -5,8 +5,8 @@
 use ts_rs::TS;
 
 use crate::{
-    Ack, ClusterVersion, Context, ContextAuth, ExecReview, KeyboardLayout, ListBatch, ListQuery,
-    Resource, SetWindow, ShellEnvironment, Space, StateEntry, StateSnapshot, SubscriptionId,
+    Ack, ClusterVersion, Context, ContextAuth, Discovered, ExecReview, KeyboardLayout, ListBatch,
+    ListQuery, SetWindow, ShellEnvironment, Space, StateEntry, StateSnapshot, SubscriptionId,
 };
 
 pub trait Command {
@@ -49,14 +49,15 @@ impl Command for SpaceOpen {
     type Message = ();
 }
 
-/// The resources a space serves, by its id.
-pub struct ResourcesList;
+/// Answers with the resources a space's context serves, by the space's id,
+/// then sends them again on every change (ARCHITECTURE 3.6).
+pub struct ResourcesWatch;
 
-impl Command for ResourcesList {
-    const NAME: &'static str = "resources_list";
+impl Command for ResourcesWatch {
+    const NAME: &'static str = "resources_watch";
     type Request = String;
-    type Response = Vec<Resource>;
-    type Message = ();
+    type Response = Discovered;
+    type Message = Discovered;
 }
 
 /// A context's Kubernetes version, by the context's name.
