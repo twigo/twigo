@@ -23,12 +23,12 @@ use super::oidc::{Oidc, OidcEntry};
 use super::output::Credential;
 use super::run::{self, RunError};
 
-/// How much of a plugin's stderr its status keeps, from its start and from
-/// its end: device codes and URLs come first, errors last.
 /// A credential counts as expired this long before it does, so that a
 /// request never carries one that expires on its way (ARCHITECTURE 6.2).
 const MARGIN: SignedDuration = SignedDuration::from_secs(60);
 
+/// How much of a plugin's stderr its status keeps, from its start and from
+/// its end: device codes and URLs come first, errors last.
 const OUTPUT_HEAD: usize = 8 << 10;
 const OUTPUT_TAIL: usize = 8 << 10;
 
@@ -336,9 +336,8 @@ impl Source {
                 Ok(credential) => {
                     state.credential = Some(Arc::clone(credential));
                     state.kept_until = credential.expires().map(|expires| {
-                        let early = expires - MARGIN;
-                        if Timestamp::now() < early {
-                            early
+                        if Timestamp::now() + MARGIN < expires {
+                            expires - MARGIN
                         } else {
                             expires
                         }

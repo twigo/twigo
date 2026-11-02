@@ -882,3 +882,21 @@ fn the_client_s_id_and_secret_are_escaped_as_go_s_query_escape_does() {
         "a~b%2Ac+d%2Be%2Ff%3Ag%21h%27i%28j%29k"
     );
 }
+
+#[tokio::test]
+async fn an_expiry_at_the_start_of_time_neither_panics_nor_is_kept() {
+    let plugins = Plugins::new();
+    let ancient = plugins.token(
+        "ancient",
+        "t",
+        Some(Timestamp::MIN + SignedDuration::from_secs(30)),
+    );
+    let source = registry().source(exec(&ancient, ""));
+    for _ in 0..2 {
+        tokio::time::timeout(Duration::from_secs(5), source.credential())
+            .await
+            .expect("an answer")
+            .unwrap();
+    }
+    assert_eq!(plugins.runs(), 2);
+}

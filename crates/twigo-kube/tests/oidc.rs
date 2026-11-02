@@ -611,3 +611,46 @@ async fn a_request_whose_refreshed_token_is_rejected_goes_unretried() {
         "the same token again would only be rejected again"
     );
 }
+
+#[tokio::test]
+async fn a_refresh_whose_request_is_dropped_still_keeps_the_rotated_tokens() {
+    let issuer = Issuer::start("r1").await;
+    issuer.issued.lock().unwrap().token_delay = Some(std::time::Duration::from_millis(300));
+    let setup = setup(&kubeconfig(
+        &issuer,
+        &jwt(SignedDuration::from_secs(-60), 0),
+        Some("r1"),
+    ));
+    let dropped = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        setup.oidc.credential(),
+    )
+    .await;
+    assert!(dropped.is_err());
+    setup.oidc.credential().await.unwrap();
+    assert_eq!(issuer.grants().len(), 1);
+    assert!(
+        std::fs::read_to_string(&setup.file)
+            .unwrap()
+            .contains("refresh-token: r2")
+    );
+}
+
+#[tokio::test]
+async fn rejections_of_a_token_whose_refresh_fails_refresh_it_once() {
+    let issuer = Issuer::start("not-r1").await;
+    issuer.issued.lock().unwrap().token_delay = Some(std::time::Duration::from_millis(300));
+    let valid = jwt(SignedDuration::from_hours(1), 0);
+    let setup = setup(&kubeconfig(&issuer, &valid, Some("r1")));
+    let used = setup.oidc.credential().await.unwrap();
+    setup.oidc.reject(&used);
+    let oidc = Arc::clone(&setup.oidc);
+    let first = tokio::spawn(async move { oidc.credential().await });
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    setup.oidc.reject(&used);
+    let second = setup.oidc.credential().await.unwrap();
+    let first = first.await.unwrap().unwrap();
+    assert!(Arc::ptr_eq(&first, &used));
+    assert!(Arc::ptr_eq(&second, &used));
+    assert_eq!(issuer.grants().len(), 2, "the header, then the form, once");
+}

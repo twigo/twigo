@@ -158,7 +158,7 @@ struct State {
     current: Option<Arc<Credential>>,
     style: Option<Style>,
     /// The id-token has had its refresh: this source's refresh got it, or
-    /// the issuer refused to replace it after a rejection. A rejection then
+    /// the refresh a rejection asked for failed. A rejection then
     /// keeps it rather than ask the issuer, spend another refresh token and
     /// write the file again on every request; client-go never refreshes on
     /// a 401.
@@ -171,7 +171,7 @@ struct State {
     /// The id-token from the file the server rejected: the next request
     /// reads the file again, then refreshes once if that token is still
     /// current, since other requests that carried it are rejected too; if
-    /// the issuer refuses, the token stays while it lasts, as client-go
+    /// the refresh fails, the token stays while it lasts, as client-go
     /// keeps it.
     retry: Option<Arc<Credential>>,
     /// The id-token and refresh token the user's file held when this source
@@ -215,45 +215,55 @@ impl Oidc {
 
     /// The id-token while it lasts, else a refreshed one; one refresh at a
     /// time, so a rotated refresh token is never spent twice.
-    pub async fn credential(&self) -> Result<Arc<Credential>, OidcError> {
+    pub async fn credential(self: &Arc<Self>) -> Result<Arc<Credential>, OidcError> {
         let pending = {
             let state = self.state();
             state.reread || state.retry.is_some()
         };
-        if pending {
-            let _one = self.refreshing.lock().await;
-            let (reread, retry) = {
-                let mut state = self.state();
-                (std::mem::take(&mut state.reread), state.retry.take())
-            };
-            if reread || retry.is_some() {
-                self.read_back();
-            }
-            // Reading back drops `current` when the file holds a newer token,
-            // and a refresh meanwhile has replaced it.
-            let rejected = retry.is_some_and(|rejected| {
-                self.state()
+        if !pending && let Some(credential) = self.valid() {
+            return Ok(credential);
+        }
+        // The refresh goes on when the request that wanted it is dropped,
+        // since the issuer may have rotated the refresh token already.
+        let oidc = Arc::clone(self);
+        tokio::spawn(async move { oidc.refreshed().await })
+            .await
+            .expect("the refresh does not panic")
+    }
+
+    /// A token from the file, else one refreshed after a rejection or on
+    /// expiry, under `refreshing`.
+    async fn refreshed(&self) -> Result<Arc<Credential>, OidcError> {
+        let _one = self.refreshing.lock().await;
+        let (reread, retry) = {
+            let mut state = self.state();
+            (std::mem::take(&mut state.reread), state.retry.take())
+        };
+        if reread || retry.is_some() {
+            self.read_back();
+        }
+        // Reading back drops `current` when the file holds a newer token, a
+        // refresh meanwhile has replaced it, and a failed one has spent it.
+        let rejected = retry.is_some_and(|rejected| {
+            let state = self.state();
+            !state.spent
+                && state
                     .current
                     .as_ref()
                     .is_some_and(|current| Arc::ptr_eq(current, &rejected))
-            });
-            if rejected {
-                match self.refresh_now().await {
-                    Ok(credential) => return Ok(credential),
-                    Err(error) => {
-                        self.state().spent = true;
-                        eprintln!(
-                            "kept the rejected oidc token of {}, since its refresh failed: {error}",
-                            self.user
-                        );
-                    }
+        });
+        if rejected {
+            match self.refresh_now().await {
+                Ok(credential) => return Ok(credential),
+                Err(error) => {
+                    self.state().spent = true;
+                    eprintln!(
+                        "kept the rejected oidc token of {}, since its refresh failed: {error}",
+                        self.user
+                    );
                 }
             }
         }
-        if let Some(credential) = self.valid() {
-            return Ok(credential);
-        }
-        let _one = self.refreshing.lock().await;
         if let Some(credential) = self.valid() {
             return Ok(credential);
         }

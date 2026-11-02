@@ -1148,7 +1148,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     Only the two values change, through `yaml-edit`, under kubectl's `<file>.lock`, by a rename over the resolved file, so its hard links and ACLs do not carry over; kubectl writes in place.
   - One refresh runs at a time, and the file is read again first: tokens someone else wrote since, as kubectl does, are taken, never the ones it still holds after a failed write or a rejection.
     The new tokens go to memory before the file, so a failed write never loses the only valid refresh token.
-  - After a 401 the next request takes a newer token from the user's file, else refreshes once if a refresh can replace the rejected token: one from the file with a refresh token, not one a refresh just got or one whose refresh the issuer refused.
+  - After a 401 the next request takes a newer token from the user's file, else refreshes once if a refresh can replace the rejected token: one from the file with a refresh token, not one a refresh just got or one whose refresh failed.
     The other requests that carried it are rejected too, so a refresh starts only while the rejected token is still the current one.
     The rejected token stays until something replaces it, since client-go never refreshes on a 401 and every refresh rewrites the file.
     A request whose provider has no other credential goes unretried.
