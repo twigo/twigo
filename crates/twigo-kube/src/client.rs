@@ -1,12 +1,16 @@
 //! The clients of a context (ARCHITECTURE 3.2, 6.2, 6.3): two shared
 //! hyper-util clients, and the kube clients built over them.
 
+mod auth;
 mod connections;
 mod counter;
 mod dial;
+mod identity;
+pub(crate) mod idp;
 mod proxy;
 mod retry;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use hyper_rustls::{FixedServerNameResolver, HttpsConnectorBuilder};
@@ -15,8 +19,10 @@ use hyper_util::client::legacy::connect::{Connect, HttpConnector};
 use hyper_util::rt::{TokioExecutor, TokioTimer};
 use kube::client::{Body, ConfigExt};
 use kube::{Client, Config};
+use rustls::client::Resumption;
 use rustls::pki_types::InvalidDnsNameError;
 use rustls::pki_types::ServerName;
+use secrecy::ExposeSecret;
 use tokio::sync::watch;
 use tower::timeout::TimeoutLayer;
 use tower::{BoxError, ServiceBuilder};
@@ -25,10 +31,14 @@ pub use connections::Connections;
 pub use counter::{Budgets, Class, Slots, Usage};
 pub use proxy::{Proxy, ProxyEnv, ProxyError, proxy_for};
 
+use auth::AuthLayer;
 use connections::{ConnectionsLayer, Tracked};
 use counter::{Counter, CounterLayer};
 use dial::Dialer;
+use identity::Identity;
 use retry::RetryLayer;
+
+use crate::credentials::{Provider, token_or_basic};
 
 /// client-go's: its dialer's keepalive (`transport/cache.go`) and its
 /// HTTP/2 health check (`ReadIdleTimeout` and `PingTimeout` in
@@ -58,6 +68,14 @@ pub enum Error {
     ServerName(#[from] InvalidDnsNameError),
     #[error("the OS's trust store, for an https proxy: {0}")]
     TrustStore(#[from] rustls::Error),
+    #[error(
+        "The gcp auth plugin has been removed.\nPlease use the \"gke-gcloud-auth-plugin\" kubectl/client-go credential plugin instead.\nSee https://cloud.google.com/blog/products/containers-kubernetes/kubectl-auth-changes-in-gke for further details"
+    )]
+    Gcp,
+    #[error(
+        "The azure auth plugin has been removed.\nPlease use the https://github.com/Azure/kubelogin kubectl/client-go credential plugin instead.\nSee https://kubernetes.io/docs/reference/access-authn-authz/authentication/#client-go-credential-plugins for further details"
+    )]
+    Azure,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -66,13 +84,26 @@ pub struct Options {
     /// From [`proxy_for`]: `config.proxy_url` is not read, since kube fills
     /// it from Twigo's own environment.
     pub proxy: Option<Proxy>,
+    /// The user entry's exec plugin or oidc provider, whose credential
+    /// Twigo gets instead of kube (ARCHITECTURE 6.2): `config.auth_info`'s
+    /// `exec` is never read, nor its `auth-provider` with one.
+    pub provider: Option<Provider>,
 }
 
 impl Clients {
     pub fn new(config: &Config, options: Options) -> Result<Self, Error> {
+        let config = &without_plugins(config, options.provider.is_some())?;
         let proxy = options.proxy.as_ref();
         let counter = Counter::new(options.budgets);
         let connections = Connections::default();
+        let identity = Arc::new(Identity::new(connections.clone()));
+        let offered = matches!(options.provider, Some(Provider::Exec(_))).then_some(&identity);
+        let auth = || {
+            options
+                .provider
+                .as_ref()
+                .map(|provider| AuthLayer::new(provider.clone(), Arc::clone(&identity)))
+        };
 
         let mut builder = hyper_util::client::legacy::Client::builder(TokioExecutor::new());
         builder
@@ -85,12 +116,13 @@ impl Clients {
             .http2_keep_alive_timeout(PING_TIMEOUT)
             .http2_keep_alive_while_idle(true);
         let api = builder.build::<_, Body>(Tracked::new(
-            connector(config, Alpn::Both, proxy)?,
+            connector(config, Alpn::Both, proxy, offered)?,
             connections.clone(),
         ));
         let api = ServiceBuilder::new()
             .layer(config.base_uri_layer())
             .option_layer(config.auth_layer()?)
+            .option_layer(auth())
             .layer(config.extra_headers_layer()?)
             .layer(CounterLayer(counter.clone()))
             .layer(TimeoutLayer::new(REQUEST_TIMEOUT))
@@ -98,12 +130,15 @@ impl Clients {
             .layer(ConnectionsLayer(connections.clone()))
             .service(api);
 
+        // Each session upgrades its connection, which leaves the pool, so an
+        // idle one would only carry a certificate the plugin has replaced.
         let sessions = hyper_util::client::legacy::Client::builder(TokioExecutor::new())
-            .build::<_, Body>(connector(config, Alpn::Http1, proxy)?);
+            .pool_max_idle_per_host(0)
+            .build::<_, Body>(connector(config, Alpn::Http1, proxy, offered)?);
 
         Ok(Clients {
             api: Client::new(api, config.default_namespace.clone()),
-            sessions: kube_client(config, sessions)?,
+            sessions: kube_client(config, sessions, auth())?,
             counter,
             connections,
         })
@@ -118,9 +153,50 @@ impl Clients {
     }
 }
 
+/// The config without what kube would get credentials from itself: the
+/// exec plugin, which Twigo runs, the auth provider when Twigo gets its
+/// credential, and the gcp one's `cmd-path`, refused with the azure one as
+/// client-go refuses both since they were removed
+/// (`plugin/pkg/client/auth/gcp/gcp_stub.go`, `azure/azure_stub.go`).
+fn without_plugins(config: &Config, provided: bool) -> Result<Config, Error> {
+    match config
+        .auth_info
+        .auth_provider
+        .as_ref()
+        .map(|p| p.name.as_str())
+    {
+        Some("gcp") => return Err(Error::Gcp),
+        Some("azure") => return Err(Error::Azure),
+        _ => {}
+    }
+    let mut config = config.clone();
+    config.auth_info.exec = None;
+    // client-go reads an empty token or username as none; kube would send
+    // `Bearer ` and leave a token file unread.
+    let user = &mut config.auth_info;
+    if user
+        .token
+        .as_ref()
+        .is_some_and(|token| token.expose_secret().is_empty())
+    {
+        user.token = None;
+    }
+    if user.username.as_deref() == Some("") {
+        user.username = None;
+    }
+    // client-go's bearer and basic round trippers wrap the provider's, which
+    // passes on a request that carries a header already; kube reads the
+    // provider first.
+    if provided || token_or_basic(&config.auth_info) {
+        config.auth_info.auth_provider = None;
+    }
+    Ok(config)
+}
+
 fn kube_client<C>(
     config: &Config,
     client: hyper_util::client::legacy::Client<C, Body>,
+    auth: Option<AuthLayer>,
 ) -> Result<Client, Error>
 where
     C: Connect + Clone + Send + Sync + 'static,
@@ -128,6 +204,7 @@ where
     let service = ServiceBuilder::new()
         .layer(config.base_uri_layer())
         .option_layer(config.auth_layer()?)
+        .option_layer(auth)
         .layer(config.extra_headers_layer()?)
         .map_err(BoxError::from)
         .service(client);
@@ -144,14 +221,23 @@ fn connector(
     config: &Config,
     alpn: Alpn,
     proxy: Option<&Proxy>,
+    identity: Option<&Arc<Identity>>,
 ) -> Result<TimeoutConnector<hyper_rustls::HttpsConnector<Dialer>>, Error> {
     let mut http = HttpConnector::new();
     http.enforce_http(false);
     http.set_connect_timeout(config.connect_timeout);
     http.set_keepalive(Some(TCP_KEEPALIVE));
     http.set_keepalive_interval(Some(TCP_KEEPALIVE));
+    let mut tls = config.rustls_client_config()?;
+    if let Some(identity) = identity {
+        identity.provider(tls.crypto_provider());
+        tls.client_auth_cert_resolver = Arc::clone(identity) as _;
+        // A resumed session keeps the certificate of the handshake it
+        // resumes, so a new one from the plugin needs a full handshake.
+        tls.resumption = Resumption::disabled();
+    }
     let mut https = HttpsConnectorBuilder::new()
-        .with_tls_config(config.rustls_client_config()?)
+        .with_tls_config(tls)
         .https_or_http();
     if let Some(name) = &config.tls_server_name {
         https = https.with_server_name_resolver(FixedServerNameResolver::new(

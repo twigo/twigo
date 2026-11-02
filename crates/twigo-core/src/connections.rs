@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use kube::Config;
 use kube::config::{KubeConfigOptions, KubeconfigError};
 use twigo_kube::client::{self, Clients, Options, ProxyEnv, ProxyError, proxy_for};
+use twigo_kube::credentials::Provider;
 use twigo_kube::kubeconfig::{self, Fingerprint};
 
 #[derive(Default)]
@@ -48,10 +49,13 @@ pub enum Error {
 }
 
 impl Connections {
+    /// `provider` is where the context's credential comes from, which its
+    /// fingerprint covers.
     pub async fn clients(
         &self,
         context: &kubeconfig::Context,
         env: &ProxyEnv,
+        provider: Option<Provider>,
     ) -> Result<Arc<Clients>, Error> {
         let slot = {
             let mut contexts = self.contexts.lock().expect("connections lock");
@@ -74,6 +78,7 @@ impl Connections {
             &config,
             Options {
                 proxy,
+                provider,
                 ..Options::default()
             },
         )?);
@@ -167,15 +172,15 @@ contexts:
 
         let catalog = load(dir.path());
         let a = connections
-            .clients(find(&catalog, "kind-a"), &env)
+            .clients(find(&catalog, "kind-a"), &env, None)
             .await
             .unwrap();
         let b = connections
-            .clients(find(&catalog, "kind-b"), &env)
+            .clients(find(&catalog, "kind-b"), &env, None)
             .await
             .unwrap();
         let again = connections
-            .clients(find(&catalog, "kind-a"), &env)
+            .clients(find(&catalog, "kind-a"), &env, None)
             .await
             .unwrap();
         assert!(Arc::ptr_eq(&a, &again));
@@ -186,12 +191,12 @@ contexts:
         );
         let catalog = load(dir.path());
         let rebuilt = connections
-            .clients(find(&catalog, "kind-a"), &env)
+            .clients(find(&catalog, "kind-a"), &env, None)
             .await
             .unwrap();
         assert!(!Arc::ptr_eq(&a, &rebuilt), "the CA file changed");
         let same = connections
-            .clients(find(&catalog, "kind-b"), &env)
+            .clients(find(&catalog, "kind-b"), &env, None)
             .await
             .unwrap();
         assert!(Arc::ptr_eq(&b, &same));
@@ -200,7 +205,7 @@ contexts:
             (name == "HTTPS_PROXY").then(|| "http://proxy.example:3128".to_owned())
         });
         let through = connections
-            .clients(find(&catalog, "kind-b"), &proxied)
+            .clients(find(&catalog, "kind-b"), &proxied, None)
             .await
             .unwrap();
         assert!(!Arc::ptr_eq(&b, &through), "the proxy variables changed");
@@ -217,7 +222,7 @@ contexts:
         let connections = Connections::default();
         let catalog = load(dir.path());
         let a = connections
-            .clients(find(&catalog, "kind-a"), &ProxyEnv::default())
+            .clients(find(&catalog, "kind-a"), &ProxyEnv::default(), None)
             .await
             .unwrap();
         let retired = a.connections().retired();
@@ -240,13 +245,13 @@ contexts:
         let env = ProxyEnv::default();
         let catalog = load(dir.path());
         let b = connections
-            .clients(find(&catalog, "kind-b"), &env)
+            .clients(find(&catalog, "kind-b"), &env, None)
             .await
             .unwrap();
 
         connections.keep(&HashSet::from(["kind-a".to_owned()]));
         let again = connections
-            .clients(find(&catalog, "kind-b"), &env)
+            .clients(find(&catalog, "kind-b"), &env, None)
             .await
             .unwrap();
         assert!(!Arc::ptr_eq(&b, &again));

@@ -7,6 +7,7 @@ mod fingerprint;
 mod tests;
 mod watch;
 
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -15,6 +16,8 @@ use std::sync::Arc;
 use kube::config::{Kubeconfig, KubeconfigError, NamedAuthInfo, NamedCluster, NamedContext};
 use serde::Deserialize;
 use twigo_ipc::ContextColor;
+
+use crate::credentials::{Exec, ExecError, OidcEntry, OidcError, token_or_basic};
 
 pub use fingerprint::Fingerprint;
 pub use watch::Watch;
@@ -80,6 +83,9 @@ impl Sources {
     pub fn load(&self) -> Catalog {
         let mut merged = Kubeconfig::default();
         let mut failures = Vec::new();
+        // The file each user entry comes from: the first that names it, as
+        // kubectl's merge keeps it, and where its refreshed tokens go.
+        let mut origins: HashMap<String, PathBuf> = HashMap::new();
         for file in &self.files {
             let config = match Kubeconfig::read_from(file) {
                 Ok(config) => config,
@@ -93,8 +99,14 @@ impl Sources {
                     continue;
                 }
             };
+            let users: Vec<String> = config.auth_infos.iter().map(|u| u.name.clone()).collect();
             merged = match merged.clone().merge(config) {
-                Ok(next) => next,
+                Ok(next) => {
+                    for user in users {
+                        origins.entry(user).or_insert_with(|| file.clone());
+                    }
+                    next
+                }
                 Err(error) => {
                     failures.push(FileFailure::new(file, &error));
                     continue;
@@ -105,7 +117,7 @@ impl Sources {
             .contexts
             .iter()
             .filter(|named| !self.test_only || is_test_context(&named.name))
-            .map(|named| Context::new(named, &merged))
+            .map(|named| Context::new(named, &merged, &origins))
             .collect();
         Catalog { contexts, failures }
     }
@@ -141,7 +153,7 @@ pub struct Context {
 }
 
 impl Context {
-    fn new(named: &NamedContext, merged: &Kubeconfig) -> Self {
+    fn new(named: &NamedContext, merged: &Kubeconfig, origins: &HashMap<String, PathBuf>) -> Self {
         let entry = named.context.as_ref();
         let cluster_name = entry.map(|context| context.cluster.as_str());
         let user_name = entry.and_then(|context| context.user.as_deref());
@@ -160,7 +172,12 @@ impl Context {
             order: extension.order,
             fingerprint: Fingerprint::of(named, cluster, user),
             problem,
-            entries: Entries::new(named, cluster, user),
+            entries: Entries::new(
+                named,
+                cluster,
+                user,
+                user_name.and_then(|name| origins.get(name)).cloned(),
+            ),
         }
     }
 }
@@ -168,38 +185,92 @@ impl Context {
 /// A context's context, cluster and user entries, as a kubeconfig of their
 /// own whose current context it is: what its clients are built from.
 #[derive(Debug, Clone)]
-pub struct Entries(Arc<Kubeconfig>);
+pub struct Entries {
+    config: Arc<Kubeconfig>,
+    /// The file the user entry comes from.
+    user_file: Option<PathBuf>,
+}
 
 impl Entries {
     fn new(
         named: &NamedContext,
         cluster: Option<&NamedCluster>,
         user: Option<&NamedAuthInfo>,
+        user_file: Option<PathBuf>,
     ) -> Self {
-        Self(Arc::new(Kubeconfig {
-            current_context: Some(named.name.clone()),
-            contexts: vec![named.clone()],
-            clusters: cluster.into_iter().cloned().collect(),
-            auth_infos: user.into_iter().cloned().collect(),
-            ..Kubeconfig::default()
-        }))
+        Self {
+            config: Arc::new(Kubeconfig {
+                current_context: Some(named.name.clone()),
+                contexts: vec![named.clone()],
+                clusters: cluster.into_iter().cloned().collect(),
+                auth_infos: user.into_iter().cloned().collect(),
+                ..Kubeconfig::default()
+            }),
+            user_file,
+        }
     }
 
     pub fn kubeconfig(&self) -> Kubeconfig {
-        Kubeconfig::clone(&self.0)
+        Kubeconfig::clone(&self.config)
     }
 
     pub fn proxy_url(&self) -> Option<&str> {
-        let cluster = self.0.clusters.first()?.cluster.as_ref()?;
+        let cluster = self.config.clusters.first()?.cluster.as_ref()?;
         cluster.proxy_url.as_deref()
     }
+
+    /// The user entry's `auth-provider: oidc`, with its file of origin.
+    pub fn oidc(&self) -> Option<Result<OidcUser, OidcError>> {
+        let user = self.config.auth_infos.first()?;
+        let info = user.auth_info.as_ref()?;
+        let provider = info.auth_provider.as_ref()?;
+        // A token or basic auth in the entry wins, as in client-go, and an
+        // exec plugin beside it makes the entry one client-go refuses, as
+        // `Exec::of` does.
+        if provider.name != "oidc" || token_or_basic(info) || info.exec.is_some() {
+            return None;
+        }
+        Some(OidcEntry::of(&provider.config).map(|entry| OidcUser {
+            origin: self.user_file.clone(),
+            user: user.name.clone(),
+            entry,
+        }))
+    }
+
+    /// The user entry's exec plugin, if it names one that the entry's other
+    /// credentials do not override.
+    pub fn exec(&self) -> Result<Option<Exec>, ExecError> {
+        let Some(user) = self.config.auth_infos.first() else {
+            return Ok(None);
+        };
+        let Some(auth) = &user.auth_info else {
+            return Ok(None);
+        };
+        let cluster = self
+            .config
+            .clusters
+            .first()
+            .and_then(|named| named.cluster.clone())
+            .unwrap_or_default();
+        Exec::of(&user.name, auth, &cluster)
+    }
+}
+
+/// A user entry's `auth-provider: oidc`.
+pub struct OidcUser {
+    /// The file the entry comes from, where refreshed tokens go.
+    pub origin: Option<PathBuf>,
+    pub user: String,
+    pub entry: OidcEntry,
 }
 
 /// kube's kubeconfig types compare only in kube's own tests.
 impl PartialEq for Entries {
     fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
-            || serde_json::to_value(&*self.0).ok() == serde_json::to_value(&*other.0).ok()
+        self.user_file == other.user_file
+            && (Arc::ptr_eq(&self.config, &other.config)
+                || serde_json::to_value(&*self.config).ok()
+                    == serde_json::to_value(&*other.config).ok())
     }
 }
 

@@ -17,6 +17,12 @@ import type {
   ShellEnvironment,
   ViewState,
 } from "../generated";
+import {
+  AUTH_SCENARIOS,
+  isAuthScenario,
+  MockAuth,
+  type AuthScenario,
+} from "./auth";
 import { Cluster, podCells, podRow, type Pod } from "./cluster";
 import { CONTEXTS, NAMESPACES, POD_COUNT, SPACES, VERSIONS } from "./fixtures";
 import dvorak from "./layouts/dvorak.json";
@@ -30,12 +36,16 @@ import { checkQuery, podColumns, runQuery } from "./query";
 /** `live` connects, syncs and then changes pods every second; any other value pins that state. */
 type ListScenario = "live" | ViewState["state"];
 
-/** A list scenario, or `shellTimeout`: live lists while the login shell's environment timed out. */
-export type MockScenario = ListScenario | "shellTimeout";
+/**
+ * A list scenario, `shellTimeout`: live lists while the login shell's
+ * environment timed out, or a pinned state of prod-eu's credentials.
+ */
+export type MockScenario = ListScenario | "shellTimeout" | AuthScenario;
 
 export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "live",
   "shellTimeout",
+  ...AUTH_SCENARIOS,
   "queued",
   "connecting",
   "syncing",
@@ -94,7 +104,10 @@ export function createMockBackend(
   changesPerSecond?: number,
 ): Backend {
   const now = Date.now();
-  const lists: ListScenario = scenario === "shellTimeout" ? "live" : scenario;
+  const pinsAuth = isAuthScenario(scenario);
+  const lists: ListScenario =
+    scenario === "shellTimeout" || isAuthScenario(scenario) ? "live" : scenario;
+  const auth = new MockAuth(pinsAuth ? scenario : undefined);
   const resolved: ShellEnvironment =
     scenario === "shellTimeout" ? SHELL_TIMEOUT : { state: "resolved" };
   let environment = resolved;
@@ -156,7 +169,22 @@ export function createMockBackend(
     cluster_version: (name) => {
       const version = VERSIONS[name];
       if (!version) throw new IpcError("notFound", `no context ${name}`);
+      auth.check(name);
       return { gitVersion: version };
+    },
+    context_sign_in: (context) => auth.signIn(context),
+    context_sign_in_cancel: (context) => auth.cancel(context),
+    exec_review: () => auth.review(),
+    exec_trust: (digests) => auth.trust(digests),
+    url_open: (url) => {
+      if (!signInLink(url)) {
+        throw new IpcError(
+          "invalidInput",
+          `Twigo opens only sign-in links: ${url}`,
+        );
+      }
+      globalThis.open(url, "_blank", "noopener,noreferrer");
+      return null;
     },
     namespaces_list: (id) => {
       space(id);
@@ -268,6 +296,7 @@ export function createMockBackend(
       return id;
     },
     contexts_watch: () => CONTEXTS,
+    context_auth_watch: (context, onMessage) => auth.watch(context, onMessage),
     keyboard_layout_watch: () => LAYOUTS[layout],
     shell_environment_watch: (_request, onMessage) => {
       environmentWatchers.add(onMessage);
@@ -287,6 +316,22 @@ export function createMockBackend(
       return settle(() => streams[command](request, onMessage));
     },
   };
+}
+
+/** Rust's `sign_in_url` rule: https, or http to localhost or 127.0.0.1, without a user part; WHATWG's URL parser may read an unusual link otherwise than Rust's. */
+function signInLink(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.username !== "" || parsed.password !== "") return false;
+  return (
+    parsed.protocol === "https:" ||
+    (parsed.protocol === "http:" &&
+      (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1"))
+  );
 }
 
 /** Answers asynchronously, as IPC does. */

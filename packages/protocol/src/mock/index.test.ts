@@ -414,3 +414,41 @@ test("values of an unknown column are refused at subscribe", async () => {
   await vi.advanceTimersByTimeAsync(0);
   await rejected;
 });
+
+test("a request for an idle plugin's credential starts its run, and only sign-in links open", async () => {
+  vi.useRealTimers();
+  const backend = createMockBackend("review");
+  await backend.invoke("exec_trust", ["azure-prod-eu"]);
+  const seen: string[] = [];
+  const first = await backend.subscribe(
+    "context_auth_watch",
+    "prod-eu",
+    (auth) => {
+      if (auth.state === "plugin") seen.push(auth.status.state);
+    },
+  );
+  expect(first).toMatchObject({ state: "plugin", status: { state: "idle" } });
+  await expect(backend.invoke("cluster_version", "prod-eu")).rejects.toThrow(
+    "gave no credential yet",
+  );
+  expect(seen).toContain("running");
+  await expect(
+    backend.invoke("url_open", "http://localhost:1@example.com/"),
+  ).rejects.toThrow("only sign-in links");
+});
+
+test("a request runs a failed unattended plugin again, as Rust holds only a sign-in's failure", async () => {
+  vi.useRealTimers();
+  const backend = createMockBackend("pluginFailed");
+  const seen: string[] = [];
+  await backend.subscribe("context_auth_watch", "prod-eu", (auth) => {
+    if (auth.state === "plugin") seen.push(auth.status.state);
+  });
+  await expect(backend.invoke("cluster_version", "prod-eu")).rejects.toThrow(
+    "gave no credential yet",
+  );
+  expect(seen).toEqual(["running"]);
+  await vi.waitFor(() => {
+    expect(seen).toEqual(["running", "running", "failed"]);
+  });
+});

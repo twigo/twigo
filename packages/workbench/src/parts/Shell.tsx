@@ -4,6 +4,7 @@ import { Toaster } from "@twigo/ui";
 import { QuickAccessWidget } from "../quickaccess/QuickAccessWidget";
 import { useChanges, useWorkbench } from "../react";
 import type { Location } from "../views/registry";
+import { ReviewDialog, TrustDialog } from "./credentials/TrustDialog";
 import { EditorArea } from "./EditorArea";
 import { PanelBoundary, PartCrash } from "./PanelBoundary";
 import { PartView } from "./PartView";
@@ -131,6 +132,8 @@ export function Shell() {
         <StatusBar />
       </PanelBoundary>
       <QuickAccessWidget />
+      <ReviewDialog />
+      <TrustDialog />
       <Toaster />
     </div>
   );

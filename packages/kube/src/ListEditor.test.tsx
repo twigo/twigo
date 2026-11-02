@@ -275,7 +275,9 @@ test("a list reopened with a health chip picked subscribes with that health's va
   });
   await settle();
   const values = subscribe.mock.calls.flatMap(([command, query]) =>
-    command === "list_subscribe" && query ? [query.values?.values] : [],
+    command === "list_subscribe" && typeof query === "object" && query
+      ? [query.values?.values]
+      : [],
   );
   expect(values).toEqual([["CrashLoopBackOff", "Error", "ImagePullBackOff"]]);
   expect(rows().length).toBeGreaterThan(0);

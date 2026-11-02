@@ -36,9 +36,42 @@ export type Context = { name: string,
  */
 color: ContextColor | null, };
 
+/**
+ * How a context gets its credentials.
+ */
+export type ContextAuth = { "state": "none" } | { "state": "invalid", message: string, } | { "state": "untrusted", plugin: ExecPlugin, } | { "state": "plugin", plugin: ExecPlugin, status: PluginStatus, };
+
 export type ContextColor = "red" | "orange" | "yellow" | "green" | "blue" | "purple";
 
+export type EnvVar = { name: string, value: string, };
+
 export type ErrorKind = "invalidInput" | "notFound" | "conflict" | "forbidden" | "unauthorized" | "timeout" | "unavailable" | "internal";
+
+/**
+ * An exec credential plugin as the kubeconfig names it (ARCHITECTURE 6.2).
+ */
+export type ExecPlugin = { command: string, args: Array<string>, env: Array<EnvVar>, 
+/**
+ * Identifies what the person trusts: the command, its arguments and
+ * its environment.
+ */
+digest: string, 
+/**
+ * It may open a browser or print a device code, so it runs only while
+ * a Twigo window has the focus.
+ */
+signsIn: boolean, };
+
+/**
+ * The plugins the kubeconfigs name that the person has not trusted, for
+ * the review on the first start.
+ */
+export type ExecReview = { 
+/**
+ * The person has answered a review before, so a new plugin asks only
+ * when it is about to run.
+ */
+reviewed: boolean, plugins: Array<ReviewedPlugin>, };
 
 export type GroupCount = { value: string, count: number, };
 
@@ -131,11 +164,32 @@ groupBy: string | null,
  */
 values: ColumnValues | null, };
 
+export type PluginStatus = { "state": "idle" } | { "state": "waiting" } | { "state": "running", 
+/**
+ * When the run started, RFC 3339.
+ */
+since: string, output: string, } | { "state": "ready", 
+/**
+ * RFC 3339; none when the credential lasts until the cluster
+ * rejects it.
+ */
+expires: string | null, } | { "state": "failed", error: string, output: string, 
+/**
+ * The kubeconfig's `installHint`, when the command was not found.
+ */
+installHint: string | null, };
+
 /**
  * A resource the space's clusters serve, from discovery: what the explorer
  * lists and what `:` in quick access resolves names against (ARCHITECTURE 4.5).
  */
 export type Resource = { gvr: Gvr, kind: string, singular: string, shortNames: Array<string>, namespaced: boolean, };
+
+export type ReviewedPlugin = { plugin: ExecPlugin, 
+/**
+ * The contexts that use it.
+ */
+contexts: Array<string>, };
 
 export type Row = { id: RowId, 
 /**
@@ -236,4 +290,10 @@ export type Commands = {
   state_set: { request: Array<StateEntry>; response: null; message: null };
   shell_environment_watch: { request: null; response: ShellEnvironment; message: ShellEnvironment };
   shell_environment_retry: { request: null; response: null; message: null };
+  context_auth_watch: { request: string; response: ContextAuth; message: ContextAuth };
+  context_sign_in: { request: string; response: null; message: null };
+  context_sign_in_cancel: { request: string; response: null; message: null };
+  exec_review: { request: null; response: ExecReview; message: null };
+  exec_trust: { request: Array<string>; response: null; message: null };
+  url_open: { request: string; response: null; message: null };
 };

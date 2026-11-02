@@ -58,10 +58,13 @@ export function ClusterStatusItem({
   statuses: ListStatuses;
   discovery: Discovery;
 }) {
-  const { spaces, editors } = useWorkbench();
+  const { spaces, editors, credentials } = useWorkbench();
   useChanges(spaces.changes);
   useChanges(editors.changes);
   useChanges(statuses.changes);
+  useChanges(credentials.changes);
+  // The version is asked again once the context's credential comes.
+  const { ready } = credentials;
   const space = spaces.active;
   const [only, ...more] = space?.contexts ?? [];
   const context = more.length === 0 ? only : undefined;
@@ -78,7 +81,7 @@ export function ClusterStatusItem({
     return () => {
       live = false;
     };
-  }, [discovery, context]);
+  }, [discovery, context, ready]);
 
   const active = editors.active;
   const list = active === undefined ? undefined : statuses.get(active);

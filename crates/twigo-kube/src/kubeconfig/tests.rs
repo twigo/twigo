@@ -407,3 +407,111 @@ contexts:
     assert_eq!(context(&catalog, "kind-b").entries.proxy_url(), None);
     assert_ne!(*a, context(&catalog, "kind-b").entries);
 }
+
+const OIDC: &str = "
+users:
+- name: dev
+  user:
+    auth-provider:
+      name: oidc
+      config: { idp-issuer-url: 'https://id.example', client-id: twigo, id-token: ID, refresh-token: RT }
+contexts:
+- name: kind-oidc
+  context: { cluster: c, user: dev }
+clusters:
+- name: c
+  cluster: { server: 'https://c:6443' }
+";
+
+#[test]
+fn a_user_entry_knows_the_first_file_that_names_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = write(dir.path(), "first", OIDC);
+    let second = write(
+        dir.path(),
+        "second",
+        &OIDC.replace("https://id.example", "https://other.example"),
+    );
+    let catalog = kubectl(&[&first, &second]).load();
+    let oidc = context(&catalog, "kind-oidc")
+        .entries
+        .oidc()
+        .unwrap()
+        .unwrap();
+    assert_eq!(oidc.origin.as_deref(), Some(first.as_path()));
+    assert_eq!(oidc.user, "dev");
+}
+
+#[test]
+fn an_oidc_provider_beside_an_exec_plugin_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = write(
+        dir.path(),
+        "config",
+        &OIDC.replace(
+            "    auth-provider:",
+            "    exec: { apiVersion: client.authentication.k8s.io/v1, interactiveMode: Never, command: aws }\n    auth-provider:",
+        ),
+    );
+    let catalog = kubectl(&[&file]).load();
+    let entries = &context(&catalog, "kind-oidc").entries;
+    assert!(entries.oidc().is_none());
+    assert!(matches!(
+        entries.exec(),
+        Err(crate::credentials::ExecError::WithAuthProvider(_))
+    ));
+}
+
+#[test]
+fn a_token_in_the_entry_wins_over_its_oidc_provider() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = write(
+        dir.path(),
+        "config",
+        &OIDC.replace(
+            "    auth-provider:",
+            "    token: static\n    auth-provider:",
+        ),
+    );
+    let catalog = kubectl(&[&file]).load();
+    assert!(context(&catalog, "kind-oidc").entries.oidc().is_none());
+}
+
+#[test]
+fn refreshed_oidc_tokens_leave_the_fingerprint_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = write(dir.path(), "config", OIDC);
+    let fingerprint = || context(&kubectl(&[&file]).load(), "kind-oidc").fingerprint;
+    let before = fingerprint();
+    write(
+        dir.path(),
+        "config",
+        &OIDC.replace(
+            "id-token: ID, refresh-token: RT",
+            "id-token: ID2, refresh-token: RT2",
+        ),
+    );
+    assert_eq!(fingerprint(), before);
+    write(
+        dir.path(),
+        "config",
+        &OIDC.replace("client-id: twigo", "client-id: other"),
+    );
+    assert_ne!(fingerprint(), before, "the provider itself changed");
+
+    let ca = write(dir.path(), "idp.pem", "first");
+    write(
+        dir.path(),
+        "config",
+        &OIDC.replace(
+            "client-id: twigo,",
+            &format!(
+                "client-id: twigo, idp-certificate-authority: '{}',",
+                ca.display()
+            ),
+        ),
+    );
+    let with_ca = fingerprint();
+    write(dir.path(), "idp.pem", "second");
+    assert_ne!(fingerprint(), with_ca, "the IdP's CA file changed in place");
+}

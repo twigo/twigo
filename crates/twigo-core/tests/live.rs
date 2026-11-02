@@ -20,7 +20,7 @@ async fn the_cluster_version_comes_from_the_cluster() {
         "refusing context {context:?}: only kind and kwok clusters"
     );
     let dir = tempfile::tempdir().unwrap();
-    let core = Arc::new(Core::new(dir.path().join("state.json")));
+    let core = Arc::new(Core::new(dir.path()));
     let env = ShellEnv::from_iter(Vec::<(OsString, OsString)>::new());
     let (_status, followed) = watch::channel(Status::Resolved(Arc::new(env)));
     tokio::spawn({
