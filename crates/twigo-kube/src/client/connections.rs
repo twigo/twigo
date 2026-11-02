@@ -160,9 +160,10 @@ impl Connections {
         self.0.retired.subscribe()
     }
 
-    /// Retires every connection for good: other clients replace these, so
-    /// whoever holds them moves to those, however late they look, which a
-    /// count of retirements would not tell them.
+    /// Retires every connection and says, as a state, that other clients
+    /// replace these: whoever holds them moves to those, however late they
+    /// look, which a count of retirements would not tell them. A
+    /// connection these clients dial later is not refused.
     pub fn abandon(&self) {
         self.0.abandoned.send_replace(true);
         self.retire();

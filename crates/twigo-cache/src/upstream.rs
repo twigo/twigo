@@ -369,7 +369,11 @@ where
                     next
                 }
                 Outcome::Polled => {
-                    tokio::time::sleep(POLL).await;
+                    let mut abandoned = clients.connections().abandoned();
+                    tokio::select! {
+                        () = tokio::time::sleep(POLL) => {}
+                        _ = abandoned.wait_for(|abandoned| *abandoned) => {}
+                    }
                     Next::List
                 }
                 Outcome::Failed {

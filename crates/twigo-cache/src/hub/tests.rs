@@ -708,8 +708,15 @@ async fn whole_rows_wait_for_a_whole_list() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn clients_abandoned_before_their_first_watch_are_left_at_once() {
+async fn clients_abandoned_before_their_first_list_are_left_at_once() {
+    for streaming in [true, false] {
+        clients_abandoned_before_listing(streaming).await;
+    }
+}
+
+async fn clients_abandoned_before_listing(streaming: bool) {
     let fake = Fake::default();
+    fake.state().no_streaming = !streaming;
     fake.add("pods", Some("a"), "p1");
     let abandoned = fake.clients(Budgets::default());
     abandoned.connections().abandon();
@@ -732,6 +739,13 @@ async fn clients_abandoned_before_their_first_watch_are_left_at_once() {
     ready(&mut pods).await;
     assert_eq!(names(&pods), ["p1"]);
     assert_eq!(connects.load(std::sync::atomic::Ordering::Relaxed), 2);
+    // Over the current clients: a streaming list, or one refused and a
+    // page.
+    assert_eq!(
+        fake.count("sendInitialEvents") + fake.count("limit=500"),
+        if streaming { 1 } else { 2 },
+        "nothing listed over the abandoned clients"
+    );
     sleep(Duration::from_secs(30)).await;
     assert_eq!(
         connects.load(std::sync::atomic::Ordering::Relaxed),
@@ -748,6 +762,39 @@ async fn a_name_that_can_be_no_path_segment_is_refused() {
         assert_eq!(refused.kind, twigo_ipc::ErrorKind::InvalidInput, "{name:?}");
     }
     assert!(hub.scopes().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_poll_leaves_clients_abandoned_meanwhile() {
+    let fake = Fake::default();
+    fake.state().unwatchable.insert("pods".to_owned());
+    let first = fake.clients(Budgets::default());
+    let second = fake.clients(Budgets::default());
+    let switched = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let connect: Connect = {
+        let (first, second, switched) = (
+            Arc::clone(&first),
+            Arc::clone(&second),
+            Arc::clone(&switched),
+        );
+        Arc::new(move |_context| {
+            let now = switched.load(std::sync::atomic::Ordering::Relaxed);
+            let clients = Arc::clone(if now { &second } else { &first });
+            Box::pin(async move { Ok(clients) })
+        })
+    };
+    let hub = Hub::new(connect);
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut pods).await;
+    let lists = fake.count("limit=500");
+    switched.store(true, std::sync::atomic::Ordering::Relaxed);
+    first.connections().abandon();
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        fake.count("limit=500"),
+        lists + 1,
+        "it listed over the new clients without waiting out its 15 s"
+    );
 }
 
 #[test]
