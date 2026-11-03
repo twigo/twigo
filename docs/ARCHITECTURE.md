@@ -1141,7 +1141,7 @@ A section takes over a core one only by naming its id in `replaces`, and its hea
       Reads do not count, since inotify reports every open, Twigo's own loads among them, and a change that leaves the catalog as it was reports nothing.
     - The explicit mode keeps development, tests and the bench off real clusters: in debug and bench builds `TWIGO_KUBECONFIG` replaces every source, and only its `kind-*` and `kwok-*` contexts count.
   - The webview follows the catalog through `contexts_watch`, which answers once the sources have been read, after the login shell's environment.
-    Each context says the file that defines it, from `~` under the home directory, and its cluster's URL with only scheme, host, port and path, so no credential written into the URL reaches the webview.
+    Each context says the file that defines it, from `~` under the home directory, and its cluster's URL with only scheme, host and port, so no credential written into the URL reaches the webview.
   - Each extension's `clusterProviders` is a further source.
   - Later: Cluster Inventory `ClusterProfile` (SIG Multicluster, alpha).
 - **Connection** is either

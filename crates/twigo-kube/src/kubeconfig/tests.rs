@@ -123,7 +123,7 @@ clusters:
 - name: plain
   cluster: { server: 'https://10.0.0.1:6443' }
 - name: secret
-  cluster: { server: 'https://admin:hunter2@rancher.example:8443/k8s/clusters/c-1?token=t#f' }
+  cluster: { server: 'https://admin:hunter2@rancher.example:8443/k8s/clusters/c-1/t0ken?token=t#f' }
 - name: ipv6
   cluster: { server: 'https://[::1]:6443/' }
 - name: none
@@ -149,7 +149,7 @@ contexts:
     );
     assert_eq!(
         server("kind-secret").as_deref(),
-        Some("https://rancher.example:8443/k8s/clusters/c-1")
+        Some("https://rancher.example:8443")
     );
     assert_eq!(server("kind-ipv6").as_deref(), Some("https://[::1]:6443"));
     assert_eq!(server("kind-none"), None);

@@ -20,9 +20,9 @@ pub struct Context {
     /// The kubeconfig file that defines it, as a person names it:
     /// `~/.kube/config`.
     pub source: String,
-    /// The URL of the cluster it reaches, without user info, query or
-    /// fragment: `https://10.0.0.1:6443`. None when the kubeconfig names no
-    /// server that parses.
+    /// The URL of the cluster it reaches, only its scheme, host and port:
+    /// `https://10.0.0.1:6443`. None when the kubeconfig names no server
+    /// that parses.
     pub server: Option<String>,
 }
 

@@ -217,7 +217,7 @@ impl Context {
 }
 
 /// A cluster entry's server as the webview may see it: only its scheme,
-/// host, port and path, so no credential written into the URL goes along.
+/// host and port, so no credential written into the URL goes along.
 fn server(cluster: &NamedCluster) -> Option<String> {
     let uri: http::Uri = cluster.cluster.as_ref()?.server.as_deref()?.parse().ok()?;
     let scheme = uri.scheme_str()?;
@@ -226,11 +226,7 @@ fn server(cluster: &NamedCluster) -> Option<String> {
         .port()
         .map(|port| format!(":{port}"))
         .unwrap_or_default();
-    let path = match uri.path() {
-        "/" => "",
-        path => path,
-    };
-    Some(format!("{scheme}://{}{port}{path}", authority.host()))
+    Some(format!("{scheme}://{}{port}", authority.host()))
 }
 
 /// A context's context, cluster and user entries, as a kubeconfig of their

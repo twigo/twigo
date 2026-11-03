@@ -59,9 +59,9 @@ color: ContextColor | null,
  */
 source: string, 
 /**
- * The URL of the cluster it reaches, without user info, query or
- * fragment: `https://10.0.0.1:6443`. None when the kubeconfig names no
- * server that parses.
+ * The URL of the cluster it reaches, only its scheme, host and port:
+ * `https://10.0.0.1:6443`. None when the kubeconfig names no server
+ * that parses.
  */
 server: string | null, };
 
@@ -221,9 +221,9 @@ upserts: Array<Row>, status: ViewState,
 counts: Array<ValueCount> | null, 
 /**
  * With `group_by`: the groups that hold matching rows, in group order,
- * present in the first batch and whenever a group appears, disappears
- * or moves, or its rows or counts change. Empty once the list no
- * longer has the column.
+ * present once the list has the column and whenever a group appears,
+ * disappears or moves, or its rows or counts change. Empty once the
+ * list no longer has the column.
  */
 groups: Array<RowGroup> | null, };
 

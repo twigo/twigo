@@ -119,9 +119,9 @@ pub struct ListBatch {
     /// in the first batch and whenever a count changes.
     pub counts: Option<Vec<ValueCount>>,
     /// With `group_by`: the groups that hold matching rows, in group order,
-    /// present in the first batch and whenever a group appears, disappears
-    /// or moves, or its rows or counts change. Empty once the list no
-    /// longer has the column.
+    /// present once the list has the column and whenever a group appears,
+    /// disappears or moves, or its rows or counts change. Empty once the
+    /// list no longer has the column.
     pub groups: Option<Vec<RowGroup>>,
 }
 
