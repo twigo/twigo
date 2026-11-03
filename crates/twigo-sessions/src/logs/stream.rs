@@ -171,6 +171,8 @@ enum Outcome {
     },
     /// The connection was retired or its clients abandoned under it.
     Cut,
+    /// The body broke, which says nothing of the instance.
+    Broken,
     Failed(IpcError),
     /// The kubelet could not read the instance's log and said why in the
     /// body, after the zero-byte write that sends its headers
@@ -366,6 +368,12 @@ impl Reader {
             }
             match outcome {
                 Outcome::Cut => from = self.resumed(from),
+                Outcome::Broken => {
+                    from = self.resumed(from);
+                    if !self.pause(pod).await {
+                        return;
+                    }
+                }
                 Outcome::Ended { fresh } => {
                     // The status may not say yet that it ended; or the
                     // server ended the log of one that runs.
@@ -413,6 +421,12 @@ impl Reader {
             let id = id.to_owned();
             match self.read(true, from, send).await {
                 Outcome::Cut => from = self.resumed(from),
+                Outcome::Broken => {
+                    from = self.resumed(from);
+                    if !self.pause(pod).await {
+                        return;
+                    }
+                }
                 outcome @ (Outcome::Ended { .. } | Outcome::Unreadable(_)) => {
                     let current = Arc::clone(&pod.borrow_and_update());
                     let status = Status::of(&current, &self.stream.container);
@@ -591,9 +605,7 @@ impl Reader {
             match read {
                 Ok(0) => return Outcome::Ended { fresh },
                 Ok(_) => {}
-                // The stream broke: read again after the pause, which a
-                // server failing at once would otherwise not get.
-                Err(_) => return Outcome::Ended { fresh },
+                Err(_) => return Outcome::Broken,
             }
             let parsed = line::parse(&buffer);
             // With timestamps every line the container wrote has its time.
@@ -619,9 +631,152 @@ impl Reader {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use serde_json::json;
+    use tokio::task::JoinHandle;
 
     use super::*;
+    use crate::logs::fake::{Fake, NAMESPACE};
+
+    /// A stream of `web-1`'s container `web` over the fake, and what it said.
+    struct Followed {
+        events: Arc<Mutex<Vec<Event>>>,
+        told: watch::Sender<Arc<Value>>,
+        task: JoinHandle<()>,
+    }
+
+    impl Followed {
+        fn new(fake: &Fake, pod: Value, previous: bool) -> Self {
+            let stream = Stream {
+                hub: fake.hub(),
+                context: "kind-test".to_owned(),
+                namespace: NAMESPACE.to_owned(),
+                pod: "web-1".to_owned(),
+                container: "web".to_owned(),
+                since: Since::Start,
+                previous,
+            };
+            let (told, followed) = watch::channel(Arc::new(pod));
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let sink = Arc::clone(&events);
+            let task = tokio::spawn(run(stream, followed, move |event| {
+                sink.lock().unwrap().push(event);
+            }));
+            Self { events, told, task }
+        }
+
+        fn tell(&self, pod: Value) {
+            self.told.send_replace(Arc::new(pod));
+        }
+
+        /// The lines and ends it sent, as `text` and `ended`.
+        fn entries(&self) -> Vec<String> {
+            self.events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|event| match event {
+                    Event::Line { text, .. } => Some(text.clone()),
+                    Event::Ended { .. } => Some("ended".to_owned()),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        fn finished(&self) -> bool {
+            self.events.lock().unwrap().contains(&Event::Finished)
+        }
+
+        async fn until(&self, what: &str, done: impl Fn(&Self) -> bool) {
+            let reached = async {
+                while !done(self) {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            };
+            tokio::time::timeout(Duration::from_secs(600), reached)
+                .await
+                .unwrap_or_else(|_| panic!("{what}; it said {:?}", self.events.lock().unwrap()));
+        }
+    }
+
+    impl Drop for Followed {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
+    /// `web-1` with its container `web` in `state`, after `last`.
+    fn web(state: Value, last: Value) -> Value {
+        json!({
+            "metadata": { "name": "web-1" },
+            "spec": { "containers": [{ "name": "web" }] },
+            "status": { "phase": "Running", "containerStatuses": [
+                { "name": "web", "containerID": "web-a", "state": state, "lastState": last },
+            ] },
+        })
+    }
+
+    fn crashed(instance: &str) -> Value {
+        json!({ "terminated": { "containerID": instance, "exitCode": 1, "reason": "Error", "finishedAt": "2026-11-03T10:00:09Z" } })
+    }
+
+    fn numbered(fake: &Fake, instance: &str, lines: std::ops::RangeInclusive<i64>) {
+        for n in lines {
+            fake.write(
+                "web-1",
+                "web",
+                instance,
+                n * SECOND,
+                &format!("{instance} {n}"),
+            );
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_broken_body_reads_on_to_the_end_of_a_crashed_instance() {
+        let fake = Fake::default();
+        fake.serve("web-1", "web", Some("web-a"), None);
+        numbered(&fake, "web-a", 1..=3);
+        let running = json!({ "running": { "startedAt": "2026-11-03T10:00:00Z" } });
+        let followed = Followed::new(&fake, web(running, json!({})), false);
+        followed
+            .until("three lines", |followed| followed.entries().len() == 3)
+            .await;
+        followed.tell(web(crashed("web-a"), json!({})));
+        fake.break_follows("web-1", "web");
+        numbered(&fake, "web-a", 4..=5);
+        fake.stop("web-1", "web", "web-a");
+        followed
+            .until("its end", |followed| {
+                followed.entries().contains(&"ended".to_owned())
+            })
+            .await;
+        assert_eq!(
+            followed.entries(),
+            [
+                "web-a 1", "web-a 2", "web-a 3", "web-a 4", "web-a 5", "ended"
+            ]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_broken_body_reads_a_previous_instance_to_its_end() {
+        let fake = Fake::default();
+        fake.serve("web-1", "web", Some("web-b"), Some("web-a"));
+        numbered(&fake, "web-a", 1..=5);
+        fake.stop("web-1", "web", "web-a");
+        fake.break_after("web-1", "web", 3);
+        let running = json!({ "running": { "startedAt": "2026-11-03T10:00:10Z" } });
+        let followed = Followed::new(&fake, web(running, crashed("web-a")), true);
+        followed.until("finished", Followed::finished).await;
+        assert_eq!(
+            followed.entries(),
+            [
+                "web-a 1", "web-a 2", "web-a 3", "web-a 4", "web-a 5", "ended"
+            ]
+        );
+    }
 
     fn reread(resume: &mut Resume, times: &[i64]) -> Vec<bool> {
         resume.reopen();

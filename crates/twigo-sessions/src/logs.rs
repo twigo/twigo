@@ -3,6 +3,8 @@
 //! filters, searches and windows for the webview.
 
 pub mod buffer;
+#[cfg(test)]
+mod fake;
 pub mod level;
 pub mod line;
 mod plan;
