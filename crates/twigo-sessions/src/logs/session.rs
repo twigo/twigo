@@ -792,6 +792,8 @@ fn nanos(time: jiff::Timestamp) -> i64 {
 mod tests {
     use twigo_ipc::{Containers, Gvr, LevelFilter, LogTarget, Since};
 
+    use twigo_ipc::LogEntry;
+
     use super::*;
     use crate::logs::buffer::{Limits, Origin};
     use crate::logs::fake::{Fake, NAMESPACE};
@@ -879,6 +881,80 @@ mod tests {
             pod["metadata"]["deletionTimestamp"] = serde_json::json!("2026-11-03T10:00:04Z");
         }
         pod
+    }
+
+    /// A session over the fake whose pod `web-1` wrote three lines, and
+    /// its batches, none acknowledged.
+    async fn opened(fake: &Fake) -> (Session, mpsc::UnboundedReceiver<LogBatch>) {
+        fake.pod(web(false));
+        fake.serve("web-1", "web", Some("web-a"), None);
+        for n in 1..=3 {
+            fake.write(
+                "web-1",
+                "web",
+                "web-a",
+                T0 + n * SECOND,
+                &format!("line {n}"),
+            );
+        }
+        let (hub, _) = fake.hub();
+        let (sent, batches) = mpsc::unbounded_channel();
+        let session = Session::open(
+            hub,
+            "kind-test".to_owned(),
+            request("web-1"),
+            move |batch| sent.send(batch).is_ok(),
+        )
+        .await
+        .unwrap();
+        session.set_window(LogWindow::Tail { count: 100 });
+        (session, batches)
+    }
+
+    fn lines(batch: &LogBatch) -> Vec<&str> {
+        batch
+            .window
+            .iter()
+            .flat_map(|window| &window.entries)
+            .filter_map(|entry| match entry {
+                LogEntry::Line { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn at_most_one_batch_goes_unacknowledged() {
+        let fake = Fake::default();
+        let (session, mut batches) = opened(&fake).await;
+        let first = batches.recv().await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        assert!(batches.try_recv().is_err(), "a second batch before the ack");
+
+        session.ack(first.seq);
+        let second = batches.recv().await.unwrap();
+        assert_eq!(second.seq, first.seq + 1);
+        assert_eq!(lines(&second), ["line 1", "line 2", "line 3"]);
+        fake.write("web-1", "web", "web-a", T0 + 4 * SECOND, "line 4");
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        assert!(batches.try_recv().is_err(), "a third batch before the ack");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_window_change_waiting_on_an_ack_goes_out_with_it() {
+        let fake = Fake::default();
+        let (session, mut batches) = opened(&fake).await;
+        let first = batches.recv().await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        session.set_window(LogWindow::Range { start: 0, end: 1 });
+        tokio::time::sleep(std::time::Duration::from_secs(10) + FLUSH / 2).await;
+        assert!(batches.try_recv().is_err(), "a batch before the ack");
+
+        let acked = tokio::time::Instant::now();
+        session.ack(first.seq);
+        let second = batches.recv().await.unwrap();
+        assert_eq!(tokio::time::Instant::now(), acked, "it waited for a tick");
+        assert_eq!(lines(&second), ["line 1"]);
     }
 
     #[tokio::test(start_paused = true)]
