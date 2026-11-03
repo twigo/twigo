@@ -237,6 +237,27 @@ function Grid({
     [statuses, uri],
   );
 
+  const select = useCallback(
+    (row: Row) => {
+      selection.set(uri, {
+        gvr,
+        kind: resource.kind,
+        namespaced: resource.namespaced,
+        columns: snapshot.columns,
+        row,
+      });
+    },
+    [selection, uri, gvr, resource.kind, resource.namespaced, snapshot.columns],
+  );
+  const current = selection.get(uri);
+  const live = current && snapshot.rows.get(current.row.id);
+  const changed =
+    live !== undefined &&
+    (live !== current?.row || snapshot.columns !== current.columns);
+  useEffect(() => {
+    if (changed) select(live);
+  }, [changed, live, select]);
+
   const register = useListRegistration({
     "resource.group": resource.gvr.group,
     "resource.kind": resource.kind,
@@ -264,7 +285,6 @@ function Grid({
       />
     );
 
-  const selected = selection.get(uri)?.row.id;
   const Icon = kindIcon(gvr);
   const filtered = text !== "" || picked !== undefined;
   return (
@@ -300,15 +320,9 @@ function Grid({
       onToggleGroup={(id) => {
         states.toggleGroup(uri, id.slice(GROUP.length));
       }}
-      selected={selected}
+      selected={current?.row.id}
       onSelect={(_, row) => {
-        selection.set(uri, {
-          gvr,
-          kind: resource.kind,
-          namespaced: resource.namespaced,
-          columns: snapshot.columns,
-          row,
-        });
+        select(row);
       }}
       onActivate={onActivate}
       marked={selection.marks(uri)}

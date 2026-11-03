@@ -8,6 +8,7 @@ import {
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type {
   Backend,
+  ListBatch,
   ObjectBatch,
   ObjectEvent,
   Overview,
@@ -138,6 +139,34 @@ describe("in a wide editor", () => {
     ).toBe("false");
   });
 
+  test("the details follow their row as it changes, and stay closed once closed", async () => {
+    const script = scriptedPods();
+    await openList(script.backend);
+    const send = async (batch: ListBatch) => {
+      act(() => {
+        script.send(batch);
+      });
+      await settle(1);
+    };
+    await send(podsBatch(1, { "web-1": "Running", "web-2": "Running" }, true));
+    fireEvent.contextMenu(rows()[0] ?? document.body);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open Details" }));
+    await settle(1);
+    const header = () => shown().querySelector("header") ?? document.body;
+    expect(within(header()).getByText("Running")).toBeTruthy();
+
+    await send(podsBatch(2, { "web-1": "CrashLoopBackOff" }));
+    expect(within(header()).getByText("CrashLoopBackOff")).toBeTruthy();
+    expect(within(shown()).getAllByText("CrashLoopBackOff")).toHaveLength(2);
+    expect(within(header()).queryByText("Running")).toBeNull();
+
+    fireEvent.click(
+      within(shown()).getByRole("button", { name: "Close details" }),
+    );
+    await send(podsBatch(3, { "web-1": "Error" }));
+    expect(details()).toBeNull();
+  });
+
   test("the Events tab counts the object's warnings", async () => {
     await openList(withWarnings(2));
     fireEvent.click(rows()[0] ?? document.body);
@@ -158,6 +187,52 @@ describe("in a narrow editor", () => {
     expect(headers()).toEqual(EVERY_COLUMN);
   });
 });
+
+function scriptedPods() {
+  const mock = createMockBackend("ready");
+  let send: ((batch: ListBatch) => void) | undefined;
+  const backend: Backend = {
+    invoke: (command, request) =>
+      command.startsWith("list_")
+        ? Promise.resolve(null as never)
+        : mock.invoke(command, request),
+    subscribe(command, request, onMessage) {
+      if (command !== "list_subscribe")
+        return mock.subscribe(command, request, onMessage);
+      send = onMessage;
+      return Promise.resolve(1 as never);
+    },
+  };
+  return { backend, send: (batch: ListBatch) => send?.(batch) };
+}
+
+function podsBatch(
+  seq: number,
+  statuses: Record<string, string>,
+  first = false,
+): ListBatch {
+  const ids = Object.keys(statuses).map((name) => `prod-eu/default/${name}`);
+  return {
+    seq,
+    total: 2,
+    columns: first
+      ? [
+          { name: "Name", kind: "string", priority: 0 },
+          { name: "Status", kind: "string", priority: 0 },
+        ]
+      : null,
+    window: first ? { start: 0, ids } : null,
+    upserts: Object.entries(statuses).map(([name, status]) => ({
+      id: `prod-eu/default/${name}`,
+      created: null,
+      generated: null,
+      cells: [name, status],
+    })),
+    status: { state: "ready" },
+    counts: null,
+    groups: null,
+  };
+}
 
 function warning(index: number): ObjectEvent {
   return {
