@@ -31,6 +31,8 @@ pub struct Sources {
     files: Vec<PathBuf>,
     /// Only `kind-*` and `kwok-*` contexts count.
     test_only: bool,
+    /// The home directory, which a context's source names as `~`.
+    home: Option<PathBuf>,
 }
 
 impl Sources {
@@ -61,6 +63,7 @@ impl Sources {
         Self {
             files,
             test_only: false,
+            home: home.map(Path::to_path_buf),
         }
     }
 
@@ -71,6 +74,7 @@ impl Sources {
         Self {
             files: vec![absolute(file)],
             test_only: true,
+            home: None,
         }
     }
 
@@ -86,6 +90,8 @@ impl Sources {
         // The file each user entry comes from: the first that names it, as
         // kubectl's merge keeps it, and where its refreshed tokens go.
         let mut origins: HashMap<String, PathBuf> = HashMap::new();
+        // The file each context comes from, by the same rule.
+        let mut sources: HashMap<String, String> = HashMap::new();
         for file in &self.files {
             let config = match Kubeconfig::read_from(file) {
                 Ok(config) => config,
@@ -100,10 +106,14 @@ impl Sources {
                 }
             };
             let users: Vec<String> = config.auth_infos.iter().map(|u| u.name.clone()).collect();
+            let contexts: Vec<String> = config.contexts.iter().map(|c| c.name.clone()).collect();
             merged = match merged.clone().merge(config) {
                 Ok(next) => {
                     for user in users {
                         origins.entry(user).or_insert_with(|| file.clone());
+                    }
+                    for context in contexts {
+                        sources.entry(context).or_insert_with(|| self.named(file));
                     }
                     next
                 }
@@ -117,9 +127,21 @@ impl Sources {
             .contexts
             .iter()
             .filter(|named| !self.test_only || is_test_context(&named.name))
-            .map(|named| Context::new(named, &merged, &origins))
+            .map(|named| {
+                let source = sources[&named.name].clone();
+                Context::new(named, &merged, &origins, source)
+            })
             .collect();
         Catalog { contexts, failures }
+    }
+
+    /// A file as a person names it: under the home directory, from `~`.
+    fn named(&self, file: &Path) -> String {
+        match self.home.as_deref().map(|home| file.strip_prefix(home)) {
+            Some(Ok(rest)) if rest.as_os_str().is_empty() => "~".to_owned(),
+            Some(Ok(rest)) => format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display()),
+            _ => file.display().to_string(),
+        }
     }
 }
 
@@ -144,6 +166,11 @@ pub struct Catalog {
 pub struct Context {
     pub name: String,
     pub color: Option<ContextColor>,
+    /// The file that defines it, as a person names it: `~/.kube/config`.
+    pub source: String,
+    /// The URL of the cluster it reaches, without user info, query or
+    /// fragment; none without a cluster entry or a server that parses.
+    pub server: Option<String>,
     /// Where the context goes among the others, lowest first.
     pub order: Option<i64>,
     pub fingerprint: Fingerprint,
@@ -153,7 +180,12 @@ pub struct Context {
 }
 
 impl Context {
-    fn new(named: &NamedContext, merged: &Kubeconfig, origins: &HashMap<String, PathBuf>) -> Self {
+    fn new(
+        named: &NamedContext,
+        merged: &Kubeconfig,
+        origins: &HashMap<String, PathBuf>,
+        source: String,
+    ) -> Self {
         let entry = named.context.as_ref();
         let cluster_name = entry.map(|context| context.cluster.as_str());
         let user_name = entry.and_then(|context| context.user.as_deref());
@@ -169,6 +201,8 @@ impl Context {
         Self {
             name: named.name.clone(),
             color: extension.color,
+            source,
+            server: cluster.and_then(server),
             order: extension.order,
             fingerprint: Fingerprint::of(named, cluster, user),
             problem,
@@ -180,6 +214,19 @@ impl Context {
             ),
         }
     }
+}
+
+/// A cluster entry's server as the webview may see it: only its scheme,
+/// host and port, so no credential written into the URL goes along.
+fn server(cluster: &NamedCluster) -> Option<String> {
+    let uri: http::Uri = cluster.cluster.as_ref()?.server.as_deref()?.parse().ok()?;
+    let scheme = uri.scheme_str()?;
+    let authority = uri.authority()?;
+    let port = authority
+        .port()
+        .map(|port| format!(":{port}"))
+        .unwrap_or_default();
+    Some(format!("{scheme}://{}{port}", authority.host()))
 }
 
 /// A context's context, cluster and user entries, as a kubeconfig of their

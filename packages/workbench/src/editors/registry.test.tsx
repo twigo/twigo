@@ -93,6 +93,34 @@ test("each space keeps its own editors", async () => {
   expect(tabs()).toEqual([{ title: "prod", preview: "false" }]);
 });
 
+test("closing an editor says so, while moving it or switching spaces does not", async () => {
+  const { workbench, editors } = await mounted();
+  const closed: string[] = [];
+  editors.onClose((uri) => closed.push(uri));
+  act(() => {
+    editors.open("note://a");
+    editors.open("note://b");
+  });
+  act(() => {
+    void workbench.commands.execute(
+      "workbench.action.moveEditorToRightGroup",
+      workbench.keys.lookup(null),
+    );
+  });
+  expect(document.querySelectorAll(".dv-groupview")).toHaveLength(2);
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  act(() => {
+    workbench.spaces.select("prod-eu");
+  });
+  expect(closed).toEqual([]);
+  act(() => {
+    editors.close("note://b");
+  });
+  expect(closed).toEqual(["note://b"]);
+});
+
 test("a URI nothing opens fails loudly", async () => {
   const { editors } = await mounted();
   expect(() => {

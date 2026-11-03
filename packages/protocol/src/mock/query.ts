@@ -1,5 +1,12 @@
 import { IpcError } from "../error";
-import type { Cell, Column, GroupCount, ListQuery, RowId } from "../generated";
+import type {
+  Cell,
+  Column,
+  ListQuery,
+  RowGroup,
+  RowId,
+  ValueCount,
+} from "../generated";
 import { parseSelector, type Selector } from "./selector";
 
 /** A row as a query reads it: the webview's cells, Namespace included. */
@@ -38,7 +45,8 @@ export interface CompiledQuery {
   readonly text: TextFilter | null;
   readonly textColumns: readonly number[];
   readonly sort: { at: number; descending: boolean; age: boolean } | null;
-  readonly group: number | null;
+  readonly count: number | null;
+  readonly group: { at: number; collapsed: ReadonlySet<string> } | null;
   readonly values: { at: number; values: ReadonlySet<string> } | null;
 }
 
@@ -63,6 +71,7 @@ export function compileQuery(
   const sorted = query.sort === null ? null : find(query.sort.column);
   const at = sorted ?? find(NAME);
   const valuesAt = query.values === null ? null : find(query.values.column);
+  const groupAt = query.groupBy === null ? null : find(query.groupBy.column);
   return {
     query,
     selector:
@@ -77,7 +86,11 @@ export function compileQuery(
             descending: sorted !== null && (query.sort?.descending ?? false),
             age: columns[at]?.kind === "age",
           },
-    group: query.groupBy === null ? null : find(query.groupBy),
+    count: query.countBy === null ? null : find(query.countBy),
+    group:
+      groupAt === null || query.groupBy === null
+        ? null
+        : { at: groupAt, collapsed: new Set(query.groupBy.collapsed) },
     values:
       valuesAt === null || query.values === null
         ? null
@@ -86,16 +99,20 @@ export function compileQuery(
 }
 
 export interface QueryResult<R> {
-  /** The matching rows, sorted. */
+  /** The matching rows, sorted, by group first with `groupBy`. */
   readonly rows: R[];
-  /** With `groupBy`: the rows the text and the labels keep, per value. */
-  readonly groups: GroupCount[] | null;
+  /** The rows a window reads: those of the groups not collapsed. */
+  readonly readable: R[];
+  /** With `countBy`: the rows the text and the labels keep, per value. */
+  readonly counts: ValueCount[] | null;
+  /** With `groupBy`: the groups that hold matching rows, in group order. */
+  readonly groups: RowGroup[] | null;
 }
 
 /**
- * Filters, counts and sorts as Rust's query view does (ARCHITECTURE 3.4),
- * from scratch on every call; the shared query cases check that the two
- * agree.
+ * Filters, counts, groups and sorts as Rust's query view does
+ * (ARCHITECTURE 3.4), from scratch on every call; the shared query cases
+ * check that the two agree.
  */
 export function runQuery<R extends QueryRow>(
   rows: readonly R[],
@@ -103,8 +120,9 @@ export function runQuery<R extends QueryRow>(
 ): QueryResult<R> {
   const { query } = compiled;
   const namespaces = new Set(query.namespaces);
-  const counts = new Map<string, number>();
-  const kept: R[] = [];
+  const counted = new Map<string, number>();
+  const tallies = new Map<string, Tally>();
+  const kept: { row: R; group: string | null }[] = [];
   for (const row of rows) {
     if (
       query.namespaced &&
@@ -122,9 +140,16 @@ export function runQuery<R extends QueryRow>(
     ) {
       continue;
     }
-    if (compiled.group !== null) {
-      const value = cellText(row.cells[compiled.group]);
-      counts.set(value, (counts.get(value) ?? 0) + 1);
+    const value =
+      compiled.count === null ? null : cellText(row.cells[compiled.count]);
+    if (value !== null) increment(counted, value);
+    const group =
+      compiled.group === null ? null : cellText(row.cells[compiled.group.at]);
+    let tally: Tally | undefined;
+    if (group !== null) {
+      tally = tallies.get(group) ?? { rows: 0, counts: new Map() };
+      tallies.set(group, tally);
+      if (value !== null) increment(tally.counts, value);
     }
     if (
       compiled.values &&
@@ -132,27 +157,74 @@ export function runQuery<R extends QueryRow>(
     ) {
       continue;
     }
-    kept.push(row);
+    if (tally) tally.rows++;
+    kept.push({ row, group });
   }
   const { sort } = compiled;
-  const keyed = kept.map((row) => ({
+  const groupOrder = new Map(
+    [...new Set(kept.map(({ group }) => group ?? ""))]
+      .sort(compareGroups)
+      .map((value, index) => [value, index]),
+  );
+  const keyed = kept.map(({ row, group }) => ({
     row,
+    group,
+    rank: groupOrder.get(group ?? "") ?? 0,
     key: sort ? sortKey(row.cells[sort.at], sort.age, row.created) : NULL,
   }));
   keyed.sort((a, b) => {
     const order = compareKeys(a.key, b.key);
-    return (sort?.descending ? -order : order) || natural(a.row.id, b.row.id);
+    return (
+      a.rank - b.rank ||
+      (sort?.descending ? -order : order) ||
+      natural(a.row.id, b.row.id)
+    );
   });
-  const groups =
-    query.groupBy === null
-      ? null
-      : [...counts]
-          .map(([value, count]) => ({ value, count }))
-          .sort((a, b) => b.count - a.count || codePoints(a.value, b.value));
-  return { rows: keyed.map(({ row }) => row), groups };
+  const collapsed = compiled.group?.collapsed;
+  return {
+    rows: keyed.map(({ row }) => row),
+    readable: keyed
+      .filter(({ group }) => group === null || !collapsed?.has(group))
+      .map(({ row }) => row),
+    counts: query.countBy === null ? null : sortCounts(counted),
+    groups:
+      compiled.group === null
+        ? null
+        : [...tallies]
+            .filter(([, tally]) => tally.rows > 0)
+            .sort(([a], [b]) => compareGroups(a, b))
+            .map(([value, tally]) => ({
+              value,
+              rows: tally.rows,
+              counts: sortCounts(tally.counts),
+            })),
+  };
 }
 
-/** A cell as the filter, the values and the groups read it. */
+/** A group's matching rows, and its counts before values drop any. */
+interface Tally {
+  rows: number;
+  readonly counts: Map<string, number>;
+}
+
+function increment(counts: Map<string, number>, value: string): void {
+  counts.set(value, (counts.get(value) ?? 0) + 1);
+}
+
+/** Largest first, then by value. */
+function sortCounts(counts: ReadonlyMap<string, number>): ValueCount[] {
+  return [...counts]
+    .map(([value, count]) => ({ value, count }))
+    .sort((a, b) => b.count - a.count || codePoints(a.value, b.value));
+}
+
+/** Groups in natural order of their values, the empty value last. */
+function compareGroups(a: string | null, b: string | null): number {
+  if (a === null || b === null) return 0;
+  return Number(a === "") - Number(b === "") || natural(a, b);
+}
+
+/** A cell as the filter, the values, the counts and the groups read it. */
 function cellText(cell: Cell | undefined): string {
   return cell === null || cell === undefined ? "" : String(cell);
 }
@@ -318,6 +390,12 @@ function codePoints(a: string, b: string): number {
   return x.length - y.length;
 }
 
+/** A character's code point, an ASCII capital as its small letter. */
+function foldAscii(char: string): number {
+  const code = char.codePointAt(0) ?? 0;
+  return code >= 65 && code <= 90 ? code + 32 : code;
+}
+
 function digit(char: string | undefined): boolean {
   return char !== undefined && char >= "0" && char <= "9";
 }
@@ -352,7 +430,7 @@ export function natural(a: string, b: string): number {
       j = q;
       continue;
     }
-    const order = codePoints(lowerAscii(c), lowerAscii(d));
+    const order = foldAscii(c) - foldAscii(d);
     if (order !== 0) return order;
     i++;
     j++;

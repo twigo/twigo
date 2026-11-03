@@ -51,7 +51,8 @@ fn query(context: &str) -> ListQuery {
             column: "Restarts".to_owned(),
             descending: true,
         }),
-        group_by: Some("Status".to_owned()),
+        count_by: Some("Status".to_owned()),
+        group_by: None,
         values: None,
     }
 }

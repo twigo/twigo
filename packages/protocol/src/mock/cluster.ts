@@ -1,10 +1,14 @@
-import type { Cell, Row, RowId } from "../generated";
+import type { Cell, RowId } from "../generated";
 import { NAMESPACES, WORKLOADS } from "./fixtures";
 
 export interface Pod {
   id: RowId;
   namespace: string;
   name: string;
+  /** Its ReplicaSet's name and a dash. */
+  generateName: string;
+  /** Its ReplicaSet's `pod-template-hash`. */
+  templateHash: string;
   containers: number;
   ready: number;
   status: string;
@@ -25,15 +29,30 @@ const ABNORMAL: [string, number][] = [
   ["Error", 0.005],
 ];
 
+export interface Node {
+  id: RowId;
+  name: string;
+  /** As kube-apiserver prints it: `Ready`, `NotReady`, `Ready,SchedulingDisabled`. */
+  status: string;
+  created: number;
+  ip: string;
+}
+
 const DAY = 86_400_000;
 
-/** Deterministic pods for one context, so screenshots repeat. */
+/** The nodes of a cluster with pods, which the pods spread over. */
+const NODES = 40;
+
+/** Deterministic pods and nodes for one context, so screenshots repeat. */
 export class Cluster {
   readonly pods: Pod[] = [];
+  readonly nodes: Node[] = [];
   /** Bumped on every change, so query results can be cached. */
   version = 0;
-  /** Set once the first subscription has synced; later ones start ready, as on a shared upstream. */
-  synced = false;
+  /** When the cluster last changed, which the times its events print count from. */
+  now: number;
+  /** The kinds whose first subscription has synced; later ones start ready, as on a shared upstream. */
+  readonly synced = new Set<string>();
   readonly #random: () => number;
   #serial = 0;
 
@@ -42,8 +61,27 @@ export class Cluster {
     count: number,
     now: number,
   ) {
+    this.now = now;
     this.#random = mulberry32(hash(context));
     for (let i = 0; i < count; i++) this.pods.push(this.#pod(now));
+    // A stream of their own, so the pods and their churn stay as they were.
+    const random = mulberry32(hash(`${context}/nodes`));
+    for (let i = 0; i < (count > 0 ? NODES : 0); i++) {
+      const name = `${context}-node-${i}`;
+      const roll = random();
+      this.nodes.push({
+        id: `${context}/${name}`,
+        name,
+        status:
+          roll < 0.05
+            ? "NotReady"
+            : roll < 0.08
+              ? "Ready,SchedulingDisabled"
+              : "Ready",
+        created: now - Math.floor((30 + random() * 60) * DAY),
+        ip: `10.0.${Math.floor(i / 200)}.${10 + (i % 200)}`,
+      });
+    }
   }
 
   /** Changes `count` random pods plus every pod in `focus`, and replaces one pod. */
@@ -63,6 +101,7 @@ export class Cluster {
       const gone = Math.floor(this.#random() * this.pods.length);
       this.pods.splice(gone, 1, this.#pod(now, now));
     }
+    this.now = now;
     this.version++;
   }
 
@@ -95,11 +134,14 @@ export class Cluster {
     const random = this.#random;
     const namespace = pick(NAMESPACES, random);
     const workload = pick(WORKLOADS, random);
-    const replicaSet = Math.floor(random() * 0xffffffff).toString(36);
+    const templateHash = Math.floor(random() * 0xffffffff)
+      .toString(36)
+      .slice(0, 8);
     const suffix = Math.floor(random() * 36 ** 5)
       .toString(36)
       .padStart(5, "0");
-    const name = `${namespace.split("-")[0] ?? namespace}-${workload}-${replicaSet.slice(0, 8)}-${suffix}`;
+    const generateName = `${namespace.split("-")[0] ?? namespace}-${workload}-${templateHash}-`;
+    const name = `${generateName}${suffix}`;
     const containers = 1 + Math.floor(random() * random() * 3);
     let status = "Running";
     let roll = random();
@@ -121,6 +163,8 @@ export class Cluster {
       id: `${this.context}/${namespace}/${name}`,
       namespace,
       name,
+      generateName,
+      templateHash,
       containers,
       ready:
         status === "Running"
@@ -135,7 +179,7 @@ export class Cluster {
           : `${restarts} (${1 + Math.floor(random() * 59)}m ago)`,
       created: created ?? now - Math.floor(random() * random() * 90 * DAY),
       ip: `10.244.${this.#serial % 250}.${1 + Math.floor(random() * 250)}`,
-      node: `${this.context}-node-${Math.floor(random() * 40)}`,
+      node: `${this.context}-node-${Math.floor(random() * NODES)}`,
       version: 0,
     };
   }
@@ -157,12 +201,45 @@ export function podCells(pod: Pod, withNamespace: boolean): Cell[] {
   ];
 }
 
-export function podRow(pod: Pod, withNamespace: boolean): Row {
-  return {
-    id: pod.id,
-    created: new Date(pod.created).toISOString(),
-    cells: podCells(pod, withNamespace),
-  };
+/** The characters the API server appends to a `generateName`. */
+const GENERATED_LENGTH = 5;
+const KEPT_BASE = 58;
+
+/**
+ * Where the generated part of a name starts, as Rust's row metadata finds
+ * it: after `generateName` when the API server appended its characters to
+ * it, or at the `pod-template-hash` that ends `generateName`.
+ */
+export function generatedAt(
+  name: string,
+  generateName: string | null,
+  labels: Readonly<Record<string, string>>,
+): number | null {
+  if (!generateName) return null;
+  if (labels["statefulset.kubernetes.io/pod-name"] === name) return null;
+  const kept = keptBase(generateName);
+  if (kept === null || !name.startsWith(kept)) return null;
+  const suffix = name.slice(kept.length);
+  if (Array.from(suffix).length !== GENERATED_LENGTH) return null;
+  const hash = labels["pod-template-hash"];
+  return hash && generateName.endsWith(`-${hash}-`)
+    ? Math.min(kept.length, generateName.length - hash.length - 1)
+    : kept.length;
+}
+
+/** What the API server keeps of a generateName: its first 58 bytes, none if they end inside a character. */
+function keptBase(base: string): string | null {
+  let bytes = 0;
+  let end = 0;
+  for (const char of base) {
+    const code = char.codePointAt(0) ?? 0;
+    const size = code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+    if (bytes + size > KEPT_BASE)
+      return bytes === KEPT_BASE ? base.slice(0, end) : null;
+    bytes += size;
+    end += char.length;
+  }
+  return base;
 }
 
 function pick<T>(items: readonly T[], random: () => number): T {
@@ -171,7 +248,8 @@ function pick<T>(items: readonly T[], random: () => number): T {
   return item;
 }
 
-function hash(text: string): number {
+/** FNV-1a, for seeds and names that stay the same for the same text. */
+export function hash(text: string): number {
   let h = 2166136261;
   for (let i = 0; i < text.length; i++) {
     h ^= text.charCodeAt(i);

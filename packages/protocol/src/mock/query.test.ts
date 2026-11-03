@@ -25,6 +25,7 @@ test("only the choices' own keys count, not Object.prototype's", () => {
     text: "x",
     columns: {},
     sort: null,
+    countBy: null,
     groupBy: null,
     values: null,
   };
@@ -47,6 +48,7 @@ for (const list of CASES.lists) {
         text: null,
         columns: null,
         sort: null,
+        countBy: null,
         groupBy: null,
         values: null,
         ...(partial as Partial<ListQuery>),
@@ -75,12 +77,17 @@ for (const list of CASES.lists) {
       const [start, end] = window;
       expect({
         total: result.rows.length,
-        ids: result.rows.slice(start, end).map((row) => row.id),
+        ids: result.readable.slice(start, end).map((row) => row.id),
       }).toEqual({ total: wanted.total, ids: wanted.ids });
       if ("columns" in wanted) {
         expect(columns.map((column) => column.name)).toEqual(wanted.columns);
       }
-      if ("groups" in wanted) expect(result.groups).toEqual(wanted.groups);
+      if ("counts" in wanted) expect(result.counts).toEqual(wanted.counts);
+      if (query.groupBy !== null) {
+        expect(result.groups).toEqual(
+          "groups" in wanted ? wanted.groups : null,
+        );
+      }
     });
   }
 }

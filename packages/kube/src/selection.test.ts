@@ -3,7 +3,7 @@ import type { Row } from "@twigo/protocol";
 import { objectOf, type Selected } from "./selection";
 
 function selected(id: string, namespaced: boolean): Selected {
-  const row: Row = { id, created: null, cells: [] };
+  const row: Row = { id, created: null, generated: null, cells: [] };
   return {
     gvr: { group: "", version: "v1", resource: "pods" },
     kind: "Pod",

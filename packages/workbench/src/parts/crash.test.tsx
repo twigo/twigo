@@ -44,7 +44,7 @@ test("a crashed title bar, space rail or status item leaves the rest of the wind
     id: "broken",
     alignment: "left",
     priority: 0,
-    component: () => {
+    useEntries: () => {
       throw new Error("status item broke");
     },
   });
@@ -52,7 +52,7 @@ test("a crashed title bar, space rail or status item leaves the rest of the wind
     id: "working",
     alignment: "right",
     priority: 0,
-    component: () => <span>still here</span>,
+    useEntries: () => [{ id: "working", text: "still here" }],
   });
   render(<WorkbenchView workbench={workbench} />);
   expect(alerts()).toEqual(

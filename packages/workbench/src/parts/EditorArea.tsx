@@ -10,7 +10,7 @@ import {
   type IDockviewPanelProps,
 } from "dockview-react";
 import { FileQuestion, X } from "lucide-react";
-import { cn, EmptyState, Kbd } from "@twigo/ui";
+import { cn, EmptyState, KeyHints } from "@twigo/ui";
 import { EDITOR_COMPONENT, EDITOR_TAB, readParams } from "../editors/registry";
 import { useChanges, useWorkbench } from "../react";
 import { PanelBoundary } from "./PanelBoundary";
@@ -165,7 +165,7 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
   const provider = params && editors.resolve(params.uri);
   return (
     <div
-      className="flex h-full items-center gap-1.5 pr-1 pl-2 text-[13px]"
+      className="flex h-full items-center gap-1.5 pr-[3px] pl-2 text-[13px]"
       onDoubleClick={() => {
         if (params) editors.pin(params.uri);
       }}
@@ -174,7 +174,10 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
       }}
     >
       {params && provider?.icon && (
-        <provider.icon uri={params.uri} className="size-4 shrink-0" />
+        <provider.icon
+          uri={params.uri}
+          className="size-4 shrink-0 text-muted-foreground"
+        />
       )}
       <span data-preview={params?.preview ?? false} className="truncate">
         {api.title}
@@ -187,7 +190,7 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
           api.close();
         }}
         className={cn(
-          "twigo-tab-close flex size-5 items-center justify-center rounded",
+          "twigo-tab-close -ml-[3px] flex size-5 items-center justify-center rounded",
           "hover:bg-row-hover",
         )}
       >
@@ -197,31 +200,39 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
   );
 }
 
-/** What an empty editor area says: how to open something. */
+/**
+ * What an empty editor area shows: the first watermark a feature registered
+ * whose `when` holds, such as the cluster's home, else how to open something.
+ */
 function Watermark() {
-  const { keybindings } = useWorkbench();
+  const { views, keys, spaces, keybindings } = useWorkbench();
+  useChanges(views.changes);
+  useChanges(keys.changes);
   useChanges(keybindings.changes);
-  const hint = (command: string, label: string) => {
+  const space = spaces.active;
+  const contributed = views.watermark(keys.lookup(null));
+  if (space && contributed) {
+    const Contributed = contributed.component;
+    return <Contributed space={space.id} />;
+  }
+  const hints = HINTS.flatMap(({ command, label }) => {
     const binding = keybindings.primary(command);
-    return (
-      binding && (
-        <p className="flex items-center justify-between gap-6">
-          <span>{label}</span>
-          <Kbd>{keybindings.label(binding.presses)}</Kbd>
-        </p>
-      )
-    );
-  };
+    return binding
+      ? [{ id: command, keys: keybindings.label(binding.presses), label }]
+      : [];
+  });
   return (
-    <div className="flex h-full items-center justify-center bg-editor text-xs text-muted-foreground">
-      <div className="flex w-56 flex-col gap-2">
-        {hint("workbench.action.quickOpen", "Go to resource")}
-        {hint("workbench.action.showCommands", "Show all commands")}
-        {hint("workbench.action.quickOpenHelp", "Quick access help")}
-      </div>
+    <div className="flex h-full items-center justify-center bg-editor">
+      <KeyHints hints={hints} />
     </div>
   );
 }
+
+const HINTS: readonly { command: string; label: string }[] = [
+  { command: "workbench.action.quickOpen", label: "Go to resource" },
+  { command: "workbench.action.showCommands", label: "Show all commands" },
+  { command: "workbench.action.quickOpenHelp", label: "Quick access help" },
+];
 
 const COMPONENTS = { [EDITOR_COMPONENT]: EditorPanel };
 const TABS = { [EDITOR_TAB]: EditorTab };

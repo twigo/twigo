@@ -224,19 +224,20 @@ It translates Tauri commands and channels into calls on `twigo-core`.
 
 ### 2.3 Frontend packages
 
-| Package              | Owns                                                                                                                                                                                       | May import                    |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------- |
-| `packages/ui`        | Tokens, primitives (shadcn/Radix), table and tree primitives, toasts (`notify`), empty, loading and error states                                                                           | —                             |
-| `packages/workbench` | Layout parts, contribution registries, command, menu, keybinding and context-key services, quick access, the toaster and notification centre (4.7), settings UI, spaces UI, editor service | `ui`, `protocol`              |
-| `packages/kube`      | Every Kubernetes view and editor; registers into the workbench registries                                                                                                                  | `ui`, `workbench`, `protocol` |
-| `packages/protocol`  | Generated request and response types, a channel client with seq/ack, and a **mock backend** that runs the UI in a plain browser on fixtures (design reviews, component tests)              | —                             |
-| `packages/utils`     | Pure helpers without React or IPC, such as formatters                                                                                                                                      | —                             |
-| `apps/desktop/src`   | Bootstraps the workbench and registers `kube`                                                                                                                                              | all                           |
-| `apps/desktop/bench` | The bench mode's entry and driver, built only by `vite build --mode bench` ([bench](bench.md))                                                                                             | all                           |
+| Package              | Owns                                                                                                                                                                                                                                                               | May import                    |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------- |
+| `packages/ui`        | Tokens, and primitives (shadcn/Radix) for every recurring pattern: actions and their menus, tones and status dots, counts, keys, fields, segmented controls, the data grid, the tree, property lists, sections, toasts (`notify`), empty, loading and error states | —                             |
+| `packages/workbench` | Layout parts, contribution registries, command, menu, keybinding and context-key services, the list service and its `list.*` commands, quick access, the toaster and notification centre (4.7), settings UI, spaces UI, editor service                             | `ui`, `protocol`              |
+| `packages/kube`      | Every Kubernetes view and editor, column rules and cells, status entries; registers into the workbench registries                                                                                                                                                  | `ui`, `workbench`, `protocol` |
+| `packages/protocol`  | Generated request and response types, a channel client with seq/ack, and a **mock backend** that runs the UI in a plain browser on fixtures (design reviews, component tests)                                                                                      | —                             |
+| `packages/utils`     | Pure helpers without React or IPC, such as formatters                                                                                                                                                                                                              | —                             |
+| `apps/desktop/src`   | Bootstraps the workbench and registers `kube`                                                                                                                                                                                                                      | all                           |
+| `apps/desktop/bench` | The bench mode's entry and driver, built only by `vite build --mode bench` ([bench](bench.md))                                                                                                                                                                     | all                           |
 
 Every package may import `utils`.
 The ESLint boundary rule from legacy now enforces the whole table; above all, `workbench` must not import `kube`.
 The workbench only learns about Kubernetes through registries.
+Contributions are data that the workbench renders, menus become `ui` actions through `workbench.actions`, and outside `ui` and the workbench's parts class names only lay things out ([decision](decisions/frontend-architecture.md)).
 
 ## 3. Data flow: watchers → cache → batching → UI store
 
@@ -420,7 +421,7 @@ The hub's row store adds about 130 bytes a row for its key and map, by `examples
 ### 3.4 Query views: Rust sorts, filters and windows
 
 The frontend never holds the full list.
-A subscription carries a `ListQuery { space, gvr, namespaced, namespaces, labelSelector, text, columns, sort, groupBy, values }`.
+A subscription carries a `ListQuery { space, gvr, namespaced, namespaces, labelSelector, text, columns, sort, countBy, groupBy, values }`.
 `namespaced` comes from discovery, which the webview holds already, so a list subscribes once its space's resources are known: Rust needs the scope for the request's path and for the Namespace column, which a cluster-scoped kind never has.
 The webview then sends `setWindow(start, end)` as the user scrolls, covering the visible rows plus about two screens of overscan.
 
@@ -429,7 +430,7 @@ The webview then sends `setWindow(start, end)` as the user scrolls, covering the
   - Rust derives sort keys: a ratio by its fraction, then its total, `0/0` as whole; a count such as `3 (5m ago)` by the count, then the duration; durations such as `1h5m` in seconds; Age by `creationTimestamp`, the youngest first.
     Other text sorts naturally: runs of ASCII digits by value, ASCII letters folded, ties by code points.
     Empty cells come first, then numbers, ratios and text; rows with equal keys follow their ids, ascending in either direction.
-  - A sort, a group or values for a column the list lacks do nothing, and no sort sorts by Name.
+  - A sort, a count, a group or values for a column the list lacks do nothing, and no sort sorts by Name.
 - Each reader of a row store has a feed of the keys changed since it last read, coalesced, and a key added since then and deleted again leaves it, so it holds no more keys than the reader held and the store holds, however long the reader waits.
   A flush drains it, updates the index row by row and computes what changed **inside the window**; a relist, new columns or new upstreams send every row again.
 - Text filter on the columns the table shows, Name always among them: a substring in any case of ASCII letters; `!` before it keeps the rows without one; `/…/` is a case-insensitive regex, and `!/…/` its negation.
@@ -438,7 +439,11 @@ The webview then sends `setWindow(start, end)` as the user scrolls, covering the
   `columns` carries the user's choices by name, and Rust resolves them against its own columns, so the first batch already filters right and a choice for a column the list lacks, such as Namespace under one namespace, does nothing; without choices the columns of priority 0 count.
 - Label selectors are matched in Rust against each row's labels, with the grammar and checks of apimachinery's `labels.Parse`.
 - Values keep the rows whose column holds one of them, such as a pod's Status in CrashLoopBackOff or Error.
-  `groupBy` counts the rows that the labels and the text keep before values drop any, so a filter by health keeps every health's count.
+  `countBy` counts the rows that the labels and the text keep before values drop any, so a filter by health keeps every health's count.
+- `groupBy { column, collapsed }` groups the rows by a column's text: groups in the natural order of their values, the empty value last, and rows within a group by the sort.
+  Only groups with a matching row show; a batch carries them whenever one appears, goes, moves or changes, each with its rows and its own `countBy` counts, counted before values drop any.
+  A collapsed group's rows still count, but they leave the sequence the window indexes, so `setWindow` and the window cover only the rows of open groups; the webview puts each group's header before its rows (4.4).
+- Each row says where the generated part of its name starts, when the name is its `generateName`, cut to 58 bytes as the API server cuts it, and the five characters the API server appends: after the `generateName`, less a `pod-template-hash` it ends with, so a Deployment's pod `api-7f9c8d6b5-x2kq9` reads `api-` and a quieter rest, and a StatefulSet's `db-0`, whose `generateName` is `db-` but whose controller names it, has none (4.4).
 - A list sends rows only while it is ready, relisting or stale; in the other states its view shows the state, as 3.7 has it.
 - The mock backend sorts, filters and groups by the same rules, and `packages/protocol/src/query-cases.json` holds cases that both it and Rust's query view run.
   Its regexes are the browser's, which agree with Rust's `regex` crate only where both the pattern and the text are ASCII, without carriage returns, in the syntax both have, since the crate's `\d`, `\w`, `\s` and case folding follow Unicode and its `.` matches a carriage return, and it prints numbers as JavaScript does, `1e-7` where Rust prints `0.0000001`: the shared cases keep to what both read alike.
@@ -605,18 +610,22 @@ The bench also replays the cases that broke other clients, and one that loopback
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-| Part               | Holds                                                                                                                                                                                                                                                                                                                                            |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Title bar          | Breadcrumb of the space and its namespace scope, a search button that opens quick access; drag region; native traffic lights on macOS. Parts show and hide by keys (⌘B, ⌘J, ⌥⌘B), the View menu and the palette, not buttons                                                                                                                     |
-| Space rail         | Tiles of the open spaces (D6, Lens's hotbar), ⌘1..9 by position, a button that opens any context                                                                                                                                                                                                                                                 |
-| Primary side bar   | View containers as tabs in its header (Explorer, Port forwards, Helm, Extensions and contributed ones); the active one's views: resource tree, saved filters                                                                                                                                                                                     |
-| Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups                                                                                                                                                                                                                                                                  |
-| Panel              | Terminal (pty), cluster Events stream, Output (Twigo logs per channel), Agent activity (audit, 6.6)                                                                                                                                                                                                                                              |
-| Secondary side bar | The ACP agent panel later; hidden while nothing lives there, as is the panel                                                                                                                                                                                                                                                                     |
-| Status bar         | The cluster's health: on the left a warning while the login shell's environment is missing (6.1), the cluster's connection and Kubernetes version (later policy mode, port-forwards, sync); on the right the active list's rows and how many are healthy, pending or failing, each a filter; the breadcrumb, not the status bar, names the space |
+| Part               | Holds                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Title bar          | Breadcrumb of the space and its namespace scope; in the middle a search field with its key that opens quick access, as VS Code's Command Center; drag region; native traffic lights on macOS. Parts show and hide by keys (⌘B, ⌘J, ⌥⌘B), the View menu and the palette, not buttons                                                                                                               |
+| Space rail         | Tiles of the open spaces (D6, Lens's hotbar), each with a dot of its connection, ⌘1..9 by position, a button that opens any context                                                                                                                                                                                                                                                               |
+| Primary side bar   | View containers as tabs in its header (Explorer, Port forwards, Helm, Extensions and contributed ones); the active one's views: resource tree, saved filters                                                                                                                                                                                                                                      |
+| Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups; with no editor open, the space's home                                                                                                                                                                                                                                                                            |
+| Panel              | Terminal (pty), cluster Events stream, Output (Twigo logs per channel), Agent activity (audit, 6.6)                                                                                                                                                                                                                                                                                               |
+| Secondary side bar | The ACP agent panel later; hidden while nothing lives there, as is the panel                                                                                                                                                                                                                                                                                                                      |
+| Status bar         | In the shell's colour, entries as data: on the left the active space in its context's colour, a warning while the login shell's environment is missing (6.1), credentials that need the person, the cluster's version, or its connection in words when it is not connected (later policy mode, port-forwards, sync); on the right the active list's rows and how many fail or wait, each a filter |
 
 The parts sit flush, split by hairlines, with no cards or gaps: the owner tried islands, as JetBrains Islands and VS Code's 2026 layout ([research](research/workbench-chrome.md)), and preferred flat parts.
 Views are descriptors (ID, title, container, `when`, provider), so the user can move a view to another container, VS Code style.
+An editor area with no editor open shows the first watermark a feature registered whose `when` holds, else the workbench's key hints.
+`kube` registers the space's home for spaces of one context: the space's tile, name, Kubernetes version and node count; a tile each for nodes, pods, Deployments and warning events, which opens its list with the filter that shows what is wrong (`h=` or `q=`); what needs attention, the abnormal pod statuses by count in words and then nodes not ready and Deployments short of ready, each with a Show; and the keys that open things.
+Rust counts each tile's list in a query view with `countBy` and an empty window, so no row crosses the IPC (3.4), and only while the home shows (3.2).
+A list the credentials may not read shows "–" and why, never 0.
 The layout per space is persisted (dockview `toJSON` and which parts show); part sizes are the app's (4.8).
 
 ### 4.2 Spaces (D6)
@@ -627,10 +636,12 @@ The layout per space is persisted (dockview `toJSON` and which parts show); part
   A space whose context goes away keeps its state and comes back with it.
   When the catalog lists contexts but no space has them, as on the first start, the first context's space opens.
 - Switching spaces moves the whole workbench: explorer, editors, status bar, policy badge.
-  The rail shows a tile per open space: two letters on the tint of its context's colour, the active one ringed and marked, a lock badge on a locked context.
+  The rail shows a tile per open space: two letters on the tint of its context's colour, the active one ringed and marked, a dot of its connection (connected, connecting, failed, or idle while another space is active), a lock badge on a locked context.
   The title bar's breadcrumb names the active space and its namespace scope and opens their pickers.
-  An optional user-chosen colour from the context's metadata (5.5) is the only extra colour, from six tokens: red, orange, yellow, green, blue and purple.
-  It tints the tile and the title bar's left end behind the breadcrumb, as JetBrains does with a project's colour.
+  Every context has a colour, the only extra colour, from six tokens: red, orange, yellow, green, blue and purple.
+  It comes from the context's kubeconfig metadata (5.5), else from the user's pick in Twigo (Set Space Colour… in the palette and the tile's menu, kept in the app's state), else from its name, the same each time, among blue, purple, green and orange: red and yellow stay for the user and the environment types (6.4), so neither says danger by chance.
+  Decided with the owner on 2026-11-03, after contexts without metadata left the workbench grey.
+  It tints the tile and the title bar's left end behind the breadcrumb, as JetBrains does with a project's colour, and fills the status bar's space entry.
   A space with several contexts shows none.
 - Every editor in a space belongs to that space's contexts.
   Opening another cluster's object means switching spaces or running **Compare with…**, which opens a diff editor against an object picked from any context and says so in its title.
@@ -639,6 +650,7 @@ The layout per space is persisted (dockview `toJSON` and which parts show); part
 - A space connects lazily on its first activation.
   A background space's sessions (port-forwards, exec, logs) survive; its list subscriptions linger, then stop (3.2).
 - Shortcuts: ⌘1..9 selects a space by its place in the rail; the rail's button and `ctx ` in quick access switch to a space or open one for any context; ⌘⇧N opens a space in a new window.
+- The `ctx ` picker lists the open spaces first, each with its tile, its context's server as host and port, its connection as the rail has it (the cluster's version alone while connected) and its ⌘ key; then the other contexts under the kubeconfig file that defines them (5.5).
 
 ### 4.3 Editor model
 
@@ -656,12 +668,17 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 | `untitled://manifest-n`                                             | New manifest; Apply asks for the target context                                                                               |
 | `twigo://settings`, `twigo://keybindings`, `twigo://extension/<id>` | Settings UI, keybindings UI, extension details                                                                                |
 
-- **Preview tabs.**
-  A click or Enter on a row opens its details, sliding in over the list from the right, as Lens's drawer; arrows move them along and Esc closes them.
-  After a 150 ms pause they hold the object's Object upstream and follow it, as an editor does ([research](research/details.md#following-the-object)).
-  The upstreams it leaves behind linger as a list's do, and give way to any watch that waits for the budget (3.2).
-  Opening the resource from its details opens a preview tab (italic title); editing it or double-clicking its tab pins it.
-  Opening an object from a list's details, or following a link in an object, pins the tab it came from, so the object opens beside it rather than in its place.
+- **Details and preview tabs.**
+  A click or Enter on a row opens its details, and Space shows or hides them, as Linear's peek; arrows move them along and Esc closes them.
+  - In an editor at least 960 px wide they stand beside the list as an inspector, and the list keeps only its name, ready and status columns, so the selected row stays in view (WCAG 2.4.11); in a narrower one they slide over the list from the right, as Lens's drawer.
+  - Their header says what the object is and how it is: the name, its generated part quieter; the status as a pill; the namespace; the controlling owner as a link; the age.
+    Then the commands of `resource/details` with their keys, such as Show YAML (`e`) and Open in Editor, and later Logs (`l`), Shell (`s`) and Forward (`f`) as their commands come.
+  - Below, the object's views as tabs, Overview, YAML, Events with its warnings counted, and Related, the same views the editor shows; the tab shown stays as the selection moves.
+  - The Diagnostics section of step 9 comes first in the Overview when something is wrong: why, in words, with its exit code, restarts, next try and last log line, and a button to the previous container's logs.
+    After a 150 ms pause they hold the object's Object upstream and follow it, as an editor does ([research](research/details.md#following-the-object)).
+    The upstreams it leaves behind linger as a list's do, and give way to any watch that waits for the budget (3.2).
+    Opening the resource from its details opens a preview tab (italic title); editing it or double-clicking its tab pins it.
+    Opening an object from a list's details, or following a link in an object, pins the tab it came from, so the object opens beside it rather than in its place.
 - **Object URIs.**
   The core group is an empty segment, `k8s://prod//v1/pods/payments/api-0`, so an object in a namespace has five path segments and a cluster-scoped one four.
 - **Sub-tabs.**
@@ -683,17 +700,30 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 ### 4.4 Resource tables and the keyboard
 
 - Columns come from the Table `columnDefinitions` (priority 0 by default, wide on toggle), plus Context, CPU and memory when available, and Namespace unless the query names one namespace.
-  Column presets are kept per GVR, for every space: the user shows or hides columns by name from the head of the actions column, and a column nobody chose for follows its priority.
-- The last column is the row's actions: a ⋯ button on hover and on the selected row, and the same menu on a right click, built from `resource/context`.
-  Its commands act on the selected row of the active list.
-  Columns share the free width in proportion to their widths until the user drags one's edge; header dividers show on hover.
-- Cells read by what matters: a status shows a tone dot, a ratio short of its total (Ready `0/1`) is pending, Namespace and Age are quiet, and a count's remainder (Restarts ` (28m ago)`) and a zero count are grey.
-  Which column does what is data in `packages/kube`, by `group/resource/column`.
-- Focus model: arrows or `j`/`k` move, Enter opens, Space marks, ⇧Space marks a range, `/` or ⌘F filters, Esc clears.
-- A list's filters sit at the right of its group's tab strip, as the editor's actions (`editor/title`): chips for All, Failing, Pending and Healthy with their counts, for kinds with a status column, and the text field.
+  Each kind keeps a preset for every space: the columns the user showed or hid by name from the head of the actions column (a column nobody chose for follows its priority), the widths they dragged or fitted, and the column the rows are grouped by.
+- What a column does is data in `packages/kube`, a rule by kind, then by name, then by `group/resource/column`: its cell, starting width, alignment, whether it is quiet, whether rows group by it, and the tone of its abnormal values.
+  Columns keep their widths, numbers and ratios aligned to the end; the name column takes the free width until the user sizes it; a double click on a header's edge fits the column to what it shows.
+- Cells read by what matters, data near-monochrome:
+  - a name's generated part is quieter, and stays whole when the name is cut, since it tells siblings apart (3.4);
+  - a status shows a tone dot, its text coloured when abnormal, the dot pulsing while the state is in flight (ContainerCreating, Terminating);
+  - a ratio short of its total (Ready `0/1`) is pending;
+  - restarts read as a count in a column of its own and how long ago the last was;
+  - Namespace and Age are quiet, a zero count and empty values grey.
+- A failing or pending row has an edge in its tone at its left.
+- Grouping by a column (Namespace, Node, a status) puts a header before each group with its rows and how many fail or wait; a click or Enter folds it, Left goes to it from a row, and folded groups are kept per list.
+- The last column is the row's actions: a ⋯ button on hover and on the selected row, and the same menu on a right click, from `resource/context`; a hovered row also shows the commands of `resource/inline` that have icons.
+  They act on the selected row of the active list.
+- Marks: X marks the row under the cursor, ⇧↓ and ⇧↑ mark as they move, a click on a row's box marks it; Space shows the details (4.3).
+  Marked rows get a bar at the bottom with the commands of `resource/marked`; Esc clears them.
+  A change of the list's text, health or, for a namespaced kind, namespaces clears them too, as a new search clears a selection, so no command acts on rows the list no longer shows.
+  Marks are row IDs (3.4).
+- Focus model: arrows or `j`/`k` move, Enter opens, Left and Right fold, `/` or ⌘F filters, Esc clears.
+  These are the workbench's `list.*` commands, which drive every list and tree.
+- A list's filters sit at the right of its group's tab strip, as the editor's actions (`editor/title`): its health as one control of All, Failing, Pending and Healthy with their counts, for kinds with a health column, a pod's or a node's Status or a Deployment's Ready; the text field, which names its syntax and its key; the grouping; and a pin.
   They take no row of their own, so a table sits under three bars: title, tabs, header.
-  Each open list keeps its own; a count in the status bar picks the same chip.
-- Single-key verbs work only when a table is focused (context key `listFocus`): `l` logs, `s` shell, `e` edit YAML, `d` describe/overview, `y` copy YAML, `f` port-forward, `⇧J` jump to owner, `⌫` delete (with confirmation).
+  Each open list keeps its own; a count in the status bar picks the same health.
+- A pinned list keeps its namespaces, text and health in its URI and shows at the top of the explorer; a kind whose list is open shows its rows and its worst health there.
+- Single-key verbs work only when a table is focused (context key `listFocus`): `l` logs, `s` shell, `e` edit YAML, `d` describe/overview, `y` copy YAML, `f` port-forward, `⇧J` jump to owner, `⌘⌫` delete (with confirmation), off a bare key since k9s users deleted the wrong object from one ([research](research/workbench-design.md)).
   These are ordinary commands with keybindings, so users can remap them.
 - Changed cells flash briefly: the cell's background starts at the `--flash` tint and fades out over 1 s.
   A batch that changes more than 8 rows flashes nothing, so a rollout does not strobe the table.
@@ -715,6 +745,15 @@ One input, with providers registered by prefix (VS Code `QuickAccessRegistry` me
 Quick-access providers are core-only in v1, as in VS Code.
 Extensions add commands, not prefixes.
 
+- **The widget** drops from the title bar's search field, centred under the title bar and min(600 px, 62 vw) wide, as VS Code's quick input.
+- **Rows are data** (`QuickPickItem`) that the widget draws alike for every provider: the kind's icon or a space's tile, the label with what matched the filter bold in the brand colour, a quiet description such as the namespace, a state only when it is abnormal as its dot and its words in its tone, a quieter kind at the end, and keys.
+  Filters match as Sublime Text does (fuzzysort), so a row's highlight is what its score came from; the pods of the no-prefix provider are filtered in Rust by substring, and highlight that.
+- **Recent first.**
+  The no-prefix provider shows the space's recently opened editors that match under Recent, each with its kind and namespace, then the pods; `workbench.recent` keeps them per space (4.8).
+- **A footer of keys**: ↑↓ move, ↵ the provider's verb (Open, Run, Switch), and ⌘↵ open to the side where the provider can, which opens the editor in a new group to the right of the active one.
+  Each is the binding of a `quickInput.*` command, so a key the user binds shows there.
+  On the empty prefix the footer adds the prefixes whose providers name themselves for it (`>` Commands, `:` Lists, `?` Help), so a new provider shows up by registering.
+
 ### 4.6 Logs, terminal and editors
 
 - **Logs.**
@@ -723,8 +762,12 @@ Extensions add commands, not prefixes.
   - Search is done in Rust (regex) and returns a match index.
   - Supported: follow, wrap, timestamps, previous container, download, and switching between containers.
   - On EOF the stream reopens with `sinceTime` set to the last timestamp and drops duplicates.
-  - Logs aggregated across a workload's pods, stern-style, come in v1.x.
-    Watch the log budget (3.2).
+  - Designed with the owner on 2026-11-03 ([research](research/workbench-design.md)), for step 10:
+    - a logs tab follows an owner, not a pod: `deployment auth-api` merges its pods' lines and picks up the new pods of a rollout, since a tab tied to one pod dies with each rollout (lens#8163); watch the log budget (3.2);
+    - one toolbar: the pods and container, a time range, follow, wrap and timestamps, a level filter, a filter that keeps only matching lines, and apart from it a search that steps through matches as `3 of 5`;
+    - a volume histogram above the lines, warnings and errors in their tones, where a drag picks the time range;
+    - a narrow pod column of each line's generated suffix, levels read from structured fields, and only warning and error lines tinted;
+    - a container's end as a separator line with its exit code and when it restarts.
 - **Exec and attach.**
   xterm.js 6 with the WebGL addon.
   It falls back to the DOM renderer on context loss, which happens on WebKitGTK.
@@ -792,10 +835,10 @@ Progress shows in the status bar, or in a notification when the operation needs 
   `keybindings.json` works the same way.
 - **State** is what the UI leaves behind and nobody edits by hand: layouts, recent items, command history, column choices ([research](research/state.md)).
   - It has two scopes, as VS Code's storage has: the app's, and each space's.
-    The app keeps the rail's spaces in order, the active space, part sizes, quick-access history and the columns chosen per kind.
-    A space keeps its editors, which parts show and their containers, moved views, its namespace scope and each view's own state.
+    The app keeps the rail's spaces in order, the active space, part sizes, quick-access history, the columns chosen per kind and the colours chosen for contexts.
+    A space keeps its editors, which parts show and their containers, moved views, its namespace scope, the editors it opened recently and each view's own state.
   - Part sizes are the app's, so switching spaces never moves the splits; VS Code keeps them per profile for the same reason.
-  - Each value is a key that one module owns, such as `parts`, `namespaces` or `view/<id>` in a space, and `parts/sizes` or `quickaccess/history` in the app.
+  - Each value is a key that one module owns, such as `parts`, `namespaces`, `recent` or `view/<id>` in a space, and `parts/sizes` or `quickaccess/history` in the app.
     The module reads it back with a valibot schema, field by field, and what does not fit falls back to its default, so a bad value costs that value only.
     Extensions (M3) get keys in the same scopes.
   - The webview reads everything once as it starts (`state_load`), so its reads are synchronous.
@@ -817,18 +860,21 @@ Progress shows in the status bar, or in a notification when the operation needs 
 ### 4.9 Design language (D8)
 
 The legacy app had a deliberate design language.
-It moves into `packages/ui` unchanged and gets extended for the new views.
+It lives in `packages/ui`: the tokens, and primitives that draw every recurring pattern, so a feature says what to show and the primitives decide how it looks ([decision](decisions/frontend-architecture.md)).
 
 - **Tokens (`theme.css`).**
   - An azure brand pair (`--brand` at oklch hue ≈245).
     Changing that pair re-skins the app.
   - Neutral greys with a trace of the brand hue: an app's chrome, not a tinted dashboard.
-    The shell and the side bars share one tone and the editor is the surface that stands out: 0.975 and white on light, 0.205 and 0.235 on dark, with card 0.25 and popover 0.27, as VS Code's ramp.
+    The shell and the side bars share one tone and the editor is the surface that stands out: white under a 0.975 shell on light; on dark the darkest, 0.185 under a 0.218 shell, as VS Code's Dark 2026, JetBrains Islands and Zed draw it, with card 0.25 and popover 0.27 above both.
     Text sits a step below white on dark (0.87).
+  - Three text tiers, each at 4.5:1 or more on the shell and the editor (WCAG 1.4.3): primary, secondary for what places a row, tertiary for units, hints and empty values ([research](research/workbench-design.md)).
+    On a selected row tertiary reads as secondary, and text in a tone reads at 4.5:1 on a selected row and its pill's tint too.
+  - Tones: error, warn, ok and idle; `--warn` fills dots and edges, and `--warn-foreground` is its readable text.
   - Hover and selection are alpha overlays, so they work on any surface.
-  - A two-layer focus ring.
+  - A two-layer focus ring: a solid brand line, 3:1 or more on any surface (WCAG 1.4.11), and a translucent halo.
   - Hairline borders in alpha tiers.
-  - The status bar is a matte, muted blue, low in chroma so it reads as ink, never a glossy accent.
+  - The status bar takes the shell's colour; colour there comes only from its entries' tones and the active space's context colour, as VS Code's 2026 themes do.
 - **Type.**
   - The platform's UI font, SF on macOS, as VS Code; tabular numbers for every metric column.
   - Two weights, 400 and 600, as VS Code and JetBrains; 13 px base, 12 px secondary, 11 px labels; sentence case, no capitals.
@@ -846,7 +892,8 @@ It moves into `packages/ui` unchanged and gets extended for the new views.
   - Data stays near-monochrome.
   - Colour belongs to chrome accents and wayfinding: active tab, focus, selection.
   - Kubernetes status uses small semantic glyphs, and colour only for abnormal states (failed, pending, warning).
-    Rows, namespaces and labels are never coloured.
+    A tone has a shape too, so no state rests on hue alone (WCAG 1.4.1): error a filled dot, warn a ring, and a pulse only while a state is in flight.
+    Rows, namespaces and labels are never coloured; a failing or pending row has only an edge in its tone.
   - Syntax colour lives in Monaco only.
   - Big canvases stay plain.
   - About one primary action per panel.
@@ -867,6 +914,11 @@ It moves into `packages/ui` unchanged and gets extended for the new views.
   - a rail of space tiles replaces the space tabs and the activity bar (4.2);
   - the title bar is a breadcrumb and a search;
   - flat parts split by hairlines, connected tabs, two weights and sentence case.
+- **Settled with the owner** on 2026-11-03, from live mockups after [research](research/workbench-design.md) into Kubernetes clients, IDEs, operations tools and guidelines:
+  - the resource list of 4.4 as a whole, grouping included: search in the middle of the title bar, connection dots on the rail, counts and pins in the explorer, a status bar in the shell's colour;
+  - the editor darker than the shell in dark;
+  - text tiers at 4.5:1, a solid focus ring, tones drawn by shape;
+  - the space's home in an empty editor area (4.1), without the mockup's capacity and trend, for which Twigo has no data.
 
 ## 5. Commands, keybindings and extensions
 
@@ -895,6 +947,9 @@ interface CommandDescriptor {
   The menu IDs:
   - `commandPalette`
   - `resource/context` (row context menu)
+  - `resource/details` (details header, 4.3)
+  - `resource/inline` (row icon buttons on hover, 4.4)
+  - `resource/marked` (marked rows' bar, 4.4)
   - `resource/title` (resource editor toolbar)
   - `view/title`, `view/item`
   - `editor/title`
@@ -910,6 +965,7 @@ interface CommandDescriptor {
   - `space.contexts`, `space.multiContext`
   - `context.name`, `context.readOnly`, `context.mode`, `context.provider`
   - `listFocus`, `treeFocus` (a tree, which is also a list: left and right close and open), `editorFocus`, `inputFocus`
+  - `inQuickOpen`, `quickOpenToSide` (the open provider opens rows to the side)
   - `resource.group`, `resource.kind`, `resource.namespaced`, `resource.namespace`
   - `selection.count`
   - `editor.open`, `editor.dirty`, `editor.type`
@@ -940,6 +996,7 @@ interface CommandDescriptor {
   - Labels show what is printed on the key.
 - **Bare keys** fire only in `listFocus` and never inside inputs or Monaco.
   This keeps legacy `isTypingTarget`.
+  Quick access's input is the one exception, for ↑, ↓ and Enter under `inQuickOpen`: they edit no line of text, and drive its list as in VS Code's quick input.
 - **The keybindings editor** shows conflicts and the source of every binding.
 - **Keymaps** ship as contributions: Default (VS Code-like) and k9s (vim movement, `:` mode on bare `:` in `listFocus`).
 - **macOS native menu accelerators** come from the same table.
@@ -1089,6 +1146,7 @@ A section takes over a core one only by naming its id in `replaces`, and its hea
       Reads do not count, since inotify reports every open, Twigo's own loads among them, and a change that leaves the catalog as it was reports nothing.
     - The explicit mode keeps development, tests and the bench off real clusters: in debug and bench builds `TWIGO_KUBECONFIG` replaces every source, and only its `kind-*` and `kwok-*` contexts count.
   - The webview follows the catalog through `contexts_watch`, which answers once the sources have been read, after the login shell's environment.
+    Each context says the file that defines it, from `~` under the home directory, and its cluster's URL with only scheme, host and port, so no credential written into the URL reaches the webview.
   - Each extension's `clusterProviders` is a further source.
   - Later: Cluster Inventory `ClusterProfile` (SIG Multicluster, alpha).
 - **Connection** is either
@@ -1331,6 +1389,16 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   A command switches a `read-only` context to `guarded` for a limited time.
   A banner shows the countdown, and the context relocks by itself.
 - **Every blocked request** returns a typed `permissions` error with the mode and its source, and the UI shows which rule blocked it.
+- **How the UI shows a mode and asks before damage**, designed with the owner on 2026-11-03 ([research](research/workbench-design.md)), for M2:
+  - Environment types, Production, Staging, Development and Local, set a context's colour and its default mode; the type is data, like the colour, from kubeconfig metadata or rules over context names.
+  - A production context is a mode with two cues (NN/g): a chip in the title bar after its name that says the type and the lock (`Production · read-only`), a 2 px line of its colour along the title bar's top, and the status bar tinted in it.
+  - Friction grows with the blast radius (Primer):
+    - scale, cordon and suspend run at once with an undo (⌘Z);
+    - deleting a pod that a controller replaces, outside production, sends after a 5 s toast with Cancel, as Headlamp holds it;
+    - deleting one object asks in a dialog that names the cluster in its question and lists what follows, with the equivalent kubectl command;
+    - a namespace, a node or a bulk delete asks for the object's name typed, as the guarded mode asks for the context's;
+    - the confirming button names its action, `Delete namespace`, never Yes or OK.
+  - Delete is ⌘⌫, never a bare key (4.4).
 
 ### 6.5 YAML apply: dry-run diff, then server-side apply
 

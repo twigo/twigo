@@ -102,7 +102,7 @@ function grid(): HTMLElement {
 function headers(table: HTMLElement): HTMLButtonElement[] {
   return [
     ...table.querySelectorAll<HTMLButtonElement>(
-      '[aria-rowindex="1"] button[role="columnheader"]',
+      '[aria-rowindex="1"] [role="columnheader"][aria-sort] > button',
     ),
   ];
 }
@@ -119,8 +119,8 @@ function rowAt(table: HTMLElement, index: number): HTMLElement | null {
 
 function cellText(row: HTMLElement, position: number): string | undefined {
   return (
-    row.querySelectorAll(':scope > [role="gridcell"]')[position]?.textContent ??
-    undefined
+    row.querySelectorAll(':scope > [role="gridcell"][data-column]')[position]
+      ?.textContent ?? undefined
   );
 }
 

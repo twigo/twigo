@@ -40,6 +40,32 @@ async fn contexts_come_by_order_then_by_name() {
     );
 }
 
+#[tokio::test]
+async fn the_webview_learns_where_a_context_comes_from() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("config");
+    fs::write(
+        &file,
+        "
+clusters: [{ name: c, cluster: { server: 'https://user:pass@kind:6443' } }]
+contexts: [{ name: kind-a, context: { cluster: c } }]
+",
+    )
+    .unwrap();
+    let catalog = Catalog::default();
+    catalog.follow(Sources::explicit(file.clone()));
+    let contexts = catalog.contexts().await.ipc();
+    assert_eq!(
+        contexts,
+        [twigo_ipc::Context {
+            name: "kind-a".to_owned(),
+            color: None,
+            source: file.display().to_string(),
+            server: Some("https://kind:6443".to_owned()),
+        }]
+    );
+}
+
 #[test]
 fn the_explicit_mode_never_reads_home() {
     let dir = tempfile::tempdir().unwrap();

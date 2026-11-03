@@ -1,3 +1,4 @@
+import type { LucideIcon } from "lucide-react";
 import {
   ListView,
   toIpcError,
@@ -7,16 +8,19 @@ import {
   type Resource,
   type Row,
 } from "@twigo/protocol";
-import { commandScore } from "@twigo/ui";
-import type {
-  QuickAccessProvider,
-  QuickPickItem,
-  Workbench,
+import { fuzzyMatch, type TextRange } from "@twigo/ui";
+import {
+  filtered,
+  type QuickAccessProvider,
+  type QuickPickItem,
+  type RecentEditor,
+  type Workbench,
 } from "@twigo/workbench";
-import type { Discovery } from "./discovery";
+import { cellTone, IN_FLIGHT, statusColumn } from "./columns";
+import { sameGvr, type Discovery } from "./discovery";
 import { kindIcon, PODS, pluralTitle } from "./kinds";
-import type { Selection } from "./selection";
-import { listUri } from "./uri";
+import type { ListServices } from "./services";
+import { listUri, parseListUri, parseObjectUri } from "./uri";
 
 /** A `:` query in k9s's grammar: `po payments /api app=web @prod-eu`. */
 export interface K9sQuery {
@@ -74,17 +78,28 @@ export function listProvider(
   discovery: Discovery,
 ): QuickAccessProvider {
   const { spaces, editors } = workbench;
-  const titled = (resource: Resource, extra?: string): QuickPickItem => ({
-    id: gvrId(resource),
-    label: pluralTitle(resource.kind, resource.gvr.resource),
-    description: extra ?? names(resource),
-    icon: kindIcon(resource.gvr),
-  });
+  const titled = (
+    resource: Resource,
+    extra?: string,
+    search?: string,
+  ): QuickPickItem => {
+    const label = pluralTitle(resource.kind, resource.gvr.resource);
+    const match = search === undefined ? undefined : fuzzyMatch(label, search);
+    return {
+      id: gvrId(resource),
+      label,
+      ...(match && { matches: match.ranges }),
+      description: extra ?? names(resource),
+      icon: kindIcon(resource.gvr),
+    };
+  };
   return {
     prefix: ":",
     placeholder:
       "A resource, then a namespace, /filter, label=value or @context",
     help: "Open a resource list, k9s style",
+    hint: "Lists",
+    toSide: true,
     async items(filter) {
       const space = spaces.active;
       if (!space) return [];
@@ -102,12 +117,12 @@ export function listProvider(
                 ...resource.shortNames,
                 resource.gvr.resource,
                 resource.kind,
-              ].map((name) => commandScore(name, query.resource, [])),
+              ].map((name) => fuzzyMatch(name, query.resource)?.score ?? 0),
             ),
           }))
           .filter(({ score }) => score > 0)
           .sort((a, b) => b.score - a.score)
-          .map(({ resource }) => titled(resource));
+          .map(({ resource }) => titled(resource, undefined, query.resource));
       }
       const resource = resolveResource(resources, query.resource);
       if (!resource) return [];
@@ -119,7 +134,7 @@ export function listProvider(
       ].filter(Boolean);
       return [titled(resource, parts.join(" "))];
     },
-    async accept(item, filter) {
+    async accept(item, filter, _context, options) {
       const space = spaces.active;
       if (!space) return;
       const resources = await discovery.resources(space.id);
@@ -139,6 +154,7 @@ export function listProvider(
           ...(typed?.text && { text: typed.text }),
           ...(typed?.labels && { labels: typed.labels }),
         }),
+        { side: options?.side ?? false },
       );
     },
   };
@@ -171,6 +187,7 @@ export function namespaceProvider(workbench: Workbench): QuickAccessProvider {
     prefix: "ns ",
     placeholder: "Scope the space to a namespace",
     help: "Set the namespace scope",
+    acceptLabel: "Select",
     async items(filter) {
       const space = spaces.active;
       if (!space) return [];
@@ -193,9 +210,7 @@ export function namespaceProvider(workbench: Workbench): QuickAccessProvider {
             }),
         }),
       );
-      return search === "" || typed
-        ? items
-        : items.filter((item) => commandScore(item.label, search, []) > 0);
+      return typed ? items : filtered(items, search);
     },
     accept(item) {
       const space = spaces.active;
@@ -239,27 +254,37 @@ function firstRows(view: ListView): Promise<ListSnapshot> {
   });
 }
 
+const RECENT = "recent:";
+
 /**
- * No prefix: pods of the active space by name, filtered in Rust, as the live
- * upstream serves them; picking one opens its list with its details shown,
- * without a GET.
+ * No prefix: the active space's recent editors that match, then its pods by
+ * name, filtered in Rust as the live upstream serves them. Picking a pod
+ * opens its list with its details shown, without a GET; ⌘↵ opens either to
+ * the side.
  */
 export function resourceProvider(
   workbench: Workbench,
-  selection: Selection,
+  { selection, discovery }: Pick<ListServices, "selection" | "discovery">,
 ): QuickAccessProvider {
-  const { spaces, backend, editors } = workbench;
+  const { spaces, backend, editors, recent } = workbench;
   const picks = new WeakMap<
     QuickPickItem,
     { space: string; columns: readonly Column[]; row: Row }
   >();
   return {
     prefix: "",
-    placeholder: "Go to a pod by name",
+    placeholder: "Go to a recent editor or a pod by name",
     help: "Go to a resource",
+    toSide: true,
     async items(filter) {
       const space = spaces.active;
       if (!space) return [];
+      const served = discovery.last(space.id);
+      const resources = served?.state === "ready" ? served.value : [];
+      const recents = filtered(
+        recent.list(space.id).map((entry) => recentItem(entry, resources)),
+        filter,
+      );
       const snapshot = await firstRows(
         new ListView(backend, {
           space: space.id,
@@ -270,31 +295,48 @@ export function resourceProvider(
           text: filter.trim() === "" ? null : filter.trim(),
           columns: null,
           sort: null,
+          countBy: null,
           groupBy: null,
           values: null,
         }),
       );
-      const name = snapshot.columns.findIndex(
-        (column) => column.name === "Name",
-      );
-      const namespace = snapshot.columns.findIndex(
-        (column) => column.name === "Namespace",
-      );
-      return snapshot.ids.flatMap((id) => {
+      const at = (column: string | undefined) =>
+        snapshot.columns.findIndex((candidate) => candidate.name === column);
+      const name = at("Name");
+      const namespace = at("Namespace");
+      const status = statusColumn(PODS);
+      const statusAt = at(status);
+      const pods = snapshot.ids.flatMap((id) => {
         const row = snapshot.rows.get(id);
         if (!row) return [];
+        const label = String(row.cells[name] ?? id);
+        const text = statusAt < 0 ? "" : String(row.cells[statusAt] ?? "");
+        const tone = status && cellTone(PODS, status, text);
         const item: QuickPickItem = {
           id,
-          label: String(row.cells[name] ?? id),
+          label,
+          matches: substring(label, filter),
+          icon: kindIcon(PODS),
           ...(namespace >= 0 && {
             description: String(row.cells[namespace] ?? ""),
           }),
+          ...(tone && {
+            state: { tone, label: text, pulse: IN_FLIGHT.test(text) },
+          }),
+          kind: "Pod",
+          group: "Pods",
         };
         picks.set(item, { space: space.id, columns: snapshot.columns, row });
         return [item];
       });
+      return [...recents, ...pods];
     },
-    accept(item) {
+    accept(item, _filter, _context, options) {
+      const side = options?.side ?? false;
+      if (item.id.startsWith(RECENT)) {
+        editors.open(item.id.slice(RECENT.length), { side });
+        return;
+      }
       const pick = picks.get(item);
       if (!pick) return;
       const uri = listUri({ space: pick.space, gvr: PODS, text: item.label });
@@ -306,7 +348,65 @@ export function resourceProvider(
         row: pick.row,
         reveal: true,
       });
-      editors.open(uri, { preview: true });
+      editors.open(uri, { preview: true, side });
     },
   };
+}
+
+/** A recent editor as quick access and the home show it. */
+export interface RecentRow {
+  readonly label: string;
+  readonly icon?: LucideIcon;
+  /** An object's namespace, or a list's scope and filter. */
+  readonly description?: string;
+  readonly kind?: string;
+}
+
+/** A recent editor as a row: an object by its kind and namespace, a list by its scope and filter. */
+export function recentRow(
+  { uri, title }: RecentEditor,
+  resources: readonly Resource[],
+): RecentRow {
+  const object = parseObjectUri(uri);
+  const list = object ? undefined : parseListUri(uri);
+  const gvr = object?.gvr ?? list?.gvr;
+  const kind =
+    object && resources.find((resource) => sameGvr(resource.gvr, object.gvr));
+  const scope = list && [
+    ...(list.namespaces ?? []),
+    ...(list.text ? [`/${list.text}`] : []),
+  ];
+  return {
+    label: title,
+    ...(gvr && { icon: kindIcon(gvr) }),
+    ...(object?.namespace && { description: object.namespace }),
+    ...(scope && scope.length > 0 && { description: scope.join(" ") }),
+    ...(kind ? { kind: kind.kind } : list && { kind: "List" }),
+  };
+}
+
+function recentItem(
+  entry: RecentEditor,
+  resources: readonly Resource[],
+): QuickPickItem {
+  return {
+    id: `${RECENT}${entry.uri}`,
+    ...recentRow(entry, resources),
+    group: "Recent",
+  };
+}
+
+/**
+ * Where the pods' filter found the text in a name: Rust keeps a row whose
+ * text holds it as a substring in any case of ASCII letters
+ * (twigo-cache's view filter); a negation or a regex marks nothing.
+ */
+function substring(label: string, filter: string): TextRange[] {
+  const search = lowerAscii(filter.trim());
+  const at = search === "" ? -1 : lowerAscii(label).indexOf(search);
+  return at < 0 ? [] : [{ start: at, end: at + search.length }];
+}
+
+function lowerAscii(text: string): string {
+  return text.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 }

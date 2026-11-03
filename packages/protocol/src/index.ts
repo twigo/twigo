@@ -23,7 +23,7 @@ export type {
   ErrorKind,
   ExecPlugin,
   ExecReview,
-  GroupCount,
+  Grouping,
   Gvr,
   KeyboardLayout,
   KeyMapping,
@@ -50,6 +50,7 @@ export type {
   Resource,
   ReviewedPlugin,
   Row,
+  RowGroup,
   RowId,
   ShellEnvironment,
   Sort,
@@ -57,6 +58,7 @@ export type {
   StateEntry,
   StateSnapshot,
   SubscriptionId,
+  ValueCount,
   ViewState,
 } from "./generated";
 export { INITIAL_SNAPSHOT, ListView, type ListSnapshot } from "./list";

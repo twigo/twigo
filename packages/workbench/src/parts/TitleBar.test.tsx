@@ -57,6 +57,32 @@ test("the breadcrumb follows the space and its namespace scope", async () => {
   ).toBe("payments");
 });
 
+test("the bar is tinted with the active context's colour, an automatic or a chosen one too", async () => {
+  const { workbench, container } = await mounted();
+  const header = () => container.querySelector("header");
+  const tint = () => ({
+    color: header()?.getAttribute("data-color"),
+    variable: header()?.style.getPropertyValue("--twigo-context"),
+  });
+  expect(tint()).toEqual({ color: "red", variable: "var(--context-red)" });
+
+  await act(() => workbench.spaces.open("qa"));
+  const automatic = workbench.colors.of("qa");
+  expect(workbench.colors.source("qa")).toBe("automatic");
+  expect(tint()).toEqual({
+    color: automatic,
+    variable: `var(--context-${automatic})`,
+  });
+
+  act(() => {
+    workbench.colors.choose("qa", "yellow");
+  });
+  expect(tint()).toEqual({
+    color: "yellow",
+    variable: "var(--context-yellow)",
+  });
+});
+
 test("the search opens quick access, and the bar has no part toggles", async () => {
   const { workbench } = await mounted();
   fireEvent.click(screen.getByRole("button", { name: /Search prod-eu/ }));

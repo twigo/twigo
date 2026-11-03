@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { ChevronDown, ChevronRight, PanelsTopLeft } from "lucide-react";
-import { Button, cn, EmptyState } from "@twigo/ui";
+import { PanelsTopLeft } from "lucide-react";
+import { cn, EmptyState, InlineActions, Section } from "@twigo/ui";
 import type { Lookup } from "../contextkey/when";
 import { useChanges, useWorkbench } from "../react";
 import { LOCATION_TITLES, type Location, type View } from "../views/registry";
@@ -31,9 +31,9 @@ export function PartView({ location }: { location: Location }) {
         location === "panel" ? "bg-panel" : "bg-sidebar",
       )}
     >
-      <header className="flex h-9 shrink-0 items-center gap-1 px-3">
+      <header className="flex h-[34px] shrink-0 items-center gap-1 pr-2 pl-3">
         {containers.length < 2 ? (
-          <h2 className="text-xs font-medium">{container?.title}</h2>
+          <h2 className="font-medium">{container?.title}</h2>
         ) : (
           <div role="tablist" className="flex items-center gap-1">
             {containers.map((candidate) => (
@@ -102,57 +102,28 @@ function ViewBody({ view }: { view: View }) {
 /** One of several views in a container: a header that folds it, VS Code's pane view. */
 function ViewSection({ view, lookup }: { view: View; lookup: Lookup }) {
   const [open, setOpen] = useState(true);
-  const Chevron = open ? ChevronDown : ChevronRight;
   return (
-    <div
-      className={cn(
-        "flex flex-col border-t border-border-subtle",
-        open && "min-h-0 flex-1",
-      )}
+    <Section
+      title={view.title}
+      size="sm"
+      open={open}
+      onToggle={() => {
+        setOpen(!open);
+      }}
+      actions={<ViewActions view={view} lookup={lookup} />}
+      className={cn("border-t border-border-subtle", open && "min-h-0 flex-1")}
     >
-      <div className="flex h-6 shrink-0 items-center">
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-expanded={open}
-          onClick={() => {
-            setOpen(!open);
-          }}
-          className="h-6 flex-1 justify-start gap-1 rounded-none px-1 text-xs font-medium"
-        >
-          <Chevron className="size-3.5" />
-          {view.title}
-        </Button>
-        <ViewActions view={view} lookup={lookup} />
-      </div>
-      {open && <ViewBody view={view} />}
-    </div>
+      <ViewBody view={view} />
+    </Section>
   );
 }
 
 /** The view's `view/title` menu as icon buttons; `view` names the view in its `when`. */
 function ViewActions({ view, lookup }: { view: View; lookup: Lookup }) {
-  const { menus, commands } = useWorkbench();
-  useChanges(menus.changes);
+  const workbench = useWorkbench();
+  useChanges(workbench.menus.changes);
   const scoped: Lookup = (key) => (key === "view" ? view.id : lookup(key));
-  const items = menus.groups("view/title", scoped).flat();
-  return items.map((item) => {
-    const command = commands.get(item.command);
-    if (!command?.icon) return null;
-    const Icon = command.icon;
-    return (
-      <Button
-        key={item.command}
-        variant="ghost"
-        size="icon-sm"
-        aria-label={command.title}
-        title={command.title}
-        onClick={() => {
-          void commands.execute(item.command, scoped);
-        }}
-      >
-        <Icon />
-      </Button>
-    );
-  });
+  return (
+    <InlineActions actions={workbench.actions("view/title", scoped).flat()} />
+  );
 }

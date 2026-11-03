@@ -4,7 +4,7 @@
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border outline-ring;
   }
   html,
   body,
@@ -24,6 +24,11 @@
 
   .tabular-nums {
     font-variant-numeric: tabular-nums;
+  }
+
+  [aria-selected="true"],
+  [data-cursor] {
+    --muted-foreground-2: var(--muted-foreground);
   }
 
   /* Native <button> doesn't show the pointer cursor and Tailwind's reset

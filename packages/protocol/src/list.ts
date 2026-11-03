@@ -3,12 +3,13 @@ import { toIpcError } from "./error";
 import type {
   Cell,
   Column,
-  GroupCount,
   ListBatch,
   ListQuery,
   Row,
+  RowGroup,
   RowId,
   SubscriptionId,
+  ValueCount,
   ViewState,
 } from "./generated";
 
@@ -21,8 +22,10 @@ export interface ListSnapshot {
   readonly ids: readonly RowId[];
   readonly rows: ReadonlyMap<RowId, Row>;
   readonly status: ViewState;
-  /** The matching rows per value of the query's `groupBy` column. */
-  readonly groups: readonly GroupCount[];
+  /** The matching rows per value of the query's `countBy` column. */
+  readonly counts: readonly ValueCount[];
+  /** The query's `groupBy` groups, in group order. */
+  readonly groups: readonly RowGroup[];
   /** Column indexes of the cells the latest batch changed, by row. */
   readonly changed: ReadonlyMap<RowId, readonly number[]>;
 }
@@ -36,6 +39,7 @@ export const INITIAL_SNAPSHOT: ListSnapshot = {
   ids: [],
   rows: new Map(),
   status: { state: "connecting" },
+  counts: [],
   groups: [],
   changed: new Map(),
 };
@@ -139,6 +143,7 @@ export class ListView {
       ids,
       rows,
       status: batch.status,
+      counts: batch.counts ?? previous.counts,
       groups: batch.groups ?? previous.groups,
       changed,
     });

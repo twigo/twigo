@@ -10,7 +10,9 @@ use twigo_cache::hub::Delta;
 use twigo_cache::meta::Meta;
 use twigo_cache::table::{Cell, Column, ColumnKind, Row};
 use twigo_cache::view::{QueryView, Spec};
-use twigo_ipc::{ColumnValues, ErrorKind, GroupCount, Gvr, ListQuery, Sort, ViewState};
+use twigo_ipc::{
+    ColumnValues, ErrorKind, Grouping, Gvr, ListQuery, RowGroup, Sort, ValueCount, ViewState,
+};
 
 const CASES: &str = include_str!("../../../packages/protocol/src/query-cases.json");
 
@@ -54,7 +56,8 @@ struct CaseQuery {
     text: Option<String>,
     columns: Option<BTreeMap<String, bool>>,
     sort: Option<Sort>,
-    group_by: Option<String>,
+    count_by: Option<String>,
+    group_by: Option<Grouping>,
     values: Option<ColumnValues>,
 }
 
@@ -65,7 +68,8 @@ struct Expect {
     columns: Option<Vec<String>>,
     total: u32,
     ids: Vec<String>,
-    groups: Option<Vec<GroupCount>>,
+    counts: Option<Vec<ValueCount>>,
+    groups: Option<Vec<RowGroup>>,
 }
 
 fn column(column: &twigo_ipc::Column) -> Column {
@@ -118,6 +122,7 @@ fn row(row: &CaseRow, columns: &[Column], at: usize) -> Row {
                 .collect(),
             owners: Box::default(),
             created: row.created,
+            generated: None,
         },
         cells,
     }
@@ -143,6 +148,7 @@ fn the_query_cases_pass() {
                 text: case.query.text.clone(),
                 columns: case.query.columns.clone(),
                 sort: case.query.sort.clone(),
+                count_by: case.query.count_by.clone(),
                 group_by: case.query.group_by.clone(),
                 values: case.query.values.clone(),
             };
@@ -204,11 +210,12 @@ fn the_query_cases_pass() {
                     .columns
                     .as_ref()
                     .is_some_and(|columns| *columns != names)
-                || expect.groups.is_some() && batch.groups != expect.groups;
+                || expect.counts.is_some() && batch.counts != expect.counts
+                || query.group_by.is_some() && batch.groups != expect.groups;
             if wrong {
                 failed.push(format!(
-                    "{}: {}: total {}, ids {ids:?}, columns {names:?}, groups {:?}",
-                    list.name, case.name, batch.total, batch.groups
+                    "{}: {}: total {}, ids {ids:?}, columns {names:?}, counts {:?}, groups {:?}",
+                    list.name, case.name, batch.total, batch.counts, batch.groups
                 ));
             }
         }

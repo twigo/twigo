@@ -1,9 +1,12 @@
 import * as v from "valibot";
-import { commandScore } from "@twigo/ui";
+import { fuzzyMatch } from "@twigo/ui";
 import type { Workbench } from "../services";
 import type { QuickAccessProvider, QuickPickItem } from "./registry";
 
-/** Items whose label matches the filter, best first; all of them, in order, for no filter. */
+/**
+ * Items whose label matches the filter, best first, with what matched; all
+ * of them, in order, for no filter.
+ */
 export function filtered<T extends QuickPickItem>(
   items: readonly T[],
   filter: string,
@@ -11,8 +14,12 @@ export function filtered<T extends QuickPickItem>(
   const search = filter.trim();
   if (search === "") return [...items];
   return items
-    .map((item) => ({ item, score: commandScore(item.label, search, []) }))
-    .filter(({ score }) => score > 0)
+    .flatMap((item) => {
+      const match = fuzzyMatch(item.label, search);
+      return match
+        ? [{ item: { ...item, matches: match.ranges }, score: match.score }]
+        : [];
+    })
     .sort((a, b) => b.score - a.score)
     .map(({ item }) => item);
 }
@@ -29,6 +36,8 @@ export function commandsProvider(workbench: Workbench): QuickAccessProvider {
     prefix: ">",
     placeholder: "Type the name of a command to run",
     help: "Run a command",
+    hint: "Commands",
+    acceptLabel: "Run",
     items(filter, { lookup }) {
       const recent = history();
       const rank = (id: string) => {
@@ -68,6 +77,7 @@ export function helpProvider(workbench: Workbench): QuickAccessProvider {
     prefix: "?",
     placeholder: "Pick a prefix, or a command to run by its keys",
     help: "Show this help",
+    hint: "Help",
     items(filter) {
       const prefixes = quickAccess
         .providers()
@@ -106,36 +116,74 @@ export function helpProvider(workbench: Workbench): QuickAccessProvider {
   };
 }
 
-/** `ctx `: switch to a space, or open the space of a context that has none (ARCHITECTURE 4.2). */
+/**
+ * `ctx `: switch to a space, or open the space of a context that has none
+ * (ARCHITECTURE 4.2). The open spaces come first with their connections and
+ * keys, then the other contexts by the kubeconfig file that defines them.
+ */
 export function spacesProvider(workbench: Workbench): QuickAccessProvider {
-  const { spaces, catalog } = workbench;
+  const { spaces, catalog, colors, spaceStatus, keybindings } = workbench;
   return {
     prefix: "ctx ",
     placeholder: "Switch to a space, or open one for a context",
     help: "Switch or open a space",
+    acceptLabel: "Switch",
     items(filter) {
+      const open = spaces.list.map((space, index): QuickPickItem => {
+        const [only, ...more] = space.contexts;
+        const context =
+          only !== undefined && more.length === 0
+            ? catalog.find(only)
+            : undefined;
+        const server = context && hostOf(context.server);
+        const connection = spaceStatus.get(space.id);
+        const binding = keybindings.primary(
+          `workbench.action.selectSpace${String(index + 1)}`,
+        );
+        return {
+          id: `space:${space.id}`,
+          label: space.name,
+          tile: { name: space.name, color: colors.ofSpace(space) },
+          ...(context
+            ? server && { description: server }
+            : { description: space.contexts.join(" + ") }),
+          ...(connection && {
+            state: {
+              tone: connection.tone,
+              // As the status bar says it: the version alone while connected.
+              label:
+                connection.tone === "ok" && connection.version
+                  ? connection.version
+                  : connection.label,
+            },
+          }),
+          ...(binding && { keybinding: keybindings.label(binding.presses) }),
+          group: "Open spaces",
+        };
+      });
       const own = new Set(
         spaces.list.flatMap((space) =>
           space.contexts.length === 1 ? space.contexts : [],
         ),
       );
-      const items: QuickPickItem[] = [
-        ...spaces.list.map((space) => ({
-          id: `space:${space.id}`,
-          label: space.name,
-          description: space.contexts.join(" + "),
-          group: "Spaces",
-        })),
-        ...(catalog.list ?? [])
-          .filter((context) => !own.has(context.name))
-          .map((context) => ({
+      const files = new Map<string, QuickPickItem[]>();
+      for (const context of catalog.list ?? []) {
+        if (own.has(context.name)) continue;
+        const server = hostOf(context.server);
+        files.set(context.source, [
+          ...(files.get(context.source) ?? []),
+          {
             id: `context:${context.name}`,
             label: context.name,
-            description: "Open a space",
-            group: "Contexts",
-          })),
-      ];
-      return filtered(items, filter);
+            tile: { name: context.name, color: colors.of(context.name) },
+            ...(server && { description: server }),
+            group: context.source,
+          },
+        ]);
+      }
+      return [open, ...files.values()].flatMap((section) =>
+        filtered(section, filter),
+      );
     },
     async accept(item) {
       if (item.id.startsWith("space:")) {
@@ -147,6 +195,16 @@ export function spacesProvider(workbench: Workbench): QuickAccessProvider {
   };
 }
 
+/** A server's host and port, as the picker shows it; what no URL parser takes shows as it is. */
+function hostOf(server: string | null): string | undefined {
+  if (server === null) return undefined;
+  try {
+    return new URL(server).host;
+  } catch {
+    return server;
+  }
+}
+
 /** `@`: the symbols the active editor publishes, such as a YAML outline. */
 export function symbolsProvider(workbench: Workbench): QuickAccessProvider {
   const { editors } = workbench;
@@ -154,6 +212,7 @@ export function symbolsProvider(workbench: Workbench): QuickAccessProvider {
     prefix: "@",
     placeholder: "Go to a symbol of the active editor",
     help: "Go to a symbol in the editor",
+    acceptLabel: "Go to",
     items(filter) {
       const active = editors.active;
       const symbols = active === undefined ? [] : editors.symbols(active);

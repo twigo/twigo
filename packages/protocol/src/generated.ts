@@ -52,7 +52,18 @@ export type Context = { name: string,
 /**
  * From the `twigo` extension of the kubeconfig context; none by default.
  */
-color: ContextColor | null, };
+color: ContextColor | null, 
+/**
+ * The kubeconfig file that defines it, as a person names it:
+ * `~/.kube/config`.
+ */
+source: string, 
+/**
+ * The URL of the cluster it reaches, only its scheme, host and port:
+ * `https://10.0.0.1:6443`. None when the kubeconfig names no server
+ * that parses.
+ */
+server: string | null, };
 
 /**
  * How a context gets its credentials.
@@ -122,7 +133,23 @@ export type Field = { label: string, value: Value, };
  */
 export type GetValues = { id: SubscriptionId, keys: Array<string>, };
 
-export type GroupCount = { value: string, count: number, };
+/**
+ * The rows grouped by the text of a column: the groups in the natural
+ * order of their values, runs of ASCII digits by their value and ASCII
+ * letters folded, the empty value last, and the rows of each group in
+ * the query's sort.
+ */
+export type Grouping = { 
+/**
+ * A column name from [`ListBatch::columns`].
+ */
+column: string, 
+/**
+ * The values of the groups the window skips. Their rows still count
+ * in `total`, in `counts` and in their group's `rows`; a value no
+ * group has does nothing.
+ */
+collapsed: Array<string>, };
 
 export type Gvr = { 
 /**
@@ -170,7 +197,8 @@ export type Label = { key: string, value: string, };
  */
 export type ListBatch = { seq: number, 
 /**
- * Rows matching the query, in or out of the window.
+ * Rows matching the query, in or out of the window, those of collapsed
+ * groups included.
  */
 total: number, 
 /**
@@ -187,10 +215,17 @@ window: Window | null,
  */
 upserts: Array<Row>, status: ViewState, 
 /**
- * With `group_by`: the matching rows per value of that column, present
+ * With `count_by`: the matching rows per value of that column, present
  * in the first batch and whenever a count changes.
  */
-groups: Array<GroupCount> | null, };
+counts: Array<ValueCount> | null, 
+/**
+ * With `group_by`: the groups that hold matching rows, in group order,
+ * present once the list has the column and whenever a group appears,
+ * disappears or moves, or its rows or counts change. Empty once the
+ * list no longer has the column.
+ */
+groups: Array<RowGroup> | null, };
 
 export type ListQuery = { space: string, gvr: Gvr, 
 /**
@@ -225,10 +260,15 @@ sort: Sort | null,
  * A column to count the matching rows by, such as a pod's Status; one
  * the list lacks counts nothing.
  */
-groupBy: string | null, 
+countBy: string | null, 
+/**
+ * A column to group the matching rows by; one the list lacks groups
+ * nothing.
+ */
+groupBy: Grouping | null, 
 /**
  * Keeps the rows whose column holds one of the values, read as text.
- * The counts of `group_by` come before it, so the values it drops keep
+ * The counts of `count_by` come before it, so the values it drops keep
  * theirs; a column the list lacks keeps every row.
  */
 values: ColumnValues | null, };
@@ -389,9 +429,33 @@ export type Row = { id: RowId,
  */
 created: string | null, 
 /**
+ * Where the generated part of the object's name starts, in UTF-16
+ * units: after its `metadata.generateName`, or at a pod's
+ * `pod-template-hash` within it, so `api-7f9c8d6b5-x2kq9` reads `api-`
+ * before what was generated. Null for a name the API server did not
+ * generate.
+ */
+generated: number | null, 
+/**
  * One per column; null in Age columns.
  */
 cells: Array<Cell>, };
+
+export type RowGroup = { 
+/**
+ * The column's text; empty for the rows that have none.
+ */
+value: string, 
+/**
+ * The group's matching rows, collapsed or not.
+ */
+rows: number, 
+/**
+ * With `count_by`: the group's rows per value of that column, counted
+ * before `values` drops any and ordered as the list's counts are,
+ * largest first; empty without it.
+ */
+counts: Array<ValueCount>, };
 
 /**
  * `context/namespace/name`, or `context/name` for cluster-scoped objects.
@@ -406,6 +470,10 @@ id: string, title: string, blocks: Array<Block>, };
 
 export type SetParts = { id: SubscriptionId, parts: ObjectParts, };
 
+/**
+ * `start` and `end` index the rows a window reads: every matching row,
+ * or with `group_by` those of the groups not collapsed, in group order.
+ */
 export type SetWindow = { id: SubscriptionId, start: number, 
 /**
  * Exclusive.
@@ -484,12 +552,18 @@ export type TreeValue = { "type": "scalar", text: string, } | { "type": "map", e
 
 export type Value = { "type": "text", text: string, } | { "type": "time", at: string, } | { "type": "link", target: ObjectRef, text: string, } | { "type": "labels", labels: Array<Label>, } | { "type": "list", items: Array<Value>, };
 
+export type ValueCount = { value: string, count: number, };
+
 /**
  * The state of the upstream behind a subscription (ARCHITECTURE 3.7).
  */
 export type ViewState = { "state": "queued" } | { "state": "connecting" } | { "state": "syncing", loaded: number, } | { "state": "ready" } | { "state": "relisting" } | { "state": "stale" } | { "state": "forbidden", verb: string, resource: string, } | { "state": "unauthorized" } | { "state": "error", error: IpcError, };
 
-export type Window = { start: number, ids: Array<RowId>, };
+export type Window = { 
+/**
+ * An index into the rows the window reads, as in [`SetWindow`].
+ */
+start: number, ids: Array<RowId>, };
 
 export type Commands = {
   spaces_list: { request: null; response: Array<Space>; message: null };

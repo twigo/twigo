@@ -1,17 +1,48 @@
 import type { ComponentType } from "react";
+import type { ContextColor } from "@twigo/protocol";
+import type { TextRange, Tone } from "@twigo/ui";
 import { Changes } from "../changes";
 import type { ContextKeys } from "../contextkey/service";
 import type { Lookup } from "../contextkey/when";
 
+/**
+ * A row of quick access as data (ARCHITECTURE 4.5): the widget draws every
+ * provider's rows alike.
+ */
 export interface QuickPickItem {
   readonly id: string;
   readonly label: string;
+  /** What in the label matched the filter, drawn bold in the brand colour. */
+  readonly matches?: readonly TextRange[];
+  /** Quiet words after the label, such as a namespace. */
   readonly description?: string;
   readonly icon?: ComponentType<{ className?: string }>;
+  /** Two letters of the name on its colour in place of the icon, as the rail draws a space. */
+  readonly tile?: {
+    readonly name: string;
+    readonly color: ContextColor | undefined;
+  };
+  /**
+   * A state worth saying at the row's end, as its dot and its words in its
+   * tone: a pod's only when it is abnormal, a space's connection always.
+   */
+  readonly state?: {
+    readonly tone: Tone;
+    readonly label: string;
+    /** While the state is in flight. */
+    readonly pulse?: boolean;
+  };
+  /** What sort of thing the row is, quieter at its end: `Pod`, `Deployment`. */
+  readonly kind?: string;
   /** A keybinding label, shown at the end. */
   readonly keybinding?: string;
   /** Items group under headings in the order they come. */
   readonly group?: string;
+}
+
+export interface AcceptOptions {
+  /** ⌘↵: open what the row names beside the active editor. */
+  readonly side: boolean;
 }
 
 /** What a provider sees: the context keys of the element focused when quick access opened. */
@@ -29,6 +60,12 @@ export interface QuickAccessProvider {
   readonly placeholder: string;
   /** What `?` says about the prefix. */
   readonly help: string;
+  /** Names the prefix in the footer of keys, as `Commands`; without it the prefix stays out of the footer. */
+  readonly hint?: string;
+  /** What Enter does to a row, in the footer: `Open` unless it says. */
+  readonly acceptLabel?: string;
+  /** Whether ⌘↵ opens a row to the side; `accept` then gets `side`. */
+  readonly toSide?: boolean;
   items(
     filter: string,
     context: QuickAccessContext,
@@ -37,7 +74,15 @@ export interface QuickAccessProvider {
     item: QuickPickItem,
     filter: string,
     context: QuickAccessContext,
+    options?: AcceptOptions,
   ): void | Promise<void>;
+}
+
+/** What the open widget does for the `quickInput.*` commands. */
+export interface QuickAccessList {
+  /** Moves the selection, wrapping around. */
+  move(delta: number): void;
+  accept(options: AcceptOptions): void;
 }
 
 interface Pick {
@@ -58,6 +103,7 @@ export class QuickAccess {
   readonly #providers = new Map<string, QuickAccessProvider>();
   #session: Session | undefined;
   #restore: HTMLElement | undefined;
+  #list: QuickAccessList | undefined;
 
   constructor(private readonly keys: ContextKeys) {}
 
@@ -123,8 +169,11 @@ export class QuickAccess {
     this.#close();
   }
 
-  /** Accepts an item of the open session. */
-  async accept(item: QuickPickItem): Promise<void> {
+  /** Accepts an item of the open session; only a provider that says `toSide` opens it to the side. */
+  async accept(
+    item: QuickPickItem,
+    { side }: AcceptOptions = { side: false },
+  ): Promise<void> {
     const session = this.#session;
     if (!session) return;
     if (session.pick) {
@@ -135,7 +184,21 @@ export class QuickAccess {
     const resolved = this.resolve(session.value);
     if (!resolved) return;
     this.#close();
-    await resolved.provider.accept(item, resolved.filter, session.context);
+    await resolved.provider.accept(item, resolved.filter, session.context, {
+      side: side && resolved.provider.toSide === true,
+    });
+  }
+
+  /** The open widget's rows, while it shows them. */
+  get list(): QuickAccessList | undefined {
+    return this.#list;
+  }
+
+  attach(list: QuickAccessList): () => void {
+    this.#list = list;
+    return () => {
+      if (this.#list === list) this.#list = undefined;
+    };
   }
 
   #open({ value, pick }: { value: string; pick: Pick | undefined }) {

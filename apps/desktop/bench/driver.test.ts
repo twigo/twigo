@@ -10,14 +10,17 @@ function table(rows: (readonly [string, string] | null)[]): HTMLElement {
     "Namespace",
     "Status",
   ]
-    .map((name) => `<button role="columnheader">${name}</button>`)
+    .map(
+      (name) =>
+        `<div role="columnheader" aria-sort="none"><button type="button">${name}</button></div>`,
+    )
     .join("")}</div>`;
   rows.forEach((row, index) => {
     const element = document.createElement("div");
     element.setAttribute("role", "row");
     element.setAttribute("aria-rowindex", String(index + 2));
     element.innerHTML = row
-      ? `<div role="gridcell">${row[0]}</div><div role="gridcell">${row[1]}</div><div role="gridcell">Running</div>`
+      ? `<div role="gridcell"></div><div role="gridcell" data-column="Name">${row[0]}</div><div role="gridcell" data-column="Namespace">${row[1]}</div><div role="gridcell" data-column="Status">Running</div><div role="gridcell"></div>`
       : "<div><span></span></div>";
     grid.append(element);
   });
@@ -66,10 +69,11 @@ test("the list's first rows are named as the screen's are, once its window start
     ],
     window: { start: 0, ids: ["b", "a"] },
     upserts: [
-      { id: "a", created: null, cells: ["api-1", "payments"] },
-      { id: "b", created: null, cells: ["api-2", "payments"] },
+      { id: "a", created: null, generated: null, cells: ["api-1", "payments"] },
+      { id: "b", created: null, generated: null, cells: ["api-2", "payments"] },
     ],
     status: { state: "ready" },
+    counts: null,
     groups: null,
   });
   expect(topRows(list)).toEqual(["payments/api-2", "payments/api-1"]);
@@ -80,6 +84,7 @@ test("the list's first rows are named as the screen's are, once its window start
     window: { start: 1, ids: ["a", "b"] },
     upserts: [],
     status: { state: "ready" },
+    counts: null,
     groups: null,
   });
   expect(topRows(list)).toBeUndefined();

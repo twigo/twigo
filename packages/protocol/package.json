@@ -13,7 +13,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.12.4"
+    "@tauri-apps/api": "^2.12.4",
+    "@twigo/utils": "workspace:*"
   },
   "devDependencies": {
     "jsdom": "^30.1.3",

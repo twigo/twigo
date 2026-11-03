@@ -13,12 +13,13 @@ const QUERY: ListQuery = {
   text: null,
   columns: null,
   sort: null,
+  countBy: null,
   groupBy: null,
   values: null,
 };
 
 function row(id: string, ...cells: Row["cells"]): Row {
-  return { id, created: null, cells };
+  return { id, created: null, generated: null, cells };
 }
 
 function batch(seq: number, rest: Partial<ListBatch> = {}): ListBatch {
@@ -29,6 +30,7 @@ function batch(seq: number, rest: Partial<ListBatch> = {}): ListBatch {
     window: null,
     upserts: [],
     status: { state: "ready" },
+    counts: null,
     groups: null,
     ...rest,
   };
@@ -96,16 +98,29 @@ test("a batch replaces the window and reports the cells it changed", async () =>
   expect(view.getSnapshot().changed.size).toBe(0);
 });
 
+test("a batch without counts keeps the previous ones", async () => {
+  const fake = fakeBackend();
+  const view = new ListView(fake.backend, QUERY);
+  fake.resolve(7);
+  await vi.runAllTimersAsync();
+  const counts = [{ value: "Running", count: 2 }];
+  fake.send(batch(1, { window: { start: 0, ids: [] }, counts }));
+  fake.send(batch(2, { total: 3 }));
+  expect(view.getSnapshot().total).toBe(3);
+  expect(view.getSnapshot().counts).toEqual(counts);
+});
+
 test("a batch without groups keeps the previous ones", async () => {
   const fake = fakeBackend();
   const view = new ListView(fake.backend, QUERY);
   fake.resolve(7);
   await vi.runAllTimersAsync();
-  const groups = [{ value: "Running", count: 2 }];
+  const groups = [{ value: "alpha", rows: 2, counts: [] }];
   fake.send(batch(1, { window: { start: 0, ids: [] }, groups }));
   fake.send(batch(2, { total: 3 }));
-  expect(view.getSnapshot().total).toBe(3);
   expect(view.getSnapshot().groups).toEqual(groups);
+  fake.send(batch(3, { groups: [] }));
+  expect(view.getSnapshot().groups).toEqual([]);
 });
 
 test("every seq is acknowledged once, after the next frame", async () => {

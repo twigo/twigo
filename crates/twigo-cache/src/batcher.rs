@@ -173,6 +173,7 @@ mod tests {
             text: None,
             columns: None,
             sort: None,
+            count_by: None,
             group_by: None,
             values: None,
         };

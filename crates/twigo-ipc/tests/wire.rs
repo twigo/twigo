@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 use twigo_ipc::{
-    Cell, ColumnValues, ErrorKind, Gvr, IpcError, ListQuery, RowId, Sort, SubscriptionId, ViewState,
+    Cell, ColumnValues, ErrorKind, Grouping, Gvr, IpcError, ListQuery, RowId, Sort, SubscriptionId,
+    ViewState,
 };
 
 fn wire<T: serde::Serialize>(value: &T) -> Value {
@@ -65,7 +66,11 @@ fn queries_use_camel_case_and_newtypes_are_bare() {
             column: "Age".into(),
             descending: true,
         }),
-        group_by: Some("Status".into()),
+        count_by: Some("Status".into()),
+        group_by: Some(Grouping {
+            column: "Namespace".into(),
+            collapsed: vec!["kube-system".into()],
+        }),
         values: Some(ColumnValues {
             column: "Status".into(),
             values: vec!["Error".into()],
@@ -73,7 +78,11 @@ fn queries_use_camel_case_and_newtypes_are_bare() {
     };
     assert_eq!(wire(&query)["namespaced"], json!(true));
     assert_eq!(wire(&query)["labelSelector"], json!("app=api"));
-    assert_eq!(wire(&query)["groupBy"], json!("Status"));
+    assert_eq!(wire(&query)["countBy"], json!("Status"));
+    assert_eq!(
+        wire(&query)["groupBy"],
+        json!({ "column": "Namespace", "collapsed": ["kube-system"] })
+    );
     assert_eq!(
         wire(&query)["columns"],
         json!({ "IP": true, "Namespace": false })

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use twigo_ipc::{ColumnValues, Gvr, Sort};
+use twigo_ipc::{ColumnValues, Grouping, Gvr, Sort};
 
 use super::*;
 use crate::meta::Meta;
@@ -36,6 +36,7 @@ fn pod(namespace: &str, name: &str, status: &str, restarts: &str) -> Row {
             labels: Box::new([("app".into(), name.split('-').next().unwrap_or(name).into())]),
             owners: Box::default(),
             created: Some(jiff::Timestamp::UNIX_EPOCH),
+            generated: None,
         },
         cells: Box::new([
             Cell::Text(name.into()),
@@ -62,6 +63,7 @@ fn query() -> ListQuery {
         text: None,
         columns: None,
         sort: None,
+        count_by: None,
         group_by: None,
         values: None,
     }
@@ -280,7 +282,8 @@ fn columns_the_list_lacks_do_nothing() {
         column: "Nominated".to_owned(),
         descending: true,
     });
-    odd.group_by = Some("Phase".to_owned());
+    odd.count_by = Some("Phase".to_owned());
+    odd.group_by = grouping("Phase", &[""]);
     odd.values = Some(ColumnValues {
         column: "Phase".to_owned(),
         values: vec!["Failed".to_owned()],
@@ -292,9 +295,10 @@ fn columns_the_list_lacks_do_nothing() {
     assert_eq!(
         ids(&batch),
         ["kind-test/a/web-1", "kind-test/a/web-2"],
-        "by Name"
+        "by Name, and no empty group to collapse"
     );
-    assert_eq!(batch.groups, Some(Vec::new()));
+    assert_eq!(batch.counts, Some(Vec::new()));
+    assert_eq!(batch.groups, None);
 }
 
 #[test]
@@ -320,9 +324,9 @@ fn the_filter_reads_the_shown_columns_and_name() {
 }
 
 #[test]
-fn groups_count_before_values_drop_rows() {
+fn counts_come_before_values_drop_rows() {
     let mut health = query();
-    health.group_by = Some("Status".to_owned());
+    health.count_by = Some("Status".to_owned());
     health.values = Some(ColumnValues {
         column: "Status".to_owned(),
         values: vec!["Error".to_owned()],
@@ -335,24 +339,24 @@ fn groups_count_before_values_drop_rows() {
     rig.store.upsert(pod("a", "db-1", "Error", "0"));
     let batch = rig.flush().unwrap();
     assert_eq!(ids(&batch), ["kind-test/a/web-2"]);
-    let groups = |batch: &ListBatch| {
+    let counts = |batch: &ListBatch| {
         batch
-            .groups
+            .counts
             .clone()
             .unwrap()
             .into_iter()
-            .map(|group| (group.value, group.count))
+            .map(|count| (count.value, count.count))
             .collect::<Vec<_>>()
     };
     assert_eq!(
-        groups(&batch),
+        counts(&batch),
         [("Running".to_owned(), 2), ("Error".to_owned(), 1)]
     );
 
     rig.store.upsert(pod("a", "web-1", "Error", "1"));
     let batch = rig.flush().unwrap();
     assert_eq!(
-        groups(&batch),
+        counts(&batch),
         [("Error".to_owned(), 2), ("Running".to_owned(), 1)]
     );
     rig.store.upsert(pod("a", "web-3", "Running", "1"));
@@ -365,9 +369,10 @@ fn groups_count_before_values_drop_rows() {
 
 #[test]
 fn only_a_list_that_shows_rows_sends_them() {
-    let mut grouped = query();
-    grouped.group_by = Some("Status".to_owned());
-    let mut rig = Rig::new(&grouped);
+    let mut counted = query();
+    counted.count_by = Some("Status".to_owned());
+    counted.group_by = grouping("Status", &[]);
+    let mut rig = Rig::new(&counted);
     rig.store.upsert(pod("a", "web-1", "Running", "0"));
     let delta = match rig.store.drain(&rig.feed) {
         Drained::Reset { items, columns } => Delta::Reset {
@@ -378,11 +383,26 @@ fn only_a_list_that_shows_rows_sends_them() {
     };
     rig.view.apply(delta);
     let syncing = rig.view.batch(ViewState::Syncing { loaded: 1 }).unwrap();
-    assert_eq!((syncing.total, syncing.groups), (0, Some(Vec::new())));
+    assert_eq!((syncing.total, syncing.counts), (0, Some(Vec::new())));
+    assert_eq!(syncing.groups, Some(Vec::new()));
     assert!(syncing.window.unwrap().ids.is_empty());
     let ready = rig.view.batch(ViewState::Ready).unwrap();
     assert_eq!(ready.total, 1);
     assert_eq!(ids(&ready), ["kind-test/a/web-1"]);
+    assert_eq!(groups(&ready), [("Running", 1)]);
+}
+
+#[test]
+fn a_row_says_where_its_name_was_generated() {
+    let mut rig = Rig::new(&query());
+    let mut row = pod("a", "web-1", "Running", "0");
+    rig.store.upsert(row.clone());
+    assert_eq!(rig.flush().unwrap().upserts[0].generated, None);
+    row.meta.generated = Some(4);
+    row.meta.resource_version = "2".into();
+    rig.store.upsert(row);
+    let batch = rig.flush().expect("the generated part changed");
+    assert_eq!(batch.upserts[0].generated, Some(4));
 }
 
 #[test]
@@ -395,13 +415,229 @@ fn a_status_change_alone_is_a_batch() {
     assert_eq!(batch.seq, 2);
 }
 
-/// What the index must hold: every row the query keeps, sorted from
-/// scratch.
-fn naive(rows: &HashMap<String, Row>, query: &ListQuery) -> (Vec<String>, Vec<GroupCount>) {
+fn grouping(column: &str, collapsed: &[&str]) -> Option<Grouping> {
+    Some(Grouping {
+        column: column.to_owned(),
+        collapsed: collapsed.iter().map(|value| (*value).to_owned()).collect(),
+    })
+}
+
+fn groups(batch: &ListBatch) -> Vec<(&str, u32)> {
+    batch
+        .groups
+        .as_ref()
+        .expect("groups")
+        .iter()
+        .map(|group| (group.value.as_str(), group.rows))
+        .collect()
+}
+
+fn counts(counts: &[ValueCount]) -> Vec<(&str, u32)> {
+    counts
+        .iter()
+        .map(|count| (count.value.as_str(), count.count))
+        .collect()
+}
+
+#[test]
+fn groups_follow_their_values_in_natural_order_with_the_empty_value_last() {
+    let mut grouped = query();
+    grouped.group_by = grouping("Status", &[]);
+    grouped.sort = Some(Sort {
+        column: "Restarts".to_owned(),
+        descending: true,
+    });
+    let mut rig = Rig::new(&grouped);
+    for (name, status, restarts) in [
+        ("web-1", "node-10", "0"),
+        ("web-2", "", "1"),
+        ("web-3", "node-9", "2"),
+        ("web-4", "Node-2", "3"),
+        ("web-5", "node-10", "4"),
+        ("web-6", "node-9", "5"),
+    ] {
+        rig.store.upsert(pod("a", name, status, restarts));
+    }
+    let batch = rig.flush().unwrap();
+    assert_eq!(
+        groups(&batch),
+        [("Node-2", 1), ("node-9", 2), ("node-10", 2), ("", 1)]
+    );
+    assert_eq!(
+        ids(&batch),
+        [
+            "kind-test/a/web-4",
+            "kind-test/a/web-6",
+            "kind-test/a/web-3",
+            "kind-test/a/web-5",
+            "kind-test/a/web-1",
+            "kind-test/a/web-2",
+        ],
+        "the query's sort within each group"
+    );
+}
+
+#[test]
+fn a_collapsed_group_counts_everywhere_but_in_the_window() {
+    let mut grouped = query();
+    grouped.group_by = grouping("Namespace", &["b", "nowhere"]);
+    grouped.count_by = Some("Status".to_owned());
+    let mut rig = Rig::new(&grouped);
+    for (namespace, name, status) in [
+        ("a", "web-1", "Running"),
+        ("a", "web-2", "Error"),
+        ("b", "web-1", "Error"),
+        ("b", "web-2", "Error"),
+        ("c", "web-1", "Running"),
+        ("c", "web-2", "Running"),
+    ] {
+        rig.store.upsert(pod(namespace, name, status, "0"));
+    }
+    let batch = rig.flush().unwrap();
+    assert_eq!(batch.total, 6);
+    assert_eq!(
+        ids(&batch),
+        [
+            "kind-test/a/web-1",
+            "kind-test/a/web-2",
+            "kind-test/c/web-1",
+            "kind-test/c/web-2",
+        ]
+    );
+    assert_eq!(
+        counts(batch.counts.as_deref().unwrap()),
+        [("Error", 3), ("Running", 3)]
+    );
+    let shown: Vec<_> = batch
+        .groups
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|group| (group.value.as_str(), group.rows, counts(&group.counts)))
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            ("a", 2, vec![("Error", 1), ("Running", 1)]),
+            ("b", 2, vec![("Error", 2)]),
+            ("c", 2, vec![("Running", 2)]),
+        ]
+    );
+
+    rig.view.set_window(1, 3);
+    let batch = rig.flush().unwrap();
+    let window = batch.window.as_ref().unwrap();
+    assert_eq!(window.start, 1);
+    assert_eq!(
+        ids(&batch),
+        ["kind-test/a/web-2", "kind-test/c/web-1"],
+        "across the collapsed group"
+    );
+    assert_eq!(batch.groups, None, "unchanged");
+}
+
+#[test]
+fn a_collapsed_value_no_group_has_does_nothing() {
+    let mut grouped = query();
+    grouped.group_by = grouping("Status", &["Error", ""]);
+    let mut rig = Rig::new(&grouped);
+    rig.store.upsert(pod("a", "web-1", "Running", "0"));
+    rig.store.upsert(pod("a", "web-2", "Running", "0"));
+    let batch = rig.flush().unwrap();
+    assert_eq!(ids(&batch), ["kind-test/a/web-1", "kind-test/a/web-2"]);
+    assert_eq!(groups(&batch), [("Running", 2)]);
+}
+
+#[test]
+fn a_change_to_the_groups_alone_is_a_batch() {
+    let mut grouped = query();
+    grouped.group_by = grouping("Restarts", &[]);
+    grouped.count_by = Some("Status".to_owned());
+    let mut rig = Rig::new(&grouped);
+    rig.view.set_window(0, 0);
+    rig.store.upsert(pod("a", "web-1", "Running", "0"));
+    rig.store.upsert(pod("a", "web-2", "Error", "1"));
+    rig.flush().unwrap();
+
+    rig.store.upsert(pod("a", "web-1", "Running", "1"));
+    rig.store.upsert(pod("a", "web-2", "Error", "0"));
+    let batch = rig.flush().expect("the counts within the groups changed");
+    assert_eq!(
+        (&batch.window, &batch.counts, batch.upserts.len()),
+        (&None, &None, 0)
+    );
+    let shown: Vec<_> = batch
+        .groups
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|group| (group.value.as_str(), group.rows, counts(&group.counts)))
+        .collect();
+    assert_eq!(
+        shown,
+        [("0", 1, vec![("Error", 1)]), ("1", 1, vec![("Running", 1)])]
+    );
+
+    rig.store.upsert(pod("a", "web-1", "Running", "3"));
+    let batch = rig.flush().expect("a group went, another came");
+    assert_eq!(groups(&batch), [("0", 1), ("3", 1)]);
+    rig.store.upsert(pod("a", "web-2", "Error", "4"));
+    let batch = rig.flush().expect("the groups moved");
+    assert_eq!(groups(&batch), [("3", 1), ("4", 1)]);
+
+    let mut same = pod("a", "web-2", "Error", "4");
+    same.meta.resource_version = "2".into();
+    rig.store.upsert(same);
+    assert_eq!(rig.flush(), None, "the same groups");
+}
+
+#[test]
+fn groups_end_empty_once_the_list_loses_their_column() {
+    let mut grouped = query();
+    grouped.group_by = grouping("Status", &["Running"]);
+    let mut rig = Rig::new(&grouped);
+    rig.store.upsert(pod("a", "web-1", "Running", "0"));
+    let batch = rig.flush().unwrap();
+    assert_eq!(groups(&batch), [("Running", 1)]);
+    assert_eq!(ids(&batch), Vec::<&str>::new(), "collapsed");
+
+    rig.store.set_columns(Some(&Arc::from([
+        column("Name", ColumnKind::String, 0),
+        column("Ready", ColumnKind::String, 0),
+    ])));
+    let batch = rig.flush().unwrap();
+    assert_eq!(batch.groups, Some(Vec::new()));
+    assert_eq!(ids(&batch), ["kind-test/a/web-1"], "nothing to collapse");
+    assert_eq!(rig.flush(), None);
+}
+
+/// What the view must show, worked out from scratch: every row the query
+/// keeps in the index's order, those the window reads, and the counts and
+/// the groups.
+struct Expected {
+    every: Vec<String>,
+    readable: Vec<String>,
+    counts: Vec<ValueCount>,
+    groups: Option<Vec<RowGroup>>,
+}
+
+fn naive(rows: &HashMap<String, Row>, query: &ListQuery) -> Expected {
+    fn sorted(counts: HashMap<String, u32>) -> Vec<ValueCount> {
+        let mut counts: Vec<ValueCount> = counts
+            .into_iter()
+            .map(|(value, count)| ValueCount { value, count })
+            .collect();
+        counts.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.value.cmp(&b.value)));
+        counts
+    }
+    fn by_group(a: &str, b: &str) -> Ordering {
+        a.is_empty().cmp(&b.is_empty()).then_with(|| natural(a, b))
+    }
     let spec = Spec::new("kind-test", query).unwrap();
     let layout = Layout::new(&spec, pod_columns());
     let mut kept = Vec::new();
-    let mut groups: HashMap<String, u32> = HashMap::new();
+    let mut counts: HashMap<String, u32> = HashMap::new();
+    let mut groups: HashMap<String, (u32, HashMap<String, u32>)> = HashMap::new();
     for row in rows.values() {
         if spec
             .labels
@@ -414,36 +650,76 @@ fn naive(rows: &HashMap<String, Row>, query: &ListQuery) -> (Vec<String>, Vec<Gr
         if spec.text.as_ref().is_some_and(|t| !t.keeps(texts)) {
             continue;
         }
-        if let Some(at) = layout.group {
-            *groups.entry(layout.text(row, at).into_owned()).or_default() += 1;
+        let count = layout.count.map(|at| layout.text(row, at).into_owned());
+        let group = layout
+            .group
+            .as_ref()
+            .map(|(at, _)| layout.text(row, *at).into_owned());
+        if let Some(count) = &count {
+            *counts.entry(count.clone()).or_default() += 1;
+        }
+        if let Some(group) = &group {
+            let (_, within) = groups.entry(group.clone()).or_default();
+            if let Some(count) = &count {
+                *within.entry(count.clone()).or_default() += 1;
+            }
         }
         if let Some((at, values)) = &layout.values
             && !values.contains(&*layout.text(row, *at))
         {
             continue;
         }
+        if let Some(group) = &group {
+            groups.get_mut(group).unwrap().0 += 1;
+        }
         let id = format!(
             "kind-test/{}/{}",
             row.meta.namespace.as_deref().unwrap(),
             row.meta.name
         );
-        kept.push((layout.sort_key(row), id));
+        kept.push((group, layout.sort_key(row), id));
     }
-    kept.sort_by(|(a, x), (b, y)| {
+    kept.sort_by(|(g, a, x), (h, b, y)| {
         let order = a.cmp(b);
         let order = if layout.descending {
             order.reverse()
         } else {
             order
         };
-        order.then_with(|| natural(x, y))
+        let group = match (g, h) {
+            (Some(g), Some(h)) => by_group(g, h),
+            _ => Ordering::Equal,
+        };
+        group.then(order).then_with(|| natural(x, y))
     });
-    let mut groups: Vec<GroupCount> = groups
-        .into_iter()
-        .map(|(value, count)| GroupCount { value, count })
+    let collapsed = |group: &Option<String>| match (&layout.group, group) {
+        (Some((_, collapsed)), Some(group)) => collapsed.contains(group),
+        _ => false,
+    };
+    let readable = kept
+        .iter()
+        .filter(|(group, ..)| !collapsed(group))
+        .map(|(.., id)| id.clone())
         .collect();
-    groups.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.value.cmp(&b.value)));
-    (kept.into_iter().map(|(_, id)| id).collect(), groups)
+    let groups = layout.group.as_ref().map(|_| {
+        let mut groups: Vec<RowGroup> = groups
+            .into_iter()
+            .filter(|(_, (rows, _))| *rows > 0)
+            .map(|(value, (rows, within))| RowGroup {
+                value,
+                rows,
+                counts: sorted(within),
+            })
+            .collect();
+        groups.sort_by(|a, b| by_group(&a.value, &b.value));
+        groups
+    });
+    Expected {
+        every: kept.into_iter().map(|(.., id)| id).collect(),
+        readable,
+        counts: sorted(counts),
+        groups,
+    }
 }
 
 /// What the webview holds, applied as `ListView` applies batches.
@@ -452,6 +728,7 @@ struct Mirror {
     start: u32,
     ids: Vec<String>,
     rows: HashMap<String, Vec<ipc::Cell>>,
+    groups: Vec<RowGroup>,
 }
 
 impl Mirror {
@@ -465,6 +742,9 @@ impl Mirror {
         for row in batch.upserts {
             self.rows.insert(row.id.0, row.cells);
         }
+        if let Some(groups) = batch.groups {
+            self.groups = groups;
+        }
     }
 }
 
@@ -472,7 +752,8 @@ impl Mirror {
 /// up to `burst` changes each, every flush checked against a full sort and
 /// against what the webview holds.
 fn random_change_sets(seeds: std::ops::Range<u64>, names: usize, rounds: usize, burst: usize) {
-    const STATUSES: [&str; 4] = ["Running", "Pending", "Error", "CrashLoopBackOff"];
+    const STATUSES: [&str; 5] = ["Running", "Pending", "Error", "CrashLoopBackOff", ""];
+    const COLLAPSIBLE: [&str; 7] = ["Running", "Error", "", "a", "3", "1/1", "none"];
     const RESTARTS: [&str; 5] = ["0", "3", "3 (5m ago)", "12 (1h ago)", "1 (45s ago)"];
     const TEXTS: [&str; 5] = ["web", "!db", "/^api-\\d$/", "!/1$/", "RUN"];
     for seed in seeds {
@@ -486,7 +767,16 @@ fn random_change_sets(seeds: std::ops::Range<u64>, names: usize, rounds: usize, 
         query.text = random
             .bool()
             .then(|| TEXTS[random.usize(..TEXTS.len())].to_owned());
-        query.group_by = random.bool().then(|| "Status".to_owned());
+        query.count_by = random.bool().then(|| "Status".to_owned());
+        query.group_by = random.bool().then(|| Grouping {
+            column: ["Status", "Namespace", "Restarts", "Ready", "Phase"][random.usize(..5)]
+                .to_owned(),
+            collapsed: COLLAPSIBLE
+                .iter()
+                .filter(|_| random.bool())
+                .map(|value| (*value).to_owned())
+                .collect(),
+        });
         query.values = random.bool().then(|| ColumnValues {
             column: "Status".to_owned(),
             values: vec!["Running".to_owned(), "Error".to_owned()],
@@ -526,9 +816,10 @@ fn random_change_sets(seeds: std::ops::Range<u64>, names: usize, rounds: usize, 
             if let Some(batch) = rig.flush() {
                 mirror.apply(batch);
             }
-            let (expected, groups) = naive(&rows, &query);
+            let expected = naive(&rows, &query);
             let (start, end) = rig.view.window;
             let window: Vec<&str> = expected
+                .readable
                 .iter()
                 .skip(start as usize)
                 .take(end.saturating_sub(start) as usize)
@@ -536,14 +827,28 @@ fn random_change_sets(seeds: std::ops::Range<u64>, names: usize, rounds: usize, 
                 .collect();
             let shown: Vec<&str> = rig.view.sent.ids.iter().map(|id| &**id).collect();
             assert_eq!(shown, window, "seed {seed}: {query:?}");
-            assert_eq!(rig.view.sent.total as usize, expected.len(), "seed {seed}");
-            if query.group_by.is_some() {
-                assert_eq!(rig.view.sent.groups.as_ref(), Some(&groups), "seed {seed}");
+            assert_eq!(
+                rig.view.sent.total as usize,
+                expected.every.len(),
+                "seed {seed}"
+            );
+            if query.count_by.is_some() {
+                assert_eq!(
+                    rig.view.sent.counts.as_ref(),
+                    Some(&expected.counts),
+                    "seed {seed}"
+                );
             }
+            assert_eq!(rig.view.sent.groups, expected.groups, "seed {seed}");
             let every: Vec<&str> = rig.view.index.iter().map(|entry| &*entry.id).collect();
-            assert_eq!(every, expected, "seed {seed}: the whole index");
+            assert_eq!(every, expected.every, "seed {seed}: the whole index");
             assert_eq!(mirror.start, start, "seed {seed}: the webview's start");
             assert_eq!(mirror.ids, window, "seed {seed}: the webview's window");
+            assert_eq!(
+                mirror.groups,
+                expected.groups.unwrap_or_default(),
+                "seed {seed}: the webview's groups"
+            );
             for id in &mirror.ids {
                 let key = id.trim_start_matches("kind-test/");
                 let wire = rig.view.layout.wire_row(&rows[key], id);

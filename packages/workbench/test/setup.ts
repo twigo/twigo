@@ -9,3 +9,5 @@ globalThis.ResizeObserver = class {
     return undefined;
   }
 };
+
+Element.prototype.scrollIntoView = () => undefined;

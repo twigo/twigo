@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { act, cleanup, render } from "@testing-library/react";
 import { expect, test } from "vitest";
+import { Changes } from "../changes";
 import { testWorkbench } from "../testing";
 import { WorkbenchView } from "../WorkbenchView";
 import type { QuickAccessContext, QuickPickItem } from "./registry";
@@ -65,19 +66,71 @@ test("> puts what ran last first and remembers it in the backend", async () => {
   );
 });
 
-test("ctx lists the spaces, then the contexts without one", async () => {
+test("ctx lists the open spaces, then the other contexts by the file that defines them, in their colours", async () => {
   const { found, workbench, provider } = await items("ctx ");
   expect(found.map((item) => [item.group, item.label])).toEqual([
-    ["Spaces", "prod-eu"],
-    ["Spaces", "staging"],
-    ["Spaces", "dev"],
-    ["Contexts", "qa"],
-    ["Contexts", "kind-local"],
+    ["Open spaces", "prod-eu"],
+    ["Open spaces", "staging"],
+    ["Open spaces", "dev"],
+    ["~/.kube/config", "qa"],
+    ["~/.kube/kind.yaml", "kind-local"],
   ]);
+  expect(found[0]).toMatchObject({
+    tile: { name: "prod-eu", color: "red" },
+    description: "4f2a9c1e7b.gr7.eu-west-1.eks.amazonaws.com",
+    keybinding: "⌘1",
+  });
+  expect(found[3]).toMatchObject({
+    tile: { name: "qa", color: workbench.colors.of("qa") },
+    description: "qa.internal:6443",
+  });
+  expect(found[3]?.keybinding).toBeUndefined();
+  workbench.colors.choose("qa", "purple");
+  const again = await provider.items("", NOWHERE);
+  expect(again.find((item) => item.label === "qa")?.tile).toEqual({
+    name: "qa",
+    color: "purple",
+  });
+  expect(provider.acceptLabel).toBe("Switch");
   const local = found.find((item) => item.label === "kind-local");
   if (!local) throw new Error("no kind-local");
   await act(() => provider.accept(local, "", NOWHERE));
   expect(workbench.spaces.active?.id).toBe("kind-local");
+});
+
+test("ctx says each open space's connection, the version alone while connected", async () => {
+  const { workbench, provider } = await items("ctx ");
+  workbench.spaceStatus.register({
+    changes: new Changes(),
+    status: (space) =>
+      (
+        ({
+          "prod-eu": { tone: "ok", label: "Connected", version: "v1.33.4" },
+          staging: { tone: "warn", label: "Reconnecting", version: "v1.35.2" },
+        }) as const
+      )[space],
+  });
+  const found = await provider.items("", NOWHERE);
+  expect(found.slice(0, 3).map((item) => item.state)).toEqual([
+    { tone: "ok", label: "v1.33.4" },
+    { tone: "warn", label: "Reconnecting" },
+    undefined,
+  ]);
+});
+
+test("ctx keeps its sections in order as it filters, best first in each", async () => {
+  const { provider } = await items("ctx ");
+  const found = await provider.items("l", NOWHERE);
+  expect(found.map((item) => [item.group, item.label])).toEqual([
+    ["~/.kube/kind.yaml", "kind-local"],
+  ]);
+  expect(found[0]?.matches).toEqual([{ start: 5, end: 6 }]);
+  const some = await provider.items("a", NOWHERE);
+  expect(some.map((item) => [item.group, item.label])).toEqual([
+    ["Open spaces", "staging"],
+    ["~/.kube/config", "qa"],
+    ["~/.kube/kind.yaml", "kind-local"],
+  ]);
 });
 
 test("? lists the prefixes and the bound commands", async () => {
@@ -113,7 +166,14 @@ test("@ lists the symbols the active editor publishes", async () => {
     { label: "spec", detail: "line 12", reveal: () => (revealed = "spec") },
   ]);
   const found = await provider.items("spe", NOWHERE);
-  expect(found).toEqual([{ id: "1", label: "spec", description: "line 12" }]);
+  expect(found).toEqual([
+    {
+      id: "1",
+      label: "spec",
+      description: "line 12",
+      matches: [{ start: 0, end: 3 }],
+    },
+  ]);
   await provider.accept(found[0] ?? { id: "", label: "" }, "spe", NOWHERE);
   expect(revealed).toBe("spec");
   cleanup();

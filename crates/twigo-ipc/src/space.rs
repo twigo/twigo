@@ -17,6 +17,13 @@ pub struct Context {
     pub name: String,
     /// From the `twigo` extension of the kubeconfig context; none by default.
     pub color: Option<ContextColor>,
+    /// The kubeconfig file that defines it, as a person names it:
+    /// `~/.kube/config`.
+    pub source: String,
+    /// The URL of the cluster it reaches, only its scheme, host and port:
+    /// `https://10.0.0.1:6443`. None when the kubeconfig names no server
+    /// that parses.
+    pub server: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

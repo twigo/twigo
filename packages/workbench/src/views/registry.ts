@@ -1,5 +1,7 @@
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
+import type { ContextColor } from "@twigo/protocol";
+import type { Tone } from "@twigo/ui";
 import { Changes } from "../changes";
 import {
   evaluate,
@@ -39,13 +41,54 @@ export interface View {
 
 export type Alignment = "left" | "right";
 
+/**
+ * One entry of the status bar, as data (ARCHITECTURE 4.1): the bar draws
+ * every entry alike, so a contribution says what it shows, not how.
+ */
+export interface StatusEntry {
+  /** Unique within its item. */
+  readonly id: string;
+  readonly text: string;
+  readonly icon?: LucideIcon;
+  /** Spins the icon while work is under way. */
+  readonly spin?: boolean;
+  /** A dot before the text. */
+  readonly tone?: Tone;
+  /** The context's colour behind the entry, as the rail's tile has it. */
+  readonly accent?: ContextColor;
+  readonly tooltip?: string;
+  /** A click; without one the entry only shows. */
+  readonly run?: () => void;
+  /** Set when `run` shows or hides something. */
+  readonly expanded?: boolean;
+  /** A popover the entry opens, dismissed by Escape or a click elsewhere. */
+  readonly popover?: {
+    readonly open: boolean;
+    readonly onOpenChange: (open: boolean) => void;
+    readonly content: ReactNode;
+  };
+  /** A panel that stays above the entry until its owner closes it. */
+  readonly panel?: ReactNode;
+}
+
 export interface StatusBarItem {
   readonly id: string;
   readonly alignment: Alignment;
   /** Higher sits further out: leftmost on the left, rightmost on the right. */
   readonly priority: number;
   readonly when?: string;
-  readonly component: ComponentType;
+  /** A hook: the entries to show now, none to show nothing. */
+  readonly useEntries: () => readonly StatusEntry[];
+}
+
+/**
+ * What the editor area of a space shows while no editor is open, in place
+ * of the workbench's own key hints, such as a cluster's home.
+ */
+export interface Watermark {
+  readonly id: string;
+  readonly when?: string;
+  readonly component: ComponentType<{ readonly space: string }>;
 }
 
 interface Conditional<T> {
@@ -53,12 +96,13 @@ interface Conditional<T> {
   readonly when: When | undefined;
 }
 
-/** The view containers, views and status-bar items that features contribute. */
+/** The view containers, views, status-bar items and watermarks that features contribute. */
 export class Views {
   readonly changes = new Changes();
   readonly #containers = new Map<string, ViewContainer>();
   readonly #views = new Map<string, Conditional<View>>();
   readonly #items = new Map<string, Conditional<StatusBarItem>>();
+  readonly #watermarks = new Map<string, Conditional<Watermark>>();
 
   registerContainer(container: ViewContainer): () => void {
     return this.#add(this.#containers, container.id, container);
@@ -70,6 +114,10 @@ export class Views {
 
   registerStatusBarItem(item: StatusBarItem): () => void {
     return this.#add(this.#items, item.id, conditional(item));
+  }
+
+  registerWatermark(watermark: Watermark): () => void {
+    return this.#add(this.#watermarks, watermark.id, conditional(watermark));
   }
 
   containers(location: Location): ViewContainer[] {
@@ -118,6 +166,14 @@ export class Views {
           ? b.priority - a.priority
           : a.priority - b.priority,
       );
+  }
+
+  /** The first registered watermark whose `when` holds. */
+  watermark(lookup: Lookup): Watermark | undefined {
+    for (const { item, when } of this.#watermarks.values()) {
+      if (!when || evaluate(when, lookup)) return item;
+    }
+    return undefined;
   }
 
   #add<T>(map: Map<string, T>, id: string, value: T): () => void {

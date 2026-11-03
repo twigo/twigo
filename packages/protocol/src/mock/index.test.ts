@@ -13,6 +13,7 @@ function query(rest: Partial<ListQuery> = {}): ListQuery {
     text: null,
     columns: null,
     sort: null,
+    countBy: null,
     groupBy: null,
     values: null,
     ...rest,
@@ -314,6 +315,79 @@ test("pinned states keep or drop rows as Rust does", async () => {
   }
 });
 
+test("a forbidden list names its resource; live, prod-eu may not list nodes, staging may", async () => {
+  const nodes = {
+    gvr: { group: "", version: "v1", resource: "nodes" },
+    namespaced: false,
+  };
+  const pinned = await open("forbidden", query(nodes));
+  expect(pinned.batches[0]?.status).toEqual({
+    state: "forbidden",
+    verb: "list",
+    resource: "nodes",
+  });
+  const prod = await open("live", query(nodes));
+  expect(prod.batches[0]?.status.state).toBe("forbidden");
+  const staging = await open("live", query({ ...nodes, space: "staging" }));
+  await staging.window(0, 50);
+  for (let ms = 0; ms < 1500; ms += 50) {
+    await staging.ack();
+    await vi.advanceTimersByTimeAsync(50);
+  }
+  const latest = last(staging.batches);
+  expect(latest?.status.state).toBe("ready");
+  expect(latest?.total).toBe(40);
+});
+
+test("nodes, deployments and events come behind the same query view as pods", async () => {
+  const deployments = await open(
+    "ready",
+    query({
+      gvr: { group: "apps", version: "v1", resource: "deployments" },
+      countBy: "Ready",
+    }),
+  );
+  expect(deployments.batches[0]?.columns?.map((column) => column.name)).toEqual(
+    [
+      "Name",
+      "Namespace",
+      "Ready",
+      "Up-to-date",
+      "Available",
+      "Age",
+      "Containers",
+      "Images",
+      "Selector",
+    ],
+  );
+  expect(
+    deployments.batches[0]?.counts?.reduce(
+      (sum, value) => sum + value.count,
+      0,
+    ),
+  ).toBe(deployments.batches[0]?.total);
+  const warnings = await open(
+    "ready",
+    query({
+      gvr: { group: "", version: "v1", resource: "events" },
+      countBy: "Type",
+    }),
+  );
+  expect(
+    warnings.batches[0]?.counts?.find((value) => value.value === "Warning")
+      ?.count,
+  ).toBeGreaterThan(0);
+  const refused = createMockBackend("ready")
+    .subscribe(
+      "list_subscribe",
+      query({ gvr: { group: "", version: "v1", resource: "secrets" } }),
+      () => undefined,
+    )
+    .catch((error: unknown) => error);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(await refused).toMatchObject({ kind: "notFound" });
+});
+
 test("text matches the columns of priority 0 and those the query's choices show", async () => {
   const total = async (text: string, columns: Record<string, boolean> | null) =>
     (await open("ready", query({ text, columns }))).batches[0]?.total;
@@ -336,11 +410,11 @@ test("a choice for a column the list lacks does nothing", async () => {
   expect(one.batches[0]?.total).toBeGreaterThan(0);
 });
 
-test("a sort or groupBy column the list lacks does nothing", async () => {
+test("a sort or countBy column the list lacks does nothing", async () => {
   const plain = await open("ready");
   const odd = await open(
     "ready",
-    query({ sort: { column: "Bogus", descending: true }, groupBy: "Bogus" }),
+    query({ sort: { column: "Bogus", descending: true }, countBy: "Bogus" }),
   );
   for (const sub of [plain, odd]) {
     await sub.ack();
@@ -350,7 +424,7 @@ test("a sort or groupBy column the list lacks does nothing", async () => {
   const ids = last(plain.batches)?.window?.ids;
   expect(ids).toHaveLength(10);
   expect(last(odd.batches)?.window?.ids).toEqual(ids);
-  expect(odd.batches[0]?.groups).toEqual([]);
+  expect(odd.batches[0]?.counts).toEqual([]);
 });
 
 test("label selectors match the pods' labels, and one that does not parse is refused", async () => {
@@ -446,21 +520,21 @@ test("state loads what was stored, all of a set or none", async () => {
   });
 });
 
-test("grouped counts follow the rows once a live list syncs", async () => {
-  const { batches, ack } = await open("live", query({ groupBy: "Status" }));
+test("counts follow the rows once a live list syncs", async () => {
+  const { batches, ack } = await open("live", query({ countBy: "Status" }));
   for (let i = 0; i < 40; i++) {
     await ack();
     await vi.advanceTimersByTimeAsync(50);
   }
-  const groups = batches.flatMap((batch) =>
-    batch.groups ? [batch.groups] : [],
+  const counts = batches.flatMap((batch) =>
+    batch.counts ? [batch.counts] : [],
   );
-  const latest = groups[groups.length - 1] ?? [];
-  expect(latest.reduce((sum, group) => sum + group.count, 0)).toBe(5000);
+  const latest = counts[counts.length - 1] ?? [];
+  expect(latest.reduce((sum, value) => sum + value.count, 0)).toBe(5000);
 });
 
-test("a change of counts alone sends a batch with the new groups", async () => {
-  const { batches, ack } = await open("live", query({ groupBy: "Status" }));
+test("a change of counts alone sends a batch with the new counts", async () => {
+  const { batches, ack } = await open("live", query({ countBy: "Status" }));
   for (let ms = 0; ms < 4000; ms += 50) {
     await ack();
     await vi.advanceTimersByTimeAsync(50);
@@ -469,34 +543,34 @@ test("a change of counts alone sends a batch with the new groups", async () => {
   const after = batches.slice(ready + 1);
   expect(ready).toBeGreaterThan(0);
   expect(after.length).toBeGreaterThan(0);
-  expect(after.every((batch) => batch.groups !== null)).toBe(true);
+  expect(after.every((batch) => batch.counts !== null)).toBe(true);
   after.forEach((batch, i) => {
-    expect(batch.groups).not.toEqual(batches[ready + i]?.groups);
+    expect(batch.counts).not.toEqual(batches[ready + i]?.counts);
   });
 });
 
-test("no groupBy, no groups", async () => {
+test("no countBy, no counts", async () => {
   const { batches } = await open("ready");
-  expect(batches.every((batch) => batch.groups === null)).toBe(true);
+  expect(batches.every((batch) => batch.counts === null)).toBe(true);
 });
 
-test("values keep their rows, and the grouped counts stay those of every value", async () => {
-  const all = await open("ready", query({ groupBy: "Status" }));
+test("values keep their rows, and the counts stay those of every value", async () => {
+  const all = await open("ready", query({ countBy: "Status" }));
   const picked = await open(
     "ready",
     query({
-      groupBy: "Status",
+      countBy: "Status",
       values: { column: "Status", values: ["CrashLoopBackOff", "Error"] },
     }),
   );
-  const counts = all.batches[0]?.groups ?? [];
+  const counts = all.batches[0]?.counts ?? [];
   const count = (value: string) =>
-    counts.find((group) => group.value === value)?.count ?? 0;
+    counts.find((counted) => counted.value === value)?.count ?? 0;
   expect(picked.batches[0]?.total).toBe(
     count("CrashLoopBackOff") + count("Error"),
   );
   expect(picked.batches[0]?.total).toBeGreaterThan(0);
-  expect(picked.batches[0]?.groups).toEqual(counts);
+  expect(picked.batches[0]?.counts).toEqual(counts);
 });
 
 test("values of a column the list lacks keep every row", async () => {
@@ -505,6 +579,51 @@ test("values of a column the list lacks keep every row", async () => {
     query({ values: { column: "Bogus", values: ["x"] } }),
   );
   expect(batches[0]?.total).toBe(5000);
+});
+
+test("a grouped list sends its groups, and its window skips the collapsed ones", async () => {
+  const grouped = await open(
+    "ready",
+    query({ groupBy: { column: "Status", collapsed: [] } }),
+  );
+  const groups = grouped.batches[0]?.groups ?? [];
+  expect(groups.map((group) => group.value)).toEqual(
+    groups.map((group) => group.value).sort(natural),
+  );
+  expect(groups.reduce((sum, group) => sum + group.rows, 0)).toBe(5000);
+  const running = groups.find((group) => group.value === "Running")?.rows;
+  expect(running).toBeGreaterThan(0);
+
+  const collapsed = await open(
+    "ready",
+    query({ groupBy: { column: "Status", collapsed: ["Running"] } }),
+  );
+  await collapsed.ack();
+  await collapsed.window(0, 5000);
+  await vi.advanceTimersByTimeAsync(10);
+  const batch = last(collapsed.batches);
+  expect(batch?.total).toBe(5000);
+  expect(batch?.window?.ids).toHaveLength(5000 - (running ?? 0));
+  expect(collapsed.batches[0]?.groups).toEqual(groups);
+});
+
+test("groups come once a list knows its columns, empty until it shows rows", async () => {
+  for (const [scenario, groups] of [
+    ["connecting", null],
+    ["syncing", []],
+  ] as const) {
+    const sub = await open(
+      scenario,
+      query({ groupBy: { column: "Status", collapsed: [] } }),
+    );
+    expect(sub.batches[0]?.groups, scenario).toEqual(groups);
+  }
+  const odd = await open(
+    "ready",
+    query({ groupBy: { column: "Bogus", collapsed: [""] } }),
+  );
+  expect(odd.batches[0]?.groups).toBeNull();
+  expect(odd.batches[0]?.total).toBe(5000);
 });
 
 test("a request for an idle plugin's credential starts its run, and only sign-in links open", async () => {

@@ -69,22 +69,33 @@ export function useObject(
 }
 
 /**
- * The editor URI of the object a link points at, found in the space's
- * resources by its group and kind, its version preferred; its namespace
- * dropped when the kind is cluster-scoped.
+ * The resource of the object a link points at, found in the space's
+ * resources by its group and kind, its version preferred.
+ */
+export function refResource(
+  resources: readonly Resource[],
+  target: ObjectRef,
+): Resource | undefined {
+  const candidates = resources.filter(
+    (resource) =>
+      resource.gvr.group === target.group && resource.kind === target.kind,
+  );
+  return (
+    candidates.find((candidate) => candidate.gvr.version === target.version) ??
+    candidates[0]
+  );
+}
+
+/**
+ * The editor URI of the object a link points at, its namespace dropped
+ * when the kind is cluster-scoped.
  */
 export function refUri(
   space: string,
   resources: readonly Resource[],
   target: ObjectRef,
 ): string | undefined {
-  const candidates = resources.filter(
-    (resource) =>
-      resource.gvr.group === target.group && resource.kind === target.kind,
-  );
-  const resource =
-    candidates.find((candidate) => candidate.gvr.version === target.version) ??
-    candidates[0];
+  const resource = refResource(resources, target);
   if (!resource) return undefined;
   return objectUri({
     space,

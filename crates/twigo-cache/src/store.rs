@@ -309,6 +309,7 @@ mod tests {
                 labels: Box::default(),
                 owners: Box::default(),
                 created: None,
+                generated: None,
             },
             cells: Box::new([Cell::Text(version.into())]),
         }

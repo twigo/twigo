@@ -9,10 +9,14 @@ async function withEveryEnablement() {
   workbench.keys.set("treeFocus", true);
   workbench.keys.set("resource.namespaced", true);
   workbench.keys.set("detailsOpen", true);
+  workbench.keys.set("listMarked", true);
+  workbench.keys.set("resource.selected", true);
   workbench.keys.set("editor.open", true);
   workbench.keys.set("editor.type", "kube.list");
   workbench.keys.set("space.count", 9);
   workbench.keys.set("shellEnvironment", "failed");
+  workbench.keys.set("inQuickOpen", true);
+  workbench.keys.set("quickOpenToSide", true);
   return workbench;
 }
 

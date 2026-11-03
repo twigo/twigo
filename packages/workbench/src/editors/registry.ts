@@ -50,6 +50,7 @@ export class Editors {
   readonly changes = new Changes();
   readonly #providers = new Set<EditorProvider>();
   readonly #symbols = new Map<string, readonly EditorSymbol[]>();
+  readonly #closed = new Set<(uri: string) => void>();
   #api: DockviewApi | undefined;
   #active: string | undefined;
 
@@ -80,14 +81,28 @@ export class Editors {
     return this.#active;
   }
 
+  /**
+   * Tells `listener` the URI of each editor that closes. Moving an editor
+   * to another group closes none (dockview reports no removal while it
+   * moves a panel), and neither does a space giving way to another.
+   */
+  onClose(listener: (uri: string) => void): () => void {
+    this.#closed.add(listener);
+    return () => this.#closed.delete(listener);
+  }
+
   attach(api: DockviewApi): () => void {
     this.#api = api;
     const listener = api.onDidActivePanelChange(({ panel }) => {
       this.#setActive(panel);
     });
+    const removal = api.onDidRemovePanel((panel) => {
+      for (const closed of this.#closed) closed(panel.id);
+    });
     this.#setActive(api.activePanel);
     return () => {
       listener.dispose();
+      removal.dispose();
       if (this.#api === api) {
         this.#api = undefined;
         this.#setActive(undefined);
@@ -95,7 +110,17 @@ export class Editors {
     };
   }
 
-  open(uri: string, { preview = false }: { preview?: boolean } = {}): void {
+  /**
+   * Opens an editor in the active group, or with `side` in a new group to
+   * its right; an open URI is focused where it is, since a URI is one panel.
+   */
+  open(
+    uri: string,
+    {
+      preview = false,
+      side = false,
+    }: { preview?: boolean; side?: boolean } = {},
+  ): void {
     const api = this.#api;
     if (!api) throw new Error("no editor area is mounted");
     const provider = this.resolve(uri);
@@ -107,9 +132,10 @@ export class Editors {
       return;
     }
     const group = api.activeGroup;
-    const replaced = preview
-      ? group?.panels.find((panel) => paramsOf(panel)?.preview)
-      : undefined;
+    const replaced =
+      preview && !side
+        ? group?.panels.find((panel) => paramsOf(panel)?.preview)
+        : undefined;
     const params: EditorParams = { uri, preview };
     api.addPanel({
       id: uri,
@@ -118,10 +144,12 @@ export class Editors {
       title: provider.title(new URL(uri)),
       params,
       ...(group && {
-        position: {
-          referenceGroup: group,
-          ...(replaced && { index: group.panels.indexOf(replaced) }),
-        },
+        position: side
+          ? { referenceGroup: group, direction: "right" }
+          : {
+              referenceGroup: group,
+              ...(replaced && { index: group.panels.indexOf(replaced) }),
+            },
       }),
     });
     replaced?.api.close();
@@ -147,9 +175,16 @@ export class Editors {
     return this.#symbols.get(uri) ?? [];
   }
 
+  title(uri: string): string | undefined {
+    return this.#api?.getPanel(uri)?.title;
+  }
+
   /** Renames an open editor's tab, once the editor knows a better title. */
   setTitle(uri: string, title: string): void {
-    this.#api?.getPanel(uri)?.api.setTitle(title);
+    const panel = this.#api?.getPanel(uri);
+    if (!panel || panel.title === title) return;
+    panel.api.setTitle(title);
+    this.changes.emit();
   }
 
   close(uri: string): void {
