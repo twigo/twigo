@@ -303,16 +303,28 @@ test("a move down scrolls the cursor's row clear of the bottom, a move up clear 
   expect(scrolled.scrollTop).toBe(234);
 });
 
-test("a hovered row's actions run on that row", () => {
-  const run = vi.fn();
+test("a hovered row's actions run on that row, which they select first, without opening it", () => {
+  let selection = "a1";
+  const ranOn: string[] = [];
   const { handlers } = grid({
-    inline: [{ id: "copy", label: "Copy Name", icon: Copy, run }],
+    selected: selection,
+    onSelect: (id: string) => {
+      selection = id;
+    },
+    inline: [
+      {
+        id: "copy",
+        label: "Copy Name",
+        icon: Copy,
+        run: () => {
+          ranOn.push(selection);
+        },
+      },
+    ],
   });
   fireEvent.click(nth(screen.getAllByRole("button", { name: "Copy Name" }), 2));
-  expect(handlers.onSelect).toHaveBeenLastCalledWith("e1", {
-    name: "gateway-1",
-  });
-  expect(run).toHaveBeenCalledOnce();
+  expect(ranOn).toEqual(["e1"]);
+  expect(handlers.onActivate).not.toHaveBeenCalled();
 });
 
 test("a header is a column header with a button that sorts, and a double click on its edge fits the column", () => {
