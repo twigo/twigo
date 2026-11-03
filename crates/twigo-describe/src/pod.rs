@@ -46,7 +46,7 @@ fn fields(input: &Input<'_>) -> Fields {
     let status = &pod["status"];
     let namespace = text(&pod["metadata"]["namespace"]);
     let mut fields = Fields::default();
-    let finished = matches!(status["phase"].as_str(), Some("Succeeded" | "Failed"));
+    let finished = finished(pod);
     if pod["metadata"]["deletionTimestamp"].is_string() && !finished {
         fields.add("Phase", toned("Terminating", Tone::Warning));
     } else {
@@ -339,10 +339,7 @@ fn findings(input: &Input<'_>) -> Vec<Finding> {
 fn terminating(pod: &Value) -> Option<Finding> {
     let metadata = &pod["metadata"];
     let deadline: Timestamp = metadata["deletionTimestamp"].as_str()?.parse().ok()?;
-    if matches!(
-        pod["status"]["phase"].as_str(),
-        Some("Succeeded" | "Failed")
-    ) {
+    if finished(pod) {
         return None;
     }
     let grace = metadata["deletionGracePeriodSeconds"]
@@ -392,8 +389,12 @@ const CREATING: &[(&str, &str)] = &[
 /// pod's newest event is the warning that says why. A pod that runs or
 /// crash-loops has its sandbox, so a remount that fails under it, which the
 /// kubelet tries on every sync, finds nothing; nor does a warning that
-/// passed, followed by an image's pull.
+/// passed, followed by an image's pull, nor one under a pod that finished,
+/// whose sandbox the kubelet stops.
 fn creating(input: &Input<'_>) -> Option<Finding> {
+    if finished(input.object) {
+        return None;
+    }
     let sandbox = condition(input.object, "PodReadyToStartContainers")?;
     if sandbox["status"] != "False" {
         return None;
@@ -417,6 +418,13 @@ fn creating(input: &Input<'_>) -> Option<Finding> {
         detail,
         message: Some(event.message.trim().to_owned()),
     })
+}
+
+fn finished(pod: &Value) -> bool {
+    matches!(
+        pod["status"]["phase"].as_str(),
+        Some("Succeeded" | "Failed")
+    )
 }
 
 fn condition<'a>(object: &'a Value, kind: &str) -> Option<&'a Value> {

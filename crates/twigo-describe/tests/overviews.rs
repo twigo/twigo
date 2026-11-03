@@ -909,6 +909,17 @@ fn a_pod_that_stops_or_cannot_mount_or_inspect_says_why() {
         findings(&remounting).is_empty(),
         "a remount that failed in a pod that runs"
     );
+    let finished_remounting = edited("pod", |recorded| {
+        no_sandbox(&mut recorded.object);
+        recorded.object["status"]["phase"] = "Succeeded".into();
+        recorded.object["status"]["containerStatuses"][0]["state"] =
+            serde_json::json!({ "terminated": { "reason": "Completed", "exitCode": 0 } });
+        recorded.events = vec![mount_failed()];
+    });
+    assert!(
+        findings(&finished_remounting).is_empty(),
+        "a remount that failed in a pod that finished"
+    );
     let crash_remounting = edited("pod-crashing", |recorded| {
         recorded.events.insert(0, mount_failed());
     });
@@ -1075,7 +1086,6 @@ fn a_pod_names_its_scheduling_group() {
     );
 }
 
-/// The pod's sandbox gone, as the kubelet reports it until it makes one.
 fn no_sandbox(pod: &mut Value) {
     for condition in pod["status"]["conditions"]
         .as_array_mut()
