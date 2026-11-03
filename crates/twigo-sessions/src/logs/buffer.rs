@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use twigo_ipc::{Level, ObjectRef, TextStyle};
 
-/// What the buffer holds at most: 50,000 entries and 32 MiB of their text.
+/// What the buffer holds at most: 50,000 entries and 16 MiB of their text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
     pub entries: usize,
@@ -17,7 +17,7 @@ pub struct Limits {
 
 pub const LIMITS: Limits = Limits {
     entries: 50_000,
-    bytes: 32 << 20,
+    bytes: 16 << 20,
 };
 
 /// The pod and container a line or an end came from, shared by its

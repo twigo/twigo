@@ -767,8 +767,8 @@ Extensions add commands, not prefixes.
     Containers with an instance to read come first, then the newest pods, and a stream with nothing to read, one that waits to start or has no previous instance to read, gives its place up to one that can be read; one without a previous instance says so as its error.
     Pods that come after the first listing add a `Joined` entry with their controller, and those that go a `Left` entry.
   - The backing store is a buffer in Rust that merges every stream's entries in time order, ties by arrival, each with an id it keeps while buffered.
-    It keeps the last 50,000 entries and 32 MiB of their text, as the owner decided on 2026-11-03, and once it has dropped any, one `Dropped` entry comes first.
-    50,000 lines of ten streams with 139 bytes of text on average take 12.5 MiB, 261 bytes a line, and lines of 700 bytes reach the bound of their text at 47,899 lines in 37.8 MiB (`cargo run --release -p twigo-sessions --example logs_memory`, and with `561`, on an Apple M4 Max, 2026-11-03).
+    It keeps the last 50,000 entries and 16 MiB of their text, as the owner decided on 2026-11-03, and once it has dropped any, one `Dropped` entry comes first.
+    50,000 lines of ten streams with 139 bytes of text on average take 12.5 MiB, 261 bytes a line, and lines of 700 bytes reach the bound of their text at 23,945 lines in 18.9 MiB (`cargo run --release -p twigo-sessions --example logs_memory`, and with `561`, on an Apple M4 Max, 2026-11-03).
   - A line's level comes from what it says, not from its colours: a JSON object's `level`, `lvl`, `severity`, `levelname` or `log.level`, pino's numbers included, and a JSON object's fields alone.
     Otherwise logfmt's `level=` or `lvl=`, else klog's `E1103`, else a level word among the first four words, alone, in brackets or before a colon, after the times, numbers and brackets before it.
     The first other word starts a message, which says no level, as in `No error found`; fatal, critical and panic count as errors.

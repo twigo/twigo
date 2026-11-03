@@ -6,7 +6,7 @@ export interface Limits {
   readonly bytes: number;
 }
 
-export const LIMITS: Limits = { entries: 50_000, bytes: 32 * 2 ** 20 };
+export const LIMITS: Limits = { entries: 50_000, bytes: 16 * 2 ** 20 };
 
 export type Kind =
   | {

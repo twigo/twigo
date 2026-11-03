@@ -169,7 +169,7 @@ export function lineItem(
         kind: "marker",
         key,
         icon: Ellipsis,
-        text: `${entry.count.toLocaleString("en")} older lines dropped · a tab keeps the last 50,000 lines or 32 MB`,
+        text: `${entry.count.toLocaleString("en")} older lines dropped · a tab keeps the last 50,000 lines or 16 MB`,
       };
   }
 }
