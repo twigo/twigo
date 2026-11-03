@@ -136,20 +136,32 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
 
   const land = (target: GridItem<R, G>, marks?: readonly string[]) => {
     setCursor(target.id);
-    if (target.type !== "row") return;
+    if (target.type !== "row") {
+      if (marks && marks.length > 0 && onMark) onMark(marks, true);
+      return;
+    }
     onSelect(target.id, target.data);
     if (marks && onMark)
       onMark(marks.includes(target.id) ? marks : [...marks, target.id], true);
   };
 
   // A keyboard move can land outside the loaded window; the cursor lands
-  // once the item arrives.
+  // once the item arrives. A marking move keeps the cursor it left, which
+  // is marked too if it is still a row of the list when the move lands;
+  // its place is loaded by then, to tell.
   const [wanted, setWanted] = useState<{
     index: number;
-    marks?: readonly string[];
+    from?: { id: string; index: number };
   }>();
   if (wanted !== undefined && wanted.index >= length) setWanted(undefined);
   const wantedItem = wanted === undefined ? undefined : item(wanted.index);
+  const from = wanted?.from;
+  const ready =
+    wantedItem !== undefined &&
+    (from === undefined ||
+      from.index < 0 ||
+      from.index >= length ||
+      item(from.index) !== undefined);
   const latest = useRef({
     cursor,
     length,
@@ -162,7 +174,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     land,
   });
   // Where the cursor was last seen, to move on from once it leaves the
-  // window, and whether on a group header, which marks never hold.
+  // window.
   const seen = useRef<{ id: string; index: number }>(undefined);
   useEffect(() => {
     latest.current = {
@@ -181,10 +193,18 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       seen.current = { id: cursor, index: at };
   });
   useEffect(() => {
-    if (!wanted || !wantedItem) return;
-    latest.current.land(wantedItem, wanted.marks);
+    if (!wanted || !wantedItem || !ready) return;
+    const { from: left } = wanted;
+    if (left === undefined) {
+      latest.current.land(wantedItem);
+    } else {
+      const { indexOf: find, item: at } = latest.current;
+      const index = find(left.id);
+      const origin = index < 0 ? undefined : at(index);
+      latest.current.land(wantedItem, origin?.type === "row" ? [left.id] : []);
+    }
     setWanted(undefined);
-  }, [wanted, wantedItem]);
+  }, [wanted, wantedItem, ready]);
 
   const controller = useMemo<ListController>(() => {
     const at = () => {
@@ -205,13 +225,9 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       if (count === 0) return;
       const target = Math.min(Math.max(index, 0), count - 1);
       virtualizer.scrollToIndex(target);
-      const from = current();
       setWanted({
         index: target,
-        ...(extend &&
-          id !== undefined && {
-            marks: from?.type === "row" ? [from.id] : [],
-          }),
+        ...(extend && id !== undefined && { from: { id, index: at() } }),
       });
     };
     return {

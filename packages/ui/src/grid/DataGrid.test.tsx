@@ -210,6 +210,73 @@ test("once the cursor's row is gone, Enter and X act on no other row, and a mark
   expect(handlers.onMark).toHaveBeenCalledWith(["p3"], true);
 });
 
+test("a marking move marks the row it left if the list still has it when the move lands", () => {
+  const four = PODS.slice(0, 4);
+  const { handlers, controller, rerender } = grid({
+    ...list(four),
+    selected: "p2",
+  });
+  rerender(list(four.map((pod) => (pod.id >= "p2" ? undefined : pod))));
+  act(() => {
+    controller()?.move(1, true);
+  });
+  expect(handlers.onMark).not.toHaveBeenCalled();
+  rerender(list(four));
+  expect(handlers.onMark).toHaveBeenCalledWith(["p2", "p3"], true);
+});
+
+test("a marking move waits for the row it left when only that row is outside the loaded window", () => {
+  const four = PODS.slice(0, 4);
+  const { handlers, controller, rerender } = grid({
+    ...list(four),
+    selected: "p2",
+  });
+  rerender(list(four.map((pod) => (pod.id <= "p2" ? undefined : pod))));
+  act(() => {
+    controller()?.move(1, true);
+  });
+  expect(handlers.onMark).not.toHaveBeenCalled();
+  rerender(list(four));
+  expect(handlers.onMark).toHaveBeenCalledWith(["p2", "p3"], true);
+});
+
+test("a marking move onto a group header marks the row it left", () => {
+  const { handlers, controller } = grid({ selected: "a2" });
+  act(() => {
+    controller()?.move(1, true);
+  });
+  act(() => {
+    controller()?.move(1, true);
+  });
+  expect(handlers.onMark.mock.calls).toEqual([
+    [["a2"], true],
+    [["e1"], true],
+  ]);
+});
+
+test("a marking move from a cursor the grid never saw lands at once and marks where it lands", () => {
+  const { handlers, controller } = grid({
+    ...list(PODS.slice(0, 4)),
+    selected: "p9",
+  });
+  act(() => {
+    controller()?.move(1, true);
+  });
+  expect(handlers.onMark).toHaveBeenCalledWith(["p0"], true);
+});
+
+test("a marking move from a cursor the list lost past its end marks only where it lands", () => {
+  const { handlers, controller, rerender } = grid({
+    ...list(PODS.slice(0, 4)),
+    selected: "p3",
+  });
+  rerender(list(PODS.slice(0, 3)));
+  act(() => {
+    controller()?.move(-1, true);
+  });
+  expect(handlers.onMark).toHaveBeenCalledWith(["p2"], true);
+});
+
 test("a right click opens a row's menu, but neither on a group header nor on a row still loading", () => {
   const menu = [[{ id: "delete", label: "Delete", run: vi.fn() }]];
   grid({ ...list([...ITEMS, undefined]), selected: "a1", menu });
