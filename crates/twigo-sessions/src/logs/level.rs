@@ -145,12 +145,17 @@ fn klog(word: &str) -> Option<Level> {
 }
 
 /// The level a word names, in any case: syslog's, Python's, .NET's, zap's,
-/// logrus's and slog's names; fatal, critical and panic count as errors.
+/// logrus's and slog's names, and the four letters of .NET's console
+/// formatter (`trce`, `dbug`, `fail`; dotnet/runtime v10.0.0,
+/// `SimpleConsoleFormatter.GetLogLevelString`); fatal, critical and panic
+/// count as errors.
 fn named(word: &str) -> Option<Level> {
     const NAMES: &[(&str, Level)] = &[
         ("trace", Level::Trace),
+        ("trce", Level::Trace),
         ("verbose", Level::Trace),
         ("debug", Level::Debug),
+        ("dbug", Level::Debug),
         ("dbg", Level::Debug),
         ("info", Level::Info),
         ("information", Level::Info),
@@ -159,6 +164,7 @@ fn named(word: &str) -> Option<Level> {
         ("warning", Level::Warn),
         ("error", Level::Error),
         ("err", Level::Error),
+        ("fail", Level::Error),
         ("fatal", Level::Error),
         ("critical", Level::Error),
         ("crit", Level::Error),

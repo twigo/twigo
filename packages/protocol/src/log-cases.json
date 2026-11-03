@@ -364,6 +364,36 @@
       }
     },
     {
+      "name": ".NET's fail is an error",
+      "raw": "2026-11-03T10:00:00Z fail: Microsoft.AspNetCore.Server.Kestrel[13]",
+      "expect": {
+        "time": "2026-11-03T10:00:00.000000000Z",
+        "text": "fail: Microsoft.AspNetCore.Server.Kestrel[13]",
+        "level": "error",
+        "styles": []
+      }
+    },
+    {
+      "name": ".NET's dbug",
+      "raw": "2026-11-03T10:00:00Z dbug: Shop.Orders.Repository[0]",
+      "expect": {
+        "time": "2026-11-03T10:00:00.000000000Z",
+        "text": "dbug: Shop.Orders.Repository[0]",
+        "level": "debug",
+        "styles": []
+      }
+    },
+    {
+      "name": ".NET's trce",
+      "raw": "2026-11-03T10:00:00Z trce: Shop.Orders.Cache[7]",
+      "expect": {
+        "time": "2026-11-03T10:00:00.000000000Z",
+        "text": "trce: Shop.Orders.Cache[7]",
+        "level": "trace",
+        "styles": []
+      }
+    },
+    {
       "name": "klog's header",
       "raw": "2026-11-03T10:00:08Z E1103 10:00:08.000000       1 reflector.go:200] failed",
       "expect": {

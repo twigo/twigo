@@ -143,11 +143,13 @@ function klog(word: string): Level | null {
   }
 }
 
-/** syslog's, Python's, .NET's, zap's, logrus's and slog's names; fatal, critical and panic count as errors. */
+/** syslog's, Python's, .NET's, zap's, logrus's and slog's names, and the four letters of .NET's console formatter; fatal, critical and panic count as errors. */
 const NAMES = new Map<string, Level>([
   ["trace", "trace"],
+  ["trce", "trace"],
   ["verbose", "trace"],
   ["debug", "debug"],
+  ["dbug", "debug"],
   ["dbg", "debug"],
   ["info", "info"],
   ["information", "info"],
@@ -156,6 +158,7 @@ const NAMES = new Map<string, Level>([
   ["warning", "warn"],
   ["error", "error"],
   ["err", "error"],
+  ["fail", "error"],
   ["fatal", "error"],
   ["critical", "error"],
   ["crit", "error"],
