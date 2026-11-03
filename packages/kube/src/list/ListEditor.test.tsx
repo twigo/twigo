@@ -194,6 +194,19 @@ test("a row's actions button and a right click run the resource commands on that
   expect(details()?.textContent).toContain(nameOf(third));
 });
 
+test("a row's hover buttons show before any row is selected, and act on their row", async () => {
+  const writeText = clipboard();
+  await openList();
+  const second = rows()[1];
+  if (!second) throw new Error("no rows");
+  expect(
+    rows().filter((row) => row.getAttribute("aria-selected") === "true"),
+  ).toEqual([]);
+  fireEvent.click(within(second).getByRole("button", { name: "Copy Name" }));
+  await settle(1);
+  expect(writeText).toHaveBeenCalledWith(nameOf(second));
+});
+
 test("the column chooser shows a wide column, and the kind keeps the choice", async () => {
   const backend = createMockBackend("ready");
   await openList(backend);

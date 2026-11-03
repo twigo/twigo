@@ -284,6 +284,10 @@ function Grid({
     [register],
   );
   const lookup = keys.lookup(grid);
+  // The grid selects a row before it runs one of the row's inline actions,
+  // so they show and run as for a selected row.
+  const rowLookup = (key: string) =>
+    key === "resource.selected" ? true : lookup(key);
 
   if (isProblem(snapshot.status.state))
     return (
@@ -339,7 +343,7 @@ function Grid({
         selection.mark(uri, ids, marked);
       }}
       menu={workbench.actions("resource/context", lookup)}
-      inline={workbench.actions("resource/inline", lookup).flat()}
+      inline={workbench.actions("resource/inline", rowLookup).flat()}
       headerEnd={
         <ActionDropdown
           label="Choose columns"
