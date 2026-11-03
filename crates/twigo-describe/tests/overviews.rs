@@ -640,4 +640,14 @@ fn a_claim_names_the_pods_that_use_it() {
     assert_eq!(shown(field(claim, "Status")), "Bound");
     assert_eq!(shown(field(claim, "Used by")), "db-0");
     assert_eq!(shown(field(claim, "Capacity")), "1Gi");
+    let conditions = section(&described["pvc"], "core.conditions");
+    let [Block::Conditions { conditions }] = &conditions.blocks[..] else {
+        panic!("the conditions");
+    };
+    let unused = conditions.iter().find(|c| c.kind == "Unused").unwrap();
+    assert_eq!(
+        (unused.status.as_str(), unused.tone),
+        ("False", Tone::Neutral),
+        "in use is no warning"
+    );
 }

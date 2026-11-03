@@ -296,8 +296,10 @@ fn generic(object: &Value, printed: &[Printed]) -> Vec<Section> {
     sections
 }
 
-/// Condition types whose True is bad news, from the core kinds: a node's
-/// pressures, a ReplicaSet's or Deployment's ReplicaFailure, a Job's Failed.
+/// Condition types whose True is bad news, from the core kinds (k8s.io/api
+/// v0.37.1): a node's pressures, a ReplicaSet's or Deployment's
+/// ReplicaFailure, a Job's Failed, a claim's resize and modify errors, a
+/// pod about to be disrupted, a namespace that cannot be deleted.
 const TRUE_IS_BAD: &[&str] = &[
     "MemoryPressure",
     "DiskPressure",
@@ -306,6 +308,34 @@ const TRUE_IS_BAD: &[&str] = &[
     "ReplicaFailure",
     "Failed",
     "FailureTarget",
+    "ControllerResizeError",
+    "NodeResizeError",
+    "ModifyVolumeError",
+    "DisruptionTarget",
+    "NamespaceDeletionDiscoveryFailure",
+    "NamespaceDeletionContentFailure",
+    "NamespaceDeletionGroupVersionParsingFailure",
+];
+
+/// Condition types that tell a state rather than health, so neither status
+/// is wrong: a claim in use or resizing, a pod or node in a planned change,
+/// a suspended Job, a namespace still emptying.
+const STATES: &[&str] = &[
+    "Unused",
+    "Resizing",
+    "FileSystemResizePending",
+    "ModifyingVolume",
+    "PodResizePending",
+    "PodResizeInProgress",
+    "AllContainersRestarting",
+    "GracefulNodeShutdownInProgress",
+    "DrainInProgress",
+    "Drained",
+    "MaintenancePlanned",
+    "MaintenanceInProgress",
+    "Suspended",
+    "NamespaceContentRemaining",
+    "NamespaceFinalizersRemaining",
 ];
 
 fn conditions(object: &Value) -> Option<Section> {
@@ -317,6 +347,7 @@ fn conditions(object: &Value) -> Option<Section> {
             let status = condition["status"].as_str().unwrap_or("Unknown").to_owned();
             let bad_when_true = TRUE_IS_BAD.contains(&kind.as_str());
             let tone = match (status.as_str(), bad_when_true) {
+                _ if STATES.contains(&kind.as_str()) => Tone::Neutral,
                 ("True", false) | ("False", true) => Tone::Success,
                 ("True", true) => Tone::Danger,
                 ("False", false) => Tone::Warning,

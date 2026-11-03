@@ -5580,7 +5580,7 @@
                 {
                   "type": "Unused",
                   "status": "False",
-                  "tone": "warning",
+                  "tone": "neutral",
                   "reason": "PodUsingPVC",
                   "message": "A pod is currently referencing this PVC",
                   "lastTransition": "2026-11-03T11:36:43Z"
