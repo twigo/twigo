@@ -52,7 +52,7 @@ pub enum Since {
 pub struct LogSource {
     pub containers: Containers,
     /// The pods to follow, by name; null follows the target's pods, new
-    /// ones included, as long as the tab's ten streams last (decision 23).
+    /// ones included, as long as the tab's ten streams last (ARCHITECTURE 4.6).
     pub pods: Option<Vec<String>>,
     pub since: Since,
     /// Each container's previous instance, the one that ended, read to its
@@ -157,8 +157,8 @@ pub struct LogBatch {
     pub matches: Option<LogMatches>,
     /// Present when it changed.
     pub histogram: Option<Histogram>,
-    /// Lines the buffer's bound dropped since the session opened (decision
-    /// 24).
+    /// Lines the buffer's bound dropped since the session opened (ARCHITECTURE
+    /// 4.6).
     pub dropped: u64,
 }
 

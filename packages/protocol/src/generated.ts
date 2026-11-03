@@ -450,8 +450,8 @@ matches: LogMatches | null,
  */
 histogram: Histogram | null, 
 /**
- * Lines the buffer's bound dropped since the session opened (decision
- * 24).
+ * Lines the buffer's bound dropped since the session opened (ARCHITECTURE
+ * 4.6).
  */
 dropped: number, };
 
@@ -536,7 +536,7 @@ status: string, tone: Tone, containers: Array<LogContainer>, };
 export type LogSource = { containers: Containers, 
 /**
  * The pods to follow, by name; null follows the target's pods, new
- * ones included, as long as the tab's ten streams last (decision 23).
+ * ones included, as long as the tab's ten streams last (ARCHITECTURE 4.6).
  */
 pods: Array<string> | null, since: Since, 
 /**

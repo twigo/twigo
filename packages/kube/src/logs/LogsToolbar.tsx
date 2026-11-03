@@ -42,7 +42,7 @@ import type { LogsInput } from "../uri";
 import { clock, currentMatch, followed, logsKind, podTag } from "./entries";
 import { TAB_STREAMS, type LogsTabs } from "./state";
 
-/** Where a session starts, as the range offers it (decision 22). */
+/** Where a session starts, as the range offers it (ARCHITECTURE 4.6). */
 const RANGES: readonly { id: string; label: string; since: Since }[] = [
   {
     id: "lines",
