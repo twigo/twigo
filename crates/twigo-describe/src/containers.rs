@@ -17,6 +17,7 @@ const STUCK: &[&str] = &[
     "ErrImagePull",
     "ErrImageNeverPull",
     "InvalidImageName",
+    "ImageInspectError",
     "CreateContainerConfigError",
     "CreateContainerError",
     "RunContainerError",

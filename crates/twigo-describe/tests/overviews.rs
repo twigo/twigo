@@ -651,3 +651,209 @@ fn a_claim_names_the_pods_that_use_it() {
         "in use is no warning"
     );
 }
+
+/// The recorded object as `edit` changes it, described.
+fn edited(name: &str, edit: impl FnOnce(&mut Recorded)) -> Overview {
+    let mut recorded = recorded().remove(name).unwrap();
+    edit(&mut recorded);
+    describe(Input {
+        object: &recorded.object,
+        printed: &recorded.printed,
+        events: &EventList {
+            events: recorded.events.clone(),
+            unavailable: None,
+        },
+        facts: &recorded.facts,
+    })
+}
+
+fn warning(reason: &str, message: &str) -> ObjectEvent {
+    ObjectEvent {
+        kind: "Warning".to_owned(),
+        reason: reason.to_owned(),
+        message: message.to_owned(),
+        source: "test".to_owned(),
+        count: 3,
+        first: Some("2026-11-03T10:00:00Z".to_owned()),
+        last: Some("2026-11-03T10:05:00Z".to_owned()),
+        field_path: None,
+    }
+}
+
+fn unavailable(recorded: &mut Recorded) {
+    for fact in &mut recorded.facts {
+        fact.found = Found::Unavailable {
+            message: "You may not list them.".to_owned(),
+        };
+    }
+}
+
+fn titles(overview: &Overview) -> Vec<(Tone, &str)> {
+    findings(overview)
+        .iter()
+        .map(|finding| (finding.tone, finding.title.as_str()))
+        .collect()
+}
+
+#[test]
+fn what_cannot_be_listed_says_so_and_lists_no_pods() {
+    let deployment = edited("deployment", unavailable);
+    assert!(
+        !ids(&deployment).contains(&"core.pods"),
+        "{:?}",
+        ids(&deployment)
+    );
+    assert_eq!(
+        shown(field(fields(&deployment, "core.rollout"), "ReplicaSets")),
+        "You may not list them."
+    );
+    let service = edited("service", unavailable);
+    let (_, rows) = table(&service, "core.ports");
+    assert_eq!(rows[0][5], "You may not list them.");
+    assert!(findings(&service).is_empty());
+    let ingress = edited("ingress", unavailable);
+    let (_, rows) = table(&ingress, "core.rules");
+    assert_eq!(rows[0][4], "You may not list them.");
+}
+
+#[test]
+fn an_ingress_backend_no_ready_pod_serves_is_a_finding() {
+    let ingress = edited("ingress", |recorded| {
+        for fact in &mut recorded.facts {
+            if let Found::Listed { objects } = &mut fact.found {
+                for slice in objects.iter_mut() {
+                    for endpoint in slice["endpoints"].as_array_mut().into_iter().flatten() {
+                        endpoint["conditions"]["ready"] = Value::Bool(false);
+                    }
+                }
+            }
+        }
+        recorded.object["spec"]["defaultBackend"] =
+            serde_json::json!({ "service": { "name": "web", "port": { "number": 80 } } });
+    });
+    assert_eq!(
+        titles(&ingress),
+        [
+            (Tone::Warning, "Service reports does not exist"),
+            (Tone::Warning, "No ready pod serves Service web")
+        ]
+    );
+    let default = field(fields(&ingress, "core.ingress"), "Default backend");
+    assert_eq!(shown(default), "web:80 | none");
+}
+
+#[test]
+fn a_claim_that_waits_for_its_pod_is_fine_and_one_that_cannot_bind_says_why() {
+    let pending = |recorded: &mut Recorded| {
+        recorded.object["status"] = serde_json::json!({ "phase": "Pending" });
+        recorded.events = vec![ObjectEvent {
+            kind: "Normal".to_owned(),
+            ..warning(
+                "WaitForFirstConsumer",
+                "waiting for first consumer to be created before binding",
+            )
+        }];
+    };
+    assert!(findings(&edited("pvc", pending)).is_empty());
+    let failing = edited("pvc", |recorded| {
+        pending(recorded);
+        recorded
+            .events
+            .insert(0, warning("ProvisioningFailed", "no capacity left"));
+    });
+    assert_eq!(
+        titles(&failing),
+        [(Tone::Warning, "The claim cannot be bound")]
+    );
+    assert_eq!(
+        findings(&failing)[0].message.as_deref(),
+        Some("no capacity left")
+    );
+}
+
+#[test]
+fn a_cron_job_whose_last_run_failed_and_a_job_about_to_fail_say_so() {
+    let cron = edited("cronjob", |recorded| {
+        let status = &mut recorded.object["status"];
+        status["lastScheduleTime"] = "2026-11-03T12:00:00Z".into();
+        status["lastSuccessfulTime"] = "2026-11-03T11:00:00Z".into();
+        status["active"] = Value::Null;
+    });
+    assert_eq!(
+        titles(&cron),
+        [(Tone::Warning, "Its last run did not succeed")]
+    );
+    let running = edited("cronjob", |recorded| {
+        let status = &mut recorded.object["status"];
+        status["lastScheduleTime"] = "2026-11-03T12:00:00Z".into();
+        status["lastSuccessfulTime"] = "2026-11-03T11:00:00Z".into();
+        status["active"] = serde_json::json!([{ "name": "report-1" }]);
+    });
+    assert!(findings(&running).is_empty());
+    let job = edited("job", |recorded| {
+        recorded.object["status"]["conditions"] = serde_json::json!([{
+            "type": "FailureTarget",
+            "status": "True",
+            "reason": "BackoffLimitExceeded",
+            "message": "Job has reached the specified backoff limit",
+        }]);
+    });
+    assert_eq!(
+        titles(&job),
+        [(Tone::Danger, "The job failed too many times")]
+    );
+}
+
+#[test]
+fn a_pod_that_stops_or_cannot_mount_or_inspect_says_why() {
+    let stopping = edited("pod", |recorded| {
+        recorded.object["metadata"]["deletionTimestamp"] = "2026-11-03T12:00:30Z".into();
+        recorded.object["metadata"]["deletionGracePeriodSeconds"] = 30.into();
+    });
+    assert_eq!(
+        titles(&stopping),
+        [(Tone::Warning, "The pod is terminating")]
+    );
+    assert!(findings(&stopping)[0].detail.contains(&Span::Ago {
+        at: "2026-11-03T12:00:00Z".to_owned()
+    }));
+    assert_eq!(
+        shown(field(fields(&stopping, "core.pod"), "Phase")),
+        "Terminating"
+    );
+    let mounting = edited("pod", |recorded| {
+        recorded.object["status"]["containerStatuses"][0]["state"] =
+            serde_json::json!({ "waiting": { "reason": "ContainerCreating" } });
+        recorded.events = vec![warning(
+            "FailedMount",
+            "MountVolume.SetUp failed for volume \"settings\" : configmap \"settings\" not found",
+        )];
+    });
+    assert_eq!(
+        titles(&mounting),
+        [(Tone::Danger, "A volume of the pod cannot be mounted")]
+    );
+    let inspecting = edited("pod-pulling", |recorded| {
+        recorded.object["status"]["containerStatuses"][0]["state"]["waiting"]["reason"] =
+            "ImageInspectError".into();
+    });
+    assert_eq!(
+        titles(&inspecting),
+        [(Tone::Danger, "The image of container api cannot be pulled")]
+    );
+}
+
+#[test]
+fn workloads_short_of_ready_pods_say_so() {
+    let stateful = edited("statefulset", |recorded| {
+        recorded.object["status"]["readyReplicas"] = 0.into();
+    });
+    assert_eq!(
+        titles(&stateful),
+        [(Tone::Warning, "Not every pod is ready")]
+    );
+    let daemon = edited("daemonset", |recorded| {
+        recorded.object["status"]["numberReady"] = 0.into();
+    });
+    assert_eq!(titles(&daemon), [(Tone::Warning, "Not every pod is ready")]);
+}

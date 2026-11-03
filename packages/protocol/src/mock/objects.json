@@ -880,7 +880,8 @@
                   "tone": "success",
                   "reason": "MinimumReplicasAvailable",
                   "message": "Deployment has minimum availability.",
-                  "lastTransition": "2026-11-03T11:36:41Z"
+                  "lastTransition": "2026-11-03T11:36:41Z",
+                  "lastHeartbeat": null
                 },
                 {
                   "type": "Progressing",
@@ -888,7 +889,8 @@
                   "tone": "success",
                   "reason": "NewReplicaSetAvailable",
                   "message": "ReplicaSet \"web-54454cf656\" has successfully progressed.",
-                  "lastTransition": "2026-11-03T11:36:40Z"
+                  "lastTransition": "2026-11-03T11:36:40Z",
+                  "lastHeartbeat": null
                 }
               ]
             }
@@ -1689,7 +1691,8 @@
                   "tone": "success",
                   "reason": "CompletionsReached",
                   "message": "Reached expected number of succeeded pods",
-                  "lastTransition": "2026-11-03T11:36:44Z"
+                  "lastTransition": "2026-11-03T11:36:44Z",
+                  "lastHeartbeat": null
                 },
                 {
                   "type": "Complete",
@@ -1697,7 +1700,8 @@
                   "tone": "success",
                   "reason": "CompletionsReached",
                   "message": "Reached expected number of succeeded pods",
-                  "lastTransition": "2026-11-03T11:36:44Z"
+                  "lastTransition": "2026-11-03T11:36:44Z",
+                  "lastHeartbeat": null
                 }
               ]
             }
@@ -1947,10 +1951,17 @@
                   }
                 },
                 {
+                  "label": "Lease acquired",
+                  "value": {
+                    "type": "text",
+                    "text": "unset"
+                  }
+                },
+                {
                   "label": "Lease renewed",
                   "value": {
                     "type": "time",
-                    "at": "2026-11-03T12:15:41.878841Z"
+                    "at": "2026-11-03T12:58:45.400262Z"
                   }
                 },
                 {
@@ -2000,7 +2011,8 @@
                   "tone": "success",
                   "reason": "KubeletHasSufficientMemory",
                   "message": "kubelet has sufficient memory available",
-                  "lastTransition": "2026-11-03T11:18:50Z"
+                  "lastTransition": "2026-11-03T11:18:50Z",
+                  "lastHeartbeat": "2026-11-03T12:55:46Z"
                 },
                 {
                   "type": "DiskPressure",
@@ -2008,7 +2020,8 @@
                   "tone": "success",
                   "reason": "KubeletHasNoDiskPressure",
                   "message": "kubelet has no disk pressure",
-                  "lastTransition": "2026-11-03T11:18:50Z"
+                  "lastTransition": "2026-11-03T11:18:50Z",
+                  "lastHeartbeat": "2026-11-03T12:55:46Z"
                 },
                 {
                   "type": "PIDPressure",
@@ -2016,7 +2029,8 @@
                   "tone": "success",
                   "reason": "KubeletHasSufficientPID",
                   "message": "kubelet has sufficient PID available",
-                  "lastTransition": "2026-11-03T11:18:50Z"
+                  "lastTransition": "2026-11-03T11:18:50Z",
+                  "lastHeartbeat": "2026-11-03T12:55:46Z"
                 },
                 {
                   "type": "Ready",
@@ -2024,7 +2038,8 @@
                   "tone": "success",
                   "reason": "KubeletReady",
                   "message": "kubelet is posting ready status",
-                  "lastTransition": "2026-11-03T11:19:06Z"
+                  "lastTransition": "2026-11-03T11:19:06Z",
+                  "lastHeartbeat": "2026-11-03T12:55:46Z"
                 }
               ]
             }
@@ -2996,95 +3011,14 @@
           "blocks": [
             {
               "type": "events",
-              "events": [
-                {
-                  "type": "Normal",
-                  "reason": "NodeReady",
-                  "message": "Node twigo-overviews-control-plane status is now: NodeReady",
-                  "source": "kubelet",
-                  "count": 1,
-                  "first": "2026-11-03T11:19:06Z",
-                  "last": "2026-11-03T11:19:06Z",
-                  "fieldPath": null
-                },
-                {
-                  "type": "Normal",
-                  "reason": "Starting",
-                  "message": "",
-                  "source": "kube-proxy",
-                  "count": 1,
-                  "first": "2026-11-03T11:18:56.384998Z",
-                  "last": "2026-11-03T11:18:56.384998Z",
-                  "fieldPath": null
-                },
-                {
-                  "type": "Normal",
-                  "reason": "RegisteredNode",
-                  "message": "Node twigo-overviews-control-plane event: Registered Node twigo-overviews-control-plane in Controller",
-                  "source": "node-controller",
-                  "count": 1,
-                  "first": "2026-11-03T11:18:55Z",
-                  "last": "2026-11-03T11:18:55Z",
-                  "fieldPath": null
-                },
-                {
-                  "type": "Normal",
-                  "reason": "NodeHasSufficientMemory",
-                  "message": "Node twigo-overviews-control-plane status is now: NodeHasSufficientMemory",
-                  "source": "kubelet",
-                  "count": 1,
-                  "first": "2026-11-03T11:18:53Z",
-                  "last": "2026-11-03T11:18:53Z",
-                  "fieldPath": null
-                },
-                {
-                  "type": "Normal",
-                  "reason": "NodeHasNoDiskPressure",
-                  "message": "Node twigo-overviews-control-plane status is now: NodeHasNoDiskPressure",
-                  "source": "kubelet",
-                  "count": 1,
-                  "first": "2026-11-03T11:18:53Z",
-                  "last": "2026-11-03T11:18:53Z",
-                  "fieldPath": null
-                },
-                {
-                  "type": "Normal",
-                  "reason": "NodeHasSufficientPID",
-                  "message": "Node twigo-overviews-control-plane status is now: NodeHasSufficientPID",
-                  "source": "kubelet",
-                  "count": 1,
-                  "first": "2026-11-03T11:18:53Z",
-                  "last": "2026-11-03T11:18:53Z",
-                  "fieldPath": null
-                },
-                {
-                  "type": "Normal",
-                  "reason": "NodeAllocatableEnforced",
-                  "message": "Updated Node Allocatable limit across pods",
-                  "source": "kubelet",
-                  "count": 1,
-                  "first": "2026-11-03T11:18:53Z",
-                  "last": "2026-11-03T11:18:53Z",
-                  "fieldPath": null
-                },
-                {
-                  "type": "Normal",
-                  "reason": "Starting",
-                  "message": "Starting kubelet.",
-                  "source": "kubelet",
-                  "count": 1,
-                  "first": "2026-11-03T11:18:53Z",
-                  "last": "2026-11-03T11:18:53Z",
-                  "fieldPath": null
-                }
-              ],
+              "events": [],
               "unavailable": null
             }
           ]
         }
       ]
     },
-    "manifest": "{\"apiVersion\":\"v1\",\"kind\":\"Node\",\"metadata\":{\"annotations\":{\"node.alpha.kubernetes.io/ttl\":\"0\",\"volumes.kubernetes.io/controller-managed-attach-detach\":\"true\"},\"creationTimestamp\":\"2026-11-03T11:18:51Z\",\"labels\":{\"beta.kubernetes.io/arch\":\"arm64\",\"beta.kubernetes.io/os\":\"linux\",\"kubernetes.io/arch\":\"arm64\",\"kubernetes.io/hostname\":\"twigo-overviews-control-plane\",\"kubernetes.io/os\":\"linux\",\"node-role.kubernetes.io/control-plane\":\"\"},\"name\":\"twigo-overviews-control-plane\",\"resourceVersion\":\"7609\",\"uid\":\"e6f2f01c-db59-43e1-8768-b9600f2f77b8\"},\"spec\":{\"podCIDR\":\"10.244.0.0/24\",\"podCIDRs\":[\"10.244.0.0/24\"],\"providerID\":\"kind://docker/twigo-overviews/twigo-overviews-control-plane\"},\"status\":{\"addresses\":[{\"address\":\"172.18.0.2\",\"type\":\"InternalIP\"},{\"address\":\"twigo-overviews-control-plane\",\"type\":\"Hostname\"}],\"allocatable\":{\"cpu\":\"16\",\"ephemeral-storage\":\"977896124416\",\"hugepages-1Gi\":\"0\",\"hugepages-2Mi\":\"0\",\"hugepages-32Mi\":\"0\",\"hugepages-64Ki\":\"0\",\"memory\":\"16355060Ki\",\"pods\":\"110\"},\"capacity\":{\"cpu\":\"16\",\"ephemeral-storage\":\"977896124416\",\"hugepages-1Gi\":\"0\",\"hugepages-2Mi\":\"0\",\"hugepages-32Mi\":\"0\",\"hugepages-64Ki\":\"0\",\"memory\":\"16355060Ki\",\"pods\":\"110\"},\"conditions\":[{\"lastHeartbeatTime\":\"2026-11-03T12:15:00Z\",\"lastTransitionTime\":\"2026-11-03T11:18:50Z\",\"message\":\"kubelet has sufficient memory available\",\"reason\":\"KubeletHasSufficientMemory\",\"status\":\"False\",\"type\":\"MemoryPressure\"},{\"lastHeartbeatTime\":\"2026-11-03T12:15:00Z\",\"lastTransitionTime\":\"2026-11-03T11:18:50Z\",\"message\":\"kubelet has no disk pressure\",\"reason\":\"KubeletHasNoDiskPressure\",\"status\":\"False\",\"type\":\"DiskPressure\"},{\"lastHeartbeatTime\":\"2026-11-03T12:15:00Z\",\"lastTransitionTime\":\"2026-11-03T11:18:50Z\",\"message\":\"kubelet has sufficient PID available\",\"reason\":\"KubeletHasSufficientPID\",\"status\":\"False\",\"type\":\"PIDPressure\"},{\"lastHeartbeatTime\":\"2026-11-03T12:15:00Z\",\"lastTransitionTime\":\"2026-11-03T11:19:06Z\",\"message\":\"kubelet is posting ready status\",\"reason\":\"KubeletReady\",\"status\":\"True\",\"type\":\"Ready\"}],\"daemonEndpoints\":{\"kubeletEndpoint\":{\"Port\":10250}},\"declaredFeatures\":[\"ExtendWebSocketsToKubelet\",\"InPlacePodLevelResourcesVerticalScaling\",\"InPlacePodVerticalScalingInitContainers\",\"RestartAllContainersOnContainerExits\"],\"features\":{\"supplementalGroupsPolicy\":true},\"images\":[{\"names\":[\"docker.io/library/import-2026-08-26@sha256:4fbbef5581e6ed60b96426e3786371b57da07f66e350b4ff2b0077413c2b0444\",\"registry.k8s.io/kube-apiserver-arm64:v1.37.0\",\"registry.k8s.io/kube-apiserver:v1.37.0\"],\"sizeBytes\":97074036},{\"names\":[\"docker.io/library/import-2026-08-26@sha256:dda35f6553455c1dde75aebfbb20759d24b7de776b884eb06415f242f276200c\",\"registry.k8s.io/kube-controller-manager-arm64:v1.37.0\",\"registry.k8s.io/kube-controller-manager:v1.37.0\"],\"sizeBytes\":85082212},{\"names\":[\"docker.io/library/import-2026-08-26@sha256:d5e740cce95911da5590b633aae2f7f7e3370ec9d212d4dbbbf3bf19fa07551f\",\"registry.k8s.io/kube-proxy-arm64:v1.37.0\",\"registry.k8s.io/kube-proxy:v1.37.0\"],\"sizeBytes\":84532964},{\"names\":[\"docker.io/library/import-2026-08-26@sha256:2aa78b45454b3df79d15bf6a57b4f9871f11ce16c8b645109ba2310076d228dd\",\"registry.k8s.io/kube-scheduler-arm64:v1.37.0\",\"registry.k8s.io/kube-scheduler:v1.37.0\"],\"sizeBytes\":59129565},{\"names\":[\"registry.k8s.io/kwok/kwok@sha256:6d25aa8fbdfe78845423160bf125b5513f9522e2770981f0945c2a250c2b26f0\",\"registry.k8s.io/kwok/kwok:v0.8.0\"],\"sizeBytes\":38511382},{\"names\":[\"docker.io/kindest/kindnetd:v20260820-69b56db7\"],\"sizeBytes\":35652389},{\"names\":[\"registry.k8s.io/coredns/coredns:v1.14.6\"],\"sizeBytes\":21239459},{\"names\":[\"registry.k8s.io/etcd:3.7.0-0\"],\"sizeBytes\":20455189},{\"names\":[\"docker.io/kindest/local-path-provisioner:v20260820-69b56db7\"],\"sizeBytes\":14217939},{\"names\":[\"docker.io/kindest/local-path-helper:v20260131-7181c60a\"],\"sizeBytes\":2740462},{\"names\":[\"registry.k8s.io/pause:3.10\"],\"sizeBytes\":267933}],\"nodeInfo\":{\"architecture\":\"arm64\",\"bootID\":\"9372f463-3bc7-48d2-9b53-ad6149948273\",\"containerRuntimeVersion\":\"containerd://2.3.4\",\"kernelVersion\":\"6.12.54-linuxkit\",\"kubeProxyVersion\":\"\",\"kubeletVersion\":\"v1.37.0\",\"machineID\":\"87526d77fd6b4de09eb9a1afd3b56023\",\"operatingSystem\":\"linux\",\"osImage\":\"Debian GNU/Linux 13 (trixie)\",\"runningInUserNamespace\":false,\"swap\":{\"capacity\":1073737728},\"systemUUID\":\"87526d77fd6b4de09eb9a1afd3b56023\"},\"runtimeHandlers\":[{\"features\":{\"recursiveReadOnlyMounts\":true,\"userNamespaces\":true},\"name\":\"\"},{\"features\":{\"recursiveReadOnlyMounts\":true,\"userNamespaces\":true},\"name\":\"runc\"},{\"features\":{\"recursiveReadOnlyMounts\":true,\"userNamespaces\":true},\"name\":\"test-handler\"}]}}"
+    "manifest": "{\"apiVersion\":\"v1\",\"kind\":\"Node\",\"metadata\":{\"annotations\":{\"node.alpha.kubernetes.io/ttl\":\"0\",\"volumes.kubernetes.io/controller-managed-attach-detach\":\"true\"},\"creationTimestamp\":\"2026-11-03T11:18:51Z\",\"labels\":{\"beta.kubernetes.io/arch\":\"arm64\",\"beta.kubernetes.io/os\":\"linux\",\"kubernetes.io/arch\":\"arm64\",\"kubernetes.io/hostname\":\"twigo-overviews-control-plane\",\"kubernetes.io/os\":\"linux\",\"node-role.kubernetes.io/control-plane\":\"\"},\"name\":\"twigo-overviews-control-plane\",\"resourceVersion\":\"12674\",\"uid\":\"e6f2f01c-db59-43e1-8768-b9600f2f77b8\"},\"spec\":{\"podCIDR\":\"10.244.0.0/24\",\"podCIDRs\":[\"10.244.0.0/24\"],\"providerID\":\"kind://docker/twigo-overviews/twigo-overviews-control-plane\"},\"status\":{\"addresses\":[{\"address\":\"172.18.0.2\",\"type\":\"InternalIP\"},{\"address\":\"twigo-overviews-control-plane\",\"type\":\"Hostname\"}],\"allocatable\":{\"cpu\":\"16\",\"ephemeral-storage\":\"977896124416\",\"hugepages-1Gi\":\"0\",\"hugepages-2Mi\":\"0\",\"hugepages-32Mi\":\"0\",\"hugepages-64Ki\":\"0\",\"memory\":\"16355060Ki\",\"pods\":\"110\"},\"capacity\":{\"cpu\":\"16\",\"ephemeral-storage\":\"977896124416\",\"hugepages-1Gi\":\"0\",\"hugepages-2Mi\":\"0\",\"hugepages-32Mi\":\"0\",\"hugepages-64Ki\":\"0\",\"memory\":\"16355060Ki\",\"pods\":\"110\"},\"conditions\":[{\"lastHeartbeatTime\":\"2026-11-03T12:55:46Z\",\"lastTransitionTime\":\"2026-11-03T11:18:50Z\",\"message\":\"kubelet has sufficient memory available\",\"reason\":\"KubeletHasSufficientMemory\",\"status\":\"False\",\"type\":\"MemoryPressure\"},{\"lastHeartbeatTime\":\"2026-11-03T12:55:46Z\",\"lastTransitionTime\":\"2026-11-03T11:18:50Z\",\"message\":\"kubelet has no disk pressure\",\"reason\":\"KubeletHasNoDiskPressure\",\"status\":\"False\",\"type\":\"DiskPressure\"},{\"lastHeartbeatTime\":\"2026-11-03T12:55:46Z\",\"lastTransitionTime\":\"2026-11-03T11:18:50Z\",\"message\":\"kubelet has sufficient PID available\",\"reason\":\"KubeletHasSufficientPID\",\"status\":\"False\",\"type\":\"PIDPressure\"},{\"lastHeartbeatTime\":\"2026-11-03T12:55:46Z\",\"lastTransitionTime\":\"2026-11-03T11:19:06Z\",\"message\":\"kubelet is posting ready status\",\"reason\":\"KubeletReady\",\"status\":\"True\",\"type\":\"Ready\"}],\"daemonEndpoints\":{\"kubeletEndpoint\":{\"Port\":10250}},\"declaredFeatures\":[\"ExtendWebSocketsToKubelet\",\"InPlacePodLevelResourcesVerticalScaling\",\"InPlacePodVerticalScalingInitContainers\",\"RestartAllContainersOnContainerExits\"],\"features\":{\"supplementalGroupsPolicy\":true},\"images\":[{\"names\":[\"docker.io/library/import-2026-08-26@sha256:4fbbef5581e6ed60b96426e3786371b57da07f66e350b4ff2b0077413c2b0444\",\"registry.k8s.io/kube-apiserver-arm64:v1.37.0\",\"registry.k8s.io/kube-apiserver:v1.37.0\"],\"sizeBytes\":97074036},{\"names\":[\"docker.io/library/import-2026-08-26@sha256:dda35f6553455c1dde75aebfbb20759d24b7de776b884eb06415f242f276200c\",\"registry.k8s.io/kube-controller-manager-arm64:v1.37.0\",\"registry.k8s.io/kube-controller-manager:v1.37.0\"],\"sizeBytes\":85082212},{\"names\":[\"docker.io/library/import-2026-08-26@sha256:d5e740cce95911da5590b633aae2f7f7e3370ec9d212d4dbbbf3bf19fa07551f\",\"registry.k8s.io/kube-proxy-arm64:v1.37.0\",\"registry.k8s.io/kube-proxy:v1.37.0\"],\"sizeBytes\":84532964},{\"names\":[\"docker.io/library/import-2026-08-26@sha256:2aa78b45454b3df79d15bf6a57b4f9871f11ce16c8b645109ba2310076d228dd\",\"registry.k8s.io/kube-scheduler-arm64:v1.37.0\",\"registry.k8s.io/kube-scheduler:v1.37.0\"],\"sizeBytes\":59129565},{\"names\":[\"registry.k8s.io/kwok/kwok@sha256:6d25aa8fbdfe78845423160bf125b5513f9522e2770981f0945c2a250c2b26f0\",\"registry.k8s.io/kwok/kwok:v0.8.0\"],\"sizeBytes\":38511382},{\"names\":[\"docker.io/kindest/kindnetd:v20260820-69b56db7\"],\"sizeBytes\":35652389},{\"names\":[\"registry.k8s.io/coredns/coredns:v1.14.6\"],\"sizeBytes\":21239459},{\"names\":[\"registry.k8s.io/etcd:3.7.0-0\"],\"sizeBytes\":20455189},{\"names\":[\"docker.io/kindest/local-path-provisioner:v20260820-69b56db7\"],\"sizeBytes\":14217939},{\"names\":[\"docker.io/kindest/local-path-helper:v20260131-7181c60a\"],\"sizeBytes\":2740462},{\"names\":[\"registry.k8s.io/pause:3.10\"],\"sizeBytes\":267933}],\"nodeInfo\":{\"architecture\":\"arm64\",\"bootID\":\"9372f463-3bc7-48d2-9b53-ad6149948273\",\"containerRuntimeVersion\":\"containerd://2.3.4\",\"kernelVersion\":\"6.12.54-linuxkit\",\"kubeProxyVersion\":\"\",\"kubeletVersion\":\"v1.37.0\",\"machineID\":\"87526d77fd6b4de09eb9a1afd3b56023\",\"operatingSystem\":\"linux\",\"osImage\":\"Debian GNU/Linux 13 (trixie)\",\"runningInUserNamespace\":false,\"swap\":{\"capacity\":1073737728},\"systemUUID\":\"87526d77fd6b4de09eb9a1afd3b56023\"},\"runtimeHandlers\":[{\"features\":{\"recursiveReadOnlyMounts\":true,\"userNamespaces\":true},\"name\":\"\"},{\"features\":{\"recursiveReadOnlyMounts\":true,\"userNamespaces\":true},\"name\":\"runc\"},{\"features\":{\"recursiveReadOnlyMounts\":true,\"userNamespaces\":true},\"name\":\"test-handler\"}]}}"
   },
   "pod": {
     "overview": {
@@ -3211,7 +3145,8 @@
                   "tone": "success",
                   "reason": null,
                   "message": null,
-                  "lastTransition": "2026-11-03T11:36:41Z"
+                  "lastTransition": "2026-11-03T11:36:41Z",
+                  "lastHeartbeat": null
                 },
                 {
                   "type": "Initialized",
@@ -3219,7 +3154,8 @@
                   "tone": "success",
                   "reason": null,
                   "message": null,
-                  "lastTransition": "2026-11-03T11:36:41Z"
+                  "lastTransition": "2026-11-03T11:36:41Z",
+                  "lastHeartbeat": null
                 },
                 {
                   "type": "Ready",
@@ -3227,7 +3163,8 @@
                   "tone": "success",
                   "reason": null,
                   "message": null,
-                  "lastTransition": "2026-11-03T11:36:41Z"
+                  "lastTransition": "2026-11-03T11:36:41Z",
+                  "lastHeartbeat": null
                 },
                 {
                   "type": "ContainersReady",
@@ -3235,7 +3172,8 @@
                   "tone": "success",
                   "reason": null,
                   "message": null,
-                  "lastTransition": "2026-11-03T11:36:41Z"
+                  "lastTransition": "2026-11-03T11:36:41Z",
+                  "lastHeartbeat": null
                 },
                 {
                   "type": "PodScheduled",
@@ -3243,7 +3181,8 @@
                   "tone": "success",
                   "reason": null,
                   "message": null,
-                  "lastTransition": "2026-11-03T11:36:41Z"
+                  "lastTransition": "2026-11-03T11:36:41Z",
+                  "lastHeartbeat": null
                 }
               ]
             }
@@ -3833,7 +3772,8 @@
                   "tone": "success",
                   "reason": null,
                   "message": null,
-                  "lastTransition": "2026-11-03T12:13:01Z"
+                  "lastTransition": "2026-11-03T12:13:01Z",
+                  "lastHeartbeat": null
                 },
                 {
                   "type": "Initialized",
@@ -3841,7 +3781,8 @@
                   "tone": "success",
                   "reason": null,
                   "message": null,
-                  "lastTransition": "2026-11-03T12:13:01Z"
+                  "lastTransition": "2026-11-03T12:13:01Z",
+                  "lastHeartbeat": null
                 },
                 {
                   "type": "Ready",
@@ -3849,7 +3790,8 @@
                   "tone": "warning",
                   "reason": "ContainersNotReady",
                   "message": "containers with unready status: [api]",
-                  "lastTransition": "2026-11-03T12:14:32Z"
+                  "lastTransition": "2026-11-03T12:14:32Z",
+                  "lastHeartbeat": null
                 },
                 {
                   "type": "ContainersReady",
@@ -3857,7 +3799,8 @@
                   "tone": "warning",
                   "reason": "ContainersNotReady",
                   "message": "containers with unready status: [api]",
-                  "lastTransition": "2026-11-03T12:14:32Z"
+                  "lastTransition": "2026-11-03T12:14:32Z",
+                  "lastHeartbeat": null
                 },
                 {
                   "type": "PodScheduled",
@@ -3865,7 +3808,8 @@
                   "tone": "success",
                   "reason": null,
                   "message": null,
-                  "lastTransition": "2026-11-03T12:13:01Z"
+                  "lastTransition": "2026-11-03T12:13:01Z",
+                  "lastHeartbeat": null
                 }
               ]
             }
@@ -4318,7 +4262,8 @@
                   "tone": "warning",
                   "reason": "Unschedulable",
                   "message": "0/3 nodes are available: 1 node(s) didn't match Pod's node affinity/selector, 2 node(s) had untolerated taint(s). preemption: 0/3 nodes are available: 3 Preemption is not helpful for scheduling.",
-                  "lastTransition": "2026-11-03T11:36:41Z"
+                  "lastTransition": "2026-11-03T11:36:41Z",
+                  "lastHeartbeat": null
                 }
               ]
             }
@@ -4679,7 +4624,8 @@
                   "tone": "success",
                   "reason": null,
                   "message": null,
-                  "lastTransition": "2026-11-03T11:36:41Z"
+                  "lastTransition": "2026-11-03T11:36:41Z",
+                  "lastHeartbeat": null
                 },
                 {
                   "type": "Initialized",
@@ -4687,7 +4633,8 @@
                   "tone": "success",
                   "reason": null,
                   "message": null,
-                  "lastTransition": "2026-11-03T11:36:41Z"
+                  "lastTransition": "2026-11-03T11:36:41Z",
+                  "lastHeartbeat": null
                 },
                 {
                   "type": "Ready",
@@ -4695,7 +4642,8 @@
                   "tone": "warning",
                   "reason": "ContainersNotReady",
                   "message": "containers with unready status: [api]",
-                  "lastTransition": "2026-11-03T11:36:41Z"
+                  "lastTransition": "2026-11-03T11:36:41Z",
+                  "lastHeartbeat": null
                 },
                 {
                   "type": "ContainersReady",
@@ -4703,7 +4651,8 @@
                   "tone": "warning",
                   "reason": "ContainersNotReady",
                   "message": "containers with unready status: [api]",
-                  "lastTransition": "2026-11-03T11:36:41Z"
+                  "lastTransition": "2026-11-03T11:36:41Z",
+                  "lastHeartbeat": null
                 },
                 {
                   "type": "PodScheduled",
@@ -4711,7 +4660,8 @@
                   "tone": "success",
                   "reason": null,
                   "message": null,
-                  "lastTransition": "2026-11-03T11:36:41Z"
+                  "lastTransition": "2026-11-03T11:36:41Z",
+                  "lastHeartbeat": null
                 }
               ]
             }
@@ -5147,7 +5097,8 @@
                   "tone": "success",
                   "reason": null,
                   "message": null,
-                  "lastTransition": "2026-11-03T11:36:41Z"
+                  "lastTransition": "2026-11-03T11:36:41Z",
+                  "lastHeartbeat": null
                 },
                 {
                   "type": "Initialized",
@@ -5155,7 +5106,8 @@
                   "tone": "success",
                   "reason": null,
                   "message": null,
-                  "lastTransition": "2026-11-03T11:36:41Z"
+                  "lastTransition": "2026-11-03T11:36:41Z",
+                  "lastHeartbeat": null
                 },
                 {
                   "type": "Ready",
@@ -5163,7 +5115,8 @@
                   "tone": "warning",
                   "reason": "ContainersNotReady",
                   "message": "containers with unready status: [api]",
-                  "lastTransition": "2026-11-03T11:36:41Z"
+                  "lastTransition": "2026-11-03T11:36:41Z",
+                  "lastHeartbeat": null
                 },
                 {
                   "type": "ContainersReady",
@@ -5171,7 +5124,8 @@
                   "tone": "warning",
                   "reason": "ContainersNotReady",
                   "message": "containers with unready status: [api]",
-                  "lastTransition": "2026-11-03T11:36:41Z"
+                  "lastTransition": "2026-11-03T11:36:41Z",
+                  "lastHeartbeat": null
                 },
                 {
                   "type": "PodScheduled",
@@ -5179,7 +5133,8 @@
                   "tone": "success",
                   "reason": null,
                   "message": null,
-                  "lastTransition": "2026-11-03T11:36:41Z"
+                  "lastTransition": "2026-11-03T11:36:41Z",
+                  "lastHeartbeat": null
                 }
               ]
             }
@@ -5583,7 +5538,8 @@
                   "tone": "neutral",
                   "reason": "PodUsingPVC",
                   "message": "A pod is currently referencing this PVC",
-                  "lastTransition": "2026-11-03T11:36:43Z"
+                  "lastTransition": "2026-11-03T11:36:43Z",
+                  "lastHeartbeat": null
                 }
               ]
             }

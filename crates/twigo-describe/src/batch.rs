@@ -116,13 +116,24 @@ fn duration(seconds: i64) -> String {
     }
 }
 
-/// A Job that failed, with the reason its controller gave.
+/// A Job that failed, or that its controller has marked to fail while its
+/// pods stop (FailureTarget comes before Failed), with the reason it gave.
 fn job_findings(job: &Value) -> Vec<Finding> {
-    job["status"]["conditions"]
+    let conditions: Vec<&Value> = job["status"]["conditions"]
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|condition| condition["type"] == "Failed" && condition["status"] == "True")
+        .filter(|condition| condition["status"] == "True")
+        .collect();
+    conditions
+        .iter()
+        .find(|condition| condition["type"] == "Failed")
+        .or_else(|| {
+            conditions
+                .iter()
+                .find(|condition| condition["type"] == "FailureTarget")
+        })
+        .into_iter()
         .map(|failed| Finding {
             tone: Tone::Danger,
             title: match text(&failed["reason"]).as_deref() {
@@ -207,7 +218,7 @@ pub(crate) fn cron_job(input: &Input<'_>) -> Described {
     template.id = "core.jobtemplate".to_owned();
     template.title = "Job template".to_owned();
     Described {
-        findings: Vec::new(),
+        findings: cron_findings(status),
         sections: vec![
             Section {
                 id: "core.cronjob".to_owned(),
@@ -218,4 +229,36 @@ pub(crate) fn cron_job(input: &Input<'_>) -> Described {
             template,
         ],
     }
+}
+
+/// A CronJob whose last scheduled run is over and did not succeed: its last
+/// schedule is later than its last success, and no job of it runs.
+fn cron_findings(status: &Value) -> Vec<Finding> {
+    let time = |key: &str| {
+        status[key]
+            .as_str()
+            .and_then(|at| at.parse::<jiff::Timestamp>().ok())
+    };
+    let running = status["active"]
+        .as_array()
+        .is_some_and(|active| !active.is_empty());
+    let (Some(scheduled), success) = (time("lastScheduleTime"), time("lastSuccessfulTime")) else {
+        return Vec::new();
+    };
+    if running || success.is_some_and(|success| success >= scheduled) {
+        return Vec::new();
+    }
+    let span = |text: &str| Span::Text {
+        text: text.to_owned(),
+    };
+    let detail = match text(&status["lastSuccessfulTime"]) {
+        Some(at) => vec![span("Its last success was "), Span::Ago { at }, span(".")],
+        None => vec![span("It has never succeeded.")],
+    };
+    vec![Finding {
+        tone: Tone::Warning,
+        title: "Its last run did not succeed".to_owned(),
+        detail,
+        message: None,
+    }]
 }

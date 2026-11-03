@@ -13,6 +13,8 @@ use crate::{Described, Found, Input, Need, text};
 const SERVICE_NAME: &str = "kubernetes.io/service-name";
 /// How many endpoints a port lists before it counts the rest, as kubectl.
 const SHOWN: usize = 3;
+/// What a port without a ready endpoint lists.
+const NONE: &str = "none";
 
 fn namespaced(object: &Value, group: &str, resource: &str) -> Need {
     Need {
@@ -99,7 +101,7 @@ fn endpoints(slices: &[&Value], port: &str) -> String {
         }
     }
     if shown.is_empty() {
-        return "none".to_owned();
+        return NONE.to_owned();
     }
     let listed = shown.join(", ");
     if count > SHOWN {
@@ -316,13 +318,26 @@ pub(crate) fn ingress(input: &Input<'_>) -> Described {
             .map_or_else(|| plain("none yet"), code),
     );
     let mut missing: Vec<String> = Vec::new();
+    let mut unserved: Vec<String> = Vec::new();
     let mut backend = |backend: &Value| -> (Shown, Shown) {
-        describe_backend(backend, namespace, services, slices, &mut missing)
+        describe_backend(
+            backend,
+            namespace,
+            services,
+            slices,
+            &mut missing,
+            &mut unserved,
+        )
     };
     fields.add(
         "Default backend",
         if spec["defaultBackend"].is_object() {
-            backend(&spec["defaultBackend"]).0
+            {
+                let (target, endpoints) = backend(&spec["defaultBackend"]);
+                Shown::List {
+                    items: vec![target, endpoints],
+                }
+            }
         } else {
             plain("the controller's")
         },
@@ -339,7 +354,7 @@ pub(crate) fn ingress(input: &Input<'_>) -> Described {
             let (target, endpoints) = backend(&path["backend"]);
             rows.push(vec![
                 plain(host.clone()),
-                code(path["path"].as_str().unwrap_or("/")),
+                code(path["path"].as_str().unwrap_or_default()),
                 plain(path["pathType"].as_str().unwrap_or_default()),
                 target,
                 endpoints,
@@ -384,16 +399,24 @@ pub(crate) fn ingress(input: &Input<'_>) -> Described {
     }
     missing.sort();
     missing.dedup();
+    unserved.sort();
+    unserved.dedup();
+    let finding = |title: String| Finding {
+        tone: Tone::Warning,
+        title,
+        detail: vec![Span::Text {
+            text: "A rule sends traffic to it.".to_owned(),
+        }],
+        message: None,
+    };
     let findings = missing
         .into_iter()
-        .map(|service| Finding {
-            tone: Tone::Warning,
-            title: format!("Service {service} does not exist"),
-            detail: vec![Span::Text {
-                text: "A rule sends traffic to it.".to_owned(),
-            }],
-            message: None,
-        })
+        .map(|service| finding(format!("Service {service} does not exist")))
+        .chain(
+            unserved
+                .into_iter()
+                .map(|service| finding(format!("No ready pod serves Service {service}"))),
+        )
         .collect();
     Described { findings, sections }
 }
@@ -407,6 +430,7 @@ fn describe_backend(
     services: Option<&Found>,
     slices: Option<&Found>,
     missing: &mut Vec<String>,
+    unserved: &mut Vec<String>,
 ) -> (Shown, Shown) {
     let service = &backend["service"];
     if !service.is_object() {
@@ -454,7 +478,13 @@ fn describe_backend(
                         .and_then(|candidate| candidate["name"].as_str())
                         .unwrap_or_default();
                     match slices_of(slices, name) {
-                        Some(Ok(slices)) => code(endpoints(&slices, port_name)),
+                        Some(Ok(slices)) => {
+                            let shown = endpoints(&slices, port_name);
+                            if shown == NONE {
+                                unserved.push(name.to_owned());
+                            }
+                            code(shown)
+                        }
                         Some(Err(message)) => plain(message),
                         None => plain(""),
                     }

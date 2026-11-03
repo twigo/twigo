@@ -277,6 +277,7 @@ test("conditions read as chips with a mark in their tone, and the wrong ones say
                     reason: "ContainersNotReady",
                     message: "containers with unready status: [api]",
                     lastTransition: AT,
+                    lastHeartbeat: null,
                   },
                   {
                     type: "PodScheduled",
@@ -285,6 +286,7 @@ test("conditions read as chips with a mark in their tone, and the wrong ones say
                     reason: null,
                     message: null,
                     lastTransition: AT,
+                    lastHeartbeat: null,
                   },
                   {
                     type: "DisruptionTarget",
@@ -293,6 +295,7 @@ test("conditions read as chips with a mark in their tone, and the wrong ones say
                     reason: "EvictionByEvictionAPI",
                     message: null,
                     lastTransition: AT,
+                    lastHeartbeat: null,
                   },
                   {
                     type: "Initialized",
@@ -301,6 +304,7 @@ test("conditions read as chips with a mark in their tone, and the wrong ones say
                     reason: null,
                     message: null,
                     lastTransition: AT,
+                    lastHeartbeat: null,
                   },
                 ],
               },

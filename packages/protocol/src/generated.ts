@@ -43,7 +43,12 @@ tone: Tone, reason: string | null, message: string | null,
 /**
  * RFC 3339.
  */
-lastTransition: string | null, };
+lastTransition: string | null, 
+/**
+ * RFC 3339, when its reporter last confirmed it, as a node's kubelet
+ * does.
+ */
+lastHeartbeat: string | null, };
 
 export type Container = { name: string, role: ContainerRole, image: string, 
 /**

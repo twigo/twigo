@@ -109,20 +109,23 @@ pub(crate) fn describe(input: &Input<'_>) -> Described {
         None => {}
     }
     let mut findings = Vec::new();
-    if phase == "Pending" {
-        let reason = input
-            .events
-            .events
-            .iter()
-            .find(|event| event.kind == "Warning")
-            .map(|event| event.message.clone());
+    // A claim of a WaitForFirstConsumer class waits for its pod with only a
+    // Normal event; a claim that cannot bind says why in a Warning.
+    let failing = input
+        .events
+        .events
+        .iter()
+        .find(|event| event.kind == "Warning");
+    if phase == "Pending"
+        && let Some(event) = failing
+    {
         findings.push(Finding {
             tone: Tone::Warning,
-            title: "The claim is not bound".to_owned(),
+            title: "The claim cannot be bound".to_owned(),
             detail: vec![Span::Text {
-                text: "No volume backs it yet.".to_owned(),
+                text: format!("{}.", event.reason),
             }],
-            message: reason,
+            message: Some(event.message.trim().to_owned()),
         });
     }
     if phase == "Lost" {

@@ -287,6 +287,9 @@ pub struct Condition {
     pub message: Option<String>,
     /// RFC 3339.
     pub last_transition: Option<String>,
+    /// RFC 3339, when its reporter last confirmed it, as a node's kubelet
+    /// does.
+    pub last_heartbeat: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

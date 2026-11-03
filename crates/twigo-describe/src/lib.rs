@@ -360,6 +360,7 @@ fn conditions(object: &Value) -> Option<Section> {
                 reason: text(&condition["reason"]),
                 message: text(&condition["message"]),
                 last_transition: text(&condition["lastTransitionTime"]),
+                last_heartbeat: text(&condition["lastHeartbeatTime"]),
             })
         })
         .collect();

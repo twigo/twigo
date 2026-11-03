@@ -78,10 +78,10 @@ pub(crate) fn deployment(input: &Input<'_>) -> Described {
         blocks: vec![Block::Fields { fields: fields.0 }],
     }];
     let found = fact(input.facts, &replica_sets(object)[0]);
-    let owned: Option<Vec<&Value>> = found.map(|found| match found {
-        Found::Listed { objects } => controlled(objects, &uid),
-        Found::Unavailable { .. } => Vec::new(),
-    });
+    let owned: Option<Vec<&Value>> = match found {
+        Some(Found::Listed { objects }) => Some(controlled(objects, &uid)),
+        _ => None,
+    };
     if let Some(found) = found {
         sections.push(rollout(
             object,

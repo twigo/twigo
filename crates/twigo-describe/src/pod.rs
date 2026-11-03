@@ -46,11 +46,15 @@ fn fields(input: &Input<'_>) -> Fields {
     let status = &pod["status"];
     let namespace = text(&pod["metadata"]["namespace"]);
     let mut fields = Fields::default();
-    fields.text("Phase", &status["phase"]);
+    let finished = matches!(status["phase"].as_str(), Some("Succeeded" | "Failed"));
+    if pod["metadata"]["deletionTimestamp"].is_string() && !finished {
+        fields.add("Phase", toned("Terminating", Tone::Warning));
+    } else {
+        fields.text("Phase", &status["phase"]);
+    }
     fields.text("Reason", &status["reason"]);
     fields.text("Message", &status["message"]);
     if let Some(ready) = printed(input.printed, "Ready") {
-        let finished = matches!(status["phase"].as_str(), Some("Succeeded" | "Failed"));
         let all = ready
             .split_once('/')
             .is_some_and(|(have, want)| have == want);
@@ -176,6 +180,7 @@ pub(crate) fn scheduling(spec: &Value) -> Option<Section> {
                 .collect(),
         ),
     );
+    fields.text("Scheduling group", &spec["schedulingGroup"]["podGroupName"]);
     if let Some(scheduler) = text(&spec["schedulerName"]).filter(|name| name != "default-scheduler")
     {
         fields.add("Scheduler", plain(scheduler));
@@ -282,6 +287,12 @@ fn findings(input: &Input<'_>) -> Vec<Finding> {
             message: message(&status["message"]),
         });
     }
+    if let Some(terminating) = terminating(pod) {
+        findings.push(terminating);
+    }
+    if let Some(creating) = creating(input) {
+        findings.push(creating);
+    }
     if let Some(scheduled) = condition(pod, "PodScheduled")
         && scheduled["status"] == "False"
     {
@@ -321,6 +332,94 @@ fn findings(input: &Input<'_>) -> Vec<Finding> {
     }
     findings.sort_by_key(|finding| finding.tone != Tone::Danger);
     findings
+}
+
+/// A pod asked to stop that has not finished: since when, and how long it
+/// may take, as kubectl prints `Terminating (lasts …)` and its grace period.
+fn terminating(pod: &Value) -> Option<Finding> {
+    let metadata = &pod["metadata"];
+    let deadline: Timestamp = metadata["deletionTimestamp"].as_str()?.parse().ok()?;
+    if matches!(
+        pod["status"]["phase"].as_str(),
+        Some("Succeeded" | "Failed")
+    ) {
+        return None;
+    }
+    let grace = metadata["deletionGracePeriodSeconds"]
+        .as_i64()
+        .unwrap_or_default();
+    let asked = deadline - SignedDuration::from_secs(grace);
+    let mut detail = vec![
+        span("Asked to stop "),
+        Span::Ago {
+            at: asked.to_string(),
+        },
+    ];
+    detail.push(span(&format!(", with a grace period of {grace} s.")));
+    let finalizers: Vec<&str> = metadata["finalizers"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    Some(Finding {
+        tone: Tone::Warning,
+        title: "The pod is terminating".to_owned(),
+        detail,
+        message: (!finalizers.is_empty()).then(|| format!("Finalizers: {}", finalizers.join(", "))),
+    })
+}
+
+/// Event reasons that keep a pod's containers from being created, by what
+/// they say, from the kubelet (kubernetes v1.37.1 `pkg/kubelet/events`).
+const CREATING: &[(&str, &str)] = &[
+    ("FailedMount", "A volume of the pod cannot be mounted"),
+    (
+        "FailedAttachVolume",
+        "A volume of the pod cannot be attached",
+    ),
+    (
+        "FailedCreatePodSandBox",
+        "The pod's sandbox cannot be created",
+    ),
+];
+
+/// Containers still being created while the kubelet warns why they cannot
+/// be: the newest such warning.
+fn creating(input: &Input<'_>) -> Option<Finding> {
+    let status = &input.object["status"];
+    let waiting = ["initContainerStatuses", "containerStatuses"]
+        .iter()
+        .flat_map(|key| status[*key].as_array().into_iter().flatten())
+        .any(|container| {
+            matches!(
+                container["state"]["waiting"]["reason"].as_str(),
+                Some("ContainerCreating" | "PodInitializing")
+            )
+        });
+    if !waiting {
+        return None;
+    }
+    input.events.events.iter().find_map(|event| {
+        let (_, title) = CREATING
+            .iter()
+            .find(|(reason, _)| event.kind == "Warning" && event.reason == *reason)?;
+        let mut detail = vec![span(&event.reason)];
+        if event.count > 1 {
+            detail.push(span(&format!(", {} times", event.count)));
+        }
+        if let Some(at) = &event.last {
+            detail.push(span(", last "));
+            detail.push(Span::Ago { at: at.clone() });
+        }
+        detail.push(span("."));
+        Some(Finding {
+            tone: Tone::Danger,
+            title: (*title).to_owned(),
+            detail,
+            message: Some(event.message.trim().to_owned()),
+        })
+    })
 }
 
 fn condition<'a>(object: &'a Value, kind: &str) -> Option<&'a Value> {
@@ -372,19 +471,18 @@ fn container(input: &Input<'_>, status: &Value, noun: &str, serving: bool) -> Op
                 message: message(&last["message"]),
             })
         }
-        "ImagePullBackOff" | "ErrImagePull" | "ErrImageNeverPull" | "InvalidImageName" => {
-            Some(Finding {
-                tone: Tone::Danger,
-                title: format!(
-                    "The image of {} {name} cannot be pulled",
-                    noun.to_lowercase()
-                ),
-                detail: text(&status["image"])
-                    .map(|image| vec![span(&image)])
-                    .unwrap_or_default(),
-                message: message(&waiting["message"]),
-            })
-        }
+        "ImagePullBackOff" | "ErrImagePull" | "ErrImageNeverPull" | "InvalidImageName"
+        | "ImageInspectError" => Some(Finding {
+            tone: Tone::Danger,
+            title: format!(
+                "The image of {} {name} cannot be pulled",
+                noun.to_lowercase()
+            ),
+            detail: text(&status["image"])
+                .map(|image| vec![span(&image)])
+                .unwrap_or_default(),
+            message: message(&waiting["message"]),
+        }),
         "CreateContainerConfigError"
         | "CreateContainerError"
         | "RunContainerError"

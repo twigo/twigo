@@ -54,6 +54,7 @@
 - Files under `crates/*/tests/fixtures` are recorded server responses: never reformat or edit them by hand.
 - `packages/protocol/src/mock/resources.json` is recorded by the `record_discovery` example from a cluster of `bench/cluster.sh up <name> 1.37`, which installs kwok's CRDs: never edit it by hand.
 - `packages/protocol/src/mock/objects.json` is written by `twigo-describe`'s `overviews` test from the recorded objects: never edit it by hand.
+- kube-apiserver keeps events an hour (`--event-ttl`), so `record_objects` records objects older than that without their events: delete the namespace `overview` first, or record only the fixtures that changed and keep the others.
 - `packages/protocol/src/mock/layouts/*.json` are recorded by `cargo run -p twigo-keyboard --example record`: never reformat or edit them by hand.
   `UCKeyTranslate` takes the keyboard type (`LMGetKbdType`), so a Mac with another keyboard may record other characters; the committed ones come from an ANSI keyboard, type 91 (2026-10-31).
 - The live X11 test changes the X server's keymap and group, so it runs only where `TWIGO_TEST_X11_DISPLAY` equals `DISPLAY`, as under `xvfb-run`.

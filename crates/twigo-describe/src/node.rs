@@ -38,6 +38,19 @@ fn lease_need(node: &Value) -> Need {
     }
 }
 
+/// The node's own ResourceSlices, by the field kubectl selects them by
+/// (k8s.io/api v0.37.1 `ResourceSliceSelectorNodeName`).
+fn slices_need(node: &Value) -> Need {
+    Need {
+        group: "resource.k8s.io".to_owned(),
+        version: "v1".to_owned(),
+        resource: "resourceslices".to_owned(),
+        namespaced: false,
+        namespace: None,
+        field_selector: Some(on(node)),
+    }
+}
+
 /// The field selector of the node's pods.
 fn on(node: &Value) -> String {
     format!(
@@ -47,7 +60,7 @@ fn on(node: &Value) -> String {
 }
 
 pub(crate) fn needs(node: &Value) -> Vec<Need> {
-    vec![pods_need(node), lease_need(node)]
+    vec![pods_need(node), lease_need(node), slices_need(node)]
 }
 
 pub(crate) fn describe(input: &Input<'_>) -> Described {
@@ -61,11 +74,28 @@ pub(crate) fn describe(input: &Input<'_>) -> Described {
         fields.add("Unschedulable", toned("true", Tone::Warning));
     }
     fields.maybe("Taints", taints(&spec["taints"]));
-    if let Some(Found::Listed { objects }) = fact(input.facts, &lease_need(node))
-        && let Some(lease) = objects.first()
-    {
-        fields.text("Lease holder", &lease["spec"]["holderIdentity"]);
-        fields.time("Lease renewed", &lease["spec"]["renewTime"]);
+    match fact(input.facts, &lease_need(node)) {
+        Some(Found::Listed { objects }) => {
+            let lease = objects.first().map_or(&Value::Null, |lease| &lease["spec"]);
+            let unset = || plain("unset");
+            fields.add(
+                "Lease holder",
+                text(&lease["holderIdentity"]).map_or_else(unset, plain),
+            );
+            for (label, key) in [
+                ("Lease acquired", "acquireTime"),
+                ("Lease renewed", "renewTime"),
+            ] {
+                fields.add(
+                    label,
+                    text(&lease[key]).map_or_else(unset, |at| Shown::Time { at }),
+                );
+            }
+        }
+        Some(Found::Unavailable { message }) => {
+            fields.add("Lease", plain(message.clone()));
+        }
+        None => {}
     }
     fields.maybe(
         "Addresses",
@@ -149,6 +179,9 @@ pub(crate) fn describe(input: &Input<'_>) -> Described {
     if let Some(running) = &running {
         sections.extend(pod_resources(node, running));
     }
+    if let Some(Found::Listed { objects }) = fact(input.facts, &slices_need(node)) {
+        sections.extend(resource_slices(objects));
+    }
     sections.push(Section {
         id: "core.system".to_owned(),
         title: "System".to_owned(),
@@ -158,6 +191,54 @@ pub(crate) fn describe(input: &Input<'_>) -> Described {
         findings: findings(node),
         sections,
     }
+}
+
+/// The node's ResourceSlices by driver and pool, ten pools at most, as
+/// kubectl's `describeNodeResourceSlices` counts them.
+fn resource_slices(slices: &[Value]) -> Option<Section> {
+    const POOLS: usize = 10;
+    let mut pools: BTreeMap<(String, String), (usize, usize)> = BTreeMap::new();
+    for slice in slices {
+        let spec = &slice["spec"];
+        let key = (
+            spec["driver"].as_str().unwrap_or_default().to_owned(),
+            spec["pool"]["name"].as_str().unwrap_or_default().to_owned(),
+        );
+        let entry = pools.entry(key).or_default();
+        entry.0 += 1;
+        entry.1 += spec["devices"].as_array().map_or(0, Vec::len);
+    }
+    let more = pools.len().saturating_sub(POOLS);
+    let mut rows: Vec<Vec<Shown>> = pools
+        .into_iter()
+        .take(POOLS)
+        .map(|((driver, pool), (slices, devices))| {
+            vec![
+                plain(driver),
+                plain(pool),
+                plain(slices.to_string()),
+                plain(devices.to_string()),
+            ]
+        })
+        .collect();
+    if more > 0 {
+        rows.push(vec![
+            plain(format!("and {more} more pools")),
+            plain(""),
+            plain(""),
+            plain(""),
+        ]);
+    }
+    (!rows.is_empty()).then(|| Section {
+        id: "core.resourceslices".to_owned(),
+        title: "Resource slices".to_owned(),
+        blocks: vec![Block::Table {
+            columns: ["Driver", "Pool", "Slices", "Devices"]
+                .map(str::to_owned)
+                .to_vec(),
+            rows,
+        }],
+    })
 }
 
 /// The roles its labels give it, as kubectl's `findNodeRoles` reads them.
@@ -200,8 +281,8 @@ fn taints(taints: &Value) -> Option<Shown> {
 }
 
 /// Each resource the node has: its capacity, what it allocates to pods,
-/// and what the pods on it request and may use at most, as kubectl's
-/// `describeNodeResource` adds them up.
+/// and what the pods on it request and may use at most, by their specs, as
+/// kubectl's `getPodsTotalRequestsAndLimits` adds them up.
 fn resources(node: &Value, running: Option<&[&Value]>, pods: Option<&Found>) -> Section {
     let capacity = node["status"]["capacity"].as_object();
     let allocatable = &node["status"]["allocatable"];
@@ -209,8 +290,8 @@ fn resources(node: &Value, running: Option<&[&Value]>, pods: Option<&Found>) -> 
         let mut requests: BTreeMap<String, Quantity> = BTreeMap::new();
         let mut limits: BTreeMap<String, Quantity> = BTreeMap::new();
         for pod in pods {
-            add(&mut requests, pod_requests(pod));
-            add(&mut limits, pod_limits(pod));
+            add(&mut requests, pod_requests(pod, false));
+            add(&mut limits, pod_limits(pod, false));
         }
         (requests, limits)
     });
@@ -318,8 +399,9 @@ fn show(name: &str, quantity: Quantity) -> String {
     value.to_string()
 }
 
-/// Each running pod with what it requests and may use at most, against
-/// what the node allocates, as kubectl's non-terminated pods table.
+/// Each running pod with what it requests and may use at most, its status
+/// resources read, against what the node allocates, as kubectl's
+/// non-terminated pods table (`describeNodeResource`).
 fn pod_resources(node: &Value, pods: &[&Value]) -> Option<Section> {
     let allocatable = &node["status"]["allocatable"];
     let share = |totals: &BTreeMap<String, Quantity>, name: &str| -> Shown {
@@ -349,8 +431,8 @@ fn pod_resources(node: &Value, pods: &[&Value]) -> Option<Section> {
         .map(|pod| {
             let namespace = pod["metadata"]["namespace"].as_str();
             let name = pod["metadata"]["name"].as_str().unwrap_or_default();
-            let requests = pod_requests(pod);
-            let limits = pod_limits(pod);
+            let requests = pod_requests(pod, true);
+            let limits = pod_limits(pod, true);
             vec![
                 plain(namespace.unwrap_or_default()),
                 link(POD, namespace, name, name),
@@ -444,43 +526,81 @@ fn aggregate(
     result
 }
 
-/// What a pod requests (k8s.io/component-helpers v0.37.0, `PodRequests`
-/// with status resources): the most of its spec's, its allocated and its
-/// actuated requests, pod-level requests in their place, and overhead.
-pub(crate) fn pod_requests(pod: &Value) -> BTreeMap<String, Quantity> {
+/// Whether the kubelet found a pod's resize infeasible, so its spec no
+/// longer says what it has (`IsPodResizeInfeasible`).
+fn resize_infeasible(pod: &Value) -> bool {
+    pod["status"]["conditions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|condition| {
+            condition["type"] == "PodResizePending" && condition["reason"] == "Infeasible"
+        })
+}
+
+/// What a pod requests (k8s.io/component-helpers v0.37.0, `PodRequests`):
+/// with `status` as kubectl's per-pod rows read it, the most of what its
+/// spec, its allocated and its actuated resources say, the spec left out
+/// when a resize is infeasible; without, as its totals read it, its spec.
+/// Pod-level requests take the containers' place, and overhead adds on.
+pub(crate) fn pod_requests(pod: &Value, status: bool) -> BTreeMap<String, Quantity> {
     let spec =
         |container: &Value, _: Option<&Value>| quantities(&container["resources"]["requests"]);
-    let allocated = |container: &Value, status: Option<&Value>| match status {
-        Some(status) if status["allocatedResources"].is_object() => {
-            quantities(&status["allocatedResources"])
-        }
-        _ => quantities(&container["resources"]["requests"]),
-    };
-    let actuated = |container: &Value, status: Option<&Value>| match status {
-        Some(status) if status["resources"]["requests"].is_object() => {
-            quantities(&status["resources"]["requests"])
-        }
-        _ => quantities(&container["resources"]["requests"]),
-    };
     let mut requests = aggregate(pod, spec);
-    largest(&mut requests, aggregate(pod, allocated));
-    largest(&mut requests, aggregate(pod, actuated));
+    if status {
+        let infeasible = resize_infeasible(pod);
+        let fallback = |container: &Value| {
+            if infeasible {
+                BTreeMap::new()
+            } else {
+                quantities(&container["resources"]["requests"])
+            }
+        };
+        let allocated = |container: &Value, status: Option<&Value>| match status {
+            Some(status) if status["allocatedResources"].is_object() => {
+                quantities(&status["allocatedResources"])
+            }
+            _ => fallback(container),
+        };
+        let actuated = |container: &Value, status: Option<&Value>| match status {
+            Some(status) if status["resources"]["requests"].is_object() => {
+                quantities(&status["resources"]["requests"])
+            }
+            Some(status) if status["allocatedResources"].is_object() => {
+                quantities(&status["allocatedResources"])
+            }
+            _ => fallback(container),
+        };
+        if infeasible {
+            requests = BTreeMap::new();
+        }
+        largest(&mut requests, aggregate(pod, allocated));
+        largest(&mut requests, aggregate(pod, actuated));
+    }
     pod_level(&mut requests, &pod["spec"]["resources"]["requests"]);
     add(&mut requests, quantities(&pod["spec"]["overhead"]));
     requests
 }
 
-/// What a pod may use at most (`PodLimits` with status resources).
-pub(crate) fn pod_limits(pod: &Value) -> BTreeMap<String, Quantity> {
+/// What a pod may use at most (`PodLimits`), read as [`pod_requests`]
+/// reads requests; overhead adds on to the limits that are set.
+pub(crate) fn pod_limits(pod: &Value, status: bool) -> BTreeMap<String, Quantity> {
     let spec = |container: &Value, _: Option<&Value>| quantities(&container["resources"]["limits"]);
-    let actuated = |container: &Value, status: Option<&Value>| match status {
-        Some(status) if status["resources"]["limits"].is_object() => {
-            quantities(&status["resources"]["limits"])
-        }
-        _ => quantities(&container["resources"]["limits"]),
-    };
     let mut limits = aggregate(pod, spec);
-    largest(&mut limits, aggregate(pod, actuated));
+    if status {
+        let infeasible = resize_infeasible(pod);
+        let actuated = |container: &Value, status: Option<&Value>| match status {
+            Some(status) if status["resources"]["limits"].is_object() => {
+                quantities(&status["resources"]["limits"])
+            }
+            _ if infeasible => BTreeMap::new(),
+            _ => quantities(&container["resources"]["limits"]),
+        };
+        if infeasible {
+            limits = BTreeMap::new();
+        }
+        largest(&mut limits, aggregate(pod, actuated));
+    }
     pod_level(&mut limits, &pod["spec"]["resources"]["limits"]);
     for (name, overhead) in quantities(&pod["spec"]["overhead"]) {
         if let Some(limit) = limits.get_mut(&name)
@@ -556,4 +676,90 @@ fn findings(node: &Value) -> Vec<Finding> {
     }
     findings.sort_by_key(|finding| finding.tone != Tone::Danger);
     findings
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn milli(totals: &BTreeMap<String, Quantity>, name: &str) -> i128 {
+        totals.get(name).map_or(0, |quantity| quantity.milli())
+    }
+
+    #[test]
+    fn init_containers_count_as_the_most_any_needs_and_sidecars_add_up() {
+        let pod = json!({
+            "spec": {
+                "initContainers": [
+                    { "name": "setup", "resources": { "requests": { "cpu": "1" } } },
+                    { "name": "proxy", "restartPolicy": "Always", "resources": { "requests": { "cpu": "200m" } } },
+                    { "name": "migrate", "resources": { "requests": { "cpu": "500m" } } },
+                ],
+                "containers": [{ "name": "app", "resources": { "requests": { "cpu": "300m" } } }],
+                "overhead": { "cpu": "50m" },
+            },
+        });
+        assert_eq!(milli(&pod_requests(&pod, false), "cpu"), 1000 + 50);
+    }
+
+    #[test]
+    fn pod_level_requests_replace_the_containers_sum() {
+        let pod = json!({
+            "spec": {
+                "resources": { "requests": { "memory": "1Gi" } },
+                "containers": [
+                    { "name": "a", "resources": { "requests": { "memory": "128Mi", "cpu": "100m" } } },
+                    { "name": "b", "resources": { "requests": { "memory": "128Mi" } } },
+                ],
+            },
+        });
+        let requests = pod_requests(&pod, false);
+        assert_eq!(milli(&requests, "memory"), (1 << 30) * 1000);
+        assert_eq!(milli(&requests, "cpu"), 100);
+    }
+
+    #[test]
+    fn status_resources_count_for_a_pod_and_an_infeasible_resize_leaves_its_spec_out() {
+        let resized = |infeasible: bool| {
+            json!({
+                "spec": { "containers": [{ "name": "a", "resources": {
+                    "requests": { "cpu": "6" }, "limits": { "cpu": "8" },
+                } }] },
+                "status": {
+                    "conditions": if infeasible {
+                        json!([{ "type": "PodResizePending", "status": "True", "reason": "Infeasible" }])
+                    } else {
+                        json!([])
+                    },
+                    "containerStatuses": [{
+                        "name": "a",
+                        "allocatedResources": { "cpu": "1" },
+                        "resources": { "requests": { "cpu": "1" }, "limits": { "cpu": "2" } },
+                    }],
+                },
+            })
+        };
+        let pod = resized(false);
+        assert_eq!(milli(&pod_requests(&pod, true), "cpu"), 6000);
+        assert_eq!(milli(&pod_requests(&pod, false), "cpu"), 6000);
+        let pod = resized(true);
+        assert_eq!(milli(&pod_requests(&pod, true), "cpu"), 1000);
+        assert_eq!(milli(&pod_limits(&pod, true), "cpu"), 2000);
+        assert_eq!(milli(&pod_limits(&pod, false), "cpu"), 8000);
+    }
+
+    #[test]
+    fn overhead_adds_only_to_the_limits_that_are_set() {
+        let pod = json!({
+            "spec": {
+                "overhead": { "cpu": "100m", "memory": "64Mi" },
+                "containers": [{ "name": "a", "resources": { "limits": { "cpu": "1" } } }],
+            },
+        });
+        let limits = pod_limits(&pod, false);
+        assert_eq!(milli(&limits, "cpu"), 1100);
+        assert_eq!(milli(&limits, "memory"), 0);
+    }
 }

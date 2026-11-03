@@ -1,86 +1,5 @@
 {
-  "events": [
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:19:06Z",
-      "last": "2026-11-03T11:19:06Z",
-      "message": "Node twigo-overviews-control-plane status is now: NodeReady",
-      "reason": "NodeReady",
-      "source": "kubelet",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:18:56.384998Z",
-      "last": "2026-11-03T11:18:56.384998Z",
-      "message": "",
-      "reason": "Starting",
-      "source": "kube-proxy",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:18:55Z",
-      "last": "2026-11-03T11:18:55Z",
-      "message": "Node twigo-overviews-control-plane event: Registered Node twigo-overviews-control-plane in Controller",
-      "reason": "RegisteredNode",
-      "source": "node-controller",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:18:53Z",
-      "last": "2026-11-03T11:18:53Z",
-      "message": "Node twigo-overviews-control-plane status is now: NodeHasSufficientMemory",
-      "reason": "NodeHasSufficientMemory",
-      "source": "kubelet",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:18:53Z",
-      "last": "2026-11-03T11:18:53Z",
-      "message": "Node twigo-overviews-control-plane status is now: NodeHasNoDiskPressure",
-      "reason": "NodeHasNoDiskPressure",
-      "source": "kubelet",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:18:53Z",
-      "last": "2026-11-03T11:18:53Z",
-      "message": "Node twigo-overviews-control-plane status is now: NodeHasSufficientPID",
-      "reason": "NodeHasSufficientPID",
-      "source": "kubelet",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:18:53Z",
-      "last": "2026-11-03T11:18:53Z",
-      "message": "Updated Node Allocatable limit across pods",
-      "reason": "NodeAllocatableEnforced",
-      "source": "kubelet",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:18:53Z",
-      "last": "2026-11-03T11:18:53Z",
-      "message": "Starting kubelet.",
-      "reason": "Starting",
-      "source": "kubelet",
-      "type": "Normal"
-    }
-  ],
+  "events": [],
   "facts": [
     {
       "found": {
@@ -5920,7 +5839,7 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T12:15:41Z"
+                  "time": "2026-11-03T12:55:30Z"
                 }
               ],
               "name": "api-c8894f678-vmnxl",
@@ -5935,7 +5854,7 @@
                   "uid": "d5a58dfc-d7c6-4945-8e5f-943c1c450598"
                 }
               ],
-              "resourceVersion": "7690",
+              "resourceVersion": "12647",
               "uid": "1b638b55-cff7-4253-99ee-2baa87001aea"
             },
             "spec": {
@@ -6048,7 +5967,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:14:32Z",
+                  "lastTransitionTime": "2026-11-03T12:54:28Z",
                   "message": "containers with unready status: [api]",
                   "observedGeneration": 1,
                   "reason": "ContainersNotReady",
@@ -6057,7 +5976,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:14:32Z",
+                  "lastTransitionTime": "2026-11-03T12:54:28Z",
                   "message": "containers with unready status: [api]",
                   "observedGeneration": 1,
                   "reason": "ContainersNotReady",
@@ -6074,27 +5993,27 @@
               ],
               "containerStatuses": [
                 {
-                  "containerID": "containerd://a52fc20b5f4647e3317e71c75b6df266ffb098742a6ff690c5aee6035198a89d",
+                  "containerID": "containerd://f008a57fa5632bf105800d4ad1e4c76253b56324582ad893344dba8c93b7b96c",
                   "image": "docker.io/kindest/local-path-helper:v20260131-7181c60a",
                   "imageID": "sha256:8f375e9f935137d1f92bd9bbfb860bbb6862a90c54e086f2696ce2385d0a5b78",
                   "lastState": {
                     "terminated": {
-                      "containerID": "containerd://a52fc20b5f4647e3317e71c75b6df266ffb098742a6ff690c5aee6035198a89d",
+                      "containerID": "containerd://f008a57fa5632bf105800d4ad1e4c76253b56324582ad893344dba8c93b7b96c",
                       "exitCode": 1,
-                      "finishedAt": "2026-11-03T12:14:31Z",
+                      "finishedAt": "2026-11-03T12:54:27Z",
                       "message": "panic: dial tcp 10.96.0.20:5432: connect: connection refused\n",
                       "reason": "Error",
-                      "startedAt": "2026-11-03T12:14:31Z"
+                      "startedAt": "2026-11-03T12:54:27Z"
                     }
                   },
                   "name": "api",
                   "ready": false,
                   "resources": {},
-                  "restartCount": 4,
+                  "restartCount": 13,
                   "started": false,
                   "state": {
                     "waiting": {
-                      "message": "back-off 1m20s restarting failed container=api pod=api-c8894f678-vmnxl_overview(1b638b55-cff7-4253-99ee-2baa87001aea)",
+                      "message": "back-off 5m0s restarting failed container=api pod=api-c8894f678-vmnxl_overview(1b638b55-cff7-4253-99ee-2baa87001aea)",
                       "reason": "CrashLoopBackOff"
                     }
                   },
@@ -6937,12 +6856,12 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T12:13:39Z"
+                  "time": "2026-11-03T12:54:33Z"
                 }
               ],
               "name": "pull",
               "namespace": "overview",
-              "resourceVersion": "7424",
+              "resourceVersion": "12532",
               "uid": "1ad7b2f9-68b1-4215-89dd-1ff5c4486e16"
             },
             "spec": {
@@ -7122,14 +7041,14 @@
             "apiVersion": "v1",
             "kind": "Pod",
             "metadata": {
-              "creationTimestamp": "2026-11-03T12:14:00Z",
-              "generateName": "report-29895134-",
+              "creationTimestamp": "2026-11-03T12:57:00Z",
+              "generateName": "report-29895177-",
               "generation": 1,
               "labels": {
-                "batch.kubernetes.io/controller-uid": "59311383-6aff-4814-b0a8-ee130a66e662",
-                "batch.kubernetes.io/job-name": "report-29895134",
-                "controller-uid": "59311383-6aff-4814-b0a8-ee130a66e662",
-                "job-name": "report-29895134"
+                "batch.kubernetes.io/controller-uid": "58a702d2-d70d-4a43-8dc6-4e2148755bcc",
+                "batch.kubernetes.io/job-name": "report-29895177",
+                "controller-uid": "58a702d2-d70d-4a43-8dc6-4e2148755bcc",
+                "job-name": "report-29895177"
               },
               "managedFields": [
                 {
@@ -7147,7 +7066,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"59311383-6aff-4814-b0a8-ee130a66e662\"}": {}
+                        "k:{\"uid\":\"58a702d2-d70d-4a43-8dc6-4e2148755bcc\"}": {}
                       }
                     },
                     "f:spec": {
@@ -7174,7 +7093,7 @@
                   },
                   "manager": "kube-controller-manager",
                   "operation": "Update",
-                  "time": "2026-11-03T12:14:00Z"
+                  "time": "2026-11-03T12:57:00Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -7231,7 +7150,7 @@
                       "f:podIP": {},
                       "f:podIPs": {
                         ".": {},
-                        "k:{\"ip\":\"10.244.0.55\"}": {
+                        "k:{\"ip\":\"10.244.0.98\"}": {
                           ".": {},
                           "f:ip": {}
                         }
@@ -7243,10 +7162,10 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T12:14:01Z"
+                  "time": "2026-11-03T12:57:01Z"
                 }
               ],
-              "name": "report-29895134-jnswm",
+              "name": "report-29895177-n4wct",
               "namespace": "overview",
               "ownerReferences": [
                 {
@@ -7254,12 +7173,12 @@
                   "blockOwnerDeletion": true,
                   "controller": true,
                   "kind": "Job",
-                  "name": "report-29895134",
-                  "uid": "59311383-6aff-4814-b0a8-ee130a66e662"
+                  "name": "report-29895177",
+                  "uid": "58a702d2-d70d-4a43-8dc6-4e2148755bcc"
                 }
               ],
-              "resourceVersion": "7486",
-              "uid": "38897d3c-c523-41e2-b047-21f6238c099a"
+              "resourceVersion": "12841",
+              "uid": "c6e2de25-2949-4b70-9ed4-9c70e1af7e79"
             },
             "spec": {
               "containers": [
@@ -7278,7 +7197,7 @@
                   "volumeMounts": [
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-58x92",
+                      "name": "kube-api-access-fd7c7",
                       "readOnly": true
                     }
                   ]
@@ -7314,7 +7233,7 @@
               ],
               "volumes": [
                 {
-                  "name": "kube-api-access-58x92",
+                  "name": "kube-api-access-fd7c7",
                   "projected": {
                     "defaultMode": 420,
                     "sources": [
@@ -7357,7 +7276,7 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:14:01Z",
+                  "lastTransitionTime": "2026-11-03T12:57:01Z",
                   "message": "pod sandbox is not ready",
                   "observedGeneration": 1,
                   "reason": "PodSandboxNotReady",
@@ -7366,7 +7285,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:14:00Z",
+                  "lastTransitionTime": "2026-11-03T12:57:00Z",
                   "observedGeneration": 1,
                   "reason": "PodCompleted",
                   "status": "True",
@@ -7374,7 +7293,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:14:00Z",
+                  "lastTransitionTime": "2026-11-03T12:57:00Z",
                   "observedGeneration": 1,
                   "reason": "PodCompleted",
                   "status": "False",
@@ -7382,7 +7301,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:14:00Z",
+                  "lastTransitionTime": "2026-11-03T12:57:00Z",
                   "observedGeneration": 1,
                   "reason": "PodCompleted",
                   "status": "False",
@@ -7390,7 +7309,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:14:00Z",
+                  "lastTransitionTime": "2026-11-03T12:57:00Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodScheduled"
@@ -7398,7 +7317,7 @@
               ],
               "containerStatuses": [
                 {
-                  "containerID": "containerd://7a7bac58f4c12e29ea24b0d5f642709d817b419b666f7ace7aa6a9943a6b868f",
+                  "containerID": "containerd://07e71b0080252250f6508a84aa3ec178e86bcb89960a798469cc6e32a8f45cf8",
                   "image": "docker.io/kindest/local-path-helper:v20260131-7181c60a",
                   "imageID": "sha256:8f375e9f935137d1f92bd9bbfb860bbb6862a90c54e086f2696ce2385d0a5b78",
                   "lastState": {},
@@ -7409,11 +7328,11 @@
                   "started": false,
                   "state": {
                     "terminated": {
-                      "containerID": "containerd://7a7bac58f4c12e29ea24b0d5f642709d817b419b666f7ace7aa6a9943a6b868f",
+                      "containerID": "containerd://07e71b0080252250f6508a84aa3ec178e86bcb89960a798469cc6e32a8f45cf8",
                       "exitCode": 0,
-                      "finishedAt": "2026-11-03T12:14:00Z",
+                      "finishedAt": "2026-11-03T12:57:00Z",
                       "reason": "Completed",
-                      "startedAt": "2026-11-03T12:14:00Z"
+                      "startedAt": "2026-11-03T12:57:00Z"
                     }
                   },
                   "user": {
@@ -7428,7 +7347,7 @@
                   "volumeMounts": [
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-58x92",
+                      "name": "kube-api-access-fd7c7",
                       "readOnly": true,
                       "recursiveReadOnly": "Disabled"
                     }
@@ -7443,29 +7362,29 @@
               ],
               "observedGeneration": 1,
               "phase": "Succeeded",
-              "podIP": "10.244.0.55",
+              "podIP": "10.244.0.98",
               "podIPs": [
                 {
-                  "ip": "10.244.0.55"
+                  "ip": "10.244.0.98"
                 }
               ],
               "qosClass": "BestEffort",
               "resources": {},
-              "startTime": "2026-11-03T12:14:00Z"
+              "startTime": "2026-11-03T12:57:00Z"
             }
           },
           {
             "apiVersion": "v1",
             "kind": "Pod",
             "metadata": {
-              "creationTimestamp": "2026-11-03T12:15:00Z",
-              "generateName": "report-29895135-",
+              "creationTimestamp": "2026-11-03T12:58:00Z",
+              "generateName": "report-29895178-",
               "generation": 1,
               "labels": {
-                "batch.kubernetes.io/controller-uid": "d928f308-14c2-4612-a16f-0534aabc9def",
-                "batch.kubernetes.io/job-name": "report-29895135",
-                "controller-uid": "d928f308-14c2-4612-a16f-0534aabc9def",
-                "job-name": "report-29895135"
+                "batch.kubernetes.io/controller-uid": "94d53e79-a1a7-4b14-8603-e1bdb7541399",
+                "batch.kubernetes.io/job-name": "report-29895178",
+                "controller-uid": "94d53e79-a1a7-4b14-8603-e1bdb7541399",
+                "job-name": "report-29895178"
               },
               "managedFields": [
                 {
@@ -7483,7 +7402,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"d928f308-14c2-4612-a16f-0534aabc9def\"}": {}
+                        "k:{\"uid\":\"94d53e79-a1a7-4b14-8603-e1bdb7541399\"}": {}
                       }
                     },
                     "f:spec": {
@@ -7510,7 +7429,7 @@
                   },
                   "manager": "kube-controller-manager",
                   "operation": "Update",
-                  "time": "2026-11-03T12:15:00Z"
+                  "time": "2026-11-03T12:58:00Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -7567,7 +7486,7 @@
                       "f:podIP": {},
                       "f:podIPs": {
                         ".": {},
-                        "k:{\"ip\":\"10.244.0.56\"}": {
+                        "k:{\"ip\":\"10.244.0.99\"}": {
                           ".": {},
                           "f:ip": {}
                         }
@@ -7579,10 +7498,10 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T12:15:02Z"
+                  "time": "2026-11-03T12:58:01Z"
                 }
               ],
-              "name": "report-29895135-lrtbw",
+              "name": "report-29895178-v22rs",
               "namespace": "overview",
               "ownerReferences": [
                 {
@@ -7590,12 +7509,12 @@
                   "blockOwnerDeletion": true,
                   "controller": true,
                   "kind": "Job",
-                  "name": "report-29895135",
-                  "uid": "d928f308-14c2-4612-a16f-0534aabc9def"
+                  "name": "report-29895178",
+                  "uid": "94d53e79-a1a7-4b14-8603-e1bdb7541399"
                 }
               ],
-              "resourceVersion": "7619",
-              "uid": "f0b2ac14-fe37-4093-a47d-ce1095a52388"
+              "resourceVersion": "12961",
+              "uid": "675e2520-8f43-4b10-b71d-47340026ac77"
             },
             "spec": {
               "containers": [
@@ -7614,7 +7533,7 @@
                   "volumeMounts": [
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-rgslx",
+                      "name": "kube-api-access-c6x5l",
                       "readOnly": true
                     }
                   ]
@@ -7650,7 +7569,7 @@
               ],
               "volumes": [
                 {
-                  "name": "kube-api-access-rgslx",
+                  "name": "kube-api-access-c6x5l",
                   "projected": {
                     "defaultMode": 420,
                     "sources": [
@@ -7693,7 +7612,7 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:15:02Z",
+                  "lastTransitionTime": "2026-11-03T12:58:01Z",
                   "message": "pod sandbox is not ready",
                   "observedGeneration": 1,
                   "reason": "PodSandboxNotReady",
@@ -7702,7 +7621,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:15:00Z",
+                  "lastTransitionTime": "2026-11-03T12:58:00Z",
                   "observedGeneration": 1,
                   "reason": "PodCompleted",
                   "status": "True",
@@ -7710,7 +7629,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:15:01Z",
+                  "lastTransitionTime": "2026-11-03T12:58:00Z",
                   "observedGeneration": 1,
                   "reason": "PodCompleted",
                   "status": "False",
@@ -7718,7 +7637,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:15:01Z",
+                  "lastTransitionTime": "2026-11-03T12:58:00Z",
                   "observedGeneration": 1,
                   "reason": "PodCompleted",
                   "status": "False",
@@ -7726,7 +7645,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:15:00Z",
+                  "lastTransitionTime": "2026-11-03T12:58:00Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodScheduled"
@@ -7734,7 +7653,7 @@
               ],
               "containerStatuses": [
                 {
-                  "containerID": "containerd://2c30087289b35df4002ebf5c9416cc93581650f2cbc1ab28800bc2c64622ad27",
+                  "containerID": "containerd://1a34d238abc3a917e1a959215f52debcafc1eed1e827844c5d53505ae54e88a8",
                   "image": "docker.io/kindest/local-path-helper:v20260131-7181c60a",
                   "imageID": "sha256:8f375e9f935137d1f92bd9bbfb860bbb6862a90c54e086f2696ce2385d0a5b78",
                   "lastState": {},
@@ -7745,11 +7664,11 @@
                   "started": false,
                   "state": {
                     "terminated": {
-                      "containerID": "containerd://2c30087289b35df4002ebf5c9416cc93581650f2cbc1ab28800bc2c64622ad27",
+                      "containerID": "containerd://1a34d238abc3a917e1a959215f52debcafc1eed1e827844c5d53505ae54e88a8",
                       "exitCode": 0,
-                      "finishedAt": "2026-11-03T12:15:00Z",
+                      "finishedAt": "2026-11-03T12:58:00Z",
                       "reason": "Completed",
-                      "startedAt": "2026-11-03T12:15:00Z"
+                      "startedAt": "2026-11-03T12:58:00Z"
                     }
                   },
                   "user": {
@@ -7764,7 +7683,7 @@
                   "volumeMounts": [
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-rgslx",
+                      "name": "kube-api-access-c6x5l",
                       "readOnly": true,
                       "recursiveReadOnly": "Disabled"
                     }
@@ -7779,15 +7698,15 @@
               ],
               "observedGeneration": 1,
               "phase": "Succeeded",
-              "podIP": "10.244.0.56",
+              "podIP": "10.244.0.99",
               "podIPs": [
                 {
-                  "ip": "10.244.0.56"
+                  "ip": "10.244.0.99"
                 }
               ],
               "qosClass": "BestEffort",
               "resources": {},
-              "startTime": "2026-11-03T12:15:00Z"
+              "startTime": "2026-11-03T12:58:00Z"
             }
           },
           {
@@ -9162,7 +9081,7 @@
                   },
                   "manager": "kubelet",
                   "operation": "Update",
-                  "time": "2026-11-03T12:15:41Z"
+                  "time": "2026-11-03T12:58:45Z"
                 }
               ],
               "name": "twigo-overviews-control-plane",
@@ -9175,13 +9094,13 @@
                   "uid": "e6f2f01c-db59-43e1-8768-b9600f2f77b8"
                 }
               ],
-              "resourceVersion": "7691",
+              "resourceVersion": "13039",
               "uid": "96856fb8-8c7c-412e-8130-9eb41df7d8a1"
             },
             "spec": {
               "holderIdentity": "twigo-overviews-control-plane",
               "leaseDurationSeconds": 40,
-              "renewTime": "2026-11-03T12:15:41.878841Z"
+              "renewTime": "2026-11-03T12:58:45.400262Z"
             }
           }
         ],
@@ -9193,6 +9112,20 @@
         "namespace": "kube-node-lease",
         "namespaced": true,
         "resource": "leases",
+        "version": "v1"
+      }
+    },
+    {
+      "found": {
+        "objects": [],
+        "state": "listed"
+      },
+      "need": {
+        "fieldSelector": "spec.nodeName=twigo-overviews-control-plane",
+        "group": "resource.k8s.io",
+        "namespace": null,
+        "namespaced": false,
+        "resource": "resourceslices",
         "version": "v1"
       }
     }
@@ -9305,11 +9238,11 @@
           "manager": "kubelet",
           "operation": "Update",
           "subresource": "status",
-          "time": "2026-11-03T12:15:00Z"
+          "time": "2026-11-03T12:55:46Z"
         }
       ],
       "name": "twigo-overviews-control-plane",
-      "resourceVersion": "7609",
+      "resourceVersion": "12674",
       "uid": "e6f2f01c-db59-43e1-8768-b9600f2f77b8"
     },
     "spec": {
@@ -9352,7 +9285,7 @@
       },
       "conditions": [
         {
-          "lastHeartbeatTime": "2026-11-03T12:15:00Z",
+          "lastHeartbeatTime": "2026-11-03T12:55:46Z",
           "lastTransitionTime": "2026-11-03T11:18:50Z",
           "message": "kubelet has sufficient memory available",
           "reason": "KubeletHasSufficientMemory",
@@ -9360,7 +9293,7 @@
           "type": "MemoryPressure"
         },
         {
-          "lastHeartbeatTime": "2026-11-03T12:15:00Z",
+          "lastHeartbeatTime": "2026-11-03T12:55:46Z",
           "lastTransitionTime": "2026-11-03T11:18:50Z",
           "message": "kubelet has no disk pressure",
           "reason": "KubeletHasNoDiskPressure",
@@ -9368,7 +9301,7 @@
           "type": "DiskPressure"
         },
         {
-          "lastHeartbeatTime": "2026-11-03T12:15:00Z",
+          "lastHeartbeatTime": "2026-11-03T12:55:46Z",
           "lastTransitionTime": "2026-11-03T11:18:50Z",
           "message": "kubelet has sufficient PID available",
           "reason": "KubeletHasSufficientPID",
@@ -9376,7 +9309,7 @@
           "type": "PIDPressure"
         },
         {
-          "lastHeartbeatTime": "2026-11-03T12:15:00Z",
+          "lastHeartbeatTime": "2026-11-03T12:55:46Z",
           "lastTransitionTime": "2026-11-03T11:19:06Z",
           "message": "kubelet is posting ready status",
           "reason": "KubeletReady",

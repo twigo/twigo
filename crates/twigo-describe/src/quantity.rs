@@ -50,7 +50,10 @@ impl Quantity {
                 if power >= 0 { (ten, 1) } else { (1, ten) }
             }
         };
-        let milli = div_ceil(digits.checked_mul(1000)?.checked_mul(num)?, scale * den);
+        let milli = div_ceil(
+            digits.checked_mul(1000)?.checked_mul(num)?,
+            scale.checked_mul(den)?,
+        );
         Some(Quantity(if negative { -milli } else { milli }))
     }
 
@@ -106,7 +109,15 @@ mod tests {
                 "{text}"
             );
         }
-        for text in ["", "Gi", "1.2.3", "1x", "abc"] {
+        for text in [
+            "",
+            "Gi",
+            "1.2.3",
+            "1x",
+            "abc",
+            "0.000000000000000000000000000001n",
+            "1.0000000000e-30",
+        ] {
             assert_eq!(Quantity::parse(text), None, "{text}");
         }
         assert_eq!(Quantity::parse("1500m").map(Quantity::value), Some(2));
