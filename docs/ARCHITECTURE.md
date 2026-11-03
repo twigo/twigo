@@ -761,10 +761,24 @@ Extensions add commands, not prefixes.
 
 - **Logs.**
   A virtualized line list with ANSI parsing, not xterm.
-  - The backing store is a ring buffer in Rust, bounded by lines and bytes, with a `dropped` marker as in legacy.
-  - Search is done in Rust (regex) and returns a match index.
+  - A logs tab is a session in `twigo-sessions` over a pod, or over the pods a workload controls by their controller reference: a Deployment's through its ReplicaSets, a CronJob's through its Jobs, a ReplicaSet's, StatefulSet's, DaemonSet's or Job's directly.
+    The hub follows them as Object upstreams, so their containers' states come with them; other kinds are refused.
+    Each chosen container is a stream, ten at most per tab and the newest pods first, so one workload cannot take the cluster's 32 followed logs (3.2); the others wait as `OverLimit`.
+    Pods that come after the first listing add a `Joined` entry with their controller, and those that go a `Left` entry.
+  - The backing store is a buffer in Rust that merges every stream's entries in time order, ties by arrival, each with an id it keeps while buffered.
+    It keeps the last 50,000 entries and 32 MiB of their text, as the owner decided on 2026-11-03, and once it has dropped any, one `Dropped` entry comes first.
+    50,000 lines of ten streams with 139 bytes of text on average take 12.5 MiB, 261 bytes a line, and lines of 700 bytes reach the bound of their text at 47,899 lines in 37.8 MiB (`cargo run --release -p twigo-sessions --example logs_memory`, and with `561`, on an Apple M4 Max, 2026-11-03).
+  - A line's level comes from what it says, not from its colours: a JSON object's `level`, `lvl`, `severity`, `levelname` or `log.level`, pino's numbers included, and a JSON object's fields alone.
+    Otherwise logfmt's `level=` or `lvl=`, else klog's `E1103`, else a level word among the first four words, alone, in brackets or before a colon, after the times, numbers and brackets before it.
+    The first other word starts a message, which says no level, as in `No error found`; fatal, critical and panic count as errors.
+  - Escapes leave their text; SGR runs come as styles in UTF-16 units, 256 and true colours as the nearest of the sixteen in the VGA palette.
+  - The view's filter is the list's (3.4), its search marks its matches and lists the last 10,000 with an exact count, and its histogram counts the lines it keeps, its range aside, in 60 spans of 1 s to a day that reach back from the buffer's last line.
   - Supported: follow, wrap, timestamps, previous container, download, and switching between containers.
-  - On EOF the stream reopens with `sinceTime` set to the last timestamp and drops duplicates.
+  - A stream asks for `timestamps=true` and follows the instance the kubelet reads, the running one or else the one that ended last ([`validateContainerLogStatus`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/pkg/kubelet/kubelet_pods.go#L1547)).
+    When the server ends it while the container runs, or its connection is retired or abandoned, it reopens with `sinceTime` at its last line's second, the precision the API server passes on ([`LogLocation`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/pkg/registry/core/pod/strategy.go#L672)), and skips the lines up to its last one, those at that time counted.
+    Once the status says the instance ended, an `Ended` entry with its exit code, its reason and, in a crash loop's back-off, its next start follows the instance's last line, and the stream reads the next instance from its start, until the restart policy runs the container no more.
+    The kubelet sends a log's headers before it reads ([`GetKubeletContainerLogs`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/pkg/kubelet/kubelet_pods.go#L1660-L1665)), so a line without a time is the kubelet saying why it cannot read the instance, which the stream shows as its error.
+  - A container's findings in Diagnostics say whether it has a previous instance and carry the last line of the one that ended last, read once per restart; in a quick crash loop the status may name as the previous instance one the kubelet has removed, so that line is read with `previous` only while a new instance runs.
   - Designed with the owner on 2026-11-03 ([research](research/workbench-design.md)), for step 10:
     - a logs tab follows an owner, not a pod: `deployment auth-api` merges its pods' lines and picks up the new pods of a rollout, since a tab tied to one pod dies with each rollout (lens#8163); watch the log budget (3.2);
     - one toolbar: the pods and container, a time range, follow, wrap and timestamps, a level filter, a filter that keeps only matching lines, and apart from it a search that steps through matches as `3 of 5`;

@@ -1,7 +1,7 @@
-//! A session's buffer (decision 24): the entries of every stream in time
-//! order, each with an id it keeps while buffered, bounded by lines and
-//! bytes of text, oldest out first, with one `Dropped` entry before them
-//! once any went.
+//! A session's buffer (ARCHITECTURE 4.6): the entries of every stream in
+//! time order, each with an id it keeps while buffered, bounded by lines
+//! and bytes of text, oldest out first, with one `Dropped` entry before
+//! them once any went.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
