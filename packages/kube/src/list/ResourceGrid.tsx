@@ -252,7 +252,7 @@ function Grid({
   const filter = JSON.stringify([
     text,
     picked ?? null,
-    [...query.namespaces].sort(),
+    resource.namespaced ? [...query.namespaces].sort() : [],
   ]);
   useEffect(() => {
     selection.filter(uri, filter);

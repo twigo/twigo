@@ -602,6 +602,27 @@ const pinButton = (label: string) =>
   screen.getByRole("button", { name: label });
 const explorer = () => screen.getByRole("tree", { name: "Resources" });
 
+test("a cluster-scoped list keeps its marks as the namespace scope changes", async () => {
+  const workbench = await openList(undefined, "k8s-list://prod-eu/v1/nodes");
+  const before = rows().map((row) => row.textContent);
+  fireEvent.click(
+    within(rows()[0] ?? document.body).getByRole("checkbox", {
+      name: "Mark row",
+    }),
+  );
+  await settle(1);
+  expect(markBar()?.textContent).toContain("1 marked");
+  act(() => {
+    workbench.spaces.update("prod-eu", (state) => ({
+      ...state,
+      namespaces: ["auth"],
+    }));
+  });
+  await settle();
+  expect(rows().map((row) => row.textContent)).toEqual(before);
+  expect(markBar()?.textContent).toContain("1 marked");
+});
+
 test("the pin keeps the list with its namespaces, text and health, opens it so, and unpins on a second press", async () => {
   const workbench = await openList();
   act(() => {
