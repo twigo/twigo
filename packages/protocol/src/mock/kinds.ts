@@ -34,6 +34,8 @@ export interface MockKind {
   readonly columns: readonly Column[];
   /** The fields its rows can be selected by. */
   readonly fields: readonly string[];
+  /** Old names of fields, as conversion maps them. */
+  readonly aliases?: Readonly<Record<string, string>>;
   /** The cells follow `queryColumns(columns, query)`: Namespace second when the list shows it. */
   rows(cluster: Cluster, withNamespace: boolean): MockRow[];
 }
@@ -57,8 +59,10 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
       "spec.hostNetwork",
       "status.phase",
       "status.podIP",
+      "status.podIPs",
       "status.nominatedNodeName",
     ],
+    aliases: { "spec.host": "spec.nodeName" },
     rows: (cluster, withNamespace) =>
       cluster.pods.map((pod) => ({
         id: pod.id,
@@ -177,20 +181,23 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
   },
 };
 
+/** Statuses of a pod whose containers have never run. */
+const PENDING: ReadonlySet<string> = new Set([
+  "Pending",
+  "ContainerCreating",
+  "ImagePullBackOff",
+]);
+
 /**
  * What a pod is selectable by, as kube-apiserver selects it (kubernetes
  * v1.37.1 `pkg/registry/core/pod/strategy.go` `ToSelectableFields`), read
- * from what the mock knows of it: a crash loop runs, the rest waits.
+ * from what the mock knows of it. Its pods restart always, so one whose
+ * containers have run stays Running whatever they did, as the kubelet's
+ * `getPhase` keeps it; `status.podIPs`, which conversion accepts but the
+ * set lacks, is empty.
  */
 function podFields(pod: Pod): Readonly<Record<string, string>> {
-  const phase =
-    pod.status === "Completed"
-      ? "Succeeded"
-      : pod.status === "Error"
-        ? "Failed"
-        : ["Running", "CrashLoopBackOff"].includes(pod.status)
-          ? "Running"
-          : "Pending";
+  const phase = PENDING.has(pod.status) ? "Pending" : "Running";
   return {
     "metadata.name": pod.name,
     "metadata.namespace": pod.namespace,
@@ -201,6 +208,7 @@ function podFields(pod: Pod): Readonly<Record<string, string>> {
     "spec.hostNetwork": "false",
     "status.phase": phase,
     "status.podIP": phase === "Pending" ? "" : pod.ip,
+    "status.podIPs": "",
     "status.nominatedNodeName": "",
   };
 }

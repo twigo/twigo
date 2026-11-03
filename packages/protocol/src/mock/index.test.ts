@@ -6,8 +6,10 @@ import type {
   ObjectBatch,
   ObjectParts,
 } from "../generated";
-import { Cluster } from "./cluster";
+import { Cluster, deploymentOf } from "./cluster";
 import { createMockBackend, type MockScenario } from "./index";
+import { KINDS } from "./kinds";
+import { MockObject } from "./objects";
 import { natural } from "./query";
 
 function query(rest: Partial<ListQuery> = {}): ListQuery {
@@ -485,6 +487,70 @@ test("a field selector keeps the pods of one node, and one on a field pods lack 
     },
   });
   expect(wrong.batches[0]?.total).toBe(0);
+});
+
+test("a field selector takes old names and fields the server matches as empty, and refuses what does not parse", async () => {
+  const pods = new Cluster("prod-eu", 5000, Date.now()).pods;
+  const node = pods[0]?.node ?? "";
+  const old = await open(
+    "ready",
+    query({ fieldSelector: `spec.host=${node}` }),
+  );
+  expect(old.batches[0]?.total).toBe(
+    pods.filter((pod) => pod.node === node).length,
+  );
+  const empty = await open("ready", query({ fieldSelector: "status.podIPs=" }));
+  expect(empty.batches[0]?.total).toBe(5000);
+  const completed = pods.find((pod) => pod.status === "Completed");
+  const running = await open(
+    "ready",
+    query({
+      fieldSelector: `status.phase=Running,metadata.name=${completed?.name ?? ""}`,
+    }),
+  );
+  expect(running.batches[0]?.total).toBe(1);
+  const broken = await open("ready", query({ fieldSelector: "spec.nodeName" }));
+  expect(broken.batches[0]?.status).toMatchObject({
+    state: "error",
+    error: { kind: "invalidInput" },
+  });
+});
+
+test("a pod that churn puts in a Deployment with a new hash joins its live list", () => {
+  const cluster = new Cluster("prod-eu", 5000, Date.now());
+  const pod = cluster.pods[0];
+  if (!pod) throw new Error("a pod");
+  const deployment = deploymentOf(pod);
+  let owners: readonly string[] = [];
+  new MockObject(
+    {
+      space: "prod-eu",
+      gvr: { group: "apps", version: "v1", resource: "deployments" },
+      namespaced: true,
+      namespace: pod.namespace,
+      name: deployment,
+    },
+    OVERVIEW,
+    cluster,
+    (batch) => {
+      for (const section of batch.overview?.sections ?? [])
+        for (const block of section.blocks)
+          if (block.type === "list") owners = block.owners ?? [];
+    },
+  );
+  vi.advanceTimersByTime(1);
+  cluster.pods.push({
+    ...pod,
+    id: `${pod.id}-new`,
+    name: `${deployment}-zzzzzzzz-new01`,
+    generateName: `${deployment}-zzzzzzzz-`,
+    templateHash: "zzzzzzzz",
+  });
+  const rows = KINDS["/v1/pods"]?.rows(cluster, false) ?? [];
+  const listed = rows.filter(
+    (row) => row.controller !== null && owners.includes(row.controller),
+  );
+  expect(listed.map((row) => row.id)).toContain(`${pod.id}-new`);
 });
 
 const OVERVIEW: ObjectParts = {
