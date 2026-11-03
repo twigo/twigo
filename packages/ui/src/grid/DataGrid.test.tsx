@@ -205,6 +205,17 @@ test("once the cursor's row is gone, Enter and X act on no other row", () => {
   expect(handlers.onMark).not.toHaveBeenCalled();
 });
 
+test("a right click opens a row's menu, but neither on a group header nor on a row still loading", () => {
+  const menu = [[{ id: "delete", label: "Delete", run: vi.fn() }]];
+  grid({ ...list([...ITEMS, undefined]), selected: "a1", menu });
+  fireEvent.contextMenu(screen.getByText("edge"));
+  expect(screen.queryByRole("menu")).toBeNull();
+  fireEvent.contextMenu(nth(screen.getAllByRole("row"), ITEMS.length + 1));
+  expect(screen.queryByRole("menu")).toBeNull();
+  fireEvent.contextMenu(screen.getByText("gateway-1"));
+  expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
+});
+
 test("a move down scrolls the cursor's row clear of the bottom, a move up clear of the sticky header", () => {
   const { controller } = grid({ ...list(PODS), selected: "p22" });
   const element = scrollable(PODS.length);

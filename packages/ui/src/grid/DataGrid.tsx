@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type SyntheticEvent,
+} from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronDown, ChevronRight, Ellipsis } from "lucide-react";
 import { cn } from "../lib/cn";
@@ -273,6 +280,11 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     (marking ? MARK_WIDTH : 0) +
     columns.reduce((sum, column) => sum + widthOf(column), 0) +
     ACTIONS_WIDTH;
+  // The menu's trigger wraps every row, and opens the selected row's menu
+  // unless a row prevents the event's default.
+  const withoutMenu = (event: SyntheticEvent) => {
+    event.preventDefault();
+  };
 
   const rows = virtual.map((at) => {
     const target = item(at.index);
@@ -286,6 +298,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
           key={`pending-${String(at.index)}`}
           role="row"
           aria-rowindex={at.index + 2}
+          onContextMenu={withoutMenu}
           className="absolute inset-x-0 top-0 grid items-center border-b border-border-subtle"
           style={{ ...place, gridTemplateColumns: template }}
         >
@@ -312,6 +325,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
             setCursor(target.id);
             onToggleGroup?.(target.id);
           }}
+          onContextMenu={withoutMenu}
           className={cn(
             "absolute inset-x-0 top-0 flex items-center border-b border-border bg-shell text-xs hover:bg-row-hover",
             isCursor && "group-focus/grid:bg-selected",
