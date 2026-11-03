@@ -242,6 +242,13 @@ export class MockLogs {
         id: this.#nextId++,
         pod: pod.name,
         time: stamp(now),
+        owner: {
+          group: "apps",
+          version: "v1",
+          kind: "ReplicaSet",
+          namespace: pod.namespace,
+          name: pod.generateName.slice(0, -1),
+        },
         at: now,
       });
       for (const container of this.#chosen(pod)) {

@@ -134,7 +134,7 @@ export function lineItem(
         key,
         icon: LogIn,
         tag: podTag(entry.pod),
-        text: `Pod ${entry.pod} joined`,
+        text: `Pod ${entry.pod} joined${entry.owner ? ` from ${entry.owner.kind} ${entry.owner.name}` : ""}`,
       };
     case "left":
       return {
