@@ -425,9 +425,11 @@ impl Run {
         self.dirty.view = true;
     }
 
-    /// Starts a stream for each chosen container without one, the newest
-    /// pods first, while the tab has fewer than [`STREAMS`]; stops those
-    /// the source no longer chooses. Streams under way keep their places.
+    /// Starts a stream for each chosen container without one, those with
+    /// an instance to read first, then the newest pods, while the tab has
+    /// fewer than [`STREAMS`]; stops those the source no longer chooses.
+    /// Streams under way keep their places, but one with nothing to read
+    /// gives its place up to one that can be read.
     fn plan(&mut self) {
         let mut order: Vec<&Pod> = self
             .pods
@@ -435,20 +437,38 @@ impl Run {
             .filter(|pod| self.reads(&pod.name))
             .collect();
         order.sort_by(|a, b| b.created.cmp(&a.created).then_with(|| a.name.cmp(&b.name)));
-        let wanted: Vec<(Key, &Pod)> = order
+        let previous = self.source.previous;
+        let mut wanted: Vec<(Key, &Pod, bool)> = order
             .into_iter()
             .flat_map(|pod| {
                 plan::chosen(&pod.json, &self.source.containers)
                     .into_iter()
-                    .map(move |container| ((Arc::clone(&pod.uid), container.into()), pod))
+                    .map(move |container| {
+                        let readable = stream::readable(&pod.json, &container, previous);
+                        ((Arc::clone(&pod.uid), container.into()), pod, readable)
+                    })
             })
-            .filter(|(key, _)| !self.finished.contains_key(key))
+            .filter(|(key, ..)| !self.finished.contains_key(key))
             .collect();
+        wanted.sort_by_key(|(.., readable)| !readable);
         self.streams
-            .retain(|key, _| wanted.iter().any(|(wanted, _)| wanted == key));
+            .retain(|key, _| wanted.iter().any(|(wanted, ..)| wanted == key));
+        let lacking = wanted
+            .iter()
+            .filter(|(key, _, readable)| *readable && !self.streams.contains_key(key))
+            .count();
+        let mut yielding = lacking.saturating_sub(STREAMS - self.streams.len());
+        for (key, _, readable) in wanted.iter().rev() {
+            if yielding == 0 {
+                break;
+            }
+            if !readable && self.streams.remove(key).is_some() {
+                yielding -= 1;
+            }
+        }
         let mut started = Vec::new();
         let mut held = self.streams.len();
-        for (key, pod) in wanted {
+        for (key, pod, _) in wanted {
             if held == STREAMS {
                 break;
             }
@@ -778,6 +798,62 @@ mod tests {
                 styles: Box::new([]),
             },
         )
+    }
+
+    /// A pod created `minute` minutes after 10:00 whose container `web`
+    /// runs, or waits to start.
+    fn pod(name: &str, minute: i64, runs: bool) -> Pod {
+        let status = if runs {
+            serde_json::json!({ "name": "web", "containerID": format!("{name}-a"), "state": { "running": {} } })
+        } else {
+            serde_json::json!({ "name": "web", "state": { "waiting": { "reason": "ContainerCreating" } } })
+        };
+        let json = serde_json::json!({
+            "spec": { "containers": [{ "name": "web" }] },
+            "status": { "containerStatuses": [status] },
+        });
+        Pod {
+            uid: name.into(),
+            name: name.into(),
+            generated: None,
+            created: Some(jiff::Timestamp::from_second(1_793_700_000 + minute * 60).unwrap()),
+            version: "1".into(),
+            status: "Running".to_owned(),
+            json: Arc::new(json),
+        }
+    }
+
+    fn followed(run: &Run) -> Vec<String> {
+        let mut names: Vec<String> = run.streams.keys().map(|(uid, _)| uid.to_string()).collect();
+        names.sort();
+        names
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn containers_that_wait_to_start_give_their_places_to_those_that_can_be_read() {
+        let mut run = unconnected("web").await;
+        run.pods = (0..10)
+            .map(|at| pod(&format!("new-{at}"), 10 + at, false))
+            .chain([pod("old", 0, true)])
+            .collect();
+        run.plan();
+        assert_eq!(run.streams.len(), STREAMS);
+        assert!(
+            followed(&run).contains(&"old".to_owned()),
+            "{:?}",
+            followed(&run)
+        );
+        assert!(!followed(&run).contains(&"new-0".to_owned()));
+
+        run.pods.push(pod("older", 0, true));
+        run.plan();
+        assert_eq!(run.streams.len(), STREAMS);
+        let names = followed(&run);
+        assert!(
+            names.contains(&"old".to_owned()) && names.contains(&"older".to_owned()),
+            "{names:?}"
+        );
+        assert!(!names.contains(&"new-1".to_owned()), "{names:?}");
     }
 
     #[tokio::test(start_paused = true)]

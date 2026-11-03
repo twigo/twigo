@@ -763,7 +763,8 @@ Extensions add commands, not prefixes.
   A virtualized line list with ANSI parsing, not xterm.
   - A logs tab is a session in `twigo-sessions` over a pod, or over the pods a workload controls by their controller reference: a Deployment's through its ReplicaSets, a CronJob's through its Jobs, a ReplicaSet's, StatefulSet's, DaemonSet's or Job's directly.
     The hub follows them as Object upstreams, so their containers' states come with them; other kinds are refused.
-    Each chosen container is a stream, ten at most per tab and the newest pods first, so one workload cannot take the cluster's 32 followed logs (3.2); the others wait as `OverLimit`.
+    Each chosen container is a stream, ten at most per tab, so one workload cannot take the cluster's 32 followed logs (3.2); the others wait as `OverLimit`.
+    Containers with an instance to read come first, then the newest pods, and a stream with nothing to read, one that waits to start or has no previous instance to read, gives its place up to one that can be read; one without a previous instance says so as its error.
     Pods that come after the first listing add a `Joined` entry with their controller, and those that go a `Left` entry.
   - The backing store is a buffer in Rust that merges every stream's entries in time order, ties by arrival, each with an id it keeps while buffered.
     It keeps the last 50,000 entries and 32 MiB of their text, as the owner decided on 2026-11-03, and once it has dropped any, one `Dropped` entry comes first.

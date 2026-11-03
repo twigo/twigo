@@ -284,6 +284,18 @@ impl<'a> Status<'a> {
     }
 }
 
+/// Whether the kubelet has an instance of the container to read: the
+/// previous one, or the one it reads now.
+pub fn readable(pod: &Value, container: &str, previous: bool) -> bool {
+    Status::of(pod, container).is_some_and(|status| {
+        if previous {
+            status.previous().is_some()
+        } else {
+            status.current().is_some()
+        }
+    })
+}
+
 /// Whether the kubelet runs the container again after it ended with
 /// `exit_code`: as the pod's restart policy says, a sidecar always, an init
 /// container only after a failure, none once the pod is done or deleted.
@@ -534,10 +546,8 @@ impl Reader {
                         message: format!("{} has no previous instance", self.stream.container),
                     },
                 }));
-                if pod.changed().await.is_err() {
-                    return;
-                }
-                continue;
+                send(Event::Finished);
+                return;
             };
             let id = id.to_owned();
             self.resume.reopen(true);
@@ -1052,6 +1062,21 @@ mod tests {
         let followed = Followed::new(&fake, pod, false);
         followed.until("finished", Followed::finished).await;
         assert!(unreadable(followed.state()), "{:?}", followed.state());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_container_without_a_previous_instance_has_nothing_to_read() {
+        let fake = Fake::default();
+        let followed = Followed::new(&fake, web(running(), json!({})), true);
+        followed.until("finished", Followed::finished).await;
+        assert!(
+            matches!(
+                followed.state(),
+                Some(StreamState::Error { error }) if error.kind == ErrorKind::NotFound
+            ),
+            "{:?}",
+            followed.state()
+        );
     }
 
     #[tokio::test(start_paused = true)]
