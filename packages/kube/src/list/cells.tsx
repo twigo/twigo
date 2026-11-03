@@ -87,7 +87,7 @@ function Name({ name, generated }: { name: string; generated: number | null }) {
   return (
     <span className="inline-flex max-w-full min-w-0 align-bottom">
       <span className="truncate">{name.slice(0, generated)}</span>
-      <span className="shrink-0 text-muted-foreground">
+      <span className="shrink-0 text-muted-foreground-2">
         {name.slice(generated)}
       </span>
     </span>
