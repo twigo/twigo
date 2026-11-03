@@ -273,6 +273,12 @@ export class MockLogs {
       if (followed++ >= granted || !writes(stream.pod)) continue;
       if (stream.restartAt !== undefined) {
         if (now < stream.restartAt) continue;
+        // The kubelet tells the next start as the back-off ends, 60 ms
+        // before the restart after one of 40 s (ARCHITECTURE 4.6).
+        const { pod, container, restartAt } = stream;
+        const told = rfc3339(nanos(restartAt));
+        if (this.#buffer.restarts(pod.name, container, told))
+          this.#dirty.lines = true;
         stream.restartAt = undefined;
         this.#dirty.pods = true;
       }
@@ -337,9 +343,7 @@ export class MockLogs {
         time: rfc3339(at),
         exitCode: 1,
         reason: "Error",
-        restarting: this.#source.previous
-          ? null
-          : rfc3339(at + 40_000_000_000n),
+        restarting: null,
       },
     ];
   }

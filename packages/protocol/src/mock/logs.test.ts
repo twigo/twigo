@@ -150,6 +150,47 @@ test("arrived counts the entries the view kept as they came, and starts again wi
   logs.close();
 });
 
+test("a crash loop's end comes without its next start, which a later batch gives it under the same id", async () => {
+  const cluster = new Cluster("prod-eu", 5000, Date.now());
+  const pod = cluster.pods.find((each) => each.status === "CrashLoopBackOff");
+  expect(pod).toBeDefined();
+  const batches: LogBatch[] = [];
+  const logs = new MockLogs(
+    {
+      space: "prod-eu",
+      gvr: { group: "", version: "v1", resource: "pods" },
+      namespace: pod?.namespace ?? "",
+      name: pod?.name ?? "",
+    },
+    SOURCE,
+    VIEW,
+    cluster,
+    (_session, wanted) => wanted,
+    (batch) => {
+      batches.push(batch);
+      logs.ack(batch.seq);
+    },
+  );
+  logs.setWindow({ type: "tail", count: 200 });
+  await vi.advanceTimersByTimeAsync(120_000);
+  const first = new Map<number, string | null>();
+  const last = new Map<number, { time: string; restarting: string | null }>();
+  for (const entry of batches.flatMap((batch) => batch.window?.entries ?? [])) {
+    if (entry.type !== "ended") continue;
+    if (!first.has(entry.id)) first.set(entry.id, entry.restarting);
+    last.set(entry.id, entry);
+  }
+  expect([...first.values()].every((restarting) => restarting === null)).toBe(
+    true,
+  );
+  const told = [...last.values()].filter((end) => end.restarting !== null);
+  expect(told.length).toBeGreaterThan(0);
+  for (const { time, restarting } of told) {
+    expect(Date.parse(restarting ?? "") - Date.parse(time)).toBe(40_000);
+  }
+  logs.close();
+});
+
 test("a batch counts every source and view change applied, a no-op among them", async () => {
   const { logs, batches } = session();
   await vi.advanceTimersByTimeAsync(1_000);

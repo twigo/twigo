@@ -150,6 +150,21 @@ export class LogBuffer {
     };
   }
 
+  /** Gives a container's last entry its next start while that entry is its end, as the kubelet tells it only later; whether it did. */
+  restarts(pod: string, container: string, restarting: string): boolean {
+    for (let index = this.#entries.length - 1; index >= 0; index--) {
+      const entry = this.#entries[index];
+      if (!entry) continue;
+      const { kind } = entry;
+      if (kind.type !== "line" && kind.type !== "ended") continue;
+      if (kind.pod !== pod || kind.container !== container) continue;
+      if (kind.type === "line") return false;
+      this.#entries[index] = { ...entry, kind: { ...kind, restarting } };
+      return true;
+    }
+    return false;
+  }
+
   /** Empties it for a source read anew; ids go on from where they were. */
   clear(): void {
     this.#entries = [];
