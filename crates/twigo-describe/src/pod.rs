@@ -385,29 +385,17 @@ const CREATING: &[(&str, &str)] = &[
     ),
 ];
 
-/// Containers the kubelet cannot create: one waits as ContainerCreating
-/// or PodInitializing, which the kubelet says of a container it has not
-/// created, none runs, and the pod's newest event is the warning that says
-/// why. A warning that passed, followed by an image's pull, finds nothing;
-/// so does one on a pod that runs or crash-loops, as the kubelet mounts its
-/// volumes again on every sync and warns when that fails, the volume still
-/// mounted (kubernetes v1.37.1 volume_manager.go, operation_generator.go).
+/// A pod whose containers cannot start, as its sandbox is not ready:
+/// PodReadyToStartContainers is False until the sandbox is made with its
+/// network, and the kubelet mounts the volumes before it asks for one
+/// (kubernetes v1.37.1 status/generate.go, kubelet.go SyncPod); and the
+/// pod's newest event is the warning that says why. A pod that runs or
+/// crash-loops has its sandbox, so a remount that fails under it, which the
+/// kubelet tries on every sync, finds nothing; nor does a warning that
+/// passed, followed by an image's pull.
 fn creating(input: &Input<'_>) -> Option<Finding> {
-    let status = &input.object["status"];
-    let statuses: Vec<&Value> = ["initContainerStatuses", "containerStatuses"]
-        .iter()
-        .flat_map(|key| status[*key].as_array().into_iter().flatten())
-        .collect();
-    let uncreated = statuses.iter().any(|container| {
-        matches!(
-            container["state"]["waiting"]["reason"].as_str(),
-            Some("ContainerCreating" | "PodInitializing")
-        )
-    });
-    let running = statuses
-        .iter()
-        .any(|container| container["state"]["running"].is_object());
-    if !uncreated || running {
+    let sandbox = condition(input.object, "PodReadyToStartContainers")?;
+    if sandbox["status"] != "False" {
         return None;
     }
     let event = input.events.events.first()?;

@@ -854,94 +854,87 @@ fn a_pod_that_stops_or_cannot_mount_or_inspect_says_why() {
         shown(field(fields(&stopping, "core.pod"), "Phase")),
         "Terminating"
     );
-    let mounting = edited("pod", |recorded| {
-        recorded.object["status"]["containerStatuses"][0]["state"] =
-            serde_json::json!({ "waiting": { "reason": "ContainerCreating" } });
-        recorded.events = vec![warning(
+    let mount_failed = || {
+        warning(
             "FailedMount",
             "MountVolume.SetUp failed for volume \"settings\" : configmap \"settings\" not found",
-        )];
+        )
+    };
+    let sandbox_failed = || {
+        warning(
+            "FailedCreatePodSandBox",
+            "failed to create pod sandbox: network not ready",
+        )
+    };
+    let mounting = edited("pod", |recorded| {
+        no_sandbox(&mut recorded.object);
+        recorded.object["status"]["containerStatuses"][0]["state"] =
+            serde_json::json!({ "waiting": { "reason": "ContainerCreating" } });
+        recorded.events = vec![mount_failed()];
     });
     assert_eq!(
         titles(&mounting),
         [(Tone::Danger, "A volume of the pod cannot be mounted")]
     );
-    let mounted = edited("pod", |recorded| {
-        recorded.object["status"]["containerStatuses"][0]["state"] =
-            serde_json::json!({ "waiting": { "reason": "ContainerCreating" } });
+    let pulling = edited("pod", |recorded| {
+        no_sandbox(&mut recorded.object);
         recorded.events = vec![
             ObjectEvent {
                 kind: "Normal".to_owned(),
                 ..warning("Pulling", "Pulling image")
             },
-            warning("FailedMount", "configmap \"settings\" not found"),
+            mount_failed(),
         ];
     });
-    assert!(findings(&mounted).is_empty(), "a warning that passed");
-    let initializing = edited("pod", |recorded| {
-        let status = &mut recorded.object["status"];
-        status["containerStatuses"][0]["state"] =
-            serde_json::json!({ "waiting": { "reason": "PodInitializing" } });
-        status["initContainerStatuses"] = serde_json::json!([{
-            "name": "migrate",
-            "state": { "running": { "startedAt": "2026-11-03T10:00:00Z" } },
-        }]);
-        recorded.events = vec![warning("FailedMount", "configmap \"settings\" not found")];
-    });
-    assert!(
-        findings(&initializing).is_empty(),
-        "a running init container mounted"
-    );
-    let restarted = edited("pod", |recorded| {
-        let container = &mut recorded.object["status"]["containerStatuses"][0];
-        container["state"] = serde_json::json!({ "waiting": { "reason": "ContainerCreating" } });
-        container["lastState"] = serde_json::json!({
-            "terminated": { "reason": "ContainerStatusUnknown", "exitCode": 137 },
-        });
-        recorded.events = vec![warning(
-            "FailedCreatePodSandBox",
-            "failed to create pod sandbox: network not ready",
-        )];
-    });
-    assert_eq!(
-        titles(&restarted),
-        [(Tone::Danger, "The pod's sandbox cannot be created")],
-        "a container that ran before its node restarted"
-    );
-    let reinitializing = edited("pod", |recorded| {
-        let status = &mut recorded.object["status"];
-        status["initContainerStatuses"] = serde_json::json!([{
+    assert!(findings(&pulling).is_empty(), "a warning that passed");
+    let rebooted = edited("pod", |recorded| {
+        no_sandbox(&mut recorded.object);
+        recorded.object["status"]["containerStatuses"][0]["state"] =
+            serde_json::json!({ "terminated": { "reason": "Unknown", "exitCode": 255 } });
+        recorded.object["status"]["initContainerStatuses"] = serde_json::json!([{
             "name": "migrate",
             "state": { "terminated": { "reason": "Completed", "exitCode": 0 } },
         }]);
+        recorded.events = vec![sandbox_failed()];
+    });
+    assert!(
+        titles(&rebooted).contains(&(Tone::Danger, "The pod's sandbox cannot be created")),
+        "containers containerd restores as exited after a reboot: {:?}",
+        titles(&rebooted)
+    );
+    let remounting = edited("pod", |recorded| {
+        recorded.events = vec![mount_failed()];
+    });
+    assert!(
+        findings(&remounting).is_empty(),
+        "a remount that failed in a pod that runs"
+    );
+    let crash_remounting = edited("pod-crashing", |recorded| {
+        recorded.events.insert(0, mount_failed());
+    });
+    assert_eq!(
+        titles(&crash_remounting),
+        [(Tone::Danger, "Container api keeps crashing")],
+        "a remount that failed in a pod that crash-loops"
+    );
+    let init_remounting = edited("pod", |recorded| {
+        let status = &mut recorded.object["status"];
         status["containerStatuses"][0]["state"] =
             serde_json::json!({ "waiting": { "reason": "PodInitializing" } });
-        status["containerStatuses"][0]["lastState"] = serde_json::json!({
-            "terminated": { "reason": "ContainerStatusUnknown", "exitCode": 137 },
-        });
-        recorded.events = vec![warning(
-            "FailedCreatePodSandBox",
-            "failed to create pod sandbox: network not ready",
-        )];
+        status["initContainerStatuses"] = serde_json::json!([{
+            "name": "migrate",
+            "state": { "waiting": { "reason": "CrashLoopBackOff" } },
+            "lastState": { "terminated": { "reason": "Error", "exitCode": 1 } },
+            "restartCount": 3,
+        }]);
+        recorded.object["spec"]["initContainers"] =
+            serde_json::json!([{ "name": "migrate", "image": "busybox" }]);
+        recorded.events = vec![mount_failed(), warning("BackOff", "Back-off restarting")];
     });
     assert_eq!(
-        titles(&reinitializing),
-        [(Tone::Danger, "The pod's sandbox cannot be created")],
-        "an init container that completed before its node restarted"
-    );
-    let remounting = edited("pod-crashing", |recorded| {
-        recorded.events.insert(
-            0,
-            warning(
-                "FailedMount",
-                "MountVolume.SetUp failed for volume \"cfg\" : configmap \"cfg\" not found",
-            ),
-        );
-    });
-    assert_eq!(
-        titles(&remounting),
-        [(Tone::Danger, "Container api keeps crashing")],
-        "a remount that failed under a container that runs"
+        titles(&init_remounting),
+        [(Tone::Danger, "Init container migrate keeps crashing")],
+        "a remount that failed while an init container crash-loops"
     );
     let inspecting = edited("pod-pulling", |recorded| {
         recorded.object["status"]["containerStatuses"][0]["state"]["waiting"]["reason"] =
@@ -1080,4 +1073,17 @@ fn a_pod_names_its_scheduling_group() {
         )),
         "training"
     );
+}
+
+/// The pod's sandbox gone, as the kubelet reports it until it makes one.
+fn no_sandbox(pod: &mut Value) {
+    for condition in pod["status"]["conditions"]
+        .as_array_mut()
+        .into_iter()
+        .flatten()
+    {
+        if condition["type"] == "PodReadyToStartContainers" {
+            condition["status"] = "False".into();
+        }
+    }
 }
