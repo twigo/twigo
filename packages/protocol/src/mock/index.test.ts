@@ -454,34 +454,37 @@ test("label selectors match the pods' labels, and one that does not parse is ref
   await rejected;
 });
 
-test("a field selector keeps the pods of one node, and one on a field pods lack is refused", async () => {
+test("a field selector keeps the pods of one node, and one on a field pods lack fails the list as the server does", async () => {
   const pods = new Cluster("prod-eu", 5000, Date.now()).pods;
   const node = pods[0]?.node ?? "";
   const on = await open(
     "ready",
-    query({ fieldSelector: `spec.nodeName=${node}` }),
+    query({ fieldSelector: `spec.nodeName=${node},` }),
   );
   expect(on.batches[0]?.total).toBe(
     pods.filter((pod) => pod.node === node).length,
   );
   const off = await open(
     "ready",
-    query({ fieldSelector: `spec.nodeName!=${node}` }),
+    query({
+      fieldSelector: `spec.nodeName!=${node},spec.restartPolicy=Always`,
+    }),
   );
   expect(off.batches[0]?.total).toBe(
     pods.filter((pod) => pod.node !== node).length,
   );
-  const backend = createMockBackend();
-  const pending = backend.subscribe(
-    "list_subscribe",
-    query({ fieldSelector: "spec.restartPolicy=Always" }),
-    () => undefined,
+  const wrong = await open(
+    "ready",
+    query({ fieldSelector: "spec.containers=api" }),
   );
-  const rejected = expect(pending).rejects.toMatchObject({
-    kind: "invalidInput",
+  expect(wrong.batches[0]?.status).toEqual({
+    state: "error",
+    error: {
+      kind: "invalidInput",
+      message: "field label not supported: spec.containers",
+    },
   });
-  await vi.advanceTimersByTimeAsync(0);
-  await rejected;
+  expect(wrong.batches[0]?.total).toBe(0);
 });
 
 const OVERVIEW: ObjectParts = {
@@ -531,6 +534,10 @@ test("a mock pod opens as the recorded pod in its state", async () => {
   expect(broken.overview?.sections[0]?.id).toBe("core.diagnostics");
   const healthy = await described("pods", "", running.namespace, running.name);
   expect(healthy.overview?.sections[0]?.id).toBe("core.pod");
+  const completed = pods.find((pod) => pod.status === "Completed");
+  if (!completed) throw new Error("prod-eu has a completed pod");
+  const done = await described("pods", "", completed.namespace, completed.name);
+  expect(done.overview?.sections[0]?.id).toBe("core.pod");
 });
 
 test("a mock Deployment lists the mock pods of its ReplicaSets", async () => {

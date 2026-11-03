@@ -4,6 +4,7 @@ import {
   generatedAt,
   hash,
   podCells,
+  deploymentOf,
   replicaSetUid,
   type Cluster,
   type Pod,
@@ -46,26 +47,37 @@ export interface MockKind {
 export const KINDS: Readonly<Record<string, MockKind>> = {
   "/v1/pods": {
     columns: POD_COLUMNS,
-    fields: ["metadata.name", "metadata.namespace", "spec.nodeName"],
+    fields: [
+      "metadata.name",
+      "metadata.namespace",
+      "spec.nodeName",
+      "spec.restartPolicy",
+      "spec.schedulerName",
+      "spec.serviceAccountName",
+      "spec.hostNetwork",
+      "status.phase",
+      "status.podIP",
+      "status.nominatedNodeName",
+    ],
     rows: (cluster, withNamespace) =>
       cluster.pods.map((pod) => ({
         id: pod.id,
         namespace: pod.namespace,
         created: pod.created,
         labels: {},
-        controller: replicaSetUid(cluster.context, pod),
+        controller: replicaSetUid(
+          cluster.context,
+          pod.namespace,
+          deploymentOf(pod),
+        ),
         cells: podCells(pod, withNamespace),
         generated: podGenerated(pod),
-        fields: {
-          "metadata.name": pod.name,
-          "metadata.namespace": pod.namespace,
-          "spec.nodeName": pod.node,
-        },
+        fields: podFields(pod),
       })),
   },
   "/v1/nodes": {
     columns: NODE_COLUMNS,
-    fields: ["metadata.name"],
+    fields: ["metadata.name", "spec.unschedulable"],
     rows: (cluster) =>
       cluster.nodes.map((node) => ({
         id: node.id,
@@ -86,7 +98,12 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
           "containerd://2.3.4",
         ],
         generated: null,
-        fields: { "metadata.name": node.name },
+        fields: {
+          "metadata.name": node.name,
+          "spec.unschedulable": String(
+            node.status.includes("SchedulingDisabled"),
+          ),
+        },
       })),
   },
   "apps/v1/deployments": {
@@ -160,6 +177,34 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
   },
 };
 
+/**
+ * What a pod is selectable by, as kube-apiserver selects it (kubernetes
+ * v1.37.1 `pkg/registry/core/pod/strategy.go` `ToSelectableFields`), read
+ * from what the mock knows of it: a crash loop runs, the rest waits.
+ */
+function podFields(pod: Pod): Readonly<Record<string, string>> {
+  const phase =
+    pod.status === "Completed"
+      ? "Succeeded"
+      : pod.status === "Error"
+        ? "Failed"
+        : ["Running", "CrashLoopBackOff"].includes(pod.status)
+          ? "Running"
+          : "Pending";
+  return {
+    "metadata.name": pod.name,
+    "metadata.namespace": pod.namespace,
+    "spec.nodeName": pod.node,
+    "spec.restartPolicy": "Always",
+    "spec.schedulerName": "default-scheduler",
+    "spec.serviceAccountName": "default",
+    "spec.hostNetwork": "false",
+    "status.phase": phase,
+    "status.podIP": phase === "Pending" ? "" : pod.ip,
+    "status.nominatedNodeName": "",
+  };
+}
+
 export function wireRow(row: MockRow): Row {
   return {
     id: row.id,
@@ -186,14 +231,9 @@ function namespaced(
     : [first ?? null, ...rest];
 }
 
-/** A pod's Deployment: its ReplicaSet's name without the template hash. */
-function ownerOf(pod: Pod): string {
-  return pod.generateName.slice(0, -(pod.templateHash.length + 2));
-}
-
 /** Its Deployment's one container, named after the workload. */
 function containerOf(pod: Pod): string {
-  return ownerOf(pod).slice(ownerOf(pod).indexOf("-") + 1);
+  return deploymentOf(pod).slice(deploymentOf(pod).indexOf("-") + 1);
 }
 
 function imageOf(pod: Pod): string {
@@ -218,7 +258,7 @@ interface Deployment {
 function deployments(cluster: Cluster): Deployment[] {
   const owned = new Map<string, Pod[]>();
   for (const pod of cluster.pods) {
-    const key = `${pod.namespace}/${ownerOf(pod)}`;
+    const key = `${pod.namespace}/${deploymentOf(pod)}`;
     const pods = owned.get(key);
     if (pods) pods.push(pod);
     else owned.set(key, [pod]);
@@ -229,7 +269,7 @@ function deployments(cluster: Cluster): Deployment[] {
     return [
       {
         namespace: first.namespace,
-        name: ownerOf(first),
+        name: deploymentOf(first),
         replicas: pods.length,
         ready: pods.filter(ready).length,
         created: Math.min(...pods.map((pod) => pod.created)),

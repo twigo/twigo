@@ -39,7 +39,11 @@ const BY_RESOURCE: Readonly<Record<string, string>> = {
   "kwok.x-k8s.io/v1alpha1/stages": "stage",
 };
 
-/** The recorded pod in the state a mock pod's status names. */
+/**
+ * The recorded pod in the state a mock pod's status names; one that runs
+ * short of ready containers is the unready one, and any other the healthy
+ * one, as the mock records no completed or creating pod.
+ */
 function podFixture(pod: Pod | undefined): string {
   switch (pod?.status) {
     case "CrashLoopBackOff":
@@ -49,8 +53,10 @@ function podFixture(pod: Pod | undefined): string {
       return "pod-pulling";
     case "Pending":
       return "pod-pending";
+    case "Running":
+      return pod.ready < pod.containers ? "pod-unready" : "pod";
     default:
-      return pod && pod.ready < pod.containers ? "pod-unready" : "pod";
+      return "pod";
   }
 }
 
@@ -197,18 +203,8 @@ function listing(
     }
     if (block.owners === null) return block;
     const owners =
-      query.gvr.resource === "deployments" && cluster
-        ? [
-            ...new Set(
-              cluster.pods
-                .filter(
-                  (pod) =>
-                    pod.namespace === query.namespace &&
-                    pod.generateName === `${query.name}-${pod.templateHash}-`,
-                )
-                .map((pod) => replicaSetUid(cluster.context, pod)),
-            ),
-          ]
+      query.gvr.resource === "deployments" && cluster && query.namespace
+        ? [replicaSetUid(cluster.context, query.namespace, query.name)]
         : [];
     return { ...block, namespace: query.namespace, owners };
   };

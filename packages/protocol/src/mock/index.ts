@@ -325,7 +325,7 @@ export function createMockBackend(
           `the mock backend serves only pods, nodes, deployments, jobs and events, not ${resource}`,
         );
       }
-      const fields = parseFields(query.fieldSelector, kind);
+      const selected = parseFields(query.fieldSelector, kind);
       const columns = queryColumns(kind.columns, query);
       const compiled = compileQuery(query, columns);
       const id = nextId++;
@@ -335,15 +335,20 @@ export function createMockBackend(
         resource,
       };
       const state: Exclude<ListScenario, "forbidden"> | ViewState =
-        lists === "forbidden" ||
-        (lists === "live" && FORBIDDEN[context]?.includes(resource))
-          ? forbidden
-          : lists;
+        typeof selected === "string"
+          ? {
+              state: "error",
+              error: { kind: "invalidInput", message: selected },
+            }
+          : lists === "forbidden" ||
+              (lists === "live" && FORBIDDEN[context]?.includes(resource))
+            ? forbidden
+            : lists;
       subscriptions.set(
         id,
         new Subscription(
           compiled,
-          fields,
+          typeof selected === "string" ? () => true : selected,
           columns,
           kind,
           cluster(context),
@@ -683,23 +688,27 @@ class Subscription {
 type FieldSelector = (fields: Readonly<Record<string, string>>) => boolean;
 
 /**
- * A field selector as the API server reads one: terms joined by commas,
- * each `field=value`, `field==value` or `field!=value`, every one on a
- * field the kind can be selected by, else refused as the server refuses it.
+ * A field selector as the API server reads one (apimachinery v0.37.1
+ * `fields.ParseSelector`): terms joined by commas, empty ones skipped,
+ * each `field=value`, `field==value` or `field!=value`; a field the kind
+ * cannot be selected by is the message the server refuses it with, which
+ * Rust shows as the list's error.
  */
-function parseFields(selector: string | null, kind: MockKind): FieldSelector {
-  if (selector === null || selector === "") return () => true;
-  const terms = selector.split(",").map((term) => {
+function parseFields(
+  selector: string | null,
+  kind: MockKind,
+): FieldSelector | string {
+  const terms: { field: string; value: string; negated: boolean }[] = [];
+  for (const term of (selector ?? "").split(",")) {
+    if (term === "") continue;
     const match = /^([^!=]+)(!=|==|=)(.*)$/.exec(term);
     const [, field = "", operator, value = ""] = match ?? [];
-    if (!match || !kind.fields.includes(field)) {
-      throw new IpcError(
-        "invalidInput",
-        `field label not supported: ${field || term}`,
-      );
-    }
-    return { field, value, negated: operator === "!=" };
-  });
+    if (!match)
+      return `invalid selector: '${selector ?? ""}'; can't understand '${term}'`;
+    if (!kind.fields.includes(field))
+      return `field label not supported: ${field}`;
+    terms.push({ field, value, negated: operator === "!=" });
+  }
   return (fields) =>
     terms.every(
       ({ field, value, negated }) => (fields[field] === value) !== negated,

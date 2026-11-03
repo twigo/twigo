@@ -20,9 +20,22 @@ export interface Pod {
   version: number;
 }
 
-/** The mock's uid of the ReplicaSet that controls a pod: its row id. */
-export function replicaSetUid(context: string, pod: Pod): string {
-  return `${context}/${pod.namespace}/${pod.generateName.slice(0, -1)}`;
+/**
+ * The mock's uid of the ReplicaSet of a Deployment. The mock gives each
+ * Deployment one ReplicaSet, whose pods differ in their hash alone, so a
+ * pod that churn replaces stays the Deployment's.
+ */
+export function replicaSetUid(
+  context: string,
+  namespace: string,
+  deployment: string,
+): string {
+  return `${context}/${namespace}/${deployment}`;
+}
+
+/** The Deployment a pod's name says owns it. */
+export function deploymentOf(pod: Pod): string {
+  return pod.generateName.slice(0, -(pod.templateHash.length + 2));
 }
 
 const ABNORMAL: [string, number][] = [
