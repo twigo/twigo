@@ -88,6 +88,49 @@ test("a crashing pod says why first, and its container's card folds its details"
   ).toBeDefined();
 });
 
+test("a finding is announced by its title and its tone has a name", async () => {
+  await shown("pod-crashing");
+  const live = document.querySelector("[aria-live=polite]");
+  expect(live?.textContent).toBe("Container api keeps crashing");
+  expect(
+    within(section("Diagnostics")).getByRole("img", { name: "Error" }),
+  ).toBeDefined();
+});
+
+test("a container's folds stay open for the kind's next object", async () => {
+  const states = new OverviewStates();
+  const overview = RECORDED["pod-crashing"]?.overview;
+  if (!overview) throw new Error("the crashing pod");
+  const workbench = await testWorkbench("ready");
+  const mounted = (kind: string) =>
+    render(
+      <Overview
+        overview={overview}
+        space="prod-eu"
+        states={states}
+        kind={kind}
+        onOpen={() => undefined}
+      />,
+      { wrapper: inWorkbench(workbench) },
+    );
+  mounted("/pods");
+  const details = () =>
+    within(section("Containers")).getByRole("button", {
+      name: /^Details \d+$/,
+    });
+  expect(details().getAttribute("aria-expanded")).toBe("false");
+  act(() => {
+    details().click();
+  });
+  expect(details().getAttribute("aria-expanded")).toBe("true");
+  cleanup();
+  mounted("/pods");
+  expect(details().getAttribute("aria-expanded")).toBe("true");
+  cleanup();
+  mounted("/other");
+  expect(details().getAttribute("aria-expanded")).toBe("false");
+});
+
 test("a node adds up its pods' requests in its resources table", async () => {
   await shown("node");
   const resources = within(section("Resources")).getByRole("table", {

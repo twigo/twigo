@@ -46,7 +46,8 @@ export interface OverviewProps {
 /**
  * An object described in Rust (ARCHITECTURE 4.3): its sections in order,
  * each folding by its id as the kind's other objects do, each block drawn
- * by its type.
+ * by its type. A finding that comes or goes while the object is shown is
+ * announced by its title, which, unlike its times, does not tick.
  */
 export function Overview({
   overview,
@@ -57,8 +58,16 @@ export function Overview({
   values,
 }: OverviewProps) {
   useChanges(states.changes);
+  const findings = overview.sections.flatMap((section) =>
+    section.blocks.flatMap((block) =>
+      block.type === "diagnostics" ? block.findings : [],
+    ),
+  );
   return (
     <div className="flex flex-col gap-4 px-3.5 pt-3 pb-4 text-[13px]">
+      <p className="sr-only" aria-live="polite">
+        {findings.map((finding) => finding.title).join(". ")}
+      </p>
       {overview.sections.map((section) => {
         const open = states.open(kind, section.id, true);
         return (
@@ -212,6 +221,8 @@ function Conditions({ conditions }: { conditions: readonly Condition[] }) {
                 `${condition.type}: ${condition.status}`,
                 condition.reason,
                 condition.message,
+                condition.lastHeartbeat &&
+                  `Last heartbeat ${new Date(condition.lastHeartbeat).toLocaleString()}`,
               ]
                 .filter(Boolean)
                 .join("\n")}

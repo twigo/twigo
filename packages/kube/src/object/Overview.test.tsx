@@ -376,7 +376,9 @@ test("conditions read as chips with a mark in their tone, and the wrong ones say
     "Initialized",
   ]);
   expect(
-    [...document.querySelectorAll("p")].map((reason) => reason.textContent),
+    [...document.querySelectorAll("p:not([aria-live])")].map(
+      (reason) => reason.textContent,
+    ),
   ).toEqual([
     "Ready · ContainersNotReadycontainers with unready status: [api]",
     "DisruptionTarget · EvictionByEvictionAPI",

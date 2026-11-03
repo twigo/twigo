@@ -31,6 +31,13 @@ import { useWidth } from "../useWidth";
 import { ViewStatus } from "../ViewStatus";
 import type { OverviewStates } from "./overviewStates";
 
+/**
+ * Inside a row's details, the list editor's selection and marks are not
+ * this list's, so its resource keys find no row here; and Space and `/`
+ * stay with it rather than hide the details or filter the editor.
+ */
+const EMBEDDED_KEYS = { "resource.selected": false, listMarked: false };
+
 /** Rows an embedded list shows before it scrolls. */
 const VISIBLE = 8;
 const HEADER = 28;
@@ -64,7 +71,7 @@ export function EmbeddedList({
   onOpen: (target: ObjectRef) => void;
 }) {
   const { backend } = useWorkbench();
-  const register = useListRegistration();
+  const register = useListRegistration(EMBEDDED_KEYS, ["peek", "filter"]);
   const { gvr } = list;
   const countBy = statusColumn(gvr);
   useChanges(states.changes);

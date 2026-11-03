@@ -11,6 +11,11 @@ export interface ListTarget extends Partial<ListController> {
   close?(): void;
   /** Shows or hides what the list shows beside it, as Linear's peek. */
   peek?(): void;
+  /**
+   * What the lists around it may not do while it has the focus, as a list
+   * inside a row's details keeps that row's list from hiding them.
+   */
+  keeps?: readonly Exclude<Capability, "keeps">[];
 }
 
 type Capability = keyof ListTarget;
@@ -18,7 +23,8 @@ type Capability = keyof ListTarget;
 /**
  * The mounted lists, grids and trees by element, so the `list.*` commands
  * act on the one that has the focus, as VS Code's list service does. A
- * command takes the nearest element around the focus that can do it.
+ * command takes the nearest element around the focus that can do it,
+ * unless a list nearer the focus keeps it.
  */
 export class Lists {
   readonly #targets = new WeakMap<Element, ListTarget>();
@@ -37,6 +43,8 @@ export class Lists {
       const target = this.#targets.get(at);
       if (target?.[capability])
         return target as ListTarget & Required<Pick<ListTarget, K>>;
+      if (target?.keeps?.includes(capability as Exclude<Capability, "keeps">))
+        return undefined;
     }
     return undefined;
   }

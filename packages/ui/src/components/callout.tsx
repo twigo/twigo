@@ -9,15 +9,19 @@ const TINT = {
 } as const;
 
 const TITLE = {
-  error: { icon: CircleAlert, className: "text-error" },
-  warn: { icon: TriangleAlert, className: "text-warn-foreground" },
+  error: { icon: CircleAlert, className: "text-error", label: "Error" },
+  warn: {
+    icon: TriangleAlert,
+    className: "text-warn-foreground",
+    label: "Warning",
+  },
 } as const;
 
 /**
  * What is wrong, in words, on its tone's tint with its title in the tone:
  * an object's diagnostics. The tone has its own icon, so it does not rest
- * on hue alone. It is no live region: it is there when its view opens,
- * and its times tick, which a screen reader would read out each second.
+ * on hue alone, and a name for screen readers. It is no live region, as
+ * its times tick, which a screen reader would read out each second.
  */
 export function Callout({
   tone,
@@ -30,7 +34,7 @@ export function Callout({
   children?: ReactNode;
   className?: string;
 }) {
-  const { icon: Icon, className: titleClass } = TITLE[tone];
+  const { icon: Icon, className: titleClass, label } = TITLE[tone];
   return (
     <div
       className={cn(
@@ -42,7 +46,7 @@ export function Callout({
       <div
         className={cn("flex items-center gap-1.5 font-semibold", titleClass)}
       >
-        <Icon aria-hidden className="size-3.5 shrink-0" />
+        <Icon role="img" aria-label={label} className="size-3.5 shrink-0" />
         <span className="min-w-0">{title}</span>
       </div>
       {children}

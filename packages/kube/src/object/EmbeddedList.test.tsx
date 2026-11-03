@@ -26,7 +26,11 @@ const NODE_PODS: Spec = {
   owners: null,
 };
 
-async function shown(list: Spec, onOpen: (target: ObjectRef) => void) {
+async function shown(
+  list: Spec,
+  onOpen: (target: ObjectRef) => void,
+  states = new OverviewStates(),
+) {
   const pending = testWorkbench("ready");
   await vi.advanceTimersByTimeAsync(10);
   const workbench = await pending;
@@ -34,7 +38,7 @@ async function shown(list: Spec, onOpen: (target: ObjectRef) => void) {
     <EmbeddedList
       list={list}
       space="prod-eu"
-      states={new OverviewStates()}
+      states={states}
       kind="/nodes"
       id="core.pods"
       onOpen={onOpen}
@@ -89,4 +93,15 @@ test("owners that control nothing list no pods", async () => {
   await shown({ ...NODE_PODS, fieldSelector: null, owners: [] }, vi.fn());
   expect(screen.getByText("No pods")).toBeDefined();
   expect(screen.queryByRole("grid")).toBeNull();
+});
+
+test("a sort is kept for the kind's next object", async () => {
+  const states = new OverviewStates();
+  await shown(NODE_PODS, vi.fn(), states);
+  act(() => {
+    within(screen.getByRole("columnheader", { name: "Name" }))
+      .getByRole("button")
+      .click();
+  });
+  expect(states.sort("/nodes", "core.pods")).toMatchObject({ column: "Name" });
 });
