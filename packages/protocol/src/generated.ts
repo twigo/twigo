@@ -258,15 +258,15 @@ group: string, version: string, resource: string, };
 
 /**
  * The view's lines over time, its range aside, in equal spans from `from`
- * to `to`.
+ * to `to`; no spans while the buffer holds no line.
  */
 export type Histogram = { 
 /**
- * RFC 3339.
+ * RFC 3339, or empty without spans.
  */
 from: string, 
 /**
- * RFC 3339.
+ * RFC 3339, or empty without spans.
  */
 to: string, buckets: Array<Bucket>, };
 

@@ -286,12 +286,12 @@ pub struct LogMatches {
 }
 
 /// The view's lines over time, its range aside, in equal spans from `from`
-/// to `to`.
+/// to `to`; no spans while the buffer holds no line.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct Histogram {
-    /// RFC 3339.
+    /// RFC 3339, or empty without spans.
     pub from: String,
-    /// RFC 3339.
+    /// RFC 3339, or empty without spans.
     pub to: String,
     pub buckets: Vec<Bucket>,
 }
