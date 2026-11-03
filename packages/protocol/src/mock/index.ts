@@ -322,9 +322,10 @@ export function createMockBackend(
       if (!kind) {
         throw new IpcError(
           "notFound",
-          `the mock backend serves only pods, nodes, deployments and events, not ${resource}`,
+          `the mock backend serves only pods, nodes, deployments, jobs and events, not ${resource}`,
         );
       }
+      const fields = parseFields(query.fieldSelector, kind);
       const columns = queryColumns(kind.columns, query);
       const compiled = compileQuery(query, columns);
       const id = nextId++;
@@ -342,6 +343,7 @@ export function createMockBackend(
         id,
         new Subscription(
           compiled,
+          fields,
           columns,
           kind,
           cluster(context),
@@ -360,7 +362,16 @@ export function createMockBackend(
     object_open: ({ object: query, parts }, onMessage) => {
       space(query.space);
       const id = nextId++;
-      objects.set(id, new MockObject(query, parts, onMessage));
+      const [context] = space(query.space).contexts;
+      objects.set(
+        id,
+        new MockObject(
+          query,
+          parts,
+          context === undefined ? undefined : cluster(context),
+          onMessage,
+        ),
+      );
       return id;
     },
     contexts_watch: () => CONTEXTS,
@@ -457,6 +468,7 @@ const KNOWS_COLUMNS = new Set<ViewState["state"]>([
 /** The batcher of one subscription: one unacknowledged batch at a time, the latest state wins. */
 class Subscription {
   readonly #query: CompiledQuery;
+  readonly #fields: FieldSelector;
   readonly #kind: MockKind;
   readonly #key: string;
   readonly #cluster: Cluster;
@@ -495,6 +507,7 @@ class Subscription {
 
   constructor(
     query: CompiledQuery,
+    fields: FieldSelector,
     columns: Column[],
     kind: MockKind,
     cluster: Cluster,
@@ -502,6 +515,7 @@ class Subscription {
     onMessage: (batch: ListBatch) => void,
   ) {
     this.#query = query;
+    this.#fields = fields;
     this.#kind = kind;
     this.#key = JSON.stringify(query.query.gvr);
     this.#cluster = cluster;
@@ -594,7 +608,9 @@ class Subscription {
     const { version } = this.#cluster;
     if (this.#cache?.version !== version) {
       const withNamespace = this.#columns.some((c) => c.name === "Namespace");
-      const rows = this.#kind.rows(this.#cluster, withNamespace);
+      const rows = this.#kind
+        .rows(this.#cluster, withNamespace)
+        .filter((row) => this.#fields(row.fields));
       this.#cache = { version, result: runQuery(rows, this.#query) };
     }
     return this.#cache.result;
@@ -661,4 +677,31 @@ class Subscription {
       groups: groupsChanged ? (groups ?? []) : null,
     });
   }
+}
+
+/** Whether a row's fields pass a field selector. */
+type FieldSelector = (fields: Readonly<Record<string, string>>) => boolean;
+
+/**
+ * A field selector as the API server reads one: terms joined by commas,
+ * each `field=value`, `field==value` or `field!=value`, every one on a
+ * field the kind can be selected by, else refused as the server refuses it.
+ */
+function parseFields(selector: string | null, kind: MockKind): FieldSelector {
+  if (selector === null || selector === "") return () => true;
+  const terms = selector.split(",").map((term) => {
+    const match = /^([^!=]+)(!=|==|=)(.*)$/.exec(term);
+    const [, field = "", operator, value = ""] = match ?? [];
+    if (!match || !kind.fields.includes(field)) {
+      throw new IpcError(
+        "invalidInput",
+        `field label not supported: ${field || term}`,
+      );
+    }
+    return { field, value, negated: operator === "!=" };
+  });
+  return (fields) =>
+    terms.every(
+      ({ field, value, negated }) => (fields[field] === value) !== negated,
+    );
 }

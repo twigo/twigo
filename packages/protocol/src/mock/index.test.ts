@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { KeyboardLayout, ListBatch, ListQuery } from "../generated";
+import type {
+  KeyboardLayout,
+  ListBatch,
+  ListQuery,
+  ObjectBatch,
+  ObjectParts,
+} from "../generated";
+import { Cluster } from "./cluster";
 import { createMockBackend, type MockScenario } from "./index";
 import { natural } from "./query";
 
@@ -445,6 +452,113 @@ test("label selectors match the pods' labels, and one that does not parse is ref
   });
   await vi.advanceTimersByTimeAsync(0);
   await rejected;
+});
+
+test("a field selector keeps the pods of one node, and one on a field pods lack is refused", async () => {
+  const pods = new Cluster("prod-eu", 5000, Date.now()).pods;
+  const node = pods[0]?.node ?? "";
+  const on = await open(
+    "ready",
+    query({ fieldSelector: `spec.nodeName=${node}` }),
+  );
+  expect(on.batches[0]?.total).toBe(
+    pods.filter((pod) => pod.node === node).length,
+  );
+  const off = await open(
+    "ready",
+    query({ fieldSelector: `spec.nodeName!=${node}` }),
+  );
+  expect(off.batches[0]?.total).toBe(
+    pods.filter((pod) => pod.node !== node).length,
+  );
+  const backend = createMockBackend();
+  const pending = backend.subscribe(
+    "list_subscribe",
+    query({ fieldSelector: "spec.restartPolicy=Always" }),
+    () => undefined,
+  );
+  const rejected = expect(pending).rejects.toMatchObject({
+    kind: "invalidInput",
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  await rejected;
+});
+
+const OVERVIEW: ObjectParts = {
+  overview: true,
+  manifest: false,
+  events: false,
+  related: false,
+};
+
+async function described(
+  resource: string,
+  group: string,
+  namespace: string,
+  name: string,
+): Promise<ObjectBatch> {
+  const backend = createMockBackend("ready");
+  const batches: ObjectBatch[] = [];
+  const pending = backend.subscribe(
+    "object_open",
+    {
+      object: {
+        space: "prod-eu",
+        gvr: { group, version: "v1", resource },
+        namespaced: true,
+        namespace,
+        name,
+      },
+      parts: OVERVIEW,
+    },
+    (batch) => batches.push(batch),
+  );
+  await vi.advanceTimersByTimeAsync(10);
+  await pending;
+  const first = batches[0];
+  if (!first) throw new Error("no batch");
+  return first;
+}
+
+test("a mock pod opens as the recorded pod in its state", async () => {
+  const pods = new Cluster("prod-eu", 5000, Date.now()).pods;
+  const crashing = pods.find((pod) => pod.status === "CrashLoopBackOff");
+  const running = pods.find(
+    (pod) => pod.status === "Running" && pod.ready === pod.containers,
+  );
+  if (!crashing || !running) throw new Error("prod-eu has both");
+  const broken = await described("pods", "", crashing.namespace, crashing.name);
+  expect(broken.overview?.sections[0]?.id).toBe("core.diagnostics");
+  const healthy = await described("pods", "", running.namespace, running.name);
+  expect(healthy.overview?.sections[0]?.id).toBe("core.pod");
+});
+
+test("a mock Deployment lists the mock pods of its ReplicaSets", async () => {
+  const pods = new Cluster("prod-eu", 5000, Date.now()).pods;
+  const pod = pods[0];
+  if (!pod) throw new Error("a pod");
+  const name = pod.generateName.slice(0, -`${pod.templateHash}-`.length - 1);
+  const batch = await described("deployments", "apps", pod.namespace, name);
+  const list = batch.overview?.sections
+    .flatMap((section) => section.blocks)
+    .find((block) => block.type === "list");
+  if (list?.type !== "list") throw new Error("a live list");
+  expect(list.namespace).toBe(pod.namespace);
+  const owned = await open(
+    "ready",
+    query({
+      namespaces: [pod.namespace],
+      owners: list.owners,
+    }),
+  );
+  expect(owned.batches[0]?.total).toBe(
+    pods.filter(
+      (candidate) =>
+        candidate.namespace === pod.namespace &&
+        candidate.generateName === `${name}-${candidate.templateHash}-`,
+    ).length,
+  );
+  expect(owned.batches[0]?.total).toBeGreaterThan(0);
 });
 
 test("a regex that does not parse is refused at subscribe", async () => {

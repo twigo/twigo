@@ -1,5 +1,6 @@
 import { IpcError } from "../error";
 import type {
+  Block,
   EventList,
   ObjectBatch,
   ObjectParts,
@@ -9,6 +10,7 @@ import type {
   RelatedObject,
   Value,
 } from "../generated";
+import { replicaSetUid, type Cluster, type Pod } from "./cluster";
 import OBJECTS from "./objects.json";
 
 /**
@@ -23,16 +25,40 @@ const RECORDED: Readonly<
 const BY_RESOURCE: Readonly<Record<string, string>> = {
   "/v1/pods": "pod",
   "apps/v1/deployments": "deployment",
+  "apps/v1/replicasets": "replicaset",
+  "apps/v1/statefulsets": "statefulset",
+  "apps/v1/daemonsets": "daemonset",
+  "batch/v1/jobs": "job",
+  "batch/v1/cronjobs": "cronjob",
   "/v1/services": "service",
+  "networking.k8s.io/v1/ingresses": "ingress",
+  "/v1/persistentvolumeclaims": "pvc",
   "/v1/configmaps": "configmap",
   "/v1/secrets": "secret",
   "/v1/nodes": "node",
   "kwok.x-k8s.io/v1alpha1/stages": "stage",
 };
 
+/** The recorded pod in the state a mock pod's status names. */
+function podFixture(pod: Pod | undefined): string {
+  switch (pod?.status) {
+    case "CrashLoopBackOff":
+    case "Error":
+      return "pod-crashing";
+    case "ImagePullBackOff":
+      return "pod-pulling";
+    case "Pending":
+      return "pod-pending";
+    default:
+      return pod && pod.ready < pod.containers ? "pod-unready" : "pod";
+  }
+}
+
 /**
  * An open object of the mock backend: the recorded object of its resource
- * under the name asked for, sent once and again for each part shown later.
+ * under the name asked for, a pod's in the state of the mock's pod, sent
+ * once and again for each part shown later. Its live lists list what the
+ * mock has of it: a Deployment's pods, a node's pods.
  */
 export class MockObject {
   readonly #overview: Overview;
@@ -45,10 +71,19 @@ export class MockObject {
   constructor(
     query: ObjectQuery,
     parts: ObjectParts,
+    cluster: Cluster | undefined,
     onMessage: (batch: ObjectBatch) => void,
   ) {
     const { group, version, resource } = query.gvr;
-    const name = BY_RESOURCE[`${group}/${version}/${resource}`];
+    const pod = cluster?.pods.find(
+      (candidate) =>
+        candidate.namespace === query.namespace &&
+        candidate.name === query.name,
+    );
+    const name =
+      resource === "pods" && group === ""
+        ? podFixture(pod)
+        : BY_RESOURCE[`${group}/${version}/${resource}`];
     const recorded = name === undefined ? undefined : RECORDED[name];
     if (recorded === undefined) {
       throw new IpcError(
@@ -56,7 +91,7 @@ export class MockObject {
         `the mock backend has no recorded ${resource}`,
       );
     }
-    this.#overview = renamed(recorded.overview, query);
+    this.#overview = listing(renamed(recorded.overview, query), query, cluster);
     const manifest = JSON.parse(recorded.manifest) as {
       metadata: Record<string, unknown>;
     };
@@ -142,6 +177,46 @@ function renamed(overview: Overview, query: ObjectQuery): Overview {
             ),
           },
     ),
+  };
+}
+
+/**
+ * The document's live lists over the mock's objects: a Deployment's pods
+ * by the mock's ReplicaSets of it, a node's pods by its name, and none of
+ * the objects the mock does not serve.
+ */
+function listing(
+  overview: Overview,
+  query: ObjectQuery,
+  cluster: Cluster | undefined,
+): Overview {
+  const rewired = (block: Block): Block => {
+    if (block.type !== "list") return block;
+    if (block.fieldSelector?.startsWith("spec.nodeName=")) {
+      return { ...block, fieldSelector: `spec.nodeName=${query.name}` };
+    }
+    if (block.owners === null) return block;
+    const owners =
+      query.gvr.resource === "deployments" && cluster
+        ? [
+            ...new Set(
+              cluster.pods
+                .filter(
+                  (pod) =>
+                    pod.namespace === query.namespace &&
+                    pod.generateName === `${query.name}-${pod.templateHash}-`,
+                )
+                .map((pod) => replicaSetUid(cluster.context, pod)),
+            ),
+          ]
+        : [];
+    return { ...block, namespace: query.namespace, owners };
+  };
+  return {
+    sections: overview.sections.map((section) => ({
+      ...section,
+      blocks: section.blocks.map(rewired),
+    })),
   };
 }
 

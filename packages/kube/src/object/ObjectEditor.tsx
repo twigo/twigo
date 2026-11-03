@@ -51,6 +51,7 @@ export function ObjectEditor({
   return (
     <ObjectContent
       tab={tab}
+      space={input.space}
       snapshot={snapshot}
       values={values}
       onOpen={open}

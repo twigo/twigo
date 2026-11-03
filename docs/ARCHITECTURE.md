@@ -690,11 +690,13 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   - Unsaved working copies survive a restart (backups per space).
 - **Overview.**
   One document per object, described in Rust by `twigo-describe` and rendered alike by the drawer, the Overview tab and MCP's describe-style summaries (6.6) ([research](research/details.md)).
-  - Sections have ids and an order: metadata first, then the kind's sections, conditions, extension sections, events last.
-    Each section holds blocks from a closed set (fields, tables, conditions, containers, data keys, live lists, events, a tree), which the webview renders with an exhaustive switch.
+  - Sections have ids and an order, the object's state first: Diagnostics when something is wrong, the kind's first section, conditions, the kind's other sections, extension sections, then metadata and events last.
+    Each section holds blocks from a closed set (fields, diagnostics, tables, conditions, containers, data keys, live lists, events, a tree), which the webview renders with a switch that lint holds exhaustive.
   - Core kinds get describers (Pod, Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, Ingress, Node, PVC, ConfigMap, Secret): at least what `kubectl describe` prints, plus a Diagnostics section when something is wrong.
-  - Any kind, CRDs included, gets a generic overview: metadata, the server's printer columns, a `status.conditions` table when present, spec and status as a tree with the descriptions of their schema, events.
-  - A workload's pods, a CronJob's jobs and a node's pods are live resource tables inside the Overview, run by query views with an owner filter.
+    A describer names the objects of other resources it reads, such as a Deployment its ReplicaSets, a Service its EndpointSlices or a node its pods, and `twigo-core` follows them through the hub while the Overview is shown.
+  - A container's card shows its state, how it last ended and its resources; the rest of what `kubectl describe` prints of it, its environment and its mounts fold.
+  - Any kind, CRDs included, gets a generic overview: the server's printer columns, a `status.conditions` table when present, spec and status as a tree with the descriptions of their schema, metadata, events.
+  - A workload's pods, a CronJob's jobs and a node's pods are live resource tables inside the Overview, run by query views: a workload's by the uids of what controls them, a node's by a field selector.
   - Extensions add declarative sections per GVK (5.4), and replace a core section only by naming its id.
 
 ### 4.4 Resource tables and the keyboard
@@ -919,6 +921,7 @@ It lives in `packages/ui`: the tokens, and primitives that draw every recurring 
   - the editor darker than the shell in dark;
   - text tiers at 4.5:1, a solid focus ring, tones drawn by shape;
   - the space's home in an empty editor area (4.1), without the mockup's capacity and trend, for which Twigo has no data.
+- **Settled with the owner** on 2026-11-03, from live variants of the Overview (4.3): the object's state before its metadata, and containers as cards whose less used fields fold.
 
 ## 5. Commands, keybindings and extensions
 

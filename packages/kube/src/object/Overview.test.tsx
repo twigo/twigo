@@ -43,6 +43,7 @@ test("a ConfigMap of 2,000 keys puts in the DOM the values of the keys opened on
   );
   render(
     <Overview
+      space="kind-test"
       overview={configMap()}
       onOpen={() => undefined}
       values={values}
@@ -70,6 +71,7 @@ test("a link opens the object it points at", () => {
   };
   render(
     <Overview
+      space="kind-test"
       overview={{
         sections: [
           {
@@ -97,7 +99,13 @@ test("a link opens the object it points at", () => {
 });
 
 test("a section folds by its title", () => {
-  render(<Overview overview={configMap()} onOpen={() => undefined} />);
+  render(
+    <Overview
+      space="kind-test"
+      overview={configMap()}
+      onOpen={() => undefined}
+    />,
+  );
   expect(screen.getByText("key-0")).toBeDefined();
   fireEvent.click(screen.getByRole("button", { name: "Data" }));
   expect(screen.queryByText("key-0")).toBeNull();
@@ -125,7 +133,12 @@ test("an open value is read again when the object changes", async () => {
   let current = "old";
   const values = vi.fn(() => Promise.resolve([current]));
   const { rerender } = render(
-    <Overview overview={data(true)} onOpen={() => undefined} values={values} />,
+    <Overview
+      space="kind-test"
+      overview={data(true)}
+      onOpen={() => undefined}
+      values={values}
+    />,
   );
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: /mode/ }));
@@ -136,6 +149,7 @@ test("an open value is read again when the object changes", async () => {
   await act(async () => {
     rerender(
       <Overview
+        space="kind-test"
         overview={data(true, 5)}
         onOpen={() => undefined}
         values={values}
@@ -152,7 +166,12 @@ test("a value that cannot be read says why", async () => {
     Promise.reject(new Error("the object is not open yet")),
   );
   render(
-    <Overview overview={data(true)} onOpen={() => undefined} values={values} />,
+    <Overview
+      space="kind-test"
+      overview={data(true)}
+      onOpen={() => undefined}
+      values={values}
+    />,
   );
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: /mode/ }));
@@ -165,6 +184,7 @@ test("a Secret's keys do not open", () => {
   const values = vi.fn(() => Promise.resolve([null]));
   render(
     <Overview
+      space="kind-test"
       overview={data(false)}
       onOpen={() => undefined}
       values={values}
@@ -177,6 +197,7 @@ test("a Secret's keys do not open", () => {
 test("events that cannot be listed say why instead of none", () => {
   render(
     <Overview
+      space="kind-test"
       overview={{
         sections: [
           {
@@ -202,6 +223,7 @@ test("events that cannot be listed say why instead of none", () => {
 test("a multiline value keeps its lines", () => {
   render(
     <Overview
+      space="kind-test"
       overview={{
         sections: [
           {
@@ -238,6 +260,7 @@ const AT = "2026-11-02T21:04:52Z";
 test("conditions read as chips with a mark in their tone, and the wrong ones say why below them", () => {
   render(
     <Overview
+      space="kind-test"
       overview={{
         sections: [
           {

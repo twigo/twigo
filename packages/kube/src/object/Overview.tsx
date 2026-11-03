@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -16,16 +16,20 @@ import type {
   Field,
   ObjectRef,
   Overview as Document,
-  Value,
 } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
-import { Chip, cn, LinkButton, PropertyList, Section } from "@twigo/ui";
-import { formatBytes, humanDuration } from "@twigo/utils";
-import { useNow } from "../useNow";
+import { cn, PropertyList, Section, Table } from "@twigo/ui";
+import { formatBytes } from "@twigo/utils";
+import { Containers } from "./Containers";
+import { Diagnostics } from "./Diagnostics";
+import { EmbeddedList } from "./EmbeddedList";
 import { Properties } from "./Properties";
+import { Age, ValueView } from "./values";
 
 export interface OverviewProps {
   readonly overview: Document;
+  /** The space the object is in, which its live lists query. */
+  readonly space: string;
   /** Opens the object a link points at. */
   readonly onOpen: (target: ObjectRef) => void;
   /** The values of a ConfigMap's keys, null for a binary one. */
@@ -36,7 +40,7 @@ export interface OverviewProps {
  * An object described in Rust (ARCHITECTURE 4.3): its sections in order,
  * each folding by its id, each block drawn by its type.
  */
-export function Overview({ overview, onOpen, values }: OverviewProps) {
+export function Overview({ overview, space, onOpen, values }: OverviewProps) {
   const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
   return (
     <div className="flex flex-col gap-4 px-3.5 pt-3 pb-4 text-[13px]">
@@ -58,7 +62,9 @@ export function Overview({ overview, onOpen, values }: OverviewProps) {
               {section.blocks.map((block, index) => (
                 <BlockView
                   key={index}
+                  title={section.title}
                   block={block}
+                  space={space}
                   onOpen={onOpen}
                   values={values}
                 />
@@ -72,11 +78,16 @@ export function Overview({ overview, onOpen, values }: OverviewProps) {
 }
 
 function BlockView({
+  title,
   block,
+  space,
   onOpen,
   values,
 }: {
+  /** The section's, which names a table. */
+  title: string;
   block: Block;
+  space: string;
   onOpen: (target: ObjectRef) => void;
   values: OverviewProps["values"];
 }) {
@@ -96,6 +107,24 @@ function BlockView({
       return <Properties nodes={block.nodes} depth={0} />;
     case "events":
       return <Events list={block} />;
+    case "diagnostics":
+      return <Diagnostics findings={block.findings} />;
+    case "containers":
+      return <Containers containers={block.containers} onOpen={onOpen} />;
+    case "table":
+      return (
+        <Table
+          label={title}
+          columns={block.columns}
+          rows={block.rows.map((row) =>
+            row.map((value, index) => (
+              <ValueView key={index} value={value} onOpen={onOpen} compact />
+            )),
+          )}
+        />
+      );
+    case "list":
+      return <EmbeddedList list={block} space={space} onOpen={onOpen} />;
   }
 }
 
@@ -114,111 +143,6 @@ function Fields({
         value: <ValueView value={field.value} onOpen={onOpen} />,
       }))}
     />
-  );
-}
-
-function ValueView({
-  value,
-  onOpen,
-}: {
-  value: Value;
-  onOpen: (target: ObjectRef) => void;
-}): ReactNode {
-  switch (value.type) {
-    case "text":
-      return (
-        <span className="break-words whitespace-pre-wrap">{value.text}</span>
-      );
-    case "time":
-      return <Time at={value.at} />;
-    case "link":
-      return (
-        <LinkButton
-          onClick={() => {
-            onOpen(value.target);
-          }}
-          className="break-all"
-        >
-          {value.text}
-        </LinkButton>
-      );
-    case "labels":
-      return (
-        <ul className="flex flex-wrap gap-1">
-          {value.labels.map((label) => (
-            <LabelChip key={label.key} name={label.key} value={label.value} />
-          ))}
-        </ul>
-      );
-    case "list":
-      return (
-        <ul className="flex flex-col">
-          {value.items.map((item, index) => (
-            <li key={index}>
-              <ValueView value={item} onOpen={onOpen} />
-            </li>
-          ))}
-        </ul>
-      );
-  }
-}
-
-/** Long and multiline values fold to one line and open whole on a click. */
-function LabelChip({ name, value }: { name: string; value: string }) {
-  const long = value.length > 60 || value.includes("\n");
-  const [open, setOpen] = useState(false);
-  const chip = (
-    <>
-      <span className="text-muted-foreground">{name}</span>
-      {value !== "" && <span>={value}</span>}
-    </>
-  );
-  if (!long)
-    return (
-      <li className="max-w-full">
-        <Chip>{chip}</Chip>
-      </li>
-    );
-  return (
-    <li className="max-w-full">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => {
-          setOpen(!open);
-        }}
-        className={cn(
-          "max-w-full rounded bg-muted px-1.5 py-px text-left text-xs",
-          open ? "break-all whitespace-pre-wrap" : "block truncate",
-        )}
-      >
-        {chip}
-      </button>
-    </li>
-  );
-}
-
-function Time({ at }: { at: string }) {
-  const now = useNow(1000);
-  const when = Date.parse(at);
-  if (Number.isNaN(when)) return <span>{at}</span>;
-  const date = new Date(when).toLocaleString();
-  return (
-    <span title={date}>
-      {humanDuration(Math.max(0, now - when))} ago
-      <span className="ml-2 text-muted-foreground">{date}</span>
-    </span>
-  );
-}
-
-function Age({ at }: { at: string | null }) {
-  const now = useNow(1000);
-  const when = at === null ? Number.NaN : Date.parse(at);
-  if (Number.isNaN(when)) return null;
-  return (
-    <span title={new Date(when).toLocaleString()} className="tabular-nums">
-      {humanDuration(Math.max(0, now - when))}
-    </span>
   );
 }
 

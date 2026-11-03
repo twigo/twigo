@@ -266,6 +266,7 @@ export function Details({
         {snapshot.overview || tab !== "overview" ? (
           <ObjectContent
             tab={tab}
+            space={space}
             snapshot={snapshot}
             values={values}
             onOpen={open}

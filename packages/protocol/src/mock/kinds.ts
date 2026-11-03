@@ -11,20 +11,28 @@ import {
 import {
   DEPLOYMENT_COLUMNS,
   EVENT_COLUMNS,
+  JOB_COLUMNS,
   NODE_COLUMNS,
   POD_COLUMNS,
   VERSIONS,
 } from "./fixtures";
 import type { QueryRow } from "./query";
 
-/** A row as the mock serves it: what a query reads, and where its name was generated. */
+/**
+ * A row as the mock serves it: what a query reads, where its name was
+ * generated, and the fields a field selector reads, as the API server
+ * selects by them.
+ */
 export interface MockRow extends QueryRow {
   readonly generated: number | null;
+  readonly fields: Readonly<Record<string, string>>;
 }
 
 /** A kind the mock serves: the columns kube-apiserver sends for it, and its objects as rows. */
 export interface MockKind {
   readonly columns: readonly Column[];
+  /** The fields its rows can be selected by. */
+  readonly fields: readonly string[];
   /** The cells follow `queryColumns(columns, query)`: Namespace second when the list shows it. */
   rows(cluster: Cluster, withNamespace: boolean): MockRow[];
 }
@@ -38,6 +46,7 @@ export interface MockKind {
 export const KINDS: Readonly<Record<string, MockKind>> = {
   "/v1/pods": {
     columns: POD_COLUMNS,
+    fields: ["metadata.name", "metadata.namespace", "spec.nodeName"],
     rows: (cluster, withNamespace) =>
       cluster.pods.map((pod) => ({
         id: pod.id,
@@ -47,10 +56,16 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
         controller: replicaSetUid(cluster.context, pod),
         cells: podCells(pod, withNamespace),
         generated: podGenerated(pod),
+        fields: {
+          "metadata.name": pod.name,
+          "metadata.namespace": pod.namespace,
+          "spec.nodeName": pod.node,
+        },
       })),
   },
   "/v1/nodes": {
     columns: NODE_COLUMNS,
+    fields: ["metadata.name"],
     rows: (cluster) =>
       cluster.nodes.map((node) => ({
         id: node.id,
@@ -71,10 +86,12 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
           "containerd://2.3.4",
         ],
         generated: null,
+        fields: { "metadata.name": node.name },
       })),
   },
   "apps/v1/deployments": {
     columns: DEPLOYMENT_COLUMNS,
+    fields: ["metadata.name", "metadata.namespace"],
     rows: (cluster, withNamespace) =>
       deployments(cluster).map((deployment) => ({
         id: `${cluster.context}/${deployment.namespace}/${deployment.name}`,
@@ -97,10 +114,20 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
           withNamespace,
         ),
         generated: null,
+        fields: {
+          "metadata.name": deployment.name,
+          "metadata.namespace": deployment.namespace,
+        },
       })),
+  },
+  "batch/v1/jobs": {
+    columns: JOB_COLUMNS,
+    fields: ["metadata.name", "metadata.namespace"],
+    rows: () => [],
   },
   "/v1/events": {
     columns: EVENT_COLUMNS,
+    fields: ["metadata.name", "metadata.namespace"],
     rows: (cluster, withNamespace) =>
       events(cluster).map((event) => ({
         id: `${cluster.context}/${event.pod.namespace}/${event.name}`,
@@ -125,6 +152,10 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
           withNamespace,
         ),
         generated: null,
+        fields: {
+          "metadata.name": event.name,
+          "metadata.namespace": event.pod.namespace,
+        },
       })),
   },
 };
