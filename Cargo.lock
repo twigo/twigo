@@ -5604,6 +5604,7 @@ dependencies = [
  "twigo-kube",
  "twigo-netmon",
  "twigo-policy",
+ "twigo-sessions",
 ]
 
 [[package]]

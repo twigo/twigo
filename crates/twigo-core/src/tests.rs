@@ -533,3 +533,111 @@ async fn a_namespaced_object_without_a_namespace_is_refused() {
     let refused = core.object_open("main", nowhere, |_| true).await;
     assert_eq!(refused.unwrap_err().kind, ErrorKind::InvalidInput);
 }
+
+fn logs(space: &str, group: &str, resource: &str) -> twigo_ipc::OpenLogs {
+    twigo_ipc::OpenLogs {
+        target: twigo_ipc::LogTarget {
+            space: space.to_owned(),
+            gvr: twigo_ipc::Gvr {
+                group: group.to_owned(),
+                version: "v1".to_owned(),
+                resource: resource.to_owned(),
+            },
+            namespace: "default".to_owned(),
+            name: "web".to_owned(),
+        },
+        source: twigo_ipc::LogSource {
+            containers: twigo_ipc::Containers::Default,
+            pods: None,
+            since: twigo_ipc::Since::Seconds { seconds: 900 },
+            previous: false,
+        },
+        view: twigo_ipc::LogView {
+            level: twigo_ipc::LevelFilter::All,
+            filter: None,
+            search: None,
+            range: None,
+        },
+    }
+}
+
+#[tokio::test]
+async fn a_window_reaches_only_its_own_logs_and_a_reload_closes_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = Core::new(dir.path(), &dir.path().join("cache"));
+    let space = core.state.open_space("kind-test").id;
+    let (sender, mut batches) = tokio::sync::mpsc::unbounded_channel();
+    let id = core
+        .logs_open("main", logs(&space, "", "pods"), move |batch| {
+            sender.send(batch).is_ok()
+        })
+        .await
+        .unwrap();
+    let window = twigo_ipc::SetLogWindow {
+        id,
+        window: twigo_ipc::LogWindow::Tail { count: 100 },
+    };
+    core.logs_set_window("main", window).unwrap();
+    let first = tokio::time::timeout(Duration::from_secs(5), batches.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.status, ViewState::Connecting);
+    assert_eq!(first.pods, Some(Vec::new()));
+    assert_eq!(first.window.map(|window| window.entries.len()), Some(0));
+    let ack = Ack { id, seq: first.seq };
+    core.logs_ack("main", ack).unwrap();
+    assert_eq!(core.logs_file_name("main", id).unwrap(), "web.log");
+    let bad = twigo_ipc::SetLogView {
+        id,
+        view: twigo_ipc::LogView {
+            filter: Some("/web-[/".to_owned()),
+            ..logs(&space, "", "pods").view
+        },
+    };
+    assert_eq!(
+        core.logs_set_view("main", bad).unwrap_err().kind,
+        ErrorKind::InvalidInput
+    );
+    let file = dir.path().join("web.log");
+    let download = twigo_ipc::DownloadLogs { id, filtered: true };
+    core.logs_write("main", download, &file).await.unwrap();
+    assert_eq!(std::fs::read(&file).unwrap(), b"");
+    for refused in [
+        core.logs_set_window("other", window),
+        core.logs_ack("other", ack),
+        core.logs_close("other", id),
+    ] {
+        assert_eq!(refused.unwrap_err().kind, ErrorKind::NotFound);
+    }
+
+    core.drop_window("main");
+    assert_eq!(
+        core.logs_ack("main", ack).unwrap_err().kind,
+        ErrorKind::NotFound
+    );
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while batches.recv().await.is_some() {}
+    })
+    .await
+    .expect("the session ended with its window");
+}
+
+#[tokio::test]
+async fn logs_of_a_kind_without_pods_or_an_unknown_space_are_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = Core::new(dir.path(), &dir.path().join("cache"));
+    let refused = core
+        .logs_open("main", logs("nowhere", "", "pods"), |_| true)
+        .await;
+    assert_eq!(refused.unwrap_err().kind, ErrorKind::NotFound);
+    let space = core.state.open_space("kind-test").id;
+    let refused = core
+        .logs_open("main", logs(&space, "", "services"), |_| true)
+        .await;
+    assert_eq!(refused.unwrap_err().kind, ErrorKind::InvalidInput);
+    let deployment = core
+        .logs_open("main", logs(&space, "apps", "deployments"), |_| true)
+        .await;
+    assert!(deployment.is_ok(), "{deployment:?}");
+}
