@@ -32,6 +32,8 @@ pub struct Fake(Arc<Mutex<State>>);
 #[derive(Default)]
 struct State {
     containers: BTreeMap<(String, String), Container>,
+    /// Follows over a connection that died: open, and silent.
+    stranded: Vec<Sender>,
 }
 
 /// What the kubelet holds of a container.
@@ -59,18 +61,21 @@ impl Fake {
         self.0.lock().unwrap()
     }
 
-    pub fn hub(&self) -> Hub {
+    pub fn hub(&self) -> (Hub, Arc<Clients>) {
         let fake = self.clone();
         let service = tower::service_fn(move |request: Request<kube::client::Body>| {
             let fake = fake.clone();
             async move { Ok::<_, BoxError>(fake.respond(&request)) }
         });
         let clients = Arc::new(Clients::over(service, Budgets::default()));
-        let connect: Connect = Arc::new(move |_context| {
+        let connect: Connect = {
             let clients = Arc::clone(&clients);
-            Box::pin(async move { Ok::<_, IpcError>(clients) })
-        });
-        Hub::new(connect)
+            Arc::new(move |_context| {
+                let clients = Arc::clone(&clients);
+                Box::pin(async move { Ok::<_, IpcError>(clients) })
+            })
+        };
+        (Hub::new(connect), clients)
     }
 
     /// Which instances of a container the kubelet reads.
@@ -108,6 +113,17 @@ impl Fake {
                 let _ = sender.unbounded_send(Err("the connection broke".into()));
             }
         }
+    }
+
+    /// The follows of a container get nothing more, as over a connection
+    /// that died, which neither ends nor breaks their bodies.
+    pub fn strand(&self, pod: &str, container: &str) {
+        let mut state = self.state();
+        let mut stranded = Vec::new();
+        for instance in state.container(pod, container).instances.values_mut() {
+            stranded.extend(instance.followers.drain(..).map(|(_, sender)| sender));
+        }
+        state.stranded.extend(stranded);
     }
 
     /// The next read of a container breaks after `lines` lines.
