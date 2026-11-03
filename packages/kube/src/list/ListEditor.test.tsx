@@ -2,46 +2,19 @@ import {
   act,
   cleanup,
   fireEvent,
-  render,
   screen,
   within,
 } from "@testing-library/react";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  expect,
-  test,
-  vi,
-} from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { createMockBackend } from "@twigo/protocol/mock";
-import {
-  StateStore,
-  Workbench,
-  WorkbenchView,
-  type QuickAccessContext,
-} from "@twigo/workbench";
-import { DWELL_MS } from "./Details";
-import { PODS } from "./kinds";
-import { registerKube } from "./register";
-import { cellTone } from "./tones";
+import type { QuickAccessContext } from "@twigo/workbench";
+import { openList, settle, withScreenSize } from "../../test/workbench";
+import { cellTone } from "../columns";
+import { DWELL_MS } from "../Details";
+import { PODS } from "../kinds";
+import { parseListUri } from "../uri";
 
-beforeAll(() => {
-  Object.defineProperty(HTMLElement.prototype, "clientHeight", {
-    configurable: true,
-    get: () => 600,
-  });
-  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
-    configurable: true,
-    get: () => 1000,
-  });
-});
-
-afterAll(() => {
-  Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
-  Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
-});
+withScreenSize();
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -53,73 +26,59 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-async function settle(steps = 6) {
-  for (let i = 0; i < steps; i++) {
-    await act(() => vi.advanceTimersByTimeAsync(50));
-    act(() => {
-      vi.advanceTimersToNextFrame();
-    });
-  }
-}
-
-async function podsList(backend = createMockBackend("ready")) {
-  const state = StateStore.load(backend, () => undefined);
-  await act(() => vi.advanceTimersByTimeAsync(10));
-  const workbench = new Workbench(
-    backend,
-    "mac",
-    { id: "us", keys: {} },
-    await state,
-  );
-  registerKube(workbench);
-  const loaded = Promise.all([
-    workbench.catalog.watch(),
-    workbench.spaces.load(),
-  ]);
-  await act(() => vi.advanceTimersByTimeAsync(10));
-  await loaded;
-  render(<WorkbenchView workbench={workbench} />);
-  act(() => {
-    workbench.editors.open("k8s-list://prod-eu/v1/pods");
-  });
-  await settle();
-  return workbench;
-}
-
 const NOWHERE: QuickAccessContext = { lookup: () => undefined };
 const rows = () => screen.getAllByRole("row").slice(1);
+const cellOf = (row: HTMLElement | undefined, column: string) =>
+  row?.querySelector(`[data-column="${column}"]`)?.textContent ?? "";
+const nameOf = (row: HTMLElement | undefined) => cellOf(row, "Name");
+const statusOf = (row: HTMLElement) => cellOf(row, "Status");
 const details = () =>
   screen.queryByRole("complementary", { name: "Pod details" });
-const key = (code: string) => {
-  fireEvent.keyDown(screen.getByRole("grid"), { code, key: code });
+const grid = () => screen.getByRole("grid");
+const focusGrid = () => {
+  act(() => {
+    grid().focus();
+  });
+};
+const key = (code: string, init: KeyboardEventInit = {}) => {
+  fireEvent.keyDown(grid(), { code, key: code, ...init });
+};
+const health = (name: string) =>
+  within(screen.getByRole("group", { name: "Rows by health" })).getByRole(
+    "button",
+    { name: new RegExp(`^${name}`) },
+  );
+const filterField = () => screen.getByRole("textbox", { name: "Filter rows" });
+const openMenu = (trigger: HTMLElement) => {
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+};
+const clipboard = () => {
+  const writeText = vi.fn((_text: string) => Promise.resolve());
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  return writeText;
 };
 
 test("a click opens the row's details over the list, arrows follow, Escape closes", async () => {
-  await podsList();
+  await openList();
   expect(details()).toBeNull();
   const [first, second] = rows();
   if (!first || !second) throw new Error("no rows");
   fireEvent.click(first);
-  expect(details()?.textContent).toContain(
-    first.children[0]?.textContent ?? "?",
-  );
-  act(() => {
-    screen.getByRole("grid").focus();
-  });
+  expect(details()?.textContent).toContain(nameOf(first));
+  focusGrid();
   key("KeyJ");
   await settle(2);
-  expect(details()?.textContent).toContain(
-    second.children[0]?.textContent ?? "?",
-  );
+  expect(details()?.textContent).toContain(nameOf(second));
   key("Escape");
   expect(details()).toBeNull();
 });
 
 test("Enter on the selected row opens its details", async () => {
-  await podsList();
-  act(() => {
-    screen.getByRole("grid").focus();
-  });
+  await openList();
+  focusGrid();
   key("KeyJ");
   await settle(2);
   expect(details()).toBeNull();
@@ -127,54 +86,52 @@ test("Enter on the selected row opens its details", async () => {
   expect(details()).not.toBeNull();
 });
 
-test("the status bar counts the active list's rows", async () => {
-  await podsList();
-  expect(screen.getByText("5,000 pods")).toBeTruthy();
-});
-
-const statusOf = (row: HTMLElement) => row.children[3]?.textContent ?? "";
-const chip = (name: string) =>
-  screen.getByRole("button", { name: new RegExp(`^${name}`) });
-
-test("a health chip shows only its rows while every count stays", async () => {
-  await podsList();
+test("a health shows only its rows while every count stays, All counting every row", async () => {
+  await openList();
   const counts = () =>
     ["All", "Failing", "Pending", "Healthy"].map(
-      (name) => chip(name).textContent,
+      (name) => health(name).textContent,
     );
   const before = counts();
-  fireEvent.click(chip("Failing"));
+  expect(before[0]).toBe("All5,000");
+  fireEvent.click(health("Failing"));
   await settle();
-  expect(chip("Failing").getAttribute("aria-pressed")).toBe("true");
+  expect(health("Failing").getAttribute("aria-pressed")).toBe("true");
   expect(rows().length).toBeGreaterThan(0);
   expect(
     rows().filter((row) => cellTone(PODS, "Status", statusOf(row)) !== "error"),
   ).toEqual([]);
   expect(counts()).toEqual(before);
-  fireEvent.click(chip("All"));
+  fireEvent.click(health("All"));
   await settle();
   expect(screen.getByText("5,000 pods")).toBeTruthy();
 });
 
-test("a count in the status bar shows only those rows", async () => {
-  await podsList();
-  fireEvent.click(screen.getByRole("button", { name: /pending:/ }));
-  await settle();
-  expect(chip("Pending").getAttribute("aria-pressed")).toBe("true");
+test("All on a list whose URI picks a health shows every row", async () => {
+  await openList(
+    createMockBackend("ready"),
+    "k8s-list://prod-eu/v1/pods?h=warn",
+  );
+  expect(health("Pending").getAttribute("aria-pressed")).toBe("true");
+  expect(rows().length).toBeGreaterThan(0);
   expect(
     rows().filter((row) => cellTone(PODS, "Status", statusOf(row)) !== "warn"),
   ).toEqual([]);
+  fireEvent.click(health("All"));
+  await settle();
+  expect(health("All").getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByText("5,000 pods")).toBeTruthy();
+  expect(
+    rows().some((row) => cellTone(PODS, "Status", statusOf(row)) !== "warn"),
+  ).toBe(true);
 });
 
 test("/ in the list focuses the filter field, and its text filters the rows", async () => {
-  await podsList();
-  act(() => {
-    screen.getByRole("grid").focus();
-  });
+  await openList();
+  focusGrid();
   key("Slash");
-  const field = screen.getByRole("textbox", { name: "Filter rows" });
-  expect(document.activeElement).toBe(field);
-  fireEvent.change(field, { target: { value: "ImagePullBackOff" } });
+  expect(document.activeElement).toBe(filterField());
+  fireEvent.change(filterField(), { target: { value: "ImagePullBackOff" } });
   await settle();
   expect(rows().length).toBeGreaterThan(0);
   expect(rows().filter((row) => statusOf(row) !== "ImagePullBackOff")).toEqual(
@@ -182,69 +139,58 @@ test("/ in the list focuses the filter field, and its text filters the rows", as
   );
 });
 
-const openMenu = (trigger: HTMLElement) => {
-  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
-};
-
 test("a row's actions button and a right click run the resource commands on that row", async () => {
-  const writeText = vi.fn(() => Promise.resolve());
-  Object.defineProperty(navigator, "clipboard", {
-    configurable: true,
-    value: { writeText },
-  });
-  await podsList();
+  const writeText = clipboard();
+  await openList();
   const second = rows()[1];
   if (!second) throw new Error("no rows");
-  const name = second.children[0]?.textContent;
-  const namespace = second.children[1]?.textContent;
+  const name = nameOf(second);
+  const namespace = cellOf(second, "Namespace");
+  expect(name).not.toBe("");
+  expect(namespace).not.toBe("");
   const trigger = within(second).getByRole("button", { name: "Row actions" });
   openMenu(trigger);
   fireEvent.click(
     screen.getByRole("menuitem", { name: "Copy Namespace/Name" }),
   );
   await settle(1);
-  expect(writeText).toHaveBeenCalledWith(`${namespace ?? ""}/${name ?? ""}`);
+  expect(writeText).toHaveBeenCalledWith(`${namespace}/${name}`);
 
   const third = rows()[2];
   if (!third) throw new Error("no rows");
   fireEvent.contextMenu(third);
   fireEvent.click(screen.getByRole("menuitem", { name: "Open Details" }));
   await settle(1);
-  expect(details()?.textContent).toContain(third.children[0]?.textContent);
+  expect(details()?.textContent).toContain(nameOf(third));
 });
 
 test("the column chooser shows a wide column, and the kind keeps the choice", async () => {
   const backend = createMockBackend("ready");
-  await podsList(backend);
+  await openList(backend);
   expect(screen.queryByRole("columnheader", { name: "IP" })).toBeNull();
   openMenu(screen.getByRole("button", { name: "Choose columns" }));
-  fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "IP" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "IP" }));
   fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
   await settle(1);
   expect(screen.getByRole("columnheader", { name: "IP" })).toBeTruthy();
 
   cleanup();
-  await podsList(backend);
+  await openList(backend);
   expect(screen.getByRole("columnheader", { name: "IP" })).toBeTruthy();
 });
 
-const nameOf = (row: HTMLElement | undefined) =>
-  row?.children[0]?.textContent ?? "?";
-
 test("two lists of a space keep their own selected row for the details and the row commands", async () => {
-  const writeText = vi.fn(() => Promise.resolve());
-  Object.defineProperty(navigator, "clipboard", {
-    configurable: true,
-    value: { writeText },
-  });
-  const workbench = await podsList();
+  const writeText = clipboard();
+  const workbench = await openList();
   const all = nameOf(rows()[0]);
+  expect(all).not.toBe("");
   fireEvent.click(rows()[0] ?? document.body);
   act(() => {
     workbench.editors.open("k8s-list://prod-eu/v1/pods?ns=payments");
   });
   await settle();
   const payments = nameOf(rows()[1]);
+  expect(payments).not.toBe(all);
   fireEvent.click(rows()[1] ?? document.body);
   expect(details()?.textContent).toContain(payments);
 
@@ -261,10 +207,10 @@ test("two lists of a space keep their own selected row for the details and the r
   expect(writeText).toHaveBeenCalledWith(all);
 });
 
-test("a list reopened with a health chip picked subscribes with that health's values", async () => {
+test("a list reopened with a health picked subscribes with that health's values", async () => {
   const backend = createMockBackend("ready");
-  const workbench = await podsList(backend);
-  fireEvent.click(chip("Failing"));
+  const workbench = await openList(backend);
+  fireEvent.click(health("Failing"));
   await settle();
   act(() => {
     workbench.editors.close("k8s-list://prod-eu/v1/pods");
@@ -288,7 +234,7 @@ test("a list reopened with a health chip picked subscribes with that health's va
 });
 
 test("going to a pod again shows its details again after they were closed", async () => {
-  const workbench = await podsList();
+  const workbench = await openList();
   const provider = workbench.quickAccess.resolve("auth-api-1a4")?.provider;
   if (!provider) throw new Error("no provider");
   const goTo = async () => {
@@ -307,9 +253,7 @@ test("going to a pod again shows its details again after they were closed", asyn
   await goTo();
   expect(details()?.textContent).toContain(name);
 
-  fireEvent.change(screen.getByRole("textbox", { name: "Filter rows" }), {
-    target: { value: "" },
-  });
+  fireEvent.change(filterField(), { target: { value: "" } });
   await settle();
   const other = rows().find((row) => nameOf(row) !== name);
   fireEvent.click(other ?? document.body);
@@ -337,7 +281,7 @@ test("a list subscribes with the scope discovery gives, and waits for it", async
       return Promise.resolve(null as never);
     },
   };
-  await podsList(backend);
+  await openList(backend);
   expect(queries).toEqual([]);
   act(() => answer?.());
   await settle();
@@ -346,7 +290,7 @@ test("a list subscribes with the scope discovery gives, and waits for it", async
 });
 
 test("a kind the cluster does not serve says so instead of a list", async () => {
-  const workbench = await podsList();
+  const workbench = await openList();
   act(() => {
     workbench.editors.open("k8s-list://prod-eu/example.com/v1/widgets");
   });
@@ -366,7 +310,7 @@ test("a list of a version discovery does not prefer subscribes with that resourc
       return mock.subscribe(command, request, onMessage);
     },
   };
-  const workbench = await podsList(backend);
+  const workbench = await openList(backend);
   queries.length = 0;
   act(() => {
     workbench.editors.open(
@@ -399,7 +343,7 @@ test("a failed discovery shows its error instead of a list", async () => {
       return Promise.resolve(null as never);
     },
   };
-  await podsList(backend);
+  await openList(backend);
   const title = screen.getByText("Could not load pods");
   const state = title.parentElement ?? title;
   expect(within(state).getByText("no route to the cluster")).toBeDefined();
@@ -409,15 +353,13 @@ test("a failed discovery shows its error instead of a list", async () => {
 test("the details open the object once the selection rests on a row, not while it moves", async () => {
   const backend = createMockBackend("ready");
   const subscribe = vi.spyOn(backend, "subscribe");
-  await podsList(backend);
+  await openList(backend);
   const opened = () =>
     subscribe.mock.calls.filter(([command]) => command === "object_open");
   const [first] = rows();
   if (!first) throw new Error("no rows");
   fireEvent.click(first);
-  act(() => {
-    screen.getByRole("grid").focus();
-  });
+  focusGrid();
   for (let i = 0; i < 5; i++) {
     key("KeyJ");
     await act(() => vi.advanceTimersByTimeAsync(DWELL_MS / 3));
@@ -431,8 +373,8 @@ test("the details open the object once the selection rests on a row, not while i
   expect(opened()[0]?.[1]).toMatchObject({
     object: {
       namespaced: true,
-      namespace: shown?.children[1]?.textContent,
-      name: shown?.children[0]?.textContent,
+      namespace: cellOf(shown, "Namespace"),
+      name: nameOf(shown),
     },
   });
   expect(
@@ -443,7 +385,7 @@ test("the details open the object once the selection rests on a row, not while i
 });
 
 test("opening the object from the details keeps the list in a tab of its own", async () => {
-  const workbench = await podsList();
+  const workbench = await openList();
   act(() => {
     workbench.editors.close("k8s-list://prod-eu/v1/pods");
   });
@@ -475,7 +417,7 @@ test("the details say why the object cannot open, over the row's cells", async (
       return mock.subscribe(command, request, onMessage);
     },
   };
-  await podsList(backend);
+  await openList(backend);
   const [first] = rows();
   if (!first) throw new Error("no rows");
   fireEvent.click(first);
@@ -487,10 +429,9 @@ test("the details say why the object cannot open, over the row's cells", async (
 });
 
 test("the details show the document of the row the selection rests on", async () => {
-  await podsList();
+  await openList();
   const [first, second] = rows();
   if (!first || !second) throw new Error("no rows");
-  const nameOf = (row: HTMLElement) => row.children[0]?.textContent ?? "?";
   fireEvent.click(first);
   await settle();
   const metadata = () =>
@@ -498,11 +439,120 @@ test("the details show the document of the row the selection rests on", async ()
       name: "Metadata",
     }).textContent;
   expect(metadata()).toContain(nameOf(first));
-  act(() => {
-    screen.getByRole("grid").focus();
-  });
+  focusGrid();
   key("KeyJ");
   await settle();
   expect(metadata()).toContain(nameOf(second));
   expect(metadata()).not.toContain(nameOf(first));
+});
+
+const markBar = () => screen.queryByRole("toolbar");
+const isMarked = (row: HTMLElement | undefined) =>
+  row?.querySelector("[role=checkbox]")?.getAttribute("aria-checked");
+
+test("a row's box marks it, x marks the cursor's row, shift+down marks while moving, and Copy Names copies their names sorted", async () => {
+  const writeText = clipboard();
+  await openList();
+  expect(markBar()).toBeNull();
+  const fourth = rows()[3];
+  fireEvent.click(
+    within(fourth ?? document.body).getByRole("checkbox", { name: "Mark row" }),
+  );
+  await settle(1);
+  expect(markBar()?.textContent).toContain("1 marked");
+
+  focusGrid();
+  key("KeyJ");
+  await settle(2);
+  key("KeyX");
+  await settle(1);
+  expect(markBar()?.textContent).toContain("2 marked");
+
+  key("ArrowDown", { shiftKey: true });
+  await settle(2);
+  expect(rows().slice(0, 4).map(isMarked)).toEqual([
+    "true",
+    "true",
+    "false",
+    "true",
+  ]);
+  expect(markBar()?.textContent).toContain("3 marked");
+
+  const marked = [fourth, rows()[0], rows()[1]].map(nameOf);
+  expect(marked.filter((name) => name === "")).toEqual([]);
+  fireEvent.click(
+    within(markBar() ?? document.body).getByRole("button", {
+      name: /^Copy Names/,
+    }),
+  );
+  await settle(1);
+  expect(writeText).toHaveBeenCalledWith([...marked].sort().join("\n"));
+  expect([...marked].sort()).not.toEqual(marked);
+});
+
+test("Escape closes the details first, then clears the marks", async () => {
+  await openList();
+  const [first, second] = rows();
+  if (!first || !second) throw new Error("no rows");
+  fireEvent.click(within(second).getByRole("checkbox", { name: "Mark row" }));
+  fireEvent.click(first);
+  await settle(1);
+  expect(details()).not.toBeNull();
+  expect(markBar()?.textContent).toContain("1 marked");
+  focusGrid();
+  key("Escape");
+  await settle(1);
+  expect(details()).toBeNull();
+  expect(markBar()?.textContent).toContain("1 marked");
+  key("Escape");
+  await settle(1);
+  expect(markBar()).toBeNull();
+  expect(isMarked(rows()[1])).toBe("false");
+});
+
+const pinButton = (label: string) =>
+  screen.getByRole("button", { name: label });
+const explorer = () => screen.getByRole("tree", { name: "Resources" });
+
+test("the pin keeps the list with its namespaces, text and health, opens it so, and unpins on a second press", async () => {
+  const workbench = await openList();
+  act(() => {
+    workbench.spaces.update("prod-eu", (state) => ({
+      ...state,
+      namespaces: ["auth", "payments"],
+    }));
+  });
+  await settle();
+  fireEvent.click(health("Failing"));
+  fireEvent.change(filterField(), { target: { value: "api" } });
+  await settle();
+  expect(within(explorer()).queryByText("Pinned")).toBeNull();
+  fireEvent.click(pinButton("Pin to the explorer"));
+  await settle(1);
+
+  expect(within(explorer()).getByText("Pinned")).toBeTruthy();
+  const pinned = within(explorer()).getByRole("treeitem", {
+    name: /^PodsFailing · auth, payments · “api”/,
+  });
+  fireEvent.click(pinned);
+  await settle();
+  const uri = workbench.editors.active ?? "";
+  expect(parseListUri(uri)).toEqual({
+    space: "prod-eu",
+    gvr: PODS,
+    namespaces: ["auth", "payments"],
+    text: "api",
+    health: "error",
+  });
+  expect(health("Failing").getAttribute("aria-pressed")).toBe("true");
+  expect(filterField()).toHaveProperty("value", "api");
+  expect(rows().length).toBeGreaterThan(0);
+  expect(
+    rows().filter((row) => cellTone(PODS, "Status", statusOf(row)) !== "error"),
+  ).toEqual([]);
+
+  fireEvent.click(pinButton("Unpin from the explorer"));
+  await settle(1);
+  expect(within(explorer()).queryByText("Pinned")).toBeNull();
+  expect(pinButton("Pin to the explorer")).toBeTruthy();
 });

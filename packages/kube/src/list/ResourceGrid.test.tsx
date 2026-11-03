@@ -1,46 +1,22 @@
 import {
   act,
   cleanup,
+  configure,
   fireEvent,
-  render,
   screen,
+  within,
 } from "@testing-library/react";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type { Backend, ListBatch } from "@twigo/protocol";
+import { createMockBackend } from "@twigo/protocol/mock";
 import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  expect,
-  test,
-  vi,
-} from "vitest";
-import { StrictMode } from "react";
-import type {
-  Backend,
-  ListBatch,
-  ValueCount,
-  ViewState,
-} from "@twigo/protocol";
-import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
-import { PODS } from "./kinds";
-import { stateLabel } from "./listStatus";
-import { ResourceTable, type ListController } from "./ResourceTable";
+  mountKube,
+  openList,
+  settle,
+  withScreenSize,
+} from "../../test/workbench";
 
-beforeAll(() => {
-  Object.defineProperty(HTMLElement.prototype, "clientHeight", {
-    configurable: true,
-    get: () => 600,
-  });
-  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
-    configurable: true,
-    get: () => 1000,
-  });
-});
-
-afterAll(() => {
-  Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
-  Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
-});
+withScreenSize();
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -52,42 +28,29 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-async function settle(steps = 6) {
-  for (let i = 0; i < steps; i++) {
-    await act(() => vi.advanceTimersByTimeAsync(50));
-    act(() => {
-      vi.advanceTimersToNextFrame();
-    });
-  }
-}
-
-async function show(scenario: MockScenario, space = "prod-eu") {
-  const onStatus =
-    vi.fn<
-      (total: number, status: ViewState, groups: readonly ValueCount[]) => void
-    >();
-  render(
-    <ResourceTable
-      backend={createMockBackend(scenario)}
-      space={space}
-      gvr={PODS}
-      namespaced
-      title="Pods"
-      onStatus={onStatus}
-    />,
-  );
-  await settle();
-  return onStatus;
-}
-
 const header = (name: string) => screen.getByRole("columnheader", { name });
+const template = () =>
+  screen.getAllByRole("row")[0]?.style.gridTemplateColumns ?? "";
+const rows = () => screen.getAllByRole("row").slice(1);
+const cellOf = (row: HTMLElement | undefined, column: string) =>
+  row?.querySelector<HTMLElement>(`[data-column="${column}"]`) ?? undefined;
+const textOf = (row: HTMLElement | undefined, column: string) =>
+  cellOf(row, column)?.textContent ?? "";
+const grid = () => screen.getByRole("grid");
+const key = (code: string) => {
+  fireEvent.keyDown(grid(), { code, key: code });
+};
+const focusGrid = () => {
+  act(() => {
+    grid().focus();
+  });
+};
+const openMenu = (trigger: HTMLElement) => {
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+};
 
 test("rows from the window render with the server's priority-0 columns", async () => {
-  const onStatus = await show("ready");
-  const [total, status, groups] = onStatus.mock.lastCall ?? [];
-  expect([total, status]).toEqual([5000, { state: "ready" }]);
-  expect(groups?.reduce((sum, group) => sum + group.count, 0)).toBe(5000);
-  expect(groups?.[0]?.value).toBe("Running");
+  await openList();
   const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
   expect(headers).toEqual([
     "Name",
@@ -98,20 +61,19 @@ test("rows from the window render with the server's priority-0 columns", async (
     "Age",
     "",
   ]);
-  expect(screen.getAllByRole("row").length).toBeGreaterThan(10);
+  expect(rows().length).toBeGreaterThan(10);
 });
 
 test("clicking a header sorts by that column, then reverses, keeping rows on screen", async () => {
-  await show("ready");
+  await openList();
   fireEvent.click(header("Ready"));
-  expect(screen.getAllByRole("row").length).toBeGreaterThan(10);
+  expect(rows().length).toBeGreaterThan(10);
   await settle();
   expect(header("Ready").getAttribute("aria-sort")).toBe("ascending");
   const cells = () =>
-    screen
-      .getAllByRole("row")
-      .slice(1, 4)
-      .map((row) => row.children[2]?.textContent);
+    rows()
+      .slice(0, 3)
+      .map((row) => textOf(row, "Ready"));
   expect(cells()).toEqual(["0/1", "0/1", "0/1"]);
   fireEvent.click(header("Ready"));
   await settle();
@@ -120,7 +82,14 @@ test("clicking a header sorts by that column, then reverses, keeping rows on scr
 });
 
 test("a space without pods shows the empty state, not an error", async () => {
-  await show("live", "dev");
+  const workbench = await mountKube(createMockBackend("live"));
+  act(() => {
+    workbench.spaces.select("dev");
+  });
+  await settle();
+  act(() => {
+    workbench.editors.open("k8s-list://dev/v1/pods");
+  });
   await settle(30);
   expect(screen.getByText("No pods")).toBeTruthy();
 });
@@ -130,29 +99,24 @@ test.each([
   ["unauthorized", "Sign-in needed"],
   ["error", "Could not load pods"],
 ] as const)("%s shows its own panel with a retry", async (scenario, title) => {
-  await show(scenario);
+  const backend = createMockBackend(scenario);
+  const subscribe = vi.spyOn(backend, "subscribe");
+  await openList(backend);
   expect(screen.getByText(title)).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
-});
-
-test.each([
-  ["queued", "Waiting for a stream slot"],
-  ["connecting", "Connecting…"],
-  ["syncing", "Loading · 1,850"],
-  ["relisting", "Relisting…"],
-  ["stale", "No updates · reconnecting"],
-] as const)("%s is reported and named", async (scenario, label) => {
-  const onStatus = await show(scenario);
-  const [, status] = onStatus.mock.lastCall ?? [];
-  expect(status && stateLabel(status)).toBe(label);
+  const lists = () =>
+    subscribe.mock.calls.filter(([command]) => command === "list_subscribe");
+  expect(lists()).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await settle();
+  expect(lists()).toHaveLength(2);
+  expect(screen.getByText(title)).toBeTruthy();
 });
 
 test("a scroll during a resubscribe reaches the new subscription before it shows", async () => {
-  await show("ready");
+  await openList();
   fireEvent.click(header("Ready"));
-  const grid = screen.getByRole("grid");
-  grid.scrollTop = 3000 * 26;
-  fireEvent.scroll(grid);
+  grid().scrollTop = 3000 * 26;
+  fireEvent.scroll(grid());
   for (let i = 0; i < 10; i++) {
     await act(() => vi.advanceTimersByTimeAsync(50));
     act(() => {
@@ -161,43 +125,45 @@ test("a scroll during a resubscribe reaches the new subscription before it shows
     if (header("Ready").getAttribute("aria-sort") === "ascending") break;
   }
   expect(header("Ready").getAttribute("aria-sort")).toBe("ascending");
-  const rows = screen.getAllByRole("row").slice(1);
-  expect(rows.length).toBeGreaterThan(10);
+  expect(rows().length).toBeGreaterThan(10);
   expect(
-    rows.filter((row) => row.querySelector("[role=gridcell]") === null),
+    rows().filter((row) => row.querySelector("[role=gridcell]") === null),
   ).toEqual([]);
 });
 
-test("under StrictMode the table subscribes once and shows rows", async () => {
+test("under StrictMode the list subscribes once and shows rows", async () => {
   const backend = createMockBackend("ready");
   const subscribe = vi.spyOn(backend, "subscribe");
   const invoke = vi.spyOn(backend, "invoke");
-  render(
-    <StrictMode>
-      <ResourceTable
-        backend={backend}
-        space="prod-eu"
-        gvr={PODS}
-        namespaced
-        title="Pods"
-      />
-    </StrictMode>,
+  configure({ reactStrictMode: true });
+  try {
+    await openList(backend);
+  } finally {
+    configure({ reactStrictMode: false });
+  }
+  const subscribes = subscribe.mock.calls.filter(
+    ([command]) => command === "list_subscribe",
   );
-  await settle();
   const unsubscribes = invoke.mock.calls.filter(
     ([command]) => command === "list_unsubscribe",
   );
-  expect(subscribe.mock.calls.length - unsubscribes.length).toBe(1);
+  expect(subscribes.length - unsubscribes.length).toBe(1);
   expect(screen.getAllByRole("gridcell").length).toBeGreaterThan(10);
 });
 
 function scriptedBackend() {
+  const mock = createMockBackend("ready");
   let send: ((batch: ListBatch) => void) | undefined;
   const backend: Backend = {
-    invoke: () => Promise.resolve(null),
-    subscribe(_command, _request, onMessage) {
+    invoke: (command, request) =>
+      command.startsWith("list_")
+        ? Promise.resolve(null as never)
+        : mock.invoke(command, request),
+    subscribe(command, request, onMessage) {
+      if (command !== "list_subscribe")
+        return mock.subscribe(command, request, onMessage);
       send = onMessage;
-      return Promise.resolve(1);
+      return Promise.resolve(1 as never);
     },
   };
   return { backend, send: (batch: ListBatch) => send?.(batch) };
@@ -234,21 +200,12 @@ function batch(
 
 test("a changed cell flashes through the next batch, and a storm flashes nothing", async () => {
   const script = scriptedBackend();
-  render(
-    <ResourceTable
-      backend={script.backend}
-      space="s"
-      gvr={PODS}
-      namespaced
-      title="Pods"
-    />,
-  );
-  await settle(1);
+  await openList(script.backend);
   const restarts = (id: string) =>
-    screen
-      .getByText(id)
-      .closest("[role=row]")
-      ?.querySelectorAll("[role=gridcell] > span")[1];
+    cellOf(
+      screen.getByText(id).closest<HTMLElement>("[role=row]") ?? undefined,
+      "Restarts",
+    )?.firstElementChild;
   const send = async (b: ListBatch) => {
     act(() => {
       script.send(b);
@@ -275,101 +232,113 @@ test("a changed cell flashes through the next batch, and a storm flashes nothing
   ).toEqual([]);
 });
 
-test("columns share the free width until dragging an edge sizes one", async () => {
-  await show("ready");
-  const row = () => screen.getAllByRole("row")[0];
-  expect(
-    row()?.style.gridTemplateColumns.startsWith(
-      "minmax(280px, 280fr) minmax(140px, 140fr) ",
-    ),
-  ).toBe(true);
+test("the name takes the free width until an edge's drag sizes it, and the kind keeps the width", async () => {
+  const backend = createMockBackend("ready");
+  await openList(backend);
+  expect(template()).toBe(
+    "28px minmax(280px, 1fr) 120px 56px 160px 112px 64px 32px",
+  );
   const edge = screen.getByRole("separator", { name: "Resize Name" });
   fireEvent.pointerDown(edge, { clientX: 300, pointerId: 1 });
   fireEvent.pointerMove(edge, { clientX: 400, pointerId: 1 });
   fireEvent.pointerUp(edge, { pointerId: 1 });
-  expect(
-    row()?.style.gridTemplateColumns.startsWith("380px minmax(140px, 140fr) "),
-  ).toBe(true);
+  expect(template()).toBe(
+    "28px 380px 120px 56px 160px 112px 64px minmax(0, 1fr) 32px",
+  );
   fireEvent.pointerDown(edge, { clientX: 400, pointerId: 1 });
   fireEvent.pointerMove(edge, { clientX: -1000, pointerId: 1 });
-  expect(row()?.style.gridTemplateColumns.startsWith("48px ")).toBe(true);
+  fireEvent.pointerUp(edge, { pointerId: 1 });
+  expect(template().startsWith("28px 48px ")).toBe(true);
+  await settle(1);
+
+  cleanup();
+  await openList(backend);
+  expect(template().startsWith("28px 48px ")).toBe(true);
+});
+
+test("a double click on a header's edge fits the column to its widest cell", async () => {
+  Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.textContent.length * 10;
+    },
+  });
+  try {
+    await openList();
+    const widest = Math.max(
+      ...rows().map((row) => textOf(row, "Status").length * 10),
+    );
+    expect(widest).toBeGreaterThan(48);
+    fireEvent.doubleClick(
+      screen.getByRole("separator", { name: "Resize Status" }),
+    );
+    await settle(1);
+    expect(template()).toBe(
+      `28px minmax(280px, 1fr) 120px 56px ${String(widest + 2)}px 112px 64px 32px`,
+    );
+  } finally {
+    Reflect.deleteProperty(HTMLElement.prototype, "scrollWidth");
+  }
 });
 
 test("filters that match nothing say so and offer to clear them", async () => {
-  const onClearFilters = vi.fn();
-  render(
-    <ResourceTable
-      backend={createMockBackend("ready")}
-      space="prod-eu"
-      gvr={PODS}
-      namespaced
-      title="Pods"
-      text="no-such-pod"
-      onClearFilters={onClearFilters}
-    />,
+  await openList(
+    createMockBackend("ready"),
+    "k8s-list://prod-eu/v1/pods?q=no-such-pod",
   );
-  await settle();
   expect(screen.getByText("No matching pods")).toBeTruthy();
   expect(screen.queryByText("No pods")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-  expect(onClearFilters).toHaveBeenCalledTimes(1);
+  await settle();
+  expect(screen.queryByText("No matching pods")).toBeNull();
+  expect(rows().length).toBeGreaterThan(10);
+  expect(screen.getByRole("textbox", { name: "Filter rows" })).toHaveProperty(
+    "value",
+    "",
+  );
 });
 
 test("j moves on from the selected row after it scrolled out of the window", async () => {
-  let controller: ListController | undefined;
-  render(
-    <ResourceTable
-      backend={createMockBackend("ready")}
-      space="prod-eu"
-      gvr={PODS}
-      namespaced
-      title="Pods"
-      register={(_, list) => {
-        controller = list;
-        return () => undefined;
-      }}
-    />,
+  await openList();
+  focusGrid();
+  key("KeyJ");
+  await settle(2);
+  grid().scrollTop = 3000 * 26;
+  fireEvent.scroll(grid());
+  await settle();
+  key("KeyJ");
+  await settle();
+  grid().scrollTop = 0;
+  fireEvent.scroll(grid());
+  await settle();
+  const selected = rows().filter(
+    (row) => row.getAttribute("aria-selected") === "true",
   );
-  await settle();
-  fireEvent.click(screen.getAllByRole("row")[1] ?? document.body);
-  const grid = screen.getByRole("grid");
-  grid.scrollTop = 3000 * 26;
-  fireEvent.scroll(grid);
-  await settle();
-  act(() => {
-    controller?.move(1);
-  });
-  await settle();
-  grid.scrollTop = 0;
-  fireEvent.scroll(grid);
-  await settle();
-  const selected = screen
-    .getAllByRole("row")
-    .filter((row) => row.getAttribute("aria-selected") === "true");
   expect(selected.map((row) => row.getAttribute("aria-rowindex"))).toEqual([
     "3",
   ]);
 });
 
+async function choose(column: string) {
+  openMenu(screen.getByRole("button", { name: "Choose columns" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: column }));
+  fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+  await settle(1);
+}
+
 test.each([
-  [{ IP: true }, "10.244.", true],
-  [{}, "10.244.", false],
-  [{ Namespace: false }, "kube-system", false],
-  [{}, "kube-system", true],
+  ["IP", "10.244.", true],
+  [undefined, "10.244.", false],
+  ["Namespace", "kube-system", false],
+  [undefined, "kube-system", true],
 ])(
-  "with choices %o the text %s matches rows: %s",
-  async (choices, text, matches) => {
-    render(
-      <ResourceTable
-        backend={createMockBackend("ready")}
-        space="prod-eu"
-        gvr={PODS}
-        namespaced
-        title="Pods"
-        text={text}
-        choices={choices}
-      />,
-    );
+  "with %s toggled the text %s matches rows: %s",
+  async (column, text, matches) => {
+    await openList();
+    if (column) await choose(column);
+    fireEvent.change(screen.getByRole("textbox", { name: "Filter rows" }), {
+      target: { value: text },
+    });
     await settle();
     expect(screen.queryByText("No matching pods") === null).toBe(matches);
   },
@@ -377,23 +346,195 @@ test.each([
 
 test("the first subscription already carries the column choices the text filter follows", async () => {
   const backend = createMockBackend("ready");
+  const workbench = await openList(backend);
+  await choose("IP");
   const subscribe = vi.spyOn(backend, "subscribe");
-  render(
-    <ResourceTable
-      backend={backend}
-      space="prod-eu"
-      gvr={PODS}
-      namespaced
-      title="Pods"
-      text="10.244."
-      choices={{ IP: true }}
-    />,
-  );
+  act(() => {
+    workbench.editors.open("k8s-list://prod-eu/v1/pods?q=10.244.");
+  });
   await settle();
-  const queries = subscribe.mock.calls.flatMap(([, request]) =>
-    typeof request === "object" && request && "columns" in request
+  const queries = subscribe.mock.calls.flatMap(([command, request]) =>
+    command === "list_subscribe" &&
+    typeof request === "object" &&
+    request &&
+    "columns" in request
       ? [request.columns]
       : [],
   );
   expect(queries).toEqual([{ IP: true }]);
+});
+
+function generatedNames(): Backend {
+  const mock = createMockBackend("ready");
+  return {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe(command, request, onMessage) {
+      if (command !== "list_subscribe")
+        return mock.subscribe(command, request, onMessage);
+      const send = onMessage as (batch: ListBatch) => void;
+      return mock.subscribe(command, request, (message) => {
+        const batch = message as ListBatch;
+        send({
+          ...batch,
+          upserts: batch.upserts.map((row) => ({
+            ...row,
+            generated: String(row.cells[0]).lastIndexOf("-") + 1,
+          })),
+        });
+      });
+    },
+  };
+}
+
+test("a failing row has an edge, a name's generated part reads quieter, and restarts read as a count and its age", async () => {
+  await openList(generatedNames());
+  const parts = (row: HTMLElement | undefined, column: string) => [
+    ...(cellOf(row, column)?.querySelectorAll(":scope > span > span > span") ??
+      []),
+  ];
+  const filter = async (text: string) => {
+    fireEvent.change(screen.getByRole("textbox", { name: "Filter rows" }), {
+      target: { value: text },
+    });
+    await settle();
+    return rows()[0];
+  };
+
+  const running = rows().find((row) => textOf(row, "Status") === "Running");
+  expect(running?.className).not.toMatch(/var\(--(error|warn)\)/);
+  const whole = textOf(running, "Name");
+  const cut = whole.lastIndexOf("-") + 1;
+  const name = parts(running, "Name");
+  expect(name.map((part) => part.textContent)).toEqual([
+    whole.slice(0, cut),
+    whole.slice(cut),
+  ]);
+  expect(name[0]?.className).not.toContain("text-muted-foreground");
+  expect(name[1]?.className).toContain("text-muted-foreground");
+
+  const failing = await filter("CrashLoopBackOff");
+  expect(textOf(failing, "Status")).toBe("CrashLoopBackOff");
+  expect(failing?.className).toContain("var(--error)");
+  const restarts = parts(failing, "Restarts").map((part) => part.textContent);
+  expect(restarts).toHaveLength(2);
+  expect(restarts[0]).toMatch(/^\d+$/);
+  expect(restarts[1]).toMatch(/^\d+m ago$/);
+
+  const pending = await filter("Pending");
+  expect(textOf(pending, "Status")).toBe("Pending");
+  expect(pending?.className).toContain("var(--warn)");
+});
+
+const groupHeaders = () =>
+  rows().filter((row) => row.hasAttribute("aria-expanded"));
+const groupOf = (row: HTMLElement) =>
+  [...row.querySelectorAll("[role=gridcell] > span")].map(
+    (part) => part.textContent,
+  );
+const statusCount = (health: string) =>
+  Number(
+    screen
+      .getByRole("button", { name: new RegExp(` ${health}$`) })
+      .textContent.split(" ")[0]
+      ?.replace(/,/g, ""),
+  );
+
+async function groupBy(column: string) {
+  openMenu(screen.getByRole("button", { name: "Group rows" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: column }));
+  await settle();
+}
+
+test("grouping by Namespace puts each group's rows under a header with its counts, and hides the column", async () => {
+  await openList();
+  await groupBy("Namespace");
+  expect(screen.queryByRole("columnheader", { name: "Namespace" })).toBeNull();
+  const shown = rows();
+  const [first] = shown;
+  expect(first && groupOf(first)[0]).toBe("auth");
+  const next = shown.findIndex(
+    (row, index) => index > 0 && row.hasAttribute("aria-expanded"),
+  );
+  const auth = shown.slice(1, next < 0 ? undefined : next);
+  expect(auth.length).toBeGreaterThan(10);
+  expect(
+    auth.filter((row) => !textOf(row, "Name").startsWith("auth-")),
+  ).toEqual([]);
+
+  for (let open = 0; open < 12; open++) {
+    const header = groupHeaders().find(
+      (row) => row.getAttribute("aria-expanded") === "true",
+    );
+    if (!header) break;
+    fireEvent.click(header);
+    await settle();
+  }
+  const groups = groupHeaders().map(groupOf);
+  expect(groups.map(([value]) => value)).toEqual([
+    "auth",
+    "batch",
+    "checkout",
+    "default",
+    "ingress-nginx",
+    "kube-system",
+    "ledger",
+    "monitoring",
+    "notify",
+    "payments",
+    "platform",
+    "search",
+  ]);
+  const sum = (word: string) =>
+    groups.reduce((total, parts) => {
+      const part = parts.find((text) => text.endsWith(` ${word}`));
+      return total + Number(part?.split(" ")[0]?.replace(/,/g, "") ?? 0);
+    }, 0);
+  expect(sum("pods")).toBe(5000);
+  expect(sum("failing")).toBe(statusCount("failing"));
+  expect(sum("pending")).toBe(statusCount("pending"));
+  expect(sum("failing")).toBeGreaterThan(0);
+  expect(sum("pending")).toBeGreaterThan(0);
+});
+
+test("a header's click folds its group, Left goes from a row to its header, and the kind keeps the grouping", async () => {
+  const backend = createMockBackend("ready");
+  await openList(backend);
+  await groupBy("Namespace");
+  const [auth] = groupHeaders();
+  if (!auth) throw new Error("no groups");
+  fireEvent.click(auth);
+  await settle();
+  const [folded, batch, firstOfBatch, secondOfBatch] = rows();
+  expect(folded && groupOf(folded)[0]).toBe("auth");
+  expect(folded?.getAttribute("aria-expanded")).toBe("false");
+  expect(batch && groupOf(batch)[0]).toBe("batch");
+  expect(textOf(firstOfBatch, "Name").startsWith("batch-")).toBe(true);
+
+  focusGrid();
+  key("KeyJ");
+  key("KeyJ");
+  await settle(2);
+  key("KeyJ");
+  await settle(2);
+  const selected = () =>
+    rows().filter((row) => row.getAttribute("aria-selected") === "true");
+  expect(selected().map((row) => textOf(row, "Name"))).toEqual([
+    textOf(secondOfBatch, "Name"),
+  ]);
+  key("ArrowLeft");
+  await settle(2);
+  expect(selected().map((row) => groupOf(row)[0])).toEqual(["batch"]);
+  key("ArrowLeft");
+  await settle();
+  expect(groupHeaders()[1]?.getAttribute("aria-expanded")).toBe("false");
+
+  cleanup();
+  await openList(backend);
+  expect(screen.queryByRole("columnheader", { name: "Namespace" })).toBeNull();
+  expect(groupHeaders().map((row) => groupOf(row)[0])[0]).toBe("auth");
+  expect(
+    within(screen.getByRole("button", { name: "Group rows" })).getByText(
+      "Namespace",
+    ),
+  ).toBeTruthy();
 });

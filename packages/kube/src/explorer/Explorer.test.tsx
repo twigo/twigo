@@ -2,14 +2,19 @@ import {
   act,
   cleanup,
   fireEvent,
-  render,
   screen,
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { createMockBackend } from "@twigo/protocol/mock";
-import { StateStore, Workbench, WorkbenchView } from "@twigo/workbench";
-import { registerKube } from "./register";
+import {
+  mountKube,
+  openList,
+  settle,
+  withScreenSize,
+} from "../../test/workbench";
+
+withScreenSize();
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -21,35 +26,9 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-async function settle() {
-  for (let i = 0; i < 4; i++) {
-    await act(() => vi.advanceTimersByTimeAsync(50));
-  }
-}
-
-async function mounted(backend = createMockBackend("ready")) {
-  const state = StateStore.load(backend, () => undefined);
-  await act(() => vi.advanceTimersByTimeAsync(10));
-  const workbench = new Workbench(
-    backend,
-    "mac",
-    { id: "us", keys: {} },
-    await state,
-  );
-  registerKube(workbench);
-  const loaded = Promise.all([
-    workbench.catalog.watch(),
-    workbench.spaces.load(),
-  ]);
-  await act(() => vi.advanceTimersByTimeAsync(10));
-  await loaded;
-  render(<WorkbenchView workbench={workbench} />);
-  await settle();
-  return workbench;
-}
-
 const tree = () => screen.getByRole("tree", { name: "Resources" });
-const item = (name: string) => within(tree()).getByRole("treeitem", { name });
+const item = (name: string | RegExp) =>
+  within(tree()).getByRole("treeitem", { name });
 const focused = () => {
   const id = tree().getAttribute("aria-activedescendant");
   return id === null ? undefined : document.getElementById(id)?.textContent;
@@ -59,7 +38,7 @@ const press = (code: string) => {
 };
 
 test("the list keys move through the tree, left and right close and open sections, Enter opens a kind", async () => {
-  const workbench = await mounted();
+  const workbench = await mountKube();
   tree().focus();
   expect(focused()).toBe("Workloads");
 
@@ -84,7 +63,7 @@ test("the list keys move through the tree, left and right close and open section
 
 test("open sections are kept per space, across switches and windows", async () => {
   const backend = createMockBackend("ready");
-  const workbench = await mounted(backend);
+  const workbench = await mountKube(backend);
   fireEvent.click(item("Config"));
   expect(item("Config").getAttribute("aria-expanded")).toBe("true");
 
@@ -102,6 +81,52 @@ test("open sections are kept per space, across switches and windows", async () =
   expect(item("Config").getAttribute("aria-expanded")).toBe("true");
 
   cleanup();
-  await mounted(backend);
+  await mountKube(backend);
   expect(item("Config").getAttribute("aria-expanded")).toBe("true");
+});
+
+const errorDot = (row: HTMLElement) => row.querySelector(".bg-error");
+const healthButton = (name: string) =>
+  within(screen.getByRole("group", { name: "Rows by health" })).getByRole(
+    "button",
+    { name: new RegExp(`^${name}`) },
+  );
+
+test("a kind whose list is open shows every row it has, and an error dot while some fail", async () => {
+  const workbench = await mountKube();
+  expect(item("Pods").textContent).toBe("Pods");
+  act(() => {
+    workbench.editors.open("k8s-list://prod-eu/v1/pods");
+  });
+  await settle();
+  expect(item(/^Pods/).textContent).toBe("Pods5,000");
+  expect(errorDot(item(/^Pods/))).not.toBeNull();
+
+  fireEvent.click(healthButton("Failing"));
+  await settle();
+  expect(item(/^Pods/).textContent).toBe("Pods5,000");
+
+  fireEvent.change(screen.getByRole("textbox", { name: "Filter rows" }), {
+    target: { value: "Running" },
+  });
+  await settle();
+  expect(item(/^Pods/).textContent).toMatch(/^Pods[\d,]+$/);
+  expect(item(/^Pods/).textContent).not.toBe("Pods5,000");
+  expect(errorDot(item(/^Pods/))).toBeNull();
+});
+
+test("a pinned list shows the rows its filters keep", async () => {
+  const workbench = await openList(
+    createMockBackend("ready"),
+    "k8s-list://prod-eu/v1/pods?h=error",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Pin to the explorer" }));
+  await settle(1);
+  const failing = screen
+    .getAllByRole("button", { name: /^[\d,]+ failing$/ })[0]
+    ?.textContent.split(" ")[0];
+  expect(failing).toMatch(/^[\d,]+$/);
+  const pinned = item(/^PodsFailing/);
+  expect(pinned.textContent).toBe(`PodsFailing${failing ?? ""}`);
+  expect(workbench.editors.active).toBe("k8s-list://prod-eu/v1/pods?h=error");
 });
