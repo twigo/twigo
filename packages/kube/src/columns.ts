@@ -80,7 +80,7 @@ const BY_RESOURCE: Readonly<Record<string, Partial<ColumnRule>>> = {
     health: true,
     tone: podStatus,
   },
-  "/pods/Restarts": { cell: "restarts", width: 112 },
+  "/pods/Restarts": { cell: "restarts", width: 132 },
   "/nodes/Status": {
     cell: "status",
     width: 160,

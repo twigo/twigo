@@ -99,13 +99,16 @@ function Restarts({ text }: { text: string }) {
   const match = /^(\d+)(?: \((.+) ago\))?$/.exec(text);
   const [, count = text, ago] = match ?? [];
   return (
-    <span className="inline-grid grid-cols-[3ch_1fr] gap-2 align-bottom">
+    <>
       <span
-        className={cn("text-right", count === "0" && "text-muted-foreground-2")}
+        className={cn(
+          "inline-block w-[3ch] text-right",
+          count === "0" && "text-muted-foreground-2",
+        )}
       >
         {count}
       </span>
-      {ago && <span className="text-muted-foreground">{ago} ago</span>}
-    </span>
+      {ago && <span className="ml-2 text-muted-foreground">{ago} ago</span>}
+    </>
   );
 }
