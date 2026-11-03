@@ -217,7 +217,7 @@ test("an object editor's Logs opens its workload's tab once and focuses it after
       DEPLOYMENT,
     );
   await act(run);
-  await act(() => {
+  act(() => {
     workbench.editors.open(logsUri(POD));
   });
   await act(run);

@@ -23,8 +23,10 @@ export interface LogsSnapshot {
   readonly window: LogEntries | undefined;
   readonly matches: LogMatches | undefined;
   readonly histogram: Histogram | undefined;
-  /** Lines the buffer's bound dropped. */
+  /** Entries the buffer's bound dropped. */
   readonly dropped: number;
+  /** Entries the view kept as they came since its source or view last changed. */
+  readonly arrived: number;
 }
 
 export const INITIAL_LOGS: LogsSnapshot = {
@@ -36,6 +38,7 @@ export const INITIAL_LOGS: LogsSnapshot = {
   matches: undefined,
   histogram: undefined,
   dropped: 0,
+  arrived: 0,
 };
 
 /**
@@ -163,6 +166,7 @@ export class LogsSession {
       matches: batch.matches ?? previous.matches,
       histogram: batch.histogram ?? previous.histogram,
       dropped: batch.dropped,
+      arrived: batch.arrived,
     });
     this.#unacked = batch.seq;
     if (this.#id !== undefined) this.#ack(batch.seq);

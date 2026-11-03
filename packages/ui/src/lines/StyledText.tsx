@@ -78,6 +78,24 @@ const BG: Readonly<Record<AnsiColor, string>> = {
   brightWhite: "bg-ansi-bright-white/25",
 };
 
+const PLAIN: ReadonlySet<AnsiColor> = new Set([
+  "black",
+  "white",
+  "brightBlack",
+  "brightWhite",
+]);
+
+/**
+ * A run's text colour. On a background, black and white are the
+ * background's opposite in a terminal, which the theme's own text is at
+ * 4.5:1 or more on a background's tint and the black and white tokens are
+ * not, so they become the theme's text, as does a run with no colour.
+ */
+function textOf(run: TextRun): string | undefined {
+  if (run.bg && (!run.fg || PLAIN.has(run.fg))) return "text-foreground";
+  return run.fg ? FG[run.fg] : undefined;
+}
+
 /**
  * Text as a terminal styled it, its search matches marked: rendered as
  * text, never as markup, so a log line cannot inject any.
@@ -114,7 +132,7 @@ export function StyledText({
       <span
         key={start}
         className={cn(
-          run?.fg && FG[run.fg],
+          run && textOf(run),
           run?.bg && BG[run.bg],
           run?.bold && "font-semibold",
           run?.dim && "opacity-70",

@@ -33,6 +33,7 @@ function batch(seq: number, rest: Partial<LogBatch> = {}): LogBatch {
     matches: null,
     histogram: null,
     dropped: 0,
+    arrived: 0,
     ...rest,
   };
 }

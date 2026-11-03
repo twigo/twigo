@@ -41,7 +41,8 @@ export function Histogram({
     if (!box || box.width === 0) return 0;
     return Math.max(0, Math.min(1, (event.clientX - box.left) / box.width));
   };
-  const shown = drag ?? selection;
+  const shown = clamp(drag ?? selection);
+  const empty = buckets.length === 0;
   return (
     <div className={cn("flex-none px-3 pt-1", className)}>
       <div
@@ -49,6 +50,7 @@ export function Histogram({
         role="img"
         aria-label={label}
         onPointerDown={(event) => {
+          if (empty) return;
           event.currentTarget.setPointerCapture(event.pointerId);
           const from = at(event);
           setDrag({ from, to: from });
@@ -99,8 +101,8 @@ export function Histogram({
           <span
             className="pointer-events-none absolute -inset-y-0.5 rounded-[3px] bg-brand/14 shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--brand)_55%,transparent)]"
             style={{
-              left: `${String(Math.min(shown.from, shown.to) * 100)}%`,
-              width: `${String(Math.abs(shown.to - shown.from) * 100)}%`,
+              left: `${String(shown.from * 100)}%`,
+              width: `${String((shown.to - shown.from) * 100)}%`,
             }}
           />
         )}
@@ -112,4 +114,12 @@ export function Histogram({
       </div>
     </div>
   );
+}
+
+/** A span inside the bars, as a selection that the histogram's span moved past is drawn. */
+function clamp(span: HistogramSpan | undefined): HistogramSpan | undefined {
+  if (!span) return undefined;
+  const from = Math.max(0, Math.min(1, Math.min(span.from, span.to)));
+  const to = Math.max(0, Math.min(1, Math.max(span.from, span.to)));
+  return to > from ? { from, to } : undefined;
 }

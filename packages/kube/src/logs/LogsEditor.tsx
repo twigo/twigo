@@ -6,7 +6,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { CircleAlert, History, Hourglass, ScrollText } from "lucide-react";
-import type { LogTarget, LogView } from "@twigo/protocol";
+import type { LogView } from "@twigo/protocol";
 import {
   Banner,
   Button,
@@ -15,6 +15,7 @@ import {
   LineList,
   Skeleton,
   type HistogramSpan,
+  type LinePlace,
   type LineWindow,
 } from "@twigo/ui";
 import {
@@ -47,17 +48,9 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
   const { keys, lists } = useWorkbench();
   useChanges(tabs.changes);
   const input = useMemo(() => parseLogsUri(uri), [uri]);
-  const target: LogTarget | undefined = input && {
-    space: input.space,
-    gvr: input.gvr,
-    namespace: input.namespace,
-    name: input.name,
-  };
   const session = useMemo(
-    () => (target ? tabs.session(uri, target) : undefined),
-    // The URI names the target.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tabs, uri],
+    () => (input ? tabs.session(uri, input) : undefined),
+    [input, tabs, uri],
   );
   const snapshot = useSyncExternalStore(
     session?.subscribe ?? NO_SUBSCRIBE,
@@ -123,14 +116,27 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
       session?.setWindow(
         "tail" in window
           ? { type: "tail", count: window.tail }
-          : { type: "range", start: window.start, end: window.end },
+          : "around" in window
+            ? {
+                type: "around",
+                id: Number(window.around),
+                before: window.before,
+                after: window.after,
+              }
+            : { type: "range", start: window.start, end: window.end },
       );
     },
     [session],
   );
   const onFollowChange = useCallback(
     (follow: boolean) => {
-      tabs.update(uri, { follow });
+      tabs.follow(uri, follow);
+    },
+    [tabs, uri],
+  );
+  const onPlace = useCallback(
+    (place: LinePlace) => {
+      tabs.keepPlace(uri, place);
     },
     [tabs, uri],
   );
@@ -285,8 +291,11 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
                 ? { index: match.index, token: tab.steps }
                 : undefined
             }
+            fresh={Math.max(0, snapshot.arrived - tab.pausedAt)}
+            place={tabs.place(uri)}
             onWindow={onWindow}
             onFollowChange={onFollowChange}
+            onPlace={onPlace}
             register={register}
             className="flex-1"
           />

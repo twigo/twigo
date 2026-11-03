@@ -1,4 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, type LucideIcon } from "lucide-react";
 import { cn } from "../lib/cn";
@@ -35,20 +41,37 @@ export interface MarkerLine {
 
 export type LineItem = TextLine | MarkerLine;
 
-/** The lines a list asks for: the last ones while it follows, else a range. */
+/**
+ * The lines a list asks for: the last ones while it follows; paused, those
+ * around the line it keeps in place, wherever lines before it moved it, or
+ * a range until it has one.
+ */
 export type LineWindow =
-  { readonly tail: number } | { readonly start: number; readonly end: number };
+  | { readonly tail: number }
+  | { readonly start: number; readonly end: number }
+  | {
+      readonly around: string;
+      readonly before: number;
+      readonly after: number;
+    };
+
+/** Where a paused list stands: the key of its top line, and how far that line's start lies above the list's top. */
+export interface LinePlace {
+  readonly key: string;
+  readonly offset: number;
+}
 
 const ROW = 19;
-/** Lines asked for beyond the visible ones, in blocks, so a scroll asks again only now and then. */
+/** Lines asked for beyond the visible ones. */
 const OVERSCAN = 40;
-const BLOCK = 50;
+/** How far the top may move from the line a window was asked around before it asks again, so a scroll asks now and then. */
+const DRIFT = 25;
 
 /**
  * A virtualized list of text lines, of which only a window is loaded
- * (ARCHITECTURE 4.6): it follows the end until the person scrolls up,
- * counts what came meanwhile, and keeps its place by the lines' keys as
- * lines enter and leave before it.
+ * (ARCHITECTURE 4.6): it follows the end until the person scrolls up, and
+ * paused it keeps its top line in place by its key, however many lines
+ * enter or leave before it, and when it shows again after a remount.
  */
 export function LineList({
   label,
@@ -59,9 +82,12 @@ export function LineList({
   wrap,
   timestamps,
   tagWidth = 6,
+  fresh,
+  place,
   reveal,
   onWindow,
   onFollowChange,
+  onPlace,
   register,
   className,
 }: {
@@ -75,34 +101,72 @@ export function LineList({
   timestamps: boolean;
   /** The tag column's width in characters. */
   tagWidth?: number;
+  /** Lines that came while paused, on a button that follows again. */
+  fresh: number;
+  /** Where the list stood when it last paused, which it goes back to when it mounts paused. */
+  place?: LinePlace | undefined;
   /** An index to scroll to, such as the current search match, each time its token changes. */
   reveal?: { readonly index: number; readonly token: number } | undefined;
   onWindow: (window: LineWindow) => void;
   onFollowChange: (follow: boolean) => void;
+  /** Where the paused list stands as the person scrolls, for `place`. */
+  onPlace?: (place: LinePlace) => void;
   /** Scopes the list's keys while it is mounted and routes the list commands to it, as a grid's. */
   register?: (element: HTMLElement, controller: ListController) => () => void;
   className?: string;
 }) {
   const [element, setElement] = useState<HTMLDivElement | null>(null);
   const [height, setHeight] = useState(0);
-  const anchor = useRef<{ key: string; index: number } | undefined>(undefined);
+  /** The top line, as the list last saw it. */
+  const anchor = useRef<
+    { key: string; index: number; offset: number } | undefined
+  >(undefined);
+  /** The line the window was last asked around. */
+  const [asked, setAsked] = useState<
+    { key: string; index: number } | undefined
+  >(place && !follow ? { key: place.key, index: -1 } : undefined);
+  const restoring = useRef(place && !follow ? place : undefined);
   const programmatic = useRef(false);
-  const [paused, setPaused] = useState(total);
   const virtualizer = useVirtualizer({
     count: total,
     getScrollElement: () => element,
     estimateSize: () => ROW,
+    getItemKey: (index) => items[index - start]?.key ?? `#${String(index)}`,
     overscan: 10,
     initialRect: { width: 0, height: 400 },
   });
   const virtual = virtualizer.getVirtualItems();
   const first = virtual[0]?.index ?? 0;
   const last = virtual[virtual.length - 1]?.index ?? first;
+  const rows = Math.ceil(height / ROW);
+
+  /** Scrolls, and expects a scroll event only when the list moved. */
+  const scroll = useEffectEvent((move: (to: HTMLElement) => void) => {
+    if (!element) return;
+    const before = element.scrollTop;
+    move(element);
+    programmatic.current = element.scrollTop !== before;
+  });
+  const offsetOf = useEffectEvent(
+    (index: number) =>
+      virtualizer.measurementsCache[index]?.start ?? index * ROW,
+  );
+  // A tab the panel hid comes back at the top without a scroll event.
+  const shownAgain = useEffectEvent(() => {
+    const held = anchor.current;
+    if (!held || follow || !element) return;
+    element.scrollTop = offsetOf(held.index) + held.offset;
+  });
 
   useEffect(() => {
     if (!element) return;
+    let shown = element.clientHeight > 0;
     const observer = new ResizeObserver(([entry]) => {
-      if (entry) setHeight(entry.contentRect.height);
+      if (!entry) return;
+      setHeight(entry.contentRect.height);
+      const visible = entry.contentRect.height > 0;
+      if (visible && !shown) shownAgain();
+      shown = visible;
     });
     observer.observe(element);
     return () => {
@@ -112,23 +176,44 @@ export function LineList({
 
   useEffect(() => {
     if (follow) {
-      onWindow({ tail: Math.ceil(height / ROW) + OVERSCAN });
+      onWindow({ tail: rows + OVERSCAN });
+      return;
+    }
+    if (asked) {
+      onWindow({ around: asked.key, before: OVERSCAN, after: rows + OVERSCAN });
       return;
     }
     onWindow({
-      start: Math.max(0, Math.floor((first - OVERSCAN) / BLOCK) * BLOCK),
-      end: Math.ceil((last + OVERSCAN) / BLOCK) * BLOCK,
+      start: Math.max(0, first - OVERSCAN),
+      end: last + OVERSCAN,
     });
-  }, [follow, height, first, last, onWindow]);
+  }, [follow, rows, asked, first, last, onWindow]);
 
-  // Following, the end stays in view; paused, the line at the top stays put
-  // as lines enter and leave before it.
+  useEffect(() => {
+    if (follow) setAsked(undefined);
+  }, [follow]);
+
+  // Following, the end stays in view; paused, the top line stays put as
+  // lines enter and leave before it.
   useLayoutEffect(() => {
     if (!element) return;
     if (follow) {
       if (total === 0) return;
-      programmatic.current = true;
-      virtualizer.scrollToIndex(total - 1, { align: "end" });
+      scroll(() => {
+        virtualizer.scrollToIndex(total - 1, { align: "end" });
+      });
+      return;
+    }
+    const back = restoring.current;
+    if (back) {
+      const found = items.findIndex((item) => item.key === back.key);
+      if (found < 0) return;
+      restoring.current = undefined;
+      const index = start + found;
+      scroll((to) => {
+        to.scrollTop = offsetOf(index) + back.offset;
+      });
+      anchor.current = { key: back.key, index, offset: back.offset };
       return;
     }
     const held = anchor.current;
@@ -137,24 +222,24 @@ export function LineList({
     if (found < 0) return;
     const index = start + found;
     if (index === held.index) return;
-    const offset = (at: number) =>
-      virtualizer.measurementsCache[at]?.start ?? at * ROW;
-    programmatic.current = true;
-    element.scrollTop += offset(index) - offset(held.index);
-    anchor.current = { key: held.key, index };
+    scroll((to) => {
+      to.scrollTop += offsetOf(index) - offsetOf(held.index);
+    });
+    anchor.current = { ...held, index };
   }, [element, follow, items, start, total, virtualizer]);
+
+  useEffect(() => {
+    virtualizer.measure();
+  }, [wrap, virtualizer]);
 
   const revealed = useRef<number | undefined>(undefined);
   useLayoutEffect(() => {
     if (!reveal || reveal.token === revealed.current) return;
     revealed.current = reveal.token;
-    programmatic.current = true;
-    virtualizer.scrollToIndex(reveal.index, { align: "center" });
+    scroll(() => {
+      virtualizer.scrollToIndex(reveal.index, { align: "center" });
+    });
   }, [reveal, virtualizer]);
-
-  useEffect(() => {
-    if (follow) setPaused(total);
-  }, [follow, total]);
 
   useEffect(() => {
     if (!element || !register) return;
@@ -177,11 +262,17 @@ export function LineList({
 
   const onScroll = () => {
     if (!element) return;
-    const top = virtualizer
-      .getVirtualItems()
-      .find((item) => item.start >= element.scrollTop);
+    const top = virtualizer.getVirtualItemForOffset(element.scrollTop);
     const item = top && items[top.index - start];
-    if (item) anchor.current = { key: item.key, index: top.index };
+    if (item) {
+      const offset = element.scrollTop - top.start;
+      anchor.current = { key: item.key, index: top.index, offset };
+      if (!follow) {
+        onPlace?.({ key: item.key, offset });
+        if (!asked || Math.abs(asked.index - top.index) > DRIFT)
+          setAsked({ key: item.key, index: top.index });
+      }
+    }
     if (programmatic.current) {
       programmatic.current = false;
       return;
@@ -191,7 +282,6 @@ export function LineList({
     if (follow !== atEnd) onFollowChange(atEnd);
   };
 
-  const fresh = follow ? 0 : Math.max(0, total - paused);
   return (
     <div className={cn("relative min-h-0", className)}>
       <div
@@ -236,7 +326,7 @@ export function LineList({
           })}
         </div>
       </div>
-      {fresh > 0 && (
+      {!follow && fresh > 0 && (
         <button
           type="button"
           onClick={() => {

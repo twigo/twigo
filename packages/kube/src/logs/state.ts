@@ -6,6 +6,7 @@ import {
   type LogTarget,
   type LogView,
 } from "@twigo/protocol";
+import type { LinePlace } from "@twigo/ui";
 import { Changes } from "@twigo/workbench";
 
 /** What a logs tab shows (ARCHITECTURE 4.6); its lines live in Rust. */
@@ -25,6 +26,8 @@ export interface LogsTab {
   readonly anchor: MatchAnchor | undefined;
   /** Counts the steps, so the list scrolls to the current match on a step and not as lines come. */
   readonly steps: number;
+  /** The view's `arrived` when the list paused, from which it counts the lines that came since. */
+  readonly pausedAt: number;
   /** A field asked to take the focus and has not yet. */
   readonly focus: "filter" | "search" | undefined;
 }
@@ -61,6 +64,7 @@ const INITIAL: LogsTab = {
   current: 0,
   anchor: undefined,
   steps: 0,
+  pausedAt: 0,
   focus: undefined,
 };
 
@@ -73,6 +77,8 @@ export class LogsTabs {
   readonly changes = new Changes();
   readonly #tabs = new Map<string, LogsTab>();
   readonly #sessions = new Map<string, LogsSession>();
+  /** Where each paused list stands, kept as it scrolls, so a tab that mounts again stands there. */
+  readonly #places = new Map<string, LinePlace>();
   /** The pods each tab saw join, from their Joined entries, which stand out in its lines. */
   readonly #joined = new Map<string, Set<string>>();
 
@@ -102,29 +108,53 @@ export class LogsTabs {
   /** A new view or source has other matches, so the search starts again from the newest. */
   setView(uri: string, change: Partial<LogView>): void {
     const tab = this.get(uri);
+    this.#places.delete(uri);
     this.update(uri, {
       view: { ...tab.view, ...change },
       current: 0,
       anchor: undefined,
+      pausedAt: 0,
     });
   }
 
   setSource(uri: string, change: Partial<LogSource>): void {
+    this.#places.delete(uri);
     this.update(uri, {
       source: { ...this.get(uri).source, ...change },
       current: 0,
       anchor: undefined,
+      pausedAt: 0,
     });
+  }
+
+  /** Follows the end, or pauses, counting the lines that come from the view's `arrived` now. */
+  follow(uri: string, follow: boolean): void {
+    const tab = this.get(uri);
+    if (tab.follow === follow) return;
+    const arrived = this.#sessions.get(uri)?.getSnapshot().arrived ?? 0;
+    if (follow) this.#places.delete(uri);
+    this.update(uri, { follow, ...(!follow && { pausedAt: arrived }) });
+  }
+
+  place(uri: string): LinePlace | undefined {
+    return this.#places.get(uri);
+  }
+
+  /** Keeps where a paused list stands; nothing redraws for it. */
+  keepPlace(uri: string, place: LinePlace): void {
+    this.#places.set(uri, place);
   }
 
   /** Steps the search to a match and scrolls to it, which pauses following. */
   step(uri: string, current: number, anchor: MatchAnchor | undefined): void {
     const tab = this.get(uri);
+    const arrived = this.#sessions.get(uri)?.getSnapshot().arrived ?? 0;
     this.update(uri, {
       current,
       anchor,
       steps: tab.steps + 1,
       follow: false,
+      ...(tab.follow && { pausedAt: arrived }),
     });
   }
 
@@ -170,6 +200,7 @@ export class LogsTabs {
     this.#sessions.get(uri)?.close();
     this.#sessions.delete(uri);
     this.#joined.delete(uri);
+    this.#places.delete(uri);
     if (this.#tabs.delete(uri)) this.changes.emit();
   }
 }

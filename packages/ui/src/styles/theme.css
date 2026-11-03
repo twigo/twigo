@@ -118,12 +118,12 @@
   --ansi-cyan: oklch(0.52 0.09 210);
   --ansi-white: oklch(0.47 0.006 250);
   --ansi-bright-black: oklch(0.47 0.006 250);
-  --ansi-bright-red: oklch(0.56 0.21 27);
-  --ansi-bright-green: oklch(0.53 0.14 150);
-  --ansi-bright-yellow: oklch(0.55 0.12 85);
-  --ansi-bright-blue: oklch(0.54 0.17 255);
+  --ansi-bright-red: oklch(0.53 0.21 27);
+  --ansi-bright-green: oklch(0.49 0.14 150);
+  --ansi-bright-yellow: oklch(0.5 0.12 85);
+  --ansi-bright-blue: oklch(0.51 0.17 255);
   --ansi-bright-magenta: oklch(0.54 0.2 325);
-  --ansi-bright-cyan: oklch(0.55 0.1 210);
+  --ansi-bright-cyan: oklch(0.49 0.1 210);
   --ansi-bright-white: oklch(0.32 0.004 250);
 
   /* Search matches in text, and the current one, filled. */

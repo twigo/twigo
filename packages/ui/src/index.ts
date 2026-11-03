@@ -47,6 +47,7 @@ export * from "./components/histogram";
 export {
   LineList,
   type LineItem,
+  type LinePlace,
   type LineWindow,
   type MarkerLine,
   type TextLine,

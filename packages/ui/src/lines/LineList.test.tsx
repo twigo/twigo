@@ -46,6 +46,7 @@ function list(props: Partial<Parameters<typeof LineList>[0]> = {}) {
       follow
       wrap={false}
       timestamps
+      fresh={0}
       onWindow={onWindow}
       onFollowChange={onFollowChange}
       {...props}
@@ -59,9 +60,29 @@ test("following, it asks for the tail", () => {
   expect(onWindow).toHaveBeenLastCalledWith({ tail: 40 });
 });
 
-test("paused, it asks for a range in blocks around what it shows", () => {
+test("paused, it asks for a range around what it shows until a line is on top", () => {
   const { onWindow } = list({ follow: false });
-  expect(onWindow).toHaveBeenLastCalledWith({ start: 0, end: 50 });
+  expect(onWindow).toHaveBeenLastCalledWith({ start: 0, end: 44 });
+});
+
+test("paused, a scroll asks for the lines around the top line by its key", () => {
+  const { onWindow, onFollowChange } = list({
+    follow: false,
+    total: 300,
+    items: Array.from({ length: 300 }, (_, index) => line(index)),
+  });
+  const log = screen.getByRole("log");
+  Object.defineProperty(log, "scrollHeight", { value: 19 * 300 });
+  act(() => {
+    log.scrollTop = 19 * 120;
+    fireEvent.scroll(log);
+  });
+  expect(onWindow).toHaveBeenLastCalledWith({
+    around: "120",
+    before: 40,
+    after: 40,
+  });
+  expect(onFollowChange).not.toHaveBeenCalledWith(true);
 });
 
 test("a wheel up pauses following", () => {
@@ -71,25 +92,56 @@ test("a wheel up pauses following", () => {
 });
 
 test("paused, the lines that came meanwhile show on a button that follows again", () => {
-  const { rerender, onFollowChange, onWindow, items } = list({ follow: false });
-  const more = [...items, line(5), line(6)];
-  rerender(
-    <LineList
-      label="Logs"
-      total={7}
-      start={0}
-      items={more}
-      follow={false}
-      wrap={false}
-      timestamps
-      onWindow={onWindow}
-      onFollowChange={onFollowChange}
-    />,
-  );
+  const { onFollowChange } = list({ follow: false, fresh: 2 });
   act(() => {
     screen.getByRole("button", { name: "2 new lines" }).click();
   });
   expect(onFollowChange).toHaveBeenCalledWith(true);
+});
+
+test("paused, the top line stays put as lines leave before it", () => {
+  const items = Array.from({ length: 300 }, (_, index) => line(index));
+  const { rerender, onWindow, onFollowChange } = list({
+    follow: false,
+    total: 300,
+    items,
+  });
+  const log = screen.getByRole("log");
+  act(() => {
+    log.scrollTop = 19 * 120;
+    fireEvent.scroll(log);
+  });
+  rerender(
+    <LineList
+      label="Logs"
+      total={250}
+      start={0}
+      items={items.slice(50)}
+      follow={false}
+      wrap={false}
+      timestamps
+      fresh={0}
+      onWindow={onWindow}
+      onFollowChange={onFollowChange}
+    />,
+  );
+  expect(log.scrollTop).toBe(19 * 70);
+});
+
+test("a list that mounts paused goes back to where it stood", () => {
+  const { onWindow } = list({
+    follow: false,
+    total: 300,
+    start: 100,
+    items: Array.from({ length: 100 }, (_, index) => line(index + 100)),
+    place: { key: "150", offset: 7 },
+  });
+  expect(onWindow).toHaveBeenCalledWith({
+    around: "150",
+    before: 40,
+    after: 40,
+  });
+  expect(screen.getByRole("log").scrollTop).toBe(19 * 150 + 7);
 });
 
 test("a marker draws its icon, tag and words", () => {
@@ -136,4 +188,30 @@ test("styled text splits at runs and marks, the current mark filled", () => {
     ["refused", "rounded-xs bg-mark-current text-mark-current-foreground"],
   ]);
   expect(screen.getByTestId("text").textContent).toBe("WARN db refused");
+});
+
+test("on a background, black and no colour are the theme's text", () => {
+  render(
+    <p data-testid="text">
+      <StyledText
+        text="FAIL"
+        runs={[
+          {
+            start: 0,
+            end: 4,
+            fg: "black",
+            bg: "yellow",
+            bold: false,
+            dim: false,
+            italic: false,
+            underline: false,
+          },
+        ]}
+        marks={[]}
+      />
+    </p>,
+  );
+  expect(screen.getByText("FAIL").className).toBe(
+    "text-foreground bg-ansi-yellow/25",
+  );
 });
