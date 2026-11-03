@@ -39,7 +39,10 @@ test.each([
   expect(level(line)).toBe(wanted);
 });
 
-function session(view: LogView = VIEW) {
+function session(
+  view: LogView = VIEW,
+  budget = (_session: MockLogs, wanted: number) => wanted,
+) {
   const cluster = new Cluster("prod-eu", 5000, Date.now());
   const counts = new Map<string, number>();
   for (const pod of cluster.pods) {
@@ -59,7 +62,7 @@ function session(view: LogView = VIEW) {
     SOURCE,
     view,
     cluster,
-    (_session, wanted) => wanted,
+    budget,
     (batch) => {
       batches.push(batch);
       logs.ack(batch.seq);
@@ -153,6 +156,19 @@ test("a rollout replaces a followed pod: its followed containers end, it leaves,
   expect(ended).toEqual(following);
   expect(after).toEqual([]);
   expect(joined?.type === "joined" && joined.owner?.kind).toBe("ReplicaSet");
+  logs.close();
+});
+
+test("a rollout of a pod whose streams are queued gives its left without an end", async () => {
+  const { logs, batches } = session(VIEW, () => 0);
+  await vi.advanceTimersByTimeAsync(26_000);
+  const states = (batches.find((batch) => batch.pods !== null)?.pods ?? [])
+    .flatMap((pod) => pod.containers.map((container) => container.stream.state))
+    .filter((state) => state !== "off" && state !== "overLimit");
+  const entries = batches.flatMap((batch) => batch.window?.entries ?? []);
+  expect(states).toEqual(Array(TAB_STREAMS).fill("queued"));
+  expect(entries.some((entry) => entry.type === "left")).toBe(true);
+  expect(entries.filter((entry) => entry.type === "ended")).toEqual([]);
   logs.close();
 });
 

@@ -234,14 +234,25 @@ export class MockLogs {
     const at = nanos(now);
     const incoming: Timed[] = [];
     const current = new Set(this.#pods().map((pod) => pod.name));
+    const reading = new Set(
+      [...this.#streams.keys()].slice(
+        0,
+        this.#budget(this, this.#streams.size),
+      ),
+    );
     for (const name of this.#members) {
       if (current.has(name)) continue;
       this.#members.delete(name);
       // The kubelet deletes a rolled-out pod once its containers ended, so
-      // their ends come before its `left` (ARCHITECTURE 4.6).
+      // their ends come before its `left` (ARCHITECTURE 4.6); a queued
+      // stream's read finds no pod by then, so it gets none.
       for (const [id, stream] of this.#streams) {
         if (stream.pod.name !== name) continue;
-        if (writes(stream.pod) && stream.restartAt === undefined)
+        if (
+          reading.has(id) &&
+          writes(stream.pod) &&
+          stream.restartAt === undefined
+        )
           incoming.push(this.#ended(stream, at, 0, "Completed"));
         this.#streams.delete(id);
       }
