@@ -111,21 +111,28 @@ export class LogsTabs {
   /** A new view or source has other matches, so the search starts again from the newest. */
   setView(uri: string, change: Partial<LogView>): void {
     const tab = this.get(uri);
+    const view = { ...tab.view, ...change };
+    if (same(view, tab.view)) return;
     this.#places.delete(uri);
     this.update(uri, {
-      view: { ...tab.view, ...change },
+      view,
       current: 0,
       anchor: undefined,
       pausedAt: 0,
     });
   }
 
+  /** A new source reads the buffer anew, so the list follows its end. */
   setSource(uri: string, change: Partial<LogSource>): void {
+    const tab = this.get(uri);
+    const source = { ...tab.source, ...change };
+    if (same(source, tab.source)) return;
     this.#places.delete(uri);
     this.update(uri, {
-      source: { ...this.get(uri).source, ...change },
+      source,
       current: 0,
       anchor: undefined,
+      follow: true,
       pausedAt: 0,
     });
   }
@@ -206,4 +213,9 @@ export class LogsTabs {
     this.#places.delete(uri);
     if (this.#tabs.delete(uri)) this.changes.emit();
   }
+}
+
+/** The choices are plain data, so their JSON tells them apart. */
+function same(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
 }

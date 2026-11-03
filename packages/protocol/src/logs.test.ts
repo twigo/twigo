@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Backend } from "./backend";
 import type { LogBatch, LogSource, LogView, OpenLogs } from "./generated";
+import { IpcError } from "./error";
 import { LogsSession } from "./logs";
 
 const SOURCE: LogSource = {
@@ -124,4 +125,33 @@ test("a session closed before its id arrives closes once it does", async () => {
   fake.resolve(9);
   await vi.runAllTimersAsync();
   expect(fake.calls).toContainEqual(["logs_close", 9]);
+});
+
+test("a refused view stays refused through later batches until a view is taken", async () => {
+  const fake = fakeBackend();
+  const invoke = fake.backend.invoke.bind(fake.backend);
+  let refuse = true;
+  fake.backend.invoke = ((command: string, request: unknown) => {
+    if (command === "logs_set_view" && refuse)
+      return Promise.reject(
+        new IpcError("invalidInput", "the filter /(/ is no regex"),
+      );
+    return invoke(command as never, request as never);
+  });
+  const session = new LogsSession(fake.backend, OPEN);
+  fake.resolve(5);
+  await vi.runAllTimersAsync();
+  session.setView({ ...VIEW, filter: "/(/" });
+  await vi.runAllTimersAsync();
+  expect(session.getSnapshot().refused?.message).toBe(
+    "the filter /(/ is no regex",
+  );
+  fake.send(batch(1));
+  expect(session.getSnapshot().refused?.message).toBe(
+    "the filter /(/ is no regex",
+  );
+  refuse = false;
+  session.setView({ ...VIEW, filter: "refused" });
+  await vi.runAllTimersAsync();
+  expect(session.getSnapshot().refused).toBeUndefined();
 });

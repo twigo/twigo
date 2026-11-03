@@ -55,33 +55,20 @@ test("a line's tag is its pod's last part", () => {
 });
 
 test("the current match counts back from the newest, and its mark from its entry's last", () => {
-  const matches = { count: 12, entries: [3, 7, 7, 9] };
-  expect(currentMatch(matches, 0)).toEqual({
-    index: 9,
-    fromEnd: 0,
-    number: 12,
-  });
-  expect(currentMatch(matches, 1)).toEqual({
-    index: 7,
-    fromEnd: 0,
-    number: 11,
-  });
-  expect(currentMatch(matches, 2)).toEqual({
-    index: 7,
-    fromEnd: 1,
-    number: 10,
-  });
+  const matches = { count: 12, entries: [30, 70, 70, 90] };
+  expect(currentMatch(matches, 0)).toEqual({ id: 90, fromEnd: 0, number: 12 });
+  expect(currentMatch(matches, 1)).toEqual({ id: 70, fromEnd: 0, number: 11 });
+  expect(currentMatch(matches, 2)).toEqual({ id: 70, fromEnd: 1, number: 10 });
   expect(currentMatch(matches, 4)).toBeUndefined();
   expect(currentMatch(undefined, 0)).toBeUndefined();
 });
 
 test("an anchored match keeps its entry and mark as matches come after it and drop before it", () => {
-  const before = { count: 4, entries: [3, 7, 7, 9] };
-  expect(anchoredMatch(before, 7, 1)).toBe(2);
-  const after = { count: 5, entries: [5, 5, 10, 12, 14] };
-  expect(anchoredMatch(after, 5, 1)).toBe(4);
-  expect(anchoredMatch(after, 5, 0)).toBe(3);
-  expect(anchoredMatch(after, 6, 0)).toBeUndefined();
+  expect(anchoredMatch({ count: 4, entries: [30, 70, 70, 90] }, 70, 1)).toBe(2);
+  const after = { count: 5, entries: [70, 70, 95, 96, 97] };
+  expect(anchoredMatch(after, 70, 1)).toBe(4);
+  expect(anchoredMatch(after, 70, 0)).toBe(3);
+  expect(anchoredMatch(after, 30, 0)).toBeUndefined();
 });
 
 test("entries become lines and markers: a level's tone, the current mark, a crash and a rollout", () => {
@@ -262,5 +249,29 @@ test("a narrow tab's fields open in a row of their own from their icons", async 
   expect(
     screen.getByRole("button", { name: "Where the lines start" }).textContent,
   ).toBe("15 min");
+  session.close();
+});
+
+test("a pause counts from what has arrived; a source that changes nothing resets nothing, and a new one follows", async () => {
+  const workbench = await testWorkbench();
+  const tabs = new LogsTabs(workbench.backend);
+  const uri = logsUri(DEPLOYMENT);
+  const input = parseLogsUri(uri);
+  if (!input) throw new Error("no logs URI");
+  const session = tabs.session(uri, input);
+  session.setWindow({ type: "tail", count: 50 });
+  await vi.waitFor(() => {
+    expect(session.getSnapshot().arrived).toBeGreaterThan(0);
+  });
+  const arrived = session.getSnapshot().arrived;
+  tabs.follow(uri, false);
+  expect(tabs.get(uri)).toMatchObject({ follow: false, pausedAt: arrived });
+  tabs.keepPlace(uri, { key: "7", offset: 0 });
+  tabs.setSource(uri, { since: { type: "seconds", seconds: 900 } });
+  expect(tabs.get(uri)).toMatchObject({ follow: false, pausedAt: arrived });
+  expect(tabs.place(uri)).toEqual({ key: "7", offset: 0 });
+  tabs.setSource(uri, { since: { type: "start" } });
+  expect(tabs.get(uri)).toMatchObject({ follow: true, pausedAt: 0 });
+  expect(tabs.place(uri)).toBeUndefined();
   session.close();
 });

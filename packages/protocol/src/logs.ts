@@ -1,5 +1,5 @@
 import type { Backend } from "./backend";
-import { toIpcError } from "./error";
+import { toIpcError, type IpcError } from "./error";
 import type {
   Histogram,
   LogBatch,
@@ -27,6 +27,12 @@ export interface LogsSnapshot {
   readonly dropped: number;
   /** Entries the view kept as they came since its source or view last changed. */
   readonly arrived: number;
+  /**
+   * Why Rust refused the source or view last sent, as a filter that is no
+   * regex; it keeps the one it had, so the lines show that one until a
+   * change is taken.
+   */
+  readonly refused: IpcError | undefined;
 }
 
 export const INITIAL_LOGS: LogsSnapshot = {
@@ -39,6 +45,7 @@ export const INITIAL_LOGS: LogsSnapshot = {
   histogram: undefined,
   dropped: 0,
   arrived: 0,
+  refused: undefined,
 };
 
 /**
@@ -59,6 +66,10 @@ export class LogsSession {
   #sent: { source: LogSource; view: LogView; window: LogWindow | undefined };
   #unacked: number | undefined;
   #closed = false;
+  readonly #refusals: {
+    source: IpcError | undefined;
+    view: IpcError | undefined;
+  } = { source: undefined, view: undefined };
 
   constructor(backend: Backend, request: OpenLogs) {
     this.#backend = backend;
@@ -132,15 +143,25 @@ export class LogsSession {
     const failed = (error: unknown) => {
       this.#fail(error);
     };
+    const answer = (kind: "source" | "view") => ({
+      taken: () => {
+        this.#refuse(kind, undefined);
+      },
+      refused: (error: unknown) => {
+        this.#refuse(kind, toIpcError(error));
+      },
+    });
     if (!same(sent.source, this.#source)) {
+      const { taken, refused } = answer("source");
       this.#backend
         .invoke("logs_set_source", { id, source: this.#source })
-        .catch(failed);
+        .then(taken, refused);
     }
     if (!same(sent.view, this.#view)) {
+      const { taken, refused } = answer("view");
       this.#backend
         .invoke("logs_set_view", { id, view: this.#view })
-        .catch(failed);
+        .then(taken, refused);
     }
     if (this.#window && !same(sent.window, this.#window)) {
       this.#backend
@@ -167,6 +188,7 @@ export class LogsSession {
       histogram: batch.histogram ?? previous.histogram,
       dropped: batch.dropped,
       arrived: batch.arrived,
+      refused: previous.refused,
     });
     this.#unacked = batch.seq;
     if (this.#id !== undefined) this.#ack(batch.seq);
@@ -182,6 +204,15 @@ export class LogsSession {
           this.#fail(error);
         });
     });
+  }
+
+  /** Each kind stays refused until a change of its own is taken. */
+  #refuse(kind: "source" | "view", error: IpcError | undefined): void {
+    if (this.#closed) return;
+    this.#refusals[kind] = error;
+    const refused = this.#refusals.view ?? this.#refusals.source;
+    if (this.#snapshot.refused !== refused)
+      this.#publish({ ...this.#snapshot, refused });
   }
 
   #fail(error: unknown): void {

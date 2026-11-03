@@ -102,7 +102,12 @@ export function registerLogs(workbench: Workbench): {
       run: () => {
         const uri = active();
         if (!uri) return;
-        const change: Partial<LogsTab> = { [field]: !tabs.get(uri)[field] };
+        const on = !tabs.get(uri)[field];
+        if (field === "follow") {
+          tabs.follow(uri, on);
+          return;
+        }
+        const change: Partial<LogsTab> = { [field]: on };
         tabs.update(uri, change);
       },
     });

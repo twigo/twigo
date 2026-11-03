@@ -50,41 +50,41 @@ export function clock(time: string): string {
 }
 
 /**
- * The current match, `back` from the newest: its entry's index in the view,
- * its place counted from the entry's last mark, which the matches' cut at
- * 10,000 leaves whole, and its number among all the matches.
+ * The current match, `back` from the newest: its entry's id, its place
+ * counted from the entry's last mark, which the matches' cut at 10,000
+ * leaves whole, and its number among all the matches.
  */
 export function currentMatch(
   matches: LogMatches | undefined,
   back: number,
-): { index: number; fromEnd: number; number: number } | undefined {
+): { id: number; fromEnd: number; number: number } | undefined {
   if (!matches) return undefined;
   const at = matches.entries.length - 1 - back;
-  const index = matches.entries[at];
-  if (index === undefined) return undefined;
+  const id = matches.entries[at];
+  if (id === undefined) return undefined;
   let fromEnd = 0;
   for (
     let after = at + 1;
-    after < matches.entries.length && matches.entries[after] === index;
+    after < matches.entries.length && matches.entries[after] === id;
     after++
   )
     fromEnd++;
-  return { index, fromEnd, number: matches.count - back };
+  return { id, fromEnd, number: matches.count - back };
 }
 
 /**
- * Where an anchored match is now, counted back from the newest: the entry
- * with its id at `index` in the view, and its mark `fromEnd`; undefined
- * when its entry is no longer in the matches.
+ * Where an anchored match is now, counted back from the newest: the mark
+ * `fromEnd` of the entry with `id`; undefined once the matches no longer
+ * hold it.
  */
 export function anchoredMatch(
   matches: LogMatches,
-  index: number,
+  id: number,
   fromEnd: number,
 ): number | undefined {
   let seen = 0;
   for (let at = matches.entries.length - 1; at >= 0; at--) {
-    if (matches.entries[at] !== index) continue;
+    if (matches.entries[at] !== id) continue;
     if (seen === fromEnd) return matches.entries.length - 1 - at;
     seen++;
   }

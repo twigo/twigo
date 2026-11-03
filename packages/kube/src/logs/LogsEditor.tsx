@@ -84,32 +84,16 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
     if (entries) tabs.saw(uri, entries);
   }, [entries, tabs, uri]);
 
-  // Matches come and go around the one the person stepped to; it stays the
-  // current one while its entry is in the window.
+  // Matches come and go around the one the person stepped to, which stays
+  // the current one by its entry's id while the matches hold it.
   const matchesNow = snapshot?.matches;
-  const windowNow = snapshot?.window;
   const { anchor, current } = tabs.get(uri);
-  const { steps, follow } = tabs.get(uri);
   useEffect(() => {
-    if (!matchesNow || !windowNow || follow || steps === 0) return;
-    if (!anchor) {
-      // The match stepped to holds once its entry is in the window.
-      const found = currentMatch(matchesNow, current);
-      const entry = found && windowNow.entries[found.index - windowNow.start];
-      if (found && entry)
-        tabs.update(uri, { anchor: { id: entry.id, fromEnd: found.fromEnd } });
-      return;
-    }
-    const at = windowNow.entries.findIndex((entry) => entry.id === anchor.id);
-    if (at < 0) return;
-    const back = anchoredMatch(
-      matchesNow,
-      windowNow.start + at,
-      anchor.fromEnd,
-    );
+    if (!anchor || !matchesNow) return;
+    const back = anchoredMatch(matchesNow, anchor.id, anchor.fromEnd);
     if (back !== undefined && back !== current)
       tabs.update(uri, { current: back });
-  }, [anchor, current, follow, matchesNow, steps, windowNow, tabs, uri]);
+  }, [anchor, current, matchesNow, tabs, uri]);
 
   const onWindow = useCallback(
     (window: LineWindow) => {
@@ -150,11 +134,11 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
     several ? `${podTag(pod)}/${container}` : podTag(pod);
   const match = currentMatch(matches, tab.current);
   const start = window?.start ?? 0;
-  const items = (window?.entries ?? []).map((entry, index) =>
+  const items = (window?.entries ?? []).map((entry) =>
     lineItem(entry, {
       tag,
       accent: (pod) => tabs.joined(uri, pod),
-      current: match?.index === start + index ? match.fromEnd : undefined,
+      current: match?.id === entry.id ? match.fromEnd : undefined,
       now,
     }),
   );
@@ -250,6 +234,13 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
           cluster; close a logs tab to free some.
         </Banner>
       )}
+      {snapshot.refused && (
+        <Banner tone="error" icon={CircleAlert}>
+          <span className="font-medium">Not applied:</span>{" "}
+          {snapshot.refused.message}. The lines show the last filter and search
+          that worked.
+        </Banner>
+      )}
       {failed[0] && (
         <Banner tone="error" icon={CircleAlert}>
           <span className="font-medium">
@@ -289,7 +280,7 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
             tagWidth={tagWidth}
             reveal={
               match && tab.steps > 0
-                ? { index: match.index, token: tab.steps }
+                ? { key: String(match.id), token: tab.steps }
                 : undefined
             }
             fresh={Math.max(0, snapshot.arrived - tab.pausedAt)}

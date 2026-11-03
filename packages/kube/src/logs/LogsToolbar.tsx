@@ -148,7 +148,8 @@ export function LogsToolbar({
     const shown = snapshot.matches?.entries.length ?? 0;
     if (shown === 0) return;
     const current = (tab.current + (older ? 1 : shown - 1)) % shown;
-    tabs.step(uri, current, undefined);
+    const next = currentMatch(snapshot.matches, current);
+    tabs.step(uri, current, next && { id: next.id, fromEnd: next.fromEnd });
   };
   const range = view.range;
   const fieldsRow = (
@@ -274,7 +275,7 @@ export function LogsToolbar({
           keys={key("k8s.logs.toggleFollow")}
           pressed={tab.follow}
           onClick={() => {
-            tabs.update(uri, { follow: !tab.follow });
+            tabs.follow(uri, !tab.follow);
           }}
         />
         <IconButton
@@ -309,6 +310,7 @@ export function LogsToolbar({
               label: "Warn+",
               ...(!narrow &&
                 view.level === "all" &&
+                view.range === null &&
                 counts && { count: counts.warnings }),
             },
             {
@@ -317,6 +319,7 @@ export function LogsToolbar({
               tone: "error",
               ...(!narrow &&
                 view.level === "all" &&
+                view.range === null &&
                 counts && { count: counts.errors }),
             },
           ]}
