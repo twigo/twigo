@@ -1,5 +1,5 @@
 import { Plus } from "lucide-react";
-import type { ContextColor, Space } from "@twigo/protocol";
+import type { Space } from "@twigo/protocol";
 import {
   ActionContextMenu,
   cn,
@@ -10,17 +10,7 @@ import {
 } from "@twigo/ui";
 import type { SpaceConnection } from "../spaces/status";
 import { useChanges, useWorkbench } from "../react";
-import { initials } from "./spaceBadge";
-
-/** The tint of a space's tile, from its one context's colour. */
-const TILE: Readonly<Record<ContextColor, string>> = {
-  red: "bg-context-red/20 text-foreground",
-  orange: "bg-context-orange/20 text-foreground",
-  yellow: "bg-context-yellow/20 text-foreground",
-  green: "bg-context-green/20 text-foreground",
-  blue: "bg-context-blue/20 text-foreground",
-  purple: "bg-context-purple/20 text-foreground",
-};
+import { SpaceTile } from "./SpaceTile";
 
 /**
  * The open spaces as tiles, Lens's hotbar (ARCHITECTURE 4.2): one per
@@ -29,13 +19,12 @@ const TILE: Readonly<Record<ContextColor, string>> = {
  */
 export function SpaceRail() {
   const workbench = useWorkbench();
-  const { spaces, colors, keybindings, quickAccess, spaceStatus, keys, menus } =
+  const { spaces, keybindings, quickAccess, spaceStatus, keys, menus } =
     workbench;
   useChanges(spaces.changes);
-  useChanges(colors.changes);
+  useChanges(menus.changes);
   useChanges(keybindings.changes);
   useChanges(spaceStatus.changes);
-  useChanges(menus.changes);
   const active = spaces.active?.id;
   return (
     <nav
@@ -56,9 +45,8 @@ export function SpaceRail() {
             )}
           >
             <div className="w-full">
-              <SpaceTile
+              <RailTile
                 space={space}
-                color={colors.ofSpace(space)}
                 state={spaceStatus.get(space.id)}
                 selected={space.id === active}
                 shortcut={binding && keybindings.label(binding.presses)}
@@ -89,22 +77,19 @@ export function SpaceRail() {
   );
 }
 
-function SpaceTile({
+function RailTile({
   space,
-  color,
   state,
   selected,
   shortcut,
   onSelect,
 }: {
   space: Space;
-  color: ContextColor | undefined;
   state: SpaceConnection | undefined;
   selected: boolean;
   shortcut: string | undefined;
   onSelect: () => void;
 }) {
-  const tint = color && TILE[color];
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -122,16 +107,14 @@ function SpaceTile({
               selected ? "h-5" : "h-0",
             )}
           />
-          <span
-            className={cn(
-              "relative flex size-8 items-center justify-center rounded-md text-[11px] font-medium",
-              tint ?? "bg-card text-muted-foreground",
+          <SpaceTile
+            space={space}
+            className={
               selected
                 ? "ring-1 ring-foreground/60"
-                : "group-hover:ring-1 group-hover:ring-border",
-            )}
+                : "group-hover:ring-1 group-hover:ring-border"
+            }
           >
-            {initials(space.name)}
             {state && (
               <StatusDot
                 tone={state.tone}
@@ -140,7 +123,7 @@ function SpaceTile({
                 className="absolute -right-0.5 -bottom-0.5 ring-2 ring-shell"
               />
             )}
-          </span>
+          </SpaceTile>
         </button>
       </TooltipTrigger>
       <TooltipContent side="right" className="flex items-center gap-2">

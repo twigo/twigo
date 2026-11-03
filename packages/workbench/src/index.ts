@@ -29,5 +29,7 @@ export type {
   StatusEntry,
   View,
   ViewContainer,
+  Watermark,
 } from "./views/registry";
+export { SpaceTile } from "./parts/SpaceTile";
 export { WorkbenchView } from "./WorkbenchView";
