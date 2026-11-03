@@ -48,6 +48,46 @@ const ITEMS: readonly GridItem<Pod, string>[] = [
   { type: "row", id: "e1", data: { name: "gateway-1" } },
 ];
 
+const PODS: readonly GridItem<Pod, string>[] = Array.from(
+  { length: 100 },
+  (_, index) => ({
+    type: "row",
+    id: `p${String(index)}`,
+    data: { name: `pod-${String(index)}` },
+  }),
+);
+
+function list(items: readonly (GridItem<Pod, string> | undefined)[]) {
+  return {
+    length: items.length,
+    item: (index: number) => items[index],
+    indexOf: (id: string) => items.findIndex((item) => item?.id === id),
+  };
+}
+
+function scrollable(rows: number): HTMLElement {
+  const element = screen.getByRole("grid");
+  Object.defineProperty(element, "scrollHeight", {
+    configurable: true,
+    value: 28 + rows * 26,
+  });
+  Object.defineProperty(element, "scrollTo", {
+    configurable: true,
+    value: ({ top = 0 }: ScrollToOptions) => {
+      element.scrollTop = top;
+      fireEvent.scroll(element);
+    },
+  });
+  return element;
+}
+
+function scroll(element: HTMLElement, top: number) {
+  act(() => {
+    element.scrollTop = top;
+    fireEvent.scroll(element);
+  });
+}
+
 function grid(
   overrides: Partial<Parameters<typeof DataGrid<Pod, string>>[0]> = {},
 ) {
@@ -66,9 +106,7 @@ function grid(
       columns={[{ id: "Name", title: "Name", width: 200, grow: true }]}
       widths={{}}
       sort={null}
-      length={ITEMS.length}
-      item={(index) => ITEMS[index]}
-      indexOf={(id) => ITEMS.findIndex((item) => item.id === id)}
+      {...list(ITEMS)}
       onRange={() => undefined}
       cell={(row) => row.name}
       group={(value) => value}
@@ -130,6 +168,24 @@ test("the controller moves the cursor, marks as it moves, folds back to the head
     controller()?.activate();
   });
   expect(handlers.onToggleGroup).toHaveBeenLastCalledWith("g:auth");
+});
+
+test("a move down scrolls the cursor's row clear of the bottom, a move up clear of the sticky header", () => {
+  const { controller } = grid({ ...list(PODS), selected: "p22" });
+  const element = scrollable(PODS.length);
+  act(() => {
+    controller()?.move(1);
+  });
+  expect(element.scrollTop).toBe(52);
+  cleanup();
+
+  const again = grid({ ...list(PODS), selected: "p10" });
+  const scrolled = scrollable(PODS.length);
+  scroll(scrolled, 270);
+  act(() => {
+    again.controller()?.move(-1);
+  });
+  expect(scrolled.scrollTop).toBe(234);
 });
 
 test("a hovered row's actions run on that row", () => {

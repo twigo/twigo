@@ -113,6 +113,9 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     estimateSize: () => ROW_HEIGHT,
     overscan: 8,
     initialRect: { width: 0, height: 600 },
+    // The header scrolls with the rows, ahead of them, and covers them once it sticks.
+    scrollMargin: HEADER_HEIGHT,
+    scrollPaddingStart: HEADER_HEIGHT,
   });
   const virtual = virtualizer.getVirtualItems();
   const first = virtual[0]?.index ?? 0;
@@ -268,7 +271,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
   const rows = virtual.map((at) => {
     const target = item(at.index);
     const place = {
-      transform: `translateY(${String(at.start)}px)`,
+      transform: `translateY(${String(at.start - HEADER_HEIGHT)}px)`,
       height: ROW_HEIGHT,
     };
     if (!target) {
