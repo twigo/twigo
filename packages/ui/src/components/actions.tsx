@@ -215,6 +215,10 @@ export function ActionDropdown({
         ref={content}
         align={align}
         onCloseAutoFocus={run.onCloseAutoFocus}
+        onContextMenu={(event) => {
+          // A right click in a row's menu would open the row's context menu.
+          event.preventDefault();
+        }}
       >
         {title && <DropdownMenuLabel>{title}</DropdownMenuLabel>}
         {actions.map((group, index) => (

@@ -423,6 +423,19 @@ test("a choice in a row's menu runs without opening the row", async () => {
   expect(handlers.onActivate).not.toHaveBeenCalled();
 });
 
+test("a right click in a row's menu opens no other menu", async () => {
+  grid({ menu: [[{ id: "copy", label: "Copy Name", run: vi.fn() }]] });
+  fireEvent.pointerDown(
+    nth(screen.getAllByRole("button", { name: "Row actions" }), 2),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.contextMenu(screen.getByRole("menuitem", { name: "Copy Name" }));
+  await act(() => new Promise((resolve) => setTimeout(resolve)));
+  expect(
+    document.querySelector('[data-slot="context-menu-content"]'),
+  ).toBeNull();
+});
+
 test("a header is a column header with a button that sorts, and a double click on its edge fits the column", () => {
   const { handlers } = grid({ sort: { column: "Name", descending: false } });
   const [header] = screen.getAllByRole("row");
