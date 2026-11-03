@@ -238,6 +238,16 @@ enum Outcome {
     Unauthorized(IpcError),
 }
 
+/// What the rest of an old instance's log held of the lines read.
+enum Tail {
+    /// Lines from the resume's second on, so they were its.
+    Found,
+    /// None of them, so they were a later instance's.
+    Lacked,
+    /// It was not read, which says nothing of them.
+    GaveUp,
+}
+
 /// A container's status in the pod's: its instance now, the one before.
 struct Status<'a>(&'a Value);
 
@@ -407,13 +417,17 @@ impl Reader {
                     // It ended and the next began while its read was cut:
                     // the kubelet reads its rest as the previous instance.
                     if unfinished && last.is_none() && status.previous() == Some(old.as_str()) {
-                        let Some(found) = self.tail(&old, from, None, pod, send).await else {
+                        let Some(tail) = self.tail(&old, from, None, pod, send).await else {
                             return;
                         };
-                        // Unless its log holds lines from the resume's second
-                        // on, those were a later instance's, read on a stale
-                        // status, and its Ended stands at its finish alone.
-                        last = if found { self.resume.last_at() } else { None };
+                        // A log that holds none of the lines from the resume's
+                        // second on says they were a later instance's, read on
+                        // a stale status, and its Ended stands at its finish
+                        // alone; one not read says nothing of them.
+                        last = match tail {
+                            Tail::Lacked => None,
+                            Tail::Found | Tail::GaveUp => self.resume.last_at(),
+                        };
                     } else {
                         last = last.or_else(|| self.resume.last_at());
                     }
@@ -515,14 +529,14 @@ impl Reader {
                     }
                 }
                 Outcome::Moved { at } => {
-                    let Some(found) = self.tail(&id, from, at, pod, send).await else {
+                    let Some(tail) = self.tail(&id, from, at, pod, send).await else {
                         return;
                     };
                     unfinished = false;
                     // The kubelet's previous instance held what came, so it
                     // reads a later one; else the log was rotated, and the
                     // previous instance is an older one, or none.
-                    if found {
+                    if let Tail::Found = tail {
                         over = self.resume.last_at();
                     } else {
                         moved = Some(id);
@@ -561,9 +575,8 @@ impl Reader {
     /// reads as the previous one once a later one runs, from `from` while
     /// the resume holds no line, up to `before`, the time of the later
     /// one's first line, and tries again while the cluster cannot be
-    /// reached and the status names `old`. Whether the log it read held
-    /// any line from the resume's second on, which says it was that
-    /// instance's; None once the pod's channel closed.
+    /// reached and the status names `old`. What its log held; None once the
+    /// pod's channel closed.
     async fn tail(
         &mut self,
         old: &str,
@@ -571,7 +584,7 @@ impl Reader {
         before: Option<i64>,
         pod: &mut watch::Receiver<Arc<Value>>,
         send: &impl Fn(Event),
-    ) -> Option<bool> {
+    ) -> Option<Tail> {
         loop {
             if gone(pod) {
                 return None;
@@ -579,7 +592,8 @@ impl Reader {
             self.resume.reopen(false);
             let start = self.resume.from().map_or(from, ReadFrom::Time);
             match self.read(true, start, before, send).await {
-                Outcome::Ended { found, .. } => return Some(found),
+                Outcome::Ended { found: true, .. } => return Some(Tail::Found),
+                Outcome::Ended { found: false, .. } => return Some(Tail::Lacked),
                 Outcome::Cut => {}
                 Outcome::Broken => {
                     if !self.pause(pod).await {
@@ -598,10 +612,10 @@ impl Reader {
                     let current = Arc::clone(&pod.borrow_and_update());
                     let status = Status::of(&current, &self.stream.container);
                     if !status.is_some_and(|status| status.names(old)) {
-                        return Some(false);
+                        return Some(Tail::GaveUp);
                     }
                 }
-                _ => return Some(false),
+                _ => return Some(Tail::GaveUp),
             }
         }
     }
@@ -1145,6 +1159,60 @@ mod tests {
             followed.entries(),
             ["web-a 1", "web-a 2", "web-a 3", "ended", "web-c 21"]
         );
+    }
+
+    const MS: i64 = 1_000_000;
+
+    const LATE: i64 = T0 + 5 * SECOND + 500 * MS;
+
+    async fn cut_after_a_late_last_line(fake: &Fake) -> Followed {
+        fake.serve("web-1", "web", Some("web-a"), None);
+        numbered(fake, "web-a", 1..=2);
+        fake.write("web-1", "web", "web-a", LATE, "web-a crash");
+        let followed = Followed::new(fake, web(running(), json!({})), false);
+        followed.until("its last line", has("web-a crash")).await;
+        fake.strand("web-1", "web");
+        followed.cut();
+        fake.stop("web-1", "web", "web-a");
+        fake.serve("web-1", "web", Some("web-b"), Some("web-a"));
+        followed
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_old_instances_end_follows_its_last_line_when_its_tail_is_given_up() {
+        let fake = Fake::default();
+        let followed = cut_after_a_late_last_line(&fake).await;
+        fake.fail_previous("web-1", "web");
+        followed.tell(restarted("web-b", "web-a"));
+        followed
+            .until("the error", |followed| {
+                matches!(followed.state(), Some(StreamState::Error { .. }))
+            })
+            .await;
+        fake.serve("web-1", "web", Some("web-c"), Some("web-b"));
+        numbered(&fake, "web-c", 21..=21);
+        followed.tell(restarted("web-c", "web-b"));
+        followed.until("the latest instance", has("web-c 21")).await;
+        assert_eq!(
+            followed.entries(),
+            ["web-a 1", "web-a 2", "web-a crash", "ended", "web-c 21"]
+        );
+        assert_eq!(followed.ends(), [LATE]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_old_instances_end_follows_its_last_line_when_its_tail_is_unreadable() {
+        let fake = Fake::default();
+        let followed = cut_after_a_late_last_line(&fake).await;
+        fake.remove("web-1", "web", "web-a");
+        numbered(&fake, "web-b", 11..=11);
+        followed.tell(restarted("web-b", "web-a"));
+        followed.until("the new instance", has("web-b 11")).await;
+        assert_eq!(
+            followed.entries(),
+            ["web-a 1", "web-a 2", "web-a crash", "ended", "web-b 11"]
+        );
+        assert_eq!(followed.ends(), [LATE]);
     }
 
     const OLD: [&str; 6] = [
