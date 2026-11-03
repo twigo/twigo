@@ -21,7 +21,7 @@ export interface LogsObject {
  */
 export function registerLogs(workbench: Workbench): {
   tabs: LogsTabs;
-  open: (object: LogsObject, previous?: { container: string }) => void;
+  open: (object: LogsObject) => void;
 } {
   const { editors, commands, keybindings } = workbench;
   const tabs = new LogsTabs(workbench.backend);
@@ -43,16 +43,29 @@ export function registerLogs(workbench: Workbench): {
     component: ({ uri }) => <LogsEditor uri={uri} tabs={tabs} />,
   });
 
-  const open = (object: LogsObject, previous?: { container: string }) => {
+  /** Opens or focuses an object's logs, on one container and its previous instance when a finding asks. */
+  const open = (
+    object: LogsObject,
+    choice?: { container: string; previous: boolean },
+  ) => {
     const uri = logsUri(object);
-    if (previous) {
+    if (choice) {
       tabs.prepare(uri, {
-        containers: { type: "named", name: previous.container },
-        previous: true,
+        containers: { type: "named", name: choice.container },
+        previous: choice.previous,
       });
     }
     editors.open(uri);
   };
+  commands.register({
+    id: "k8s.logs.open",
+    title: "Open Logs",
+    category: "Logs",
+    run: (args) => {
+      const asked = logsRequest(args);
+      if (asked) open(asked.object, asked.choice);
+    },
+  });
 
   const active = () => editors.activeIn("panel");
   const toggles: readonly {
@@ -100,4 +113,36 @@ export function registerLogs(workbench: Workbench): {
     { key: "mod+f", command: "k8s.logs.find", when: "logsFocus" },
   ]);
   return { tabs, open };
+}
+
+/** A `k8s.logs.open` request, as a finding's button sends it. */
+function logsRequest(
+  args: unknown,
+):
+  | { object: LogsObject; choice?: { container: string; previous: boolean } }
+  | undefined {
+  if (typeof args !== "object" || args === null) return undefined;
+  const { space, gvr, namespace, name, container, previous } = args as Record<
+    string,
+    unknown
+  >;
+  if (
+    typeof space !== "string" ||
+    typeof namespace !== "string" ||
+    typeof name !== "string" ||
+    typeof gvr !== "object" ||
+    gvr === null
+  )
+    return undefined;
+  const { group, version, resource } = gvr as Record<string, unknown>;
+  if (
+    typeof group !== "string" ||
+    typeof version !== "string" ||
+    typeof resource !== "string"
+  )
+    return undefined;
+  const object = { space, gvr: { group, version, resource }, namespace, name };
+  return typeof container === "string"
+    ? { object, choice: { container, previous: previous === true } }
+    : { object };
 }

@@ -272,6 +272,17 @@ export function Details({
             snapshot={snapshot}
             values={values}
             onOpen={open}
+            {...(namespace !== undefined && {
+              onLogs: (choice) => {
+                void workbench.commands.execute("k8s.logs.open", lookup, {
+                  space,
+                  gvr,
+                  namespace,
+                  name,
+                  ...choice,
+                });
+              },
+            })}
           />
         ) : (
           <>

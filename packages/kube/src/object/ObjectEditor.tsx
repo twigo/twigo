@@ -25,7 +25,7 @@ export function ObjectEditor({
   overviews: OverviewStates;
   tabs: ObjectTabs;
 }) {
-  const { backend, editors } = useWorkbench();
+  const { backend, editors, commands, keys } = useWorkbench();
   const input = useMemo(() => parseObjectUri(uri), [uri]);
   const resources = useResources(discovery, input?.space ?? "");
   useChanges(tabs.changes);
@@ -64,6 +64,17 @@ export function ObjectEditor({
       snapshot={snapshot}
       values={values}
       onOpen={open}
+      {...(input.namespace !== undefined && {
+        onLogs: (choice) => {
+          void commands.execute("k8s.logs.open", keys.lookup(null), {
+            space: input.space,
+            gvr: input.gvr,
+            namespace: input.namespace,
+            name: input.name,
+            ...choice,
+          });
+        },
+      })}
     />
   );
 }

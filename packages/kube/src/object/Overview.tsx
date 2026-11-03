@@ -23,7 +23,7 @@ import { cn, PropertyList, Section as Folding, Table } from "@twigo/ui";
 import { useChanges } from "@twigo/workbench";
 import { formatBytes } from "@twigo/utils";
 import { Containers } from "./Containers";
-import { Diagnostics } from "./Diagnostics";
+import { Diagnostics, type FindingLogsChoice } from "./Diagnostics";
 import { EmbeddedList } from "./EmbeddedList";
 import { Properties } from "./Properties";
 import type { OverviewStates } from "./overviewStates";
@@ -41,6 +41,8 @@ export interface OverviewProps {
   readonly onOpen: (target: ObjectRef) => void;
   /** The values of a ConfigMap's keys, null for a binary one. */
   readonly values?: (keys: readonly string[]) => Promise<(string | null)[]>;
+  /** Opens a container's logs from a finding about it. */
+  readonly onLogs?: ((choice: FindingLogsChoice) => void) | undefined;
 }
 
 /**
@@ -56,6 +58,7 @@ export function Overview({
   kind,
   onOpen,
   values,
+  onLogs,
 }: OverviewProps) {
   useChanges(states.changes);
   const titles = overview.sections.flatMap((section) =>
@@ -90,6 +93,7 @@ export function Overview({
                   kind={kind}
                   onOpen={onOpen}
                   values={values}
+                  onLogs={onLogs}
                 />
               ))}
             </div>
@@ -136,6 +140,7 @@ function BlockView({
   kind,
   onOpen,
   values,
+  onLogs,
 }: {
   /** Whose title names a table and whose id keys a list's state. */
   section: Section;
@@ -145,6 +150,7 @@ function BlockView({
   kind: string;
   onOpen: (target: ObjectRef) => void;
   values: OverviewProps["values"];
+  onLogs: OverviewProps["onLogs"];
 }) {
   switch (block.type) {
     case "fields":
@@ -163,7 +169,7 @@ function BlockView({
     case "events":
       return <Events list={block} />;
     case "diagnostics":
-      return <Diagnostics findings={block.findings} />;
+      return <Diagnostics findings={block.findings} onLogs={onLogs} />;
     case "containers":
       return (
         <Containers
