@@ -32,6 +32,11 @@ export interface LogsSnapshot {
    */
   readonly arrived: number;
   /**
+   * Whether the batch reflects every source and view change sent and not
+   * refused; until then its matches may be an earlier search's.
+   */
+  readonly settled: boolean;
+  /**
    * Why Rust refused the source or view last sent, as a filter that is no
    * regex; it keeps the one it had, so the lines show that one until a
    * change is taken.
@@ -49,6 +54,7 @@ export const INITIAL_LOGS: LogsSnapshot = {
   histogram: undefined,
   dropped: 0,
   arrived: 0,
+  settled: true,
   refused: undefined,
 };
 
@@ -147,6 +153,7 @@ export class LogsSession {
     const id = this.#id;
     if (id === undefined || this.#closed) return;
     const sent = this.#sent;
+    const changes = this.#changes;
     const failed = (error: unknown) => {
       this.#fail(error);
     };
@@ -174,6 +181,7 @@ export class LogsSession {
         .invoke("logs_set_view", { id, view: this.#view })
         .then(taken, refused);
     }
+    if (this.#changes !== changes) this.#refresh();
     if (this.#window && !same(sent.window, this.#window)) {
       this.#backend
         .invoke("logs_set_window", { id, window: this.#window })
@@ -200,6 +208,7 @@ export class LogsSession {
       histogram: batch.histogram ?? previous.histogram,
       dropped: batch.dropped,
       arrived: this.#arrived(),
+      settled: this.#applied.changes === this.#changes,
       refused: previous.refused,
     });
     this.#unacked = batch.seq;
@@ -222,13 +231,21 @@ export class LogsSession {
   #refuse(kind: "source" | "view", error: IpcError | undefined): void {
     if (this.#closed) return;
     this.#refusals[kind] = error;
+    this.#refresh();
+  }
+
+  /** Publishes what the changes sent, taken and refused make of the last batch. */
+  #refresh(): void {
     const refused = this.#refusals.view ?? this.#refusals.source;
     const arrived = this.#arrived();
+    const settled = this.#applied.changes === this.#changes;
+    const now = this.#snapshot;
     if (
-      this.#snapshot.refused !== refused ||
-      this.#snapshot.arrived !== arrived
+      now.refused !== refused ||
+      now.arrived !== arrived ||
+      now.settled !== settled
     )
-      this.#publish({ ...this.#snapshot, refused, arrived });
+      this.#publish({ ...now, refused, arrived, settled });
   }
 
   #arrived(): number {

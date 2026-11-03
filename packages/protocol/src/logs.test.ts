@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Backend } from "./backend";
-import type { LogBatch, LogSource, LogView, OpenLogs } from "./generated";
+import type {
+  LogBatch,
+  LogSource,
+  LogView,
+  OpenLogs,
+  SetLogView,
+} from "./generated";
 import { IpcError } from "./error";
 import { LogsSession } from "./logs";
 
@@ -197,4 +203,33 @@ test("a refused view is not a change Rust applied", async () => {
     arrived: 7,
     refused: { message: "the filter /(/ is no regex" },
   });
+});
+
+test("a change sent is not settled until a batch counts it or Rust refuses it", async () => {
+  const fake = fakeBackend();
+  const invoke = fake.backend.invoke.bind(fake.backend);
+  fake.backend.invoke = (command: string, request: unknown) => {
+    if (
+      command === "logs_set_view" &&
+      (request as SetLogView).view.filter === "/(/"
+    )
+      return Promise.reject(
+        new IpcError("invalidInput", "the filter /(/ is no regex"),
+      );
+    return invoke(command as never, request as never);
+  };
+  const session = new LogsSession(fake.backend, OPEN);
+  fake.resolve(7);
+  await vi.runAllTimersAsync();
+  expect(session.getSnapshot().settled).toBe(true);
+  session.setView({ ...VIEW, search: "refused" });
+  expect(session.getSnapshot().settled).toBe(false);
+  fake.send(batch(1));
+  expect(session.getSnapshot().settled).toBe(false);
+  fake.send(batch(2, { changes: 1 }));
+  expect(session.getSnapshot().settled).toBe(true);
+  session.setView({ ...VIEW, filter: "/(/" });
+  expect(session.getSnapshot().settled).toBe(false);
+  await vi.runAllTimersAsync();
+  expect(session.getSnapshot().settled).toBe(true);
 });

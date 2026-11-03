@@ -143,13 +143,8 @@ export function LogsToolbar({
   );
   const matches = snapshot.matches?.count ?? 0;
   const match = currentMatch(snapshot.matches, tab.current);
-  // `current` counts back from the newest, so an older match is a larger one.
   const step = (older: boolean) => {
-    const shown = snapshot.matches?.entries.length ?? 0;
-    if (shown === 0) return;
-    const current = (tab.current + (older ? 1 : shown - 1)) % shown;
-    const next = currentMatch(snapshot.matches, current);
-    tabs.step(uri, current, next && { id: next.id, fromEnd: next.fromEnd });
+    tabs.step(uri, older);
   };
   const range = view.range;
   const fieldsRow = (

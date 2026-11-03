@@ -8,6 +8,7 @@ import {
 } from "@twigo/protocol";
 import type { LinePlace } from "@twigo/ui";
 import { Changes } from "@twigo/workbench";
+import { currentMatch } from "./entries";
 
 /** What a logs tab shows (ARCHITECTURE 4.6); its lines live in Rust. */
 export interface LogsTab {
@@ -26,6 +27,8 @@ export interface LogsTab {
   readonly anchor: MatchAnchor | undefined;
   /** Counts the steps, so the list scrolls to the current match on a step and not as lines come. */
   readonly steps: number;
+  /** A step to an older match, or a newer one, asked before Rust applied the search it follows: done once it has. */
+  readonly waiting: "older" | "newer" | undefined;
   /** The view's `arrived` when the list paused, from which it counts the lines that came since. */
   readonly pausedAt: number;
   /** A field asked to take the focus and has not yet. */
@@ -66,6 +69,7 @@ const INITIAL: LogsTab = {
   current: 0,
   anchor: undefined,
   steps: 0,
+  waiting: undefined,
   pausedAt: 0,
   focus: undefined,
   fields: false,
@@ -155,16 +159,34 @@ export class LogsTabs {
     this.#places.set(uri, place);
   }
 
-  /** Steps the search to a match and scrolls to it, which pauses following. */
-  step(uri: string, current: number, anchor: MatchAnchor | undefined): void {
+  /**
+   * Steps the search to the next older or newer match and scrolls to it,
+   * which pauses following; asked before Rust applied the search, it waits
+   * for that search's matches.
+   */
+  step(uri: string, older: boolean): void {
+    const snapshot = this.#sessions.get(uri)?.getSnapshot();
+    if (!snapshot) return;
     const tab = this.get(uri);
-    const arrived = this.#sessions.get(uri)?.getSnapshot().arrived ?? 0;
+    if (!snapshot.settled) {
+      this.update(uri, { waiting: older ? "older" : "newer" });
+      return;
+    }
+    const shown = snapshot.matches?.entries.length ?? 0;
+    if (shown === 0) {
+      if (tab.waiting) this.update(uri, { waiting: undefined });
+      return;
+    }
+    // `current` counts back from the newest, so an older match is a larger one.
+    const current = (tab.current + (older ? 1 : shown - 1)) % shown;
+    const next = currentMatch(snapshot.matches, current);
     this.update(uri, {
       current,
-      anchor,
+      anchor: next && { id: next.id, fromEnd: next.fromEnd },
       steps: tab.steps + 1,
+      waiting: undefined,
       follow: false,
-      ...(tab.follow && { pausedAt: arrived }),
+      ...(tab.follow && { pausedAt: snapshot.arrived }),
     });
   }
 
@@ -173,8 +195,14 @@ export class LogsTabs {
     let session = this.#sessions.get(uri);
     if (!session) {
       const { source, view } = this.get(uri);
-      session = new LogsSession(this.backend, { target, source, view });
-      this.#sessions.set(uri, session);
+      const opened = new LogsSession(this.backend, { target, source, view });
+      opened.subscribe(() => {
+        const { waiting } = this.get(uri);
+        if (waiting && opened.getSnapshot().settled)
+          this.step(uri, waiting === "older");
+      });
+      this.#sessions.set(uri, opened);
+      session = opened;
     }
     return session;
   }

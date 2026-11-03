@@ -275,3 +275,29 @@ test("a pause counts from what has arrived; a source that changes nothing resets
   expect(tabs.place(uri)).toBeUndefined();
   session.close();
 });
+
+test("a step right after the search changes waits for that search's matches", async () => {
+  const workbench = await testWorkbench();
+  const tabs = new LogsTabs(workbench.backend);
+  const uri = logsUri(DEPLOYMENT);
+  const input = parseLogsUri(uri);
+  if (!input) throw new Error("no logs URI");
+  const session = tabs.session(uri, input);
+  session.setWindow({ type: "tail", count: 50 });
+  tabs.setView(uri, { search: "request" });
+  await vi.waitFor(() => {
+    expect(session.getSnapshot()).toMatchObject({ settled: true });
+    expect(session.getSnapshot().matches?.count).toBeGreaterThan(0);
+  });
+  tabs.setView(uri, { search: "token" });
+  tabs.step(uri, true);
+  expect(tabs.get(uri)).toMatchObject({ waiting: "older", steps: 0 });
+  await vi.waitFor(() => {
+    expect(tabs.get(uri).steps).toBe(1);
+  });
+  expect(tabs.get(uri).waiting).toBeUndefined();
+  expect(session.getSnapshot().matches?.entries).toContain(
+    tabs.get(uri).anchor?.id,
+  );
+  session.close();
+});
