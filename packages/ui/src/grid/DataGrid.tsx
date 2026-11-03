@@ -163,7 +163,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
   });
   // Where the cursor was last seen, to move on from once it leaves the
   // window, and whether on a group header, which marks never hold.
-  const seen = useRef<{ id: string; index: number; group: boolean }>(undefined);
+  const seen = useRef<{ id: string; index: number }>(undefined);
   useEffect(() => {
     latest.current = {
       cursor,
@@ -178,11 +178,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     };
     const at = cursor === undefined ? -1 : indexOf(cursor);
     if (cursor !== undefined && at >= 0)
-      seen.current = {
-        id: cursor,
-        index: at,
-        group: item(at)?.type === "group",
-      };
+      seen.current = { id: cursor, index: at };
   });
   useEffect(() => {
     if (!wanted || !wantedItem) return;
@@ -205,14 +201,17 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       return target?.id === latest.current.cursor ? target : undefined;
     };
     const go = (index: number, extend = false) => {
-      const { length: count, cursor: from } = latest.current;
+      const { length: count, cursor: id } = latest.current;
       if (count === 0) return;
       const target = Math.min(Math.max(index, 0), count - 1);
       virtualizer.scrollToIndex(target);
-      const header = seen.current?.group === true && seen.current.id === from;
+      const from = current();
       setWanted({
         index: target,
-        ...(extend && from !== undefined && { marks: header ? [] : [from] }),
+        ...(extend &&
+          id !== undefined && {
+            marks: from?.type === "row" ? [from.id] : [],
+          }),
       });
     };
     return {
@@ -315,12 +314,14 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
           className="absolute inset-x-0 top-0 grid items-center border-b border-border-subtle"
           style={{ ...place, gridTemplateColumns: template }}
         >
-          {marking && <div />}
+          {marking && <div role="gridcell" />}
           {columns.map((column) => (
-            <div key={column.id} className="px-2">
+            <div key={column.id} role="gridcell" className="px-2">
               <Skeleton className="h-2.5 w-3/5" />
             </div>
           ))}
+          {filler && <div role="gridcell" />}
+          <div role="gridcell" />
         </div>
       );
     }
@@ -335,6 +336,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
           aria-rowindex={at.index + 2}
           aria-expanded={target.open}
           aria-selected={!anyMarked && isCursor}
+          data-cursor={isCursor || undefined}
           onClick={() => {
             setCursor(target.id);
             onToggleGroup?.(target.id);
@@ -376,6 +378,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         role="row"
         aria-rowindex={at.index + 2}
         aria-selected={anyMarked ? isMarked : isCursor}
+        data-cursor={isCursor || undefined}
         onClick={() => {
           select();
           onActivate(target.id, target.data);

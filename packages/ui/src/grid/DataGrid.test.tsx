@@ -189,7 +189,7 @@ test("a marking move from a group header marks the row it lands on, never the he
   expect(handlers.onMark.mock.calls).toEqual([[["e1"], true]]);
 });
 
-test("once the cursor's row is gone, Enter and X act on no other row", () => {
+test("once the cursor's row is gone, Enter and X act on no other row, and a marking move marks only where it lands", () => {
   const pods = PODS.slice(0, 4);
   const { handlers, controller, rerender } = grid({
     ...list(pods),
@@ -204,6 +204,10 @@ test("once the cursor's row is gone, Enter and X act on no other row", () => {
   });
   expect(handlers.onActivate).not.toHaveBeenCalled();
   expect(handlers.onMark).not.toHaveBeenCalled();
+  act(() => {
+    controller()?.move(1, true);
+  });
+  expect(handlers.onMark).toHaveBeenCalledWith(["p3"], true);
 });
 
 test("a right click opens a row's menu, but neither on a group header nor on a row still loading", () => {
@@ -263,10 +267,17 @@ test("the cursor is the grid's active descendant, and the marked rows are the se
   rerender({ marked: new Set(["a2", "e1"]) });
   expect(active()).toBe("edge");
   expect(selected()).toEqual(["api-2", "gateway-1"]);
+  expect(
+    screen
+      .getAllByRole("row")
+      .filter((row) => row.hasAttribute("data-cursor"))
+      .map((row) => row.textContent),
+  ).toEqual(["edge"]);
 });
 
 test("whatever a row holds sits in one of its cells", () => {
   grid({
+    ...list([...ITEMS, undefined]),
     columns: [{ id: "Name", title: "Name", width: 200 }],
     marked: new Set(["a1"]),
     inline: [{ id: "copy", label: "Copy Name", icon: Copy, run: vi.fn() }],
@@ -275,6 +286,9 @@ test("whatever a row holds sits in one of its cells", () => {
   for (const row of rows)
     for (const child of row.children)
       expect(child.getAttribute("role")).toBe("gridcell");
+  expect(rows[rows.length - 1]?.children).toHaveLength(
+    header?.children.length ?? 0,
+  );
   expect(
     screen
       .getByRole("checkbox", { name: "Clear marks" })

@@ -26,7 +26,8 @@
     font-variant-numeric: tabular-nums;
   }
 
-  [aria-selected="true"] {
+  [aria-selected="true"],
+  [data-cursor] {
     --muted-foreground-2: var(--muted-foreground);
   }
 
