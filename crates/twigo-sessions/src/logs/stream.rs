@@ -372,7 +372,8 @@ fn restarts(pod: &Value, container: &str, exit_code: Option<i64>) -> bool {
 
 /// Reads the container's log, as the pod it is told of says, until it has
 /// nothing more to read; once `pod` closes, as when the pod left, it makes
-/// no new read, so it ends as soon as the read under way does.
+/// no new read, so it ends as soon as the read under way does, with the
+/// Ended of an instance a cut left unread when the status says it ended.
 pub async fn run(stream: Stream, mut pod: watch::Receiver<Arc<Value>>, send: impl Fn(Event)) {
     let mut reader = Reader {
         stream,
@@ -431,9 +432,7 @@ impl Reader {
                     // It ended and the next began while its read was cut:
                     // the kubelet reads its rest as the previous instance.
                     if unfinished && last.is_none() && status.previous() == Some(old.as_str()) {
-                        let Some(tail) = self.tail(&old, from, None, pod, send).await else {
-                            return;
-                        };
+                        let tail = self.tail(&old, from, None, pod, send).await;
                         // A log that holds none of the lines read says they
                         // were a later instance's, read on a stale status, so
                         // its Ended stands at its finish alone; one not read
@@ -496,6 +495,18 @@ impl Reader {
                 continue;
             }
             if gone(pod) {
+                // A cut or a broken body left its rest unread for good.
+                if unfinished
+                    && let Some(status) = &status
+                    && let Some(terminated) = status.termination(id)
+                {
+                    end(
+                        terminated,
+                        status,
+                        over.or_else(|| self.resume.last_at()),
+                        send,
+                    );
+                }
                 return;
             }
             let id = id.to_owned();
@@ -538,14 +549,10 @@ impl Reader {
                 Outcome::Cut => unfinished = true,
                 Outcome::Broken => {
                     unfinished = true;
-                    if !self.pause(pod).await {
-                        return;
-                    }
+                    self.pause(pod).await;
                 }
                 Outcome::Moved { at } => {
-                    let Some(tail) = self.tail(&id, from, at, pod, send).await else {
-                        return;
-                    };
+                    let tail = self.tail(&id, from, at, pod, send).await;
                     unfinished = false;
                     // The kubelet's previous instance held what came, so it
                     // reads a later one; else the log was rotated, and the
@@ -589,9 +596,9 @@ impl Reader {
     /// reads as the previous one once a later one runs, from `from` while
     /// the resume holds no line, up to `before`, the time of the later
     /// one's first line, and tries again while the cluster cannot be
-    /// reached and the status names `old`. What its log held, the resume
-    /// left as it was when it held none of the lines read, for the instance
-    /// they came from; None once the pod's channel closed.
+    /// reached and the status names `old`, but not once the pod's channel
+    /// closed. What its log held, the resume left as it was when it held
+    /// none of the lines read, for the instance they came from.
     async fn tail(
         &mut self,
         old: &str,
@@ -599,25 +606,23 @@ impl Reader {
         before: Option<i64>,
         pod: &mut watch::Receiver<Arc<Value>>,
         send: &impl Fn(Event),
-    ) -> Option<Tail> {
+    ) -> Tail {
         let kept = self.resume;
         loop {
             if gone(pod) {
-                return None;
+                return Tail::GaveUp;
             }
             self.resume.reopen(false);
             let start = self.resume.from().map_or(from, ReadFrom::Time);
             match self.read(Read::Rest, start, before, send).await {
-                Outcome::Ended { held: true, .. } => return Some(Tail::Found),
+                Outcome::Ended { held: true, .. } => return Tail::Found,
                 Outcome::Ended { held: false, .. } => {
                     self.resume = kept;
-                    return Some(Tail::Lacked);
+                    return Tail::Lacked;
                 }
                 Outcome::Cut => {}
                 Outcome::Broken => {
-                    if !self.pause(pod).await {
-                        return None;
-                    }
+                    self.pause(pod).await;
                 }
                 // The kubelet's 400, that it has no previous instance, is
                 // final.
@@ -625,16 +630,14 @@ impl Reader {
                     if matches!(error.kind, ErrorKind::Unavailable | ErrorKind::Timeout) =>
                 {
                     send(Event::State(StreamState::Error { error }));
-                    if !self.pause(pod).await {
-                        return None;
-                    }
+                    self.pause(pod).await;
                     let current = Arc::clone(&pod.borrow_and_update());
                     let status = Status::of(&current, &self.stream.container);
                     if !status.is_some_and(|status| status.names(old)) {
-                        return Some(Tail::GaveUp);
+                        return Tail::GaveUp;
                     }
                 }
-                _ => return Some(Tail::GaveUp),
+                _ => return Tail::GaveUp,
             }
         }
     }
@@ -642,6 +645,7 @@ impl Reader {
     /// Reads the container's previous instance to its end.
     async fn previous(&mut self, pod: &mut watch::Receiver<Arc<Value>>, send: &impl Fn(Event)) {
         let from = ReadFrom::source(self.stream.since);
+        let mut unfinished = false;
         loop {
             let current = Arc::clone(&pod.borrow_and_update());
             let status = Status::of(&current, &self.stream.container);
@@ -656,17 +660,22 @@ impl Reader {
                 return;
             };
             if gone(pod) {
+                if unfinished
+                    && let Some(status) = &status
+                    && let Some(terminated) = status.termination(id)
+                {
+                    send(ended(terminated, status, self.resume.last_at()));
+                }
                 return;
             }
             let id = id.to_owned();
             self.resume.reopen(true);
             let start = self.resume.from().map_or(from, ReadFrom::Time);
             match self.read(Read::Previous, start, None, send).await {
-                Outcome::Cut => {}
+                Outcome::Cut => unfinished = true,
                 Outcome::Broken => {
-                    if !self.pause(pod).await {
-                        return;
-                    }
+                    unfinished = true;
+                    self.pause(pod).await;
                 }
                 // It restarted meanwhile, so the instance read is no
                 // longer the one the kubelet reads as the previous.
@@ -1451,7 +1460,47 @@ mod tests {
         followed
             .until("its end", |followed| followed.task.is_finished())
             .await;
-        assert_eq!(followed.entries(), ["web-a 1", "web-a 2", "web-a 3"]);
+        assert_eq!(
+            followed.entries(),
+            ["web-a 1", "web-a 2", "web-a 3", "ended"]
+        );
+        assert_eq!(followed.ends(), [T0 + 5 * SECOND]);
+    }
+
+    async fn left_after_its_instance_ended(end: impl FnOnce(&Fake, &Followed)) -> Followed {
+        let fake = Fake::default();
+        fake.serve("web-1", "web", Some("web-a"), None);
+        numbered(&fake, "web-a", 1..=2);
+        let mut followed = Followed::new(&fake, web(running(), json!({})), false);
+        followed.until("its lines", has("web-a 2")).await;
+        followed.tell(web(crashed("web-a"), json!({})));
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        followed.leave();
+        end(&fake, &followed);
+        followed
+            .until("its end", |followed| followed.task.is_finished())
+            .await;
+        followed
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_left_pods_stream_cut_after_its_instance_ended_ends_it_from_the_status() {
+        let followed = left_after_its_instance_ended(|fake, followed| {
+            fake.strand("web-1", "web");
+            followed.cut();
+        })
+        .await;
+        assert_eq!(followed.entries(), ["web-a 1", "web-a 2", "ended"]);
+        assert_eq!(followed.ends(), [T0 + 5 * SECOND]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_left_pods_stream_whose_body_broke_after_its_instance_ended_ends_it_from_the_status()
+    {
+        let followed =
+            left_after_its_instance_ended(|fake, _| fake.break_follows("web-1", "web")).await;
+        assert_eq!(followed.entries(), ["web-a 1", "web-a 2", "ended"]);
+        assert_eq!(followed.ends(), [T0 + 5 * SECOND]);
     }
 
     #[tokio::test(start_paused = true)]
@@ -1463,12 +1512,33 @@ mod tests {
         fake.hold("web-1", "web");
         let mut followed = Followed::new(&fake, restarted("web-b", "web-a"), true);
         followed.until("its lines", has("web-a 5")).await;
+        numbered(&fake, "web-a", 6..=6);
         followed.leave();
         followed.cut();
         followed
             .until("its end", |followed| followed.task.is_finished())
             .await;
-        assert_eq!(followed.entries()[..], OLD[..5]);
+        assert_eq!(followed.entries(), OLD);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_left_pods_previous_instance_whose_body_broke_ends_it_from_the_status() {
+        let fake = Fake::default();
+        fake.serve("web-1", "web", Some("web-b"), Some("web-a"));
+        numbered(&fake, "web-a", 1..=5);
+        fake.stop("web-1", "web", "web-a");
+        fake.break_after("web-1", "web", 3);
+        let mut followed = Followed::new(&fake, restarted("web-b", "web-a"), true);
+        followed.until("its lines", has("web-a 3")).await;
+        followed.leave();
+        followed
+            .until("its end", |followed| followed.task.is_finished())
+            .await;
+        assert_eq!(
+            followed.entries(),
+            ["web-a 1", "web-a 2", "web-a 3", "ended"]
+        );
+        assert_eq!(followed.ends(), [T0 + 5 * SECOND]);
     }
 
     #[tokio::test(start_paused = true)]
