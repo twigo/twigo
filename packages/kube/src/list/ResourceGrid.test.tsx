@@ -53,6 +53,7 @@ test("rows from the window render with the server's priority-0 columns", async (
   await openList();
   const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
   expect(headers).toEqual([
+    "",
     "Name",
     "Namespace",
     "Ready",
@@ -66,7 +67,7 @@ test("rows from the window render with the server's priority-0 columns", async (
 
 test("clicking a header sorts by that column, then reverses, keeping rows on screen", async () => {
   await openList();
-  fireEvent.click(header("Ready"));
+  fireEvent.click(within(header("Ready")).getByRole("button"));
   expect(rows().length).toBeGreaterThan(10);
   await settle();
   expect(header("Ready").getAttribute("aria-sort")).toBe("ascending");
@@ -75,7 +76,7 @@ test("clicking a header sorts by that column, then reverses, keeping rows on scr
       .slice(0, 3)
       .map((row) => textOf(row, "Ready"));
   expect(cells()).toEqual(["0/1", "0/1", "0/1"]);
-  fireEvent.click(header("Ready"));
+  fireEvent.click(within(header("Ready")).getByRole("button"));
   await settle();
   expect(header("Ready").getAttribute("aria-sort")).toBe("descending");
   expect(cells()).toEqual(["3/3", "3/3", "3/3"]);
@@ -117,7 +118,7 @@ test.each([
 
 test("a scroll during a resubscribe reaches the new subscription before it shows", async () => {
   await openList();
-  fireEvent.click(header("Ready"));
+  fireEvent.click(within(header("Ready")).getByRole("button"));
   grid().scrollTop = 3000 * 26;
   fireEvent.scroll(grid());
   for (let i = 0; i < 10; i++) {
@@ -298,7 +299,7 @@ test("a double click on a header's edge fits the column to its widest text or it
     );
     await settle(1);
     expect(template()).toBe(
-      `28px ${String(name)}px 120px 82px 160px 132px 64px minmax(0, 1fr) 32px`,
+      `28px ${String(name)}px 120px 83px 160px 132px 64px minmax(0, 1fr) 32px`,
     );
   } finally {
     Reflect.deleteProperty(HTMLElement.prototype, "getBoundingClientRect");

@@ -51,6 +51,7 @@ const tab = (name: string) =>
     within(shown()).getByRole("tablist", { name: "Views of the object" }),
   ).getByRole("tab", { name: new RegExp(`^${name}`) });
 const EVERY_COLUMN = [
+  "",
   "Name",
   "Namespace",
   "Ready",
@@ -69,7 +70,7 @@ describe("in a wide editor", () => {
     fireEvent.click(rows()[0] ?? document.body);
     await settle(1);
     expect(shown().className).not.toContain("absolute");
-    expect(headers()).toEqual(["Name", "Ready", "Status", ""]);
+    expect(headers()).toEqual(["", "Name", "Ready", "Status", ""]);
     fireEvent.click(
       within(shown()).getByRole("button", { name: "Close details" }),
     );
