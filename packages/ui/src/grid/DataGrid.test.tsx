@@ -549,3 +549,12 @@ test("loading shows skeleton rows, and an empty grid what its owner gives", () =
   grid({ length: 0, empty: <p>No pods</p> });
   expect(screen.getByText("No pods")).toBeTruthy();
 });
+
+test("a selected or marked row keeps its tint under the pointer, the others take the hover", () => {
+  grid({ selected: "a1", marked: new Set(["e1"]) });
+  const row = (text: string) =>
+    screen.getByText(text).closest<HTMLElement>("[role=row]")?.className;
+  expect(row("api-1")).not.toContain("hover:bg-row-hover");
+  expect(row("gateway-1")).not.toContain("hover:bg-row-hover");
+  expect(row("api-2")).toContain("hover:bg-row-hover");
+});

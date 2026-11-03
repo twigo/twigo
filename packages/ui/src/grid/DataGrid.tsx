@@ -403,7 +403,8 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
           onContextMenu={withoutMenu}
           className={cn(
             "absolute inset-x-0 top-0 flex items-center border-b border-border bg-shell text-xs hover:bg-row-hover",
-            isCursor && "group-focus/grid:bg-selected",
+            isCursor &&
+              "group-focus/grid:bg-selected group-focus/grid:hover:bg-selected",
           )}
           style={place}
         >
@@ -447,8 +448,8 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         }}
         onContextMenu={select}
         className={cn(
-          "group/row absolute inset-x-0 top-0 grid items-center border-b border-border-subtle tabular-nums hover:bg-row-hover",
-          tint,
+          "group/row absolute inset-x-0 top-0 grid items-center border-b border-border-subtle tabular-nums",
+          tint ?? "hover:bg-row-hover",
           target.tone === "error" && "shadow-[inset_2px_0_0_var(--error)]",
           target.tone === "warn" && "shadow-[inset_2px_0_0_var(--warn)]",
         )}

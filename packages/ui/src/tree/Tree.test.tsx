@@ -91,3 +91,18 @@ test("the cursor passes headings by, Left goes to the parent, Right opens a clos
   });
   expect(onToggle).toHaveBeenLastCalledWith("config");
 });
+
+test("the active row keeps its tint under the pointer, the others take the hover", () => {
+  render(
+    <Tree
+      label="Resources"
+      rows={ROWS}
+      active="pods"
+      onOpen={vi.fn()}
+      onToggle={vi.fn()}
+    />,
+  );
+  const row = (name: string) => screen.getByRole("treeitem", { name });
+  expect(row("Pods").className).not.toContain("hover:bg-row-hover");
+  expect(row("Failing pods").className).toContain("hover:bg-row-hover");
+});

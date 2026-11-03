@@ -183,9 +183,10 @@ function TreeItem({
       onDoubleClick={onDoubleClick}
       style={{ paddingLeft: (folds ? 8 : 12) + row.depth * 16 }}
       className={cn(
-        "relative flex h-[22px] items-center gap-1 pr-2 text-[13px] select-none hover:bg-row-hover",
-        active && "bg-selected-unfocused",
-        cursor && "group-focus/tree:bg-selected",
+        "relative flex h-[22px] items-center gap-1 pr-2 text-[13px] select-none",
+        active ? "bg-selected-unfocused" : "hover:bg-row-hover",
+        cursor &&
+          "group-focus/tree:bg-selected group-focus/tree:hover:bg-selected",
       )}
     >
       {Array.from({ length: row.depth }, (_, level) => (
