@@ -15,6 +15,8 @@ async function withEveryEnablement() {
   workbench.keys.set("editor.type", "kube.list");
   workbench.keys.set("space.count", 9);
   workbench.keys.set("shellEnvironment", "failed");
+  workbench.keys.set("inQuickOpen", true);
+  workbench.keys.set("quickOpenToSide", true);
   return workbench;
 }
 

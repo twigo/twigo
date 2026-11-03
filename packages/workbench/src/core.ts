@@ -17,6 +17,7 @@ import {
 import { useCredentialEntries } from "./parts/credentials/credentialEntries";
 import { registerListCommands } from "./lists/commands";
 import { registerSpaceColor } from "./spaces/colorCommand";
+import { registerQuickInputCommands } from "./quickaccess/commands";
 
 const TOGGLES: readonly {
   location: Location;
@@ -219,6 +220,7 @@ export function registerCore(workbench: Workbench): void {
 
   registerListCommands(workbench, rules);
   registerSpaceColor(workbench);
+  registerQuickInputCommands(workbench, rules);
   keybindings.register("core", rules);
 
   const menubar: readonly [MenuId, string, readonly string[]][] = [

@@ -113,7 +113,14 @@ test("@ lists the symbols the active editor publishes", async () => {
     { label: "spec", detail: "line 12", reveal: () => (revealed = "spec") },
   ]);
   const found = await provider.items("spe", NOWHERE);
-  expect(found).toEqual([{ id: "1", label: "spec", description: "line 12" }]);
+  expect(found).toEqual([
+    {
+      id: "1",
+      label: "spec",
+      description: "line 12",
+      matches: [{ start: 0, end: 3 }],
+    },
+  ]);
   await provider.accept(found[0] ?? { id: "", label: "" }, "spe", NOWHERE);
   expect(revealed).toBe("spec");
   cleanup();

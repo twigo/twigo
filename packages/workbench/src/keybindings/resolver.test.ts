@@ -209,6 +209,26 @@ describe("bare keys", () => {
     expect(resolve(target, [press("ArrowDown")], input)).toBe("none");
   });
 
+  test("↑, ↓ and Enter drive quick access from its input, other bare keys do not", () => {
+    const quick = resolver({
+      weight: "core",
+      rules: [
+        { key: "down", command: "next", when: "inQuickOpen" },
+        { key: "enter", command: "accept", when: "inQuickOpen" },
+        { key: "shift+down", command: "extend", when: "inQuickOpen" },
+        { key: "l", command: "logs", when: "inQuickOpen" },
+      ],
+    });
+    const input = { inQuickOpen: true, inputFocus: true };
+    expect(resolve(quick, [press("ArrowDown")], input)).toBe("next");
+    expect(resolve(quick, [press("Enter")], input)).toBe("accept");
+    expect(resolve(quick, [press("ArrowDown", "shift")], input)).toBe("none");
+    expect(resolve(quick, [press("KeyL")], input)).toBe("none");
+    expect(resolve(quick, [press("ArrowDown")], { inputFocus: true })).toBe(
+      "none",
+    );
+  });
+
   test("Escape and the function keys are not bare", () => {
     expect(resolve(target, [press("Escape")])).toBe("clear");
     expect(resolve(target, [press("F5")])).toBe("refresh");

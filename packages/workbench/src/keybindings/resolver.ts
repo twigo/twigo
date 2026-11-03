@@ -54,6 +54,9 @@ export interface Source {
 }
 
 const LIST_ONLY = parseWhen("listFocus && !inputFocus");
+const QUICK_OPEN = parseWhen("inQuickOpen");
+/** Bare keys that edit no line of text, so they drive quick access's list from its input. */
+const QUICK_OPEN_KEYS = new Set(["ArrowUp", "ArrowDown", "Enter"]);
 
 /**
  * Resolution as in VS Code's keybindingResolver (1.144.0): rules sorted by
@@ -138,7 +141,8 @@ export class Resolver {
       if (binding.ids.length < pressed.length) continue;
       if (pressed.some((id, at) => id !== binding.ids[at])) continue;
       if (binding.when && !evaluate(binding.when, lookup)) continue;
-      if (isBare(binding.presses[0]) && !evaluate(LIST_ONLY, lookup)) continue;
+      if (isBare(binding.presses[0]) && !bareFires(binding.presses[0], lookup))
+        continue;
       if (!holds(binding)) continue;
       return binding.ids.length > pressed.length
         ? { kind: "chord" }
@@ -153,6 +157,14 @@ export class Resolver {
       .filter((binding) => binding.command === command)
       .reverse();
   }
+}
+
+/** Bare keys fire in a focused list, and ↑, ↓ and Enter in quick access too (ARCHITECTURE 5.2). */
+function bareFires(press: Press, lookup: Lookup): boolean {
+  return (
+    evaluate(LIST_ONLY, lookup) ||
+    (QUICK_OPEN_KEYS.has(pressId(press)) && evaluate(QUICK_OPEN, lookup))
+  );
 }
 
 function isRemoval(

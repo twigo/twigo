@@ -3,7 +3,10 @@ import { fuzzyMatch } from "@twigo/ui";
 import type { Workbench } from "../services";
 import type { QuickAccessProvider, QuickPickItem } from "./registry";
 
-/** Items whose label matches the filter, best first; all of them, in order, for no filter. */
+/**
+ * Items whose label matches the filter, best first, with what matched; all
+ * of them, in order, for no filter.
+ */
 export function filtered<T extends QuickPickItem>(
   items: readonly T[],
   filter: string,
@@ -13,7 +16,9 @@ export function filtered<T extends QuickPickItem>(
   return items
     .flatMap((item) => {
       const match = fuzzyMatch(item.label, search);
-      return match ? [{ item, score: match.score }] : [];
+      return match
+        ? [{ item: { ...item, matches: match.ranges }, score: match.score }]
+        : [];
     })
     .sort((a, b) => b.score - a.score)
     .map(({ item }) => item);
@@ -31,6 +36,8 @@ export function commandsProvider(workbench: Workbench): QuickAccessProvider {
     prefix: ">",
     placeholder: "Type the name of a command to run",
     help: "Run a command",
+    hint: "Commands",
+    acceptLabel: "Run",
     items(filter, { lookup }) {
       const recent = history();
       const rank = (id: string) => {
@@ -70,6 +77,7 @@ export function helpProvider(workbench: Workbench): QuickAccessProvider {
     prefix: "?",
     placeholder: "Pick a prefix, or a command to run by its keys",
     help: "Show this help",
+    hint: "Help",
     items(filter) {
       const prefixes = quickAccess
         .providers()
@@ -156,6 +164,7 @@ export function symbolsProvider(workbench: Workbench): QuickAccessProvider {
     prefix: "@",
     placeholder: "Go to a symbol of the active editor",
     help: "Go to a symbol in the editor",
+    acceptLabel: "Go to",
     items(filter) {
       const active = editors.active;
       const symbols = active === undefined ? [] : editors.symbols(active);

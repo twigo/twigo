@@ -743,6 +743,13 @@ One input, with providers registered by prefix (VS Code `QuickAccessRegistry` me
 Quick-access providers are core-only in v1, as in VS Code.
 Extensions add commands, not prefixes.
 
+- **The widget** drops from the title bar's search field, centred under the title bar and min(600 px, 62 vw) wide, as VS Code's quick input.
+- **Rows are data** (`QuickPickItem`) that the widget draws alike for every provider: the kind's icon or a space's tile, the label with what matched the filter bold in the brand colour, a quiet description such as the namespace, a state only when it is abnormal as its dot and its words in its tone, a quieter kind at the end, and keys.
+  Filters match as Sublime Text does (fuzzysort), so a row's highlight is what its score came from.
+- **A footer of keys**: ↑↓ move, ↵ the provider's verb (Open, Run, Switch), and ⌘↵ open to the side where the provider can, which opens the editor in a new group to the right of the active one.
+  Each is the binding of a `quickInput.*` command, so a key the user binds shows there.
+  On the empty prefix the footer adds the prefixes whose providers name themselves for it (`>` Commands, `:` Lists, `?` Help), so a new provider shows up by registering.
+
 ### 4.6 Logs, terminal and editors
 
 - **Logs.**
@@ -950,6 +957,7 @@ interface CommandDescriptor {
   - `space.contexts`, `space.multiContext`
   - `context.name`, `context.readOnly`, `context.mode`, `context.provider`
   - `listFocus`, `treeFocus` (a tree, which is also a list: left and right close and open), `editorFocus`, `inputFocus`
+  - `inQuickOpen`, `quickOpenToSide` (the open provider opens rows to the side)
   - `resource.group`, `resource.kind`, `resource.namespaced`, `resource.namespace`
   - `selection.count`
   - `editor.open`, `editor.dirty`, `editor.type`
@@ -980,6 +988,7 @@ interface CommandDescriptor {
   - Labels show what is printed on the key.
 - **Bare keys** fire only in `listFocus` and never inside inputs or Monaco.
   This keeps legacy `isTypingTarget`.
+  Quick access's input is the one exception, for ↑, ↓ and Enter under `inQuickOpen`: they edit no line of text, and drive its list as in VS Code's quick input.
 - **The keybindings editor** shows conflicts and the source of every binding.
 - **Keymaps** ship as contributions: Default (VS Code-like) and k9s (vim movement, `:` mode on bare `:` in `listFocus`).
 - **macOS native menu accelerators** come from the same table.

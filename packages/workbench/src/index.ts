@@ -17,10 +17,12 @@ export type { KeybindingRule } from "./keybindings/resolver";
 export { Changes } from "./changes";
 export { useChanges, useWorkbench } from "./react";
 export type {
+  AcceptOptions,
   QuickAccessContext,
   QuickAccessProvider,
   QuickPickItem,
 } from "./quickaccess/registry";
+export { filtered } from "./quickaccess/providers";
 export { createWorkbench, Workbench } from "./services";
 export { StateStore } from "./state/store";
 export type { SpaceConnection, SpaceStatusProvider } from "./spaces/status";
