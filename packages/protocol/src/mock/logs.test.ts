@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { LogBatch, LogSource, LogView } from "../generated";
 import { Cluster, deploymentOf } from "./cluster";
-import { levelOf, MockLogs, TAB_STREAMS } from "./logs";
+import { MockLogs, TAB_STREAMS } from "./logs";
+import { level } from "./logview/level";
 
 const SOURCE: LogSource = {
   containers: { type: "default" },
@@ -34,8 +35,8 @@ test.each([
   ["panic: dial tcp: connection refused", "error"],
   ["GET /healthz 200 3ms", null],
   ["{not json and no level}", null],
-])("the level of %s is %s", (line, level) => {
-  expect(levelOf(line)).toBe(level);
+])("the level of %s is %s", (line, wanted) => {
+  expect(level(line)).toBe(wanted);
 });
 
 function session(view: LogView = VIEW) {

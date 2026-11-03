@@ -1,19 +1,12 @@
 import { IpcError } from "../error";
 import type {
-  AnsiColor,
-  Bucket,
-  Histogram,
-  Level,
   LogBatch,
-  LogEntry,
   LogPod,
   LogSource,
   LogTarget,
   LogView,
   LogWindow,
   StreamState,
-  TextRange,
-  TextStyle,
   ViewState,
 } from "../generated";
 import {
@@ -24,22 +17,28 @@ import {
   type Cluster,
   type Pod,
 } from "./cluster";
-import { lowerAscii, parseText } from "./query";
+import { LogBuffer, type Kind, type Timed } from "./logview/buffer";
+import { level } from "./logview/level";
+import { parse } from "./logview/line";
+import {
+  entries,
+  histogram,
+  judge,
+  matches,
+  rfc3339,
+  spec,
+  total,
+  type Spec,
+} from "./logview/view";
 
 /** A tab's streams (ARCHITECTURE 4.6) and the cluster's followed logs (3.2). */
 export const TAB_STREAMS = 10;
 export const CLUSTER_STREAMS = 32;
-/** The buffer's bound in lines (ARCHITECTURE 4.6); the mock's lines are short, so bytes never bind first. */
-const BOUND = 50_000;
-const MATCHES = 10_000;
-const BUCKETS = 80;
 const TICK_MS = 100;
 /** How often a workload's tab sees one of its pods replaced, as in a rollout. */
 const ROLLOUT_MS = 25_000;
 /** The recorded pods' first container is `api`, so a finding's logs reach a mock stream. */
 const NAMES = ["api", "istio-proxy", "log-shipper"];
-
-type Stored = LogEntry & { readonly at: number };
 
 interface Stream {
   readonly pod: Pod;
@@ -54,8 +53,9 @@ interface Stream {
 
 /**
  * A logs tab of the mock backend: the target's pods write realistic lines,
- * JSON, logfmt, klog and ANSI among them, a crash-looping pod crashes, and
- * the view filters, searches and windows them as Rust does.
+ * JSON, logfmt, klog and ANSI among them, as the kubelet sends them, a
+ * crash-looping pod crashes, and `logview` reads, buffers and shows them
+ * as Rust does.
  */
 export class MockLogs {
   readonly #target: LogTarget;
@@ -63,17 +63,14 @@ export class MockLogs {
   readonly #onMessage: (batch: LogBatch) => void;
   readonly #budget: (logs: MockLogs, wanted: number) => number;
   #source: LogSource;
-  #view: LogView;
+  #spec: Spec;
   #window: LogWindow | undefined;
-  #entries: Stored[] = [];
+  readonly #buffer = new LogBuffer();
   #streams = new Map<string, Stream>();
   #members = new Set<string>();
-  #nextId = 1;
-  #dropped = 0;
   #seq = 0;
   #unacked: number | undefined;
   #dirty = { pods: true, lines: true };
-  #lastHistogram = 0;
   #rolledAt = Date.now();
   #timer: ReturnType<typeof setInterval>;
 
@@ -89,7 +86,7 @@ export class MockLogs {
     this.#target = target;
     this.#cluster = cluster;
     this.#source = source;
-    this.#view = checked(view);
+    this.#spec = spec(view);
     this.#budget = budget;
     this.#onMessage = onMessage;
     this.#start(Date.now());
@@ -105,15 +102,16 @@ export class MockLogs {
 
   setSource(source: LogSource): void {
     this.#source = source;
-    this.#entries = [];
+    this.#buffer.clear();
     this.#streams.clear();
     this.#members.clear();
-    this.#dropped = 0;
     this.#start(Date.now());
   }
 
+  /** Refuses a view whose filter, search or range does not parse, as Rust does. */
   setView(view: LogView): void {
-    this.#view = checked(view);
+    this.#spec = spec(view);
+    this.#buffer.judge((kind) => judge(this.#spec, kind));
     this.#dirty.lines = true;
   }
 
@@ -174,29 +172,29 @@ export class MockLogs {
     const since = this.#source.since;
     const from =
       since.type === "seconds" ? now - since.seconds * 1000 : now - 3_600_000;
+    const incoming: Timed[] = [];
     for (const pod of this.#pods()) {
       this.#members.add(pod.name);
       for (const container of this.#chosen(pod)) {
         if (this.#streams.size >= TAB_STREAMS) break;
         const stream = this.#stream(pod, container, from);
         if (!writes(pod)) continue;
-        const lines: Stored[] = [];
+        const lines: Timed[] = [];
         while (stream.next < now) lines.push(...this.#write(stream));
         const kept = this.#source.previous
           ? lastInstance(lines)
           : since.type === "lines"
             ? lines.slice(-since.lines)
             : lines;
-        this.#entries.push(...kept);
+        incoming.push(...kept);
         if (this.#source.previous) {
-          const end = kept[kept.length - 1]?.at ?? now - 2000;
-          this.#entries.push(this.#ended(stream, end + 1));
+          const end = kept[kept.length - 1]?.[0] ?? nanos(now - 2000);
+          incoming.push(this.#ended(stream, end + 1_000_000n));
           this.#streams.delete(key(pod.name, container));
         }
       }
     }
-    this.#entries.sort((a, b) => a.at - b.at);
-    this.#bound();
+    this.#insert(incoming);
     this.#dirty = { pods: true, lines: true };
   }
 
@@ -216,14 +214,17 @@ export class MockLogs {
 
   #tick(now: number): void {
     if (!this.#source.previous) this.#follow(now);
-    if (this.#unacked !== undefined || this.#window === undefined) return;
+    const window = this.#window;
+    if (this.#unacked !== undefined || window === undefined) return;
     if (!this.#dirty.lines && !this.#dirty.pods) return;
-    this.#send(now);
+    this.#send(window);
   }
 
   /** Writes what each stream wrote since the last tick, and follows the target's pods as they come and go. */
   #follow(now: number): void {
     this.#rollOut(now);
+    const at = nanos(now);
+    const incoming: Timed[] = [];
     const current = new Set(this.#pods().map((pod) => pod.name));
     for (const name of this.#members) {
       if (current.has(name)) continue;
@@ -231,32 +232,27 @@ export class MockLogs {
       for (const [id, stream] of this.#streams) {
         if (stream.pod.name === name) this.#streams.delete(id);
       }
-      this.#push({
-        type: "left",
-        id: this.#nextId++,
-        pod: name,
-        time: stamp(now),
-        at: now,
-      });
+      incoming.push([at, { type: "left", pod: name, time: rfc3339(at) }]);
       this.#dirty.pods = true;
     }
     for (const pod of this.#pods()) {
       if (this.#members.has(pod.name)) continue;
       this.#members.add(pod.name);
-      this.#push({
-        type: "joined",
-        id: this.#nextId++,
-        pod: pod.name,
-        time: stamp(now),
-        owner: {
-          group: "apps",
-          version: "v1",
-          kind: "ReplicaSet",
-          namespace: pod.namespace,
-          name: pod.generateName.slice(0, -1),
+      incoming.push([
+        at,
+        {
+          type: "joined",
+          pod: pod.name,
+          time: rfc3339(at),
+          owner: {
+            group: "apps",
+            version: "v1",
+            kind: "ReplicaSet",
+            namespace: pod.namespace,
+            name: pod.generateName.slice(0, -1),
+          },
         },
-        at: now,
-      });
+      ]);
       for (const container of this.#chosen(pod)) {
         if (this.#streams.size < TAB_STREAMS) this.#stream(pod, container, now);
       }
@@ -273,10 +269,11 @@ export class MockLogs {
       }
       while (stream.next < now) {
         const written = this.#write(stream);
-        for (const entry of written) this.#push(entry);
-        if (written.some((entry) => entry.type === "ended")) break;
+        incoming.push(...written);
+        if (written.some(([, kind]) => kind.type === "ended")) break;
       }
     }
+    this.#insert(incoming);
   }
 
   /** Now and then replaces a pod the tab follows, so a workload's tab shows a rollout. */
@@ -289,31 +286,14 @@ export class MockLogs {
     if (pod) this.#cluster.rollOut(pod, now);
   }
 
-  #push(entry: Stored): void {
-    const last = this.#entries[this.#entries.length - 1];
-    if (!last || last.at <= entry.at) this.#entries.push(entry);
-    else {
-      const at = this.#entries.findIndex((each) => each.at > entry.at);
-      this.#entries.splice(at, 0, entry);
-    }
-    this.#bound();
+  #insert(incoming: readonly Timed[]): void {
+    if (incoming.length === 0) return;
+    this.#buffer.insert(incoming, (kind) => judge(this.#spec, kind));
     this.#dirty.lines = true;
   }
 
-  #bound(): void {
-    const lines = this.#entries.filter((entry) => entry.type !== "dropped");
-    const over = lines.length - BOUND;
-    if (over <= 0) return;
-    const kept = lines.slice(over);
-    this.#dropped += over;
-    this.#entries = [
-      { type: "dropped", id: 0, count: this.#dropped, at: 0 },
-      ...kept,
-    ];
-  }
-
   /** The stream's next entries: a line, or a crash loop's crash and its end. */
-  #write(stream: Stream): Stored[] {
+  #write(stream: Stream): Timed[] {
     const at = stream.next;
     const { random } = stream;
     stream.next = at + 200 + random() * random() * 4000;
@@ -321,78 +301,38 @@ export class MockLogs {
       const step = CRASH[stream.cycle];
       stream.cycle = (stream.cycle + 1) % (CRASH.length + 1);
       if (step === undefined) {
-        const ended = this.#ended(stream, at);
+        const ended = this.#ended(stream, nanos(at));
         stream.restartAt = at + 40_000;
         stream.next = stream.restartAt;
         this.#dirty.pods = true;
         return [ended];
       }
       stream.next = at + 300 + random() * 900;
-      return [this.#line(stream, at, step)];
+      return [read(stream, kubelet(at, step))];
     }
-    return [this.#line(stream, at, fill(template(random), random))];
+    return [read(stream, kubelet(at, fill(template(random), random)))];
   }
 
-  #line(stream: Stream, at: number, raw: string): Stored {
-    const { text, styles } = ansi(raw);
-    return {
-      type: "line",
-      id: this.#nextId++,
-      pod: stream.pod.name,
-      container: stream.container,
-      time: stamp(at),
-      level: levelOf(text),
-      text,
-      styles,
-      marks: [],
+  #ended(stream: Stream, at: bigint): Timed {
+    return [
       at,
-    };
+      {
+        type: "ended",
+        pod: stream.pod.name,
+        container: stream.container,
+        time: rfc3339(at),
+        exitCode: 1,
+        reason: "Error",
+        restarting: this.#source.previous
+          ? null
+          : rfc3339(at + 40_000_000_000n),
+      },
+    ];
   }
 
-  #ended(stream: Stream, at: number): Stored {
-    return {
-      type: "ended",
-      id: this.#nextId++,
-      pod: stream.pod.name,
-      container: stream.container,
-      time: stamp(at),
-      exitCode: 1,
-      reason: "Error",
-      restarting: this.#source.previous ? null : stamp(at + 40_000),
-      at,
-    };
-  }
-
-  #send(now: number): void {
-    const view = this.#visible();
-    const total = view.length;
-    const window = this.#window ?? { type: "tail", count: 0 };
-    const [start, end] =
-      window.type === "tail"
-        ? [Math.max(0, total - window.count), total]
-        : [Math.min(window.start, total), Math.min(window.end, total)];
-    const search = searcher(this.#view.search);
-    const entries = view.slice(start, end).map((entry) => {
-      const { at: _at, ...wire } = entry;
-      return wire.type === "line" && search
-        ? { ...wire, marks: search(wire.text) }
-        : wire;
-    });
-    let count = 0;
-    const indexes: number[] = [];
-    if (search) {
-      view.forEach((entry, index) => {
-        if (entry.type !== "line") return;
-        for (const _ of search(entry.text)) {
-          count++;
-          indexes.push(index);
-        }
-      });
-    }
-    indexes.splice(0, Math.max(0, indexes.length - MATCHES));
-    const histogram =
-      now - this.#lastHistogram > 1000 ? this.#histogram() : null;
-    if (histogram) this.#lastHistogram = now;
+  #send(window: LogWindow): void {
+    const buffer = this.#buffer;
+    const checked = this.#spec;
     this.#seq++;
     this.#unacked = this.#seq;
     const status: ViewState = { state: "ready" };
@@ -400,58 +340,13 @@ export class MockLogs {
       seq: this.#seq,
       status,
       pods: this.#dirty.pods ? this.#logPods() : null,
-      total,
-      window: { start, entries },
-      matches: { count, entries: indexes },
-      histogram,
-      dropped: this.#dropped,
+      total: total(buffer, checked),
+      window: entries(buffer, checked, window),
+      matches: matches(buffer, checked),
+      histogram: histogram(buffer),
+      dropped: buffer.droppedEver,
     });
-    this.#dirty = { pods: false, lines: histogram === null };
-  }
-
-  /** The entries the view keeps: markers always, lines by level, filter and range. */
-  #visible(): Stored[] {
-    const { level, filter, range } = this.#view;
-    const text = filter === null ? null : parseText(filter);
-    const from = range ? Date.parse(range.from) : -Infinity;
-    const to = range ? Date.parse(range.to) : Infinity;
-    return this.#entries.filter((entry) => {
-      if (entry.type === "dropped") return true;
-      if (entry.at < from || entry.at >= to) return false;
-      if (entry.type !== "line") return true;
-      if (level === "warn" && entry.level !== "warn" && entry.level !== "error")
-        return false;
-      if (level === "error" && entry.level !== "error") return false;
-      return !text || text.keeps([entry.text]);
-    });
-  }
-
-  #histogram(): Histogram | null {
-    const { range: _range, ...rest } = this.#view;
-    const saved = this.#view;
-    this.#view = { ...rest, range: null };
-    const lines = this.#visible().filter(
-      (entry): entry is Stored & { type: "line" } => entry.type === "line",
-    );
-    this.#view = saved;
-    const first = lines[0];
-    const last = lines[lines.length - 1];
-    if (!first || !last) return null;
-    const span = Math.max(1, last.at - first.at + 1);
-    const buckets: Bucket[] = Array.from({ length: BUCKETS }, () => ({
-      lines: 0,
-      warnings: 0,
-      errors: 0,
-    }));
-    for (const line of lines) {
-      const bucket =
-        buckets[Math.floor(((line.at - first.at) / span) * BUCKETS)];
-      if (!bucket) continue;
-      bucket.lines++;
-      if (line.level === "warn") bucket.warnings++;
-      if (line.level === "error") bucket.errors++;
-    }
-    return { from: stamp(first.at), to: stamp(first.at + span), buckets };
+    this.#dirty = { pods: false, lines: false };
   }
 
   #logPods(): LogPod[] {
@@ -500,19 +395,19 @@ export class MockLogs {
 }
 
 /** A container's previous instance: its lines from the last start a crash loop wrote, without the end that followed. */
-function lastInstance(entries: readonly Stored[]): Stored[] {
-  const last = (from: number, test: (entry: Stored) => boolean) => {
+function lastInstance(entries: readonly Timed[]): Timed[] {
+  const last = (from: number, test: (kind: Kind) => boolean) => {
     for (let at = from - 1; at >= 0; at--) {
       const entry = entries[at];
-      if (entry && test(entry)) return at;
+      if (entry && test(entry[1])) return at;
     }
     return -1;
   };
-  const ended = last(entries.length, (entry) => entry.type === "ended");
+  const ended = last(entries.length, (kind) => kind.type === "ended");
   const end = ended < 0 ? entries.length : ended;
   const start = last(
     end,
-    (entry) => entry.type === "line" && entry.text === CRASH[0],
+    (kind) => kind.type === "line" && kind.text === CRASH[0],
   );
   return entries.slice(Math.max(0, start), end);
 }
@@ -526,180 +421,33 @@ function writes(pod: Pod): boolean {
   return pod.status !== "Pending" && pod.status !== "ContainerCreating";
 }
 
-/** A view whose filter or search is no regex is refused, as Rust refuses it. */
-function checked(view: LogView): LogView {
-  if (view.filter !== null) parseText(view.filter);
-  searcher(view.search);
-  return view;
+/** Unix milliseconds, fractions included, in nanoseconds. */
+function nanos(ms: number): bigint {
+  const whole = Math.floor(ms);
+  return BigInt(whole) * 1_000_000n + BigInt(Math.floor((ms - whole) * 1e6));
 }
 
-/** The kubelet's stamp: RFC 3339 with nanoseconds. */
-function stamp(at: number): string {
-  const nanos = String(Math.floor((at % 1) * 1e6)).padStart(6, "0");
-  return new Date(Math.floor(at)).toISOString().replace("Z", `${nanos}Z`);
+/** What a container wrote at `at`, as the kubelet sends it with `timestamps=true`. */
+function kubelet(at: number, written: string): string {
+  return `${rfc3339(nanos(at))} ${written}`;
 }
 
-/** A substring in any case of ASCII letters, or a regex between slashes in any case; null for no search. */
-function searcher(
-  source: string | null,
-): ((text: string) => TextRange[]) | null {
-  const text = source?.trim() ?? "";
-  if (text === "") return null;
-  if (text.length >= 2 && text.startsWith("/") && text.endsWith("/")) {
-    const pattern = text.slice(1, -1);
-    let regex: RegExp;
-    try {
-      regex = new RegExp(pattern, "gi");
-    } catch (error) {
-      throw new IpcError(
-        "invalidInput",
-        `the search /${pattern}/ is no regex: ${String(error)}`,
-      );
-    }
-    return (line) =>
-      [...line.matchAll(regex)]
-        .filter((match) => match[0].length > 0)
-        .map((match) => ({
-          start: match.index,
-          end: match.index + match[0].length,
-        }));
-  }
-  const needle = lowerAscii(text);
-  return (line) => {
-    const haystack = lowerAscii(line);
-    const found: TextRange[] = [];
-    let from = haystack.indexOf(needle);
-    while (from >= 0) {
-      found.push({ start: from, end: from + needle.length });
-      from = haystack.indexOf(needle, from + needle.length);
-    }
-    return found;
-  };
-}
-
-const WORDS: Readonly<Record<string, Level>> = {
-  trace: "trace",
-  debug: "debug",
-  dbg: "debug",
-  info: "info",
-  inf: "info",
-  notice: "info",
-  warn: "warn",
-  warning: "warn",
-  wrn: "warn",
-  error: "error",
-  err: "error",
-  fatal: "error",
-  crit: "error",
-  critical: "error",
-  panic: "error",
-};
-
-const PINO: readonly [number, Level][] = [
-  [60, "error"],
-  [50, "error"],
-  [40, "warn"],
-  [30, "info"],
-  [20, "debug"],
-  [10, "trace"],
-];
-
-/** A line's level: from a JSON object's field, logfmt's `level=`, klog's prefix, or a level word among its first tokens. */
-export function levelOf(text: string): Level | null {
-  const trimmed = text.trimStart();
-  if (trimmed.startsWith("{")) {
-    try {
-      const object = JSON.parse(trimmed) as Record<string, unknown>;
-      for (const field of [
-        "level",
-        "lvl",
-        "severity",
-        "levelname",
-        "log.level",
-      ]) {
-        const value = object[field];
-        if (typeof value === "string")
-          return WORDS[value.toLowerCase()] ?? null;
-        if (typeof value === "number")
-          return PINO.find(([at]) => value >= at)?.[1] ?? null;
-      }
-      return null;
-    } catch {
-      // Not JSON after all: read it as text.
-    }
-  }
-  const logfmt = /(?:^|\s)(?:level|lvl)=("?)([A-Za-z]+)\1/.exec(trimmed);
-  if (logfmt?.[2]) return WORDS[logfmt[2].toLowerCase()] ?? null;
-  const klog = /^([IWEF])\d{4} /.exec(trimmed);
-  if (klog)
-    return ({ I: "info", W: "warn", E: "error", F: "error" } as const)[
-      klog[1] as "I"
-    ];
-  for (const token of trimmed.split(/\s+/).slice(0, 3)) {
-    const word = token.replace(/^\[|[\]:]+$/g, "").toLowerCase();
-    const level = WORDS[word];
-    if (level) return level;
-  }
-  return null;
-}
-
-const ESC = String.fromCharCode(27);
-const SGR_SPLIT = new RegExp(`(${ESC}\\[[0-9;]*m)`);
-const SGR = new RegExp(`^${ESC}\\[([0-9;]*)m$`);
-
-const COLORS: readonly AnsiColor[] = [
-  "black",
-  "red",
-  "green",
-  "yellow",
-  "blue",
-  "magenta",
-  "cyan",
-  "white",
-];
-
-/** The text without its SGR escapes, and the runs they styled: the mock writes the sixteen colours and bold only. */
-function ansi(raw: string): { text: string; styles: TextStyle[] } {
-  let text = "";
-  const styles: TextStyle[] = [];
-  let fg: AnsiColor | null = null;
-  let bold = false;
-  let start = 0;
-  const close = () => {
-    if ((fg || bold) && text.length > start)
-      styles.push({
-        range: { start, end: text.length },
-        fg,
-        bg: null,
-        bold,
-        dim: false,
-        italic: false,
-        underline: false,
-      });
-    start = text.length;
-  };
-  for (const part of raw.split(SGR_SPLIT)) {
-    const sgr = SGR.exec(part);
-    if (!sgr) {
-      text += part;
-      continue;
-    }
-    close();
-    const codes = sgr[1] === undefined || sgr[1] === "" ? "0" : sgr[1];
-    for (const code of codes.split(";").map(Number)) {
-      if (code === 0) [fg, bold] = [null, false];
-      else if (code === 1) bold = true;
-      else if (code >= 30 && code <= 37) fg = COLORS[code - 30] ?? null;
-      else if (code >= 90 && code <= 97) {
-        const base = COLORS[code - 90];
-        fg = base
-          ? (`bright${base[0]?.toUpperCase()}${base.slice(1)}` as AnsiColor)
-          : null;
-      }
-    }
-  }
-  close();
-  return { text, styles };
+/** A kubelet line as Rust reads it. */
+function read(stream: Stream, line: string): Timed {
+  const { at, text, styles } = parse(line);
+  if (at === null)
+    throw new Error(`the mock wrote a line without its time: ${line}`);
+  return [
+    at,
+    {
+      type: "line",
+      pod: stream.pod.name,
+      container: stream.container,
+      level: level(text),
+      text,
+      styles,
+    },
+  ];
 }
 
 const ROUTES = [
