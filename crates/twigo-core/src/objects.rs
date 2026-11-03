@@ -268,6 +268,7 @@ async fn run(
                     dirty.events = true;
                 }
             }
+            let mut held_anew = false;
             if parts.overview {
                 let needs = twigo_describe::needs(json);
                 let current = held
@@ -276,14 +277,13 @@ async fn run(
                     .is_some_and(|facts| facts.iter().map(|held| &held.need).eq(needs.iter()));
                 if !current {
                     held.facts = Some(needs_of(&hub, &target, needs));
-                    facts = Vec::new();
-                    dirty.overview = true;
+                    held_anew = true;
                 }
             } else {
                 held.facts = None;
             }
             if let Some(needs) = &mut held.facts
-                && found(needs)
+                && (found(needs) || held_anew)
             {
                 facts = needs
                     .iter()
@@ -531,11 +531,13 @@ fn found(needs: &mut [Held]) -> bool {
                 continue;
             }
             Some(Found::Listed {
-                objects: objects
-                    .items()
-                    .iter()
-                    .filter_map(|object| serde_json::from_str(object.json.get()).ok())
-                    .collect(),
+                objects: by_name(
+                    objects
+                        .items()
+                        .iter()
+                        .filter_map(|object| serde_json::from_str(object.json.get()).ok())
+                        .collect(),
+                ),
             })
         } else {
             None
@@ -546,6 +548,21 @@ fn found(needs: &mut [Held]) -> bool {
         }
     }
     changed
+}
+
+/// Objects in the order the describers' fixtures record them, by namespace
+/// and name, rather than the store's, which a relist reshuffles.
+fn by_name(mut objects: Vec<Value>) -> Vec<Value> {
+    objects.sort_by(|a, b| {
+        let key = |object: &Value| {
+            (
+                object["metadata"]["namespace"].as_str().map(str::to_owned),
+                object["metadata"]["name"].as_str().map(str::to_owned),
+            )
+        };
+        key(a).cmp(&key(b))
+    });
+    objects
 }
 
 /// The metadata of the kinds the object's kind owns, in its namespace.

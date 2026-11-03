@@ -1,8 +1,8 @@
 //! Open objects against a kind or kwok cluster: their batches wait for their
 //! acks, they follow an edit and their events, they hold their events'
 //! upstream and what their describer needs only while a view shows them,
-//! they say why events cannot be listed, and a deleted object keeps no
-//! owners; and a list sends its field selector to the server.
+//! they say why events or a need cannot be listed, and a deleted object
+//! keeps no owners; and a list sends its field selector to the server.
 //!
 //! TWIGO_TEST_KUBECONFIG=… cargo test -p twigo-core --test objects_live -- --ignored
 
@@ -99,8 +99,9 @@ impl Cluster {
     }
 
     /// A kubeconfig in `dir` for a service account of `namespace` that may
-    /// get, list and watch pods there and nothing else; and its context.
-    async fn pod_reader(&self, namespace: &str, dir: &Path) -> (PathBuf, String) {
+    /// get, list and watch the core `resources` there and nothing else; and
+    /// its context.
+    async fn reader(&self, namespace: &str, dir: &Path, resources: &[&str]) -> (PathBuf, String) {
         let accounts = Api::<ServiceAccount>::namespaced(self.admin.clone(), namespace);
         accounts
             .create(
@@ -111,7 +112,7 @@ impl Cluster {
             .unwrap();
         let role: Role = serde_json::from_value(json!({
             "metadata": { "name": "pods" },
-            "rules": [{ "apiGroups": [""], "resources": ["pods"], "verbs": ["get", "list", "watch"] }],
+            "rules": [{ "apiGroups": [""], "resources": resources, "verbs": ["get", "list", "watch"] }],
         }))
         .unwrap();
         Api::<Role>::namespaced(self.admin.clone(), namespace)
@@ -422,7 +423,7 @@ async fn events_that_may_not_be_listed_say_why() {
     let namespace = cluster.namespace("forbidden").await;
     cluster.pod(&namespace, json!([])).await;
     let dir = tempfile::tempdir().unwrap();
-    let (kubeconfig, context) = cluster.pod_reader(&namespace, dir.path()).await;
+    let (kubeconfig, context) = cluster.reader(&namespace, dir.path(), &["pods"]).await;
     let (core, space) = core(dir.path(), &kubeconfig, &context);
     let mut opened = Opened::pod(&core, space, &namespace, OVERVIEW).await;
     let batch = opened
@@ -576,6 +577,20 @@ async fn a_describer_follows_the_objects_it_needs_while_the_overview_is_shown() 
     })
     .await;
     assert!(released.is_ok(), "the slices are let go once hidden");
+    core.object_set_parts(
+        "main",
+        SetParts {
+            id: opened.id,
+            parts: OVERVIEW,
+        },
+    )
+    .unwrap();
+    opened
+        .until(|batch| {
+            cell(batch, "core.ports", 0, "Endpoints").as_deref()
+                == Some("10.1.2.3:8080, 10.1.2.4:8080")
+        })
+        .await;
     core.object_close("main", opened.id).unwrap();
     cluster.delete(&namespace).await;
 }
@@ -604,7 +619,7 @@ async fn a_list_with_a_field_selector_keeps_what_the_server_selects() {
             resource: "pods".to_owned(),
         },
         namespaced: true,
-        namespaces: vec![namespace.clone()],
+        namespaces: Vec::new(),
         label_selector: None,
         field_selector: Some("spec.nodeName=kwok-node-0".to_owned()),
         owners: None,
@@ -643,7 +658,49 @@ async fn a_list_with_a_field_selector_keeps_what_the_server_selects() {
     .await
     .expect("the list is ready within 30 s");
     let ids: Vec<String> = ids.into_iter().map(|id| id.0).collect();
-    assert_eq!(ids, [format!("{}/{namespace}/p1", cluster.context)]);
+    let mine: Vec<&String> = ids
+        .iter()
+        .filter(|id| id.contains(&format!("/{namespace}/")))
+        .collect();
+    assert_eq!(mine, [&format!("{}/{namespace}/p1", cluster.context)]);
     core.list_unsubscribe("main", id).unwrap();
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_need_that_may_not_be_read_says_why() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("refused").await;
+    let service: DynamicObject = serde_json::from_value(json!({
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": { "name": "web" },
+        "spec": { "ports": [{ "name": "http", "port": 80 }] },
+    }))
+    .unwrap();
+    Api::<DynamicObject>::namespaced_with(
+        cluster.admin.clone(),
+        &namespace,
+        &ApiResource::erase::<k8s_openapi::api::core::v1::Service>(&()),
+    )
+    .create(&PostParams::default(), &service)
+    .await
+    .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (kubeconfig, context) = cluster
+        .reader(&namespace, dir.path(), &["services", "events"])
+        .await;
+    let (core, space) = core(dir.path(), &kubeconfig, &context);
+    let mut opened = Opened::open(&core, space, "services", &namespace, "web", OVERVIEW).await;
+    let batch = opened
+        .until(|batch| {
+            cell(batch, "core.ports", 0, "Endpoints")
+                .is_some_and(|text| text.starts_with("You may not"))
+        })
+        .await;
+    let refused = cell(&batch, "core.ports", 0, "Endpoints").unwrap();
+    assert!(refused.contains("endpointslices"), "{refused}");
+    core.object_close("main", opened.id).unwrap();
     cluster.delete(&namespace).await;
 }
