@@ -4,7 +4,9 @@ import { cn } from "../lib/cn";
 
 /**
  * A titled part of a view that folds: Overview's sections, the views of a
- * side bar. The header holds the section's actions at its end.
+ * side bar. Its title is a quiet label; in an editor it lines up with the
+ * content and its chevron follows it, in a side bar the chevron leads.
+ * The header holds the section's actions at its end.
  */
 export function Section({
   title,
@@ -26,11 +28,14 @@ export function Section({
 }) {
   const Chevron = open ? ChevronDown : ChevronRight;
   return (
-    <section aria-label={title} className={cn("flex flex-col", className)}>
+    <section
+      aria-label={title}
+      className={cn("flex flex-col", size === "md" && "gap-2", className)}
+    >
       <div
         className={cn(
-          "flex shrink-0 items-center gap-1 pr-1",
-          size === "sm" ? "h-6" : "h-8",
+          "flex shrink-0 items-center gap-1",
+          size === "sm" ? "h-[26px] pr-1" : "h-5",
         )}
       >
         <button
@@ -38,15 +43,15 @@ export function Section({
           aria-expanded={open}
           onClick={onToggle}
           className={cn(
-            "flex h-full min-w-0 flex-1 items-center gap-1 px-2 text-left font-semibold outline-none focus-visible:shadow-[inset_var(--focus-ring)]",
-            size === "sm" && "text-xs",
+            "flex h-full min-w-0 flex-1 items-center gap-1 text-left text-[11px] font-semibold text-muted-foreground outline-none hover:text-foreground focus-visible:shadow-[var(--focus-ring)]",
+            size === "sm" && "px-2",
           )}
         >
-          <Chevron
-            aria-hidden
-            className="size-3.5 shrink-0 text-muted-foreground"
-          />
+          {size === "sm" && (
+            <Chevron aria-hidden className="size-3.5 shrink-0" />
+          )}
           <span className="truncate">{title}</span>
+          {size === "md" && <Chevron aria-hidden className="size-3 shrink-0" />}
         </button>
         {actions}
       </div>

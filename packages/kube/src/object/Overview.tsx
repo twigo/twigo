@@ -39,7 +39,7 @@ export interface OverviewProps {
 export function Overview({ overview, onOpen, values }: OverviewProps) {
   const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
   return (
-    <div className="flex flex-col pb-3 text-[13px]">
+    <div className="flex flex-col gap-4 px-3.5 pt-3 pb-4 text-[13px]">
       {overview.sections.map((section) => {
         const open = !folded.has(section.id);
         return (
@@ -53,9 +53,8 @@ export function Overview({ overview, onOpen, values }: OverviewProps) {
               else next.delete(section.id);
               setFolded(next);
             }}
-            className="border-b border-border-subtle last:border-b-0"
           >
-            <div className="flex flex-col gap-3 px-3 pb-4">
+            <div className="flex flex-col gap-3">
               {section.blocks.map((block, index) => (
                 <BlockView
                   key={index}

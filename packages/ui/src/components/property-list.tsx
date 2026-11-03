@@ -20,7 +20,7 @@ export function PropertyList({
   return (
     <dl
       className={cn(
-        "grid grid-cols-[fit-content(14rem)_minmax(0,1fr)] gap-x-4 gap-y-1.5",
+        "grid grid-cols-[fit-content(14rem)_minmax(0,1fr)] gap-x-3 gap-y-[5px] leading-[1.35]",
         className,
       )}
     >
