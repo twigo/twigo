@@ -264,6 +264,26 @@ test("the cursor is the grid's active descendant, and the marked rows are the se
   expect(selected()).toEqual(["api-2", "gateway-1"]);
 });
 
+test("whatever a row holds sits in one of its cells", () => {
+  grid({
+    columns: [{ id: "Name", title: "Name", width: 200 }],
+    marked: new Set(["a1"]),
+    inline: [{ id: "copy", label: "Copy Name", icon: Copy, run: vi.fn() }],
+  });
+  const [header, ...rows] = screen.getAllByRole("row");
+  for (const row of rows)
+    for (const child of row.children)
+      expect(child.getAttribute("role")).toBe("gridcell");
+  expect(
+    screen
+      .getByRole("checkbox", { name: "Clear marks" })
+      .closest('[role="columnheader"]'),
+  ).not.toBeNull();
+  expect(
+    header?.lastElementChild?.previousElementSibling?.getAttribute("role"),
+  ).toBe("columnheader");
+});
+
 test("a move down scrolls the cursor's row clear of the bottom, a move up clear of the sticky header", () => {
   const { controller } = grid({ ...list(PODS), selected: "p22" });
   const element = scrollable(PODS.length);

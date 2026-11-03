@@ -119,8 +119,8 @@ function rowAt(table: HTMLElement, index: number): HTMLElement | null {
 
 function cellText(row: HTMLElement, position: number): string | undefined {
   return (
-    row.querySelectorAll(':scope > [role="gridcell"]')[position]?.textContent ??
-    undefined
+    row.querySelectorAll(':scope > [role="gridcell"][data-column]')[position]
+      ?.textContent ?? undefined
   );
 }
 

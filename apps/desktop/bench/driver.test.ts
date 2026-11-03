@@ -17,7 +17,7 @@ function table(rows: (readonly [string, string] | null)[]): HTMLElement {
     element.setAttribute("role", "row");
     element.setAttribute("aria-rowindex", String(index + 2));
     element.innerHTML = row
-      ? `<div role="gridcell">${row[0]}</div><div role="gridcell">${row[1]}</div><div role="gridcell">Running</div>`
+      ? `<div role="gridcell"></div><div role="gridcell" data-column="Name">${row[0]}</div><div role="gridcell" data-column="Namespace">${row[1]}</div><div role="gridcell" data-column="Status">Running</div><div role="gridcell"></div>`
       : "<div><span></span></div>";
     grid.append(element);
   });

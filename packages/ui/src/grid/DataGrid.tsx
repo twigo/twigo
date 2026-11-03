@@ -391,6 +391,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       >
         {marking && (
           <div
+            role="gridcell"
             className={cn(
               "flex justify-center",
               !isMarked &&
@@ -432,7 +433,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
             </div>
           );
         })}
-        {filler && <div />}
+        {filler && <div role="gridcell" />}
         <div role="gridcell" className="flex items-center justify-center">
           {menu.length > 0 && (
             <ActionDropdown actions={menu} label="Row actions" onOpen={select}>
@@ -450,27 +451,30 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
               </button>
             </ActionDropdown>
           )}
-        </div>
-        {inline.length > 0 && (
-          <div
-            className="absolute inset-y-0 hidden items-center bg-editor group-hover/row:flex"
-            style={{ right: ACTIONS_WIDTH }}
-          >
+          {inline.length > 0 && (
             <div
-              className={cn("flex h-full items-center bg-row-hover pl-2", tint)}
+              className="absolute inset-y-0 hidden items-center bg-editor group-hover/row:flex"
+              style={{ right: ACTIONS_WIDTH }}
             >
-              <InlineActions
-                actions={inline.map((action) => ({
-                  ...action,
-                  run: () => {
-                    select();
-                    action.run();
-                  },
-                }))}
-              />
+              <div
+                className={cn(
+                  "flex h-full items-center bg-row-hover pl-2",
+                  tint,
+                )}
+              >
+                <InlineActions
+                  actions={inline.map((action) => ({
+                    ...action,
+                    run: () => {
+                      select();
+                      action.run();
+                    },
+                  }))}
+                />
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     );
   });
@@ -497,7 +501,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         }}
       >
         {marking && (
-          <div className="flex justify-center">
+          <div role="columnheader" className="flex justify-center">
             {marked.size > 0 && (
               <MarkBox
                 checked={false}
@@ -525,7 +529,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
             }}
           />
         ))}
-        {filler && <div />}
+        {filler && <div role="columnheader" />}
         <div role="columnheader" className="flex items-center justify-center">
           {headerEnd}
         </div>
