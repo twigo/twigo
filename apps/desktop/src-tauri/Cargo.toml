@@ -18,6 +18,7 @@ tauri-build.workspace = true
 [dependencies]
 serde_json = { workspace = true, optional = true }
 tauri.workspace = true
+tauri-plugin-dialog.workspace = true
 tauri-plugin-opener.workspace = true
 tauri-plugin-single-instance.workspace = true
 tauri-plugin-window-state.workspace = true

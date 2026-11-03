@@ -13,13 +13,15 @@ use tauri::async_runtime::JoinHandle;
 use tauri::ipc::Channel;
 use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Manager, RunEvent, State, Webview, WindowEvent};
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use twigo_core::Core;
 use twigo_env::Environment;
 use twigo_ipc::{
-    Ack, ClusterVersion, Context, ContextAuth, Discovered, ErrorKind, ExecReview, GetValues,
-    IpcError, KeyboardLayout, ListBatch, ListQuery, ObjectBatch, OpenObject, SetParts, SetWindow,
-    ShellEnvironment, Space, StateEntry, StateSnapshot, SubscriptionId,
+    Ack, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ErrorKind, ExecReview,
+    GetValues, IpcError, KeyboardLayout, ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs,
+    OpenObject, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellEnvironment,
+    Space, StateEntry, StateSnapshot, SubscriptionId,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
 
@@ -346,6 +348,100 @@ fn object_close(
 }
 
 #[tauri::command]
+async fn logs_open(
+    webview: Webview,
+    app: State<'_, App>,
+    request: OpenLogs,
+    channel: Channel<LogBatch>,
+) -> Result<SubscriptionId, IpcError> {
+    app.core
+        .logs_open(webview.label(), request, move |batch| {
+            match channel.send(batch) {
+                Ok(()) => true,
+                Err(error) => {
+                    eprintln!("could not send a logs batch: {error}");
+                    false
+                }
+            }
+        })
+        .await
+}
+
+#[tauri::command]
+fn logs_set_source(
+    webview: Webview,
+    app: State<'_, App>,
+    request: SetLogSource,
+) -> Result<(), IpcError> {
+    app.core.logs_set_source(webview.label(), request)
+}
+
+#[tauri::command]
+fn logs_set_view(
+    webview: Webview,
+    app: State<'_, App>,
+    request: SetLogView,
+) -> Result<(), IpcError> {
+    app.core.logs_set_view(webview.label(), request)
+}
+
+#[tauri::command]
+fn logs_set_window(
+    webview: Webview,
+    app: State<'_, App>,
+    request: SetLogWindow,
+) -> Result<(), IpcError> {
+    app.core.logs_set_window(webview.label(), request)
+}
+
+#[tauri::command]
+fn logs_ack(webview: Webview, app: State<'_, App>, request: Ack) -> Result<(), IpcError> {
+    app.core.logs_ack(webview.label(), request)
+}
+
+/// Asks where to save a session's lines, then has the core write them
+/// there; None when the person cancels.
+#[tauri::command]
+async fn logs_download(
+    webview: Webview,
+    app: State<'_, App>,
+    request: DownloadLogs,
+) -> Result<Option<String>, IpcError> {
+    let name = app.core.logs_file_name(webview.label(), request.id)?;
+    let dialog = webview
+        .dialog()
+        .file()
+        .set_parent(&webview.window())
+        .set_file_name(name)
+        .add_filter("Logs", &["log", "txt"]);
+    // The dialog runs on the main thread, which this call must not block.
+    let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_save_file())
+        .await
+        .map_err(|error| IpcError {
+            kind: ErrorKind::Internal,
+            message: format!("the save dialog failed: {error}"),
+        })?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|error| IpcError {
+        kind: ErrorKind::InvalidInput,
+        message: format!("Twigo saves logs only to a file on this computer: {error}"),
+    })?;
+    app.core.logs_write(webview.label(), request, &path).await?;
+    Ok(Some(path.display().to_string()))
+}
+
+#[tauri::command]
+fn logs_close(
+    webview: Webview,
+    app: State<'_, App>,
+    request: SubscriptionId,
+) -> Result<(), IpcError> {
+    app.core.logs_close(webview.label(), request)
+}
+
+#[tauri::command]
 async fn context_sign_in(app: State<'_, App>, request: String) -> Result<(), IpcError> {
     app.core.sign_in(&request).await
 }
@@ -414,7 +510,8 @@ fn main() {
             }
         }))
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init());
     #[cfg(feature = "bench")]
     let builder = builder.plugin(bench::plugin());
     let app = builder
@@ -479,6 +576,13 @@ fn main() {
             object_ack,
             object_values,
             object_close,
+            logs_open,
+            logs_set_source,
+            logs_set_view,
+            logs_set_window,
+            logs_ack,
+            logs_download,
+            logs_close,
             context_sign_in,
             context_sign_in_cancel,
             exec_review,
