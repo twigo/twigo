@@ -30,6 +30,8 @@ export interface LogsTab {
   readonly pausedAt: number;
   /** A field asked to take the focus and has not yet. */
   readonly focus: "filter" | "search" | undefined;
+  /** A narrow tab's row of fields is open, once a key or its icon asked for a field. */
+  readonly fields: boolean;
 }
 
 export interface MatchAnchor {
@@ -66,6 +68,7 @@ const INITIAL: LogsTab = {
   steps: 0,
   pausedAt: 0,
   focus: undefined,
+  fields: false,
 };
 
 /**
@@ -188,7 +191,7 @@ export class LogsTabs {
   }
 
   focus(uri: string, field: "filter" | "search"): void {
-    this.update(uri, { focus: field });
+    this.update(uri, { focus: field, fields: true });
   }
 
   focused(uri: string): void {

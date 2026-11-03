@@ -44,19 +44,47 @@ import { clock, currentMatch, followed, logsKind, podTag } from "./entries";
 import { TAB_STREAMS, type LogsTabs } from "./state";
 
 /** Where a session starts, as the range offers it (ARCHITECTURE 4.6). */
-const RANGES: readonly { id: string; label: string; since: Since }[] = [
+const RANGES: readonly {
+  id: string;
+  label: string;
+  /** What a narrow toolbar's button says. */
+  short: string;
+  since: Since;
+}[] = [
   {
     id: "lines",
     label: "Last 1,000 lines per container",
+    short: "1,000 lines",
     since: { type: "lines", lines: 1000 },
   },
-  { id: "5m", label: "Last 5 min", since: { type: "seconds", seconds: 300 } },
-  { id: "15m", label: "Last 15 min", since: { type: "seconds", seconds: 900 } },
-  { id: "1h", label: "Last 1 h", since: { type: "seconds", seconds: 3600 } },
-  { id: "6h", label: "Last 6 h", since: { type: "seconds", seconds: 21600 } },
+  {
+    id: "5m",
+    label: "Last 5 min",
+    short: "5 min",
+    since: { type: "seconds", seconds: 300 },
+  },
+  {
+    id: "15m",
+    label: "Last 15 min",
+    short: "15 min",
+    since: { type: "seconds", seconds: 900 },
+  },
+  {
+    id: "1h",
+    label: "Last 1 h",
+    short: "1 h",
+    since: { type: "seconds", seconds: 3600 },
+  },
+  {
+    id: "6h",
+    label: "Last 6 h",
+    short: "6 h",
+    since: { type: "seconds", seconds: 21600 },
+  },
   {
     id: "start",
     label: "Since each container started",
+    short: "Since start",
     since: { type: "start" },
   },
 ];
@@ -76,13 +104,17 @@ export function LogsToolbar({
   snapshot,
   session,
   narrow,
+  compact,
 }: {
   uri: string;
   input: LogsInput;
   tabs: LogsTabs;
   snapshot: LogsSnapshot;
   session: LogsSession;
+  /** Below 1,100 px: no level counts, narrower fields, short range labels. */
   narrow: boolean;
+  /** Below 800 px, as a split panel's group: the fields go to a row of their own, opened by their icons. */
+  compact: boolean;
 }) {
   const workbench = useWorkbench();
   const { keybindings } = workbench;
@@ -119,105 +151,8 @@ export function LogsToolbar({
     tabs.step(uri, current, undefined);
   };
   const range = view.range;
-
-  return (
-    <div className="flex h-9 min-w-0 flex-none items-center gap-1 overflow-hidden border-b border-border-subtle px-2">
-      <PodPicker uri={uri} input={input} tabs={tabs} pods={snapshot.pods} />
-      {range ? (
-        <span className={TRIGGER}>
-          <Clock aria-hidden className="size-3.5 text-muted-foreground" />
-          <span className="tabular-nums">
-            {clock(range.from).slice(0, 8)} – {clock(range.to).slice(0, 8)}
-          </span>
-          <button
-            type="button"
-            aria-label="Show the whole range"
-            onClick={() => {
-              tabs.setView(uri, { range: null });
-            }}
-            className="-mr-1 flex size-4 items-center justify-center rounded text-muted-foreground hover:bg-row-hover hover:text-foreground"
-          >
-            <X aria-hidden className="size-3" />
-          </button>
-        </span>
-      ) : (
-        <ActionDropdown
-          label="Where the lines start"
-          align="start"
-          actions={[
-            RANGES.map(({ id, label, since }): Action => ({
-              id,
-              label,
-              checked: sameSince(since, source.since),
-              run: () => {
-                tabs.setSource(uri, { since });
-              },
-            })),
-          ]}
-        >
-          <button type="button" className={TRIGGER}>
-            <Clock aria-hidden className="size-3.5 text-muted-foreground" />
-            {RANGES.find(({ since }) => sameSince(since, source.since))
-              ?.label ?? "Range"}
-            <ChevronDown aria-hidden className="size-3 text-muted-foreground" />
-          </button>
-        </ActionDropdown>
-      )}
-      <span aria-hidden className="mx-1 h-4 w-px bg-border" />
-      <IconButton
-        icon={ArrowDownToLine}
-        label="Follow"
-        keys={key("k8s.logs.toggleFollow")}
-        pressed={tab.follow}
-        onClick={() => {
-          tabs.update(uri, { follow: !tab.follow });
-        }}
-      />
-      <IconButton
-        icon={WrapText}
-        label="Wrap Lines"
-        keys={key("k8s.logs.toggleWrap")}
-        pressed={tab.wrap}
-        onClick={() => {
-          tabs.update(uri, { wrap: !tab.wrap });
-        }}
-      />
-      <IconButton
-        icon={Clock}
-        label="Show Timestamps"
-        keys={key("k8s.logs.toggleTimestamps")}
-        pressed={tab.timestamps}
-        onClick={() => {
-          tabs.update(uri, { timestamps: !tab.timestamps });
-        }}
-      />
-      <Segmented
-        label="Level"
-        className="ml-1.5 shrink-0"
-        value={view.level}
-        onChange={(level) => {
-          tabs.setView(uri, { level });
-        }}
-        items={[
-          { value: "all", label: "All" },
-          {
-            value: "warn",
-            label: "Warn+",
-            ...(!narrow &&
-              view.level === "all" &&
-              counts && { count: counts.warnings }),
-          },
-          {
-            value: "error",
-            label: "Error",
-            tone: "error",
-            ...(!narrow &&
-              view.level === "all" &&
-              counts && { count: counts.errors }),
-          },
-        ]}
-      />
-      <span className="flex-1" />
+  const fieldsRow = (
+    <>
       <SearchField
         label="Only lines with"
         placeholder="Only lines with…"
@@ -227,7 +162,13 @@ export function LogsToolbar({
           tabs.setView(uri, { filter: text === "" ? null : text });
         }}
         inputRef={filter}
-        className={narrow ? "w-32 min-w-24" : "w-40 min-w-24"}
+        className={
+          compact
+            ? "min-w-0 flex-1"
+            : narrow
+              ? "w-32 min-w-24"
+              : "w-40 min-w-24"
+        }
       />
       <SearchField
         label="Find in the lines"
@@ -267,24 +208,172 @@ export function LogsToolbar({
             />
           </span>
         }
-        className={narrow ? "w-56 min-w-44" : "w-64 min-w-44"}
+        className={
+          compact
+            ? "min-w-0 flex-[2]"
+            : narrow
+              ? "w-56 min-w-44"
+              : "w-64 min-w-44"
+        }
       />
-      <IconButton
-        icon={Download}
-        label="Download the Lines Shown…"
-        onClick={() => {
-          session.download(true).then(
-            (path) => {
-              if (path !== null) notify.success(`Saved to ${path}`);
-            },
-            (error: unknown) => {
-              workbench.report(error);
-            },
-          );
-        }}
-      />
-    </div>
+    </>
   );
+  const fieldsShown =
+    compact && (tab.fields || view.filter !== null || view.search !== null);
+
+  return (
+    <>
+      <div className="flex h-9 min-w-0 flex-none items-center gap-1 overflow-hidden border-b border-border-subtle px-2">
+        <PodPicker uri={uri} input={input} tabs={tabs} pods={snapshot.pods} />
+        {range ? (
+          <span className={TRIGGER}>
+            <Clock aria-hidden className="size-3.5 text-muted-foreground" />
+            <span className="tabular-nums">
+              {clock(range.from).slice(0, 8)} – {clock(range.to).slice(0, 8)}
+            </span>
+            <button
+              type="button"
+              aria-label="Show the whole range"
+              onClick={() => {
+                tabs.setView(uri, { range: null });
+              }}
+              className="-mr-1 flex size-4 items-center justify-center rounded text-muted-foreground hover:bg-row-hover hover:text-foreground"
+            >
+              <X aria-hidden className="size-3" />
+            </button>
+          </span>
+        ) : (
+          <ActionDropdown
+            label="Where the lines start"
+            align="start"
+            actions={[
+              RANGES.map(({ id, label, since }): Action => ({
+                id,
+                label,
+                checked: sameSince(since, source.since),
+                run: () => {
+                  tabs.setSource(uri, { since });
+                },
+              })),
+            ]}
+          >
+            <button type="button" className={TRIGGER}>
+              <Clock aria-hidden className="size-3.5 text-muted-foreground" />
+              {rangeLabel(source.since, narrow)}
+              <ChevronDown
+                aria-hidden
+                className="size-3 text-muted-foreground"
+              />
+            </button>
+          </ActionDropdown>
+        )}
+        <span aria-hidden className="mx-1 h-4 w-px bg-border" />
+        <IconButton
+          icon={ArrowDownToLine}
+          label="Follow"
+          keys={key("k8s.logs.toggleFollow")}
+          pressed={tab.follow}
+          onClick={() => {
+            tabs.update(uri, { follow: !tab.follow });
+          }}
+        />
+        <IconButton
+          icon={WrapText}
+          label="Wrap Lines"
+          keys={key("k8s.logs.toggleWrap")}
+          pressed={tab.wrap}
+          onClick={() => {
+            tabs.update(uri, { wrap: !tab.wrap });
+          }}
+        />
+        <IconButton
+          icon={Clock}
+          label="Show Timestamps"
+          keys={key("k8s.logs.toggleTimestamps")}
+          pressed={tab.timestamps}
+          onClick={() => {
+            tabs.update(uri, { timestamps: !tab.timestamps });
+          }}
+        />
+        <Segmented
+          label="Level"
+          className="ml-1.5 shrink-0"
+          value={view.level}
+          onChange={(level) => {
+            tabs.setView(uri, { level });
+          }}
+          items={[
+            { value: "all", label: "All" },
+            {
+              value: "warn",
+              label: "Warn+",
+              ...(!narrow &&
+                view.level === "all" &&
+                counts && { count: counts.warnings }),
+            },
+            {
+              value: "error",
+              label: "Error",
+              tone: "error",
+              ...(!narrow &&
+                view.level === "all" &&
+                counts && { count: counts.errors }),
+            },
+          ]}
+        />
+        <span className="flex-1" />
+        {compact ? (
+          <>
+            <IconButton
+              icon={ListFilter}
+              label="Only Lines With…"
+              keys={key("list.find")}
+              pressed={view.filter !== null}
+              onClick={() => {
+                tabs.focus(uri, "filter");
+              }}
+            />
+            <IconButton
+              icon={Search}
+              label="Find in the Lines"
+              keys={key("k8s.logs.find")}
+              pressed={view.search !== null}
+              onClick={() => {
+                tabs.focus(uri, "search");
+              }}
+            />
+          </>
+        ) : (
+          fieldsRow
+        )}
+        <IconButton
+          icon={Download}
+          label="Download the Lines Shown…"
+          onClick={() => {
+            session.download(true).then(
+              (path) => {
+                if (path !== null) notify.success(`Saved to ${path}`);
+              },
+              (error: unknown) => {
+                workbench.report(error);
+              },
+            );
+          }}
+        />
+      </div>
+      {fieldsShown && (
+        <div className="flex h-9 min-w-0 flex-none items-center gap-1.5 border-b border-border-subtle px-2">
+          {fieldsRow}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** What the range's button says: the start picked, short on a narrow toolbar. */
+function rangeLabel(since: Since, narrow: boolean): string {
+  const picked = RANGES.find((range) => sameSince(range.since, since));
+  return (narrow ? picked?.short : picked?.label) ?? "Range";
 }
 
 function sameSince(a: Since, b: Since): boolean {

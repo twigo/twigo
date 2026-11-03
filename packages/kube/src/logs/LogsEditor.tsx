@@ -195,6 +195,7 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
         snapshot={snapshot}
         session={session}
         narrow={width > 0 && width < 1100}
+        compact={width > 0 && width < 800}
       />
       {histogram && histogram.buckets.length > 0 && (
         <Histogram

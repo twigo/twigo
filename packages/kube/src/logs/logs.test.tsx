@@ -1,10 +1,12 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import type { LogEntry } from "@twigo/protocol";
+import { INITIAL_LOGS, type LogEntry } from "@twigo/protocol";
 import { WorkbenchView } from "@twigo/workbench";
-import { testWorkbench } from "@twigo/workbench/testing";
+import { inWorkbench, testWorkbench } from "@twigo/workbench/testing";
 import { registerKube } from "../register";
-import { logsUri } from "../uri";
+import { LogsToolbar } from "./LogsToolbar";
+import { LogsTabs } from "./state";
+import { logsUri, parseLogsUri } from "../uri";
 import {
   anchoredMatch,
   currentMatch,
@@ -226,4 +228,39 @@ test("an object editor's Logs opens its workload's tab once and focuses it after
   );
   expect(workbench.editors.activeIn("panel")).toBe(logsUri(DEPLOYMENT));
   expect(backend.sources()).toHaveLength(2);
+});
+
+test("a narrow tab's fields open in a row of their own from their icons", async () => {
+  const workbench = await testWorkbench();
+  const tabs = new LogsTabs(workbench.backend);
+  const uri = logsUri(DEPLOYMENT);
+  const input = parseLogsUri(uri);
+  if (!input) throw new Error("no logs URI");
+  const session = tabs.session(uri, input);
+  const toolbar = () => (
+    <LogsToolbar
+      uri={uri}
+      input={input}
+      tabs={tabs}
+      snapshot={INITIAL_LOGS}
+      session={session}
+      narrow
+      compact
+    />
+  );
+  const { rerender } = render(toolbar(), { wrapper: inWorkbench(workbench) });
+  expect(screen.queryByRole("textbox", { name: "Find in the lines" })).toBe(
+    null,
+  );
+  act(() => {
+    screen.getByRole("button", { name: "Find in the Lines" }).click();
+  });
+  rerender(toolbar());
+  expect(screen.getByRole("textbox", { name: "Find in the lines" })).toBe(
+    document.activeElement,
+  );
+  expect(
+    screen.getByRole("button", { name: "Where the lines start" }).textContent,
+  ).toBe("15 min");
+  session.close();
 });
