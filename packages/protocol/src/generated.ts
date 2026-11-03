@@ -2,12 +2,20 @@
 
 export type Ack = { id: SubscriptionId, seq: number, };
 
+export type AnsiColor = "black" | "red" | "green" | "yellow" | "blue" | "magenta" | "cyan" | "white" | "brightBlack" | "brightRed" | "brightGreen" | "brightYellow" | "brightBlue" | "brightMagenta" | "brightCyan" | "brightWhite";
+
 export type Block = { "type": "fields", fields: Array<Field>, } | { "type": "conditions", conditions: Array<Condition>, } | { "type": "data", entries: Array<DataEntry>, 
 /**
  * Whether [`GetValues`] sends their values: a ConfigMap's text
  * values, never a Secret's.
  */
 readable: boolean, } | { "type": "tree", nodes: Array<TreeNode>, } | { "type": "events" } & EventList | { "type": "diagnostics", findings: Array<Finding>, } | { "type": "containers", containers: Array<Container>, } | { "type": "table", columns: Array<string>, rows: Array<Array<Value>>, } | { "type": "list" } & EmbeddedList;
+
+export type Bucket = { 
+/**
+ * Every line in the span, warnings and errors included.
+ */
+lines: number, warnings: number, errors: number, };
 
 export type Cell = null | boolean | number | number | string;
 
@@ -88,6 +96,11 @@ export type ContainerState = {
 text: string, tone: Tone, ready: boolean, restarts: number, };
 
 /**
+ * Which containers of each pod a session follows.
+ */
+export type Containers = { "type": "default" } | { "type": "named", name: string, } | { "type": "all" };
+
+/**
  * A context the catalog lists.
  */
 export type Context = { name: string, 
@@ -126,6 +139,12 @@ binary: boolean, };
  * `tls-server-name` and the CAs it is trusted with.
  */
 export type Discovered = { "state": "pending", cluster: string, } | { "state": "ready", cluster: string, resources: Array<Resource>, } | { "state": "failed", error: IpcError, };
+
+export type DownloadLogs = { id: SubscriptionId, 
+/**
+ * The lines the view keeps, else every line the buffer holds.
+ */
+filtered: boolean, };
 
 /**
  * A list of objects of one resource, run as any list is: the webview
@@ -238,6 +257,20 @@ export type Gvr = {
 group: string, version: string, resource: string, };
 
 /**
+ * The view's lines over time, its range aside, in equal spans from `from`
+ * to `to`.
+ */
+export type Histogram = { 
+/**
+ * RFC 3339.
+ */
+from: string, 
+/**
+ * RFC 3339.
+ */
+to: string, buckets: Array<Bucket>, };
+
+/**
  * The error every command returns. The webview branches on `kind`; `message`
  * is for people.
  */
@@ -270,6 +303,10 @@ id: string,
 keys: { [key in string]: KeyMapping }, };
 
 export type Label = { key: string, value: string, };
+
+export type Level = "trace" | "debug" | "info" | "warn" | "error";
+
+export type LevelFilter = "all" | "warn" | "error";
 
 /**
  * One flush of a subscription. Rust sends the next batch only after the
@@ -362,6 +399,163 @@ groupBy: Grouping | null,
  * theirs; a column the list lacks keeps every row.
  */
 values: ColumnValues | null, };
+
+/**
+ * One flush of a session. Rust sends the next only after the webview
+ * acknowledged this one's `seq`, and coalesces changes meanwhile.
+ */
+export type LogBatch = { seq: number, 
+/**
+ * The target's: whether its pods are listed, may be read, or are gone.
+ */
+status: ViewState, 
+/**
+ * Present in the first batch and whenever a pod, a container or a
+ * stream's state changes.
+ */
+pods: Array<LogPod> | null, 
+/**
+ * Entries the view keeps, in or out of the window.
+ */
+total: number, 
+/**
+ * Present when the window's entries changed; the view keeps exactly
+ * these.
+ */
+window: LogEntries | null, 
+/**
+ * Present when the search, or what it matches, changed; empty without
+ * a search.
+ */
+matches: LogMatches | null, 
+/**
+ * Present when it changed.
+ */
+histogram: Histogram | null, 
+/**
+ * Lines the buffer's bound dropped since the session opened (decision
+ * 24).
+ */
+dropped: number, };
+
+export type LogContainer = { name: string, stream: StreamState, };
+
+export type LogEntries = { 
+/**
+ * An index into the view's entries, as in [`LogWindow::Range`].
+ */
+start: number, entries: Array<LogEntry>, };
+
+/**
+ * Every entry has an `id`, which stays its own while the buffer holds it,
+ * so the webview keeps its place as entries enter and leave before it.
+ */
+export type LogEntry = { "type": "line", id: number, pod: string, container: string, 
+/**
+ * RFC 3339 with nanoseconds, as the kubelet stamps the line.
+ */
+time: string, level: Level | null, 
+/**
+ * Without its ANSI escapes.
+ */
+text: string, 
+/**
+ * What its ANSI escapes styled.
+ */
+styles: Array<TextStyle>, 
+/**
+ * The search's matches.
+ */
+marks: Array<TextRange>, } | { "type": "ended", id: number, pod: string, container: string, 
+/**
+ * RFC 3339.
+ */
+time: string, exit_code: number | null, reason: string | null, 
+/**
+ * RFC 3339, when the kubelet starts it again, in a crash loop's
+ * back-off.
+ */
+restarting: string | null, } | { "type": "joined", id: number, pod: string, 
+/**
+ * RFC 3339.
+ */
+time: string, } | { "type": "left", id: number, pod: string, 
+/**
+ * RFC 3339.
+ */
+time: string, } | { "type": "dropped", id: number, count: number, };
+
+export type LogMatches = { 
+/**
+ * Every match in the view.
+ */
+count: number, 
+/**
+ * The view's index of the entry of each match, in order, so an entry
+ * with two matches comes twice; the first 10,000 matches.
+ */
+entries: Array<number>, };
+
+export type LogPod = { name: string, 
+/**
+ * Where the generated part of its name starts, as a row's
+ * [`generated`](crate::Row::generated).
+ */
+generated: number | null, 
+/**
+ * As the pod list's Status column has it: Running, CrashLoopBackOff.
+ */
+status: string, tone: Tone, containers: Array<LogContainer>, };
+
+/**
+ * What a session reads from the cluster; a change reopens its streams.
+ */
+export type LogSource = { containers: Containers, 
+/**
+ * The pods to follow, by name; null follows the target's pods, new
+ * ones included, as long as the tab's ten streams last (decision 23).
+ */
+pods: Array<string> | null, since: Since, 
+/**
+ * Each container's previous instance, the one that ended, read to its
+ * end rather than followed.
+ */
+previous: boolean, };
+
+/**
+ * What a logs tab follows: a pod, or a Deployment, ReplicaSet,
+ * StatefulSet, DaemonSet, Job or CronJob, whose pods it merges and whose
+ * new pods join it, as a rollout's do.
+ */
+export type LogTarget = { space: string, gvr: Gvr, namespace: string, name: string, };
+
+/**
+ * How a session shows its buffer; a change filters it again in Rust and
+ * reopens nothing.
+ */
+export type LogView = { level: LevelFilter, 
+/**
+ * Keeps the lines whose text matches, in the list filter's syntax: a
+ * substring in any case of ASCII letters, `!` before it to keep the
+ * lines without one, or a regex between slashes, also in any case,
+ * negated as `!/…/`.
+ */
+filter: string | null, 
+/**
+ * Marks the matches in the text of the lines the view keeps: a
+ * substring in any case of ASCII letters, or a regex between slashes,
+ * also in any case.
+ */
+search: string | null, 
+/**
+ * Keeps the lines from `from` to `to`, picked on the histogram.
+ */
+range: TimeRange | null, };
+
+/**
+ * The lines of the view a window reads, markers included.
+ */
+export type LogWindow = { "type": "tail", count: number, } | { "type": "range", start: number, end: number, };
 
 /**
  * One flush of an open object. Rust sends the next only after the webview
@@ -466,6 +660,11 @@ group: string, version: string, kind: string,
  */
 namespace: string | null, name: string, };
 
+/**
+ * Rust sends nothing of the lines until the webview sets a window.
+ */
+export type OpenLogs = { target: LogTarget, source: LogSource, view: LogView, };
+
 export type OpenObject = { object: ObjectQuery, parts: ObjectParts, };
 
 /**
@@ -558,6 +757,12 @@ export type Section = {
  */
 id: string, title: string, blocks: Array<Block>, };
 
+export type SetLogSource = { id: SubscriptionId, source: LogSource, };
+
+export type SetLogView = { id: SubscriptionId, view: LogView, };
+
+export type SetLogWindow = { id: SubscriptionId, window: LogWindow, };
+
 export type SetParts = { id: SubscriptionId, parts: ObjectParts, };
 
 /**
@@ -586,6 +791,11 @@ reason: string,
  * The end of what the shell printed, the environment left out.
  */
 output: string, };
+
+/**
+ * Where each container's lines start.
+ */
+export type Since = { "type": "lines", lines: number, } | { "type": "seconds", seconds: number, } | { "type": "start" };
 
 export type Sort = { 
 /**
@@ -625,7 +835,25 @@ export type StateSnapshot = { app: { [key in string]: string },
  */
 spaces: { [key in string]: { [key in string]: string } }, };
 
+export type StreamState = { "state": "off" } | { "state": "overLimit" } | { "state": "queued" } | { "state": "connecting" } | { "state": "following" } | { "state": "ended" } | { "state": "waiting", reason: string | null, } | { "state": "error", error: IpcError, };
+
 export type SubscriptionId = number;
+
+/**
+ * Indexes a line's text in UTF-16 units; `end` is exclusive.
+ */
+export type TextRange = { start: number, end: number, };
+
+/**
+ * A run of text an ANSI escape styled; 256 and true colours come as the
+ * nearest of the sixteen.
+ */
+export type TextStyle = { range: TextRange, fg: AnsiColor | null, bg: AnsiColor | null, bold: boolean, dim: boolean, italic: boolean, underline: boolean, };
+
+/**
+ * RFC 3339; `to` is exclusive.
+ */
+export type TimeRange = { from: string, to: string, };
 
 export type Tone = "neutral" | "success" | "warning" | "danger";
 
@@ -673,6 +901,13 @@ export type Commands = {
   object_ack: { request: Ack; response: null; message: null };
   object_values: { request: GetValues; response: Array<string | null>; message: null };
   object_close: { request: SubscriptionId; response: null; message: null };
+  logs_open: { request: OpenLogs; response: SubscriptionId; message: LogBatch };
+  logs_set_source: { request: SetLogSource; response: null; message: null };
+  logs_set_view: { request: SetLogView; response: null; message: null };
+  logs_set_window: { request: SetLogWindow; response: null; message: null };
+  logs_ack: { request: Ack; response: null; message: null };
+  logs_download: { request: DownloadLogs; response: string | null; message: null };
+  logs_close: { request: SubscriptionId; response: null; message: null };
   keyboard_layout_watch: { request: null; response: KeyboardLayout; message: KeyboardLayout };
   state_load: { request: null; response: StateSnapshot; message: null };
   state_set: { request: Array<StateEntry>; response: null; message: null };

@@ -8,6 +8,7 @@ mod environment;
 mod error;
 mod keyboard;
 mod list;
+mod logs;
 mod object;
 mod space;
 mod state;
@@ -21,6 +22,12 @@ pub use keyboard::{KeyMapping, KeyboardLayout};
 pub use list::{
     Ack, Cell, Column, ColumnKind, ColumnValues, Grouping, Gvr, ListBatch, ListQuery, Row,
     RowGroup, RowId, SetWindow, Sort, SubscriptionId, ValueCount, ViewState, Window,
+};
+pub use logs::{
+    AnsiColor, Bucket, Containers, DownloadLogs, Histogram, Level, LevelFilter, LogBatch,
+    LogContainer, LogEntries, LogEntry, LogMatches, LogPod, LogSource, LogTarget, LogView,
+    LogWindow, OpenLogs, SetLogSource, SetLogView, SetLogWindow, Since, StreamState, TextRange,
+    TextStyle, TimeRange,
 };
 pub use object::{
     Block, Condition, Container, ContainerRole, ContainerState, DataEntry, EmbeddedList, EventList,
