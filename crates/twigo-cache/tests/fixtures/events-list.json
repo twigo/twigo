@@ -1,0 +1,1572 @@
+{
+  "kind": "Table",
+  "apiVersion": "meta.k8s.io/v1",
+  "metadata": {
+    "resourceVersion": "1023"
+  },
+  "columnDefinitions": [
+    {
+      "name": "Last Seen",
+      "type": "string",
+      "format": "",
+      "description": "The time at which the most recent occurrence of this event was recorded.",
+      "priority": 0
+    },
+    {
+      "name": "Type",
+      "type": "string",
+      "format": "",
+      "description": "Type of this event (Normal, Warning), new types could be added in the future",
+      "priority": 0
+    },
+    {
+      "name": "Reason",
+      "type": "string",
+      "format": "",
+      "description": "This should be a short, machine understandable string that gives the reason for the transition into the object's current status.",
+      "priority": 0
+    },
+    {
+      "name": "Object",
+      "type": "string",
+      "format": "",
+      "description": "The object that this event is about.",
+      "priority": 0
+    },
+    {
+      "name": "Subobject",
+      "type": "string",
+      "format": "",
+      "description": "If referring to a piece of an object instead of an entire object, this string should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2]. For example, if the object reference is to a container within a pod, this would take on a value like: \"spec.containers{name}\" (where \"name\" refers to the name of the container that triggered the event) or if no container name is specified \"spec.containers[2]\" (container with index 2 in this pod). This syntax is chosen only to have some well-defined way of referencing a part of an object.",
+      "priority": 1
+    },
+    {
+      "name": "Source",
+      "type": "string",
+      "format": "",
+      "description": "The component reporting this event. Should be a short machine understandable string.",
+      "priority": 1
+    },
+    {
+      "name": "Message",
+      "type": "string",
+      "format": "",
+      "description": "A human-readable description of the status of this operation.",
+      "priority": 0
+    },
+    {
+      "name": "First Seen",
+      "type": "string",
+      "format": "",
+      "description": "The time at which the event was first recorded. (Time of server receipt is in TypeMeta.)",
+      "priority": 1
+    },
+    {
+      "name": "Count",
+      "type": "string",
+      "format": "",
+      "description": "The number of times this event has occurred.",
+      "priority": 1
+    },
+    {
+      "name": "Name",
+      "type": "string",
+      "format": "name",
+      "description": "Name must be unique within a namespace. Is required when creating resources, although some resources may allow a client to request the generation of an appropriate name automatically. Name is primarily intended for creation idempotence and configuration definition. Cannot be updated. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names#names",
+      "priority": 1
+    }
+  ],
+  "rows": [
+    {
+      "cells": [
+        "2m6s",
+        "Normal",
+        "Scheduled",
+        "pod/broken-6b8c4bcd8f-bbkwp",
+        "",
+        "default-scheduler",
+        "Successfully assigned probe/broken-6b8c4bcd8f-bbkwp to twigo-home-control-plane",
+        "2m6s",
+        1,
+        "broken-6b8c4bcd8f-bbkwp.18e460a873964530"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "broken-6b8c4bcd8f-bbkwp.18e460a873964530",
+          "namespace": "probe",
+          "uid": "b06e67ee-9a8a-42ae-8a6b-6479749a4eb1",
+          "resourceVersion": "695",
+          "creationTimestamp": "2026-11-03T00:13:48Z",
+          "managedFields": [
+            {
+              "manager": "kube-scheduler",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:48Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:source": {
+                  "f:component": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "44s",
+        "Normal",
+        "Pulling",
+        "pod/broken-6b8c4bcd8f-bbkwp",
+        "spec.containers{nope}",
+        "kubelet, twigo-home-control-plane",
+        "Pulling image \"registry.invalid/nope:1\"",
+        "2m6s",
+        4,
+        "broken-6b8c4bcd8f-bbkwp.18e460a8898df447"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "broken-6b8c4bcd8f-bbkwp.18e460a8898df447",
+          "namespace": "probe",
+          "uid": "21ffbb9f-39a3-43d1-8427-f8e369bc804d",
+          "resourceVersion": "934",
+          "creationTimestamp": "2026-11-03T00:13:48Z",
+          "managedFields": [
+            {
+              "manager": "kubelet",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:15:10Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:reportingInstance": {},
+                "f:source": {
+                  "f:component": {},
+                  "f:host": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "44s",
+        "Warning",
+        "Failed",
+        "pod/broken-6b8c4bcd8f-bbkwp",
+        "spec.containers{nope}",
+        "kubelet, twigo-home-control-plane",
+        "Failed to pull image \"registry.invalid/nope:1\": failed to pull and unpack image \"registry.invalid/nope:1\": failed to resolve reference \"registry.invalid/nope:1\": failed to do request: Head \"https://registry.invalid/v2/nope/manifests/1\": dial tcp: lookup registry.invalid on 192.168.65.254:53: no such host",
+        "2m6s",
+        4,
+        "broken-6b8c4bcd8f-bbkwp.18e460a88d1b42aa"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "broken-6b8c4bcd8f-bbkwp.18e460a88d1b42aa",
+          "namespace": "probe",
+          "uid": "a61e1760-3fda-4af3-806f-1b4bb97c5785",
+          "resourceVersion": "935",
+          "creationTimestamp": "2026-11-03T00:13:48Z",
+          "managedFields": [
+            {
+              "manager": "kubelet",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:15:10Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:reportingInstance": {},
+                "f:source": {
+                  "f:component": {},
+                  "f:host": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "44s",
+        "Warning",
+        "Failed",
+        "pod/broken-6b8c4bcd8f-bbkwp",
+        "spec.containers{nope}",
+        "kubelet, twigo-home-control-plane",
+        "Error: ErrImagePull",
+        "2m6s",
+        4,
+        "broken-6b8c4bcd8f-bbkwp.18e460a88d1ca528"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "broken-6b8c4bcd8f-bbkwp.18e460a88d1ca528",
+          "namespace": "probe",
+          "uid": "1a03777c-1dd1-4ca7-a058-7cf451922d56",
+          "resourceVersion": "936",
+          "creationTimestamp": "2026-11-03T00:13:48Z",
+          "managedFields": [
+            {
+              "manager": "kubelet",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:15:10Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:reportingInstance": {},
+                "f:source": {
+                  "f:component": {},
+                  "f:host": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "8s",
+        "Normal",
+        "BackOff",
+        "pod/broken-6b8c4bcd8f-bbkwp",
+        "spec.containers{nope}",
+        "kubelet, twigo-home-control-plane",
+        "Back-off pulling image \"registry.invalid/nope:1\"",
+        "2m6s",
+        7,
+        "broken-6b8c4bcd8f-bbkwp.18e460a8a1870113"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "broken-6b8c4bcd8f-bbkwp.18e460a8a1870113",
+          "namespace": "probe",
+          "uid": "57ddea33-df13-4207-acbc-1782951ed9a5",
+          "resourceVersion": "1010",
+          "creationTimestamp": "2026-11-03T00:13:48Z",
+          "managedFields": [
+            {
+              "manager": "kubelet",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:15:46Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:reportingInstance": {},
+                "f:source": {
+                  "f:component": {},
+                  "f:host": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "8s",
+        "Warning",
+        "Failed",
+        "pod/broken-6b8c4bcd8f-bbkwp",
+        "spec.containers{nope}",
+        "kubelet, twigo-home-control-plane",
+        "Error: ImagePullBackOff",
+        "2m6s",
+        7,
+        "broken-6b8c4bcd8f-bbkwp.18e460a8a187d28c"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "broken-6b8c4bcd8f-bbkwp.18e460a8a187d28c",
+          "namespace": "probe",
+          "uid": "a5eb2471-e17c-4b9c-b5af-43b31fe4d5ae",
+          "resourceVersion": "1011",
+          "creationTimestamp": "2026-11-03T00:13:48Z",
+          "managedFields": [
+            {
+              "manager": "kubelet",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:15:46Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:reportingInstance": {},
+                "f:source": {
+                  "f:component": {},
+                  "f:host": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "2m6s",
+        "Normal",
+        "SuccessfulCreate",
+        "replicaset/broken-6b8c4bcd8f",
+        "",
+        "replicaset-controller",
+        "Created pod: broken-6b8c4bcd8f-bbkwp",
+        "2m6s",
+        1,
+        "broken-6b8c4bcd8f.18e460a8736e8b44"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "broken-6b8c4bcd8f.18e460a8736e8b44",
+          "namespace": "probe",
+          "uid": "01858ea2-f77a-406e-bbf6-2b7b66a28491",
+          "resourceVersion": "694",
+          "creationTimestamp": "2026-11-03T00:13:48Z",
+          "managedFields": [
+            {
+              "manager": "kube-controller-manager",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:48Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:source": {
+                  "f:component": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "2m6s",
+        "Normal",
+        "ScalingReplicaSet",
+        "deployment/broken",
+        "",
+        "deployment-controller",
+        "Scaled up replica set broken-6b8c4bcd8f from 0 to 1",
+        "2m6s",
+        1,
+        "broken.18e460a8735299c9"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "broken.18e460a8735299c9",
+          "namespace": "probe",
+          "uid": "9ff12bfa-d94c-4d1e-baba-036246a9cfd3",
+          "resourceVersion": "689",
+          "creationTimestamp": "2026-11-03T00:13:48Z",
+          "managedFields": [
+            {
+              "manager": "kube-controller-manager",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:48Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:source": {
+                  "f:component": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "72s",
+        "Normal",
+        "Scheduled",
+        "pod/crash-55bd8f85fc-lqbt6",
+        "",
+        "default-scheduler",
+        "Successfully assigned probe/crash-55bd8f85fc-lqbt6 to twigo-home-control-plane",
+        "72s",
+        1,
+        "crash-55bd8f85fc-lqbt6.18e460b533d6850f"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "crash-55bd8f85fc-lqbt6.18e460b533d6850f",
+          "namespace": "probe",
+          "uid": "bb28748e-d421-4a76-9688-7a942b39fe7d",
+          "resourceVersion": "841",
+          "creationTimestamp": "2026-11-03T00:14:42Z",
+          "managedFields": [
+            {
+              "manager": "kube-scheduler",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:14:42Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:source": {
+                  "f:component": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "71s",
+        "Normal",
+        "Pulling",
+        "pod/crash-55bd8f85fc-lqbt6",
+        "spec.containers{busybox}",
+        "kubelet, twigo-home-control-plane",
+        "Pulling image \"busybox:1.37\"",
+        "71s",
+        1,
+        "crash-55bd8f85fc-lqbt6.18e460b54b848b27"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "crash-55bd8f85fc-lqbt6.18e460b54b848b27",
+          "namespace": "probe",
+          "uid": "131dcecb-9358-437a-942a-ec1c38fe6b75",
+          "resourceVersion": "845",
+          "creationTimestamp": "2026-11-03T00:14:43Z",
+          "managedFields": [
+            {
+              "manager": "kubelet",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:14:43Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:reportingInstance": {},
+                "f:source": {
+                  "f:component": {},
+                  "f:host": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "68s",
+        "Normal",
+        "Pulled",
+        "pod/crash-55bd8f85fc-lqbt6",
+        "spec.containers{busybox}",
+        "kubelet, twigo-home-control-plane",
+        "Successfully pulled image \"busybox:1.37\" in 2.998s (2.998s including waiting). Image size: 1911395 bytes.",
+        "68s",
+        1,
+        "crash-55bd8f85fc-lqbt6.18e460b5fe42d9c9"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "crash-55bd8f85fc-lqbt6.18e460b5fe42d9c9",
+          "namespace": "probe",
+          "uid": "7eb3fd90-067c-4b8d-81a9-52eb8c2563d6",
+          "resourceVersion": "856",
+          "creationTimestamp": "2026-11-03T00:14:46Z",
+          "managedFields": [
+            {
+              "manager": "kubelet",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:14:46Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:reportingInstance": {},
+                "f:source": {
+                  "f:component": {},
+                  "f:host": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "29s",
+        "Normal",
+        "Created",
+        "pod/crash-55bd8f85fc-lqbt6",
+        "spec.containers{busybox}",
+        "kubelet, twigo-home-control-plane",
+        "Container created",
+        "68s",
+        4,
+        "crash-55bd8f85fc-lqbt6.18e460b5fe9120d9"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "crash-55bd8f85fc-lqbt6.18e460b5fe9120d9",
+          "namespace": "probe",
+          "uid": "e0a07cf7-daa2-41eb-8895-ea61cb99c7a2",
+          "resourceVersion": "964",
+          "creationTimestamp": "2026-11-03T00:14:46Z",
+          "managedFields": [
+            {
+              "manager": "kubelet",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:15:25Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:reportingInstance": {},
+                "f:source": {
+                  "f:component": {},
+                  "f:host": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "29s",
+        "Normal",
+        "Started",
+        "pod/crash-55bd8f85fc-lqbt6",
+        "spec.containers{busybox}",
+        "kubelet, twigo-home-control-plane",
+        "Container started",
+        "68s",
+        4,
+        "crash-55bd8f85fc-lqbt6.18e460b600883901"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "crash-55bd8f85fc-lqbt6.18e460b600883901",
+          "namespace": "probe",
+          "uid": "a1237842-b3fb-467d-8ce3-7970b9222d6b",
+          "resourceVersion": "965",
+          "creationTimestamp": "2026-11-03T00:14:46Z",
+          "managedFields": [
+            {
+              "manager": "kubelet",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:15:25Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:reportingInstance": {},
+                "f:source": {
+                  "f:component": {},
+                  "f:host": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "29s",
+        "Normal",
+        "Pulled",
+        "pod/crash-55bd8f85fc-lqbt6",
+        "spec.containers{busybox}",
+        "kubelet, twigo-home-control-plane",
+        "Container image \"busybox:1.37\" already present on machine and can be accessed by the pod",
+        "67s",
+        3,
+        "crash-55bd8f85fc-lqbt6.18e460b632103f0c"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "crash-55bd8f85fc-lqbt6.18e460b632103f0c",
+          "namespace": "probe",
+          "uid": "a0c2b607-313f-449f-ab8a-6af76b61f76f",
+          "resourceVersion": "962",
+          "creationTimestamp": "2026-11-03T00:14:47Z",
+          "managedFields": [
+            {
+              "manager": "kubelet",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:15:25Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:reportingInstance": {},
+                "f:source": {
+                  "f:component": {},
+                  "f:host": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "28s",
+        "Warning",
+        "BackOff",
+        "pod/crash-55bd8f85fc-lqbt6",
+        "spec.containers{busybox}",
+        "kubelet, twigo-home-control-plane",
+        "Back-off restarting failed container busybox in pod crash-55bd8f85fc-lqbt6_probe(daabd0aa-ad31-409a-a305-89a9acee138e)",
+        "66s",
+        4,
+        "crash-55bd8f85fc-lqbt6.18e460b66e1b64e2"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "crash-55bd8f85fc-lqbt6.18e460b66e1b64e2",
+          "namespace": "probe",
+          "uid": "14dac83a-6a79-43df-9345-cffd4bf0a159",
+          "resourceVersion": "971",
+          "creationTimestamp": "2026-11-03T00:14:48Z",
+          "managedFields": [
+            {
+              "manager": "kubelet",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:15:26Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:reportingInstance": {},
+                "f:source": {
+                  "f:component": {},
+                  "f:host": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "72s",
+        "Normal",
+        "SuccessfulCreate",
+        "replicaset/crash-55bd8f85fc",
+        "",
+        "replicaset-controller",
+        "Created pod: crash-55bd8f85fc-lqbt6",
+        "72s",
+        1,
+        "crash-55bd8f85fc.18e460b5338b199b"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "crash-55bd8f85fc.18e460b5338b199b",
+          "namespace": "probe",
+          "uid": "c2bce84a-f4e8-408b-8fed-2be9ecc0047b",
+          "resourceVersion": "839",
+          "creationTimestamp": "2026-11-03T00:14:42Z",
+          "managedFields": [
+            {
+              "manager": "kube-controller-manager",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:14:42Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:source": {
+                  "f:component": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "72s",
+        "Normal",
+        "ScalingReplicaSet",
+        "deployment/crash",
+        "",
+        "deployment-controller",
+        "Scaled up replica set crash-55bd8f85fc from 0 to 1",
+        "72s",
+        1,
+        "crash.18e460b5331ab5cb"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "crash.18e460b5331ab5cb",
+          "namespace": "probe",
+          "uid": "942f056a-2411-49e0-99b6-eb3003377c27",
+          "resourceVersion": "834",
+          "creationTimestamp": "2026-11-03T00:14:42Z",
+          "managedFields": [
+            {
+              "manager": "kube-controller-manager",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:14:42Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:source": {
+                  "f:component": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "117s",
+        "Warning",
+        "FailedScheduling",
+        "pod/huge",
+        "",
+        "default-scheduler",
+        "0/3 nodes are available: 1 Insufficient memory, 1 node(s) had untolerated taint(s), 1 node(s) were unschedulable. preemption: 0/3 nodes are available: 3 Preemption is not helpful for scheduling.",
+        "117s",
+        1,
+        "huge.18e460aa9a5e491d"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "huge.18e460aa9a5e491d",
+          "namespace": "probe",
+          "uid": "9b01b80a-4937-4e17-985d-a1763462da33",
+          "resourceVersion": "737",
+          "creationTimestamp": "2026-11-03T00:13:57Z",
+          "managedFields": [
+            {
+              "manager": "kube-scheduler",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:57Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:source": {
+                  "f:component": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "117s",
+        "Warning",
+        "FailedScheduling",
+        "pod/huge",
+        "",
+        "default-scheduler",
+        "0/4 nodes are available: 1 Insufficient memory, 1 node(s) were unschedulable, 2 node(s) had untolerated taint(s). preemption: 0/4 nodes are available: 4 Preemption is not helpful for scheduling.",
+        "117s",
+        1,
+        "huge.18e460aa9ac5aa9c"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "huge.18e460aa9ac5aa9c",
+          "namespace": "probe",
+          "uid": "be43eda0-765a-4303-a442-b35597a037c8",
+          "resourceVersion": "740",
+          "creationTimestamp": "2026-11-03T00:13:57Z",
+          "managedFields": [
+            {
+              "manager": "kube-scheduler",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:57Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:source": {
+                  "f:component": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "117s",
+        "Warning",
+        "FailedScheduling",
+        "pod/huge",
+        "",
+        "default-scheduler",
+        "0/4 nodes are available: 1 Too many pods, 1 node(s) had untolerated taint(s), 1 node(s) were unschedulable, 2 Insufficient memory. preemption: 0/4 nodes are available: 4 Preemption is not helpful for scheduling.",
+        "117s",
+        1,
+        "huge.18e460aaa6d9a2b7"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "huge.18e460aaa6d9a2b7",
+          "namespace": "probe",
+          "uid": "de8f6127-67b8-42ce-baa9-c2e2ba28ee17",
+          "resourceVersion": "748",
+          "creationTimestamp": "2026-11-03T00:13:57Z",
+          "managedFields": [
+            {
+              "manager": "kube-scheduler",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:57Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:source": {
+                  "f:component": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "2m6s",
+        "Normal",
+        "Scheduled",
+        "pod/web-86d8686cfb-jkz85",
+        "",
+        "default-scheduler",
+        "Successfully assigned probe/web-86d8686cfb-jkz85 to twigo-home-control-plane",
+        "2m6s",
+        1,
+        "web-86d8686cfb-jkz85.18e460a87252251d"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "web-86d8686cfb-jkz85.18e460a87252251d",
+          "namespace": "probe",
+          "uid": "7e0df1aa-9784-49c1-bbd2-706d528a5835",
+          "resourceVersion": "682",
+          "creationTimestamp": "2026-11-03T00:13:48Z",
+          "managedFields": [
+            {
+              "manager": "kube-scheduler",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:48Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:source": {
+                  "f:component": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "2m6s",
+        "Normal",
+        "Pulled",
+        "pod/web-86d8686cfb-jkz85",
+        "spec.containers{pause}",
+        "kubelet, twigo-home-control-plane",
+        "Container image \"registry.k8s.io/pause:3.10\" already present on machine and can be accessed by the pod",
+        "2m6s",
+        1,
+        "web-86d8686cfb-jkz85.18e460a889532e0d"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "web-86d8686cfb-jkz85.18e460a889532e0d",
+          "namespace": "probe",
+          "uid": "013c7f7a-9c6f-4309-be13-3afede9e68b0",
+          "resourceVersion": "702",
+          "creationTimestamp": "2026-11-03T00:13:48Z",
+          "managedFields": [
+            {
+              "manager": "kubelet",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:48Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:reportingInstance": {},
+                "f:source": {
+                  "f:component": {},
+                  "f:host": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "2m6s",
+        "Normal",
+        "Created",
+        "pod/web-86d8686cfb-jkz85",
+        "spec.containers{pause}",
+        "kubelet, twigo-home-control-plane",
+        "Container created",
+        "2m6s",
+        1,
+        "web-86d8686cfb-jkz85.18e460a889c9a07b"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "web-86d8686cfb-jkz85.18e460a889c9a07b",
+          "namespace": "probe",
+          "uid": "0d484d72-f6ba-4ccd-b0fc-398eda67ed61",
+          "resourceVersion": "706",
+          "creationTimestamp": "2026-11-03T00:13:48Z",
+          "managedFields": [
+            {
+              "manager": "kubelet",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:48Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:reportingInstance": {},
+                "f:source": {
+                  "f:component": {},
+                  "f:host": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "2m6s",
+        "Normal",
+        "Started",
+        "pod/web-86d8686cfb-jkz85",
+        "spec.containers{pause}",
+        "kubelet, twigo-home-control-plane",
+        "Container started",
+        "2m6s",
+        1,
+        "web-86d8686cfb-jkz85.18e460a88b2f776a"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "web-86d8686cfb-jkz85.18e460a88b2f776a",
+          "namespace": "probe",
+          "uid": "2d203469-5e04-45b5-a925-0fd4f127cb4c",
+          "resourceVersion": "707",
+          "creationTimestamp": "2026-11-03T00:13:48Z",
+          "managedFields": [
+            {
+              "manager": "kubelet",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:48Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:reportingInstance": {},
+                "f:source": {
+                  "f:component": {},
+                  "f:host": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "2m6s",
+        "Normal",
+        "Scheduled",
+        "pod/web-86d8686cfb-m2xcl",
+        "",
+        "default-scheduler",
+        "Successfully assigned probe/web-86d8686cfb-m2xcl to twigo-home-control-plane",
+        "2m6s",
+        1,
+        "web-86d8686cfb-m2xcl.18e460a871f800f1"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "web-86d8686cfb-m2xcl.18e460a871f800f1",
+          "namespace": "probe",
+          "uid": "1727fb5a-d744-4da5-9147-35caaeeecfed",
+          "resourceVersion": "678",
+          "creationTimestamp": "2026-11-03T00:13:48Z",
+          "managedFields": [
+            {
+              "manager": "kube-scheduler",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:48Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:source": {
+                  "f:component": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "2m6s",
+        "Normal",
+        "Pulled",
+        "pod/web-86d8686cfb-m2xcl",
+        "spec.containers{pause}",
+        "kubelet, twigo-home-control-plane",
+        "Container image \"registry.k8s.io/pause:3.10\" already present on machine and can be accessed by the pod",
+        "2m6s",
+        1,
+        "web-86d8686cfb-m2xcl.18e460a899f0092c"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "web-86d8686cfb-m2xcl.18e460a899f0092c",
+          "namespace": "probe",
+          "uid": "e56fb814-8873-4f44-82aa-eef84d07f0a1",
+          "resourceVersion": "713",
+          "creationTimestamp": "2026-11-03T00:13:48Z",
+          "managedFields": [
+            {
+              "manager": "kubelet",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:48Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:reportingInstance": {},
+                "f:source": {
+                  "f:component": {},
+                  "f:host": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "2m6s",
+        "Normal",
+        "Created",
+        "pod/web-86d8686cfb-m2xcl",
+        "spec.containers{pause}",
+        "kubelet, twigo-home-control-plane",
+        "Container created",
+        "2m6s",
+        1,
+        "web-86d8686cfb-m2xcl.18e460a89a70684a"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "web-86d8686cfb-m2xcl.18e460a89a70684a",
+          "namespace": "probe",
+          "uid": "d7ace6fb-711b-4dbd-aa33-796274012ac9",
+          "resourceVersion": "715",
+          "creationTimestamp": "2026-11-03T00:13:48Z",
+          "managedFields": [
+            {
+              "manager": "kubelet",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:48Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:reportingInstance": {},
+                "f:source": {
+                  "f:component": {},
+                  "f:host": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "2m6s",
+        "Normal",
+        "Started",
+        "pod/web-86d8686cfb-m2xcl",
+        "spec.containers{pause}",
+        "kubelet, twigo-home-control-plane",
+        "Container started",
+        "2m6s",
+        1,
+        "web-86d8686cfb-m2xcl.18e460a89bb1b24a"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "web-86d8686cfb-m2xcl.18e460a89bb1b24a",
+          "namespace": "probe",
+          "uid": "dae5fdb4-3dbb-4de4-befc-afa154c6c1ed",
+          "resourceVersion": "717",
+          "creationTimestamp": "2026-11-03T00:13:48Z",
+          "managedFields": [
+            {
+              "manager": "kubelet",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:48Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:reportingInstance": {},
+                "f:source": {
+                  "f:component": {},
+                  "f:host": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "2m6s",
+        "Normal",
+        "SuccessfulCreate",
+        "replicaset/web-86d8686cfb",
+        "",
+        "replicaset-controller",
+        "Created pod: web-86d8686cfb-m2xcl",
+        "2m6s",
+        1,
+        "web-86d8686cfb.18e460a871b97c39"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "web-86d8686cfb.18e460a871b97c39",
+          "namespace": "probe",
+          "uid": "223f02b5-088e-42e7-bbea-57666babe081",
+          "resourceVersion": "676",
+          "creationTimestamp": "2026-11-03T00:13:48Z",
+          "managedFields": [
+            {
+              "manager": "kube-controller-manager",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:48Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:source": {
+                  "f:component": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "2m6s",
+        "Normal",
+        "SuccessfulCreate",
+        "replicaset/web-86d8686cfb",
+        "",
+        "replicaset-controller",
+        "Created pod: web-86d8686cfb-jkz85",
+        "2m6s",
+        1,
+        "web-86d8686cfb.18e460a8721aad68"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "web-86d8686cfb.18e460a8721aad68",
+          "namespace": "probe",
+          "uid": "3c3ab6ed-a86e-4da7-b3a0-6d4167f66343",
+          "resourceVersion": "680",
+          "creationTimestamp": "2026-11-03T00:13:48Z",
+          "managedFields": [
+            {
+              "manager": "kube-controller-manager",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:48Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:source": {
+                  "f:component": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "2m6s",
+        "Normal",
+        "ScalingReplicaSet",
+        "deployment/web",
+        "",
+        "deployment-controller",
+        "Scaled up replica set web-86d8686cfb from 0 to 2",
+        "2m6s",
+        1,
+        "web.18e460a8713216c4"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "web.18e460a8713216c4",
+          "namespace": "probe",
+          "uid": "2490b0cc-5ea9-40a2-95d5-08a74f2c6575",
+          "resourceVersion": "671",
+          "creationTimestamp": "2026-11-03T00:13:48Z",
+          "managedFields": [
+            {
+              "manager": "kube-controller-manager",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:48Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:count": {},
+                "f:firstTimestamp": {},
+                "f:involvedObject": {},
+                "f:lastTimestamp": {},
+                "f:message": {},
+                "f:reason": {},
+                "f:reportingComponent": {},
+                "f:source": {
+                  "f:component": {}
+                },
+                "f:type": {}
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

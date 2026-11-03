@@ -60,6 +60,128 @@ fn pod_list_keeps_typed_columns_and_metadata() {
     assert_eq!(row.cells[4], Cell::Age);
 }
 
+fn layout(columns: &[Column]) -> Vec<(&str, ColumnKind, i32)> {
+    columns
+        .iter()
+        .map(|column| (&*column.name, column.kind, column.priority))
+        .collect()
+}
+
+#[test]
+fn node_list_keeps_its_status_and_age() {
+    use ColumnKind::{Age, String};
+    let mut decoder = TableDecoder::new();
+    let page = decoder
+        .decode_list(include_bytes!("fixtures/nodes-list.json"))
+        .unwrap();
+    assert_eq!(
+        layout(decoder.columns().unwrap()),
+        [
+            ("Name", String, 0),
+            ("Status", String, 0),
+            ("Roles", String, 0),
+            ("Age", Age, 0),
+            ("Version", String, 0),
+            ("Internal-IP", String, 1),
+            ("External-IP", String, 1),
+            ("OS-Image", String, 1),
+            ("Kernel-Version", String, 1),
+            ("Container-Runtime", String, 1),
+        ]
+    );
+    let statuses: Vec<(&str, &Cell)> = page
+        .items
+        .iter()
+        .map(|row| (&*row.meta.name, &row.cells[1]))
+        .collect();
+    assert_eq!(
+        statuses,
+        [
+            ("ghost", &Cell::Text("NotReady".into())),
+            ("kwok-node-0", &Cell::Text("Ready".into())),
+            (
+                "kwok-node-1",
+                &Cell::Text("Ready,SchedulingDisabled".into())
+            ),
+            ("twigo-home-control-plane", &Cell::Text("Ready".into())),
+        ]
+    );
+    assert!(page.items.iter().all(|row| row.meta.namespace.is_none()));
+}
+
+#[test]
+fn deployment_counts_are_sent_as_integers_under_string_columns() {
+    use ColumnKind::{Age, String};
+    let mut decoder = TableDecoder::new();
+    let page = decoder
+        .decode_list(include_bytes!("fixtures/deployments-list.json"))
+        .unwrap();
+    assert_eq!(
+        layout(decoder.columns().unwrap()),
+        [
+            ("Name", String, 0),
+            ("Ready", String, 0),
+            ("Up-to-date", String, 0),
+            ("Available", String, 0),
+            ("Age", Age, 0),
+            ("Containers", String, 1),
+            ("Images", String, 1),
+            ("Selector", String, 1),
+        ]
+    );
+    let web = page
+        .items
+        .iter()
+        .find(|row| &*row.meta.name == "web")
+        .unwrap();
+    assert_eq!(
+        web.cells[..4],
+        [
+            Cell::Text("web".into()),
+            Cell::Text("2/2".into()),
+            Cell::Int(2),
+            Cell::Int(2),
+        ]
+    );
+}
+
+#[test]
+fn event_list_has_no_age_and_its_name_last() {
+    use ColumnKind::String;
+    let mut decoder = TableDecoder::new();
+    let page = decoder
+        .decode_list(include_bytes!("fixtures/events-list.json"))
+        .unwrap();
+    assert_eq!(
+        layout(decoder.columns().unwrap()),
+        [
+            ("Last Seen", String, 0),
+            ("Type", String, 0),
+            ("Reason", String, 0),
+            ("Object", String, 0),
+            ("Subobject", String, 1),
+            ("Source", String, 1),
+            ("Message", String, 0),
+            ("First Seen", String, 1),
+            ("Count", String, 1),
+            ("Name", String, 1),
+        ]
+    );
+    let warnings: Vec<&Cell> = page
+        .items
+        .iter()
+        .filter(|row| row.cells[1] == Cell::Text("Warning".into()))
+        .map(|row| &row.cells[2])
+        .collect();
+    assert!(warnings.contains(&&Cell::Text("BackOff".into())));
+    assert!(warnings.contains(&&Cell::Text("FailedScheduling".into())));
+    assert!(
+        page.items
+            .iter()
+            .all(|row| matches!(row.cells[8], Cell::Int(_)))
+    );
+}
+
 #[test]
 fn watch_columns_come_once_per_connection() {
     let fixture = include_str!("fixtures/pods-watch.jsonl");

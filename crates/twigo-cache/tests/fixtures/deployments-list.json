@@ -1,0 +1,462 @@
+{
+  "kind": "Table",
+  "apiVersion": "meta.k8s.io/v1",
+  "metadata": {
+    "resourceVersion": "1023"
+  },
+  "columnDefinitions": [
+    {
+      "name": "Name",
+      "type": "string",
+      "format": "name",
+      "description": "Name must be unique within a namespace. Is required when creating resources, although some resources may allow a client to request the generation of an appropriate name automatically. Name is primarily intended for creation idempotence and configuration definition. Cannot be updated. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names#names",
+      "priority": 0
+    },
+    {
+      "name": "Ready",
+      "type": "string",
+      "format": "",
+      "description": "Number of the pod with ready state",
+      "priority": 0
+    },
+    {
+      "name": "Up-to-date",
+      "type": "string",
+      "format": "",
+      "description": "Total number of non-terminating pods targeted by this deployment that have the desired template spec.",
+      "priority": 0
+    },
+    {
+      "name": "Available",
+      "type": "string",
+      "format": "",
+      "description": "Total number of available non-terminating pods (ready for at least minReadySeconds) targeted by this deployment.",
+      "priority": 0
+    },
+    {
+      "name": "Age",
+      "type": "string",
+      "format": "",
+      "description": "CreationTimestamp is a timestamp representing the server time when this object was created. It is not guaranteed to be set in happens-before order across separate operations. Clients may not set this value. It is represented in RFC3339 form and is in UTC.\n\nPopulated by the system. Read-only. Null for lists. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
+      "priority": 0
+    },
+    {
+      "name": "Containers",
+      "type": "string",
+      "format": "",
+      "description": "Names of each container in the template.",
+      "priority": 1
+    },
+    {
+      "name": "Images",
+      "type": "string",
+      "format": "",
+      "description": "Images referenced by each container in the template.",
+      "priority": 1
+    },
+    {
+      "name": "Selector",
+      "type": "string",
+      "format": "",
+      "description": "Label selector for pods. Existing ReplicaSets whose pods are selected by this will be the ones affected by this deployment. It must match the pod template's labels.",
+      "priority": 1
+    }
+  ],
+  "rows": [
+    {
+      "cells": [
+        "broken",
+        "0/1",
+        1,
+        0,
+        "2m6s",
+        "nope",
+        "registry.invalid/nope:1",
+        "app=broken"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "broken",
+          "namespace": "probe",
+          "uid": "e643b8f8-d1d9-4651-81b5-a350481d9c99",
+          "resourceVersion": "698",
+          "generation": 1,
+          "creationTimestamp": "2026-11-03T00:13:48Z",
+          "labels": {
+            "app": "broken"
+          },
+          "annotations": {
+            "deployment.kubernetes.io/revision": "1"
+          },
+          "managedFields": [
+            {
+              "manager": "kube-controller-manager",
+              "operation": "Update",
+              "apiVersion": "apps/v1",
+              "time": "2026-11-03T00:13:48Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:metadata": {
+                  "f:annotations": {
+                    ".": {},
+                    "f:deployment.kubernetes.io/revision": {}
+                  }
+                },
+                "f:status": {
+                  "f:conditions": {
+                    ".": {},
+                    "k:{\"type\":\"Available\"}": {
+                      ".": {},
+                      "f:lastTransitionTime": {},
+                      "f:lastUpdateTime": {},
+                      "f:message": {},
+                      "f:reason": {},
+                      "f:status": {},
+                      "f:type": {}
+                    },
+                    "k:{\"type\":\"Progressing\"}": {
+                      ".": {},
+                      "f:lastTransitionTime": {},
+                      "f:lastUpdateTime": {},
+                      "f:message": {},
+                      "f:reason": {},
+                      "f:status": {},
+                      "f:type": {}
+                    }
+                  },
+                  "f:observedGeneration": {},
+                  "f:replicas": {},
+                  "f:terminatingReplicas": {},
+                  "f:unavailableReplicas": {},
+                  "f:updatedReplicas": {}
+                }
+              },
+              "subresource": "status"
+            },
+            {
+              "manager": "kubectl-create",
+              "operation": "Update",
+              "apiVersion": "apps/v1",
+              "time": "2026-11-03T00:13:48Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:metadata": {
+                  "f:labels": {
+                    ".": {},
+                    "f:app": {}
+                  }
+                },
+                "f:spec": {
+                  "f:progressDeadlineSeconds": {},
+                  "f:replicas": {},
+                  "f:revisionHistoryLimit": {},
+                  "f:selector": {},
+                  "f:strategy": {
+                    "f:rollingUpdate": {
+                      ".": {},
+                      "f:maxSurge": {},
+                      "f:maxUnavailable": {}
+                    },
+                    "f:type": {}
+                  },
+                  "f:template": {
+                    "f:metadata": {
+                      "f:labels": {
+                        ".": {},
+                        "f:app": {}
+                      }
+                    },
+                    "f:spec": {
+                      "f:containers": {
+                        "k:{\"name\":\"nope\"}": {
+                          ".": {},
+                          "f:image": {},
+                          "f:imagePullPolicy": {},
+                          "f:name": {},
+                          "f:resources": {},
+                          "f:terminationMessagePath": {},
+                          "f:terminationMessagePolicy": {}
+                        }
+                      },
+                      "f:dnsPolicy": {},
+                      "f:restartPolicy": {},
+                      "f:schedulerName": {},
+                      "f:securityContext": {},
+                      "f:terminationGracePeriodSeconds": {}
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "crash",
+        "0/1",
+        1,
+        0,
+        "72s",
+        "busybox",
+        "busybox:1.37",
+        "app=crash"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "crash",
+          "namespace": "probe",
+          "uid": "e608568a-3426-4b49-ae30-ec7c22483eb1",
+          "resourceVersion": "974",
+          "generation": 1,
+          "creationTimestamp": "2026-11-03T00:14:42Z",
+          "labels": {
+            "app": "crash"
+          },
+          "annotations": {
+            "deployment.kubernetes.io/revision": "1"
+          },
+          "managedFields": [
+            {
+              "manager": "kubectl-create",
+              "operation": "Update",
+              "apiVersion": "apps/v1",
+              "time": "2026-11-03T00:14:42Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:metadata": {
+                  "f:labels": {
+                    ".": {},
+                    "f:app": {}
+                  }
+                },
+                "f:spec": {
+                  "f:progressDeadlineSeconds": {},
+                  "f:replicas": {},
+                  "f:revisionHistoryLimit": {},
+                  "f:selector": {},
+                  "f:strategy": {
+                    "f:rollingUpdate": {
+                      ".": {},
+                      "f:maxSurge": {},
+                      "f:maxUnavailable": {}
+                    },
+                    "f:type": {}
+                  },
+                  "f:template": {
+                    "f:metadata": {
+                      "f:labels": {
+                        ".": {},
+                        "f:app": {}
+                      }
+                    },
+                    "f:spec": {
+                      "f:containers": {
+                        "k:{\"name\":\"busybox\"}": {
+                          ".": {},
+                          "f:command": {},
+                          "f:image": {},
+                          "f:imagePullPolicy": {},
+                          "f:name": {},
+                          "f:resources": {},
+                          "f:terminationMessagePath": {},
+                          "f:terminationMessagePolicy": {}
+                        }
+                      },
+                      "f:dnsPolicy": {},
+                      "f:restartPolicy": {},
+                      "f:schedulerName": {},
+                      "f:securityContext": {},
+                      "f:terminationGracePeriodSeconds": {}
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "manager": "kube-controller-manager",
+              "operation": "Update",
+              "apiVersion": "apps/v1",
+              "time": "2026-11-03T00:15:26Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:metadata": {
+                  "f:annotations": {
+                    ".": {},
+                    "f:deployment.kubernetes.io/revision": {}
+                  }
+                },
+                "f:status": {
+                  "f:conditions": {
+                    ".": {},
+                    "k:{\"type\":\"Available\"}": {
+                      ".": {},
+                      "f:lastTransitionTime": {},
+                      "f:lastUpdateTime": {},
+                      "f:message": {},
+                      "f:reason": {},
+                      "f:status": {},
+                      "f:type": {}
+                    },
+                    "k:{\"type\":\"Progressing\"}": {
+                      ".": {},
+                      "f:lastTransitionTime": {},
+                      "f:lastUpdateTime": {},
+                      "f:message": {},
+                      "f:reason": {},
+                      "f:status": {},
+                      "f:type": {}
+                    }
+                  },
+                  "f:observedGeneration": {},
+                  "f:replicas": {},
+                  "f:terminatingReplicas": {},
+                  "f:unavailableReplicas": {},
+                  "f:updatedReplicas": {}
+                }
+              },
+              "subresource": "status"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "web",
+        "2/2",
+        2,
+        2,
+        "2m6s",
+        "pause",
+        "registry.k8s.io/pause:3.10",
+        "app=web"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "web",
+          "namespace": "probe",
+          "uid": "6d5ea9cd-9c52-4b5a-8687-fc2baff78e5e",
+          "resourceVersion": "720",
+          "generation": 1,
+          "creationTimestamp": "2026-11-03T00:13:48Z",
+          "labels": {
+            "app": "web"
+          },
+          "annotations": {
+            "deployment.kubernetes.io/revision": "1"
+          },
+          "managedFields": [
+            {
+              "manager": "kube-controller-manager",
+              "operation": "Update",
+              "apiVersion": "apps/v1",
+              "time": "2026-11-03T00:13:48Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:metadata": {
+                  "f:annotations": {
+                    ".": {},
+                    "f:deployment.kubernetes.io/revision": {}
+                  }
+                },
+                "f:status": {
+                  "f:availableReplicas": {},
+                  "f:conditions": {
+                    ".": {},
+                    "k:{\"type\":\"Available\"}": {
+                      ".": {},
+                      "f:lastTransitionTime": {},
+                      "f:lastUpdateTime": {},
+                      "f:message": {},
+                      "f:reason": {},
+                      "f:status": {},
+                      "f:type": {}
+                    },
+                    "k:{\"type\":\"Progressing\"}": {
+                      ".": {},
+                      "f:lastTransitionTime": {},
+                      "f:lastUpdateTime": {},
+                      "f:message": {},
+                      "f:reason": {},
+                      "f:status": {},
+                      "f:type": {}
+                    }
+                  },
+                  "f:observedGeneration": {},
+                  "f:readyReplicas": {},
+                  "f:replicas": {},
+                  "f:terminatingReplicas": {},
+                  "f:updatedReplicas": {}
+                }
+              },
+              "subresource": "status"
+            },
+            {
+              "manager": "kubectl-create",
+              "operation": "Update",
+              "apiVersion": "apps/v1",
+              "time": "2026-11-03T00:13:48Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:metadata": {
+                  "f:labels": {
+                    ".": {},
+                    "f:app": {}
+                  }
+                },
+                "f:spec": {
+                  "f:progressDeadlineSeconds": {},
+                  "f:replicas": {},
+                  "f:revisionHistoryLimit": {},
+                  "f:selector": {},
+                  "f:strategy": {
+                    "f:rollingUpdate": {
+                      ".": {},
+                      "f:maxSurge": {},
+                      "f:maxUnavailable": {}
+                    },
+                    "f:type": {}
+                  },
+                  "f:template": {
+                    "f:metadata": {
+                      "f:labels": {
+                        ".": {},
+                        "f:app": {}
+                      }
+                    },
+                    "f:spec": {
+                      "f:containers": {
+                        "k:{\"name\":\"pause\"}": {
+                          ".": {},
+                          "f:image": {},
+                          "f:imagePullPolicy": {},
+                          "f:name": {},
+                          "f:resources": {},
+                          "f:terminationMessagePath": {},
+                          "f:terminationMessagePolicy": {}
+                        }
+                      },
+                      "f:dnsPolicy": {},
+                      "f:restartPolicy": {},
+                      "f:schedulerName": {},
+                      "f:securityContext": {},
+                      "f:terminationGracePeriodSeconds": {}
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

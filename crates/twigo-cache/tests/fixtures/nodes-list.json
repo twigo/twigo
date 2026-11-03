@@ -1,0 +1,676 @@
+{
+  "kind": "Table",
+  "apiVersion": "meta.k8s.io/v1",
+  "metadata": {
+    "resourceVersion": "1023"
+  },
+  "columnDefinitions": [
+    {
+      "name": "Name",
+      "type": "string",
+      "format": "name",
+      "description": "Name must be unique within a namespace. Is required when creating resources, although some resources may allow a client to request the generation of an appropriate name automatically. Name is primarily intended for creation idempotence and configuration definition. Cannot be updated. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names#names",
+      "priority": 0
+    },
+    {
+      "name": "Status",
+      "type": "string",
+      "format": "",
+      "description": "The status of the node",
+      "priority": 0
+    },
+    {
+      "name": "Roles",
+      "type": "string",
+      "format": "",
+      "description": "The roles of the node",
+      "priority": 0
+    },
+    {
+      "name": "Age",
+      "type": "string",
+      "format": "",
+      "description": "CreationTimestamp is a timestamp representing the server time when this object was created. It is not guaranteed to be set in happens-before order across separate operations. Clients may not set this value. It is represented in RFC3339 form and is in UTC.\n\nPopulated by the system. Read-only. Null for lists. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
+      "priority": 0
+    },
+    {
+      "name": "Version",
+      "type": "string",
+      "format": "",
+      "description": "Kubelet Version reported by the node.",
+      "priority": 0
+    },
+    {
+      "name": "Internal-IP",
+      "type": "string",
+      "format": "",
+      "description": "List of addresses reachable to the node. Queried from cloud provider, if available. More info: https://kubernetes.io/docs/reference/node/node-status/#addresses Note: This field is declared as mergeable, but the merge key is not sufficiently unique, which can cause data corruption when it is merged. Callers should instead use a full-replacement patch. See https://pr.k8s.io/79391 for an example. Consumers should assume that addresses can change during the lifetime of a Node. However, there are some exceptions where this may not be possible, such as Pods that inherit a Node's address in its own status or consumers of the downward API (status.hostIP).",
+      "priority": 1
+    },
+    {
+      "name": "External-IP",
+      "type": "string",
+      "format": "",
+      "description": "List of addresses reachable to the node. Queried from cloud provider, if available. More info: https://kubernetes.io/docs/reference/node/node-status/#addresses Note: This field is declared as mergeable, but the merge key is not sufficiently unique, which can cause data corruption when it is merged. Callers should instead use a full-replacement patch. See https://pr.k8s.io/79391 for an example. Consumers should assume that addresses can change during the lifetime of a Node. However, there are some exceptions where this may not be possible, such as Pods that inherit a Node's address in its own status or consumers of the downward API (status.hostIP).",
+      "priority": 1
+    },
+    {
+      "name": "OS-Image",
+      "type": "string",
+      "format": "",
+      "description": "OS Image reported by the node from /etc/os-release (e.g. Debian GNU/Linux 7 (wheezy)).",
+      "priority": 1
+    },
+    {
+      "name": "Kernel-Version",
+      "type": "string",
+      "format": "",
+      "description": "Kernel Version reported by the node from 'uname -r' (e.g. 3.16.0-0.bpo.4-amd64).",
+      "priority": 1
+    },
+    {
+      "name": "Container-Runtime",
+      "type": "string",
+      "format": "",
+      "description": "ContainerRuntime Version reported by the node through runtime remote API (e.g. containerd://1.4.2).",
+      "priority": 1
+    }
+  ],
+  "rows": [
+    {
+      "cells": [
+        "ghost",
+        "NotReady",
+        "\u003cnone\u003e",
+        "117s",
+        "",
+        "\u003cnone\u003e",
+        "\u003cnone\u003e",
+        "\u003cunknown\u003e",
+        "\u003cunknown\u003e",
+        "\u003cunknown\u003e"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "ghost",
+          "uid": "20761c0e-f4a8-49d2-bd8b-350da96738df",
+          "resourceVersion": "903",
+          "creationTimestamp": "2026-11-03T00:13:57Z",
+          "labels": {
+            "kubernetes.io/hostname": "ghost"
+          },
+          "annotations": {
+            "kubectl.kubernetes.io/last-applied-configuration": "{\"apiVersion\":\"v1\",\"kind\":\"Node\",\"metadata\":{\"annotations\":{},\"labels\":{\"kubernetes.io/hostname\":\"ghost\"},\"name\":\"ghost\"}}\n",
+            "node.alpha.kubernetes.io/ttl": "0"
+          },
+          "managedFields": [
+            {
+              "manager": "kubectl-client-side-apply",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:57Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:metadata": {
+                  "f:annotations": {
+                    ".": {},
+                    "f:kubectl.kubernetes.io/last-applied-configuration": {}
+                  },
+                  "f:labels": {
+                    ".": {},
+                    "f:kubernetes.io/hostname": {}
+                  }
+                }
+              }
+            },
+            {
+              "manager": "kube-controller-manager",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:14:59Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:metadata": {
+                  "f:annotations": {
+                    "f:node.alpha.kubernetes.io/ttl": {}
+                  }
+                },
+                "f:spec": {
+                  "f:podCIDR": {},
+                  "f:podCIDRs": {
+                    ".": {},
+                    "v:\"10.244.3.0/24\"": {}
+                  },
+                  "f:taints": {}
+                }
+              }
+            },
+            {
+              "manager": "kube-controller-manager",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:14:59Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:status": {
+                  "f:conditions": {
+                    ".": {},
+                    "k:{\"type\":\"DiskPressure\"}": {
+                      ".": {},
+                      "f:lastHeartbeatTime": {},
+                      "f:lastTransitionTime": {},
+                      "f:message": {},
+                      "f:reason": {},
+                      "f:status": {},
+                      "f:type": {}
+                    },
+                    "k:{\"type\":\"MemoryPressure\"}": {
+                      ".": {},
+                      "f:lastHeartbeatTime": {},
+                      "f:lastTransitionTime": {},
+                      "f:message": {},
+                      "f:reason": {},
+                      "f:status": {},
+                      "f:type": {}
+                    },
+                    "k:{\"type\":\"PIDPressure\"}": {
+                      ".": {},
+                      "f:lastHeartbeatTime": {},
+                      "f:lastTransitionTime": {},
+                      "f:message": {},
+                      "f:reason": {},
+                      "f:status": {},
+                      "f:type": {}
+                    },
+                    "k:{\"type\":\"Ready\"}": {
+                      ".": {},
+                      "f:lastHeartbeatTime": {},
+                      "f:lastTransitionTime": {},
+                      "f:message": {},
+                      "f:reason": {},
+                      "f:status": {},
+                      "f:type": {}
+                    }
+                  }
+                }
+              },
+              "subresource": "status"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "kwok-node-0",
+        "Ready",
+        "\u003cnone\u003e",
+        "2m32s",
+        "kwok-v0.8.0",
+        "10.244.0.5",
+        "\u003cnone\u003e",
+        "\u003cunknown\u003e",
+        "kwok-v0.8.0 (amd64)",
+        "kwok-v0.8.0"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "kwok-node-0",
+          "uid": "7fbdb677-2947-4d57-b21f-1bcb57ea6c70",
+          "resourceVersion": "619",
+          "creationTimestamp": "2026-11-03T00:13:22Z",
+          "labels": {
+            "beta.kubernetes.io/os": "linux",
+            "kubernetes.io/hostname": "kwok-node-0",
+            "kubernetes.io/os": "linux",
+            "type": "kwok"
+          },
+          "annotations": {
+            "kubectl.kubernetes.io/last-applied-configuration": "{\"apiVersion\":\"v1\",\"kind\":\"Node\",\"metadata\":{\"annotations\":{\"kwok.x-k8s.io/node\":\"fake\",\"node.alpha.kubernetes.io/ttl\":\"0\"},\"labels\":{\"kubernetes.io/hostname\":\"kwok-node-0\",\"kubernetes.io/os\":\"linux\",\"type\":\"kwok\"},\"name\":\"kwok-node-0\"},\"spec\":{\"taints\":[{\"effect\":\"NoSchedule\",\"key\":\"kwok.x-k8s.io/node\",\"value\":\"fake\"}]},\"status\":{\"allocatable\":{\"cpu\":\"64\",\"memory\":\"512Gi\",\"pods\":\"1000\"},\"capacity\":{\"cpu\":\"64\",\"memory\":\"512Gi\",\"pods\":\"1000\"}}}\n",
+            "kwok.x-k8s.io/node": "fake",
+            "node.alpha.kubernetes.io/ttl": "0"
+          },
+          "managedFields": [
+            {
+              "manager": "kubectl-client-side-apply",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:22Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:metadata": {
+                  "f:annotations": {
+                    ".": {},
+                    "f:kubectl.kubernetes.io/last-applied-configuration": {},
+                    "f:kwok.x-k8s.io/node": {},
+                    "f:node.alpha.kubernetes.io/ttl": {}
+                  },
+                  "f:labels": {
+                    ".": {},
+                    "f:kubernetes.io/hostname": {},
+                    "f:kubernetes.io/os": {},
+                    "f:type": {}
+                  }
+                }
+              }
+            },
+            {
+              "manager": "kwok",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:22Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:status": {
+                  "f:addresses": {
+                    ".": {},
+                    "k:{\"type\":\"InternalIP\"}": {
+                      ".": {},
+                      "f:address": {},
+                      "f:type": {}
+                    }
+                  },
+                  "f:conditions": {
+                    ".": {},
+                    "k:{\"type\":\"DiskPressure\"}": {
+                      ".": {},
+                      "f:lastHeartbeatTime": {},
+                      "f:lastTransitionTime": {},
+                      "f:message": {},
+                      "f:reason": {},
+                      "f:status": {},
+                      "f:type": {}
+                    },
+                    "k:{\"type\":\"MemoryPressure\"}": {
+                      ".": {},
+                      "f:lastHeartbeatTime": {},
+                      "f:lastTransitionTime": {},
+                      "f:message": {},
+                      "f:reason": {},
+                      "f:status": {},
+                      "f:type": {}
+                    },
+                    "k:{\"type\":\"NetworkUnavailable\"}": {
+                      ".": {},
+                      "f:lastHeartbeatTime": {},
+                      "f:lastTransitionTime": {},
+                      "f:message": {},
+                      "f:reason": {},
+                      "f:status": {},
+                      "f:type": {}
+                    },
+                    "k:{\"type\":\"PIDPressure\"}": {
+                      ".": {},
+                      "f:lastHeartbeatTime": {},
+                      "f:lastTransitionTime": {},
+                      "f:message": {},
+                      "f:reason": {},
+                      "f:status": {},
+                      "f:type": {}
+                    },
+                    "k:{\"type\":\"Ready\"}": {
+                      ".": {},
+                      "f:lastHeartbeatTime": {},
+                      "f:lastTransitionTime": {},
+                      "f:message": {},
+                      "f:reason": {},
+                      "f:status": {},
+                      "f:type": {}
+                    }
+                  },
+                  "f:daemonEndpoints": {
+                    "f:kubeletEndpoint": {
+                      "f:Port": {}
+                    }
+                  },
+                  "f:nodeInfo": {
+                    "f:architecture": {},
+                    "f:containerRuntimeVersion": {},
+                    "f:kernelVersion": {},
+                    "f:kubeProxyVersion": {},
+                    "f:kubeletVersion": {},
+                    "f:operatingSystem": {}
+                  },
+                  "f:phase": {}
+                }
+              },
+              "subresource": "status"
+            },
+            {
+              "manager": "kube-controller-manager",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:23Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:metadata": {
+                  "f:labels": {
+                    "f:beta.kubernetes.io/os": {}
+                  }
+                },
+                "f:spec": {
+                  "f:podCIDR": {},
+                  "f:podCIDRs": {
+                    ".": {},
+                    "v:\"10.244.1.0/24\"": {}
+                  },
+                  "f:taints": {}
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "kwok-node-1",
+        "Ready,SchedulingDisabled",
+        "\u003cnone\u003e",
+        "2m32s",
+        "kwok-v0.8.0",
+        "10.244.0.5",
+        "\u003cnone\u003e",
+        "\u003cunknown\u003e",
+        "kwok-v0.8.0 (amd64)",
+        "kwok-v0.8.0"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "kwok-node-1",
+          "uid": "334a42c0-7241-4de6-8edf-31cf9f5299d8",
+          "resourceVersion": "701",
+          "creationTimestamp": "2026-11-03T00:13:22Z",
+          "labels": {
+            "beta.kubernetes.io/os": "linux",
+            "kubernetes.io/hostname": "kwok-node-1",
+            "kubernetes.io/os": "linux",
+            "type": "kwok"
+          },
+          "annotations": {
+            "kubectl.kubernetes.io/last-applied-configuration": "{\"apiVersion\":\"v1\",\"kind\":\"Node\",\"metadata\":{\"annotations\":{\"kwok.x-k8s.io/node\":\"fake\",\"node.alpha.kubernetes.io/ttl\":\"0\"},\"labels\":{\"kubernetes.io/hostname\":\"kwok-node-1\",\"kubernetes.io/os\":\"linux\",\"type\":\"kwok\"},\"name\":\"kwok-node-1\"},\"spec\":{\"taints\":[{\"effect\":\"NoSchedule\",\"key\":\"kwok.x-k8s.io/node\",\"value\":\"fake\"}]},\"status\":{\"allocatable\":{\"cpu\":\"64\",\"memory\":\"512Gi\",\"pods\":\"1000\"},\"capacity\":{\"cpu\":\"64\",\"memory\":\"512Gi\",\"pods\":\"1000\"}}}\n",
+            "kwok.x-k8s.io/node": "fake",
+            "node.alpha.kubernetes.io/ttl": "0"
+          },
+          "managedFields": [
+            {
+              "manager": "kubectl-client-side-apply",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:22Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:metadata": {
+                  "f:annotations": {
+                    ".": {},
+                    "f:kubectl.kubernetes.io/last-applied-configuration": {},
+                    "f:kwok.x-k8s.io/node": {},
+                    "f:node.alpha.kubernetes.io/ttl": {}
+                  },
+                  "f:labels": {
+                    ".": {},
+                    "f:kubernetes.io/hostname": {},
+                    "f:kubernetes.io/os": {},
+                    "f:type": {}
+                  }
+                }
+              }
+            },
+            {
+              "manager": "kwok",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:22Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:status": {
+                  "f:addresses": {
+                    ".": {},
+                    "k:{\"type\":\"InternalIP\"}": {
+                      ".": {},
+                      "f:address": {},
+                      "f:type": {}
+                    }
+                  },
+                  "f:conditions": {
+                    ".": {},
+                    "k:{\"type\":\"DiskPressure\"}": {
+                      ".": {},
+                      "f:lastHeartbeatTime": {},
+                      "f:lastTransitionTime": {},
+                      "f:message": {},
+                      "f:reason": {},
+                      "f:status": {},
+                      "f:type": {}
+                    },
+                    "k:{\"type\":\"MemoryPressure\"}": {
+                      ".": {},
+                      "f:lastHeartbeatTime": {},
+                      "f:lastTransitionTime": {},
+                      "f:message": {},
+                      "f:reason": {},
+                      "f:status": {},
+                      "f:type": {}
+                    },
+                    "k:{\"type\":\"NetworkUnavailable\"}": {
+                      ".": {},
+                      "f:lastHeartbeatTime": {},
+                      "f:lastTransitionTime": {},
+                      "f:message": {},
+                      "f:reason": {},
+                      "f:status": {},
+                      "f:type": {}
+                    },
+                    "k:{\"type\":\"PIDPressure\"}": {
+                      ".": {},
+                      "f:lastHeartbeatTime": {},
+                      "f:lastTransitionTime": {},
+                      "f:message": {},
+                      "f:reason": {},
+                      "f:status": {},
+                      "f:type": {}
+                    },
+                    "k:{\"type\":\"Ready\"}": {
+                      ".": {},
+                      "f:lastHeartbeatTime": {},
+                      "f:lastTransitionTime": {},
+                      "f:message": {},
+                      "f:reason": {},
+                      "f:status": {},
+                      "f:type": {}
+                    }
+                  },
+                  "f:daemonEndpoints": {
+                    "f:kubeletEndpoint": {
+                      "f:Port": {}
+                    }
+                  },
+                  "f:nodeInfo": {
+                    "f:architecture": {},
+                    "f:containerRuntimeVersion": {},
+                    "f:kernelVersion": {},
+                    "f:kubeProxyVersion": {},
+                    "f:kubeletVersion": {},
+                    "f:operatingSystem": {}
+                  },
+                  "f:phase": {}
+                }
+              },
+              "subresource": "status"
+            },
+            {
+              "manager": "kube-controller-manager",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:48Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:metadata": {
+                  "f:labels": {
+                    "f:beta.kubernetes.io/os": {}
+                  }
+                },
+                "f:spec": {
+                  "f:podCIDR": {},
+                  "f:podCIDRs": {
+                    ".": {},
+                    "v:\"10.244.2.0/24\"": {}
+                  },
+                  "f:taints": {}
+                }
+              }
+            },
+            {
+              "manager": "kubectl",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:13:48Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:spec": {
+                  "f:unschedulable": {}
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "twigo-home-control-plane",
+        "Ready",
+        "control-plane",
+        "2m59s",
+        "v1.37.0",
+        "172.18.0.2",
+        "\u003cnone\u003e",
+        "Debian GNU/Linux 13 (trixie)",
+        "6.12.54-linuxkit (arm64)",
+        "containerd://2.3.4"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "twigo-home-control-plane",
+          "uid": "7deab244-f03f-4a62-8ebc-72e9a975c27c",
+          "resourceVersion": "907",
+          "creationTimestamp": "2026-11-03T00:12:55Z",
+          "labels": {
+            "beta.kubernetes.io/arch": "arm64",
+            "beta.kubernetes.io/os": "linux",
+            "kubernetes.io/arch": "arm64",
+            "kubernetes.io/hostname": "twigo-home-control-plane",
+            "kubernetes.io/os": "linux",
+            "node-role.kubernetes.io/control-plane": ""
+          },
+          "annotations": {
+            "node.alpha.kubernetes.io/ttl": "0",
+            "volumes.kubernetes.io/controller-managed-attach-detach": "true"
+          },
+          "managedFields": [
+            {
+              "manager": "kubelet",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:12:55Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:metadata": {
+                  "f:annotations": {
+                    ".": {},
+                    "f:volumes.kubernetes.io/controller-managed-attach-detach": {}
+                  },
+                  "f:labels": {
+                    ".": {},
+                    "f:beta.kubernetes.io/arch": {},
+                    "f:beta.kubernetes.io/os": {},
+                    "f:kubernetes.io/arch": {},
+                    "f:kubernetes.io/hostname": {},
+                    "f:kubernetes.io/os": {}
+                  }
+                },
+                "f:spec": {
+                  "f:providerID": {}
+                }
+              }
+            },
+            {
+              "manager": "kubeadm",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:12:57Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:metadata": {
+                  "f:labels": {
+                    "f:node-role.kubernetes.io/control-plane": {}
+                  }
+                }
+              }
+            },
+            {
+              "manager": "kube-controller-manager",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:12:59Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:metadata": {
+                  "f:annotations": {
+                    "f:node.alpha.kubernetes.io/ttl": {}
+                  }
+                },
+                "f:spec": {
+                  "f:podCIDR": {},
+                  "f:podCIDRs": {
+                    ".": {},
+                    "v:\"10.244.0.0/24\"": {}
+                  }
+                }
+              }
+            },
+            {
+              "manager": "kubelet",
+              "operation": "Update",
+              "apiVersion": "v1",
+              "time": "2026-11-03T00:15:00Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:status": {
+                  "f:conditions": {
+                    "k:{\"type\":\"DiskPressure\"}": {
+                      "f:lastHeartbeatTime": {}
+                    },
+                    "k:{\"type\":\"MemoryPressure\"}": {
+                      "f:lastHeartbeatTime": {}
+                    },
+                    "k:{\"type\":\"PIDPressure\"}": {
+                      "f:lastHeartbeatTime": {}
+                    },
+                    "k:{\"type\":\"Ready\"}": {
+                      "f:lastHeartbeatTime": {},
+                      "f:lastTransitionTime": {},
+                      "f:message": {},
+                      "f:reason": {},
+                      "f:status": {}
+                    }
+                  },
+                  "f:images": {}
+                }
+              },
+              "subresource": "status"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
