@@ -36,9 +36,14 @@ export class Workbench {
   readonly views = new Views();
   readonly editors = new Editors(this.keys, (area) => {
     const space = this.spaces.active;
-    if (area === "panel" && space) {
-      this.spaces.setPart(space.id, "panel", { visible: true });
-    }
+    if (!space) return;
+    // A maximized panel covers the editor area, as VS Code's does until an
+    // editor opens there.
+    this.spaces.setPart(
+      space.id,
+      "panel",
+      area === "panel" ? { visible: true } : { maximized: false },
+    );
   });
   readonly quickAccess = new QuickAccess(this.keys);
   readonly lists = new Lists();

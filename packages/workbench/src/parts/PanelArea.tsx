@@ -25,9 +25,9 @@ export function PanelArea() {
   useChanges(spaces.changes);
   const space = spaces.active;
   const ref = useRef<HTMLDivElement>(null);
-  const maximized = space
-    ? spaces.state(space.id).parts.panel.maximized
-    : false;
+  const panel = space ? spaces.state(space.id).parts.panel : undefined;
+  const visible = panel?.visible ?? false;
+  const maximized = visible && (panel?.maximized ?? false);
 
   useEffect(() => {
     const element = ref.current;
@@ -40,8 +40,9 @@ export function PanelArea() {
   }, [keys]);
 
   useEffect(() => {
+    keys.set("panelVisible", visible);
     keys.set("panelMaximized", maximized);
-  }, [keys, maximized]);
+  }, [keys, visible, maximized]);
 
   return (
     <section
@@ -76,18 +77,16 @@ function PanelGroupActions(props: IDockviewHeaderActionsProps) {
 
   useEffect(() => {
     const measure = () => {
-      const top = Math.min(
-        ...containerApi.groups.map((each) => each.element.offsetTop),
+      // Dockview places each group in a view of its own, so offsets are 0.
+      const boxes = containerApi.groups.map((each) =>
+        each.element.getBoundingClientRect(),
       );
+      const top = Math.min(...boxes.map((box) => box.top));
       const right = Math.max(
-        ...containerApi.groups
-          .filter((each) => each.element.offsetTop === top)
-          .map((each) => each.element.offsetLeft + each.element.offsetWidth),
+        ...boxes.filter((box) => box.top === top).map((box) => box.right),
       );
-      setCorner(
-        group.element.offsetTop === top &&
-          group.element.offsetLeft + group.element.offsetWidth === right,
-      );
+      const own = group.element.getBoundingClientRect();
+      setCorner(own.top === top && own.right === right);
     };
     measure();
     const layout = containerApi.onDidLayoutChange(measure);

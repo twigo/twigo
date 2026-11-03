@@ -89,12 +89,14 @@ export function SpaceDock({
     if (!api || !host) return;
     let last = "";
     const observer = new ResizeObserver(([entry]) => {
-      // A hidden element measures zero, which would collapse the grid.
+      // A hidden element measures zero, which would collapse the grid: a
+      // hidden part is 0 px high, not display:none (allotment 1.20.6).
       if (!entry || !host.offsetParent) return;
       // Rounded and deduplicated: a fractional devicePixelRatio would
       // otherwise lay out against itself.
       const width = Math.round(entry.contentRect.width);
       const height = Math.round(entry.contentRect.height);
+      if (width === 0 || height === 0) return;
       const size = `${String(width)}x${String(height)}`;
       if (size === last) return;
       last = size;

@@ -231,9 +231,9 @@ export class Editors {
     this.#find(uri)?.panel.api.close();
   }
 
-  /** Moves the active editor into a new group beside its own. */
-  moveActive(side: "right" | "bottom"): void {
-    const panel = this.#apis.get("editor")?.activePanel;
+  /** Moves an area's active editor into a new group beside its own. */
+  moveActive(side: "right" | "bottom", area: Area = "editor"): void {
+    const panel = this.#apis.get(area)?.activePanel;
     if (!panel || panel.group.panels.length < 2) return;
     panel.api.moveTo({ group: panel.group, position: side });
   }

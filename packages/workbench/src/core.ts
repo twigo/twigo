@@ -1,4 +1,5 @@
 import { ChevronDown, ChevronUp, X, type LucideIcon } from "lucide-react";
+import type { Area } from "./editors/registry";
 import type { Workbench } from "./services";
 import type { MenuId } from "./commands/menus";
 import type { KeybindingRule } from "./keybindings/resolver";
@@ -163,7 +164,7 @@ export function registerCore(workbench: Workbench): void {
       title: "Maximize Panel Size",
       icon: ChevronUp,
       when: "!panelMaximized",
-      part: { maximized: true },
+      part: { visible: true, maximized: true },
     },
     {
       id: "workbench.action.restorePanel",
@@ -176,7 +177,7 @@ export function registerCore(workbench: Workbench): void {
       id: "workbench.action.closePanel",
       title: "Hide Panel",
       icon: X,
-      when: "true",
+      when: "panelVisible",
       part: { visible: false },
     },
   ];
@@ -186,6 +187,7 @@ export function registerCore(workbench: Workbench): void {
       title,
       category: "View",
       icon,
+      enablement: when,
       run: () => {
         const space = spaces.active;
         if (space) spaces.setPart(space.id, "panel", part);
@@ -218,7 +220,7 @@ export function registerCore(workbench: Workbench): void {
     id: string;
     title: string;
     key?: string;
-    run: (uri: string) => void;
+    run: (uri: string, area: Area) => void;
   }[] = [
     {
       id: "workbench.action.closeActiveEditor",
@@ -240,15 +242,15 @@ export function registerCore(workbench: Workbench): void {
       id: "workbench.action.moveEditorToRightGroup",
       title: "Move Editor into New Group to the Right",
       key: "mod+\\",
-      run: () => {
-        editors.moveActive("right");
+      run: (_uri, area) => {
+        editors.moveActive("right", area);
       },
     },
     {
       id: "workbench.action.moveEditorToBelowGroup",
       title: "Move Editor into New Group Below",
-      run: () => {
-        editors.moveActive("bottom");
+      run: (_uri, area) => {
+        editors.moveActive("bottom", area);
       },
     },
   ];
@@ -257,10 +259,16 @@ export function registerCore(workbench: Workbench): void {
       id,
       title,
       category: "Editor",
-      enablement: "editor.open",
+      enablement: "editor.open || panelFocus",
       run: () => {
-        const uri = editors.active;
-        if (uri) run(uri);
+        // The panel's editors take the commands while it has the focus.
+        const area: Area =
+          workbench.keys.lookup(document.activeElement)("panelFocus") === true
+            ? "panel"
+            : "editor";
+        const uri =
+          area === "panel" ? editors.activeIn("panel") : editors.active;
+        if (uri) run(uri, area);
       },
     });
     if (key) rules.push({ key, command: id });

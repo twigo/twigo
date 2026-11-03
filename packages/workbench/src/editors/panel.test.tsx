@@ -126,3 +126,59 @@ test("the panel's layout comes back with its space", async () => {
   render(<WorkbenchView workbench={workbench} />);
   expect(workbench.editors.openIn("panel")).toEqual(["session://x"]);
 });
+
+test("an editor that opens in the editor area restores a maximized panel", async () => {
+  const { workbench, editors, panel } = await mounted();
+  act(() => {
+    editors.open("session://x");
+  });
+  await act(() =>
+    workbench.commands.execute(
+      "workbench.action.maximizePanel",
+      workbench.keys.lookup(null),
+    ),
+  );
+  expect(panel()).toEqual({ visible: true, maximized: true });
+  act(() => {
+    editors.open("note://a");
+  });
+  expect(panel()).toEqual({ visible: true, maximized: false });
+});
+
+test("closing the active editor closes the panel's while the panel has the focus", async () => {
+  const { workbench, editors } = await mounted();
+  act(() => {
+    editors.open("note://a");
+    editors.open("session://x");
+  });
+  const panel = document.querySelector('[aria-label="Panel"]');
+  const focusable = panel?.querySelector<HTMLElement>("p") ?? null;
+  focusable?.setAttribute("tabindex", "-1");
+  focusable?.focus();
+  await act(() =>
+    workbench.commands.execute(
+      "workbench.action.closeActiveEditor",
+      workbench.keys.lookup(document.activeElement),
+    ),
+  );
+  expect(editors.openIn("panel")).toEqual([]);
+  expect(editors.openIn("editor")).toEqual(["note://a"]);
+});
+
+test("the panel's tabs come back after a switch to another space and back", async () => {
+  const { workbench, editors, space } = await mounted();
+  const first = space();
+  act(() => {
+    editors.open("session://x");
+  });
+  const other = workbench.spaces.list.find((each) => each.id !== first);
+  if (!other) throw new Error("the mock lists one space");
+  act(() => {
+    workbench.spaces.select(other.id);
+  });
+  expect(editors.openIn("panel")).toEqual([]);
+  act(() => {
+    workbench.spaces.select(first);
+  });
+  expect(editors.openIn("panel")).toEqual(["session://x"]);
+});
