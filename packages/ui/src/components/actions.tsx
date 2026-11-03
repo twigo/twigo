@@ -185,13 +185,18 @@ export function InlineActions({
   );
 }
 
-/** Actions as labelled buttons with their keys, as a selection's bar. */
+/**
+ * Actions as labelled buttons with their keys: a selection's floating bar,
+ * or `inline` in a panel's header, as the details' actions.
+ */
 export function ActionBar({
   actions,
+  inline = false,
   className,
   children,
 }: {
   actions: ActionGroups;
+  inline?: boolean;
   className?: string;
   /** What the bar is about, before the actions: `2 selected`. */
   children?: ReactNode;
@@ -200,7 +205,8 @@ export function ActionBar({
     <div
       role="toolbar"
       className={cn(
-        "flex items-center gap-0.5 rounded-lg bg-popover p-1 text-xs whitespace-nowrap shadow-lg",
+        "flex items-center gap-0.5 text-xs whitespace-nowrap",
+        !inline && "rounded-lg bg-popover p-1 shadow-lg",
         className,
       )}
     >

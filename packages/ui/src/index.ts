@@ -17,11 +17,13 @@ export * from "./components/chip";
 export * from "./components/count";
 export * from "./components/icon-button";
 export * from "./components/link-button";
+export * from "./components/pill";
 export * from "./components/property-list";
 export * from "./components/search-field";
 export * from "./components/section";
 export * from "./components/segmented";
 export * from "./components/status-dot";
+export * from "./components/tab-bar";
 export {
   DataGrid,
   GridSkeleton,
