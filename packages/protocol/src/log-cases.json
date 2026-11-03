@@ -1655,6 +1655,322 @@
       }
     },
     {
+      "name": "an around window reads before and from its entry",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": "info",
+          "text": "started"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": "warn",
+          "text": "slow request"
+        },
+        {
+          "type": "line",
+          "pod": "web-2",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "GET / 200"
+        },
+        {
+          "type": "joined",
+          "pod": "web-2",
+          "time": "2026-11-03T10:00:00Z",
+          "owner": {
+            "group": "apps",
+            "version": "v1",
+            "kind": "ReplicaSet",
+            "namespace": "shop",
+            "name": "web-7f9c8d6b5"
+          }
+        },
+        {
+          "type": "ended",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:04Z",
+          "exitCode": 1,
+          "reason": "Error",
+          "restarting": "2026-11-03T10:00:14Z"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:05Z",
+          "level": "error",
+          "text": "connection refused"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": null,
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "around",
+        "id": 3,
+        "before": 1,
+        "after": 2
+      },
+      "expect": {
+        "total": 6,
+        "window": {
+          "start": 1,
+          "ids": [1, 3, 2]
+        }
+      }
+    },
+    {
+      "name": "an entry the view no longer keeps stands where its time places it",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": "info",
+          "text": "started"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": "warn",
+          "text": "slow request"
+        },
+        {
+          "type": "line",
+          "pod": "web-2",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "GET / 200"
+        },
+        {
+          "type": "joined",
+          "pod": "web-2",
+          "time": "2026-11-03T10:00:00Z",
+          "owner": {
+            "group": "apps",
+            "version": "v1",
+            "kind": "ReplicaSet",
+            "namespace": "shop",
+            "name": "web-7f9c8d6b5"
+          }
+        },
+        {
+          "type": "ended",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:04Z",
+          "exitCode": 1,
+          "reason": "Error",
+          "restarting": "2026-11-03T10:00:14Z"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:05Z",
+          "level": "error",
+          "text": "connection refused"
+        }
+      ],
+      "view": {
+        "level": "warn",
+        "filter": null,
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "around",
+        "id": 3,
+        "before": 1,
+        "after": 2
+      },
+      "expect": {
+        "total": 4,
+        "window": {
+          "start": 0,
+          "ids": [4, 2, 5]
+        }
+      }
+    },
+    {
+      "name": "an entry the bound dropped stands at the view's start",
+      "limits": {
+        "entries": 3,
+        "bytes": 1048576
+      },
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": "info",
+          "text": "started"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": "warn",
+          "text": "slow request"
+        },
+        {
+          "type": "line",
+          "pod": "web-2",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "GET / 200"
+        },
+        {
+          "type": "joined",
+          "pod": "web-2",
+          "time": "2026-11-03T10:00:00Z",
+          "owner": {
+            "group": "apps",
+            "version": "v1",
+            "kind": "ReplicaSet",
+            "namespace": "shop",
+            "name": "web-7f9c8d6b5"
+          }
+        },
+        {
+          "type": "ended",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:04Z",
+          "exitCode": 1,
+          "reason": "Error",
+          "restarting": "2026-11-03T10:00:14Z"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:05Z",
+          "level": "error",
+          "text": "connection refused"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": null,
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "around",
+        "id": 1,
+        "before": 2,
+        "after": 2
+      },
+      "expect": {
+        "total": 4,
+        "window": {
+          "start": 0,
+          "ids": [7, 2]
+        },
+        "dropped": {
+          "id": 7,
+          "count": 3
+        }
+      }
+    },
+    {
+      "name": "an around window near both ends reads what there is",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": "info",
+          "text": "started"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": "warn",
+          "text": "slow request"
+        },
+        {
+          "type": "line",
+          "pod": "web-2",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "GET / 200"
+        },
+        {
+          "type": "joined",
+          "pod": "web-2",
+          "time": "2026-11-03T10:00:00Z",
+          "owner": {
+            "group": "apps",
+            "version": "v1",
+            "kind": "ReplicaSet",
+            "namespace": "shop",
+            "name": "web-7f9c8d6b5"
+          }
+        },
+        {
+          "type": "ended",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:04Z",
+          "exitCode": 1,
+          "reason": "Error",
+          "restarting": "2026-11-03T10:00:14Z"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:05Z",
+          "level": "error",
+          "text": "connection refused"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": null,
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "around",
+        "id": 2,
+        "before": 10,
+        "after": 10
+      },
+      "expect": {
+        "total": 6,
+        "window": {
+          "start": 0,
+          "ids": [4, 1, 3, 2, 5, 6]
+        }
+      }
+    },
+    {
       "name": "the bound drops the oldest, with one Dropped entry first",
       "limits": {
         "entries": 3,

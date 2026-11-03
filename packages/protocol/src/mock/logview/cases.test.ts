@@ -108,7 +108,7 @@ for (const {
     }
     const checked = spec(view);
     const buffer = new LogBuffer(limits ?? LIMITS);
-    buffer.insert(given.map(timed), (kind) => judge(checked, kind));
+    buffer.insert(given.map(timed), (_, kind) => judge(checked, kind));
 
     expect(total(buffer, checked)).toBe(wanted.total);
     const shown = entries(buffer, checked, window);

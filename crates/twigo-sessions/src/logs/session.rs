@@ -65,31 +65,9 @@ impl Session {
         request: OpenLogs,
         send: impl FnMut(LogBatch) -> bool + Send + 'static,
     ) -> Result<Self, IpcError> {
-        let target = Target::new(&request.target)?;
-        let spec = Spec::new(&request.view)?;
-        let followed = Followed::new(&hub, &context, &target).await?;
+        let session = Run::new(hub, context, request).await?;
         let control = Arc::new(Control::default());
-        let (events, incoming) = mpsc::unbounded_channel();
-        let name = target.name.clone();
-        let session = Run {
-            hub,
-            context,
-            target,
-            followed,
-            source: request.source,
-            spec,
-            window: None,
-            buffer: Buffer::new(LIMITS),
-            pods: Vec::new(),
-            listed: false,
-            streams: HashMap::new(),
-            finished: HashMap::new(),
-            generation: 0,
-            events,
-            incoming,
-            dirty: Dirty::default(),
-            sent: None,
-        };
+        let name = session.target.name.clone();
         let task = tokio::spawn(run(session, Arc::clone(&control), send));
         Ok(Self {
             control,
@@ -210,6 +188,7 @@ struct Sent {
     matches: LogMatches,
     histogram: Histogram,
     dropped: u64,
+    arrived: u64,
 }
 
 struct Run {
@@ -234,6 +213,9 @@ struct Run {
     incoming: mpsc::UnboundedReceiver<(u64, Key, Event)>,
     dirty: Dirty,
     sent: Option<Sent>,
+    /// The entries the view kept as they came since the source or the view
+    /// last changed.
+    arrived: u64,
 }
 
 async fn run(mut session: Run, control: Arc<Control>, mut send: impl FnMut(LogBatch) -> bool) {
@@ -294,12 +276,40 @@ async fn run(mut session: Run, control: Arc<Control>, mut send: impl FnMut(LogBa
 }
 
 impl Run {
+    async fn new(hub: Hub, context: String, request: OpenLogs) -> Result<Self, IpcError> {
+        let target = Target::new(&request.target)?;
+        let spec = Spec::new(&request.view)?;
+        let followed = Followed::new(&hub, &context, &target).await?;
+        let (events, incoming) = mpsc::unbounded_channel();
+        Ok(Self {
+            hub,
+            context,
+            target,
+            followed,
+            source: request.source,
+            spec,
+            window: None,
+            buffer: Buffer::new(LIMITS),
+            pods: Vec::new(),
+            listed: false,
+            streams: HashMap::new(),
+            finished: HashMap::new(),
+            generation: 0,
+            events,
+            incoming,
+            dirty: Dirty::default(),
+            sent: None,
+            arrived: 0,
+        })
+    }
+
     fn set_source(&mut self, source: LogSource) {
         self.source = source;
         self.generation += 1;
         self.streams.clear();
         self.finished.clear();
         self.buffer.clear();
+        self.arrived = 0;
         self.dirty = Dirty {
             pods: true,
             view: true,
@@ -310,6 +320,7 @@ impl Run {
     fn set_view(&mut self, spec: Spec) {
         self.buffer.judge(|kind| spec.judge(kind));
         self.spec = spec;
+        self.arrived = 0;
         self.dirty.view = true;
     }
 
@@ -405,7 +416,12 @@ impl Run {
             return;
         }
         let spec = &self.spec;
-        self.buffer.insert(entries, |kind| spec.judge(kind));
+        let arrived = &mut self.arrived;
+        self.buffer.insert(entries, |at, kind| {
+            let judged = spec.judge(kind);
+            *arrived += u64::from(spec.keeps(at, judged));
+            judged
+        });
         self.dirty.view = true;
     }
 
@@ -586,6 +602,7 @@ impl Run {
         let window = self.window?;
         let status = self.followed.state(&self.target);
         let dropped = self.buffer.dropped_ever();
+        let arrived = self.arrived;
         let pods = (self.dirty.pods || self.sent.is_none()).then(|| self.log_pods());
         let shown = (self.dirty.view || self.sent.is_none()).then(|| {
             (
@@ -607,6 +624,7 @@ impl Run {
                 matches: matches.clone(),
                 histogram: histogram.clone(),
                 dropped,
+                arrived,
             });
             return Some(LogBatch {
                 seq,
@@ -617,6 +635,7 @@ impl Run {
                 matches: Some(matches),
                 histogram: Some(histogram),
                 dropped,
+                arrived,
             });
         };
         let pods = pods.filter(|pods| *pods != sent.pods);
@@ -635,13 +654,15 @@ impl Run {
             && window.is_none()
             && matches.is_none()
             && histogram.is_none()
-            && dropped == sent.dropped;
+            && dropped == sent.dropped
+            && arrived == sent.arrived;
         if unchanged {
             return None;
         }
         sent.status = status.clone();
         sent.total = total;
         sent.dropped = dropped;
+        sent.arrived = arrived;
         if let Some(pods) = &pods {
             sent.pods = pods.clone();
         }
@@ -663,6 +684,7 @@ impl Run {
             matches,
             histogram,
             dropped,
+            arrived,
         })
     }
 }
@@ -685,4 +707,93 @@ fn controller(pod: &Value) -> Option<ObjectRef> {
 
 fn nanos(time: jiff::Timestamp) -> i64 {
     i64::try_from(time.as_nanosecond()).unwrap_or(i64::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use twigo_ipc::{Containers, Gvr, LevelFilter, LogTarget, Since};
+
+    use super::*;
+    use crate::logs::buffer::{Limits, Origin};
+
+    const SECOND: i64 = 1_000_000_000;
+
+    fn request(name: &str) -> OpenLogs {
+        OpenLogs {
+            target: LogTarget {
+                space: "kind-test".to_owned(),
+                gvr: Gvr {
+                    group: String::new(),
+                    version: "v1".to_owned(),
+                    resource: "pods".to_owned(),
+                },
+                namespace: "shop".to_owned(),
+                name: name.to_owned(),
+            },
+            source: LogSource {
+                containers: Containers::Default,
+                pods: None,
+                since: Since::Start,
+                previous: false,
+            },
+            view: view(None),
+        }
+    }
+
+    fn view(filter: Option<&str>) -> LogView {
+        LogView {
+            level: LevelFilter::All,
+            filter: filter.map(str::to_owned),
+            search: None,
+            range: None,
+        }
+    }
+
+    /// A session's state over a hub that never connects.
+    async fn unconnected(name: &str) -> Run {
+        let connect: twigo_cache::hub::Connect = Arc::new(|_| Box::pin(std::future::pending()));
+        Run::new(Hub::new(connect), "kind-test".to_owned(), request(name))
+            .await
+            .unwrap()
+    }
+
+    fn line(at: i64, text: &str) -> (i64, Kind) {
+        let origin = Arc::new(Origin {
+            pod: "web-1".into(),
+            container: "web".into(),
+        });
+        (
+            at * SECOND,
+            Kind::Line {
+                origin,
+                level: None,
+                text: text.into(),
+                styles: Box::new([]),
+            },
+        )
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn arrived_grows_past_the_bound_and_starts_again_with_the_view_or_source() {
+        let mut run = unconnected("web-1").await;
+        run.buffer = Buffer::new(Limits {
+            entries: 3,
+            bytes: 1 << 20,
+        });
+        run.window = Some(LogWindow::Tail { count: 100 });
+        run.insert((1..=5).map(|at| line(at, "GET /")).collect());
+        let first = run.batch(1).unwrap();
+        assert_eq!((first.total, first.arrived, first.dropped), (4, 5, 2));
+        run.insert(vec![line(6, "GET /"), line(7, "boom")]);
+        let second = run.batch(2).unwrap();
+        assert_eq!((second.total, second.arrived), (4, 7));
+
+        run.set_view(Spec::new(&view(Some("boom"))).unwrap());
+        run.insert(vec![line(8, "GET /"), line(9, "boom")]);
+        assert_eq!(run.batch(3).unwrap().arrived, 1);
+
+        run.set_source(request("web-1").source);
+        run.insert(vec![line(10, "boom")]);
+        assert_eq!(run.batch(4).unwrap().arrived, 1);
+    }
 }

@@ -84,7 +84,8 @@ pub struct Entry {
 }
 
 impl Entry {
-    fn key(&self) -> (i64, u64) {
+    /// What orders it.
+    pub fn key(&self) -> (i64, u64) {
         (self.at, self.id)
     }
 }
@@ -125,14 +126,18 @@ impl Buffer {
     }
 
     /// Adds entries in the order they came, each with the next id and what
-    /// `judge` makes of it, at its place in time.
-    pub fn insert(&mut self, incoming: Vec<(i64, Kind)>, judge: impl Fn(&Kind) -> Judged) {
+    /// `judge` makes of it and its time, at its place in time.
+    pub fn insert(
+        &mut self,
+        incoming: Vec<(i64, Kind)>,
+        mut judge: impl FnMut(i64, &Kind) -> Judged,
+    ) {
         let mut fresh: Vec<Entry> = incoming
             .into_iter()
             .map(|(at, kind)| Entry {
                 id: self.id(),
                 at,
-                judged: judge(&kind),
+                judged: judge(at, &kind),
                 kind,
             })
             .collect();
@@ -242,7 +247,7 @@ mod tests {
             .collect()
     }
 
-    fn judged(_: &Kind) -> Judged {
+    fn judged(_: i64, _: &Kind) -> Judged {
         Judged::default()
     }
 

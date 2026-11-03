@@ -135,3 +135,33 @@ test("a rollout replaces a followed pod: it leaves and its successor joins from 
 test("a search or a filter that is no regex is refused", () => {
   expect(() => session({ ...VIEW, search: "/(/" })).toThrow(/no regex/);
 });
+
+test("arrived counts the entries the view kept as they came, and starts again with a new view", async () => {
+  const { logs, batches } = session();
+  await vi.advanceTimersByTimeAsync(3_000);
+  const first = batches[batches.length - 1]?.arrived ?? 0;
+  expect(first).toBeGreaterThan(0);
+  await vi.advanceTimersByTimeAsync(3_000);
+  const second = batches[batches.length - 1]?.arrived ?? 0;
+  expect(second).toBeGreaterThan(first);
+  logs.setView({ ...VIEW, filter: "no line says this" });
+  await vi.advanceTimersByTimeAsync(3_000);
+  expect(batches[batches.length - 1]?.arrived).toBe(0);
+  logs.close();
+});
+
+test("an around window reads the entries before one and from it on, by its id", async () => {
+  const { logs, batches } = session();
+  await vi.advanceTimersByTimeAsync(3_000);
+  const tail = batches[batches.length - 1]?.window?.entries ?? [];
+  const anchor = tail[tail.length - 5];
+  expect(anchor).toBeDefined();
+  logs.setWindow({ type: "around", id: anchor?.id ?? 0, before: 2, after: 3 });
+  await vi.advanceTimersByTimeAsync(200);
+  const ids = batches[batches.length - 1]?.window?.entries.map(
+    (entry) => entry.id,
+  );
+  expect(ids).toHaveLength(5);
+  expect(ids?.[2]).toBe(anchor?.id);
+  logs.close();
+});

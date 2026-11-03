@@ -217,7 +217,7 @@ fn views_show_what_the_mock_shows() {
         });
         let mut buffer = Buffer::new(limits);
         let entries = case.entries.into_iter().map(kind).collect();
-        buffer.insert(entries, |kind| spec.judge(kind));
+        buffer.insert(entries, |_, kind| spec.judge(kind));
 
         assert_eq!(
             Some(view::total(&buffer, &spec)),

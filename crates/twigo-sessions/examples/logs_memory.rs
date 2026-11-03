@@ -107,7 +107,7 @@ fn main() {
                 (parsed.at.expect("stamped"), kind)
             })
             .collect();
-        buffer.insert(entries, |kind| spec.judge(kind));
+        buffer.insert(entries, |_, kind| spec.judge(kind));
     }
     let after = dhat::HeapStats::get();
     let held = after.curr_bytes - before.curr_bytes;

@@ -90,13 +90,16 @@ export class LogBuffer {
     this.#limits = limits;
   }
 
-  /** Adds entries in the order they came, each with the next id and what `judge` makes of it, at its place in time. */
-  insert(incoming: readonly Timed[], judge: (kind: Kind) => Judged): void {
+  /** Adds entries in the order they came, each with the next id and what `judge` makes of it and its time, at its place in time. */
+  insert(
+    incoming: readonly Timed[],
+    judge: (at: bigint, kind: Kind) => Judged,
+  ): void {
     const fresh = incoming.map(([at, kind]): Entry => ({
       id: ++this.#next,
       at,
       kind,
-      judged: judge(kind),
+      judged: judge(at, kind),
     }));
     fresh.sort(order);
     const first = fresh[0];

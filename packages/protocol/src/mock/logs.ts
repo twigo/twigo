@@ -24,6 +24,7 @@ import {
   entries,
   histogram,
   judge,
+  keeps,
   matches,
   rfc3339,
   spec,
@@ -68,6 +69,8 @@ export class MockLogs {
   readonly #buffer = new LogBuffer();
   #streams = new Map<string, Stream>();
   #members = new Set<string>();
+  /** The entries the view kept as they came since the source or the view last changed. */
+  #arrived = 0;
   #seq = 0;
   #unacked: number | undefined;
   #dirty = { pods: true, lines: true };
@@ -103,6 +106,7 @@ export class MockLogs {
   setSource(source: LogSource): void {
     this.#source = source;
     this.#buffer.clear();
+    this.#arrived = 0;
     this.#streams.clear();
     this.#members.clear();
     this.#start(Date.now());
@@ -112,6 +116,7 @@ export class MockLogs {
   setView(view: LogView): void {
     this.#spec = spec(view);
     this.#buffer.judge((kind) => judge(this.#spec, kind));
+    this.#arrived = 0;
     this.#dirty.lines = true;
   }
 
@@ -288,7 +293,12 @@ export class MockLogs {
 
   #insert(incoming: readonly Timed[]): void {
     if (incoming.length === 0) return;
-    this.#buffer.insert(incoming, (kind) => judge(this.#spec, kind));
+    const checked = this.#spec;
+    this.#buffer.insert(incoming, (at, kind) => {
+      const judged = judge(checked, kind);
+      if (keeps(checked, at, judged)) this.#arrived++;
+      return judged;
+    });
     this.#dirty.lines = true;
   }
 
@@ -345,6 +355,7 @@ export class MockLogs {
       matches: matches(buffer, checked),
       histogram: histogram(buffer),
       dropped: buffer.droppedEver,
+      arrived: this.#arrived,
     });
     this.#dirty = { pods: false, lines: false };
   }

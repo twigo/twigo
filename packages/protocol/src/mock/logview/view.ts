@@ -121,11 +121,12 @@ export function judge(spec: Spec, kind: Kind): Judged {
   return { passes, hits };
 }
 
-function keeps(spec: Spec, entry: Entry): boolean {
-  if (!entry.judged.passes) return false;
+/** Whether it keeps an entry at `at` it judged so. */
+export function keeps(spec: Spec, at: bigint, judged: Judged): boolean {
+  if (!judged.passes) return false;
   if (!spec.range) return true;
   const [from, to] = spec.range;
-  return from <= entry.at && entry.at < to;
+  return from <= at && at < to;
 }
 
 /** One of the view's entries: the `Dropped` entry, or one of the buffer's. */
@@ -133,7 +134,9 @@ type Shown = { readonly dropped: Dropped } | Entry;
 
 /** The view's entries in order. */
 function shown(buffer: LogBuffer, spec: Spec): Shown[] {
-  const kept: Shown[] = buffer.entries.filter((entry) => keeps(spec, entry));
+  const kept: Shown[] = buffer.entries.filter((entry) =>
+    keeps(spec, entry.at, entry.judged),
+  );
   return buffer.dropped ? [{ dropped: buffer.dropped }, ...kept] : kept;
 }
 
@@ -151,17 +154,42 @@ export function entries(
   const total = all.length;
   let start: number;
   let end: number;
-  if (window.type === "tail") {
-    start = Math.max(0, total - window.count);
-    end = total;
-  } else {
-    start = Math.min(window.start, total);
-    end = Math.min(Math.max(window.end, start), total);
+  switch (window.type) {
+    case "tail":
+      start = Math.max(0, total - window.count);
+      end = total;
+      break;
+    case "range":
+      start = Math.min(window.start, total);
+      end = Math.min(Math.max(window.end, start), total);
+      break;
+    case "around": {
+      const at = place(buffer, spec, window.id);
+      start = Math.max(0, at - window.before);
+      end = Math.min(at + window.after, total);
+      break;
+    }
   }
   return {
     start,
     entries: all.slice(start, end).map((each) => wire(each, spec)),
   };
+}
+
+/**
+ * Where the entry with `id` stands in the view: at its index while the
+ * view keeps it, else where its time, ties by id, places it, and at the
+ * view's start once the buffer no longer holds it.
+ */
+function place(buffer: LogBuffer, spec: Spec, id: number): number {
+  const entry = buffer.entries.find((each) => each.id === id);
+  if (!entry) return 0;
+  const before = buffer.entries.filter(
+    (each) =>
+      (each.at < entry.at || (each.at === entry.at && each.id < entry.id)) &&
+      keeps(spec, each.at, each.judged),
+  ).length;
+  return (buffer.dropped ? 1 : 0) + before;
 }
 
 function wire(shown: Shown, spec: Spec): LogEntry {

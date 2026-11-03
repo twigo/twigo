@@ -78,11 +78,9 @@ impl Spec {
         Judged { passes, hits }
     }
 
-    fn keeps(&self, entry: &Entry) -> bool {
-        entry.judged.passes
-            && self
-                .range
-                .is_none_or(|(from, to)| (from..to).contains(&entry.at))
+    /// Whether it keeps an entry at `at` it judged so.
+    pub fn keeps(&self, at: i64, judged: Judged) -> bool {
+        judged.passes && self.range.is_none_or(|(from, to)| (from..to).contains(&at))
     }
 }
 
@@ -169,7 +167,7 @@ fn shown<'a>(buffer: &'a Buffer, spec: &'a Spec) -> impl Iterator<Item = Shown<'
         buffer
             .entries()
             .iter()
-            .filter(|entry| spec.keeps(entry))
+            .filter(|entry| spec.keeps(entry.at, entry.judged))
             .map(Shown::Entry),
     )
 }
@@ -187,6 +185,13 @@ pub fn window(buffer: &Buffer, spec: &Spec, window: LogWindow) -> LogEntries {
             let start = start.min(total);
             (start, end.clamp(start, total))
         }
+        LogWindow::Around { id, before, after } => {
+            let at = place(buffer, spec, id);
+            (
+                at.saturating_sub(before),
+                at.saturating_add(after).min(total),
+            )
+        }
     };
     let entries = shown(buffer, spec)
         .skip(start as usize)
@@ -194,6 +199,23 @@ pub fn window(buffer: &Buffer, spec: &Spec, window: LogWindow) -> LogEntries {
         .map(|shown| entry(shown, spec))
         .collect();
     LogEntries { start, entries }
+}
+
+/// Where the entry with `id` stands in the view: at its index while the
+/// view keeps it, else where its time, ties by id, places it, and at the
+/// view's start once the buffer no longer holds it.
+fn place(buffer: &Buffer, spec: &Spec, id: u64) -> u32 {
+    let entries = buffer.entries();
+    let Some(key) = entries.iter().find(|entry| entry.id == id).map(Entry::key) else {
+        return 0;
+    };
+    let before = entries
+        .iter()
+        .take_while(|entry| entry.key() < key)
+        .filter(|entry| spec.keeps(entry.at, entry.judged))
+        .count();
+    let dropped = usize::from(buffer.dropped().is_some());
+    u32::try_from(dropped + before).unwrap_or(u32::MAX)
 }
 
 fn entry(shown: Shown<'_>, spec: &Spec) -> LogEntry {
@@ -400,7 +422,7 @@ pub fn lines(buffer: &Buffer, spec: Option<&Spec>) -> Vec<u8> {
         let Kind::Line { origin, text, .. } = &entry.kind else {
             continue;
         };
-        if spec.is_some_and(|spec| !spec.keeps(entry)) {
+        if spec.is_some_and(|spec| !spec.keeps(entry.at, entry.judged)) {
             continue;
         }
         let line = format!(
