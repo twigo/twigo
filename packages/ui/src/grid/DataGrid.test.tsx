@@ -216,6 +216,20 @@ test("a right click opens a row's menu, but neither on a group header nor on a r
   expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
 });
 
+test("a move to a row still loading is dropped once the list no longer reaches it", () => {
+  const loaded = (length: number) =>
+    list(
+      PODS.slice(0, length).map((pod, index) => (index < 30 ? pod : undefined)),
+    );
+  const { handlers, controller, rerender } = grid(loaded(100));
+  act(() => {
+    controller()?.moveToEdge("last");
+  });
+  rerender(loaded(50));
+  rerender(list(PODS));
+  expect(handlers.onSelect).not.toHaveBeenCalled();
+});
+
 test("a move down scrolls the cursor's row clear of the bottom, a move up clear of the sticky header", () => {
   const { controller } = grid({ ...list(PODS), selected: "p22" });
   const element = scrollable(PODS.length);

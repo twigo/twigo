@@ -145,6 +145,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     index: number;
     marks?: readonly string[];
   }>();
+  if (wanted !== undefined && wanted.index >= length) setWanted(undefined);
   const wantedItem = wanted === undefined ? undefined : item(wanted.index);
   const latest = useRef({
     cursor,
