@@ -16,6 +16,8 @@ export interface QueryRow {
   /** Unix milliseconds. */
   readonly created: number | null;
   readonly labels: Readonly<Record<string, string>>;
+  /** The uid of the object that controls it. */
+  readonly controller: string | null;
   readonly cells: readonly Cell[];
 }
 
@@ -132,6 +134,12 @@ export function runQuery<R extends QueryRow>(
       continue;
     }
     if (compiled.selector && !compiled.selector.matches(row.labels)) continue;
+    if (
+      query.owners !== null &&
+      (row.controller === null || !query.owners.includes(row.controller))
+    ) {
+      continue;
+    }
     if (
       compiled.text &&
       !compiled.text.keeps(

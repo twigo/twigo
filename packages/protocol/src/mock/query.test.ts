@@ -8,6 +8,7 @@ interface CaseRow {
   name: string;
   created: string | null;
   labels: Record<string, string>;
+  owners?: { uid: string; controller: boolean }[];
   cells: Cell[];
 }
 
@@ -22,6 +23,8 @@ test("only the choices' own keys count, not Object.prototype's", () => {
     namespaced: false,
     namespaces: [],
     labelSelector: null,
+    fieldSelector: null,
+    owners: null,
     text: "x",
     columns: {},
     sort: null,
@@ -30,7 +33,14 @@ test("only the choices' own keys count, not Object.prototype's", () => {
     values: null,
   };
   const rows: QueryRow[] = [
-    { id: "w", namespace: null, created: null, labels: {}, cells: ["w", "x"] },
+    {
+      id: "w",
+      namespace: null,
+      created: null,
+      labels: {},
+      controller: null,
+      cells: ["w", "x"],
+    },
   ];
   expect(runQuery(rows, compileQuery(query, columns)).rows).toEqual([]);
 });
@@ -45,6 +55,8 @@ for (const list of CASES.lists) {
         namespaced: list.namespaced,
         namespaces: [],
         labelSelector: null,
+        fieldSelector: null,
+        owners: null,
         text: null,
         columns: null,
         sort: null,
@@ -68,6 +80,8 @@ for (const list of CASES.lists) {
           namespace: row.namespace,
           created: row.created === null ? null : Date.parse(row.created),
           labels: row.labels,
+          controller:
+            row.owners?.find((owner) => owner.controller)?.uid ?? null,
           cells: withNamespace
             ? [first ?? null, row.namespace, ...rest]
             : row.cells,

@@ -10,6 +10,8 @@ function query(rest: Partial<ListQuery> = {}): ListQuery {
     namespaced: true,
     namespaces: [],
     labelSelector: null,
+    fieldSelector: null,
+    owners: null,
     text: null,
     columns: null,
     sort: null,

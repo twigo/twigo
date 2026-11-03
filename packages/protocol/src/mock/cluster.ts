@@ -20,6 +20,11 @@ export interface Pod {
   version: number;
 }
 
+/** The mock's uid of the ReplicaSet that controls a pod: its row id. */
+export function replicaSetUid(context: string, pod: Pod): string {
+  return `${context}/${pod.namespace}/${pod.generateName.slice(0, -1)}`;
+}
+
 const ABNORMAL: [string, number][] = [
   ["Pending", 0.02],
   ["ContainerCreating", 0.01],

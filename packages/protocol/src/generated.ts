@@ -239,6 +239,16 @@ namespaced: boolean,
  */
 namespaces: Array<string>, labelSelector: string | null, 
 /**
+ * Sent to the server, as `spec.nodeName=kind-control-plane` picks a
+ * node's pods.
+ */
+fieldSelector: string | null, 
+/**
+ * Keeps the rows whose controller is one of the objects with these
+ * uids, as a workload's pods are its ReplicaSets'; empty keeps none.
+ */
+owners: Array<string> | null, 
+/**
  * A substring of a shown cell in any case of ASCII letters, `!` before
  * it to keep the rows without one, or a regex between slashes, also in
  * any case: `/^web-\d+/`, negated as `!/…/`.

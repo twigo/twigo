@@ -1,6 +1,13 @@
 import { humanDuration } from "@twigo/utils";
 import type { Cell, Column, Row } from "../generated";
-import { generatedAt, hash, podCells, type Cluster, type Pod } from "./cluster";
+import {
+  generatedAt,
+  hash,
+  podCells,
+  replicaSetUid,
+  type Cluster,
+  type Pod,
+} from "./cluster";
 import {
   DEPLOYMENT_COLUMNS,
   EVENT_COLUMNS,
@@ -37,6 +44,7 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
         namespace: pod.namespace,
         created: pod.created,
         labels: {},
+        controller: replicaSetUid(cluster.context, pod),
         cells: podCells(pod, withNamespace),
         generated: podGenerated(pod),
       })),
@@ -49,6 +57,7 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
         namespace: null,
         created: node.created,
         labels: {},
+        controller: null,
         cells: [
           node.name,
           node.status,
@@ -72,6 +81,7 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
         namespace: deployment.namespace,
         created: deployment.created,
         labels: { app: deployment.name },
+        controller: null,
         cells: namespaced(
           [
             deployment.name,
@@ -97,6 +107,7 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
         namespace: event.pod.namespace,
         created: event.first,
         labels: {},
+        controller: null,
         cells: namespaced(
           [
             humanDuration(cluster.now - event.last),

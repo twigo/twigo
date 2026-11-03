@@ -108,6 +108,8 @@ function Grid({
     namespaced: resource.namespaced,
     namespaces: [...(input.namespaces ?? spaces.state(input.space).namespaces)],
     labelSelector: input.labels ?? null,
+    fieldSelector: null,
+    owners: null,
     text: text === "" ? null : text,
     // Without a text the choices change no rows, so they stay out of the
     // query and a column toggle does not resubscribe.

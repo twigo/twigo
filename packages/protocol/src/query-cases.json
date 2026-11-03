@@ -46,7 +46,8 @@
             "app": "web",
             "tier": "front"
           },
-          "cells": ["web-1", "1/1", "Running", "0", null, "10.0.0.1"]
+          "cells": ["web-1", "1/1", "Running", "0", null, "10.0.0.1"],
+          "owners": [{ "uid": "rs-a", "controller": true }]
         },
         {
           "namespace": "alpha",
@@ -64,7 +65,8 @@
             "12 (5m ago)",
             null,
             "10.0.0.2"
-          ]
+          ],
+          "owners": [{ "uid": "rs-a", "controller": true }]
         },
         {
           "namespace": "alpha",
@@ -74,7 +76,8 @@
             "app": "web",
             "tier": "front"
           },
-          "cells": ["web-10", "1/2", "Running", "3 (1h ago)", null, "10.0.0.3"]
+          "cells": ["web-10", "1/2", "Running", "3 (1h ago)", null, "10.0.0.3"],
+          "owners": [{ "uid": "rs-b", "controller": true }]
         },
         {
           "namespace": "alpha",
@@ -85,7 +88,8 @@
             "tier": "back",
             "gen": "3"
           },
-          "cells": ["db-1", "2/2", "Running", "3 (5m ago)", null, "10.0.1.1"]
+          "cells": ["db-1", "2/2", "Running", "3 (5m ago)", null, "10.0.1.1"],
+          "owners": [{ "uid": "rs-a", "controller": false }]
         },
         {
           "namespace": "beta",
@@ -125,6 +129,45 @@
         }
       ],
       "cases": [
+        {
+          "name": "owners keep the rows their uids control",
+          "query": {
+            "owners": ["rs-a", "rs-b"]
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 3,
+            "ids": [
+              "kind-test/alpha/web-1",
+              "kind-test/alpha/web-2",
+              "kind-test/alpha/web-10"
+            ]
+          }
+        },
+        {
+          "name": "an owner that is no controller keeps nothing",
+          "query": {
+            "owners": ["rs-a"],
+            "namespaces": ["alpha"],
+            "text": "db"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 0,
+            "ids": []
+          }
+        },
+        {
+          "name": "no owners keep no rows",
+          "query": {
+            "owners": []
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 0,
+            "ids": []
+          }
+        },
         {
           "name": "by Name in natural order, with Namespace after Name",
           "query": {},
