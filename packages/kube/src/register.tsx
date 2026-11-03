@@ -13,6 +13,7 @@ import {
   namespaceProvider,
   resourceProvider,
 } from "./quickaccess";
+import { registerLogs } from "./logs/register";
 import { registerResourceActions } from "./resourceActions";
 import { createServices, type ListServices } from "./services";
 import {
@@ -117,7 +118,8 @@ export function registerKube(workbench: Workbench): void {
   keybindings.register("core", [
     { key: "escape", command: "k8s.details.close", when: "detailsOpen" },
   ]);
-  registerResourceActions(workbench, services);
+  const logs = registerLogs(workbench);
+  registerResourceActions(workbench, services, logs.open);
 }
 
 /**

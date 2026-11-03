@@ -2,23 +2,26 @@ import {
   Copy,
   FileCode,
   PanelRight,
+  ScrollText,
   SquareArrowOutUpRight,
   X,
 } from "lucide-react";
 import type { MenuId, Workbench } from "@twigo/workbench";
+import type { LogsObject } from "./logs/register";
 import type { ListServices } from "./services";
 import { objectOf, type Selected } from "./selection";
-import { objectUri, parseListUri } from "./uri";
+import { objectUri, parseListUri, parseObjectUri } from "./uri";
 
 /**
  * Commands on the active list's selected row and on its marked rows, and
  * the menus that place them (ARCHITECTURE 4.4, 5.1): the row's context
- * menu, its hover buttons and the marked rows' bar. Logs, shell, YAML and
- * delete join them with their commands.
+ * menu, its hover buttons and the marked rows' bar, and an object editor's
+ * title. Shell and delete join them with their commands.
  */
 export function registerResourceActions(
   workbench: Workbench,
   { selection, statuses, states }: ListServices,
+  openLogs: (object: LogsObject) => void,
 ): void {
   const { commands, menus, editors, keybindings } = workbench;
   /** The active list editor and its selected row. */
@@ -52,6 +55,26 @@ export function registerResourceActions(
         const found = target();
         if (found)
           selection.set(found.uri, { ...found.selected, reveal: true });
+      },
+    },
+    {
+      id: "k8s.resource.logs",
+      title: "Logs",
+      icon: ScrollText,
+      key: "l",
+      when: "resource.logs",
+      menus: [
+        ["resource/context", "navigation"],
+        ["resource/inline", "navigation"],
+        ["resource/details", "navigation"],
+      ],
+      run: () => {
+        const found = target();
+        const space = found && parseListUri(found.uri)?.space;
+        if (!found || space === undefined) return;
+        const { namespace, name } = objectOf(found.selected);
+        if (namespace === undefined) return;
+        openLogs({ space, gvr: found.selected.gvr, namespace, name });
       },
     },
     {
@@ -173,6 +196,23 @@ export function registerResourceActions(
       }
     },
   );
+  commands.register({
+    id: "k8s.object.logs",
+    title: "Logs",
+    category: "Resource",
+    icon: ScrollText,
+    enablement: "resource.logs",
+    run: (uri) => {
+      const object = typeof uri === "string" ? parseObjectUri(uri) : undefined;
+      if (object?.namespace === undefined) return;
+      openLogs({ ...object, namespace: object.namespace });
+    },
+  });
+  menus.append("editor/title", {
+    command: "k8s.object.logs",
+    group: "navigation",
+    when: "resource.logs",
+  });
   keybindings.register("core", [
     ...keys,
     {

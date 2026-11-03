@@ -4,6 +4,7 @@ import type { Resource } from "@twigo/protocol";
 import { ActionBar, EmptyState, GridSkeleton } from "@twigo/ui";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { Details } from "../Details";
+import { logsKind } from "../logs/entries";
 import { sameGvr, useResources } from "../discovery";
 import { pluralTitle } from "../kinds";
 import type { ListServices } from "../services";
@@ -127,6 +128,7 @@ function Loaded({
     scope.set("detailsOpen", open);
     scope.set("listMarked", marks.size > 0);
     scope.set("resource.selected", selected !== undefined);
+    scope.set("resource.logs", logsKind(input.gvr) !== undefined);
     const unregister = lists.register(wrapper, {
       filter: () => {
         states.focus(uri);
@@ -142,7 +144,17 @@ function Loaded({
       unregister();
       scope.dispose();
     };
-  }, [wrapper, keys, lists, states, uri, open, marks.size, selected]);
+  }, [
+    wrapper,
+    keys,
+    lists,
+    states,
+    uri,
+    open,
+    marks.size,
+    selected,
+    input.gvr,
+  ]);
 
   return (
     <div ref={setWrapper} className="relative flex h-full overflow-hidden">

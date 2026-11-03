@@ -111,3 +111,40 @@ export function parseObjectUri(uri: string): ObjectInput | undefined {
     name,
   };
 }
+
+/**
+ * A logs tab in the panel (ARCHITECTURE 4.3, 4.6), which follows a pod or
+ * a workload's pods: `logs://<space>/<group>/<version>/<resource>/<namespace>/<name>`,
+ * the core group an empty segment, as in an object's URI.
+ */
+export interface LogsInput {
+  readonly space: string;
+  readonly gvr: Gvr;
+  readonly namespace: string;
+  readonly name: string;
+}
+
+export const LOGS_SCHEME = "logs";
+
+export function logsUri({ space, gvr, namespace, name }: LogsInput): string {
+  const path = [gvr.group, gvr.version, gvr.resource, namespace, name]
+    .map(encodeURIComponent)
+    .join("/");
+  return `${LOGS_SCHEME}://${encodeURIComponent(space)}/${path}`;
+}
+
+export function parseLogsUri(uri: string): LogsInput | undefined {
+  const url = new URL(uri);
+  if (url.protocol !== `${LOGS_SCHEME}:`) return undefined;
+  const parts = url.pathname.split("/").slice(1).map(decodeURIComponent);
+  if (parts.length !== 5) return undefined;
+  const [group = "", version = "", resource = "", namespace = "", name = ""] =
+    parts;
+  if (!version || !resource || !namespace || !name) return undefined;
+  return {
+    space: decodeURIComponent(url.host),
+    gvr: { group, version, resource },
+    namespace,
+    name,
+  };
+}
