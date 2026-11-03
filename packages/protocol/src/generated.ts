@@ -470,7 +470,7 @@ marks: Array<TextRange>, } | { "type": "ended", id: number, pod: string, contain
 /**
  * RFC 3339.
  */
-time: string, exit_code: number | null, reason: string | null, 
+time: string, exitCode: number | null, reason: string | null, 
 /**
  * RFC 3339, when the kubelet starts it again, in a crash loop's
  * back-off.

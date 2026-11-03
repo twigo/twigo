@@ -172,7 +172,7 @@ pub struct LogEntries {
 /// Every entry has an `id`, which stays its own while the buffer holds it,
 /// so the webview keeps its place as entries enter and leave before it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum LogEntry {
     Line {
         id: u64,
