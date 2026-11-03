@@ -110,54 +110,55 @@ fn second(at: i64) -> i64 {
     at.div_euclid(SECOND) * SECOND
 }
 
-/// The lines a reopened read has delivered already: those before the last
-/// one's time, and as many at that time as came before, since the server
-/// reads `sinceTime` to the second (the API server passes it on as
-/// `time.RFC3339`, kubernetes v1.37.0 `pkg/registry/core/pod/strategy.go`)
-/// and the kubelet sends every line from it on (cri-client
-/// `logWriter.write`).
+/// The lines a reopened read has delivered already. It starts at the
+/// second of the latest line, since the server reads `sinceTime` to the
+/// second (the API server passes it on as `time.RFC3339`, kubernetes
+/// v1.37.0 `pkg/registry/core/pod/strategy.go`), and the kubelet sends each
+/// line of the log at or after it, in the log's order (cri-client
+/// `logWriter.write`), so the lines the stream admitted at or after that
+/// second come first. Times may go back a little, as containerd stamps
+/// stdout and stderr in goroutines of their own, so they are counted, not
+/// compared.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Resume {
-    /// The last line's time, and how many lines came at it.
-    last: Option<(i64, u32)>,
-    /// What a reopened read has still to skip.
-    skip: Option<(i64, u32)>,
+    /// The latest time admitted, and how many admitted lines came at or
+    /// after its second.
+    latest: Option<(i64, u32)>,
+    /// How many lines a reopened read has still to skip.
+    skip: u32,
 }
 
 const SECOND: i64 = 1_000_000_000;
 
 impl Resume {
-    /// Where a read after a cut starts: the second of the last line.
+    /// Where a read after a cut starts: the second of the latest line.
     fn from(&self) -> Option<i64> {
-        self.last.map(|(at, _)| second(at))
+        self.latest.map(|(at, _)| second(at))
     }
 
     /// Starts a reopened read, which skips what came already.
     fn reopen(&mut self) {
-        self.skip = self.last;
+        self.skip = self.latest.map_or(0, |(_, count)| count);
     }
 
     /// Whether a line read at `at` is new, counting it if so.
     pub fn admit(&mut self, at: i64) -> bool {
-        if let Some((time, left)) = &mut self.skip {
-            if at < *time {
-                return false;
-            }
-            if at == *time && *left > 0 {
-                *left -= 1;
-                return false;
-            }
-            self.skip = None;
+        if self.skip > 0 {
+            self.skip -= 1;
+            return false;
         }
-        self.last = match self.last {
-            Some((time, count)) if time == at => Some((time, count + 1)),
+        self.latest = match self.latest {
+            Some((latest, count)) if second(at) == second(latest) => {
+                Some((latest.max(at), count + 1))
+            }
+            Some((latest, count)) if at < latest => Some((latest, count)),
             _ => Some((at, 1)),
         };
         true
     }
 
     fn last_at(&self) -> Option<i64> {
-        self.last.map(|(at, _)| at)
+        self.latest.map(|(at, _)| at)
     }
 }
 
@@ -622,6 +623,11 @@ mod tests {
 
     use super::*;
 
+    fn reread(resume: &mut Resume, times: &[i64]) -> Vec<bool> {
+        resume.reopen();
+        times.iter().map(|at| resume.admit(*at)).collect()
+    }
+
     #[test]
     fn a_reopened_read_skips_what_came_already() {
         let mut resume = Resume::default();
@@ -629,16 +635,39 @@ mod tests {
             assert!(resume.admit(at));
         }
         assert_eq!(resume.from(), Some(0));
-        resume.reopen();
-        let again: Vec<bool> = [1_000, 1_500, 2_000, 2_000, 2_000, 2_500, 2_500]
-            .into_iter()
-            .map(|at| resume.admit(at))
-            .collect();
-        assert_eq!(again, [false, false, false, false, true, true, true]);
+        let again = reread(&mut resume, &[1_500, 2_000, 2_000, 2_000, 2_500]);
+        assert_eq!(again, [false, false, false, true, true]);
     }
 
     #[test]
-    fn a_reopened_read_resumes_from_the_last_lines_second() {
+    fn a_reopened_read_skips_exactly_what_came_at_or_after_its_second_when_times_go_back() {
+        let ms = |ms: i64| ms * 1_000_000;
+        let mut resume = Resume::default();
+        for at in [ms(1_900), ms(2_200), ms(2_300), ms(2_100)] {
+            assert!(resume.admit(at));
+        }
+        assert_eq!(resume.from(), Some(2 * SECOND));
+        let again = reread(
+            &mut resume,
+            &[ms(2_200), ms(2_300), ms(2_100), ms(2_250), ms(2_400)],
+        );
+        assert_eq!(again, [false, false, false, true, true]);
+        let again = reread(
+            &mut resume,
+            &[
+                ms(2_200),
+                ms(2_300),
+                ms(2_100),
+                ms(2_250),
+                ms(2_400),
+                ms(2_050),
+            ],
+        );
+        assert_eq!(again, [false, false, false, false, false, true]);
+    }
+
+    #[test]
+    fn a_reopened_read_resumes_from_the_latest_lines_second() {
         let mut resume = Resume::default();
         assert!(resume.admit(5 * SECOND + 700));
         assert_eq!(resume.from(), Some(5 * SECOND));
