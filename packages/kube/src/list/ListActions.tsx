@@ -46,10 +46,12 @@ export function ListActions({
   const input = parseListUri(uri);
   const list = statuses.get(uri);
   const field = useRef<HTMLInputElement>(null);
-  const request = states.focusRequest(uri);
+  const wanted = states.wantsFocus(uri);
   useEffect(() => {
-    if (request > 0) field.current?.focus();
-  }, [request]);
+    if (!wanted) return;
+    field.current?.focus();
+    states.focused(uri);
+  }, [wanted, states, uri]);
   if (!input) return null;
   const { gvr } = input;
   const column = statusColumn(gvr);

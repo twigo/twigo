@@ -139,6 +139,35 @@ test("/ in the list focuses the filter field, and its text filters the rows", as
   );
 });
 
+test("the filter field takes the focus when / asks for it, not each time the list shows again", async () => {
+  const workbench = await openList();
+  const pods = "k8s-list://prod-eu/v1/pods";
+  const object = `k8s://prod-eu//v1/pods/${cellOf(rows()[0], "Namespace")}/${nameOf(rows()[0])}`;
+  focusGrid();
+  key("Slash");
+  expect(document.activeElement).toBe(filterField());
+
+  for (const other of ["k8s-list://prod-eu/v1/nodes", object]) {
+    act(() => {
+      workbench.editors.open(other, { preview: false });
+    });
+    await settle();
+    act(() => {
+      if (document.activeElement instanceof HTMLElement)
+        document.activeElement.blur();
+    });
+    act(() => {
+      workbench.editors.open(pods);
+    });
+    await settle();
+    expect(document.activeElement).not.toBe(filterField());
+  }
+
+  focusGrid();
+  key("Slash");
+  expect(document.activeElement).toBe(filterField());
+});
+
 test("a row's actions button and a right click run the resource commands on that row", async () => {
   const writeText = clipboard();
   await openList();

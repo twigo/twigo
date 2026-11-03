@@ -16,13 +16,17 @@ interface State {
   /** Null when the user showed every row over the health in the URI. */
   readonly health?: HealthChoice | null;
   readonly collapsed: ReadonlySet<string>;
-  /** Each ask for the filter field's focus is a new number. */
-  readonly focus: number;
+  /** The filter field was asked to take the focus and has not yet. */
+  readonly focus: boolean;
   /** The view the row's details show, kept as the selection moves. */
   readonly details: ObjectTab;
 }
 
-const INITIAL: State = { collapsed: new Set(), focus: 0, details: "overview" };
+const INITIAL: State = {
+  collapsed: new Set(),
+  focus: false,
+  details: "overview",
+};
 
 /**
  * What each open list editor shows, by URI (ARCHITECTURE 4.4): its sort,
@@ -96,10 +100,15 @@ export class ListStates {
 
   /** Asks the list's filter field to take the focus. */
   focus(uri: string): void {
-    this.#update(uri, { focus: this.#get(uri).focus + 1 });
+    this.#update(uri, { focus: true });
   }
 
-  focusRequest(uri: string): number {
+  wantsFocus(uri: string): boolean {
     return this.#get(uri).focus;
+  }
+
+  /** The filter field took the focus it was asked to take. */
+  focused(uri: string): void {
+    if (this.#get(uri).focus) this.#update(uri, { focus: false });
   }
 }
