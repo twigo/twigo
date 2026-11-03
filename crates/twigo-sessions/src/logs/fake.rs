@@ -58,6 +58,8 @@ struct Container {
     previous: Option<String>,
     /// The next read's body breaks after this many lines.
     breaks: Option<usize>,
+    /// The next read's body stays open after what the log holds.
+    holds: bool,
     fails: bool,
 }
 
@@ -187,6 +189,10 @@ impl Fake {
     /// The next read of a container breaks after `lines` lines.
     pub fn break_after(&self, pod: &str, container: &str, lines: usize) {
         self.state().container(pod, container).breaks = Some(lines);
+    }
+
+    pub fn hold(&self, pod: &str, container: &str) {
+        self.state().container(pod, container).holds = true;
     }
 
     fn respond(&self, request: &Request<kube::client::Body>) -> Response<Body> {
@@ -328,6 +334,7 @@ impl State {
             );
         };
         let breaks = served.breaks.take();
+        let holds = std::mem::take(&mut served.holds);
         let instance = served.instances.entry(id).or_default();
         if instance.removed {
             let gone = "failed to try resolving symlinks in path \"/var/log/pods/0.log\": lstat /var/log/pods/0.log: no such file or directory\n";
@@ -353,6 +360,10 @@ impl State {
             return body;
         }
         lines.iter().for_each(send);
+        if holds {
+            self.stranded.push(sender);
+            return body;
+        }
         if param("follow") == Some("true") && !instance.stopped {
             instance.followers.push((since, sender));
         }

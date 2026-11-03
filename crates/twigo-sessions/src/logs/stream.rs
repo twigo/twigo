@@ -347,8 +347,8 @@ fn restarts(pod: &Value, container: &str, exit_code: Option<i64>) -> bool {
 }
 
 /// Reads the container's log, as the pod it is told of says, until it has
-/// nothing more to read; once `pod` closes, as when the pod left, it ends
-/// as soon as the read under way does.
+/// nothing more to read; once `pod` closes, as when the pod left, it makes
+/// no new read, so it ends as soon as the read under way does.
 pub async fn run(stream: Stream, mut pod: watch::Receiver<Arc<Value>>, send: impl Fn(Event)) {
     let mut reader = Reader {
         stream,
@@ -467,6 +467,9 @@ impl Reader {
                 }
                 continue;
             }
+            if gone(pod) {
+                return;
+            }
             let id = id.to_owned();
             // A reread of the instance checks that the kubelet still reads
             // it, unless the last found it did not and the status still
@@ -570,6 +573,9 @@ impl Reader {
         send: &impl Fn(Event),
     ) -> Option<bool> {
         loop {
+            if gone(pod) {
+                return None;
+            }
             self.resume.reopen(false);
             let start = self.resume.from().map_or(from, ReadFrom::Time);
             match self.read(true, start, before, send).await {
@@ -616,6 +622,9 @@ impl Reader {
                 send(Event::Finished);
                 return;
             };
+            if gone(pod) {
+                return;
+            }
             let id = id.to_owned();
             self.resume.reopen(true);
             let start = self.resume.from().map_or(from, ReadFrom::Time);
@@ -859,6 +868,15 @@ fn ended(terminated: &Value, status: &Status<'_>, last: Option<i64>) -> Event {
     }
 }
 
+/// Whether the pod's channel has closed, as once the pod left. A read then
+/// would find no pod, or another made again under its name, since the API
+/// server looks the pod up by its name before it asks the kubelet
+/// (kubernetes v1.37.0, `pkg/registry/core/pod/strategy.go`,
+/// `LogLocation`).
+fn gone(pod: &watch::Receiver<Arc<Value>>) -> bool {
+    pod.has_changed().is_err()
+}
+
 /// Waits until the status names another instance of the container than
 /// `id`, the one a read started for; never once the pod's channel has
 /// closed, so a read under way ends by itself.
@@ -929,6 +947,10 @@ mod tests {
 
         fn cut(&self) {
             self.clients.connections().retire();
+        }
+
+        fn leave(&mut self) {
+            self.told = watch::channel(Arc::new(Value::Null)).0;
         }
 
         /// The lines and ends it sent, as `text` and `ended`.
@@ -1273,6 +1295,53 @@ mod tests {
         followed.until("its end", has("ended")).await;
         assert_eq!(followed.entries().len(), 8);
         assert_eq!(followed.ends(), [T0 + 7 * SECOND]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_left_pods_stream_ends_with_its_read_when_that_is_cut() {
+        let fake = Fake::default();
+        fake.serve("web-1", "web", Some("web-a"), None);
+        numbered(&fake, "web-a", 1..=1);
+        let mut followed = Followed::new(&fake, web(running(), json!({})), false);
+        followed.until("its line", has("web-a 1")).await;
+        followed.leave();
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        fake.strand("web-1", "web");
+        followed.cut();
+        numbered(&fake, "web-a", 2..=2);
+        followed
+            .until("its end", |followed| followed.task.is_finished())
+            .await;
+        assert_eq!(followed.entries(), ["web-a 1"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_left_pods_stream_reads_no_tail_once_the_status_moved_on() {
+        let fake = Fake::default();
+        let mut followed = cut_across_a_restart(&fake).await;
+        followed.tell(restarted("web-b", "web-a"));
+        followed.leave();
+        followed
+            .until("its end", |followed| followed.task.is_finished())
+            .await;
+        assert_eq!(followed.entries(), ["web-a 1", "web-a 2", "web-a 3"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_left_pods_previous_instance_ends_with_its_read_when_that_is_cut() {
+        let fake = Fake::default();
+        fake.serve("web-1", "web", Some("web-b"), Some("web-a"));
+        numbered(&fake, "web-a", 1..=5);
+        fake.stop("web-1", "web", "web-a");
+        fake.hold("web-1", "web");
+        let mut followed = Followed::new(&fake, restarted("web-b", "web-a"), true);
+        followed.until("its lines", has("web-a 5")).await;
+        followed.leave();
+        followed.cut();
+        followed
+            .until("its end", |followed| followed.task.is_finished())
+            .await;
+        assert_eq!(followed.entries()[..], OLD[..5]);
     }
 
     #[tokio::test(start_paused = true)]
