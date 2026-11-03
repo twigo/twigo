@@ -1,5 +1,5 @@
 import * as v from "valibot";
-import { commandScore } from "@twigo/ui";
+import { fuzzyMatch } from "@twigo/ui";
 import type { Workbench } from "../services";
 import type { QuickAccessProvider, QuickPickItem } from "./registry";
 
@@ -11,8 +11,10 @@ export function filtered<T extends QuickPickItem>(
   const search = filter.trim();
   if (search === "") return [...items];
   return items
-    .map((item) => ({ item, score: commandScore(item.label, search, []) }))
-    .filter(({ score }) => score > 0)
+    .flatMap((item) => {
+      const match = fuzzyMatch(item.label, search);
+      return match ? [{ item, score: match.score }] : [];
+    })
     .sort((a, b) => b.score - a.score)
     .map(({ item }) => item);
 }

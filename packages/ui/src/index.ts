@@ -11,7 +11,7 @@ export * from "./components/skeleton";
 export { cn } from "./lib/cn";
 export * from "./components/toast";
 export * from "./components/notify";
-export { commandScore } from "./lib/score";
+export { fuzzyMatch, type TextMatch, type TextRange } from "./lib/match";
 export * from "./components/actions";
 export * from "./components/chip";
 export * from "./components/count";
@@ -26,6 +26,9 @@ export * from "./components/segmented";
 export * from "./components/stat-tile";
 export * from "./components/status-dot";
 export * from "./components/tab-bar";
+export * from "./components/status-label";
+export * from "./components/highlighted-label";
+export * from "./components/tile";
 export {
   DataGrid,
   GridSkeleton,

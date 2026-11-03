@@ -7,7 +7,7 @@ import {
   type Resource,
   type Row,
 } from "@twigo/protocol";
-import { commandScore } from "@twigo/ui";
+import { fuzzyMatch } from "@twigo/ui";
 import type {
   QuickAccessProvider,
   QuickPickItem,
@@ -102,7 +102,7 @@ export function listProvider(
                 ...resource.shortNames,
                 resource.gvr.resource,
                 resource.kind,
-              ].map((name) => commandScore(name, query.resource, [])),
+              ].map((name) => fuzzyMatch(name, query.resource)?.score ?? 0),
             ),
           }))
           .filter(({ score }) => score > 0)
@@ -195,7 +195,7 @@ export function namespaceProvider(workbench: Workbench): QuickAccessProvider {
       );
       return search === "" || typed
         ? items
-        : items.filter((item) => commandScore(item.label, search, []) > 0);
+        : items.filter((item) => fuzzyMatch(item.label, search));
     },
     accept(item) {
       const space = spaces.active;
