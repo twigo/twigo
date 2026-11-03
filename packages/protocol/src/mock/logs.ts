@@ -26,17 +26,18 @@ import {
 } from "./cluster";
 import { lowerAscii, parseText } from "./query";
 
-/** The tab's streams (decision 23) and the cluster's followed logs (ARCHITECTURE 3.2). */
+/** A tab's streams (ARCHITECTURE 4.6) and the cluster's followed logs (3.2). */
 export const TAB_STREAMS = 10;
 export const CLUSTER_STREAMS = 32;
-/** The buffer's bound in lines (decision 24); the mock's lines are short, so bytes never bind first. */
+/** The buffer's bound in lines (ARCHITECTURE 4.6); the mock's lines are short, so bytes never bind first. */
 const BOUND = 50_000;
 const MATCHES = 10_000;
 const BUCKETS = 80;
 const TICK_MS = 100;
 /** How often a workload's tab sees one of its pods replaced, as in a rollout. */
 const ROLLOUT_MS = 25_000;
-const NAMES = ["app", "istio-proxy", "log-shipper"];
+/** The recorded pods' first container is `api`, so a finding's logs reach a mock stream. */
+const NAMES = ["api", "istio-proxy", "log-shipper"];
 
 type Stored = LogEntry & { readonly at: number };
 
@@ -181,10 +182,15 @@ export class MockLogs {
         if (!writes(pod)) continue;
         const lines: Stored[] = [];
         while (stream.next < now) lines.push(...this.#write(stream));
-        const kept = since.type === "lines" ? lines.slice(-since.lines) : lines;
+        const kept = this.#source.previous
+          ? lastInstance(lines)
+          : since.type === "lines"
+            ? lines.slice(-since.lines)
+            : lines;
         this.#entries.push(...kept);
         if (this.#source.previous) {
-          this.#entries.push(this.#ended(stream, now - 2000));
+          const end = kept[kept.length - 1]?.at ?? now - 2000;
+          this.#entries.push(this.#ended(stream, end + 1));
           this.#streams.delete(key(pod.name, container));
         }
       }
@@ -493,6 +499,24 @@ export class MockLogs {
   }
 }
 
+/** A container's previous instance: its lines from the last start a crash loop wrote, without the end that followed. */
+function lastInstance(entries: readonly Stored[]): Stored[] {
+  const last = (from: number, test: (entry: Stored) => boolean) => {
+    for (let at = from - 1; at >= 0; at--) {
+      const entry = entries[at];
+      if (entry && test(entry)) return at;
+    }
+    return -1;
+  };
+  const ended = last(entries.length, (entry) => entry.type === "ended");
+  const end = ended < 0 ? entries.length : ended;
+  const start = last(
+    end,
+    (entry) => entry.type === "line" && entry.text === CRASH[0],
+  );
+  return entries.slice(Math.max(0, start), end);
+}
+
 function key(pod: string, container: string): string {
   return `${pod}/${container}`;
 }
@@ -714,13 +738,17 @@ function template(random: () => number): string {
   return pool[Math.floor(random() * pool.length)] ?? "";
 }
 
+/** The line a crash loop writes as it exits. */
+export const CRASH_LINE =
+  "panic: dial tcp 10.0.3.4:5432: connect: connection refused";
+
 /** A crash loop's lines before it exits with 1. */
 const CRASH: readonly string[] = [
   "starting auth-api 1.42.0 (commit 9f3b469)",
   'level=warn msg="db pool" attempt=1 err="dial tcp 10.0.3.4:5432: connect: connection refused"',
   'level=warn msg="db pool" attempt=2 err="dial tcp 10.0.3.4:5432: connect: connection refused"',
   "\u001b[31;1mERROR\u001b[0m db pool: giving up after 3 attempts host=pg-auth.payments.svc",
-  "panic: dial tcp 10.0.3.4:5432: connect: connection refused",
+  CRASH_LINE,
   "",
   "goroutine 1 [running]:",
   "main.main()",
