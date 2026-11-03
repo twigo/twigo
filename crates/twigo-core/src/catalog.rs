@@ -42,6 +42,8 @@ impl Contexts {
             .map(|context| twigo_ipc::Context {
                 name: context.name.clone(),
                 color: context.color,
+                source: context.source.clone(),
+                server: context.server.clone(),
             })
             .collect()
     }

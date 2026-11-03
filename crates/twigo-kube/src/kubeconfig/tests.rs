@@ -88,6 +88,75 @@ fn the_first_file_to_define_a_name_wins() {
 }
 
 #[test]
+fn a_context_names_the_file_that_defines_it_from_home() {
+    let dir = tempfile::tempdir().unwrap();
+    let kube = dir.path().join(".kube");
+    fs::create_dir(&kube).unwrap();
+    let first = write(&kube, "first", FIRST);
+    let second = write(dir.path(), "second", SECOND);
+    let elsewhere = tempfile::tempdir().unwrap();
+    let third = write(
+        elsewhere.path(),
+        "third",
+        &FIRST.replace("name: kind-a", "name: kind-c"),
+    );
+    let list = std::env::join_paths([&first, &second, &third]).unwrap();
+    let catalog = Sources::kubectl(Some(&list), Some(dir.path())).load();
+    let source = |name| context(&catalog, name).source.clone();
+    let separator = std::path::MAIN_SEPARATOR;
+    assert_eq!(
+        source("kind-a"),
+        format!("~{separator}.kube{separator}first")
+    );
+    assert_eq!(source("kind-b"), format!("~{separator}second"));
+    assert_eq!(source("kind-c"), third.display().to_string());
+}
+
+#[test]
+fn a_context_says_its_server_without_what_could_be_secret() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = write(
+        dir.path(),
+        "config",
+        "
+clusters:
+- name: plain
+  cluster: { server: 'https://10.0.0.1:6443' }
+- name: secret
+  cluster: { server: 'https://admin:hunter2@rancher.example:8443/k8s/clusters/c-1?token=t#f' }
+- name: ipv6
+  cluster: { server: 'https://[::1]:6443/' }
+- name: none
+  cluster: {}
+contexts:
+- name: kind-plain
+  context: { cluster: plain }
+- name: kind-secret
+  context: { cluster: secret }
+- name: kind-ipv6
+  context: { cluster: ipv6 }
+- name: kind-none
+  context: { cluster: none }
+- name: kind-missing
+  context: { cluster: gone }
+",
+    );
+    let catalog = kubectl(&[&file]).load();
+    let server = |name| context(&catalog, name).server.clone();
+    assert_eq!(
+        server("kind-plain").as_deref(),
+        Some("https://10.0.0.1:6443")
+    );
+    assert_eq!(
+        server("kind-secret").as_deref(),
+        Some("https://rancher.example:8443/k8s/clusters/c-1")
+    );
+    assert_eq!(server("kind-ipv6").as_deref(), Some("https://[::1]:6443"));
+    assert_eq!(server("kind-none"), None);
+    assert_eq!(server("kind-missing"), None);
+}
+
+#[test]
 fn a_missing_file_is_skipped_and_a_broken_one_reported() {
     let dir = tempfile::tempdir().unwrap();
     let missing = dir.path().join("missing");

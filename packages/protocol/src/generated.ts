@@ -52,7 +52,18 @@ export type Context = { name: string,
 /**
  * From the `twigo` extension of the kubeconfig context; none by default.
  */
-color: ContextColor | null, };
+color: ContextColor | null, 
+/**
+ * The kubeconfig file that defines it, as a person names it:
+ * `~/.kube/config`.
+ */
+source: string, 
+/**
+ * The URL of the cluster it reaches, without user info, query or
+ * fragment: `https://10.0.0.1:6443`. None when the kubeconfig names no
+ * server that parses.
+ */
+server: string | null, };
 
 /**
  * How a context gets its credentials.

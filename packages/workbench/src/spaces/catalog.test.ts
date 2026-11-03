@@ -2,8 +2,12 @@ import { expect, test, vi } from "vitest";
 import type { Backend, Context } from "@twigo/protocol";
 import { Catalog } from "./catalog";
 
-const ONE: Context[] = [{ name: "kind-one", color: null }];
-const TWO: Context[] = [{ name: "kind-two", color: "green" }];
+const ONE: Context[] = [
+  { name: "kind-one", color: null, source: "~/.kube/config", server: null },
+];
+const TWO: Context[] = [
+  { name: "kind-two", color: "green", source: "~/.kube/config", server: null },
+];
 
 function backend(early: Context[] | undefined) {
   let send: ((next: Context[]) => void) | undefined;

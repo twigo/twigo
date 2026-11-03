@@ -161,9 +161,9 @@ function withCatalog(contexts: readonly Context[]) {
 
 test("the rail hides a space whose context no source lists, and shows it again when it comes back", async () => {
   const all = [
-    { name: "prod-eu", color: null },
-    { name: "staging", color: null },
-    { name: "dev", color: null },
+    { name: "prod-eu", color: null, source: "~/.kube/config", server: null },
+    { name: "staging", color: null, source: "~/.kube/config", server: null },
+    { name: "dev", color: null, source: "~/.kube/config", server: null },
   ];
   const { backend, change } = withCatalog(all);
   const { spaces, keys } = await window(backend);
@@ -183,7 +183,9 @@ test("the rail hides a space whose context no source lists, and shows it again w
 });
 
 test("with no space for any listed context, the first context's space opens", async () => {
-  const { backend } = withCatalog([{ name: "kind-local", color: null }]);
+  const { backend } = withCatalog([
+    { name: "kind-local", color: null, source: "~/.kube/config", server: null },
+  ]);
   const { spaces } = await window(backend);
   await vi.runAllTimersAsync();
   expect(spaces.list.map((space) => space.id)).toEqual(["kind-local"]);

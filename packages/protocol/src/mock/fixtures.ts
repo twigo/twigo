@@ -6,13 +6,38 @@ export const SPACES: Space[] = [
   { id: "dev", name: "dev", contexts: ["dev"] },
 ];
 
-/** The catalog: the contexts of the spaces, plus two that have none yet. */
+/** The catalog: the contexts of the spaces, plus two that have none yet, from two files. */
 export const CONTEXTS: Context[] = [
-  { name: "prod-eu", color: "red" },
-  { name: "staging", color: "orange" },
-  { name: "dev", color: "green" },
-  { name: "qa", color: null },
-  { name: "kind-local", color: null },
+  {
+    name: "prod-eu",
+    color: "red",
+    source: "~/.kube/config",
+    server: "https://4f2a9c1e7b.gr7.eu-west-1.eks.amazonaws.com",
+  },
+  {
+    name: "staging",
+    color: "orange",
+    source: "~/.kube/config",
+    server: "https://9d3e1b7c0a.yl4.eu-west-1.eks.amazonaws.com",
+  },
+  {
+    name: "dev",
+    color: "green",
+    source: "~/.kube/config",
+    server: "https://34.141.62.18",
+  },
+  {
+    name: "qa",
+    color: null,
+    source: "~/.kube/config",
+    server: "https://qa.internal:6443",
+  },
+  {
+    name: "kind-local",
+    color: null,
+    source: "~/.kube/kind.yaml",
+    server: "https://127.0.0.1:52144",
+  },
 ];
 
 /** Each context's Kubernetes version, within the releases Twigo supports (D12). */
