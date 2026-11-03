@@ -1,8 +1,11 @@
 export const MIN_WIDTH = 48;
 
-/** A cell's padding, and a header's, which also keeps room for the sort arrow. */
+/**
+ * A cell's padding, and a header's, which also keeps room for the sort
+ * arrow and the header's right border.
+ */
 const CELL_PADDING = 16;
-const HEADER_PADDING = 32;
+const HEADER_PADDING = 33;
 
 /**
  * The width that shows a column's header and every rendered cell whole.
