@@ -521,9 +521,11 @@ export type LogMatches = {
  */
 count: number, 
 /**
- * The view's index of the entry of each match, in order, so an entry
- * with two matches comes twice: the last 10,000 matches, since a
- * search steps back from the newest.
+ * The id of each match's entry, in the view's order, so an entry with
+ * two matches comes twice: the last 10,000 matches, since a search
+ * steps back from the newest. Ids, unlike indices, stay as entries
+ * enter and leave, so the webview finds a match outside its window
+ * by asking for the window around it.
  */
 entries: Array<number>, };
 

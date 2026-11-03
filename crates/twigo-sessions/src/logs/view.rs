@@ -318,23 +318,22 @@ impl<'a> Utf16<'a> {
     }
 }
 
-/// Every match's entry by its index in the view, the last [`MATCHES`] of
-/// them, since a search steps back from the newest.
+/// Every match's entry by its id, in the view's order, the last
+/// [`MATCHES`] of them, since a search steps back from the newest.
 pub fn matches(buffer: &Buffer, spec: &Spec) -> LogMatches {
     let mut count = 0u32;
     let mut entries = VecDeque::with_capacity(MATCHES);
-    for (index, shown) in shown(buffer, spec).enumerate() {
+    for shown in shown(buffer, spec) {
         let Shown::Entry(entry) = shown else {
             continue;
         };
         let hits = entry.judged.hits;
         count = count.saturating_add(hits);
-        let index = u32::try_from(index).unwrap_or(u32::MAX);
         for _ in 0..(hits as usize).min(MATCHES) {
             if entries.len() == MATCHES {
                 entries.pop_front();
             }
-            entries.push_back(index);
+            entries.push_back(entry.id);
         }
     }
     LogMatches {

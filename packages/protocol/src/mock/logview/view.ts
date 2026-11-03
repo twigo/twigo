@@ -232,21 +232,21 @@ function whole(second: bigint): string {
 }
 
 /**
- * Every match's entry by its index in the view, the last {@link MATCHES}
- * of them, since a search steps back from the newest.
+ * Every match's entry by its id, in the view's order, the last
+ * {@link MATCHES} of them, since a search steps back from the newest.
  */
 export function matches(buffer: LogBuffer, spec: Spec): LogMatches {
   let count = 0;
-  const indexes: number[] = [];
-  shown(buffer, spec).forEach((each, index) => {
-    if ("dropped" in each) return;
+  const ids: number[] = [];
+  for (const each of shown(buffer, spec)) {
+    if ("dropped" in each) continue;
     const { hits } = each.judged;
     count += hits;
-    for (let hit = 0; hit < Math.min(hits, MATCHES); hit++) indexes.push(index);
-  });
+    for (let hit = 0; hit < Math.min(hits, MATCHES); hit++) ids.push(each.id);
+  }
   return {
     count,
-    entries: indexes.slice(Math.max(0, indexes.length - MATCHES)),
+    entries: ids.slice(Math.max(0, ids.length - MATCHES)),
   };
 }
 

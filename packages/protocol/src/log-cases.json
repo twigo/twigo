@@ -1,5 +1,5 @@
 {
-  "about": "Log cases that the mock and Rust's logs view (crates/twigo-sessions/tests/log_cases.rs) both run, so they read lines and show a buffer alike (ARCHITECTURE 4.6). A line case reads one line as the kubelet sends it with timestamps, its time with nine digits or null when it has none, and its text without escapes, with its level and the styles of its SGR sequences in UTF-16 units. A view case puts its entries in a buffer at once, in the order given, so their ids count from 1 in that order, and orders them by time, ties by id; ended entries are ordered by their time. The buffer holds 50,000 entries and 16 MiB of text unless the case sets its limits. The expected window lists the ids of the window's entries, the Dropped entry's among them; marks list the search's marks by entry id, and lines left out have none; a histogram lists its non-empty buckets by index as [lines, warnings, errors], of 60 when it has a time span and none when its times are empty; a case that expects refused expects the view refused with that error kind.",
+  "about": "Log cases that the mock and Rust's logs view (crates/twigo-sessions/tests/log_cases.rs) both run, so they read lines and show a buffer alike (ARCHITECTURE 4.6). A line case reads one line as the kubelet sends it with timestamps, its time with nine digits or null when it has none, and its text without escapes, with its level and the styles of its SGR sequences in UTF-16 units. A view case puts its entries in a buffer at once, in the order given, so their ids count from 1 in that order, and orders them by time, ties by id; ended entries are ordered by their time. The buffer holds 50,000 entries and 16 MiB of text unless the case sets its limits. The expected window lists the ids of the window's entries, the Dropped entry's among them; marks list the search's marks by entry id, and lines left out have none; matches list the id of each match's entry; a histogram lists its non-empty buckets by index as [lines, warnings, errors], of 60 when it has a time span and none when its times are empty; a case that expects refused expects the view refused with that error kind.",
   "lines": [
     {
       "name": "a line's time comes off its text",
@@ -1193,7 +1193,7 @@
         },
         "matches": {
           "count": 3,
-          "entries": [0, 0, 2]
+          "entries": [1, 1, 3]
         }
       }
     },
@@ -1257,7 +1257,7 @@
         },
         "matches": {
           "count": 2,
-          "entries": [0, 2]
+          "entries": [1, 3]
         }
       }
     },
@@ -1365,7 +1365,7 @@
         },
         "matches": {
           "count": 1,
-          "entries": [1]
+          "entries": [3]
         }
       }
     },
