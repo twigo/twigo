@@ -216,7 +216,6 @@ fn field<'a>(fields: &'a [Field], label: &str) -> &'a Shown {
         .value
 }
 
-/// A value as one line of text, a link by its text.
 fn shown(value: &Shown) -> String {
     match value {
         Shown::Text { text } | Shown::Code { text } | Shown::Toned { text, .. } => text.clone(),
@@ -534,7 +533,6 @@ fn workloads_list_the_pods_and_jobs_they_control() {
     );
 }
 
-/// The ready endpoints of the recorded slices of `service`, `ip:port`.
 fn ready_endpoints(fixture: &str, service: &str) -> Vec<String> {
     let recorded = recorded().remove(fixture).unwrap();
     let slices = recorded
@@ -652,7 +650,6 @@ fn a_claim_names_the_pods_that_use_it() {
     );
 }
 
-/// The recorded object as `edit` changes it, described.
 fn edited(name: &str, edit: impl FnOnce(&mut Recorded)) -> Overview {
     let mut recorded = recorded().remove(name).unwrap();
     edit(&mut recorded);

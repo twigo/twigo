@@ -189,7 +189,6 @@ impl Opened {
         Self::open(core, space, "pods", namespace, "p1", parts).await
     }
 
-    /// An object of a core resource.
     async fn open(
         core: &Arc<Core>,
         space: String,
@@ -283,7 +282,6 @@ fn events(batch: &ObjectBatch) -> Option<&EventList> {
         })
 }
 
-/// The cell of a table in a section, by row and column name.
 fn cell(batch: &ObjectBatch, section: &str, row: usize, column: &str) -> Option<String> {
     let section = batch
         .overview
