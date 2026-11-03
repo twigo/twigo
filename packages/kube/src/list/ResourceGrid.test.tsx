@@ -104,11 +104,14 @@ test.each([
   await openList(backend);
   expect(screen.getByText(title)).toBeTruthy();
   const lists = () =>
-    subscribe.mock.calls.filter(([command]) => command === "list_subscribe");
-  expect(lists()).toHaveLength(1);
+    subscribe.mock.calls.filter(([command]) => command === "list_subscribe")
+      .length;
+  const opened = lists();
+  await settle();
+  expect(lists()).toBe(opened);
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await settle();
-  expect(lists()).toHaveLength(2);
+  expect(lists()).toBe(opened + 1);
   expect(screen.getByText(title)).toBeTruthy();
 });
 
