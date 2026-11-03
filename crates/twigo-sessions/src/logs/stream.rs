@@ -1025,14 +1025,12 @@ mod tests {
         followed
     }
 
-    /// As [`cut_before_a_restart`], and web-b writes 11 and 12.
     async fn cut_across_a_restart(fake: &Fake) -> Followed {
         let followed = cut_before_a_restart(fake).await;
         numbered(fake, "web-b", 11..=12);
         followed
     }
 
-    /// `web-1` with `instance` crashed after `previous` did.
     fn crashed_again(instance: &str, previous: &str) -> Value {
         let mut pod = web(crashed(instance), crashed(previous));
         pod["status"]["containerStatuses"][0]["containerID"] = json!(instance);

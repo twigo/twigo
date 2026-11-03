@@ -71,7 +71,6 @@ export class MockLogs {
   #members = new Set<string>();
   /** The entries the view kept as they came since the source or the view last changed. */
   #arrived = 0;
-  /** The source and view changes applied, a no-op among them. */
   #changes = 0;
   #seq = 0;
   #unacked: number | undefined;

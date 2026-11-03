@@ -58,7 +58,6 @@ struct Container {
     previous: Option<String>,
     /// The next read's body breaks after this many lines.
     breaks: Option<usize>,
-    /// The next read of the previous instance gets a 503.
     fails: bool,
 }
 
@@ -153,8 +152,6 @@ impl Fake {
         instance.followers.clear();
     }
 
-    /// The kubelet rotates an instance's log: a read gets only what the
-    /// instance writes next.
     pub fn rotate(&self, pod: &str, container: &str, instance: &str) {
         self.state()
             .instance(pod, container, instance)
@@ -183,7 +180,6 @@ impl Fake {
         state.stranded.extend(stranded);
     }
 
-    /// The next read of a container's previous instance gets a 503.
     pub fn fail_previous(&self, pod: &str, container: &str) {
         self.state().container(pod, container).fails = true;
     }

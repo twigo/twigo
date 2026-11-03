@@ -253,7 +253,6 @@ struct Run {
     /// The entries the view kept as they came since the source or the view
     /// last changed.
     arrived: u64,
-    /// The source and view changes applied.
     changes: u32,
 }
 
@@ -1023,7 +1022,6 @@ mod tests {
         assert_eq!(lines(&second), ["line 1"]);
     }
 
-    /// Acknowledges batches until none comes for a second; the last.
     async fn settled(
         session: &Session,
         batches: &mut mpsc::UnboundedReceiver<LogBatch>,
