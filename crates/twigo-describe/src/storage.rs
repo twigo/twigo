@@ -9,6 +9,11 @@ use crate::show::{Fields, POD, PV, link, list, plain, toned};
 use crate::workloads::fact;
 use crate::{Described, Found, Input, Need, text};
 
+/// What the volume controller says while a claim of a WaitForFirstConsumer
+/// class waits, rightly, for its pod (kubernetes v1.37.1
+/// `pkg/controller/volume/events`); any other reason leaves it unbound.
+const WAITING: &[&str] = &["WaitForFirstConsumer", "WaitForPodScheduled"];
+
 fn pods_need(claim: &Value) -> Need {
     Need {
         group: String::new(),
@@ -109,23 +114,19 @@ pub(crate) fn describe(input: &Input<'_>) -> Described {
         None => {}
     }
     let mut findings = Vec::new();
-    // A claim of a WaitForFirstConsumer class waits for its pod with only a
-    // Normal event; a claim that cannot bind says why in a Warning.
-    let failing = input
-        .events
-        .events
-        .iter()
-        .find(|event| event.kind == "Warning");
-    if phase == "Pending"
-        && let Some(event) = failing
-    {
+    let newest = input.events.events.first();
+    let waits = newest.is_some_and(|event| WAITING.contains(&event.reason.as_str()));
+    if phase == "Pending" && !waits {
         findings.push(Finding {
             tone: Tone::Warning,
-            title: "The claim cannot be bound".to_owned(),
+            title: "The claim is not bound".to_owned(),
             detail: vec![Span::Text {
-                text: format!("{}.", event.reason),
+                text: newest.map_or_else(
+                    || "No volume backs it, and nothing says why.".to_owned(),
+                    |event| format!("{}.", event.reason),
+                ),
             }],
-            message: Some(event.message.trim().to_owned()),
+            message: newest.map(|event| event.message.trim().to_owned()),
         });
     }
     if phase == "Lost" {

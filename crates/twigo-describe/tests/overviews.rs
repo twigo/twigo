@@ -743,32 +743,39 @@ fn an_ingress_backend_no_ready_pod_serves_is_a_finding() {
 }
 
 #[test]
-fn a_claim_that_waits_for_its_pod_is_fine_and_one_that_cannot_bind_says_why() {
-    let pending = |recorded: &mut Recorded| {
-        recorded.object["status"] = serde_json::json!({ "phase": "Pending" });
-        recorded.events = vec![ObjectEvent {
-            kind: "Normal".to_owned(),
-            ..warning(
-                "WaitForFirstConsumer",
-                "waiting for first consumer to be created before binding",
-            )
-        }];
+fn a_claim_that_waits_for_its_pod_is_fine_and_any_other_pending_one_says_why() {
+    let pending = |event: Option<ObjectEvent>| {
+        edited("pvc", move |recorded| {
+            recorded.object["status"] = serde_json::json!({ "phase": "Pending" });
+            recorded.events = event.into_iter().collect();
+        })
     };
-    assert!(findings(&edited("pvc", pending)).is_empty());
-    let failing = edited("pvc", |recorded| {
-        pending(recorded);
-        recorded
-            .events
-            .insert(0, warning("ProvisioningFailed", "no capacity left"));
-    });
+    let normal = |reason: &str, message: &str| ObjectEvent {
+        kind: "Normal".to_owned(),
+        ..warning(reason, message)
+    };
+    for reason in ["WaitForFirstConsumer", "WaitForPodScheduled"] {
+        assert!(
+            findings(&pending(Some(normal(reason, "waiting")))).is_empty(),
+            "{reason}"
+        );
+    }
+    let provisioning = pending(Some(normal(
+        "ExternalProvisioning",
+        "Waiting for a volume to be created either by the external provisioner 'ebs.csi.aws.com'",
+    )));
     assert_eq!(
-        titles(&failing),
-        [(Tone::Warning, "The claim cannot be bound")]
+        titles(&provisioning),
+        [(Tone::Warning, "The claim is not bound")]
     );
-    assert_eq!(
-        findings(&failing)[0].message.as_deref(),
-        Some("no capacity left")
+    assert!(
+        findings(&provisioning)[0]
+            .message
+            .as_deref()
+            .is_some_and(|message| message.contains("external provisioner"))
     );
+    let silent = pending(None);
+    assert_eq!(titles(&silent), [(Tone::Warning, "The claim is not bound")]);
 }
 
 #[test]
@@ -833,6 +840,32 @@ fn a_pod_that_stops_or_cannot_mount_or_inspect_says_why() {
         titles(&mounting),
         [(Tone::Danger, "A volume of the pod cannot be mounted")]
     );
+    let mounted = edited("pod", |recorded| {
+        recorded.object["status"]["containerStatuses"][0]["state"] =
+            serde_json::json!({ "waiting": { "reason": "ContainerCreating" } });
+        recorded.events = vec![
+            ObjectEvent {
+                kind: "Normal".to_owned(),
+                ..warning("Pulling", "Pulling image")
+            },
+            warning("FailedMount", "configmap \"settings\" not found"),
+        ];
+    });
+    assert!(findings(&mounted).is_empty(), "a warning that passed");
+    let initializing = edited("pod", |recorded| {
+        let status = &mut recorded.object["status"];
+        status["containerStatuses"][0]["state"] =
+            serde_json::json!({ "waiting": { "reason": "PodInitializing" } });
+        status["initContainerStatuses"] = serde_json::json!([{
+            "name": "migrate",
+            "state": { "running": { "startedAt": "2026-11-03T10:00:00Z" } },
+        }]);
+        recorded.events = vec![warning("FailedMount", "configmap \"settings\" not found")];
+    });
+    assert!(
+        findings(&initializing).is_empty(),
+        "a running init container mounted"
+    );
     let inspecting = edited("pod-pulling", |recorded| {
         recorded.object["status"]["containerStatuses"][0]["state"]["waiting"]["reason"] =
             "ImageInspectError".into();
@@ -856,4 +889,118 @@ fn workloads_short_of_ready_pods_say_so() {
         recorded.object["status"]["numberReady"] = 0.into();
     });
     assert_eq!(titles(&daemon), [(Tone::Warning, "Not every pod is ready")]);
+}
+
+#[test]
+fn a_backend_no_pod_is_meant_to_serve_is_no_finding() {
+    let ingress = edited("ingress", |recorded| {
+        for fact in &mut recorded.facts {
+            if let Found::Listed { objects } = &mut fact.found {
+                for object in objects.iter_mut() {
+                    if object["kind"] == "Service" || object["metadata"]["name"] == "web" {
+                        object["spec"]["type"] = "ExternalName".into();
+                        object["spec"]["externalName"] = "web.example.test".into();
+                    }
+                    for endpoint in object["endpoints"].as_array_mut().into_iter().flatten() {
+                        endpoint["conditions"]["ready"] = Value::Bool(false);
+                    }
+                }
+            }
+        }
+        recorded.object["spec"]["rules"][0]["http"]["paths"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("path");
+    });
+    assert_eq!(
+        titles(&ingress),
+        [(Tone::Warning, "Service reports does not exist")]
+    );
+    let (_, rules) = table(&ingress, "core.rules");
+    assert_eq!(rules[0][1], "");
+}
+
+#[test]
+fn a_node_counts_its_resource_slices_and_says_what_its_lease_holds() {
+    let slices = edited("node", |recorded| {
+        let fact = recorded
+            .facts
+            .iter_mut()
+            .find(|fact| fact.need.resource == "resourceslices")
+            .unwrap();
+        fact.found = Found::Listed {
+            objects: (0..12)
+                .flat_map(|pool| {
+                    (0..2).map(move |_| {
+                        serde_json::json!({ "spec": {
+                            "driver": "gpu.example.com",
+                            "pool": { "name": format!("pool-{pool:02}") },
+                            "devices": [{ "name": "a" }, { "name": "b" }, { "name": "c" }],
+                        } })
+                    })
+                })
+                .collect(),
+        };
+        recorded.object["status"]["conditions"][0]["lastHeartbeatTime"] =
+            "2026-11-03T10:00:00Z".into();
+    });
+    let (columns, rows) = table(&slices, "core.resourceslices");
+    assert_eq!(columns, ["Driver", "Pool", "Slices", "Devices"]);
+    assert_eq!(rows.len(), 11);
+    assert_eq!(rows[0], ["gpu.example.com", "pool-00", "2", "6"]);
+    assert_eq!(rows[10][0], "and 2 more pools");
+    let conditions = section(&slices, "core.conditions");
+    let [Block::Conditions { conditions }] = &conditions.blocks[..] else {
+        panic!("the conditions");
+    };
+    assert_eq!(
+        conditions[0].last_heartbeat.as_deref(),
+        Some("2026-11-03T10:00:00Z")
+    );
+    let lease = |found: Found| {
+        edited("node", move |recorded| {
+            recorded
+                .facts
+                .iter_mut()
+                .find(|fact| fact.need.resource == "leases")
+                .unwrap()
+                .found = found;
+        })
+    };
+    let node = fields(&described()["node"], "core.node").to_vec();
+    assert_eq!(shown(field(&node, "Lease acquired")), "unset");
+    assert!(shown(field(&node, "Lease renewed")).starts_with("2026-"));
+    let none = lease(Found::Listed {
+        objects: Vec::new(),
+    });
+    assert_eq!(shown(field(fields(&none, "core.node"), "Lease")), "none");
+    let refused = lease(Found::Unavailable {
+        message: "You may not list them.".to_owned(),
+    });
+    assert_eq!(
+        shown(field(fields(&refused, "core.node"), "Lease")),
+        "You may not list them."
+    );
+    let unset = lease(Found::Listed {
+        objects: vec![serde_json::json!({ "spec": {} })],
+    });
+    assert_eq!(
+        shown(field(fields(&unset, "core.node"), "Lease holder")),
+        "unset"
+    );
+}
+
+#[test]
+fn a_pod_names_its_scheduling_group() {
+    let grouped = edited("pod", |recorded| {
+        recorded.object["spec"]["schedulingGroup"] =
+            serde_json::json!({ "podGroupName": "training" });
+    });
+    assert_eq!(
+        shown(field(
+            fields(&grouped, "core.scheduling"),
+            "Scheduling group"
+        )),
+        "training"
+    );
 }

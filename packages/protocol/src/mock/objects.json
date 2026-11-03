@@ -1369,7 +1369,7 @@
                   "detail": [
                     {
                       "type": "text",
-                      "text": "A rule sends traffic to it."
+                      "text": "The ingress sends traffic to it."
                     }
                   ],
                   "message": null

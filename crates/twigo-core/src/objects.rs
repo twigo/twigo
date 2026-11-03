@@ -285,15 +285,7 @@ async fn run(
             if let Some(needs) = &mut held.facts
                 && (found(needs) || held_anew)
             {
-                facts = needs
-                    .iter()
-                    .filter_map(|held| {
-                        Some(Fact {
-                            need: held.need.clone(),
-                            found: held.found.clone()?,
-                        })
-                    })
-                    .collect();
+                facts = facts_of(needs);
                 dirty.overview = true;
             }
             let owned = held.owned.as_deref().unwrap_or_default();
@@ -515,6 +507,19 @@ fn needs_of(hub: &Hub, target: &Target, needs: Vec<Need>) -> Vec<Held> {
         .collect()
 }
 
+/// What the needs found so far, for the describer.
+fn facts_of(needs: &[Held]) -> Vec<Fact> {
+    needs
+        .iter()
+        .filter_map(|held| {
+            Some(Fact {
+                need: held.need.clone(),
+                found: held.found.clone()?,
+            })
+        })
+        .collect()
+}
+
 /// Reads what each need found since the last look, saying whether any
 /// changed: its objects once listed, or why they cannot be.
 fn found(needs: &mut [Held]) -> bool {
@@ -717,6 +722,44 @@ mod tests {
             values_of(&config, &keys).unwrap(),
             [None, Some("fast".to_owned()), None]
         );
+    }
+
+    #[tokio::test]
+    async fn a_need_the_hub_refuses_is_a_fact_at_once() {
+        let connect: twigo_cache::hub::Connect = Arc::new(|_context| {
+            Box::pin(async {
+                Err(IpcError {
+                    kind: ErrorKind::Unavailable,
+                    message: "no cluster".to_owned(),
+                })
+            })
+        });
+        let hub = Hub::new(connect);
+        let target = Target {
+            context: "kind-test".to_owned(),
+            namespace: None,
+        };
+        let need = Need {
+            group: "apps".to_owned(),
+            version: "v1".to_owned(),
+            resource: "replicasets".to_owned(),
+            namespaced: true,
+            namespace: Some("a/b".to_owned()),
+            field_selector: None,
+        };
+        let held = needs_of(&hub, &target, vec![need.clone()]);
+        let facts = facts_of(&held);
+        let [
+            Fact {
+                need: found_for,
+                found: Found::Unavailable { message },
+            },
+        ] = &facts[..]
+        else {
+            panic!("an unavailable fact: {facts:?}");
+        };
+        assert_eq!(found_for, &need);
+        assert!(message.contains("a/b"), "{message}");
     }
 
     #[test]

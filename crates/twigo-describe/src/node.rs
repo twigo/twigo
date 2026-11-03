@@ -75,6 +75,9 @@ pub(crate) fn describe(input: &Input<'_>) -> Described {
     }
     fields.maybe("Taints", taints(&spec["taints"]));
     match fact(input.facts, &lease_need(node)) {
+        Some(Found::Listed { objects }) if objects.is_empty() => {
+            fields.add("Lease", plain("none"));
+        }
         Some(Found::Listed { objects }) => {
             let lease = objects.first().map_or(&Value::Null, |lease| &lease["spec"]);
             let unset = || plain("unset");

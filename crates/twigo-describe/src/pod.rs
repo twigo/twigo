@@ -371,7 +371,8 @@ fn terminating(pod: &Value) -> Option<Finding> {
 }
 
 /// Event reasons that keep a pod's containers from being created, by what
-/// they say, from the kubelet (kubernetes v1.37.1 `pkg/kubelet/events`).
+/// they say (kubernetes v1.37.1 `pkg/kubelet/events`): the kubelet's, and
+/// the attach/detach controller's FailedAttachVolume.
 const CREATING: &[(&str, &str)] = &[
     ("FailedMount", "A volume of the pod cannot be mounted"),
     (
@@ -384,41 +385,42 @@ const CREATING: &[(&str, &str)] = &[
     ),
 ];
 
-/// Containers still being created while the kubelet warns why they cannot
-/// be: the newest such warning.
+/// Containers that cannot be created yet: none of them has run, as the
+/// kubelet mounts volumes and makes the sandbox before any container
+/// starts, and the pod's newest event is the warning that says why, so a
+/// warning that passed, followed by an image's pull, finds nothing.
 fn creating(input: &Input<'_>) -> Option<Finding> {
     let status = &input.object["status"];
-    let waiting = ["initContainerStatuses", "containerStatuses"]
+    let statuses: Vec<&Value> = ["initContainerStatuses", "containerStatuses"]
         .iter()
         .flat_map(|key| status[*key].as_array().into_iter().flatten())
-        .any(|container| {
-            matches!(
-                container["state"]["waiting"]["reason"].as_str(),
-                Some("ContainerCreating" | "PodInitializing")
-            )
-        });
-    if !waiting {
+        .collect();
+    let started = statuses.iter().any(|container| {
+        container["state"]["running"].is_object()
+            || container["state"]["terminated"].is_object()
+            || container["lastState"]["terminated"].is_object()
+    });
+    if statuses.is_empty() || started {
         return None;
     }
-    input.events.events.iter().find_map(|event| {
-        let (_, title) = CREATING
-            .iter()
-            .find(|(reason, _)| event.kind == "Warning" && event.reason == *reason)?;
-        let mut detail = vec![span(&event.reason)];
-        if event.count > 1 {
-            detail.push(span(&format!(", {} times", event.count)));
-        }
-        if let Some(at) = &event.last {
-            detail.push(span(", last "));
-            detail.push(Span::Ago { at: at.clone() });
-        }
-        detail.push(span("."));
-        Some(Finding {
-            tone: Tone::Danger,
-            title: (*title).to_owned(),
-            detail,
-            message: Some(event.message.trim().to_owned()),
-        })
+    let event = input.events.events.first()?;
+    let (_, title) = CREATING
+        .iter()
+        .find(|(reason, _)| event.kind == "Warning" && event.reason == *reason)?;
+    let mut detail = vec![span(&event.reason)];
+    if event.count > 1 {
+        detail.push(span(&format!(", {} times", event.count)));
+    }
+    if let Some(at) = &event.last {
+        detail.push(span(", last "));
+        detail.push(Span::Ago { at: at.clone() });
+    }
+    detail.push(span("."));
+    Some(Finding {
+        tone: Tone::Danger,
+        title: (*title).to_owned(),
+        detail,
+        message: Some(event.message.trim().to_owned()),
     })
 }
 

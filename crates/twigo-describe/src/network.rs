@@ -201,13 +201,9 @@ pub(crate) fn service(input: &Input<'_>) -> Described {
     if let Some(slices) = listed {
         sections.extend(endpoint_table(slices, namespace.as_deref()));
     }
-    let selects = spec["selector"]
-        .as_object()
-        .is_some_and(|selector| !selector.is_empty());
     let mut findings = Vec::new();
     if let Some(slices) = listed
-        && selects
-        && spec["type"] != "ExternalName"
+        && served_by_pods(object)
         && !slices.iter().any(|slice| {
             slice["endpoints"]
                 .as_array()
@@ -405,7 +401,7 @@ pub(crate) fn ingress(input: &Input<'_>) -> Described {
         tone: Tone::Warning,
         title,
         detail: vec![Span::Text {
-            text: "A rule sends traffic to it.".to_owned(),
+            text: "The ingress sends traffic to it.".to_owned(),
         }],
         message: None,
     };
@@ -419,6 +415,16 @@ pub(crate) fn ingress(input: &Input<'_>) -> Described {
         )
         .collect();
     Described { findings, sections }
+}
+
+/// Whether pods serve a Service through EndpointSlices that its controller
+/// keeps: not an ExternalName one nor one without a selector, for which it
+/// makes none (kubernetes v1.37.1 `endpointslice_controller.go`).
+fn served_by_pods(service: &Value) -> bool {
+    service["spec"]["type"] != "ExternalName"
+        && service["spec"]["selector"]
+            .as_object()
+            .is_some_and(|selector| !selector.is_empty())
 }
 
 /// A backend as `service:port`, a link to its Service, and its ready
@@ -480,7 +486,7 @@ fn describe_backend(
                     match slices_of(slices, name) {
                         Some(Ok(slices)) => {
                             let shown = endpoints(&slices, port_name);
-                            if shown == NONE {
+                            if shown == NONE && served_by_pods(found) {
                                 unserved.push(name.to_owned());
                             }
                             code(shown)
