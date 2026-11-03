@@ -22,10 +22,14 @@ export interface ListServices {
 }
 
 export function createServices(workbench: Workbench): ListServices {
+  const states = new ListStates();
+  workbench.editors.onClose((uri) => {
+    states.closed(uri);
+  });
   return {
     discovery: new Discovery(workbench),
     presets: new ListPresets(workbench.state),
-    states: new ListStates(),
+    states,
     selection: new Selection(),
     statuses: new ListStatuses(),
     pinned: new PinnedLists(workbench.spaces),
