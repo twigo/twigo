@@ -132,6 +132,24 @@ function Grid({
     setWindow,
   } = useListView(backend, query);
   const now = useNow(1000);
+  // The rows on screen as one string: churn refreshes a picked health's
+  // values without reordering anything, so they stand as their healths.
+  const showing = JSON.stringify(
+    shown && {
+      ...shown,
+      values:
+        shown.values &&
+        Object.values(
+          byHealth(
+            gvr,
+            shown.values.column,
+            shown.values.values.map((value) => ({ value, count: 1 })),
+          ),
+        )
+          .filter((health) => health.count > 0)
+          .map((health) => health.health),
+    },
+  );
   const [grid, setGrid] = useState<HTMLElement | null>(null);
   // Rust groups nothing by a column the list lacks, such as Namespace in
   // a list of one namespace, and then sends no groups.
@@ -313,6 +331,7 @@ function Grid({
         states.setSort(uri, sort);
       }}
       length={items.length}
+      query={showing}
       item={item}
       indexOf={indexOf}
       onRange={onRange}

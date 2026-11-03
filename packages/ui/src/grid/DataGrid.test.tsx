@@ -107,6 +107,7 @@ function grid(overrides: Props = {}) {
       columns={[{ id: "Name", title: "Name", width: 200, grow: true }]}
       widths={{}}
       sort={null}
+      query=""
       {...list(ITEMS)}
       onRange={() => undefined}
       cell={(row) => row.name}
@@ -238,6 +239,95 @@ test("a marking move waits for the row it left when only that row is outside the
   expect(handlers.onMark).not.toHaveBeenCalled();
   rerender(list(four));
   expect(handlers.onMark).toHaveBeenCalledWith(["p2", "p3"], true);
+});
+
+test("a click while a move waits for its row drops the move", () => {
+  const four = PODS.slice(0, 4);
+  const { handlers, controller, rerender } = grid({
+    ...list(four),
+    selected: "p2",
+  });
+  rerender(list(four.map((pod) => (pod.id === "p3" ? undefined : pod))));
+  act(() => {
+    controller()?.move(1);
+  });
+  fireEvent.click(screen.getByText("pod-0"));
+  rerender(list(four));
+  expect(handlers.onSelect).toHaveBeenLastCalledWith("p0", { name: "pod-0" });
+});
+
+test("a click on the cursor's own row also drops a move waiting for its row", () => {
+  const four = PODS.slice(0, 4);
+  const { handlers, controller, rerender } = grid({
+    ...list(four),
+    selected: "p2",
+  });
+  rerender(list(four.map((pod) => (pod.id === "p3" ? undefined : pod))));
+  act(() => {
+    controller()?.move(1);
+  });
+  fireEvent.click(screen.getByText("pod-2"));
+  rerender(list(four));
+  expect(handlers.onSelect).toHaveBeenCalledOnce();
+  expect(handlers.onSelect).toHaveBeenCalledWith("p2", { name: "pod-2" });
+});
+
+function waiting(overrides: Props = {}, extend = false) {
+  const four = PODS.slice(0, 4);
+  const view = grid({ ...list(four), selected: "p2", ...overrides });
+  view.rerender(list(four.map((pod) => (pod.id === "p3" ? undefined : pod))));
+  act(() => {
+    view.controller()?.move(1, extend);
+  });
+  const arrive = (changes: Props = {}) => {
+    view.rerender({ ...list(four), ...changes });
+  };
+  return { ...view, arrive };
+}
+
+test("a cursor the owner moves drops a move waiting for its row", () => {
+  const { handlers, arrive } = waiting();
+  arrive({ selected: "p0" });
+  expect(handlers.onSelect).not.toHaveBeenCalled();
+});
+
+test("a press anywhere in the grid, a sort included, drops a move waiting for its row", () => {
+  const { handlers, arrive } = waiting();
+  fireEvent.pointerDown(screen.getByRole("button", { name: /^Name/ }));
+  arrive();
+  expect(handlers.onSelect).not.toHaveBeenCalled();
+});
+
+test("Enter while a move waits opens the row the cursor shows, and drops the move", () => {
+  const { handlers, controller, arrive } = waiting();
+  act(() => {
+    controller()?.activate();
+  });
+  arrive();
+  expect(handlers.onActivate).toHaveBeenCalledWith("p2", { name: "pod-2" });
+  expect(handlers.onSelect).not.toHaveBeenCalled();
+});
+
+test("X, a fold and an unfold while a move waits drop the move", () => {
+  for (const key of ["toggleMark", "collapse", "expand"] as const) {
+    const { handlers, controller, arrive } = waiting();
+    act(() => {
+      controller()?.[key]?.();
+    });
+    arrive();
+    expect(handlers.onSelect).not.toHaveBeenCalled();
+    cleanup();
+  }
+});
+
+test("marks cleared or a query changed while a move waits drop the move", () => {
+  const marked = waiting({ marked: new Set(["p1", "p2"]) }, true);
+  marked.arrive({ marked: new Set() });
+  expect(marked.handlers.onMark).not.toHaveBeenCalled();
+  cleanup();
+  const queried = waiting();
+  queried.arrive({ query: "Failing" });
+  expect(queried.handlers.onSelect).not.toHaveBeenCalled();
 });
 
 test("a marking move onto a group header marks the row it left", () => {

@@ -38,6 +38,12 @@ export interface DataGridProps<R, G> {
   readonly onSort: (sort: GridSort) => void;
   /** Items in the sequence: rows, and group headers when grouped. */
   readonly length: number;
+  /**
+   * What the items come from, such as the owner's query as one string: a
+   * new value drops a keyboard move still waiting for its item, whose
+   * index belongs to the items before.
+   */
+  readonly query: string;
   /** The item at an index, or undefined while it is not loaded. */
   readonly item: (index: number) => GridItem<R, G> | undefined;
   /** Where a loaded item sits, or -1. */
@@ -74,6 +80,15 @@ export interface DataGridProps<R, G> {
   ) => () => void;
 }
 
+function same(
+  a: ReadonlySet<string> | undefined,
+  b: ReadonlySet<string> | undefined,
+): boolean {
+  return (
+    a === b || (a?.size === b?.size && [...(a ?? [])].every((id) => b?.has(id)))
+  );
+}
+
 /**
  * A virtualized grid of rows (ARCHITECTURE 4.4), controlled and
  * domain-free: its owner says what each item is and how a cell reads, and
@@ -88,6 +103,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     sort,
     onSort,
     length,
+    query,
     item,
     indexOf,
     onRange,
@@ -148,12 +164,25 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
   // A keyboard move can land outside the loaded window; the cursor lands
   // once the item arrives. A marking move keeps the cursor it left, which
   // is marked too if it is still a row of the list when the move lands;
-  // its place is loaded by then, to tell.
+  // its place is loaded by then, to tell. Until it lands the cursor shows
+  // where it was; a press of the pointer in the grid, the grid's own keys
+  // that act on the cursor, and a cursor, marks or query the owner changed
+  // meanwhile drop the move.
   const [wanted, setWanted] = useState<{
     index: number;
+    cursor: string | undefined;
+    marked: ReadonlySet<string> | undefined;
+    query: string;
     from?: { id: string; index: number };
   }>();
-  if (wanted !== undefined && wanted.index >= length) setWanted(undefined);
+  if (
+    wanted !== undefined &&
+    (wanted.index >= length ||
+      wanted.cursor !== cursor ||
+      !same(wanted.marked, marked) ||
+      wanted.query !== query)
+  )
+    setWanted(undefined);
   const wantedItem = wanted === undefined ? undefined : item(wanted.index);
   const from = wanted?.from;
   const ready =
@@ -170,6 +199,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     onActivate,
     onToggleGroup,
     marked,
+    query,
     onMark,
     land,
   });
@@ -185,6 +215,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       onActivate,
       onToggleGroup,
       marked,
+      query,
       onMark,
       land,
     };
@@ -221,12 +252,20 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       return target?.id === latest.current.cursor ? target : undefined;
     };
     const go = (index: number, extend = false) => {
-      const { length: count, cursor: id } = latest.current;
+      const {
+        length: count,
+        cursor: id,
+        marked: marks,
+        query: source,
+      } = latest.current;
       if (count === 0) return;
       const target = Math.min(Math.max(index, 0), count - 1);
       virtualizer.scrollToIndex(target);
       setWanted({
         index: target,
+        cursor: id,
+        marked: marks,
+        query: source,
         ...(extend && id !== undefined && { from: { id, index: at() } }),
       });
     };
@@ -246,17 +285,20 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         go(edge === "first" ? 0 : latest.current.length - 1);
       },
       activate() {
+        setWanted(undefined);
         const target = current();
         if (target?.type === "group") latest.current.onToggleGroup?.(target.id);
         else if (target) latest.current.onActivate(target.id, target.data);
       },
       toggleMark() {
+        setWanted(undefined);
         const target = current();
         const { marked: marks, onMark: mark } = latest.current;
         if (target?.type === "row" && marks && mark)
           mark([target.id], !marks.has(target.id));
       },
       collapse() {
+        setWanted(undefined);
         const index = at();
         const target = current();
         if (target?.type === "group") {
@@ -273,6 +315,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         }
       },
       expand() {
+        setWanted(undefined);
         const target = current();
         if (target?.type === "group" && !target.open)
           latest.current.onToggleGroup?.(target.id);
@@ -384,6 +427,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         ? "bg-selected-unfocused group-focus/grid:bg-selected"
         : undefined;
     const select = () => {
+      setWanted(undefined);
       setCursor(target.id);
       onSelect(target.id, target.data);
     };
@@ -506,6 +550,9 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       role="grid"
       tabIndex={0}
       aria-label={label}
+      onPointerDown={() => {
+        setWanted(undefined);
+      }}
       aria-rowcount={length + 1}
       aria-multiselectable={marking || undefined}
       aria-activedescendant={active && rowId(active.index)}

@@ -339,6 +339,177 @@ test("j moves on from the selected row after it scrolled out of the window", asy
   ]);
 });
 
+test("a filter typed while j waits for its row drops the move", async () => {
+  await openList();
+  focusGrid();
+  key("KeyJ");
+  await settle(2);
+  const first = textOf(rows()[0], "Name");
+  grid().scrollTop = 3000 * 26;
+  fireEvent.scroll(grid());
+  await settle();
+  key("KeyJ");
+  fireEvent.change(screen.getByRole("textbox", { name: "Filter rows" }), {
+    target: { value: "auth" },
+  });
+  await settle();
+  grid().scrollTop = 0;
+  fireEvent.scroll(grid());
+  await settle();
+  const selected = rows().filter(
+    (row) => row.getAttribute("aria-selected") === "true",
+  );
+  expect(selected.map((row) => textOf(row, "Name"))).toEqual([first]);
+});
+
+test("j pressed after a sort is asked, before its rows arrive, is dropped with the rows it was for", async () => {
+  await openList();
+  focusGrid();
+  key("KeyJ");
+  await settle(2);
+  const first = textOf(rows()[0], "Name");
+  grid().scrollTop = 3000 * 26;
+  fireEvent.scroll(grid());
+  await settle();
+  fireEvent.click(within(header("Ready")).getByRole("button"));
+  key("KeyJ");
+  await settle();
+  grid().scrollTop = 0;
+  fireEvent.scroll(grid());
+  await settle();
+  const selected = rows()
+    .filter((row) => row.getAttribute("aria-selected") === "true")
+    .map((row) => textOf(row, "Name"));
+  expect(selected.filter((name) => name !== first)).toEqual([]);
+});
+
+test("a health picked while j waits for its row drops the move", async () => {
+  await openList();
+  focusGrid();
+  key("KeyJ");
+  await settle(2);
+  const first = textOf(rows()[0], "Name");
+  grid().scrollTop = 3000 * 26;
+  fireEvent.scroll(grid());
+  await settle();
+  key("KeyJ");
+  fireEvent.click(
+    within(screen.getByRole("group", { name: "Rows by health" })).getByRole(
+      "button",
+      { name: /^Healthy/ },
+    ),
+  );
+  await settle();
+  grid().scrollTop = 0;
+  fireEvent.scroll(grid());
+  await settle();
+  const selected = rows()
+    .filter((row) => row.getAttribute("aria-selected") === "true")
+    .map((row) => textOf(row, "Name"));
+  expect(selected.filter((name) => name !== first)).toEqual([]);
+});
+
+function warnBatch(seq: number, ids: readonly string[], creating: number) {
+  return {
+    seq,
+    total: IDS.length,
+    columns: [
+      { name: "Name", kind: "string", priority: 0 },
+      { name: "Status", kind: "string", priority: 0 },
+    ],
+    window: { start: 0, ids: [...ids] },
+    upserts: ids.map((id) => ({
+      id,
+      created: null,
+      generated: null,
+      cells: [id, "Pending"],
+    })),
+    status: { state: "ready" },
+    counts: [
+      { value: "Pending", count: IDS.length },
+      ...(creating > 0
+        ? [{ value: "ContainerCreating", count: creating }]
+        : []),
+    ],
+    groups: null,
+  } as ListBatch;
+}
+
+const selectedNames = () =>
+  rows()
+    .filter((row) => row.getAttribute("aria-selected") === "true")
+    .map((row) => textOf(row, "Name"));
+
+async function waitOnE() {
+  fireEvent.click(screen.getByText("e"));
+  await settle(1);
+  focusGrid();
+  key("KeyJ");
+  await settle(1);
+  expect(selectedNames()).toEqual(["e"]);
+}
+
+test("j waiting for its row lands though the picked health's values refresh meanwhile", async () => {
+  const script = scriptedBackend();
+  await openList(script.backend, "k8s-list://prod-eu/v1/pods?h=warn");
+  act(() => {
+    script.send(warnBatch(1, IDS.slice(0, 5), 1));
+  });
+  await settle(2);
+  act(() => {
+    script.send(warnBatch(1, IDS.slice(0, 5), 1));
+  });
+  await settle(2);
+  await waitOnE();
+  act(() => {
+    script.send({ ...warnBatch(2, [], 0), columns: null, window: null });
+  });
+  await settle(2);
+  act(() => {
+    script.send(warnBatch(1, IDS, 0));
+  });
+  await settle(2);
+  expect(selectedNames()).toEqual(["f"]);
+});
+
+test("j pressed while a URI's health still shows every row is dropped once its rows arrive", async () => {
+  const script = scriptedBackend();
+  await openList(script.backend, "k8s-list://prod-eu/v1/pods?h=warn");
+  act(() => {
+    script.send(warnBatch(1, IDS.slice(0, 5), 1));
+  });
+  await settle(2);
+  await waitOnE();
+  act(() => {
+    script.send(warnBatch(1, IDS, 1));
+  });
+  await settle(2);
+  expect(selectedNames().filter((name) => name !== "e")).toEqual([]);
+});
+
+test("j pressed after a health is picked, before its rows arrive, is dropped with the rows it was for", async () => {
+  await openList();
+  focusGrid();
+  key("KeyJ");
+  await settle(2);
+  const first = textOf(rows()[0], "Name");
+  grid().scrollTop = 3000 * 26;
+  fireEvent.scroll(grid());
+  await settle();
+  fireEvent.click(
+    within(screen.getByRole("group", { name: "Rows by health" })).getByRole(
+      "button",
+      { name: /^Healthy/ },
+    ),
+  );
+  key("KeyJ");
+  await settle();
+  grid().scrollTop = 0;
+  fireEvent.scroll(grid());
+  await settle();
+  expect(selectedNames().filter((name) => name !== first)).toEqual([]);
+});
+
 async function choose(column: string) {
   openMenu(screen.getByRole("button", { name: "Choose columns" }));
   fireEvent.click(screen.getByRole("menuitem", { name: column }));
