@@ -4,8 +4,9 @@ use twigo_ipc::{ErrorKind, IpcError};
 
 use crate::credentials::{CredentialError, OidcError, RunError};
 
-/// A request's failure: the API server's status, else why the request got
-/// no answer.
+/// A request's failure: the API server's status in its own words, rather
+/// than kube's `ApiError: … (Status { … })`, else why the request got no
+/// answer.
 pub fn request(error: &kube::Error) -> IpcError {
     let kind = match error {
         kube::Error::Api(status) => match status.code {
@@ -28,10 +29,11 @@ pub fn request(error: &kube::Error) -> IpcError {
         kube::Error::Service(_) | kube::Error::HyperError(_) => ErrorKind::Unavailable,
         _ => ErrorKind::Internal,
     };
-    IpcError {
-        kind,
-        message: error.to_string(),
-    }
+    let message = match error {
+        kube::Error::Api(status) if !status.message.is_empty() => status.message.clone(),
+        _ => error.to_string(),
+    };
+    IpcError { kind, message }
 }
 
 /// Whether the context's plugin or oidc provider gave the request no
@@ -113,5 +115,25 @@ mod tests {
         }));
         assert_eq!(request(&slow).kind, ErrorKind::Timeout);
         assert!(no_credential(&slow));
+    }
+
+    #[test]
+    fn the_server_says_what_was_wrong_in_its_own_words() {
+        let status = Status::failure("field label not supported: spec.containers", "BadRequest")
+            .with_code(400);
+        let refused = request(&kube::Error::Api(Box::new(status)));
+        assert_eq!(
+            (refused.kind, refused.message.as_str()),
+            (
+                ErrorKind::InvalidInput,
+                "field label not supported: spec.containers"
+            )
+        );
+        let silent = Status::failure("", "InternalError").with_code(500);
+        assert!(
+            request(&kube::Error::Api(Box::new(silent)))
+                .message
+                .contains("InternalError")
+        );
     }
 }
