@@ -278,9 +278,6 @@ importers:
 
   packages/kube:
     dependencies:
-      '@tanstack/react-virtual':
-        specifier: ^3.14.24
-        version: 3.14.24(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@twigo/protocol':
         specifier: workspace:*
         version: link:../protocol

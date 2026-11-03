@@ -17,7 +17,7 @@ import {
 import { byHealth, statusColumn, worstHealth } from "../columns";
 import { useResources } from "../discovery";
 import { kindIcon, pluralTitle, sections, type Section } from "../kinds";
-import type { ListStatus } from "../list/listStatus";
+import { SHOWS_ROWS, type ListStatus } from "../list/listStatus";
 import type { ListServices } from "../services";
 import { listUri, parseListUri } from "../uri";
 
@@ -219,7 +219,7 @@ function Total({
   gvr: Gvr | undefined;
   whole?: boolean;
 }) {
-  if (!status) return null;
+  if (!status || !SHOWS_ROWS.has(status.status.state)) return null;
   const column = gvr && statusColumn(gvr);
   const counts =
     gvr && column ? byHealth(gvr, column, status.counts) : undefined;

@@ -12,7 +12,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@tanstack/react-virtual": "^3.14.24",
     "@twigo/protocol": "workspace:*",
     "@twigo/ui": "workspace:*",
     "@twigo/utils": "workspace:*",
