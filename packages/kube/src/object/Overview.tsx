@@ -234,8 +234,8 @@ const CONDITION: Readonly<
 
 /**
  * Conditions as chips that read at a glance (ARCHITECTURE 4.3): a mark in
- * the condition's tone, its type, and its reason, message and age in the
- * chip's tooltip; what is wrong says why below them.
+ * the condition's tone, its type and its age, with its status, reason and
+ * message in the chip's tooltip; what is wrong says why below them.
  */
 function Conditions({ conditions }: { conditions: readonly Condition[] }) {
   const wrong = conditions.filter(
