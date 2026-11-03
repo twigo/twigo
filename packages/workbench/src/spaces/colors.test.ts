@@ -1,5 +1,6 @@
 import { act } from "@testing-library/react";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
+import type { Context } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { StateStore } from "../state/store";
 import { testWorkbench } from "../testing";
@@ -74,4 +75,37 @@ test("the colour command picks for the space the rail's menu names and leaves a 
   qa?.resolve(qa.items.find((item) => item.id === "yellow"));
   await again;
   expect(colors.of("qa")).toBe("yellow");
+});
+
+test("the colour command does nothing for a space the rail no longer shows", async () => {
+  const contexts: Context[] = ["prod-eu", "staging", "dev"].map((name) => ({
+    name,
+    color: null,
+    source: "~/.kube/config",
+    server: null,
+  }));
+  const backend = createMockBackend("ready");
+  let send: ((next: Context[]) => void) | undefined;
+  const subscribe = backend.subscribe.bind(backend);
+  vi.spyOn(backend, "subscribe").mockImplementation((command, request, on) => {
+    if (command !== "contexts_watch") return subscribe(command, request, on);
+    send = on;
+    return Promise.resolve(contexts);
+  });
+  const workbench = await testWorkbench("ready", backend);
+  act(() => {
+    send?.(contexts.filter((context) => context.name !== "staging"));
+  });
+  expect(workbench.spaces.list.map((space) => space.id)).toEqual([
+    "prod-eu",
+    "dev",
+  ]);
+
+  void workbench.commands.execute(
+    SET_SPACE_COLOR,
+    workbench.keys.lookup(null),
+    "staging",
+  );
+  await act(() => Promise.resolve());
+  expect(workbench.quickAccess.session).toBeUndefined();
 });

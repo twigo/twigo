@@ -12,8 +12,8 @@ const AUTOMATIC = "automatic";
 
 /**
  * Picks the colour of a space's context (ARCHITECTURE 4.2): the space the
- * rail's menu names, else the active one. A colour from the kubeconfig
- * stays, and the pick says so.
+ * rail's menu names, while the rail shows it, or the active one when none
+ * is named. A colour from the kubeconfig stays, and the pick says so.
  */
 export function registerSpaceColor({
   commands,
@@ -29,11 +29,10 @@ export function registerSpaceColor({
     icon: Palette,
     enablement: "space.count > 0",
     run: async (args) => {
-      const named =
+      const space =
         typeof args === "string"
           ? spaces.list.find((candidate) => candidate.id === args)
-          : undefined;
-      const space = named ?? spaces.active;
+          : spaces.active;
       const [context, ...more] = space?.contexts ?? [];
       if (!space || context === undefined || more.length > 0) return;
       const current = colors.of(context);
