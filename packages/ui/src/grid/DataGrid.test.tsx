@@ -88,9 +88,9 @@ function scroll(element: HTMLElement, top: number) {
   });
 }
 
-function grid(
-  overrides: Partial<Parameters<typeof DataGrid<Pod, string>>[0]> = {},
-) {
+type Props = Partial<Parameters<typeof DataGrid<Pod, string>>[0]>;
+
+function grid(overrides: Props = {}) {
   const handlers = {
     onSelect: vi.fn(),
     onActivate: vi.fn(),
@@ -100,7 +100,7 @@ function grid(
     onSort: vi.fn(),
   };
   let controller: ListController | undefined;
-  render(
+  const element = (props: Props) => (
     <DataGrid<Pod, string>
       label="Pods"
       columns={[{ id: "Name", title: "Name", width: 200, grow: true }]}
@@ -118,10 +118,17 @@ function grid(
         return () => undefined;
       }}
       {...handlers}
-      {...overrides}
-    />,
+      {...props}
+    />
   );
-  return { handlers, controller: () => controller };
+  const { rerender } = render(element(overrides));
+  return {
+    handlers,
+    controller: () => controller,
+    rerender: (changes: Props) => {
+      rerender(element({ ...overrides, ...changes }));
+    },
+  };
 }
 
 test("group headers come before their rows, a failing row has an edge, and a header's click folds it", () => {
@@ -179,6 +186,23 @@ test("a marking move from a group header marks the row it lands on, never the he
     controller()?.move(1, true);
   });
   expect(handlers.onMark.mock.calls).toEqual([[["e1"], true]]);
+});
+
+test("once the cursor's row is gone, Enter and X act on no other row", () => {
+  const pods = PODS.slice(0, 4);
+  const { handlers, controller, rerender } = grid({
+    ...list(pods),
+    selected: "p2",
+  });
+  rerender(list(pods.filter((pod) => pod.id !== "p2")));
+  act(() => {
+    controller()?.activate();
+  });
+  act(() => {
+    controller()?.toggleMark?.();
+  });
+  expect(handlers.onActivate).not.toHaveBeenCalled();
+  expect(handlers.onMark).not.toHaveBeenCalled();
 });
 
 test("a move down scrolls the cursor's row clear of the bottom, a move up clear of the sticky header", () => {

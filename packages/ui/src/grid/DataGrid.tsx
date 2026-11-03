@@ -192,7 +192,8 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     };
     const current = () => {
       const index = at();
-      return index < 0 ? undefined : latest.current.item(index);
+      const target = index < 0 ? undefined : latest.current.item(index);
+      return target?.id === latest.current.cursor ? target : undefined;
     };
     const go = (index: number, extend = false) => {
       const { length: count, cursor: from } = latest.current;
