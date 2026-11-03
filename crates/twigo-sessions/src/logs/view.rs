@@ -9,8 +9,8 @@ use aho_corasick::AhoCorasick;
 use regex::{Regex, RegexBuilder};
 use twigo_cache::view::TextFilter;
 use twigo_ipc::{
-    Bucket, ErrorKind, Histogram, IpcError, Level, LevelFilter, LogEntries, LogEntry, LogMatches,
-    LogView, LogWindow, TextRange,
+    Bucket, ErrorKind, Histogram, IpcError, Level, LevelFilter, LogAround, LogEntries, LogEntry,
+    LogMatches, LogView, LogWindow, TextRange,
 };
 
 use crate::logs::buffer::{Buffer, Entry, Judged, Kind};
@@ -179,17 +179,18 @@ pub fn total(buffer: &Buffer, spec: &Spec) -> u32 {
 /// The entries a window reads, with the search's marks.
 pub fn window(buffer: &Buffer, spec: &Spec, window: LogWindow) -> LogEntries {
     let total = total(buffer, spec);
-    let (start, end) = match window {
-        LogWindow::Tail { count } => (total.saturating_sub(count), total),
+    let (start, end, around) = match window {
+        LogWindow::Tail { count } => (total.saturating_sub(count), total, None),
         LogWindow::Range { start, end } => {
             let start = start.min(total);
-            (start, end.clamp(start, total))
+            (start, end.clamp(start, total), None)
         }
         LogWindow::Around { id, before, after } => {
-            let at = place(buffer, spec, id);
+            let index = place(buffer, spec, id);
             (
-                at.saturating_sub(before),
-                at.saturating_add(after).min(total),
+                index.saturating_sub(before),
+                index.saturating_add(after).min(total),
+                Some(LogAround { id, index }),
             )
         }
     };
@@ -198,7 +199,11 @@ pub fn window(buffer: &Buffer, spec: &Spec, window: LogWindow) -> LogEntries {
         .take((end - start) as usize)
         .map(|shown| entry(shown, spec))
         .collect();
-    LogEntries { start, entries }
+    LogEntries {
+        start,
+        entries,
+        around,
+    }
 }
 
 /// Where the entry with `id` stands in the view: at its index while the

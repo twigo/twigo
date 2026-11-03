@@ -3,6 +3,7 @@ import type {
   Bucket,
   Histogram,
   LevelFilter,
+  LogAround,
   LogEntries,
   LogEntry,
   LogMatches,
@@ -154,6 +155,7 @@ export function entries(
   const total = all.length;
   let start: number;
   let end: number;
+  let around: LogAround | null = null;
   switch (window.type) {
     case "tail":
       start = Math.max(0, total - window.count);
@@ -164,15 +166,17 @@ export function entries(
       end = Math.min(Math.max(window.end, start), total);
       break;
     case "around": {
-      const at = place(buffer, spec, window.id);
-      start = Math.max(0, at - window.before);
-      end = Math.min(at + window.after, total);
+      const index = place(buffer, spec, window.id);
+      start = Math.max(0, index - window.before);
+      end = Math.min(index + window.after, total);
+      around = { id: window.id, index };
       break;
     }
   }
   return {
     start,
     entries: all.slice(start, end).map((each) => wire(each, spec)),
+    around,
   };
 }
 

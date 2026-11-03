@@ -24,10 +24,10 @@ pub use list::{
     RowGroup, RowId, SetWindow, Sort, SubscriptionId, ValueCount, ViewState, Window,
 };
 pub use logs::{
-    AnsiColor, Bucket, Containers, DownloadLogs, Histogram, Level, LevelFilter, LogBatch,
-    LogContainer, LogEntries, LogEntry, LogMatches, LogPod, LogSource, LogTarget, LogView,
-    LogWindow, OpenLogs, SetLogSource, SetLogView, SetLogWindow, Since, StreamState, TextRange,
-    TextStyle, TimeRange,
+    AnsiColor, Bucket, Containers, DownloadLogs, Histogram, Level, LevelFilter, LogAround,
+    LogBatch, LogContainer, LogEntries, LogEntry, LogMatches, LogPod, LogSource, LogTarget,
+    LogView, LogWindow, OpenLogs, SetLogSource, SetLogView, SetLogWindow, Since, StreamState,
+    TextRange, TextStyle, TimeRange,
 };
 pub use object::{
     Block, Condition, Container, ContainerRole, ContainerState, DataEntry, EmbeddedList, EventList,

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use serde_json::Value;
-use twigo_ipc::{ErrorKind, Level, LogEntry, LogView, LogWindow, ObjectRef, TextRange};
+use twigo_ipc::{ErrorKind, Level, LogAround, LogEntry, LogView, LogWindow, ObjectRef, TextRange};
 use twigo_sessions::logs::buffer::{Buffer, Dropped, Kind, LIMITS, Limits, Origin};
 use twigo_sessions::logs::view::{self, BUCKETS, Spec, rfc3339};
 use twigo_sessions::logs::{level, line};
@@ -92,6 +92,8 @@ struct Expect {
 struct ExpectWindow {
     start: u32,
     ids: Vec<u64>,
+    #[serde(default)]
+    around: Option<LogAround>,
 }
 
 #[derive(Deserialize, Debug, PartialEq)]
@@ -228,6 +230,7 @@ fn views_show_what_the_mock_shows() {
         let shown = ExpectWindow {
             start: window.start,
             ids: window.entries.iter().map(id).collect(),
+            around: window.around,
         };
         assert_eq!(Some(shown), case.expect.window, "{name}");
         for entry in &window.entries {

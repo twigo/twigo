@@ -182,6 +182,21 @@ pub struct LogEntries {
     /// An index into the view's entries, as in [`LogWindow::Range`].
     pub start: u32,
     pub entries: Vec<LogEntry>,
+    /// Where the entry of a [`LogWindow::Around`] stands, so the webview
+    /// tells the answer to the window it asked for from an earlier one,
+    /// and places an entry the view no longer keeps; absent for the other
+    /// windows.
+    pub around: Option<LogAround>,
+}
+
+/// The entry a [`LogWindow::Around`] was asked around, and where it
+/// stands: at its index while the view keeps it, else where it would
+/// stand if the view kept it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LogAround {
+    pub id: u64,
+    /// An index into the view's entries, as [`LogEntries::start`].
+    pub index: u32,
 }
 
 /// Every entry has an `id`, which stays its own while the buffer holds it,

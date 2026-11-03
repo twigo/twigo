@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import type {
   ErrorKind,
   Level,
+  LogAround,
   LogMatches,
   LogView,
   LogWindow,
@@ -53,7 +54,7 @@ interface ViewCase {
   expect: {
     refused?: ErrorKind;
     total?: number;
-    window?: { start: number; ids: number[] };
+    window?: { start: number; ids: number[]; around?: LogAround };
     marks?: Record<string, TextRange[]>;
     matches?: LogMatches;
     histogram?: {
@@ -115,7 +116,8 @@ for (const {
     expect({
       start: shown.start,
       ids: shown.entries.map((entry) => entry.id),
-    }).toEqual(wanted.window);
+      around: shown.around,
+    }).toEqual(wanted.window && { around: null, ...wanted.window });
     for (const entry of shown.entries) {
       if (entry.type !== "line") continue;
       expect(entry.marks, `the marks of ${String(entry.id)}`).toEqual(

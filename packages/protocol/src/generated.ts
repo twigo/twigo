@@ -418,6 +418,17 @@ groupBy: Grouping | null,
 values: ColumnValues | null, };
 
 /**
+ * The entry a [`LogWindow::Around`] was asked around, and where it
+ * stands: at its index while the view keeps it, else where it would
+ * stand if the view kept it.
+ */
+export type LogAround = { id: number, 
+/**
+ * An index into the view's entries, as [`LogEntries::start`].
+ */
+index: number, };
+
+/**
  * One flush of a session. Rust sends the next only after the webview
  * acknowledged this one's `seq`, and coalesces changes meanwhile.
  */
@@ -474,7 +485,14 @@ export type LogEntries = {
 /**
  * An index into the view's entries, as in [`LogWindow::Range`].
  */
-start: number, entries: Array<LogEntry>, };
+start: number, entries: Array<LogEntry>, 
+/**
+ * Where the entry of a [`LogWindow::Around`] stands, so the webview
+ * tells the answer to the window it asked for from an earlier one,
+ * and places an entry the view no longer keeps; absent for the other
+ * windows.
+ */
+around: LogAround | null, };
 
 /**
  * Every entry has an `id`, which stays its own while the buffer holds it,
