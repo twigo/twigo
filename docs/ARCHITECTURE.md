@@ -868,6 +868,7 @@ It lives in `packages/ui`: the tokens, and primitives that draw every recurring 
     The shell and the side bars share one tone and the editor is the surface that stands out: white under a 0.975 shell on light; on dark the darkest, 0.185 under a 0.218 shell, as VS Code's Dark 2026, JetBrains Islands and Zed draw it, with card 0.25 and popover 0.27 above both.
     Text sits a step below white on dark (0.87).
   - Three text tiers, each at 4.5:1 or more on the shell and the editor (WCAG 1.4.3): primary, secondary for what places a row, tertiary for units, hints and empty values ([research](research/workbench-design.md)).
+    On a selected row tertiary reads as secondary, and text in a tone reads at 4.5:1 on a selected row and its pill's tint too.
   - Tones: error, warn, ok and idle; `--warn` fills dots and edges, and `--warn-foreground` is its readable text.
   - Hover and selection are alpha overlays, so they work on any surface.
   - A two-layer focus ring: a solid brand line, 3:1 or more on any surface (WCAG 1.4.11), and a translucent halo.

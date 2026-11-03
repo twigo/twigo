@@ -17,7 +17,7 @@
   --dur-slow: 0.3s;
 
   /* change these two to re-skin the whole app */
-  --brand: oklch(0.55 0.16 245);
+  --brand: oklch(0.52 0.16 245);
   --brand-foreground: oklch(0.99 0.005 245);
 
   /* Neutral greys with a trace of the brand hue: an app's chrome, not a
@@ -35,7 +35,8 @@
   --muted: oklch(0.955 0.002 250);
   /* Three text tiers, each at 4.5:1 or more on the shell and the editor
      (WCAG 1.4.3): secondary for what places a row, tertiary for units,
-     timestamps, hints and empty values. */
+     timestamps, hints and empty values. A selected row's tint takes
+     tertiary below that, so there it reads as secondary. */
   --muted-foreground: oklch(0.47 0.006 250);
   --muted-foreground-2: oklch(0.55 0.005 250);
   --accent: oklch(0.945 0.003 250);
@@ -79,11 +80,12 @@
   --panel: oklch(0.975 0.002 250);
 
   /* Tones (ARCHITECTURE 4.9). --warn fills dots and edges; as text it is
-     --warn-foreground, which reads at 4.5:1. */
+     --warn-foreground. Text in a tone reads at 4.5:1 on the shell, the
+     editor, a selected row and its pill's tint. */
   --ok: oklch(0.62 0.14 150);
   --warn: oklch(0.72 0.15 75);
-  --warn-foreground: oklch(0.55 0.14 70);
-  --error: oklch(0.577 0.245 27.325);
+  --warn-foreground: oklch(0.51 0.13 70);
+  --error: oklch(0.52 0.21 27.325);
 
   /* Context dots: the only colour a user picks (kubeconfig metadata, 4.2). */
   --context-red: oklch(0.6 0.19 25);
@@ -163,7 +165,7 @@
   --ok: oklch(0.72 0.15 150);
   --warn: oklch(0.78 0.15 75);
   --warn-foreground: oklch(0.8 0.13 75);
-  --error: oklch(0.704 0.191 22.216);
+  --error: oklch(0.76 0.16 25);
 
   --context-red: oklch(0.7 0.17 25);
   --context-orange: oklch(0.75 0.14 55);

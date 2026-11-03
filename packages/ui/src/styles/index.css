@@ -26,6 +26,10 @@
     font-variant-numeric: tabular-nums;
   }
 
+  [aria-selected="true"] {
+    --muted-foreground-2: var(--muted-foreground);
+  }
+
   /* Native <button> doesn't show the pointer cursor and Tailwind's reset
      doesn't add it. Interactive controls should show the hand. Radix triggers
      (Select/Tooltip/Toggle/RadioGroup) render <button>, so they're covered too;
