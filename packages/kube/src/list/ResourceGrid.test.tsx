@@ -265,15 +265,10 @@ test("a double click on a header's edge fits the column to its widest text or it
   Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
     configurable: true,
     value(this: HTMLElement) {
-      return this.hasAttribute("data-fit")
+      return this.hasAttribute("data-fit") ||
+        this.hasAttribute("data-fit-header")
         ? new DOMRect(0, 0, measured(this), 10)
         : Element.prototype.getBoundingClientRect.call(this);
-    },
-  });
-  Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
-    configurable: true,
-    get(this: HTMLElement) {
-      return this.hasAttribute("data-fit-header") ? measured(this) : 0;
     },
   });
   try {
@@ -303,7 +298,6 @@ test("a double click on a header's edge fits the column to its widest text or it
     );
   } finally {
     Reflect.deleteProperty(HTMLElement.prototype, "getBoundingClientRect");
-    Reflect.deleteProperty(HTMLElement.prototype, "scrollWidth");
   }
 });
 

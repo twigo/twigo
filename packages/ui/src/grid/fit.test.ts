@@ -25,7 +25,8 @@ function grid(
   const element = document.createElement("div");
   const header = document.createElement("span");
   header.dataset.fitHeader = "Name";
-  Object.defineProperty(header, "scrollWidth", { value: title });
+  header.dataset.natural = String(title);
+  header.dataset.cut = String(title);
   element.append(header);
   for (const width of cells) {
     const {
@@ -47,6 +48,10 @@ test("a fit gives the header its title, padding, sort arrow and right border, an
   expect(fitWidth(grid(100, [60]), "Name")).toBe(133);
   expect(fitWidth(grid(40, [150.2]), "Name")).toBe(167);
   expect(fitWidth(grid(4, [10]), "Name")).toBe(48);
+});
+
+test("a fit counts a title's fraction of a pixel", () => {
+  expect(fitWidth(grid(37.4, []), "Name")).toBe(71);
 });
 
 test("a fit counts a cut cell whole, and without its content's negative margins", () => {
