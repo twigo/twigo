@@ -241,6 +241,29 @@ test("without a cursor, a move lands on the first row below the header", () => {
   });
 });
 
+test("the cursor is the grid's active descendant, and the marked rows are the selected ones while there are any", () => {
+  const { controller, rerender } = grid({ selected: "a1" });
+  const active = () => {
+    const id = screen.getByRole("grid").getAttribute("aria-activedescendant");
+    return id === null ? undefined : document.getElementById(id)?.textContent;
+  };
+  const selected = () =>
+    screen
+      .getAllByRole("row")
+      .filter((row) => row.getAttribute("aria-selected") === "true")
+      .map((row) => row.textContent);
+  expect(active()).toBe("api-1");
+  expect(selected()).toEqual(["api-1"]);
+  act(() => {
+    controller()?.move(2);
+  });
+  expect(active()).toBe("edge");
+  expect(selected()).toEqual(["edge"]);
+  rerender({ marked: new Set(["a2", "e1"]) });
+  expect(active()).toBe("edge");
+  expect(selected()).toEqual(["api-2", "gateway-1"]);
+});
+
 test("a move down scrolls the cursor's row clear of the bottom, a move up clear of the sticky header", () => {
   const { controller } = grid({ ...list(PODS), selected: "p22" });
   const element = scrollable(PODS.length);

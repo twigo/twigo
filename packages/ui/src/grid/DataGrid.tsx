@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -106,6 +107,8 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     flash,
     register,
   } = props;
+  const ids = useId();
+  const rowId = (index: number) => `${ids}-${String(index)}`;
   const [element, setElement] = useState<HTMLDivElement | null>(null);
   const [cursor, setCursor] = useState(selected);
   const [followed, setFollowed] = useState(selected);
@@ -291,6 +294,10 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
   const withoutMenu = (event: SyntheticEvent) => {
     event.preventDefault();
   };
+  const anyMarked = (marked?.size ?? 0) > 0;
+  const active = virtual.find(
+    (at) => cursor !== undefined && item(at.index)?.id === cursor,
+  );
 
   const rows = virtual.map((at) => {
     const target = item(at.index);
@@ -323,10 +330,11 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       return (
         <div
           key={target.id}
+          id={rowId(at.index)}
           role="row"
           aria-rowindex={at.index + 2}
           aria-expanded={target.open}
-          aria-selected={isCursor}
+          aria-selected={!anyMarked && isCursor}
           onClick={() => {
             setCursor(target.id);
             onToggleGroup?.(target.id);
@@ -364,9 +372,10 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     return (
       <div
         key={target.id}
+        id={rowId(at.index)}
         role="row"
         aria-rowindex={at.index + 2}
-        aria-selected={isCursor}
+        aria-selected={anyMarked ? isMarked : isCursor}
         onClick={() => {
           select();
           onActivate(target.id, target.data);
@@ -474,6 +483,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       aria-label={label}
       aria-rowcount={length + 1}
       aria-multiselectable={marking || undefined}
+      aria-activedescendant={active && rowId(active.index)}
       className="group/grid h-full min-h-0 overflow-auto outline-none"
     >
       <div
