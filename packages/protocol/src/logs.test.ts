@@ -132,13 +132,13 @@ test("a refused view stays refused through later batches until a view is taken",
   const fake = fakeBackend();
   const invoke = fake.backend.invoke.bind(fake.backend);
   let refuse = true;
-  fake.backend.invoke = ((command: string, request: unknown) => {
+  fake.backend.invoke = (command: string, request: unknown) => {
     if (command === "logs_set_view" && refuse)
       return Promise.reject(
         new IpcError("invalidInput", "the filter /(/ is no regex"),
       );
     return invoke(command as never, request as never);
-  });
+  };
   const session = new LogsSession(fake.backend, OPEN);
   fake.resolve(5);
   await vi.runAllTimersAsync();
@@ -155,4 +155,46 @@ test("a refused view stays refused through later batches until a view is taken",
   session.setView({ ...VIEW, filter: "refused" });
   await vi.runAllTimersAsync();
   expect(session.getSnapshot().refused).toBeUndefined();
+});
+
+test("arrived stays 0 while a batch still counts the view before a change sent", async () => {
+  const fake = fakeBackend();
+  const session = new LogsSession(fake.backend, OPEN);
+  fake.resolve(3);
+  await vi.runAllTimersAsync();
+  fake.send(batch(1, { arrived: 12_000 }));
+  expect(session.getSnapshot().arrived).toBe(12_000);
+  session.setView({ ...VIEW, filter: "error" });
+  session.setSource({ ...SOURCE, previous: true });
+  fake.send(batch(2, { arrived: 12_004, changes: 1 }));
+  expect(session.getSnapshot().arrived).toBe(0);
+  fake.send(batch(3, { arrived: 3, changes: 2 }));
+  expect(session.getSnapshot().arrived).toBe(3);
+});
+
+test("a refused view is not a change Rust applied", async () => {
+  const fake = fakeBackend();
+  let refuse: (() => void) | undefined;
+  const invoke = fake.backend.invoke.bind(fake.backend);
+  fake.backend.invoke = (command: string, request: unknown) => {
+    if (command === "logs_set_view")
+      return new Promise((_resolve, reject) => {
+        refuse = () => {
+          reject(new IpcError("invalidInput", "the filter /(/ is no regex"));
+        };
+      });
+    return invoke(command as never, request as never);
+  };
+  const session = new LogsSession(fake.backend, OPEN);
+  fake.resolve(6);
+  await vi.runAllTimersAsync();
+  session.setView({ ...VIEW, filter: "/(/" });
+  fake.send(batch(1, { arrived: 7 }));
+  expect(session.getSnapshot().arrived).toBe(0);
+  refuse?.();
+  await vi.runAllTimersAsync();
+  expect(session.getSnapshot()).toMatchObject({
+    arrived: 7,
+    refused: { message: "the filter /(/ is no regex" },
+  });
 });

@@ -25,7 +25,11 @@ export interface LogsSnapshot {
   readonly histogram: Histogram | undefined;
   /** Entries the buffer's bound dropped. */
   readonly dropped: number;
-  /** Entries the view kept as they came since its source or view last changed. */
+  /**
+   * Entries the view kept as they came since its source or view last
+   * changed: 0 while Rust has yet to apply a change sent, whose batches
+   * still count the old view's.
+   */
   readonly arrived: number;
   /**
    * Why Rust refused the source or view last sent, as a filter that is no
@@ -66,6 +70,9 @@ export class LogsSession {
   #sent: { source: LogSource; view: LogView; window: LogWindow | undefined };
   #unacked: number | undefined;
   #closed = false;
+  /** Source and view changes sent and not refused, as Rust counts those it applied. */
+  #changes = 0;
+  #applied = { arrived: 0, changes: 0 };
   readonly #refusals: {
     source: IpcError | undefined;
     view: IpcError | undefined;
@@ -143,14 +150,18 @@ export class LogsSession {
     const failed = (error: unknown) => {
       this.#fail(error);
     };
-    const answer = (kind: "source" | "view") => ({
-      taken: () => {
-        this.#refuse(kind, undefined);
-      },
-      refused: (error: unknown) => {
-        this.#refuse(kind, toIpcError(error));
-      },
-    });
+    const answer = (kind: "source" | "view") => {
+      this.#changes++;
+      return {
+        taken: () => {
+          this.#refuse(kind, undefined);
+        },
+        refused: (error: unknown) => {
+          this.#changes--;
+          this.#refuse(kind, toIpcError(error));
+        },
+      };
+    };
     if (!same(sent.source, this.#source)) {
       const { taken, refused } = answer("source");
       this.#backend
@@ -178,6 +189,7 @@ export class LogsSession {
   #apply(batch: LogBatch): void {
     if (this.#closed) return;
     const previous = this.#snapshot;
+    this.#applied = { arrived: batch.arrived, changes: batch.changes };
     this.#publish({
       seq: batch.seq,
       status: batch.status,
@@ -187,7 +199,7 @@ export class LogsSession {
       matches: batch.matches ?? previous.matches,
       histogram: batch.histogram ?? previous.histogram,
       dropped: batch.dropped,
-      arrived: batch.arrived,
+      arrived: this.#arrived(),
       refused: previous.refused,
     });
     this.#unacked = batch.seq;
@@ -211,8 +223,17 @@ export class LogsSession {
     if (this.#closed) return;
     this.#refusals[kind] = error;
     const refused = this.#refusals.view ?? this.#refusals.source;
-    if (this.#snapshot.refused !== refused)
-      this.#publish({ ...this.#snapshot, refused });
+    const arrived = this.#arrived();
+    if (
+      this.#snapshot.refused !== refused ||
+      this.#snapshot.arrived !== arrived
+    )
+      this.#publish({ ...this.#snapshot, refused, arrived });
+  }
+
+  #arrived(): number {
+    const { arrived, changes } = this.#applied;
+    return changes === this.#changes ? arrived : 0;
   }
 
   #fail(error: unknown): void {
