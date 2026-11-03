@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{Gvr, IpcError, SubscriptionId, Tone, ViewState};
+use crate::{Gvr, IpcError, ObjectRef, SubscriptionId, Tone, ViewState};
 
 /// What a logs tab follows: a pod, or a Deployment, ReplicaSet,
 /// StatefulSet, DaemonSet, Job or CronJob, whose pods it merges and whose
@@ -207,6 +207,9 @@ pub enum LogEntry {
         pod: String,
         /// RFC 3339.
         time: String,
+        /// What controls the pod, by its controller owner reference: a
+        /// Deployment's pod's ReplicaSet, a CronJob's pod's Job.
+        owner: Option<ObjectRef>,
     },
     /// A pod left the target.
     Left {

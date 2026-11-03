@@ -479,7 +479,12 @@ restarting: string | null, } | { "type": "joined", id: number, pod: string,
 /**
  * RFC 3339.
  */
-time: string, } | { "type": "left", id: number, pod: string, 
+time: string, 
+/**
+ * What controls the pod, by its controller owner reference: a
+ * Deployment's pod's ReplicaSet, a CronJob's pod's Job.
+ */
+owner: ObjectRef | null, } | { "type": "left", id: number, pod: string, 
 /**
  * RFC 3339.
  */
