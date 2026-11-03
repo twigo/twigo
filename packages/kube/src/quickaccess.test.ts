@@ -301,5 +301,8 @@ test("a space's connection carries its Kubernetes version once connected", async
       version: "v1.33.4",
     });
   });
-  expect(workbench.spaceStatus.get("staging")).toBeUndefined();
+  expect(workbench.spaceStatus.get("staging")).toEqual({
+    tone: "idle",
+    label: "Not connected yet",
+  });
 });
