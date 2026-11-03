@@ -249,6 +249,15 @@ function Grid({
     },
     [selection, uri, gvr, resource.kind, resource.namespaced, snapshot.columns],
   );
+  const filter = JSON.stringify([
+    text,
+    picked ?? null,
+    [...query.namespaces].sort(),
+  ]);
+  useEffect(() => {
+    selection.filter(uri, filter);
+  }, [selection, uri, filter]);
+
   const current = selection.get(uri);
   const live = current && snapshot.rows.get(current.row.id);
   const changed =

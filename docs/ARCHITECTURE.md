@@ -715,6 +715,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   They act on the selected row of the active list.
 - Marks: X marks the row under the cursor, ⇧↓ and ⇧↑ mark as they move, a click on a row's box marks it; Space shows the details (4.3).
   Marked rows get a bar at the bottom with the commands of `resource/marked`; Esc clears them.
+  A change of the list's text, health or namespaces clears them too, as a new search clears a selection, so no command acts on rows the list no longer shows.
   Marks are row IDs (3.4).
 - Focus model: arrows or `j`/`k` move, Enter opens, Left and Right fold, `/` or ⌘F filters, Esc clears.
   These are the workbench's `list.*` commands, which drive every list and tree.

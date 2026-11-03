@@ -32,12 +32,13 @@ export function objectOf({ row, namespaced }: Selected): {
  * Per list editor URI, the row last selected in its table (ARCHITECTURE
  * 4.3), so a list that mounts again selects it again, and two lists of one
  * space keep their own; and the rows the user marked (4.4), which commands
- * of the `resource/marked` menu act on.
+ * of the `resource/marked` menu act on, until the list's filter changes.
  */
 export class Selection {
   readonly changes = new Changes();
   readonly #lists = new Map<string, Selected>();
   readonly #marks = new Map<string, ReadonlySet<RowId>>();
+  readonly #filters = new Map<string, string>();
 
   get(uri: string): Selected | undefined {
     return this.#lists.get(uri);
@@ -60,6 +61,20 @@ export class Selection {
       else next.delete(id);
     }
     this.#marks.set(uri, next);
+    this.changes.emit();
+  }
+
+  /**
+   * The filter the list's rows now come from, as one string: a new one
+   * clears the marks, as a new search clears a selection, so no command
+   * acts on rows the list no longer shows.
+   */
+  filter(uri: string, filter: string): void {
+    const before = this.#filters.get(uri);
+    this.#filters.set(uri, filter);
+    if (before === undefined || before === filter) return;
+    if (this.marks(uri).size === 0) return;
+    this.#marks.delete(uri);
     this.changes.emit();
   }
 }

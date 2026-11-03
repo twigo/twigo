@@ -525,6 +525,46 @@ test("a row's box marks it, x marks the cursor's row, shift+down marks while mov
   expect([...marked].sort()).not.toEqual(marked);
 });
 
+test("a change of the list's text, health or namespaces clears its marks, its space coming back does not", async () => {
+  const workbench = await openList();
+  const mark = async () => {
+    fireEvent.click(
+      within(rows()[0] ?? document.body).getByRole("checkbox", {
+        name: "Mark row",
+      }),
+    );
+    await settle(1);
+    expect(markBar()?.textContent).toContain("1 marked");
+  };
+  await mark();
+  for (const space of ["staging", "prod-eu"]) {
+    act(() => {
+      workbench.spaces.select(space);
+    });
+    await settle();
+  }
+  expect(markBar()?.textContent).toContain("1 marked");
+
+  fireEvent.change(filterField(), { target: { value: "api" } });
+  await settle();
+  expect(markBar()).toBeNull();
+
+  await mark();
+  fireEvent.click(health("Failing"));
+  await settle();
+  expect(markBar()).toBeNull();
+
+  await mark();
+  act(() => {
+    workbench.spaces.update("prod-eu", (state) => ({
+      ...state,
+      namespaces: ["auth"],
+    }));
+  });
+  await settle();
+  expect(markBar()).toBeNull();
+});
+
 test("Escape closes the details first, then clears the marks", async () => {
   await openList();
   const [first, second] = rows();
