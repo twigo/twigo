@@ -6,9 +6,10 @@ use base64::engine::general_purpose::STANDARD;
 use serde_json::Value;
 use twigo_ipc::{Block, DataEntry, Field, Section, Value as Shown};
 
-use crate::text;
+use crate::{Described, Input, text};
 
-pub(crate) fn config_map(object: &Value) -> Vec<Section> {
+pub(crate) fn config_map(input: &Input<'_>) -> Described {
+    let object = input.object;
     let mut entries: Vec<DataEntry> = object["data"]
         .as_object()
         .into_iter()
@@ -36,14 +37,18 @@ pub(crate) fn config_map(object: &Value) -> Vec<Section> {
         entries,
         readable: true,
     });
-    vec![Section {
-        id: "core.data".to_owned(),
-        title: "Data".to_owned(),
-        blocks,
-    }]
+    Described {
+        findings: Vec::new(),
+        sections: vec![Section {
+            id: "core.data".to_owned(),
+            title: "Data".to_owned(),
+            blocks,
+        }],
+    }
 }
 
-pub(crate) fn secret(object: &Value) -> Vec<Section> {
+pub(crate) fn secret(input: &Input<'_>) -> Described {
+    let object = input.object;
     let mut fields = Vec::new();
     if let Some(kind) = text(&object["type"]) {
         fields.push(Field {
@@ -71,11 +76,14 @@ pub(crate) fn secret(object: &Value) -> Vec<Section> {
         entries,
         readable: false,
     });
-    vec![Section {
-        id: "core.data".to_owned(),
-        title: "Data".to_owned(),
-        blocks,
-    }]
+    Described {
+        findings: Vec::new(),
+        sections: vec![Section {
+            id: "core.data".to_owned(),
+            title: "Data".to_owned(),
+            blocks,
+        }],
+    }
 }
 
 fn immutable(object: &Value) -> Vec<Block> {

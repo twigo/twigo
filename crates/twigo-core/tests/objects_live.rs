@@ -1,7 +1,8 @@
 //! Open objects against a kind or kwok cluster: their batches wait for their
 //! acks, they follow an edit and their events, they hold their events'
-//! upstream only while a view shows them, they say why events cannot be
-//! listed, and a deleted object keeps no owners.
+//! upstream and what their describer needs only while a view shows them,
+//! they say why events cannot be listed, and a deleted object keeps no
+//! owners; and a list sends its field selector to the server.
 //!
 //! TWIGO_TEST_KUBECONFIG=… cargo test -p twigo-core --test objects_live -- --ignored
 
@@ -184,17 +185,29 @@ struct Opened {
 
 impl Opened {
     async fn pod(core: &Arc<Core>, space: String, namespace: &str, parts: ObjectParts) -> Self {
+        Self::open(core, space, "pods", namespace, "p1", parts).await
+    }
+
+    /// An object of a core resource.
+    async fn open(
+        core: &Arc<Core>,
+        space: String,
+        resource: &str,
+        namespace: &str,
+        name: &str,
+        parts: ObjectParts,
+    ) -> Self {
         let (sender, batches) = mpsc::unbounded_channel();
         let object = ObjectQuery {
             space,
             gvr: Gvr {
                 group: String::new(),
                 version: "v1".to_owned(),
-                resource: "pods".to_owned(),
+                resource: resource.to_owned(),
             },
             namespaced: true,
             namespace: Some(namespace.to_owned()),
-            name: "p1".to_owned(),
+            name: name.to_owned(),
         };
         let id = core
             .object_open("main", OpenObject { object, parts }, move |batch| {
@@ -223,14 +236,18 @@ impl Opened {
         batch
     }
 
-    /// Batches until one passes `wanted`.
+    /// Batches until one passes `wanted`, within 30 s.
     async fn until(&mut self, wanted: impl Fn(&ObjectBatch) -> bool) -> ObjectBatch {
-        loop {
-            let batch = self.next().await;
-            if wanted(&batch) {
-                return batch;
+        tokio::time::timeout(WAIT, async {
+            loop {
+                let batch = self.next().await;
+                if wanted(&batch) {
+                    return batch;
+                }
             }
-        }
+        })
+        .await
+        .expect("a wanted batch within 30 s")
     }
 }
 
@@ -263,6 +280,28 @@ fn events(batch: &ObjectBatch) -> Option<&EventList> {
                 _ => None,
             })
         })
+}
+
+/// The cell of a table in a section, by row and column name.
+fn cell(batch: &ObjectBatch, section: &str, row: usize, column: &str) -> Option<String> {
+    let section = batch
+        .overview
+        .as_ref()?
+        .sections
+        .iter()
+        .find(|candidate| candidate.id == section)?;
+    section.blocks.iter().find_map(|block| match block {
+        Block::Table { columns, rows } => {
+            let at = columns.iter().position(|name| name == column)?;
+            match rows.get(row)?.get(at)? {
+                Value::Text { text } | Value::Code { text } | Value::Toned { text, .. } => {
+                    Some(text.clone())
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    })
 }
 
 const OVERVIEW: ObjectParts = ObjectParts {
@@ -441,5 +480,170 @@ async fn a_deleted_object_keeps_no_owners() {
         .await;
     assert_eq!(gone.related, Some(Related::default()));
     core.object_close("main", opened.id).unwrap();
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_describer_follows_the_objects_it_needs_while_the_overview_is_shown() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("needs").await;
+    let service: DynamicObject = serde_json::from_value(json!({
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": { "name": "web" },
+        "spec": { "ports": [{ "name": "http", "port": 80, "targetPort": 8080 }] },
+    }))
+    .unwrap();
+    let services: Api<DynamicObject> = Api::namespaced_with(
+        cluster.admin.clone(),
+        &namespace,
+        &ApiResource::erase::<k8s_openapi::api::core::v1::Service>(&()),
+    );
+    services
+        .create(&PostParams::default(), &service)
+        .await
+        .unwrap();
+    let slices: Api<DynamicObject> = Api::namespaced_with(
+        cluster.admin.clone(),
+        &namespace,
+        &ApiResource {
+            group: "discovery.k8s.io".to_owned(),
+            version: "v1".to_owned(),
+            api_version: "discovery.k8s.io/v1".to_owned(),
+            kind: "EndpointSlice".to_owned(),
+            plural: "endpointslices".to_owned(),
+        },
+    );
+    let slice = |addresses: &[&str]| {
+        json!({
+            "apiVersion": "discovery.k8s.io/v1",
+            "kind": "EndpointSlice",
+            "metadata": { "name": "web-1", "labels": { "kubernetes.io/service-name": "web" } },
+            "addressType": "IPv4",
+            "ports": [{ "name": "http", "port": 8080, "protocol": "TCP" }],
+            "endpoints": addresses
+                .iter()
+                .map(|address| json!({ "addresses": [address], "conditions": { "ready": true } }))
+                .collect::<Vec<_>>(),
+        })
+    };
+    slices
+        .create(
+            &PostParams::default(),
+            &serde_json::from_value(slice(&["10.1.2.3"])).unwrap(),
+        )
+        .await
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (core, space) = core(dir.path(), &cluster.path, &cluster.context);
+    let mut opened = Opened::open(&core, space, "services", &namespace, "web", OVERVIEW).await;
+    opened
+        .until(|batch| {
+            cell(batch, "core.ports", 0, "Endpoints").as_deref() == Some("10.1.2.3:8080")
+        })
+        .await;
+    assert_eq!(core.hub.subscribers("endpointslices"), 1);
+
+    let edited = slice(&["10.1.2.3", "10.1.2.4"]);
+    slices
+        .patch(
+            "web-1",
+            &PatchParams::apply("twigo-test").force(),
+            &Patch::Apply(&edited),
+        )
+        .await
+        .unwrap();
+    opened
+        .until(|batch| {
+            cell(batch, "core.ports", 0, "Endpoints").as_deref()
+                == Some("10.1.2.3:8080, 10.1.2.4:8080")
+        })
+        .await;
+
+    core.object_set_parts(
+        "main",
+        SetParts {
+            id: opened.id,
+            parts: ObjectParts::default(),
+        },
+    )
+    .unwrap();
+    let released = tokio::time::timeout(WAIT, async {
+        while core.hub.subscribers("endpointslices") > 0 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await;
+    assert!(released.is_ok(), "the slices are let go once hidden");
+    core.object_close("main", opened.id).unwrap();
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_list_with_a_field_selector_keeps_what_the_server_selects() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("fields").await;
+    let pods = Api::<Pod>::namespaced(cluster.admin.clone(), &namespace);
+    for (name, node) in [("p1", "kwok-node-0"), ("p2", "kwok-node-1")] {
+        let pod: Pod = serde_json::from_value(json!({
+            "metadata": { "name": name },
+            "spec": { "nodeName": node, "containers": [{ "name": "app", "image": "fake" }] },
+        }))
+        .unwrap();
+        pods.create(&PostParams::default(), &pod).await.unwrap();
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let (core, space) = core(dir.path(), &cluster.path, &cluster.context);
+    let query = twigo_ipc::ListQuery {
+        space,
+        gvr: Gvr {
+            group: String::new(),
+            version: "v1".to_owned(),
+            resource: "pods".to_owned(),
+        },
+        namespaced: true,
+        namespaces: vec![namespace.clone()],
+        label_selector: None,
+        field_selector: Some("spec.nodeName=kwok-node-0".to_owned()),
+        owners: None,
+        text: None,
+        columns: None,
+        sort: None,
+        count_by: None,
+        group_by: None,
+        values: None,
+    };
+    let (sender, mut batches) = mpsc::unbounded_channel();
+    let id = core
+        .list_subscribe("main", query, move |batch| sender.send(batch).is_ok())
+        .await
+        .unwrap();
+    core.list_set_window(
+        "main",
+        twigo_ipc::SetWindow {
+            id,
+            start: 0,
+            end: 40,
+        },
+    )
+    .unwrap();
+    let ids = tokio::time::timeout(WAIT, async {
+        loop {
+            let batch = batches.recv().await.expect("the list is open");
+            core.list_ack("main", Ack { id, seq: batch.seq }).unwrap();
+            if batch.status == ViewState::Ready
+                && let Some(window) = batch.window
+            {
+                return window.ids;
+            }
+        }
+    })
+    .await
+    .expect("the list is ready within 30 s");
+    let ids: Vec<String> = ids.into_iter().map(|id| id.0).collect();
+    assert_eq!(ids, [format!("{}/{namespace}/p1", cluster.context)]);
+    core.list_unsubscribe("main", id).unwrap();
     cluster.delete(&namespace).await;
 }

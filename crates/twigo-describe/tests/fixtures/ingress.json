@@ -1,0 +1,288 @@
+{
+  "events": [],
+  "facts": [
+    {
+      "found": {
+        "objects": [
+          {
+            "apiVersion": "v1",
+            "kind": "Service",
+            "metadata": {
+              "creationTimestamp": "2026-11-03T11:36:41Z",
+              "managedFields": [
+                {
+                  "apiVersion": "v1",
+                  "fieldsType": "FieldsV1",
+                  "fieldsV1": {
+                    "f:spec": {
+                      "f:ports": {
+                        "k:{\"port\":80,\"protocol\":\"TCP\"}": {
+                          ".": {},
+                          "f:name": {},
+                          "f:port": {},
+                          "f:targetPort": {}
+                        }
+                      },
+                      "f:selector": {}
+                    }
+                  },
+                  "manager": "twigo-record",
+                  "operation": "Apply",
+                  "time": "2026-11-03T11:36:41Z"
+                }
+              ],
+              "name": "web",
+              "namespace": "overview",
+              "resourceVersion": "2337",
+              "uid": "d722a86c-ec50-4c25-bfde-5ed90848ccb6"
+            },
+            "spec": {
+              "clusterIP": "10.96.189.89",
+              "clusterIPs": [
+                "10.96.189.89"
+              ],
+              "internalTrafficPolicy": "Cluster",
+              "ipFamilies": [
+                "IPv4"
+              ],
+              "ipFamilyPolicy": "SingleStack",
+              "ports": [
+                {
+                  "name": "http",
+                  "port": 80,
+                  "protocol": "TCP",
+                  "targetPort": "http"
+                }
+              ],
+              "selector": {
+                "app": "web"
+              },
+              "sessionAffinity": "None",
+              "type": "ClusterIP"
+            },
+            "status": {
+              "loadBalancer": {}
+            }
+          }
+        ],
+        "state": "listed"
+      },
+      "need": {
+        "fieldSelector": null,
+        "group": "",
+        "namespace": "overview",
+        "namespaced": true,
+        "resource": "services",
+        "version": "v1"
+      }
+    },
+    {
+      "found": {
+        "objects": [
+          {
+            "addressType": "IPv4",
+            "apiVersion": "discovery.k8s.io/v1",
+            "endpoints": [
+              {
+                "addresses": [
+                  "10.244.0.8"
+                ],
+                "conditions": {
+                  "ready": true,
+                  "serving": true,
+                  "terminating": false
+                },
+                "nodeName": "twigo-overviews-control-plane",
+                "targetRef": {
+                  "kind": "Pod",
+                  "name": "web-54454cf656-dvb7s",
+                  "namespace": "overview",
+                  "uid": "4d628f1b-063c-451b-8e42-d07498e421c6"
+                }
+              },
+              {
+                "addresses": [
+                  "10.244.0.15"
+                ],
+                "conditions": {
+                  "ready": true,
+                  "serving": true,
+                  "terminating": false
+                },
+                "nodeName": "twigo-overviews-control-plane",
+                "targetRef": {
+                  "kind": "Pod",
+                  "name": "web-54454cf656-hbgcx",
+                  "namespace": "overview",
+                  "uid": "c5755e87-0b75-44aa-9d0d-98e355e05635"
+                }
+              }
+            ],
+            "kind": "EndpointSlice",
+            "metadata": {
+              "annotations": {
+                "endpoints.kubernetes.io/last-change-trigger-time": "2026-11-03T11:36:42Z"
+              },
+              "creationTimestamp": "2026-11-03T11:36:41Z",
+              "generateName": "web-",
+              "generation": 7,
+              "labels": {
+                "endpointslice.kubernetes.io/managed-by": "endpointslice-controller.k8s.io",
+                "kubernetes.io/service-name": "web"
+              },
+              "managedFields": [
+                {
+                  "apiVersion": "discovery.k8s.io/v1",
+                  "fieldsType": "FieldsV1",
+                  "fieldsV1": {
+                    "f:addressType": {},
+                    "f:endpoints": {},
+                    "f:metadata": {
+                      "f:annotations": {
+                        ".": {},
+                        "f:endpoints.kubernetes.io/last-change-trigger-time": {}
+                      },
+                      "f:generateName": {},
+                      "f:labels": {
+                        ".": {},
+                        "f:endpointslice.kubernetes.io/managed-by": {},
+                        "f:kubernetes.io/service-name": {}
+                      },
+                      "f:ownerReferences": {
+                        ".": {},
+                        "k:{\"uid\":\"d722a86c-ec50-4c25-bfde-5ed90848ccb6\"}": {}
+                      }
+                    },
+                    "f:ports": {}
+                  },
+                  "manager": "kube-controller-manager",
+                  "operation": "Update",
+                  "time": "2026-11-03T11:36:42Z"
+                }
+              ],
+              "name": "web-m2hts",
+              "namespace": "overview",
+              "ownerReferences": [
+                {
+                  "apiVersion": "v1",
+                  "blockOwnerDeletion": true,
+                  "controller": true,
+                  "kind": "Service",
+                  "name": "web",
+                  "uid": "d722a86c-ec50-4c25-bfde-5ed90848ccb6"
+                }
+              ],
+              "resourceVersion": "2496",
+              "uid": "b596d98f-7dfc-4c31-9709-aa49cf6e3c18"
+            },
+            "ports": [
+              {
+                "name": "http",
+                "port": 8080,
+                "protocol": "TCP"
+              }
+            ]
+          }
+        ],
+        "state": "listed"
+      },
+      "need": {
+        "fieldSelector": null,
+        "group": "discovery.k8s.io",
+        "namespace": "overview",
+        "namespaced": true,
+        "resource": "endpointslices",
+        "version": "v1"
+      }
+    }
+  ],
+  "object": {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "Ingress",
+    "metadata": {
+      "creationTimestamp": "2026-11-03T11:36:41Z",
+      "generation": 1,
+      "managedFields": [
+        {
+          "apiVersion": "networking.k8s.io/v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:spec": {
+              "f:ingressClassName": {},
+              "f:rules": {},
+              "f:tls": {}
+            }
+          },
+          "manager": "twigo-record",
+          "operation": "Apply",
+          "time": "2026-11-03T11:36:41Z"
+        }
+      ],
+      "name": "web",
+      "namespace": "overview",
+      "resourceVersion": "2343",
+      "uid": "1ca339c5-5c57-4e70-88c2-d70b5a5612b7"
+    },
+    "spec": {
+      "ingressClassName": "nginx",
+      "rules": [
+        {
+          "host": "web.example.test",
+          "http": {
+            "paths": [
+              {
+                "backend": {
+                  "service": {
+                    "name": "web",
+                    "port": {
+                      "name": "http"
+                    }
+                  }
+                },
+                "path": "/",
+                "pathType": "Prefix"
+              },
+              {
+                "backend": {
+                  "service": {
+                    "name": "reports",
+                    "port": {
+                      "number": 8080
+                    }
+                  }
+                },
+                "path": "/reports",
+                "pathType": "Prefix"
+              }
+            ]
+          }
+        }
+      ],
+      "tls": [
+        {
+          "hosts": [
+            "web.example.test"
+          ],
+          "secretName": "web-tls"
+        }
+      ]
+    },
+    "status": {
+      "loadBalancer": {}
+    }
+  },
+  "printed": [
+    {
+      "column": "Class",
+      "value": "nginx"
+    },
+    {
+      "column": "Hosts",
+      "value": "web.example.test"
+    },
+    {
+      "column": "Ports",
+      "value": "80, 443"
+    }
+  ]
+}

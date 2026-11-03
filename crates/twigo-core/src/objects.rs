@@ -15,7 +15,7 @@ use twigo_cache::hub::{Delta, Hub, Query, Resource, RowFormat, Subscription};
 use twigo_cache::object::Object;
 use twigo_cache::request::field_value;
 use twigo_cache::table::{Cell, Column, ColumnKind, Row};
-use twigo_describe::{Input, Owned, Printed};
+use twigo_describe::{Fact, Found, Input, Need, Owned, Printed};
 use twigo_ipc::{
     ErrorKind, EventList, IpcError, ObjectBatch, ObjectEvent, ObjectParts, ObjectRef, Related,
     RelatedObject, ViewState,
@@ -127,11 +127,21 @@ impl Dirty {
     }
 }
 
-/// The events and owned objects held for the object with `uid`.
+/// The events, owned objects and facts held for the object with `uid`.
 struct Around {
     uid: Box<str>,
     events: Option<Subscription<Object>>,
     owned: Option<Vec<(Owned, Subscription<Row>)>>,
+    /// What its describer needs, while the Overview is shown.
+    facts: Option<Vec<Held>>,
+}
+
+/// A need of the object's describer, followed, and what it found so far.
+struct Held {
+    need: Need,
+    /// None when the hub refused it, which `found` then says.
+    objects: Option<Subscription<Object>>,
+    found: Option<Found>,
 }
 
 async fn run(
@@ -153,6 +163,7 @@ async fn run(
     let mut around: Option<Around> = None;
     let mut events = EventList::default();
     let mut related = Related::default();
+    let mut facts: Vec<Fact> = Vec::new();
     loop {
         let ticked = tokio::select! {
             _ = interval.tick() => true,
@@ -217,6 +228,7 @@ async fn run(
             around = None;
             events = EventList::default();
             related = Related::default();
+            facts = Vec::new();
             dirty.overview = true;
             dirty.events = true;
             dirty.related = true;
@@ -226,6 +238,7 @@ async fn run(
                 uid: uid.clone(),
                 events: None,
                 owned: None,
+                facts: None,
             });
             if wants_events && held.events.is_none() {
                 held.events = events_of(&hub, &target, json, uid).ok();
@@ -254,6 +267,34 @@ async fn run(
                     dirty.overview = true;
                     dirty.events = true;
                 }
+            }
+            if parts.overview {
+                let needs = twigo_describe::needs(json);
+                let current = held
+                    .facts
+                    .as_ref()
+                    .is_some_and(|facts| facts.iter().map(|held| &held.need).eq(needs.iter()));
+                if !current {
+                    held.facts = Some(needs_of(&hub, &target, needs));
+                    facts = Vec::new();
+                    dirty.overview = true;
+                }
+            } else {
+                held.facts = None;
+            }
+            if let Some(needs) = &mut held.facts
+                && found(needs)
+            {
+                facts = needs
+                    .iter()
+                    .filter_map(|held| {
+                        Some(Fact {
+                            need: held.need.clone(),
+                            found: held.found.clone()?,
+                        })
+                    })
+                    .collect();
+                dirty.overview = true;
             }
             let owned = held.owned.as_deref().unwrap_or_default();
             let mut owned_changed = false;
@@ -294,6 +335,7 @@ async fn run(
             printed: &printed,
             events: &events,
             related: &related,
+            facts: &facts,
         };
         let batch = shown.batch(seq, state.clone());
         dirty.overview &= !parts.overview;
@@ -316,6 +358,7 @@ struct Shown<'a> {
     printed: &'a [Printed],
     events: &'a EventList,
     related: &'a Related,
+    facts: &'a [Fact],
 }
 
 impl Shown<'_> {
@@ -328,6 +371,7 @@ impl Shown<'_> {
             printed,
             events,
             related,
+            facts,
         } = self;
         ObjectBatch {
             seq,
@@ -340,6 +384,7 @@ impl Shown<'_> {
                         object,
                         printed,
                         events,
+                        facts,
                     })
                 }),
             manifest: object
@@ -419,7 +464,7 @@ fn events_of(
             namespaced: true,
         },
         target.namespace.clone(),
-        events_selector(object, uid),
+        Some(events_selector(object, uid)),
     )
 }
 
@@ -433,6 +478,74 @@ fn events_selector(object: &Value, uid: &str) -> String {
         let mirrored = object["metadata"]["annotations"]["kubernetes.io/config.mirror"].as_str();
         format!("regarding.uid={}", field_value(mirrored.unwrap_or(uid)))
     }
+}
+
+/// Follows each need; one the hub refuses, as when it names no resource
+/// it can request, is unavailable at once.
+fn needs_of(hub: &Hub, target: &Target, needs: Vec<Need>) -> Vec<Held> {
+    needs
+        .into_iter()
+        .map(|need| {
+            let objects = hub.selected(
+                &target.context,
+                Resource {
+                    group: need.group.clone(),
+                    version: need.version.clone(),
+                    resource: need.resource.clone(),
+                    namespaced: need.namespaced,
+                },
+                need.namespace.clone(),
+                need.field_selector.clone(),
+            );
+            match objects {
+                Ok(objects) => Held {
+                    need,
+                    objects: Some(objects),
+                    found: None,
+                },
+                Err(error) => Held {
+                    need,
+                    objects: None,
+                    found: Some(Found::Unavailable {
+                        message: error.message,
+                    }),
+                },
+            }
+        })
+        .collect()
+}
+
+/// Reads what each need found since the last look, saying whether any
+/// changed: its objects once listed, or why they cannot be.
+fn found(needs: &mut [Held]) -> bool {
+    let mut changed = false;
+    for held in needs {
+        let Some(objects) = &held.objects else {
+            continue;
+        };
+        let moved = drained(objects);
+        let found = if let Some(message) = unavailable(&objects.state()) {
+            Some(Found::Unavailable { message })
+        } else if objects.listed() {
+            if !moved && matches!(held.found, Some(Found::Listed { .. })) {
+                continue;
+            }
+            Some(Found::Listed {
+                objects: objects
+                    .items()
+                    .iter()
+                    .filter_map(|object| serde_json::from_str(object.json.get()).ok())
+                    .collect(),
+            })
+        } else {
+            None
+        };
+        if found != held.found {
+            held.found = found;
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// The metadata of the kinds the object's kind owns, in its namespace.
@@ -551,6 +664,7 @@ mod tests {
             }],
             events: &EventList::default(),
             related: &related,
+            facts: &[],
         };
         let batch = shown.batch(1, ViewState::Ready);
         assert!(batch.overview.is_some() && batch.manifest.is_some());

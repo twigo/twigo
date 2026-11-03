@@ -1,0 +1,193 @@
+{
+  "events": [
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:36:44Z",
+      "last": "2026-11-03T11:36:44Z",
+      "message": "Job completed",
+      "reason": "Completed",
+      "source": "job-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:36:41Z",
+      "last": "2026-11-03T11:36:41Z",
+      "message": "Created pod: migrate-72fj4",
+      "reason": "SuccessfulCreate",
+      "source": "job-controller",
+      "type": "Normal"
+    }
+  ],
+  "facts": [],
+  "object": {
+    "apiVersion": "batch/v1",
+    "kind": "Job",
+    "metadata": {
+      "creationTimestamp": "2026-11-03T11:36:41Z",
+      "generation": 1,
+      "labels": {
+        "batch.kubernetes.io/controller-uid": "23d14ace-b325-473f-bb93-bad78aaa7928",
+        "batch.kubernetes.io/job-name": "migrate",
+        "controller-uid": "23d14ace-b325-473f-bb93-bad78aaa7928",
+        "job-name": "migrate"
+      },
+      "managedFields": [
+        {
+          "apiVersion": "batch/v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:spec": {
+              "f:backoffLimit": {},
+              "f:template": {
+                "f:spec": {
+                  "f:containers": {
+                    "k:{\"name\":\"migrate\"}": {
+                      ".": {},
+                      "f:command": {},
+                      "f:image": {},
+                      "f:name": {}
+                    }
+                  },
+                  "f:nodeSelector": {},
+                  "f:restartPolicy": {}
+                }
+              },
+              "f:ttlSecondsAfterFinished": {}
+            }
+          },
+          "manager": "twigo-record",
+          "operation": "Apply",
+          "time": "2026-11-03T11:36:41Z"
+        },
+        {
+          "apiVersion": "batch/v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:status": {
+              "f:completionTime": {},
+              "f:conditions": {},
+              "f:ready": {},
+              "f:startTime": {},
+              "f:succeeded": {},
+              "f:terminating": {},
+              "f:uncountedTerminatedPods": {}
+            }
+          },
+          "manager": "kube-controller-manager",
+          "operation": "Update",
+          "subresource": "status",
+          "time": "2026-11-03T11:36:44Z"
+        }
+      ],
+      "name": "migrate",
+      "namespace": "overview",
+      "resourceVersion": "2519",
+      "uid": "23d14ace-b325-473f-bb93-bad78aaa7928"
+    },
+    "spec": {
+      "backoffLimit": 2,
+      "completionMode": "NonIndexed",
+      "completions": 1,
+      "manualSelector": false,
+      "parallelism": 1,
+      "podReplacementPolicy": "TerminatingOrFailed",
+      "selector": {
+        "matchLabels": {
+          "batch.kubernetes.io/controller-uid": "23d14ace-b325-473f-bb93-bad78aaa7928"
+        }
+      },
+      "suspend": false,
+      "template": {
+        "metadata": {
+          "labels": {
+            "batch.kubernetes.io/controller-uid": "23d14ace-b325-473f-bb93-bad78aaa7928",
+            "batch.kubernetes.io/job-name": "migrate",
+            "controller-uid": "23d14ace-b325-473f-bb93-bad78aaa7928",
+            "job-name": "migrate"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "command": [
+                "sh",
+                "-c",
+                "echo migrate done"
+              ],
+              "image": "docker.io/kindest/local-path-helper:v20260131-7181c60a",
+              "imagePullPolicy": "IfNotPresent",
+              "name": "migrate",
+              "resources": {},
+              "terminationMessagePath": "/dev/termination-log",
+              "terminationMessagePolicy": "File"
+            }
+          ],
+          "dnsPolicy": "ClusterFirst",
+          "nodeSelector": {
+            "kubernetes.io/hostname": "twigo-overviews-control-plane"
+          },
+          "restartPolicy": "Never",
+          "schedulerName": "default-scheduler",
+          "securityContext": {},
+          "terminationGracePeriodSeconds": 30
+        }
+      },
+      "ttlSecondsAfterFinished": 86400
+    },
+    "status": {
+      "completionTime": "2026-11-03T11:36:44Z",
+      "conditions": [
+        {
+          "lastProbeTime": "2026-11-03T11:36:44Z",
+          "lastTransitionTime": "2026-11-03T11:36:44Z",
+          "message": "Reached expected number of succeeded pods",
+          "reason": "CompletionsReached",
+          "status": "True",
+          "type": "SuccessCriteriaMet"
+        },
+        {
+          "lastProbeTime": "2026-11-03T11:36:44Z",
+          "lastTransitionTime": "2026-11-03T11:36:44Z",
+          "message": "Reached expected number of succeeded pods",
+          "reason": "CompletionsReached",
+          "status": "True",
+          "type": "Complete"
+        }
+      ],
+      "ready": 0,
+      "startTime": "2026-11-03T11:36:41Z",
+      "succeeded": 1,
+      "terminating": 0,
+      "uncountedTerminatedPods": {}
+    }
+  },
+  "printed": [
+    {
+      "column": "Status",
+      "value": "Complete"
+    },
+    {
+      "column": "Completions",
+      "value": "1/1"
+    },
+    {
+      "column": "Duration",
+      "value": "3s"
+    },
+    {
+      "column": "Containers",
+      "value": "migrate"
+    },
+    {
+      "column": "Images",
+      "value": "docker.io/kindest/local-path-helper:v20260131-7181c60a"
+    },
+    {
+      "column": "Selector",
+      "value": "batch.kubernetes.io/controller-uid=23d14ace-b325-473f-bb93-bad78aaa7928"
+    }
+  ]
+}

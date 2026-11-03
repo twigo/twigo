@@ -1,5 +1,6 @@
 {
   "events": [],
+  "facts": [],
   "object": {
     "apiVersion": "kwok.x-k8s.io/v1alpha1",
     "kind": "Stage",
@@ -7,7 +8,7 @@
       "annotations": {
         "kubectl.kubernetes.io/last-applied-configuration": "{\"apiVersion\":\"kwok.x-k8s.io/v1alpha1\",\"kind\":\"Stage\",\"metadata\":{\"annotations\":{},\"name\":\"pod-ready\"},\"spec\":{\"next\":{\"statusTemplate\":\"{{ $now := Now }}\\n\\nconditions:\\n- lastTransitionTime: {{ $now | Quote }}\\n  status: \\\"True\\\"\\n  type: Initialized\\n- lastTransitionTime: {{ $now | Quote }}\\n  status: \\\"True\\\"\\n  type: Ready\\n- lastTransitionTime: {{ $now | Quote }}\\n  status: \\\"True\\\"\\n  type: ContainersReady\\n{{ range .spec.readinessGates }}\\n- lastTransitionTime: {{ $now | Quote }}\\n  status: \\\"True\\\"\\n  type: {{ .conditionType | Quote }}\\n{{ end }}\\n\\ncontainerStatuses:\\n{{ range .spec.containers }}\\n- image: {{ .image | Quote }}\\n  name: {{ .name | Quote }}\\n  ready: true\\n  restartCount: 0\\n  state:\\n    running:\\n      startedAt: {{ $now | Quote }}\\n{{ end }}\\n\\ninitContainerStatuses:\\n{{ range .spec.initContainers }}\\n- image: {{ .image | Quote }}\\n  name: {{ .name | Quote }}\\n  ready: true\\n  restartCount: 0\\n  {{ if eq .restartPolicy \\\"Always\\\" }}\\n  started: true\\n  state:\\n    running:\\n      startedAt: {{ $now | Quote }}\\n  {{ else }}\\n  state:\\n    terminated:\\n      exitCode: 0\\n      finishedAt: {{ $now | Quote }}\\n      reason: Completed\\n      startedAt: {{ $now | Quote }}\\n  {{ end }}\\n{{ end }}\\n{{ $hostIPs := NodeIPsWith .spec.nodeName }}\\n{{ with $hostIPs }}\\nhostIP: {{ index . 0 | Quote }}\\nhostIPs:\\n{{ range . }}\\n- ip: {{ . | Quote }}\\n{{ end }}\\n{{ end }}\\n{{ $podIPs := PodIPsWith .spec.nodeName ( or .spec.hostNetwork false ) ( or .metadata.uid \\\"\\\" ) ( or .metadata.name \\\"\\\" ) ( or .metadata.namespace \\\"\\\" ) }}\\n{{ with $podIPs }}\\npodIP: {{ index . 0 | Quote }}\\npodIPs:\\n{{ range . }}\\n- ip: {{ . | Quote }}\\n{{ end }}\\n{{ end }}\\nphase: Running\\nstartTime: {{ $now | Quote }}\\n\"},\"resourceRef\":{\"apiGroup\":\"v1\",\"kind\":\"Pod\"},\"selector\":{\"matchExpressions\":[{\"key\":\".metadata.deletionTimestamp\",\"operator\":\"DoesNotExist\"},{\"key\":\".status.phase\",\"operator\":\"In\",\"values\":[\"Pending\"]},{\"key\":\".status.conditions.[] | select( .type == \\\"Ready\\\" ) | .status\",\"operator\":\"NotIn\",\"values\":[\"True\"]}]}}}\n"
       },
-      "creationTimestamp": "2026-11-02T20:44:11Z",
+      "creationTimestamp": "2026-11-03T11:19:10Z",
       "generation": 1,
       "managedFields": [
         {
@@ -41,12 +42,12 @@
           },
           "manager": "kubectl-client-side-apply",
           "operation": "Update",
-          "time": "2026-11-02T20:44:11Z"
+          "time": "2026-11-03T11:19:10Z"
         }
       ],
       "name": "pod-ready",
-      "resourceVersion": "550",
-      "uid": "7f7b57fe-089a-4528-b961-73ff8c1720e1"
+      "resourceVersion": "557",
+      "uid": "9681c243-7c52-4e9c-817d-17feeaf99cc0"
     },
     "spec": {
       "next": {

@@ -1,0 +1,168 @@
+{
+  "events": [
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:36:41Z",
+      "last": "2026-11-03T11:36:41Z",
+      "message": "Created pod: agent-v2kwv",
+      "reason": "SuccessfulCreate",
+      "source": "daemonset-controller",
+      "type": "Normal"
+    }
+  ],
+  "facts": [],
+  "object": {
+    "apiVersion": "apps/v1",
+    "kind": "DaemonSet",
+    "metadata": {
+      "annotations": {
+        "deprecated.daemonset.template.generation": "1"
+      },
+      "creationTimestamp": "2026-11-03T11:36:41Z",
+      "generation": 1,
+      "managedFields": [
+        {
+          "apiVersion": "apps/v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:spec": {
+              "f:selector": {},
+              "f:template": {
+                "f:metadata": {
+                  "f:labels": {
+                    "f:app": {}
+                  }
+                },
+                "f:spec": {
+                  "f:containers": {
+                    "k:{\"name\":\"agent\"}": {
+                      ".": {},
+                      "f:image": {},
+                      "f:name": {}
+                    }
+                  },
+                  "f:nodeSelector": {}
+                }
+              }
+            }
+          },
+          "manager": "twigo-record",
+          "operation": "Apply",
+          "time": "2026-11-03T11:36:41Z"
+        },
+        {
+          "apiVersion": "apps/v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:status": {
+              "f:currentNumberScheduled": {},
+              "f:desiredNumberScheduled": {},
+              "f:numberAvailable": {},
+              "f:numberReady": {},
+              "f:observedGeneration": {},
+              "f:updatedNumberScheduled": {}
+            }
+          },
+          "manager": "kube-controller-manager",
+          "operation": "Update",
+          "subresource": "status",
+          "time": "2026-11-03T11:36:41Z"
+        }
+      ],
+      "name": "agent",
+      "namespace": "overview",
+      "resourceVersion": "2423",
+      "uid": "50ad4f58-a985-4f1e-83d8-4506a695a60d"
+    },
+    "spec": {
+      "revisionHistoryLimit": 10,
+      "selector": {
+        "matchLabels": {
+          "app": "agent"
+        }
+      },
+      "template": {
+        "metadata": {
+          "labels": {
+            "app": "agent"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "image": "registry.k8s.io/pause:3.10",
+              "imagePullPolicy": "IfNotPresent",
+              "name": "agent",
+              "resources": {},
+              "terminationMessagePath": "/dev/termination-log",
+              "terminationMessagePolicy": "File"
+            }
+          ],
+          "dnsPolicy": "ClusterFirst",
+          "nodeSelector": {
+            "kubernetes.io/hostname": "twigo-overviews-control-plane"
+          },
+          "restartPolicy": "Always",
+          "schedulerName": "default-scheduler",
+          "securityContext": {},
+          "terminationGracePeriodSeconds": 30
+        }
+      },
+      "updateStrategy": {
+        "rollingUpdate": {
+          "maxSurge": 0,
+          "maxUnavailable": 1
+        },
+        "type": "RollingUpdate"
+      }
+    },
+    "status": {
+      "currentNumberScheduled": 1,
+      "desiredNumberScheduled": 1,
+      "numberAvailable": 1,
+      "numberMisscheduled": 0,
+      "numberReady": 1,
+      "observedGeneration": 1,
+      "updatedNumberScheduled": 1
+    }
+  },
+  "printed": [
+    {
+      "column": "Desired",
+      "value": "1"
+    },
+    {
+      "column": "Current",
+      "value": "1"
+    },
+    {
+      "column": "Ready",
+      "value": "1"
+    },
+    {
+      "column": "Up-to-date",
+      "value": "1"
+    },
+    {
+      "column": "Available",
+      "value": "1"
+    },
+    {
+      "column": "Node Selector",
+      "value": "kubernetes.io/hostname=twigo-overviews-control-plane"
+    },
+    {
+      "column": "Containers",
+      "value": "agent"
+    },
+    {
+      "column": "Images",
+      "value": "registry.k8s.io/pause:3.10"
+    },
+    {
+      "column": "Selector",
+      "value": "app=agent"
+    }
+  ]
+}

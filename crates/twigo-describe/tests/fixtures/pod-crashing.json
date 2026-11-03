@@ -1,0 +1,413 @@
+{
+  "events": [
+    {
+      "count": 5,
+      "fieldPath": "spec.containers{api}",
+      "first": "2026-11-03T12:13:03Z",
+      "last": "2026-11-03T12:15:41Z",
+      "message": "Back-off restarting failed container api in pod api-c8894f678-vmnxl_overview(1b638b55-cff7-4253-99ee-2baa87001aea)",
+      "reason": "BackOff",
+      "source": "kubelet",
+      "type": "Warning"
+    },
+    {
+      "count": 5,
+      "fieldPath": "spec.containers{api}",
+      "first": "2026-11-03T12:13:01Z",
+      "last": "2026-11-03T12:14:31Z",
+      "message": "Container image \"docker.io/kindest/local-path-helper:v20260131-7181c60a\" already present on machine and can be accessed by the pod",
+      "reason": "Pulled",
+      "source": "kubelet",
+      "type": "Normal"
+    },
+    {
+      "count": 5,
+      "fieldPath": "spec.containers{api}",
+      "first": "2026-11-03T12:13:01Z",
+      "last": "2026-11-03T12:14:31Z",
+      "message": "Container created",
+      "reason": "Created",
+      "source": "kubelet",
+      "type": "Normal"
+    },
+    {
+      "count": 5,
+      "fieldPath": "spec.containers{api}",
+      "first": "2026-11-03T12:13:01Z",
+      "last": "2026-11-03T12:14:31Z",
+      "message": "Container started",
+      "reason": "Started",
+      "source": "kubelet",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T12:13:01Z",
+      "last": "2026-11-03T12:13:01Z",
+      "message": "Successfully assigned overview/api-c8894f678-vmnxl to twigo-overviews-control-plane",
+      "reason": "Scheduled",
+      "source": "default-scheduler",
+      "type": "Normal"
+    }
+  ],
+  "facts": [],
+  "object": {
+    "apiVersion": "v1",
+    "kind": "Pod",
+    "metadata": {
+      "creationTimestamp": "2026-11-03T12:13:01Z",
+      "generateName": "api-c8894f678-",
+      "generation": 1,
+      "labels": {
+        "app": "api",
+        "pod-template-hash": "c8894f678"
+      },
+      "managedFields": [
+        {
+          "apiVersion": "v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:metadata": {
+              "f:generateName": {},
+              "f:labels": {
+                ".": {},
+                "f:app": {},
+                "f:pod-template-hash": {}
+              },
+              "f:ownerReferences": {
+                ".": {},
+                "k:{\"uid\":\"d5a58dfc-d7c6-4945-8e5f-943c1c450598\"}": {}
+              }
+            },
+            "f:spec": {
+              "f:containers": {
+                "k:{\"name\":\"api\"}": {
+                  ".": {},
+                  "f:command": {},
+                  "f:image": {},
+                  "f:imagePullPolicy": {},
+                  "f:name": {},
+                  "f:resources": {},
+                  "f:terminationMessagePath": {},
+                  "f:terminationMessagePolicy": {}
+                }
+              },
+              "f:dnsPolicy": {},
+              "f:enableServiceLinks": {},
+              "f:nodeSelector": {},
+              "f:restartPolicy": {},
+              "f:schedulerName": {},
+              "f:securityContext": {},
+              "f:terminationGracePeriodSeconds": {}
+            }
+          },
+          "manager": "kube-controller-manager",
+          "operation": "Update",
+          "time": "2026-11-03T12:13:01Z"
+        },
+        {
+          "apiVersion": "v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:status": {
+              "f:conditions": {
+                "k:{\"type\":\"ContainersReady\"}": {
+                  ".": {},
+                  "f:lastProbeTime": {},
+                  "f:lastTransitionTime": {},
+                  "f:message": {},
+                  "f:observedGeneration": {},
+                  "f:reason": {},
+                  "f:status": {},
+                  "f:type": {}
+                },
+                "k:{\"type\":\"Initialized\"}": {
+                  ".": {},
+                  "f:lastProbeTime": {},
+                  "f:lastTransitionTime": {},
+                  "f:observedGeneration": {},
+                  "f:status": {},
+                  "f:type": {}
+                },
+                "k:{\"type\":\"PodReadyToStartContainers\"}": {
+                  ".": {},
+                  "f:lastProbeTime": {},
+                  "f:lastTransitionTime": {},
+                  "f:observedGeneration": {},
+                  "f:status": {},
+                  "f:type": {}
+                },
+                "k:{\"type\":\"PodScheduled\"}": {
+                  "f:observedGeneration": {}
+                },
+                "k:{\"type\":\"Ready\"}": {
+                  ".": {},
+                  "f:lastProbeTime": {},
+                  "f:lastTransitionTime": {},
+                  "f:message": {},
+                  "f:observedGeneration": {},
+                  "f:reason": {},
+                  "f:status": {},
+                  "f:type": {}
+                }
+              },
+              "f:containerStatuses": {},
+              "f:hostIP": {},
+              "f:hostIPs": {},
+              "f:observedGeneration": {},
+              "f:phase": {},
+              "f:podIP": {},
+              "f:podIPs": {
+                ".": {},
+                "k:{\"ip\":\"10.244.0.54\"}": {
+                  ".": {},
+                  "f:ip": {}
+                }
+              },
+              "f:resources": {},
+              "f:startTime": {}
+            }
+          },
+          "manager": "kubelet",
+          "operation": "Update",
+          "subresource": "status",
+          "time": "2026-11-03T12:15:41Z"
+        }
+      ],
+      "name": "api-c8894f678-vmnxl",
+      "namespace": "overview",
+      "ownerReferences": [
+        {
+          "apiVersion": "apps/v1",
+          "blockOwnerDeletion": true,
+          "controller": true,
+          "kind": "ReplicaSet",
+          "name": "api-c8894f678",
+          "uid": "d5a58dfc-d7c6-4945-8e5f-943c1c450598"
+        }
+      ],
+      "resourceVersion": "7690",
+      "uid": "1b638b55-cff7-4253-99ee-2baa87001aea"
+    },
+    "spec": {
+      "containers": [
+        {
+          "command": [
+            "sh",
+            "-c",
+            "echo 'panic: dial tcp 10.96.0.20:5432: connect: connection refused' >&2; exit 1"
+          ],
+          "image": "docker.io/kindest/local-path-helper:v20260131-7181c60a",
+          "imagePullPolicy": "IfNotPresent",
+          "name": "api",
+          "resources": {},
+          "terminationMessagePath": "/dev/termination-log",
+          "terminationMessagePolicy": "FallbackToLogsOnError",
+          "volumeMounts": [
+            {
+              "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+              "name": "kube-api-access-xsxv2",
+              "readOnly": true
+            }
+          ]
+        }
+      ],
+      "dnsPolicy": "ClusterFirst",
+      "enableServiceLinks": true,
+      "nodeName": "twigo-overviews-control-plane",
+      "nodeSelector": {
+        "kubernetes.io/hostname": "twigo-overviews-control-plane"
+      },
+      "preemptionPolicy": "PreemptLowerPriority",
+      "priority": 0,
+      "restartPolicy": "Always",
+      "schedulerName": "default-scheduler",
+      "securityContext": {},
+      "serviceAccount": "default",
+      "serviceAccountName": "default",
+      "terminationGracePeriodSeconds": 30,
+      "tolerations": [
+        {
+          "effect": "NoExecute",
+          "key": "node.kubernetes.io/not-ready",
+          "operator": "Exists",
+          "tolerationSeconds": 300
+        },
+        {
+          "effect": "NoExecute",
+          "key": "node.kubernetes.io/unreachable",
+          "operator": "Exists",
+          "tolerationSeconds": 300
+        }
+      ],
+      "volumes": [
+        {
+          "name": "kube-api-access-xsxv2",
+          "projected": {
+            "defaultMode": 420,
+            "sources": [
+              {
+                "serviceAccountToken": {
+                  "expirationSeconds": 3607,
+                  "path": "token"
+                }
+              },
+              {
+                "configMap": {
+                  "items": [
+                    {
+                      "key": "ca.crt",
+                      "path": "ca.crt"
+                    }
+                  ],
+                  "name": "kube-root-ca.crt"
+                }
+              },
+              {
+                "downwardAPI": {
+                  "items": [
+                    {
+                      "fieldRef": {
+                        "apiVersion": "v1",
+                        "fieldPath": "metadata.namespace"
+                      },
+                      "path": "namespace"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": {
+      "conditions": [
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-11-03T12:13:01Z",
+          "observedGeneration": 1,
+          "status": "True",
+          "type": "PodReadyToStartContainers"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-11-03T12:13:01Z",
+          "observedGeneration": 1,
+          "status": "True",
+          "type": "Initialized"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-11-03T12:14:32Z",
+          "message": "containers with unready status: [api]",
+          "observedGeneration": 1,
+          "reason": "ContainersNotReady",
+          "status": "False",
+          "type": "Ready"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-11-03T12:14:32Z",
+          "message": "containers with unready status: [api]",
+          "observedGeneration": 1,
+          "reason": "ContainersNotReady",
+          "status": "False",
+          "type": "ContainersReady"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-11-03T12:13:01Z",
+          "observedGeneration": 1,
+          "status": "True",
+          "type": "PodScheduled"
+        }
+      ],
+      "containerStatuses": [
+        {
+          "containerID": "containerd://a52fc20b5f4647e3317e71c75b6df266ffb098742a6ff690c5aee6035198a89d",
+          "image": "docker.io/kindest/local-path-helper:v20260131-7181c60a",
+          "imageID": "sha256:8f375e9f935137d1f92bd9bbfb860bbb6862a90c54e086f2696ce2385d0a5b78",
+          "lastState": {
+            "terminated": {
+              "containerID": "containerd://a52fc20b5f4647e3317e71c75b6df266ffb098742a6ff690c5aee6035198a89d",
+              "exitCode": 1,
+              "finishedAt": "2026-11-03T12:14:31Z",
+              "message": "panic: dial tcp 10.96.0.20:5432: connect: connection refused\n",
+              "reason": "Error",
+              "startedAt": "2026-11-03T12:14:31Z"
+            }
+          },
+          "name": "api",
+          "ready": false,
+          "resources": {},
+          "restartCount": 4,
+          "started": false,
+          "state": {
+            "waiting": {
+              "message": "back-off 1m20s restarting failed container=api pod=api-c8894f678-vmnxl_overview(1b638b55-cff7-4253-99ee-2baa87001aea)",
+              "reason": "CrashLoopBackOff"
+            }
+          },
+          "user": {
+            "linux": {
+              "gid": 0,
+              "supplementalGroups": [
+                0
+              ],
+              "uid": 0
+            }
+          },
+          "volumeMounts": [
+            {
+              "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+              "name": "kube-api-access-xsxv2",
+              "readOnly": true,
+              "recursiveReadOnly": "Disabled"
+            }
+          ]
+        }
+      ],
+      "hostIP": "172.18.0.2",
+      "hostIPs": [
+        {
+          "ip": "172.18.0.2"
+        }
+      ],
+      "observedGeneration": 1,
+      "phase": "Running",
+      "podIP": "10.244.0.54",
+      "podIPs": [
+        {
+          "ip": "10.244.0.54"
+        }
+      ],
+      "qosClass": "BestEffort",
+      "resources": {},
+      "startTime": "2026-11-03T12:13:01Z"
+    }
+  },
+  "printed": [
+    {
+      "column": "Ready",
+      "value": "0/1"
+    },
+    {
+      "column": "Status",
+      "value": "CrashLoopBackOff"
+    },
+    {
+      "column": "Restarts",
+      "value": "4 (71s ago)"
+    },
+    {
+      "column": "IP",
+      "value": "10.244.0.54"
+    },
+    {
+      "column": "Node",
+      "value": "twigo-overviews-control-plane"
+    }
+  ]
+}

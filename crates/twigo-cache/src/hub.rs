@@ -325,19 +325,19 @@ impl Hub {
             context,
             resource,
             namespace,
-            format!("metadata.name={}", field_value(name)),
+            Some(format!("metadata.name={}", field_value(name))),
         )
     }
 
-    /// The objects a field selector picks, in a namespace or, with none,
-    /// in every namespace, followed whole by an Object upstream, as an
-    /// object's events are.
+    /// The objects a field selector picks, or all of them, in a namespace
+    /// or, with none, in every namespace, followed whole by an Object
+    /// upstream, as an object's events are.
     pub fn selected(
         &self,
         context: &str,
         resource: Resource,
         namespace: Option<String>,
-        field_selector: String,
+        field_selector: Option<String>,
     ) -> Result<Subscription<Object>, IpcError> {
         resource.check()?;
         if let Some(namespace) = &namespace {
@@ -348,7 +348,7 @@ impl Hub {
             resource,
             format: Format::Object,
             scope: namespace.map_or(Scope::Cluster, Scope::Namespace),
-            field_selector: Some(field_selector),
+            field_selector,
         };
         let mut subscription = Subscription::new(key.clone(), &[]);
         let part = self.hold(&key, None);

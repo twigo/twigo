@@ -109,6 +109,108 @@ pub enum Block {
         nodes: Vec<TreeNode>,
     },
     Events(EventList),
+    /// What is wrong with the object, in words, first in its Overview.
+    Diagnostics {
+        findings: Vec<Finding>,
+    },
+    /// A pod's containers, or those of a pod template.
+    Containers {
+        containers: Vec<Container>,
+    },
+    /// Values under named columns, such as a pod's volumes.
+    Table {
+        columns: Vec<String>,
+        rows: Vec<Vec<Value>>,
+    },
+    /// A live resource list, such as a workload's pods.
+    List(EmbeddedList),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct Finding {
+    /// Danger for what keeps the object from working, warning for what
+    /// may.
+    pub tone: Tone,
+    /// What is wrong: "Container api keeps crashing".
+    pub title: String,
+    /// Why, as a sentence whose times are read when shown.
+    pub detail: Vec<Span>,
+    /// What the component that saw it said, shown as it said it: a
+    /// termination message, a waiting reason's message, an event's note.
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum Span {
+    Text {
+        text: String,
+    },
+    /// RFC 3339, in the past: "2 m ago".
+    Ago {
+        at: String,
+    },
+    /// RFC 3339, in the future: "in 2 m 40 s", or "now" once it passed.
+    Until {
+        at: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct Container {
+    pub name: String,
+    pub role: ContainerRole,
+    pub image: String,
+    /// None in a pod template, and until the kubelet reports it.
+    pub state: Option<ContainerState>,
+    /// As kubectl prints them: `8080/TCP (http)`.
+    pub ports: Vec<String>,
+    /// What its card shows: its state's times, how it last ended, its
+    /// resources.
+    pub fields: Vec<Field>,
+    /// What else kubectl describe prints of it, folded: the last
+    /// termination's message, command, probes, security, image and
+    /// container IDs.
+    pub details: Vec<Field>,
+    /// Each variable by name, then each source of many as "From".
+    pub env: Vec<Field>,
+    /// By the path it is mounted at.
+    pub mounts: Vec<Field>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ContainerRole {
+    Init,
+    /// An init container that keeps running, its restart policy Always.
+    Sidecar,
+    Regular,
+    Ephemeral,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ContainerState {
+    /// "Running", "Waiting · CrashLoopBackOff", "Terminated · Completed".
+    pub text: String,
+    pub tone: Tone,
+    pub ready: bool,
+    pub restarts: u32,
+}
+
+/// A list of objects of one resource, run as any list is: the webview
+/// subscribes with it in the object's space.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddedList {
+    pub gvr: Gvr,
+    /// The kind of its objects, which opening a row names.
+    pub kind: String,
+    pub namespaced: bool,
+    /// None for every namespace, as a node's pods are.
+    pub namespace: Option<String>,
+    pub field_selector: Option<String>,
+    /// As in [`crate::ListQuery`].
+    pub owners: Option<Vec<String>>,
 }
 
 /// An object's events, newest first.
@@ -145,6 +247,15 @@ pub enum Value {
     },
     List {
         items: Vec<Value>,
+    },
+    /// Text that is read as code, such as an IP, an image or a command.
+    Code {
+        text: String,
+    },
+    /// Text in a tone, such as a Ready of `0/1`.
+    Toned {
+        text: String,
+        tone: Tone,
     },
 }
 

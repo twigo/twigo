@@ -2,20 +2,37 @@
 //! that the drawer, the Overview tab and MCP's describe-style summaries
 //! share.
 //!
-//! Every object gets the shared sections, metadata first, its conditions
-//! and events last. Between them come the sections of its kind's describer,
-//! looked up by group and kind, or for any other kind the server's printer
-//! columns and its spec and status as trees.
+//! Its state comes first, as the owner chose on 2026-11-03: what is wrong
+//! with it when anything is, the first section of its kind's describer,
+//! its conditions, the describer's other sections, then metadata and
+//! events last. The describer is looked up by group and kind; any other
+//! kind gets the server's printer columns and its spec and status as
+//! trees. A describer may need other objects, such as a
+//! Deployment its ReplicaSets: it names them, and twigo-core lists and
+//! follows them while the Overview is shown.
 
+mod batch;
+mod containers;
 mod data;
 mod events;
 mod metadata;
+mod network;
+mod node;
 mod owned;
+mod pod;
+mod quantity;
+mod show;
+mod storage;
+mod template;
 mod tree;
+mod volumes;
+mod workloads;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use twigo_ipc::{Block, Condition, EventList, Field, Overview, Section, Tone};
+use twigo_ipc::{
+    Block, Condition, EventList, Field, Finding, Overview, Section, Tone, Value as Shown,
+};
 
 pub use events::{event, newest_first};
 pub use owned::{Owned, owned};
@@ -27,6 +44,8 @@ pub struct Input<'a> {
     /// The server's printer columns for it, Name, Namespace and Age left out.
     pub printed: &'a [Printed],
     pub events: &'a EventList,
+    /// The objects its describer [`needs`], each once it is listed.
+    pub facts: &'a [Fact],
 }
 
 /// A cell the server printed for the object, as text.
@@ -36,22 +55,162 @@ pub struct Printed {
     pub value: String,
 }
 
-type Describer = fn(&Value) -> Vec<Section>;
+/// Objects of one resource a describer reads besides its own.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Need {
+    /// Empty for the core group.
+    pub group: String,
+    pub version: String,
+    pub resource: String,
+    pub namespaced: bool,
+    /// None for every namespace, or a cluster-scoped resource.
+    pub namespace: Option<String>,
+    pub field_selector: Option<String>,
+}
+
+/// What a [`Need`] found.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Fact {
+    pub need: Need,
+    pub found: Found,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum Found {
+    Listed {
+        objects: Vec<Value>,
+    },
+    /// Why they cannot be listed, as when the person may not list them.
+    Unavailable {
+        message: String,
+    },
+}
+
+/// What a kind's describer adds to the shared sections.
+pub(crate) struct Described {
+    /// For the Diagnostics section, which comes first.
+    pub findings: Vec<Finding>,
+    pub sections: Vec<Section>,
+}
+
+struct Describer {
+    group: &'static str,
+    kind: &'static str,
+    needs: fn(&Value) -> Vec<Need>,
+    describe: fn(&Input<'_>) -> Described,
+}
+
+fn nothing(_: &Value) -> Vec<Need> {
+    Vec::new()
+}
 
 /// The kinds with sections of their own, by group and kind.
-const DESCRIBERS: &[(&str, &str, Describer)] = &[
-    ("", "ConfigMap", data::config_map),
-    ("", "Secret", data::secret),
+const DESCRIBERS: &[Describer] = &[
+    Describer {
+        group: "",
+        kind: "Pod",
+        needs: nothing,
+        describe: pod::describe,
+    },
+    Describer {
+        group: "apps",
+        kind: "Deployment",
+        needs: workloads::deployment_needs,
+        describe: workloads::deployment,
+    },
+    Describer {
+        group: "apps",
+        kind: "StatefulSet",
+        needs: nothing,
+        describe: workloads::stateful_set,
+    },
+    Describer {
+        group: "apps",
+        kind: "DaemonSet",
+        needs: nothing,
+        describe: workloads::daemon_set,
+    },
+    Describer {
+        group: "batch",
+        kind: "Job",
+        needs: nothing,
+        describe: batch::job,
+    },
+    Describer {
+        group: "batch",
+        kind: "CronJob",
+        needs: nothing,
+        describe: batch::cron_job,
+    },
+    Describer {
+        group: "",
+        kind: "Service",
+        needs: network::service_needs,
+        describe: network::service,
+    },
+    Describer {
+        group: "networking.k8s.io",
+        kind: "Ingress",
+        needs: network::ingress_needs,
+        describe: network::ingress,
+    },
+    Describer {
+        group: "",
+        kind: "Node",
+        needs: node::needs,
+        describe: node::describe,
+    },
+    Describer {
+        group: "",
+        kind: "PersistentVolumeClaim",
+        needs: storage::needs,
+        describe: storage::describe,
+    },
+    Describer {
+        group: "",
+        kind: "ConfigMap",
+        needs: nothing,
+        describe: data::config_map,
+    },
+    Describer {
+        group: "",
+        kind: "Secret",
+        needs: nothing,
+        describe: data::secret,
+    },
 ];
+
+/// The objects the describer of `object`'s kind reads besides it.
+pub fn needs(object: &Value) -> Vec<Need> {
+    describer(object).map_or_else(Vec::new, |describer| (describer.needs)(object))
+}
 
 pub fn describe(input: Input<'_>) -> Overview {
     let object = input.object;
-    let mut sections = vec![metadata::section(object)];
-    match describer(object) {
-        Some(describe) => sections.extend(describe(object)),
-        None => sections.extend(generic(object, input.printed)),
+    let described = match describer(object) {
+        Some(describer) => (describer.describe)(&input),
+        None => Described {
+            findings: Vec::new(),
+            sections: generic(object, input.printed),
+        },
+    };
+    let mut sections = Vec::new();
+    if !described.findings.is_empty() {
+        sections.push(Section {
+            id: "core.diagnostics".to_owned(),
+            title: "Diagnostics".to_owned(),
+            blocks: vec![Block::Diagnostics {
+                findings: described.findings,
+            }],
+        });
     }
+    let mut own = described.sections.into_iter();
+    sections.extend(own.next());
     sections.extend(conditions(object));
+    sections.extend(own);
+    sections.push(metadata::section(object));
     sections.push(Section {
         id: "core.events".to_owned(),
         title: "Events".to_owned(),
@@ -60,13 +219,20 @@ pub fn describe(input: Input<'_>) -> Overview {
     Overview { sections }
 }
 
-fn describer(object: &Value) -> Option<Describer> {
+fn describer(object: &Value) -> Option<&'static Describer> {
     let (group, _) = group_version(object);
     let kind = object["kind"].as_str()?;
     DESCRIBERS
         .iter()
-        .find(|(g, k, _)| *g == group && *k == kind)
-        .map(|(_, _, describe)| *describe)
+        .find(|describer| describer.group == group && describer.kind == kind)
+}
+
+/// The text the server printed in a column.
+pub(crate) fn printed<'a>(printed: &'a [Printed], column: &str) -> Option<&'a str> {
+    printed
+        .iter()
+        .find(|cell| cell.column == column)
+        .map(|cell| cell.value.as_str())
 }
 
 /// The group and version of an object's `apiVersion`, the core group empty.
@@ -89,7 +255,7 @@ fn generic(object: &Value, printed: &[Printed]) -> Vec<Section> {
                     .iter()
                     .map(|cell| Field {
                         label: cell.column.clone(),
-                        value: twigo_ipc::Value::Text {
+                        value: Shown::Text {
                             text: cell.value.clone(),
                         },
                     })
@@ -171,6 +337,16 @@ fn conditions(object: &Value) -> Option<Section> {
         title: "Conditions".to_owned(),
         blocks: vec![Block::Conditions { conditions }],
     })
+}
+
+/// What a component said, without the line ends it wrote around it, as a
+/// termination message read from a log ends.
+pub(crate) fn message(value: &Value) -> Option<String> {
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_owned)
 }
 
 /// A non-empty string.

@@ -1,0 +1,188 @@
+{
+  "events": [
+    {
+      "count": 8,
+      "fieldPath": null,
+      "first": "2026-11-03T11:36:41Z",
+      "last": "2026-11-03T12:11:55Z",
+      "message": "0/3 nodes are available: 1 node(s) didn't match Pod's node affinity/selector, 2 node(s) had untolerated taint(s). preemption: 0/3 nodes are available: 3 Preemption is not helpful for scheduling.",
+      "reason": "FailedScheduling",
+      "source": "default-scheduler",
+      "type": "Warning"
+    }
+  ],
+  "facts": [],
+  "object": {
+    "apiVersion": "v1",
+    "kind": "Pod",
+    "metadata": {
+      "creationTimestamp": "2026-11-03T11:36:41Z",
+      "generation": 1,
+      "managedFields": [
+        {
+          "apiVersion": "v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:spec": {
+              "f:containers": {
+                "k:{\"name\":\"api\"}": {
+                  ".": {},
+                  "f:image": {},
+                  "f:name": {}
+                }
+              },
+              "f:nodeSelector": {}
+            }
+          },
+          "manager": "twigo-record",
+          "operation": "Apply",
+          "time": "2026-11-03T11:36:41Z"
+        },
+        {
+          "apiVersion": "v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:status": {
+              "f:conditions": {
+                ".": {},
+                "k:{\"type\":\"PodScheduled\"}": {
+                  ".": {},
+                  "f:lastProbeTime": {},
+                  "f:lastTransitionTime": {},
+                  "f:message": {},
+                  "f:observedGeneration": {},
+                  "f:reason": {},
+                  "f:status": {},
+                  "f:type": {}
+                }
+              }
+            }
+          },
+          "manager": "kube-scheduler",
+          "operation": "Update",
+          "subresource": "status",
+          "time": "2026-11-03T11:36:41Z"
+        }
+      ],
+      "name": "pending",
+      "namespace": "overview",
+      "resourceVersion": "2389",
+      "uid": "a2d02d9f-b485-4877-ad61-8d40d466cb00"
+    },
+    "spec": {
+      "containers": [
+        {
+          "image": "registry.k8s.io/pause:3.10",
+          "imagePullPolicy": "IfNotPresent",
+          "name": "api",
+          "resources": {},
+          "terminationMessagePath": "/dev/termination-log",
+          "terminationMessagePolicy": "File",
+          "volumeMounts": [
+            {
+              "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+              "name": "kube-api-access-4ngb6",
+              "readOnly": true
+            }
+          ]
+        }
+      ],
+      "dnsPolicy": "ClusterFirst",
+      "enableServiceLinks": true,
+      "nodeSelector": {
+        "disktype": "ssd"
+      },
+      "preemptionPolicy": "PreemptLowerPriority",
+      "priority": 0,
+      "restartPolicy": "Always",
+      "schedulerName": "default-scheduler",
+      "securityContext": {},
+      "serviceAccount": "default",
+      "serviceAccountName": "default",
+      "terminationGracePeriodSeconds": 30,
+      "tolerations": [
+        {
+          "effect": "NoExecute",
+          "key": "node.kubernetes.io/not-ready",
+          "operator": "Exists",
+          "tolerationSeconds": 300
+        },
+        {
+          "effect": "NoExecute",
+          "key": "node.kubernetes.io/unreachable",
+          "operator": "Exists",
+          "tolerationSeconds": 300
+        }
+      ],
+      "volumes": [
+        {
+          "name": "kube-api-access-4ngb6",
+          "projected": {
+            "defaultMode": 420,
+            "sources": [
+              {
+                "serviceAccountToken": {
+                  "expirationSeconds": 3607,
+                  "path": "token"
+                }
+              },
+              {
+                "configMap": {
+                  "items": [
+                    {
+                      "key": "ca.crt",
+                      "path": "ca.crt"
+                    }
+                  ],
+                  "name": "kube-root-ca.crt"
+                }
+              },
+              {
+                "downwardAPI": {
+                  "items": [
+                    {
+                      "fieldRef": {
+                        "apiVersion": "v1",
+                        "fieldPath": "metadata.namespace"
+                      },
+                      "path": "namespace"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": {
+      "conditions": [
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-11-03T11:36:41Z",
+          "message": "0/3 nodes are available: 1 node(s) didn't match Pod's node affinity/selector, 2 node(s) had untolerated taint(s). preemption: 0/3 nodes are available: 3 Preemption is not helpful for scheduling.",
+          "observedGeneration": 1,
+          "reason": "Unschedulable",
+          "status": "False",
+          "type": "PodScheduled"
+        }
+      ],
+      "phase": "Pending",
+      "qosClass": "BestEffort"
+    }
+  },
+  "printed": [
+    {
+      "column": "Ready",
+      "value": "0/1"
+    },
+    {
+      "column": "Status",
+      "value": "Pending"
+    },
+    {
+      "column": "Restarts",
+      "value": "0"
+    }
+  ]
+}
