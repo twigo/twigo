@@ -747,6 +747,10 @@ fn a_claim_that_waits_for_its_pod_is_fine_and_any_other_pending_one_says_why() {
     let pending = |event: Option<ObjectEvent>| {
         edited("pvc", move |recorded| {
             recorded.object["status"] = serde_json::json!({ "phase": "Pending" });
+            recorded.object["spec"]
+                .as_object_mut()
+                .unwrap()
+                .remove("volumeName");
             recorded.events = event.into_iter().collect();
         })
     };
@@ -774,8 +778,30 @@ fn a_claim_that_waits_for_its_pod_is_fine_and_any_other_pending_one_says_why() {
             .as_deref()
             .is_some_and(|message| message.contains("external provisioner"))
     );
-    let silent = pending(None);
-    assert_eq!(titles(&silent), [(Tone::Warning, "The claim is not bound")]);
+    let failing = edited("pvc", |recorded| {
+        recorded.object["status"] = serde_json::json!({ "phase": "Pending" });
+        recorded.events = vec![
+            ObjectEvent {
+                kind: "Normal".to_owned(),
+                ..warning("ExternalProvisioning", "Waiting for a volume to be created")
+            },
+            warning("ProvisioningFailed", "rpc error: volume quota exceeded"),
+        ];
+    });
+    assert_eq!(
+        findings(&failing)[0].message.as_deref(),
+        Some("rpc error: volume quota exceeded"),
+        "the warning, under the provisioner's repeated Normal event"
+    );
+    assert!(
+        findings(&pending(None)).is_empty(),
+        "without events a waiting claim cannot be told from a stuck one"
+    );
+    let named = edited("pvc", |recorded| {
+        recorded.object["status"] = serde_json::json!({ "phase": "Pending" });
+        recorded.events = Vec::new();
+    });
+    assert_eq!(titles(&named), [(Tone::Warning, "The claim is not bound")]);
 }
 
 #[test]
@@ -865,6 +891,22 @@ fn a_pod_that_stops_or_cannot_mount_or_inspect_says_why() {
     assert!(
         findings(&initializing).is_empty(),
         "a running init container mounted"
+    );
+    let restarted = edited("pod", |recorded| {
+        let container = &mut recorded.object["status"]["containerStatuses"][0];
+        container["state"] = serde_json::json!({ "waiting": { "reason": "ContainerCreating" } });
+        container["lastState"] = serde_json::json!({
+            "terminated": { "reason": "ContainerStatusUnknown", "exitCode": 137 },
+        });
+        recorded.events = vec![warning(
+            "FailedCreatePodSandBox",
+            "failed to create pod sandbox: network not ready",
+        )];
+    });
+    assert_eq!(
+        titles(&restarted),
+        [(Tone::Danger, "The pod's sandbox cannot be created")],
+        "a container that ran before its node restarted"
     );
     let inspecting = edited("pod-pulling", |recorded| {
         recorded.object["status"]["containerStatuses"][0]["state"]["waiting"]["reason"] =

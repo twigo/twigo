@@ -3,7 +3,7 @@
 //! as kubectl's `getPodsForPVC` finds them.
 
 use serde_json::Value;
-use twigo_ipc::{Block, Finding, Section, Span, Tone, Value as Shown};
+use twigo_ipc::{Block, Finding, ObjectEvent, Section, Span, Tone, Value as Shown};
 
 use crate::show::{Fields, POD, PV, link, list, plain, toned};
 use crate::workloads::fact;
@@ -114,20 +114,10 @@ pub(crate) fn describe(input: &Input<'_>) -> Described {
         None => {}
     }
     let mut findings = Vec::new();
-    let newest = input.events.events.first();
-    let waits = newest.is_some_and(|event| WAITING.contains(&event.reason.as_str()));
-    if phase == "Pending" && !waits {
-        findings.push(Finding {
-            tone: Tone::Warning,
-            title: "The claim is not bound".to_owned(),
-            detail: vec![Span::Text {
-                text: newest.map_or_else(
-                    || "No volume backs it, and nothing says why.".to_owned(),
-                    |event| format!("{}.", event.reason),
-                ),
-            }],
-            message: newest.map(|event| event.message.trim().to_owned()),
-        });
+    if phase == "Pending"
+        && let Some(finding) = unbound(claim, &input.events.events)
+    {
+        findings.push(finding);
     }
     if phase == "Lost" {
         findings.push(Finding {
@@ -147,6 +137,40 @@ pub(crate) fn describe(input: &Input<'_>) -> Described {
             blocks: vec![Block::Fields { fields: fields.0 }],
         }],
     }
+}
+
+/// Why a Pending claim is not bound, unless it waits for its pod: what
+/// the volume controller last said when that is no waiting, the newest
+/// Warning among its events as the reason, since it says ExternalProvisioning
+/// on every sync; or the volume the claim names, which it waits for in
+/// silence. Without events nothing tells a stuck claim from one that waits,
+/// as when they cannot be read or are still coming.
+fn unbound(claim: &Value, events: &[ObjectEvent]) -> Option<Finding> {
+    let newest = events.first();
+    if newest.is_some_and(|event| WAITING.contains(&event.reason.as_str())) {
+        return None;
+    }
+    let said = events
+        .iter()
+        .find(|event| event.kind == "Warning")
+        .or(newest);
+    let (detail, message) = match (said, text(&claim["spec"]["volumeName"])) {
+        (Some(event), _) => (
+            format!("{}.", event.reason),
+            Some(event.message.trim().to_owned()),
+        ),
+        (None, Some(volume)) => (
+            format!("It names volume {volume}, which has not bound it."),
+            None,
+        ),
+        (None, None) => return None,
+    };
+    Some(Finding {
+        tone: Tone::Warning,
+        title: "The claim is not bound".to_owned(),
+        detail: vec![Span::Text { text: detail }],
+        message,
+    })
 }
 
 fn modes(modes: &Value) -> Option<String> {

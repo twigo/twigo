@@ -385,10 +385,12 @@ const CREATING: &[(&str, &str)] = &[
     ),
 ];
 
-/// Containers that cannot be created yet: none of them has run, as the
-/// kubelet mounts volumes and makes the sandbox before any container
-/// starts, and the pod's newest event is the warning that says why, so a
-/// warning that passed, followed by an image's pull, finds nothing.
+/// Containers that cannot be created: none of them runs or has stopped now,
+/// as the kubelet mounts volumes and makes the sandbox before it starts
+/// them, and the pod's newest event is the warning that says why, so a
+/// warning that passed, followed by an image's pull, finds nothing. A
+/// container that ran before counts as waiting, as one does whose sandbox
+/// the kubelet makes again after its node restarted.
 fn creating(input: &Input<'_>) -> Option<Finding> {
     let status = &input.object["status"];
     let statuses: Vec<&Value> = ["initContainerStatuses", "containerStatuses"]
@@ -396,9 +398,7 @@ fn creating(input: &Input<'_>) -> Option<Finding> {
         .flat_map(|key| status[*key].as_array().into_iter().flatten())
         .collect();
     let started = statuses.iter().any(|container| {
-        container["state"]["running"].is_object()
-            || container["state"]["terminated"].is_object()
-            || container["lastState"]["terminated"].is_object()
+        container["state"]["running"].is_object() || container["state"]["terminated"].is_object()
     });
     if statuses.is_empty() || started {
         return None;

@@ -268,24 +268,9 @@ async fn run(
                     dirty.events = true;
                 }
             }
-            let mut held_anew = false;
-            if parts.overview {
-                let needs = twigo_describe::needs(json);
-                let current = held
-                    .facts
-                    .as_ref()
-                    .is_some_and(|facts| facts.iter().map(|held| &held.need).eq(needs.iter()));
-                if !current {
-                    held.facts = Some(needs_of(&hub, &target, needs));
-                    held_anew = true;
-                }
-            } else {
-                held.facts = None;
-            }
-            if let Some(needs) = &mut held.facts
-                && (found(needs) || held_anew)
-            {
-                facts = facts_of(needs);
+            let wanted = parts.overview.then(|| twigo_describe::needs(json));
+            if let Some(found) = follow_needs(&mut held.facts, wanted, &hub, &target) {
+                facts = found;
                 dirty.overview = true;
             }
             let owned = held.owned.as_deref().unwrap_or_default();
@@ -507,6 +492,31 @@ fn needs_of(hub: &Hub, target: &Target, needs: Vec<Need>) -> Vec<Held> {
         .collect()
 }
 
+/// Holds the needs `wanted` while the Overview is shown, None letting them
+/// go, and reads what they found: the facts when they changed, or when the
+/// needs are held anew, so what a need the hub refused already says goes
+/// out at once.
+fn follow_needs(
+    held: &mut Option<Vec<Held>>,
+    wanted: Option<Vec<Need>>,
+    hub: &Hub,
+    target: &Target,
+) -> Option<Vec<Fact>> {
+    let Some(wanted) = wanted else {
+        *held = None;
+        return None;
+    };
+    let current = held
+        .as_ref()
+        .is_some_and(|held| held.iter().map(|held| &held.need).eq(wanted.iter()));
+    let anew = !current;
+    if anew {
+        *held = Some(needs_of(hub, target, wanted));
+    }
+    let needs = held.as_mut()?;
+    (found(needs) || anew).then(|| facts_of(needs))
+}
+
 /// What the needs found so far, for the describer.
 fn facts_of(needs: &[Held]) -> Vec<Fact> {
     needs
@@ -725,7 +735,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_need_the_hub_refuses_is_a_fact_at_once() {
+    async fn a_need_the_hub_refuses_reaches_the_describer_when_held() {
         let connect: twigo_cache::hub::Connect = Arc::new(|_context| {
             Box::pin(async {
                 Err(IpcError {
@@ -747,8 +757,9 @@ mod tests {
             namespace: Some("a/b".to_owned()),
             field_selector: None,
         };
-        let held = needs_of(&hub, &target, vec![need.clone()]);
-        let facts = facts_of(&held);
+        let mut held = None;
+        let facts = follow_needs(&mut held, Some(vec![need.clone()]), &hub, &target)
+            .expect("the refusal goes out when the need is held");
         let [
             Fact {
                 need: found_for,
@@ -760,6 +771,13 @@ mod tests {
         };
         assert_eq!(found_for, &need);
         assert!(message.contains("a/b"), "{message}");
+        assert_eq!(
+            follow_needs(&mut held, Some(vec![need]), &hub, &target),
+            None,
+            "nothing new the next time"
+        );
+        assert_eq!(follow_needs(&mut held, None, &hub, &target), None);
+        assert!(held.is_none(), "let go once the Overview hides");
     }
 
     #[test]
