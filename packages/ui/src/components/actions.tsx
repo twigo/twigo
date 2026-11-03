@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useRef, type ReactNode } from "react";
 import { Check, type LucideIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 import {
@@ -59,6 +59,28 @@ function ItemBody({ action }: { action: Action }) {
   );
 }
 
+/**
+ * Runs the chosen action once its menu has closed and the focus is back
+ * where it was, as VS Code runs a context menu's action: an open menu keeps
+ * the focus inside and moves it back as it closes, so an action that opens
+ * a picker or a dialog would lose the focus, and it would read the context
+ * keys of the menu instead of the element the menu was opened on.
+ */
+function useRunOnClose() {
+  const chosen = useRef<Action>(undefined);
+  return {
+    choose: (action: Action) => {
+      chosen.current = action;
+    },
+    onCloseAutoFocus: () => {
+      const action = chosen.current;
+      chosen.current = undefined;
+      // Radix moves the focus back after this handler returns.
+      if (action) queueMicrotask(action.run);
+    },
+  };
+}
+
 /** A right click on `children` opens the actions; none, and it is just `children`. */
 export function ActionContextMenu({
   actions,
@@ -69,6 +91,7 @@ export function ActionContextMenu({
   onOpen?: () => void;
   children: ReactNode;
 }) {
+  const { choose, onCloseAutoFocus } = useRunOnClose();
   if (actions.length === 0) return children;
   return (
     <ContextMenu
@@ -77,7 +100,7 @@ export function ActionContextMenu({
       }}
     >
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent>
+      <ContextMenuContent onCloseAutoFocus={onCloseAutoFocus}>
         {actions.map((group, index) => (
           <Fragment key={group[0]?.id ?? index}>
             {index > 0 && <ContextMenuSeparator />}
@@ -86,7 +109,9 @@ export function ActionContextMenu({
                 key={action.id}
                 disabled={action.disabled}
                 variant={action.danger ? "destructive" : "default"}
-                onSelect={action.run}
+                onSelect={() => {
+                  choose(action);
+                }}
               >
                 <ItemBody action={action} />
               </ContextMenuItem>
@@ -123,6 +148,7 @@ export function ActionDropdown({
   /** The trigger, rendered as the button itself. */
   children: ReactNode;
 }) {
+  const { choose, onCloseAutoFocus } = useRunOnClose();
   return (
     <DropdownMenu
       onOpenChange={(open) => {
@@ -132,7 +158,7 @@ export function ActionDropdown({
       <DropdownMenuTrigger aria-label={label} asChild>
         {children}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align={align}>
+      <DropdownMenuContent align={align} onCloseAutoFocus={onCloseAutoFocus}>
         {title && <DropdownMenuLabel>{title}</DropdownMenuLabel>}
         {actions.map((group, index) => (
           <Fragment key={group[0]?.id ?? index}>
@@ -143,8 +169,12 @@ export function ActionDropdown({
                 disabled={action.disabled}
                 className={cn(action.danger && "text-error")}
                 onSelect={(event) => {
-                  if (keepOpen) event.preventDefault();
-                  action.run();
+                  if (keepOpen) {
+                    event.preventDefault();
+                    action.run();
+                  } else {
+                    choose(action);
+                  }
                 }}
               >
                 <ItemBody action={action} />
