@@ -7,14 +7,17 @@ import {
 } from "@testing-library/react";
 import { ScrollText } from "lucide-react";
 import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
+import { resize } from "../../test/resize";
 import type { ListController } from "../lib/list";
 import { LineList, type LineItem } from "./LineList";
 import { StyledText } from "./StyledText";
 
+let shown = 600;
+
 beforeAll(() => {
   Object.defineProperty(HTMLElement.prototype, "clientHeight", {
     configurable: true,
-    get: () => 600,
+    get: () => shown,
   });
   Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
     configurable: true,
@@ -42,6 +45,7 @@ afterAll(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  shown = 600;
 });
 
 const line = (key: number, text = `line ${String(key)}`): LineItem => ({
@@ -122,6 +126,34 @@ function wrapped() {
 
 const CENTRE = (19 - 600) / 2;
 
+const startOf = (log: HTMLElement, key: string) => {
+  const row = [...log.querySelectorAll<HTMLElement>("[data-index]")].find(
+    (each) => each.textContent.endsWith(`line ${key}`),
+  );
+  return Number(/translateY\((.+)px\)/.exec(row?.style.transform ?? "")?.[1]);
+};
+
+function hide(log: HTMLElement) {
+  act(() => {
+    shown = 0;
+    resize();
+  });
+  Object.defineProperty(log, "scrollTop", {
+    configurable: true,
+    get: () => 0,
+    set: () => undefined,
+  });
+}
+
+function show(log: HTMLElement) {
+  Reflect.deleteProperty(log, "scrollTop");
+  log.scrollTop = 0;
+  act(() => {
+    shown = 600;
+    resize();
+  });
+}
+
 test("following, it asks for the tail and keeps the end in view", () => {
   const { log, onWindow } = mount({
     total: 300,
@@ -151,51 +183,127 @@ test("paused, a scroll asks for the lines around the top line by its key", () =>
   expect(onFollowChange).not.toHaveBeenCalled();
 });
 
+test("paused, a scroll too small to show other rows still moves the place it keeps", () => {
+  const { log, onPlace } = mount({
+    follow: false,
+    total: 300,
+    items: lines(0, 300),
+  });
+  scroll(log, 19 * 120);
+  scroll(log, 19 * 120 + 3);
+  expect(onPlace).toHaveBeenLastCalledWith({ key: "120", offset: 3 });
+});
+
 test("a wheel up pauses following", () => {
   const { log, onFollowChange } = mount();
   fireEvent.wheel(log, { deltaY: -40 });
   expect(onFollowChange).toHaveBeenCalledWith(false);
 });
 
-test("following, a scroll away from the end pauses it only while the person scrolls", () => {
-  const { log, onFollowChange } = mount({ total: 300, items: lines(0, 300) });
-  scroll(log, 19 * 120);
-  scroll(log, 19 * 110);
-  expect(onFollowChange).not.toHaveBeenCalled();
-  fireEvent.pointerDown(log);
-  scroll(log, 19 * 100);
-  expect(onFollowChange).toHaveBeenLastCalledWith(false);
-});
-
-test("paused, the person's scroll that reaches the end follows again, and the list's own does not", () => {
+test("paused, a wheel down that reaches the end follows again at once, and one short of it does not, though the browser scrolled by it first", () => {
   const { log, onFollowChange } = mount({
     follow: false,
     total: 300,
     items: lines(0, 300),
   });
-  scroll(log, 19 * 300 - 600);
+  log.scrollTop = 19 * 300 - 600 - 40;
+  fireEvent.wheel(log, { deltaY: 19 * 300 - 600 - 40 });
   expect(onFollowChange).not.toHaveBeenCalled();
-  scroll(log, 19 * 200);
-  wheel(log, 19 * 300 - 600);
+  log.scrollTop = 0;
+  fireEvent.wheel(log, { deltaY: 19 * 300 - 600 });
   expect(onFollowChange).toHaveBeenLastCalledWith(true);
 });
 
-test("a scroll against the way the person's wheel turned is not theirs", () => {
-  const paused = mount({ follow: false, total: 300, items: lines(0, 300) });
+test("following, a scroll the list did not write is the person's, and away from the end it pauses", () => {
+  const { log, onFollowChange } = mount({ total: 300, items: lines(0, 300) });
+  scroll(log, log.scrollTop);
+  expect(onFollowChange).not.toHaveBeenCalled();
+  scroll(log, 19 * 120);
+  expect(onFollowChange).toHaveBeenLastCalledWith(false);
+});
+
+test("a touch that scrolls the list up pauses it", () => {
+  const { log, onFollowChange } = mount({ total: 300, items: lines(0, 300) });
   act(() => {
-    fireEvent.wheel(paused.log, { deltaY: -40 });
-    paused.log.scrollTop = 19 * 300 - 600;
-    fireEvent.scroll(paused.log);
+    fireEvent.touchStart(log);
+    log.scrollTop = 19 * 100;
+    fireEvent.scroll(log);
+    fireEvent.touchEnd(log);
   });
-  expect(paused.onFollowChange).not.toHaveBeenCalled();
-  cleanup();
-  const following = mount({ total: 300, items: lines(0, 300) });
-  act(() => {
-    fireEvent.wheel(following.log, { deltaY: 40 });
-    following.log.scrollTop = 19 * 100;
-    fireEvent.scroll(following.log);
+  expect(onFollowChange).toHaveBeenLastCalledWith(false);
+});
+
+test("paused, the person's scroll down to the end follows again, and the list's own does not while a pointer or a touch holds it", () => {
+  const { log, onFollowChange, update } = mount({
+    total: 300,
+    items: lines(0, 300),
   });
-  expect(following.onFollowChange).not.toHaveBeenCalled();
+  update({ follow: false });
+  fireEvent.pointerDown(log);
+  fireEvent.touchStart(log);
+  update({ total: 250, items: lines(50, 300) });
+  scroll(log, log.scrollTop);
+  expect(onFollowChange).not.toHaveBeenCalled();
+  scroll(log, 19 * 100);
+  scroll(log, 19 * 250 - 600);
+  expect(onFollowChange).toHaveBeenLastCalledWith(true);
+});
+
+test("paused at the end, the person's scroll up within a row of it keeps it paused", () => {
+  const { log, onFollowChange, update } = mount({
+    total: 300,
+    items: lines(0, 300),
+  });
+  update({ follow: false });
+  scroll(log, 19 * 300 - 600 - 5);
+  expect(onFollowChange).not.toHaveBeenCalled();
+});
+
+test("paused, a key's scroll the browser took to the end as it stood follows again, though lines came before it got there", () => {
+  const { log, onFollowChange, update } = mount({
+    follow: false,
+    total: 300,
+    items: lines(0, 300),
+  });
+  fireEvent.keyDown(log, { key: "End" });
+  update({ total: 310, items: lines(0, 310) });
+  scroll(log, 19 * 300 - 600);
+  expect(onFollowChange).toHaveBeenLastCalledWith(true);
+});
+
+test("paused at the buffer's bound, a key's scroll to the end follows again, though the lines it began over moved before it got there", () => {
+  const { log, onFollowChange, update } = mount({
+    follow: false,
+    total: 300,
+    items: lines(0, 300),
+  });
+  scroll(log, 19 * 120);
+  fireEvent.keyDown(log, { key: "End" });
+  update({ items: lines(10, 310) });
+  expect(log.scrollTop).toBe(19 * 110);
+  scroll(log, 19 * 300 - 600 - 19 * 10);
+  expect(onFollowChange).toHaveBeenLastCalledWith(true);
+});
+
+test("a key's end is the end only for the scroll it began, not after a wheel or following again", () => {
+  const { log, onFollowChange, update } = mount({
+    follow: false,
+    total: 300,
+    items: lines(0, 300),
+  });
+  fireEvent.keyDown(log, { key: "End" });
+  update({ total: 400, items: lines(0, 400) });
+  fireEvent.wheel(log, { deltaY: -40 });
+  scroll(log, 19 * 200);
+  scroll(log, 19 * 300 - 600);
+  expect(onFollowChange).not.toHaveBeenCalledWith(true);
+  fireEvent.keyDown(log, { key: "End" });
+  update({ follow: true });
+  update({ total: 500, items: lines(0, 500) });
+  update({ follow: false });
+  scroll(log, 19 * 200);
+  scroll(log, 19 * 400 - 600);
+  expect(onFollowChange).not.toHaveBeenCalledWith(true);
 });
 
 test("paused, the lines that came meanwhile show on a button that follows again", () => {
@@ -206,17 +314,55 @@ test("paused, the lines that came meanwhile show on a button that follows again"
   expect(onFollowChange).toHaveBeenCalledWith(true);
 });
 
-test("paused, the top line stays put as lines leave before it, through the virtualizer", () => {
-  const scrolled = vi.spyOn(HTMLElement.prototype, "scrollTo");
+test("paused, the list keeps its top line in place as lines leave before it, and the virtualizer never scrolls it", () => {
   const { log, update } = mount({
     follow: false,
     total: 300,
     items: lines(0, 300),
   });
+  const scrolled = vi.spyOn(HTMLElement.prototype, "scrollTo");
   scroll(log, 19 * 120);
   update({ total: 250, items: lines(50, 300) });
   expect(log.scrollTop).toBe(19 * 70);
-  expect(scrolled).toHaveBeenLastCalledWith({ top: 19 * 70, behavior: "auto" });
+  update({ reveal: { key: "200", token: 1 } });
+  expect(log.scrollTop).toBe(19 * 150 + CENTRE);
+  update({ follow: true });
+  expect(log.scrollTop).toBe(19 * 250 - 600);
+  expect(scrolled).not.toHaveBeenCalled();
+});
+
+test("paused, turning wrap on keeps the top line where it stood as its rows are measured", () => {
+  const { log, onPlace, update } = mount({
+    follow: false,
+    total: 300,
+    items: lines(0, 300),
+  });
+  scroll(log, 19 * 120 + 8);
+  wrapped();
+  update({ wrap: true });
+  act(() => {
+    resize();
+  });
+  expect(log.scrollTop - startOf(log, "120")).toBe(8);
+  expect(onPlace).toHaveBeenLastCalledWith({ key: "120", offset: 8 });
+});
+
+test("with wrap, a revealed line stays centred as the rows before it are measured", () => {
+  wrapped();
+  const { log, update } = mount({
+    follow: false,
+    wrap: true,
+    total: 300,
+    items: lines(0, 300),
+  });
+  update({ reveal: { key: "200", token: 1 } });
+  for (let round = 0; round < 4; round++) {
+    scroll(log, log.scrollTop);
+    act(() => {
+      resize();
+    });
+  }
+  expect(log.scrollTop - startOf(log, "200")).toBe(CENTRE);
 });
 
 test("with wrap, a held line is placed by its own start as lines leave before it", () => {
@@ -231,13 +377,7 @@ test("with wrap, a held line is placed by its own start as lines leave before it
   const held = onPlace.mock.lastCall?.[0] as { key: string; offset: number };
   update({ total: 290, items: lines(10, 300) });
   scroll(log, log.scrollTop);
-  const row = [...log.querySelectorAll<HTMLElement>("[data-index]")].find(
-    (each) => each.textContent.endsWith(`line ${held.key}`),
-  );
-  const start = Number(
-    /translateY\((.+)px\)/.exec(row?.style.transform ?? "")?.[1],
-  );
-  expect(log.scrollTop - start).toBe(held.offset);
+  expect(log.scrollTop - startOf(log, held.key)).toBe(held.offset);
 });
 
 test("following with wrap through many lines, the rows on screen keep their sizes", () => {
@@ -248,9 +388,12 @@ test("following with wrap through many lines, the rows on screen keep their size
     start: 60,
     items: lines(60, 100),
   });
-  for (let end = 110; end <= 600; end += 10) {
+  for (let end = 110; end <= 1200; end += 10) {
     update({ total: end, start: end - 40, items: lines(end - 40, end) });
     scroll(log, log.scrollTop);
+    act(() => {
+      resize();
+    });
     const rows = [...log.querySelectorAll<HTMLElement>("[data-index]")]
       .map((row) => ({
         index: Number(row.dataset.index),
@@ -455,8 +598,7 @@ test("following again ends a place still loading", () => {
   });
 });
 
-test("the list's keys scroll it through the virtualizer, pausing it on the way up", () => {
-  const scrolled = vi.spyOn(HTMLElement.prototype, "scrollTo");
+test("the list's keys scroll it as the person does, pausing it on the way up", () => {
   let controller: ListController | undefined;
   const { log, onFollowChange, onWindow, update } = mount({
     total: 5000,
@@ -468,16 +610,52 @@ test("the list's keys scroll it through the virtualizer, pausing it on the way u
     },
   });
   act(() => {
-    controller?.moveToEdge("first");
+    controller?.move(-1);
   });
   expect(onFollowChange).toHaveBeenLastCalledWith(false);
-  expect(scrolled).toHaveBeenLastCalledWith({ top: 0, behavior: "auto" });
+  expect(log.scrollTop).toBe(19 * 5000 - 600 - 19);
+  act(() => {
+    controller?.moveToEdge("first");
+  });
+  expect(log.scrollTop).toBe(0);
   update({ follow: false });
-  scroll(log, 0);
   expect(onWindow).toHaveBeenLastCalledWith({
     start: 0,
     end: expect.any(Number) as number,
   });
+});
+
+test("a list hidden while paused shows its top line in place again", () => {
+  const { log, update } = mount({
+    follow: false,
+    total: 300,
+    items: lines(0, 300),
+  });
+  scroll(log, 19 * 120 + 5);
+  hide(log);
+  update({ total: 250, items: lines(50, 300) });
+  show(log);
+  expect(log.scrollTop).toBe(19 * 70 + 5);
+});
+
+test("a list hidden while following shows the end again", () => {
+  const { log, update } = mount({ total: 300, items: lines(0, 300) });
+  hide(log);
+  update({ total: 400, start: 360, items: lines(360, 400) });
+  show(log);
+  expect(log.scrollTop).toBe(19 * 400 - 600);
+});
+
+test("a list paused while hidden holds the line it stood at, not the top it shows again at", () => {
+  const { log, onPlace, update } = mount({
+    total: 300,
+    items: lines(0, 300),
+  });
+  hide(log);
+  update({ follow: false });
+  show(log);
+  expect(log.scrollTop).toBe(19 * 300 - 600);
+  expect(onPlace).toHaveBeenLastCalledWith({ key: "268", offset: 8 });
 });
 
 test("a marker draws its icon, tag and words", () => {
