@@ -395,7 +395,9 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         aria-rowindex={at.index + 2}
         aria-selected={anyMarked ? isMarked : isCursor}
         data-cursor={isCursor || undefined}
-        onClick={() => {
+        onClick={(event) => {
+          // A click in a menu the row opened reaches it through the portal.
+          if (!event.currentTarget.contains(event.target as Node)) return;
           select();
           onActivate(target.id, target.data);
         }}

@@ -408,6 +408,21 @@ test("a hovered row's actions run on that row, which they select first, without 
   expect(handlers.onActivate).not.toHaveBeenCalled();
 });
 
+test("a choice in a row's menu runs without opening the row", async () => {
+  const run = vi.fn();
+  const { handlers } = grid({
+    menu: [[{ id: "copy", label: "Copy Name", run }]],
+  });
+  fireEvent.pointerDown(
+    nth(screen.getAllByRole("button", { name: "Row actions" }), 2),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(screen.getByRole("menuitem", { name: "Copy Name" }));
+  await act(() => new Promise((resolve) => setTimeout(resolve)));
+  expect(run).toHaveBeenCalledOnce();
+  expect(handlers.onActivate).not.toHaveBeenCalled();
+});
+
 test("a header is a column header with a button that sorts, and a double click on its edge fits the column", () => {
   const { handlers } = grid({ sort: { column: "Name", descending: false } });
   const [header] = screen.getAllByRole("row");
