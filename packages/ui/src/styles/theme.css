@@ -107,6 +107,30 @@
   /* A changed table cell starts at this tint and fades out. */
   --flash: color-mix(in oklab, var(--brand) 18%, transparent);
 
+  /* A log's ANSI colours, each at 4.5:1 or more on the editor (WCAG 1.4.3):
+     black and white swap ends with the theme, so neither vanishes. */
+  --ansi-black: oklch(0.32 0.004 250);
+  --ansi-red: oklch(0.52 0.2 27);
+  --ansi-green: oklch(0.5 0.13 150);
+  --ansi-yellow: oklch(0.52 0.11 85);
+  --ansi-blue: oklch(0.5 0.16 255);
+  --ansi-magenta: oklch(0.5 0.19 325);
+  --ansi-cyan: oklch(0.52 0.09 210);
+  --ansi-white: oklch(0.47 0.006 250);
+  --ansi-bright-black: oklch(0.47 0.006 250);
+  --ansi-bright-red: oklch(0.56 0.21 27);
+  --ansi-bright-green: oklch(0.53 0.14 150);
+  --ansi-bright-yellow: oklch(0.55 0.12 85);
+  --ansi-bright-blue: oklch(0.54 0.17 255);
+  --ansi-bright-magenta: oklch(0.54 0.2 325);
+  --ansi-bright-cyan: oklch(0.55 0.1 210);
+  --ansi-bright-white: oklch(0.32 0.004 250);
+
+  /* Search matches in text, and the current one, filled. */
+  --mark: color-mix(in oklab, var(--warn) 35%, transparent);
+  --mark-current: var(--warn);
+  --mark-current-foreground: oklch(0.2 0 0);
+
   /* Layered elevation shadows (ambient + key); the large step also draws a
      hairline ring so floating surfaces hold an edge on any background. */
   --shadow-sm: 0 1px 2px oklch(0.2 0.02 235 / 8%);
@@ -176,6 +200,23 @@
 
   --flash: color-mix(in oklab, var(--brand) 24%, transparent);
 
+  --ansi-black: oklch(0.62 0.004 250);
+  --ansi-red: oklch(0.7 0.17 25);
+  --ansi-green: oklch(0.74 0.15 150);
+  --ansi-yellow: oklch(0.82 0.14 90);
+  --ansi-blue: oklch(0.72 0.13 250);
+  --ansi-magenta: oklch(0.72 0.15 325);
+  --ansi-cyan: oklch(0.78 0.11 210);
+  --ansi-white: oklch(0.87 0.002 250);
+  --ansi-bright-black: oklch(0.72 0.004 250);
+  --ansi-bright-red: oklch(0.78 0.15 25);
+  --ansi-bright-green: oklch(0.82 0.15 150);
+  --ansi-bright-yellow: oklch(0.88 0.14 90);
+  --ansi-bright-blue: oklch(0.8 0.12 250);
+  --ansi-bright-magenta: oklch(0.8 0.14 325);
+  --ansi-bright-cyan: oklch(0.85 0.1 210);
+  --ansi-bright-white: oklch(0.97 0 0);
+
   /* Floating layers only; the 1px inset rim is what keeps popovers crisp on a
      dark canvas (luminance stacking handles levels below). */
   --shadow-sm: 0 1px 2px oklch(0 0 0 / 30%);
@@ -244,6 +285,25 @@
   --color-context-blue-solid: var(--context-blue-solid);
   --color-context-purple-solid: var(--context-purple-solid);
   --color-context-solid-foreground: var(--context-solid-foreground);
+  --color-ansi-black: var(--ansi-black);
+  --color-ansi-red: var(--ansi-red);
+  --color-ansi-green: var(--ansi-green);
+  --color-ansi-yellow: var(--ansi-yellow);
+  --color-ansi-blue: var(--ansi-blue);
+  --color-ansi-magenta: var(--ansi-magenta);
+  --color-ansi-cyan: var(--ansi-cyan);
+  --color-ansi-white: var(--ansi-white);
+  --color-ansi-bright-black: var(--ansi-bright-black);
+  --color-ansi-bright-red: var(--ansi-bright-red);
+  --color-ansi-bright-green: var(--ansi-bright-green);
+  --color-ansi-bright-yellow: var(--ansi-bright-yellow);
+  --color-ansi-bright-blue: var(--ansi-bright-blue);
+  --color-ansi-bright-magenta: var(--ansi-bright-magenta);
+  --color-ansi-bright-cyan: var(--ansi-bright-cyan);
+  --color-ansi-bright-white: var(--ansi-bright-white);
+  --color-mark: var(--mark);
+  --color-mark-current: var(--mark-current);
+  --color-mark-current-foreground: var(--mark-current-foreground);
 
   --shadow-sm: var(--shadow-sm);
   --shadow-md: var(--shadow-md);
