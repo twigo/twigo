@@ -50,6 +50,7 @@ export class Editors {
   readonly changes = new Changes();
   readonly #providers = new Set<EditorProvider>();
   readonly #symbols = new Map<string, readonly EditorSymbol[]>();
+  readonly #closed = new Set<(uri: string) => void>();
   #api: DockviewApi | undefined;
   #active: string | undefined;
 
@@ -80,14 +81,28 @@ export class Editors {
     return this.#active;
   }
 
+  /**
+   * Tells `listener` the URI of each editor that closes. Moving an editor
+   * to another group closes none (dockview reports no removal while it
+   * moves a panel), and neither does a space giving way to another.
+   */
+  onClose(listener: (uri: string) => void): () => void {
+    this.#closed.add(listener);
+    return () => this.#closed.delete(listener);
+  }
+
   attach(api: DockviewApi): () => void {
     this.#api = api;
     const listener = api.onDidActivePanelChange(({ panel }) => {
       this.#setActive(panel);
     });
+    const removal = api.onDidRemovePanel((panel) => {
+      for (const closed of this.#closed) closed(panel.id);
+    });
     this.#setActive(api.activePanel);
     return () => {
       listener.dispose();
+      removal.dispose();
       if (this.#api === api) {
         this.#api = undefined;
         this.#setActive(undefined);
