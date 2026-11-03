@@ -650,6 +650,7 @@ The layout per space is persisted (dockview `toJSON` and which parts show); part
 - A space connects lazily on its first activation.
   A background space's sessions (port-forwards, exec, logs) survive; its list subscriptions linger, then stop (3.2).
 - Shortcuts: ⌘1..9 selects a space by its place in the rail; the rail's button and `ctx ` in quick access switch to a space or open one for any context; ⌘⇧N opens a space in a new window.
+- The `ctx ` picker lists the open spaces first, each with its tile, its context's server as host and port, its connection as the rail has it (the cluster's version alone while connected) and its ⌘ key; then the other contexts under the kubeconfig file that defines them (5.5).
 
 ### 4.3 Editor model
 
@@ -1138,6 +1139,7 @@ A section takes over a core one only by naming its id in `replaces`, and its hea
       Reads do not count, since inotify reports every open, Twigo's own loads among them, and a change that leaves the catalog as it was reports nothing.
     - The explicit mode keeps development, tests and the bench off real clusters: in debug and bench builds `TWIGO_KUBECONFIG` replaces every source, and only its `kind-*` and `kwok-*` contexts count.
   - The webview follows the catalog through `contexts_watch`, which answers once the sources have been read, after the login shell's environment.
+    Each context says the file that defines it, from `~` under the home directory, and its cluster's URL with only scheme, host, port and path, so no credential written into the URL reaches the webview.
   - Each extension's `clusterProviders` is a further source.
   - Later: Cluster Inventory `ClusterProfile` (SIG Multicluster, alpha).
 - **Connection** is either

@@ -5,6 +5,8 @@ export interface SpaceConnection {
   readonly tone: Tone;
   /** Says the state in words, for the tile's tooltip: `Reconnecting`. */
   readonly label: string;
+  /** The version of what the space reaches, once known: `v1.33.4`. */
+  readonly version?: string;
 }
 
 /** What a feature knows about a space's connection, for its rail tile. */
