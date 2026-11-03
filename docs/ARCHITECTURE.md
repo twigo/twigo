@@ -825,9 +825,9 @@ Progress shows in the status bar, or in a notification when the operation needs 
 - **State** is what the UI leaves behind and nobody edits by hand: layouts, recent items, command history, column choices ([research](research/state.md)).
   - It has two scopes, as VS Code's storage has: the app's, and each space's.
     The app keeps the rail's spaces in order, the active space, part sizes, quick-access history and the columns chosen per kind.
-    A space keeps its editors, which parts show and their containers, moved views, its namespace scope and each view's own state.
+    A space keeps its editors, which parts show and their containers, moved views, its namespace scope, the editors it opened recently and each view's own state.
   - Part sizes are the app's, so switching spaces never moves the splits; VS Code keeps them per profile for the same reason.
-  - Each value is a key that one module owns, such as `parts`, `namespaces` or `view/<id>` in a space, and `parts/sizes` or `quickaccess/history` in the app.
+  - Each value is a key that one module owns, such as `parts`, `namespaces`, `recent` or `view/<id>` in a space, and `parts/sizes` or `quickaccess/history` in the app.
     The module reads it back with a valibot schema, field by field, and what does not fit falls back to its default, so a bad value costs that value only.
     Extensions (M3) get keys in the same scopes.
   - The webview reads everything once as it starts (`state_load`), so its reads are synchronous.

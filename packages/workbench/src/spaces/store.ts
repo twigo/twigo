@@ -3,6 +3,7 @@ import * as v from "valibot";
 import type { Backend, Space } from "@twigo/protocol";
 import { Changes } from "../changes";
 import type { ContextKeys } from "../contextkey/service";
+import type { RecentEditor } from "../editors/recent";
 import type { StateStore } from "../state/store";
 import type { Location } from "../views/registry";
 import type { Catalog } from "./catalog";
@@ -21,6 +22,8 @@ export interface SpaceState {
   readonly placement: Readonly<Record<string, string>>;
   /** Empty for every namespace. */
   readonly namespaces: readonly string[];
+  /** The editors it opened, newest first ({@link RecentEditors}). */
+  readonly recent: readonly RecentEditor[];
 }
 
 export const DEFAULT_STATE: SpaceState = {
@@ -32,6 +35,7 @@ export const DEFAULT_STATE: SpaceState = {
   },
   placement: {},
   namespaces: [],
+  recent: [],
 };
 
 const part = (fallback: PartState) =>
@@ -60,6 +64,7 @@ const SCHEMAS: {
   }),
   placement: v.record(v.string(), v.string()),
   namespaces: v.array(v.string()),
+  recent: v.array(v.object({ uri: v.string(), title: v.string() })),
 };
 
 const KEYS = Object.keys(SCHEMAS) as (keyof SpaceState)[];
@@ -148,6 +153,7 @@ export class Spaces {
         parts: read("parts"),
         placement: read("placement"),
         namespaces: read("namespaces"),
+        recent: read("recent"),
       };
       this.#states.set(id, state);
     }

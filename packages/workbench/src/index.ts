@@ -8,6 +8,7 @@ export {
 export type { Scope } from "./contextkey/service";
 export type { ContextValue } from "./contextkey/when";
 export type { EditorProps, EditorProvider } from "./editors/registry";
+export type { RecentEditor, RecentEditors } from "./editors/recent";
 export type { ListTarget } from "./lists/service";
 export { useListRegistration } from "./lists/react";
 export type { Platform } from "./keybindings/chord";

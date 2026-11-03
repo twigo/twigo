@@ -5,6 +5,7 @@ import { menuActions } from "./commands/actions";
 import { Menus, type MenuId } from "./commands/menus";
 import { Commands } from "./commands/registry";
 import { ContextKeys } from "./contextkey/service";
+import { RecentEditors } from "./editors/recent";
 import { Editors } from "./editors/registry";
 import { ShellEnvironmentStatus } from "./environment";
 import type { Platform } from "./keybindings/chord";
@@ -41,6 +42,7 @@ export class Workbench {
   readonly catalog: Catalog;
   readonly colors: ContextColors;
   readonly spaces: Spaces;
+  readonly recent: RecentEditors;
   readonly sizes: PartSizes;
   readonly shellEnvironment: ShellEnvironmentStatus;
   readonly credentials: Credentials;
@@ -69,6 +71,7 @@ export class Workbench {
         this.report(error);
       },
     );
+    this.recent = new RecentEditors(this.editors, this.spaces);
     this.sizes = new PartSizes(state);
     this.shellEnvironment = new ShellEnvironmentStatus(backend, this.keys);
     this.credentials = new Credentials(backend, this.spaces, (error) => {
