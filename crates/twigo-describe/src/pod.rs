@@ -562,6 +562,40 @@ fn exited(terminated: &Value) -> String {
     }
 }
 
+/// The tone of a pod's Status column, as the pod list gives it (its
+/// `podStatus` rule in `packages/kube/src/columns.ts`, over the statuses
+/// printPod prints in kubernetes v1.37.1): neutral once it runs or
+/// completed, a warning while it waits or its init containers run, danger
+/// otherwise, since kubelets, runtimes and admission keep adding reasons.
+pub fn status_tone(status: &str) -> Tone {
+    const HEALTHY: &[&str] = &["Running", "Completed", "Succeeded", "ExitCode:0"];
+    const WAITING: &[&str] = &[
+        "Pending",
+        "ContainerCreating",
+        "PodInitializing",
+        "SchedulingGated",
+        "NotReady",
+        "Terminating",
+        "RestartingAllContainers",
+    ];
+    let init = status.strip_prefix("Init:");
+    let running_inits =
+        init.and_then(|counts| counts.split_once('/'))
+            .is_some_and(|(done, all)| {
+                [done, all]
+                    .iter()
+                    .all(|count| !count.is_empty() && count.bytes().all(|b| b.is_ascii_digit()))
+            });
+    let state = init.unwrap_or(status);
+    if running_inits || WAITING.contains(&state) {
+        Tone::Warning
+    } else if HEALTHY.contains(&state) {
+        Tone::Neutral
+    } else {
+        Tone::Danger
+    }
+}
+
 /// When the kubelet starts a crashing container again: its back-off after
 /// the last exit, which it names in the waiting message as Go writes a
 /// duration (kubernetes v1.37.1, `kuberuntime_manager.go` `doBackOff`:
@@ -581,6 +615,19 @@ pub fn next_start(finished: &str, message: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_status_takes_the_pod_lists_tone() {
+        assert_eq!(status_tone("Running"), Tone::Neutral);
+        assert_eq!(status_tone("Completed"), Tone::Neutral);
+        assert_eq!(status_tone("Init:ExitCode:0"), Tone::Neutral);
+        assert_eq!(status_tone("ContainerCreating"), Tone::Warning);
+        assert_eq!(status_tone("Init:1/3"), Tone::Warning);
+        assert_eq!(status_tone("Terminating"), Tone::Warning);
+        assert_eq!(status_tone("CrashLoopBackOff"), Tone::Danger);
+        assert_eq!(status_tone("Init:CrashLoopBackOff"), Tone::Danger);
+        assert_eq!(status_tone("OutOfcpu"), Tone::Danger);
+    }
 
     #[test]
     fn the_next_start_is_the_back_off_after_the_last_exit() {

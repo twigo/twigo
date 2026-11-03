@@ -5,8 +5,13 @@
 pub mod buffer;
 pub mod level;
 pub mod line;
-pub mod stream;
+mod plan;
+mod session;
+mod stream;
+mod target;
 pub mod view;
+
+pub use session::Session;
 
 /// Nanoseconds since the Unix epoch.
 fn now() -> i64 {

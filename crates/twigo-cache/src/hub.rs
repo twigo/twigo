@@ -1108,8 +1108,9 @@ where
     drop(replaced);
 }
 
-/// The least ready of the parts' states; syncing parts add up.
-fn combine(states: impl Iterator<Item = ViewState>) -> ViewState {
+/// The least ready of the states of a view's parts, or of the
+/// subscriptions a view reads together; syncing ones add up.
+pub fn combine(states: impl Iterator<Item = ViewState>) -> ViewState {
     let rank = |state: &ViewState| match state {
         ViewState::Ready => 0,
         ViewState::Stale => 1,
