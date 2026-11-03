@@ -105,8 +105,8 @@ export function LineList({
   fresh: number;
   /** Where the list stood when it last paused, which it goes back to when it mounts paused. */
   place?: LinePlace | undefined;
-  /** An index to scroll to, such as the current search match, each time its token changes. */
-  reveal?: { readonly index: number; readonly token: number } | undefined;
+  /** A line to scroll to, such as the current search match, each time its token changes; one not loaded is asked for around its key first. */
+  reveal?: { readonly key: string; readonly token: number } | undefined;
   onWindow: (window: LineWindow) => void;
   onFollowChange: (follow: boolean) => void;
   /** Where the paused list stands as the person scrolls, for `place`. */
@@ -126,6 +126,8 @@ export function LineList({
     { key: string; index: number } | undefined
   >(place && !follow ? { key: place.key, index: -1 } : undefined);
   const restoring = useRef(place && !follow ? place : undefined);
+  /** A line asked for to be revealed, until it is loaded. */
+  const revealing = useRef<string | undefined>(undefined);
   const programmatic = useRef(false);
   const virtualizer = useVirtualizer({
     count: total,
@@ -190,7 +192,10 @@ export function LineList({
   }, [follow, rows, asked, first, last, onWindow]);
 
   useEffect(() => {
-    if (follow) setAsked(undefined);
+    if (!follow) return;
+    setAsked(undefined);
+    restoring.current = undefined;
+    revealing.current = undefined;
   }, [follow]);
 
   // Following, the end stays in view; paused, the top line stays put as
@@ -204,42 +209,94 @@ export function LineList({
       });
       return;
     }
+    const wanted = revealing.current;
+    if (wanted) {
+      const found = items.findIndex((item) => item.key === wanted);
+      if (found >= 0) {
+        revealing.current = undefined;
+        restoring.current = undefined;
+        const index = start + found;
+        scroll(() => {
+          virtualizer.scrollToIndex(index, { align: "center" });
+        });
+        return;
+      }
+    }
     const back = restoring.current;
     if (back) {
       const found = items.findIndex((item) => item.key === back.key);
-      if (found < 0) return;
-      restoring.current = undefined;
-      const index = start + found;
-      scroll((to) => {
-        to.scrollTop = offsetOf(index) + back.offset;
-      });
-      anchor.current = { key: back.key, index, offset: back.offset };
-      return;
+      if (found >= 0) {
+        restoring.current = undefined;
+        const index = start + found;
+        scroll((to) => {
+          to.scrollTop = offsetOf(index) + back.offset;
+        });
+        anchor.current = { key: back.key, index, offset: back.offset };
+        return;
+      }
     }
     const held = anchor.current;
-    if (!held) return;
+    if (!held) {
+      // A range was asked for after a jump, or the kept place's line is
+      // gone: once a top line is loaded, it holds the place, so drops before
+      // it move nothing.
+      const gone = back !== undefined && items.length > 0;
+      if (gone) restoring.current = undefined;
+      const top = virtualizer.getVirtualItemForOffset(element.scrollTop);
+      const item = top && items[top.index - start];
+      if (item && (!asked || gone)) {
+        anchor.current = {
+          key: item.key,
+          index: top.index,
+          offset: element.scrollTop - top.start,
+        };
+        setAsked({ key: item.key, index: top.index });
+      }
+      return;
+    }
     const found = items.findIndex((item) => item.key === held.key);
     if (found < 0) return;
     const index = start + found;
     if (index === held.index) return;
+    // Placed by its own start and offset: with wrap, the line that held its
+    // old index is another height.
     scroll((to) => {
-      to.scrollTop += offsetOf(index) - offsetOf(held.index);
+      to.scrollTop = offsetOf(index) + held.offset;
     });
     anchor.current = { ...held, index };
-  }, [element, follow, items, start, total, virtualizer]);
+  }, [asked, element, follow, items, start, total, virtualizer]);
 
   useEffect(() => {
     virtualizer.measure();
   }, [wrap, virtualizer]);
 
+  // Sizes are kept by line, so following with wrap would keep one for every
+  // line that passed; the end is measured again at once.
+  useEffect(() => {
+    if (
+      follow &&
+      wrap &&
+      virtualizer.itemSizeCache.size > 4 * (rows + OVERSCAN)
+    )
+      virtualizer.measure();
+  }, [follow, wrap, items, rows, virtualizer]);
+
   const revealed = useRef<number | undefined>(undefined);
   useLayoutEffect(() => {
     if (!reveal || reveal.token === revealed.current) return;
     revealed.current = reveal.token;
-    scroll(() => {
-      virtualizer.scrollToIndex(reveal.index, { align: "center" });
-    });
-  }, [reveal, virtualizer]);
+    const found = items.findIndex((item) => item.key === reveal.key);
+    if (found >= 0) {
+      const index = start + found;
+      scroll(() => {
+        virtualizer.scrollToIndex(index, { align: "center" });
+      });
+      return;
+    }
+    revealing.current = reveal.key;
+    anchor.current = undefined;
+    setAsked({ key: reveal.key, index: -1 });
+  }, [reveal, items, start, virtualizer]);
 
   useEffect(() => {
     if (!element || !register) return;
@@ -262,6 +319,8 @@ export function LineList({
 
   const onScroll = () => {
     if (!element) return;
+    const user = !programmatic.current;
+    programmatic.current = false;
     const top = virtualizer.getVirtualItemForOffset(element.scrollTop);
     const item = top && items[top.index - start];
     if (item) {
@@ -272,11 +331,14 @@ export function LineList({
         if (!asked || Math.abs(asked.index - top.index) > DRIFT)
           setAsked({ key: item.key, index: top.index });
       }
+    } else if (!follow && user) {
+      // A jump past what is loaded: the lines there are asked for by index.
+      anchor.current = undefined;
+      setAsked(undefined);
     }
-    if (programmatic.current) {
-      programmatic.current = false;
-      return;
-    }
+    if (!user) return;
+    restoring.current = undefined;
+    revealing.current = undefined;
     const atEnd =
       element.scrollHeight - element.scrollTop - element.clientHeight < ROW;
     if (follow !== atEnd) onFollowChange(atEnd);

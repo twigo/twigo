@@ -60,9 +60,14 @@ test("following, it asks for the tail", () => {
   expect(onWindow).toHaveBeenLastCalledWith({ tail: 40 });
 });
 
-test("paused, it asks for a range around what it shows until a line is on top", () => {
+test("paused, it asks for a range around what it shows, then around its top line once it is loaded", () => {
   const { onWindow } = list({ follow: false });
-  expect(onWindow).toHaveBeenLastCalledWith({ start: 0, end: 44 });
+  expect(onWindow).toHaveBeenCalledWith({ start: 0, end: 44 });
+  expect(onWindow).toHaveBeenLastCalledWith({
+    around: "0",
+    before: 40,
+    after: 40,
+  });
 });
 
 test("paused, a scroll asks for the lines around the top line by its key", () => {
@@ -214,4 +219,66 @@ test("on a background, black and no colour are the theme's text", () => {
   expect(screen.getByText("FAIL").className).toBe(
     "text-foreground bg-ansi-yellow/25",
   );
+});
+
+test("paused, a jump past what is loaded asks for the lines there by index", () => {
+  const { onWindow } = list({
+    follow: false,
+    total: 5000,
+    start: 4900,
+    items: Array.from({ length: 100 }, (_, index) => line(index + 4900)),
+  });
+  const log = screen.getByRole("log");
+  Object.defineProperty(log, "scrollHeight", { value: 19 * 5000 });
+  act(() => {
+    log.scrollTop = 19 * 4950;
+    fireEvent.scroll(log);
+  });
+  expect(onWindow).toHaveBeenLastCalledWith({
+    around: "4950",
+    before: 40,
+    after: 40,
+  });
+  act(() => {
+    log.scrollTop = 19 * 1000;
+    fireEvent.scroll(log);
+  });
+  expect(onWindow).toHaveBeenLastCalledWith(
+    expect.objectContaining({ start: expect.any(Number) as number }),
+  );
+});
+
+test("a line to reveal that is not loaded is asked for around its key", () => {
+  const { onWindow } = list({
+    follow: false,
+    total: 5000,
+    start: 4900,
+    items: Array.from({ length: 100 }, (_, index) => line(index + 4900)),
+    reveal: { key: "1200", token: 1 },
+  });
+  expect(onWindow).toHaveBeenLastCalledWith({
+    around: "1200",
+    before: 40,
+    after: 40,
+  });
+});
+
+test("a kept place whose line the buffer dropped leaves the list holding the line now on top", () => {
+  const { onWindow } = list({
+    follow: false,
+    total: 300,
+    start: 0,
+    items: Array.from({ length: 100 }, (_, index) => line(index + 200)),
+    place: { key: "150", offset: 0 },
+  });
+  expect(onWindow).toHaveBeenCalledWith({
+    around: "150",
+    before: 40,
+    after: 40,
+  });
+  expect(onWindow).toHaveBeenLastCalledWith({
+    around: "200",
+    before: 40,
+    after: 40,
+  });
 });
