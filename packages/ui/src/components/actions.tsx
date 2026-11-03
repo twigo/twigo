@@ -60,23 +60,44 @@ function ItemBody({ action }: { action: Action }) {
 }
 
 /**
- * Runs the chosen action once its menu has closed and the focus is back
- * where it was, as VS Code runs a context menu's action: an open menu keeps
- * the focus inside and moves it back as it closes, so an action that opens
- * a picker or a dialog would lose the focus, and it would read the context
- * keys of the menu instead of the element the menu was opened on.
+ * Runs the chosen action as its menu closes, once the focus is back where
+ * it was before the menu opened, as VS Code runs a context menu's action:
+ * an open menu holds the focus, so an action that opens a picker or a
+ * dialog would lose it, and would read the context keys of the menu
+ * rather than of the element the menu was opened on. Radix reports the
+ * close after the render that released the menu's focus trap, and the
+ * action runs then, not after the close animation, so a menu opened
+ * again meanwhile cannot change what it acts on.
  */
 function useRunOnClose() {
   const chosen = useRef<Action>(undefined);
+  const ran = useRef(false);
+  const open = useRef(false);
   return {
+    // A closing menu's items still take clicks while it fades out.
     choose: (action: Action) => {
-      chosen.current = action;
+      if (open.current) chosen.current = action;
     },
-    onCloseAutoFocus: () => {
+    opened: (menu: HTMLElement | null) => {
+      open.current = true;
+      ran.current = false;
+      // Opened again while it fades out, the menu keeps its content, which
+      // Radix focuses only as it mounts.
+      if (menu && !menu.contains(document.activeElement)) menu.focus();
+    },
+    closed: (back: HTMLElement | null) => {
+      open.current = false;
       const action = chosen.current;
       chosen.current = undefined;
-      // Radix moves the focus back after this handler returns.
-      if (action) queueMicrotask(action.run);
+      if (!action) return;
+      back?.focus();
+      ran.current = true;
+      action.run();
+    },
+    onCloseAutoFocus: (event: Event) => {
+      // The action left the focus where it belongs, perhaps in a picker.
+      if (ran.current) event.preventDefault();
+      ran.current = false;
     },
   };
 }
@@ -91,16 +112,41 @@ export function ActionContextMenu({
   onOpen?: () => void;
   children: ReactNode;
 }) {
-  const { choose, onCloseAutoFocus } = useRunOnClose();
+  const run = useRunOnClose();
+  const back = useRef<HTMLElement | null>(null);
+  const content = useRef<HTMLDivElement>(null);
   if (actions.length === 0) return children;
   return (
     <ContextMenu
       onOpenChange={(open) => {
-        if (open) onOpen?.();
+        if (!open) {
+          run.closed(back.current);
+          return;
+        }
+        run.opened(content.current);
+        onOpen?.();
       }}
     >
-      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent onCloseAutoFocus={onCloseAutoFocus}>
+      <ContextMenuTrigger
+        asChild
+        onContextMenuCapture={(event) => {
+          // A right click while the menu is still shown moves it; the focus
+          // it had before it opened stays where to go back.
+          if (content.current) return;
+          const active = document.activeElement;
+          // Another menu that held the focus is going away with it, and
+          // nothing may hold it at all.
+          back.current =
+            active instanceof HTMLElement &&
+            active !== document.body &&
+            !active.closest('[role="menu"]')
+              ? active
+              : event.currentTarget.closest<HTMLElement>("[tabindex]");
+        }}
+      >
+        {children}
+      </ContextMenuTrigger>
+      <ContextMenuContent ref={content} onCloseAutoFocus={run.onCloseAutoFocus}>
         {actions.map((group, index) => (
           <Fragment key={group[0]?.id ?? index}>
             {index > 0 && <ContextMenuSeparator />}
@@ -110,7 +156,7 @@ export function ActionContextMenu({
                 disabled={action.disabled}
                 variant={action.danger ? "destructive" : "default"}
                 onSelect={() => {
-                  choose(action);
+                  run.choose(action);
                 }}
               >
                 <ItemBody action={action} />
@@ -148,17 +194,28 @@ export function ActionDropdown({
   /** The trigger, rendered as the button itself. */
   children: ReactNode;
 }) {
-  const { choose, onCloseAutoFocus } = useRunOnClose();
+  const run = useRunOnClose();
+  const trigger = useRef<HTMLButtonElement>(null);
+  const content = useRef<HTMLDivElement>(null);
   return (
     <DropdownMenu
       onOpenChange={(open) => {
-        if (open) onOpen?.();
+        if (!open) {
+          run.closed(trigger.current);
+          return;
+        }
+        run.opened(content.current);
+        onOpen?.();
       }}
     >
-      <DropdownMenuTrigger aria-label={label} asChild>
+      <DropdownMenuTrigger ref={trigger} aria-label={label} asChild>
         {children}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align={align} onCloseAutoFocus={onCloseAutoFocus}>
+      <DropdownMenuContent
+        ref={content}
+        align={align}
+        onCloseAutoFocus={run.onCloseAutoFocus}
+      >
         {title && <DropdownMenuLabel>{title}</DropdownMenuLabel>}
         {actions.map((group, index) => (
           <Fragment key={group[0]?.id ?? index}>
@@ -173,7 +230,7 @@ export function ActionDropdown({
                     event.preventDefault();
                     action.run();
                   } else {
-                    choose(action);
+                    run.choose(action);
                   }
                 }}
               >
