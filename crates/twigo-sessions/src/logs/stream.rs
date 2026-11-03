@@ -200,22 +200,31 @@ impl Resume {
     fn last_at(&self) -> Option<i64> {
         self.latest.map(|(at, _)| at)
     }
+
+    /// Whether a reread of the instance read before has yet to get lines
+    /// it had: a log that ends first holds none of them, as a later
+    /// instance's does not.
+    fn lacks(&self) -> bool {
+        self.skip.is_some_and(|skip| skip.same)
+    }
 }
 
 /// How a read ended.
 enum Outcome {
     /// The server ended the log; `fresh` if it sent lines this read had
-    /// not had.
+    /// not had, `found` if it sent any.
     Ended {
         fresh: bool,
+        found: bool,
     },
     /// The connection was retired or its clients abandoned under it.
     Cut,
     /// A reread of the instance read before got a later instance's log,
-    /// whose first line came at `at`: the kubelet's status had moved on
-    /// before the one the stream was told of.
+    /// whose first line came at `at`, or that ended before the lines it
+    /// had: the kubelet's status had moved on before the one the stream
+    /// was told of.
     Moved {
-        at: i64,
+        at: Option<i64>,
     },
     /// The body broke, which says nothing of the instance.
     Broken,
@@ -256,6 +265,12 @@ impl<'a> Status<'a> {
         self.0["lastState"]["terminated"]["containerID"]
             .as_str()
             .filter(|id| !id.is_empty())
+    }
+
+    /// Whether the kubelet reads another instance than `id`, as the
+    /// status says.
+    fn moved_from(&self, id: &str) -> bool {
+        self.current().is_some_and(|(current, _)| current != id)
     }
 
     /// How the instance `id` ended, once the status says it did.
@@ -362,11 +377,15 @@ impl Reader {
         let mut from = ReadFrom::source(self.stream.since);
         // The instance a read started on, and whether a cut left the rest
         // of its log unread; the last one read to its end; and one whose
-        // reread found the kubelet reading a later one.
+        // reread got a log without what came, as after it was rotated.
         let mut reading: Option<String> = None;
         let mut unfinished = false;
         let mut read: Option<String> = None;
         let mut moved: Option<String> = None;
+        // The last line of the instance a read started on, once the
+        // kubelet gave its rest as the previous instance while the status
+        // still named it: the lines read since are a later instance's.
+        let mut over: Option<i64> = None;
         // Whether the last Ended said its next start.
         let mut told = false;
         // The kubelet's error for an instance it could not read.
@@ -376,17 +395,20 @@ impl Reader {
             let status = Status::of(&current, &self.stream.container);
             let instance = status.as_ref().and_then(Status::current);
             if let Some(old) = reading.take_if(|old| instance.map(|(id, _)| id) != Some(old)) {
-                // It ended and the next began while its read was cut: the
-                // kubelet reads its rest as the previous instance.
+                let last = over.take();
                 if let Some(status) = &status {
+                    // It ended and the next began while its read was cut:
+                    // the kubelet reads its rest as the previous instance.
                     if unfinished
+                        && last.is_none()
                         && status.previous() == Some(old.as_str())
-                        && !self.tail(None, pod, send).await
+                        && self.tail(None, pod, send).await.is_none()
                     {
                         return;
                     }
                     if let Some(terminated) = status.termination(&old) {
-                        told = self.end(terminated, status, send);
+                        let last = last.or_else(|| self.resume.last_at());
+                        told = end(terminated, status, last, send);
                     }
                 }
                 read = Some(old);
@@ -438,13 +460,18 @@ impl Reader {
             let id = id.to_owned();
             // A reread of the instance checks that the kubelet still reads
             // it, unless the last found it did not and the status still
-            // says it runs, as after its log was rotated.
-            let moved_on = moved.take().as_deref() == Some(id.as_str());
+            // says it runs, as after its log was rotated, or the kubelet
+            // gave its rest as the previous instance already.
+            let moved_on = moved.take().as_deref() == Some(id.as_str()) || over.is_some();
             let same = reading.as_deref() == Some(id.as_str());
             self.resume.reopen(same && !moved_on);
             let start = self.resume.from().map_or(from, ReadFrom::Time);
             reading = Some(id.clone());
-            let outcome = self.read(false, start, None, send).await;
+            let container = self.stream.container.clone();
+            let outcome = tokio::select! {
+                outcome = self.read(false, start, None, send) => outcome,
+                () = moved_off(pod, &container, &id) => Outcome::Cut,
+            };
             if let Outcome::Ended { .. } | Outcome::Unreadable(_) = &outcome {
                 let current = Arc::clone(&pod.borrow_and_update());
                 let status = Status::of(&current, &self.stream.container);
@@ -457,7 +484,8 @@ impl Reader {
                         }));
                         unreadable = Some((id.clone(), error));
                     }
-                    told = self.end(terminated, status, send);
+                    let last = over.take().or_else(|| self.resume.last_at());
+                    told = end(terminated, status, last, send);
                     reading = None;
                     read = Some(id);
                     unfinished = false;
@@ -474,16 +502,23 @@ impl Reader {
                     }
                 }
                 Outcome::Moved { at } => {
-                    if !self.tail(Some(at), pod, send).await {
+                    let Some(found) = self.tail(at, pod, send).await else {
                         return;
-                    }
+                    };
                     unfinished = false;
-                    moved = Some(id);
+                    // The kubelet's previous instance held what came, so it
+                    // reads a later one; else the log was rotated, and the
+                    // previous instance is an older one, or none.
+                    if found {
+                        over = self.resume.last_at();
+                    } else {
+                        moved = Some(id);
+                    }
                     if !self.pause(pod).await {
                         return;
                     }
                 }
-                Outcome::Ended { fresh } => {
+                Outcome::Ended { fresh, .. } => {
                     // The status may not say yet that it ended; or the
                     // server ended the log of one that runs.
                     unfinished = false;
@@ -511,24 +546,27 @@ impl Reader {
 
     /// Reads the rest of the instance a read left, which the kubelet reads
     /// as the previous one once a later one runs, up to `before`, the time
-    /// of the later one's first line; false once the session ended.
+    /// of the later one's first line. Whether the log it read held any line
+    /// from the resume's second on, which says it was that instance's;
+    /// None once the pod's channel closed.
     async fn tail(
         &mut self,
         before: Option<i64>,
         pod: &mut watch::Receiver<Arc<Value>>,
         send: &impl Fn(Event),
-    ) -> bool {
+    ) -> Option<bool> {
         loop {
             self.resume.reopen(false);
             let start = self.resume.from().map_or(ReadFrom::Start, ReadFrom::Time);
             match self.read(true, start, before, send).await {
+                Outcome::Ended { found, .. } => return Some(found),
                 Outcome::Cut => {}
                 Outcome::Broken => {
                     if !self.pause(pod).await {
-                        return false;
+                        return None;
                     }
                 }
-                _ => return true,
+                _ => return Some(false),
             }
         }
     }
@@ -572,7 +610,7 @@ impl Reader {
                     if let Some(status) = &status
                         && let Some(terminated) = status.termination(&id)
                     {
-                        send(self.ended(terminated, status));
+                        send(ended(terminated, status, self.resume.last_at()));
                     }
                     send(Event::State(match outcome {
                         Outcome::Unreadable(error) => StreamState::Error { error },
@@ -593,45 +631,6 @@ impl Reader {
                     return;
                 }
             }
-        }
-    }
-
-    /// Sends the Ended entry of an instance, and says whether it has its
-    /// next start.
-    fn end(&self, terminated: &Value, status: &Status<'_>, send: &impl Fn(Event)) -> bool {
-        let ended = self.ended(terminated, status);
-        let told = matches!(
-            ended,
-            Event::Ended {
-                restarting: Some(_),
-                ..
-            }
-        );
-        send(ended);
-        told
-    }
-
-    fn ended(&self, terminated: &Value, status: &Status<'_>) -> Event {
-        let time = terminated["finishedAt"]
-            .as_str()
-            .unwrap_or_default()
-            .to_owned();
-        let finished = time
-            .parse::<jiff::Timestamp>()
-            .ok()
-            .and_then(|at| i64::try_from(at.as_nanosecond()).ok());
-        let at = match (finished, self.resume.last_at()) {
-            (Some(finished), Some(last)) => finished.max(last),
-            (finished, last) => finished.or(last).unwrap_or_else(now),
-        };
-        Event::Ended {
-            at,
-            restarting: status.restarting(&time),
-            time,
-            exit_code: terminated["exitCode"]
-                .as_i64()
-                .and_then(|code| i32::try_from(code).ok()),
-            reason: terminated["reason"].as_str().map(str::to_owned),
         }
     }
 
@@ -751,6 +750,7 @@ impl Reader {
         let mut lines = std::pin::pin!(lines);
         let mut fresh = false;
         let mut buffer = Vec::new();
+        let mut found = false;
         loop {
             buffer.clear();
             let read = tokio::select! {
@@ -759,7 +759,8 @@ impl Reader {
                 () = &mut abandoned => return Outcome::Cut,
             };
             match read {
-                Ok(0) => return Outcome::Ended { fresh },
+                Ok(0) if self.resume.lacks() => return Outcome::Moved { at: None },
+                Ok(0) => return Outcome::Ended { fresh, found },
                 Ok(_) => {}
                 Err(_) => return Outcome::Broken,
             }
@@ -772,12 +773,13 @@ impl Reader {
                 });
             };
             if before.is_some_and(|before| at >= before) {
-                return Outcome::Ended { fresh };
+                return Outcome::Ended { fresh, found };
             }
+            found = true;
             match self.resume.admit(at) {
                 Admit::New => fresh = true,
                 Admit::Again => continue,
-                Admit::Moved => return Outcome::Moved { at },
+                Admit::Moved => return Outcome::Moved { at: Some(at) },
             }
             send(Event::Line {
                 at,
@@ -787,6 +789,58 @@ impl Reader {
             });
         }
     }
+}
+
+/// Sends the Ended entry of an instance whose last line came at `last`,
+/// and says whether it has its next start.
+fn end(terminated: &Value, status: &Status<'_>, last: Option<i64>, send: &impl Fn(Event)) -> bool {
+    let ended = ended(terminated, status, last);
+    let told = matches!(
+        ended,
+        Event::Ended {
+            restarting: Some(_),
+            ..
+        }
+    );
+    send(ended);
+    told
+}
+
+fn ended(terminated: &Value, status: &Status<'_>, last: Option<i64>) -> Event {
+    let time = terminated["finishedAt"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    let finished = time
+        .parse::<jiff::Timestamp>()
+        .ok()
+        .and_then(|at| i64::try_from(at.as_nanosecond()).ok());
+    let at = match (finished, last) {
+        (Some(finished), Some(last)) => finished.max(last),
+        (finished, last) => finished.or(last).unwrap_or_else(now),
+    };
+    Event::Ended {
+        at,
+        restarting: status.restarting(&time),
+        time,
+        exit_code: terminated["exitCode"]
+            .as_i64()
+            .and_then(|code| i32::try_from(code).ok()),
+        reason: terminated["reason"].as_str().map(str::to_owned),
+    }
+}
+
+/// Waits until the status names another instance of the container than
+/// `id`, the one a read started for; never once the pod's channel has
+/// closed, so a read under way ends by itself.
+async fn moved_off(pod: &mut watch::Receiver<Arc<Value>>, container: &str, id: &str) {
+    while pod.changed().await.is_ok() {
+        let current = pod.borrow_and_update();
+        if Status::of(&current, container).is_some_and(|status| status.moved_from(id)) {
+            return;
+        }
+    }
+    std::future::pending().await
 }
 
 #[cfg(test)]
@@ -933,8 +987,8 @@ mod tests {
 
     /// web-a writes lines 1 to 3 into an open follow, whose connection
     /// then dies; meanwhile web-a writes 4 and 5 and crashes, and the
-    /// kubelet starts web-b, which writes 11 and 12.
-    async fn cut_across_a_restart(fake: &Fake) -> Followed {
+    /// kubelet starts web-b.
+    async fn cut_before_a_restart(fake: &Fake) -> Followed {
         fake.serve("web-1", "web", Some("web-a"), None);
         numbered(fake, "web-a", 1..=3);
         let followed = Followed::new(fake, web(running(), json!({})), false);
@@ -944,8 +998,25 @@ mod tests {
         numbered(fake, "web-a", 4..=5);
         fake.stop("web-1", "web", "web-a");
         fake.serve("web-1", "web", Some("web-b"), Some("web-a"));
+        followed
+    }
+
+    /// As [`cut_before_a_restart`], and web-b writes 11 and 12.
+    async fn cut_across_a_restart(fake: &Fake) -> Followed {
+        let followed = cut_before_a_restart(fake).await;
         numbered(fake, "web-b", 11..=12);
         followed
+    }
+
+    /// `web-1` with `instance` crashed after `previous` did.
+    fn crashed_again(instance: &str, previous: &str) -> Value {
+        let mut pod = web(crashed(instance), crashed(previous));
+        pod["status"]["containerStatuses"][0]["containerID"] = json!(instance);
+        pod
+    }
+
+    fn both_ended(followed: &Followed) -> bool {
+        followed.ends().len() == 2
     }
 
     const ACROSS: [&str; 8] = [
@@ -973,6 +1044,84 @@ mod tests {
         followed.until("the new instance", has("web-b 12")).await;
         assert_eq!(followed.entries(), ACROSS);
         assert_eq!(followed.ends(), [T0 + 5 * SECOND]);
+    }
+
+    const OLD: [&str; 6] = [
+        "web-a 1", "web-a 2", "web-a 3", "web-a 4", "web-a 5", "ended",
+    ];
+
+    #[tokio::test(start_paused = true)]
+    async fn a_reread_on_a_stale_status_reads_the_old_instance_to_its_end_once_the_status_moves_on()
+    {
+        let fake = Fake::default();
+        let followed = cut_before_a_restart(&fake).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        followed.tell(restarted("web-b", "web-a"));
+        followed.until("the old instance's end", has("ended")).await;
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        assert_eq!(followed.entries(), OLD);
+
+        fake.stop("web-1", "web", "web-b");
+        followed.tell(crashed_again("web-b", "web-a"));
+        followed.until("the new instance's end", both_ended).await;
+        assert_eq!(followed.entries()[..6], OLD);
+        assert_eq!(followed.ends(), [T0 + 5 * SECOND, T0 + 5 * SECOND]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_reread_whose_log_ends_before_the_lines_it_had_reads_the_old_instance_to_its_end() {
+        let fake = Fake::default();
+        let followed = cut_before_a_restart(&fake).await;
+        fake.stop("web-1", "web", "web-b");
+        followed
+            .until("the old instance's tail", has("web-a 5"))
+            .await;
+        followed.tell(crashed_again("web-b", "web-a"));
+        followed.until("both ends", both_ended).await;
+        assert_eq!(followed.entries()[..6], OLD);
+        assert_eq!(followed.entries().len(), 7);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_old_instances_end_follows_its_last_line_when_the_next_ones_came_first() {
+        let fake = Fake::default();
+        let followed = cut_across_a_restart(&fake).await;
+        followed.until("web-b's lines", has("web-b 12")).await;
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        followed.tell(restarted("web-b", "web-a"));
+        followed.until("the old instance's end", has("ended")).await;
+        fake.stop("web-1", "web", "web-b");
+        followed.tell(crashed_again("web-b", "web-a"));
+        followed.until("both ends", both_ended).await;
+        assert_eq!(
+            followed.entries(),
+            [
+                "web-a 1", "web-a 2", "web-a 3", "web-a 4", "web-a 5", "web-b 11", "web-b 12",
+                "ended", "ended"
+            ]
+        );
+        assert_eq!(followed.ends(), [T0 + 5 * SECOND, T0 + 12 * SECOND]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_reread_of_a_rotated_log_reads_on_as_the_same_instance() {
+        let fake = Fake::default();
+        fake.serve("web-1", "web", Some("web-a"), None);
+        numbered(&fake, "web-a", 1..=3);
+        let followed = Followed::new(&fake, web(running(), json!({})), false);
+        followed.until("three lines", has("web-a 3")).await;
+        fake.strand("web-1", "web");
+        followed.cut();
+        fake.rotate("web-1", "web", "web-a");
+        numbered(&fake, "web-a", 4..=7);
+        followed
+            .until("the lines after the rotation", has("web-a 7"))
+            .await;
+        fake.stop("web-1", "web", "web-a");
+        followed.tell(web(crashed("web-a"), json!({})));
+        followed.until("its end", has("ended")).await;
+        assert_eq!(followed.entries().len(), 8);
+        assert_eq!(followed.ends(), [T0 + 7 * SECOND]);
     }
 
     #[tokio::test(start_paused = true)]

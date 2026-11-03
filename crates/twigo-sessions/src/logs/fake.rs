@@ -151,6 +151,15 @@ impl Fake {
         instance.followers.clear();
     }
 
+    /// The kubelet rotates an instance's log: a read gets only what the
+    /// instance writes next.
+    pub fn rotate(&self, pod: &str, container: &str, instance: &str) {
+        self.state()
+            .instance(pod, container, instance)
+            .lines
+            .clear();
+    }
+
     /// Breaks the body of each open follow of a container.
     pub fn break_follows(&self, pod: &str, container: &str) {
         let mut state = self.state();
