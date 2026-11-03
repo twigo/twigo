@@ -274,6 +274,11 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
             total={total}
             start={start}
             items={items}
+            around={
+              window?.around
+                ? { key: String(window.around.id), index: window.around.index }
+                : undefined
+            }
             follow={tab.follow}
             wrap={tab.wrap}
             timestamps={tab.timestamps}

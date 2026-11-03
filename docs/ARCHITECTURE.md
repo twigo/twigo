@@ -805,6 +805,7 @@ Extensions add commands, not prefixes.
     - the pod picker lists the workload's pods with their state, `Queued` and `Not followed` included, all of them with the new ones, or some, and the container: the default, one by name, or all;
     - the filter is the list's syntax; the search marks every match and steps back from the newest, `238 of 238`, on ↑↓ and Enter;
     - the list follows the end until the person scrolls up, then counts what came on a button that follows again, and keeps its place by the entries' ids as entries enter and leave before it;
+      whether the person scrolled comes from their wheel, keys, touch or a pointer on the list, never from a scroll the list or its virtualizer made, and a window asked around a line says where that line stands, so an earlier window is not taken for the answer and a line a new filter hides keeps its place where its time puts it;
     - a line shows its text as the container wrote it, ANSI colours as tokens at 4.5:1 or more on the editor, warnings and errors tinted with an edge as failing rows are; markers say that a container ended, with its code and next start, that a pod joined from its ReplicaSet or left, and what the buffer dropped;
     - F, W and T toggle follow, wrap and timestamps while the lines have the focus, ⌘F finds and `/` filters; below 1,100 px the toolbar drops the level counts and narrows its fields, so a split panel keeps every control.
 - **Exec and attach.**
