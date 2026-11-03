@@ -130,3 +130,9 @@ test("a pinned list shows the rows its filters keep", async () => {
   expect(pinned.textContent).toBe(`PodsFailing${failing ?? ""}`);
   expect(workbench.editors.active).toBe("k8s-list://prod-eu/v1/pods?h=error");
 });
+
+test("a kind whose open list shows no rows counts nothing", async () => {
+  await openList(createMockBackend("forbidden"));
+  expect(screen.getByText("Access denied")).toBeTruthy();
+  expect(item(/^Pods/).textContent).toBe("Pods");
+});

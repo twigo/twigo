@@ -39,7 +39,8 @@ export async function openList(
   return workbench;
 }
 
-export function withScreenSize() {
+export function withScreenSize(width = 800) {
+  const unsized = globalThis.ResizeObserver;
   beforeAll(() => {
     Object.defineProperty(HTMLElement.prototype, "clientHeight", {
       configurable: true,
@@ -47,11 +48,37 @@ export function withScreenSize() {
     });
     Object.defineProperty(HTMLElement.prototype, "clientWidth", {
       configurable: true,
-      get: () => 1000,
+      get: () => width,
     });
+    globalThis.ResizeObserver = class {
+      constructor(private readonly report: ResizeObserverCallback) {}
+      observe(target: Element) {
+        this.report(
+          [
+            {
+              target,
+              contentRect: new DOMRectReadOnly(
+                0,
+                0,
+                target.clientWidth,
+                target.clientHeight,
+              ),
+            } as ResizeObserverEntry,
+          ],
+          this,
+        );
+      }
+      unobserve() {
+        return undefined;
+      }
+      disconnect() {
+        return undefined;
+      }
+    };
   });
   afterAll(() => {
     Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
     Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
+    globalThis.ResizeObserver = unsized;
   });
 }

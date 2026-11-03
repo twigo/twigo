@@ -232,3 +232,96 @@ test("a multiline value keeps its lines", () => {
   expect(value.textContent).toBe("phase: Running\nready: true");
   expect(value.className).toContain("whitespace-pre-wrap");
 });
+
+const AT = "2026-11-02T21:04:52Z";
+
+test("conditions read as chips with a mark in their tone, and the wrong ones say why below them", () => {
+  render(
+    <Overview
+      overview={{
+        sections: [
+          {
+            id: "core.conditions",
+            title: "Conditions",
+            blocks: [
+              {
+                type: "conditions",
+                conditions: [
+                  {
+                    type: "Ready",
+                    status: "False",
+                    tone: "danger",
+                    reason: "ContainersNotReady",
+                    message: "containers with unready status: [api]",
+                    lastTransition: AT,
+                  },
+                  {
+                    type: "PodScheduled",
+                    status: "True",
+                    tone: "success",
+                    reason: null,
+                    message: null,
+                    lastTransition: AT,
+                  },
+                  {
+                    type: "DisruptionTarget",
+                    status: "True",
+                    tone: "warning",
+                    reason: "EvictionByEvictionAPI",
+                    message: null,
+                    lastTransition: AT,
+                  },
+                  {
+                    type: "Initialized",
+                    status: "False",
+                    tone: "danger",
+                    reason: null,
+                    message: null,
+                    lastTransition: AT,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }}
+      onOpen={() => undefined}
+    />,
+  );
+  const chips = screen.getAllByRole("listitem");
+  expect(
+    chips.map((chip) => [
+      chip.getAttribute("title"),
+      chip.querySelector("svg")?.getAttribute("aria-label"),
+      chip
+        .querySelector("svg")
+        ?.getAttribute("class")
+        ?.match(/text-[\w-]+/)?.[0],
+    ]),
+  ).toEqual([
+    [
+      "Ready: False\nContainersNotReady\ncontainers with unready status: [api]",
+      "False",
+      "text-error",
+    ],
+    ["PodScheduled: True", "True", "text-ok"],
+    [
+      "DisruptionTarget: True\nEvictionByEvictionAPI",
+      "True",
+      "text-warn-foreground",
+    ],
+    ["Initialized: False", "False", "text-error"],
+  ]);
+  expect(chips.map((chip) => chip.textContent.split(/\d/)[0])).toEqual([
+    "Ready",
+    "PodScheduled",
+    "DisruptionTarget",
+    "Initialized",
+  ]);
+  expect(
+    [...document.querySelectorAll("p")].map((reason) => reason.textContent),
+  ).toEqual([
+    "Ready · ContainersNotReadycontainers with unready status: [api]",
+    "DisruptionTarget · EvictionByEvictionAPI",
+  ]);
+});
