@@ -238,11 +238,11 @@ function cellText(cell: Cell | undefined): string {
 }
 
 /** ASCII letters in lower case, other characters as they are. */
-function lowerAscii(text: string): string {
+export function lowerAscii(text: string): string {
   return text.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 }
 
-interface TextFilter {
+export interface TextFilter {
   keeps(texts: readonly string[]): boolean;
 }
 
@@ -251,7 +251,7 @@ interface TextFilter {
  * is a regex in any case, `!/…/` its negation. Until the closing slash the
  * text is a substring. Null for text that keeps every row.
  */
-function parseText(source: string): TextFilter | null {
+export function parseText(source: string): TextFilter | null {
   const text = source.replace(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/g, "");
   const negated = text.startsWith("!");
   const rest = negated ? text.slice(1) : text;

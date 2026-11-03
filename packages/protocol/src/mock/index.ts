@@ -23,6 +23,7 @@ import {
 } from "./auth";
 import { Cluster } from "./cluster";
 import { KINDS, wireRow, type MockKind, type MockRow } from "./kinds";
+import { CLUSTER_STREAMS, MockLogs } from "./logs";
 import { MockObject } from "./objects";
 import {
   CONTEXTS,
@@ -169,6 +170,22 @@ export function createMockBackend(
     return found;
   };
 
+  const logs = new Map<number, MockLogs>();
+  const log = (id: number) => {
+    const found = logs.get(id);
+    if (!found) throw new IpcError("notFound", `no logs subscription ${id}`);
+    return found;
+  };
+  /** The cluster's followed logs go to the sessions in the order they opened (ARCHITECTURE 3.2). */
+  const budget = (session: MockLogs, wanted: number) => {
+    let used = 0;
+    for (const other of logs.values()) {
+      if (other === session) break;
+      used += other.streams;
+    }
+    return Math.max(0, Math.min(wanted, CLUSTER_STREAMS - used));
+  };
+
   const plain: {
     [C in PlainCommand]: (request: RequestOf<C>) => ResponseOf<C>;
   } = {
@@ -267,6 +284,31 @@ export function createMockBackend(
       return null;
     },
     object_values: ({ id, keys }) => object(id).values(keys),
+    logs_set_source: ({ id, source }) => {
+      log(id).setSource(source);
+      return null;
+    },
+    logs_set_view: ({ id, view }) => {
+      log(id).setView(view);
+      return null;
+    },
+    logs_set_window: ({ id, window }) => {
+      log(id).setWindow(window);
+      return null;
+    },
+    logs_ack: ({ id, seq }) => {
+      log(id).ack(seq);
+      return null;
+    },
+    logs_download: ({ id }) => {
+      log(id);
+      return `~/Downloads/logs-${String(id)}.log`;
+    },
+    logs_close: (id) => {
+      log(id).close();
+      logs.delete(id);
+      return null;
+    },
     object_close: (id) => {
       object(id);
       objects.delete(id);
@@ -374,6 +416,22 @@ export function createMockBackend(
           query,
           parts,
           context === undefined ? undefined : cluster(context),
+          onMessage,
+        ),
+      );
+      return id;
+    },
+    logs_open: ({ target, source, view }, onMessage) => {
+      const [context] = space(target.space).contexts;
+      const id = nextId++;
+      logs.set(
+        id,
+        new MockLogs(
+          target,
+          source,
+          view,
+          context === undefined ? undefined : cluster(context),
+          budget,
           onMessage,
         ),
       );
