@@ -383,6 +383,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
             >
               <span
                 key={since ?? "steady"}
+                data-fit={column.id}
                 className={cn(
                   "-mx-1 rounded-sm px-1",
                   since !== undefined && "animate-flash",

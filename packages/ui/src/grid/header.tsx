@@ -47,7 +47,9 @@ export function HeaderCell({
           active && "text-foreground",
         )}
       >
-        <span className="truncate">{column.title}</span>
+        <span data-fit-header={column.id} className="truncate">
+          {column.title}
+        </span>
         {active && <Arrow aria-hidden className="size-3 shrink-0" />}
       </button>
       <span
