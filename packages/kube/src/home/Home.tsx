@@ -1,19 +1,20 @@
 import type { ReactNode } from "react";
-import type { Gvr } from "@twigo/protocol";
+import { CircleX, Clock } from "lucide-react";
+import type { Gvr, Resource } from "@twigo/protocol";
 import {
   Button,
   Count,
   KeyHints,
   StatTile,
-  StatusDot,
   type KeyHint,
   type StatSegment,
 } from "@twigo/ui";
 import { SpaceTile, useChanges, useWorkbench } from "@twigo/workbench";
 import { byHealth, statusColumn, type Health } from "../columns";
-import { useClusterVersion, useResources } from "../discovery";
+import { useClusterVersion, useResources, type Loaded } from "../discovery";
 import { PODS } from "../kinds";
 import type { ListServices } from "../services";
+import { recentRow } from "../quickaccess";
 import { listUri } from "../uri";
 import { exactly, podStatusWords, unit, type Attention } from "./attention";
 import { useTally, type Tally } from "./useTally";
@@ -258,9 +259,19 @@ export function Home({
                 {attention.map((item) => (
                   <li
                     key={item.id}
-                    className="flex items-center gap-3 border-b border-border-subtle py-2"
+                    className="flex items-center gap-3 border-b border-border-subtle py-[9px]"
                   >
-                    <StatusDot tone={item.tone} size="md" />
+                    {item.tone === "error" ? (
+                      <CircleX
+                        aria-hidden
+                        className="size-4 shrink-0 text-error"
+                      />
+                    ) : (
+                      <Clock
+                        aria-hidden
+                        className="size-4 shrink-0 text-warn-foreground"
+                      />
+                    )}
                     <div className="grid min-w-0 flex-1 gap-0.5">
                       <span className="truncate">
                         <span
@@ -302,6 +313,7 @@ export function Home({
             )}
           </section>
           <aside className="grid gap-2">
+            <Recent space={id} resources={resources} />
             <h2 className="text-[11px] font-semibold text-muted-foreground">
               Keys
             </h2>
@@ -354,6 +366,61 @@ function Tile({
     >
       {tally.state === "counted" && tally.total > 0 && children}
     </StatTile>
+  );
+}
+
+/** The editors the space opened last, newest first, each opening again. */
+function Recent({
+  space,
+  resources,
+}: {
+  space: string;
+  resources: Loaded<readonly Resource[]>;
+}) {
+  const { recent, editors } = useWorkbench();
+  useChanges(recent.changes);
+  const entries = recent.list(space).slice(0, 5);
+  if (entries.length === 0) return null;
+  const known = resources.state === "ready" ? resources.value : [];
+  return (
+    <section aria-label="Recent" className="mb-2.5 grid gap-2">
+      <h2 className="text-[11px] font-semibold text-muted-foreground">
+        Recent
+      </h2>
+      <ul className="grid">
+        {entries.map((entry) => {
+          const row = recentRow(entry, known);
+          const Icon = row.icon;
+          const detail = [row.kind, row.description]
+            .filter(Boolean)
+            .join(" · ");
+          return (
+            <li key={entry.uri}>
+              <button
+                type="button"
+                onClick={() => {
+                  editors.open(entry.uri);
+                }}
+                className="flex h-7 w-full min-w-0 items-center gap-2 rounded-md text-left outline-none hover:bg-row-hover focus-visible:shadow-[var(--focus-ring)]"
+              >
+                {Icon && (
+                  <Icon
+                    aria-hidden
+                    className="size-3.5 shrink-0 text-muted-foreground"
+                  />
+                )}
+                <span className="truncate">{row.label}</span>
+                {detail && (
+                  <span className="truncate text-xs text-muted-foreground">
+                    {detail}
+                  </span>
+                )}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

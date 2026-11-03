@@ -1,3 +1,4 @@
+import type { LucideIcon } from "lucide-react";
 import {
   ListView,
   toIpcError,
@@ -352,11 +353,20 @@ export function resourceProvider(
   };
 }
 
+/** A recent editor as quick access and the home show it. */
+export interface RecentRow {
+  readonly label: string;
+  readonly icon?: LucideIcon;
+  /** An object's namespace, or a list's scope and filter. */
+  readonly description?: string;
+  readonly kind?: string;
+}
+
 /** A recent editor as a row: an object by its kind and namespace, a list by its scope and filter. */
-function recentItem(
+export function recentRow(
   { uri, title }: RecentEditor,
   resources: readonly Resource[],
-): QuickPickItem {
+): RecentRow {
   const object = parseObjectUri(uri);
   const list = object ? undefined : parseListUri(uri);
   const gvr = object?.gvr ?? list?.gvr;
@@ -367,12 +377,21 @@ function recentItem(
     ...(list.text ? [`/${list.text}`] : []),
   ];
   return {
-    id: `${RECENT}${uri}`,
     label: title,
     ...(gvr && { icon: kindIcon(gvr) }),
     ...(object?.namespace && { description: object.namespace }),
     ...(scope && scope.length > 0 && { description: scope.join(" ") }),
     ...(kind ? { kind: kind.kind } : list && { kind: "List" }),
+  };
+}
+
+function recentItem(
+  entry: RecentEditor,
+  resources: readonly Resource[],
+): QuickPickItem {
+  return {
+    id: `${RECENT}${entry.uri}`,
+    ...recentRow(entry, resources),
     group: "Recent",
   };
 }

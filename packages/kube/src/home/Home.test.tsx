@@ -265,3 +265,20 @@ test("the home leaves when an editor opens and comes back when the last closes",
   await settle(2);
   expect(attention()).not.toBeNull();
 });
+
+test("the home lists the space's recent editors, each opening again", async () => {
+  const { workbench } = await home();
+  expect(screen.queryByRole("region", { name: "Recent" })).toBeNull();
+  act(() => {
+    workbench.editors.open("k8s-list://prod-eu/v1/pods");
+  });
+  await settle(2);
+  act(() => {
+    workbench.editors.close("k8s-list://prod-eu/v1/pods");
+  });
+  await settle(2);
+  const recent = screen.getByRole("region", { name: "Recent" });
+  fireEvent.click(within(recent).getByRole("button", { name: /^Pods/ }));
+  await settle(2);
+  expect(workbench.editors.active).toBe("k8s-list://prod-eu/v1/pods");
+});
