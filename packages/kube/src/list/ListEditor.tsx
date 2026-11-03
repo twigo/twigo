@@ -24,8 +24,18 @@ export function ListEditor({
   uri,
   services,
 }: EditorProps & { services: ListServices }) {
-  const { editors } = useWorkbench();
+  const { editors, spaces } = useWorkbench();
+  const { states } = services;
   const input = useMemo(() => parseListUri(uri), [uri]);
+  useEffect(() => {
+    const space = spaces.active?.id;
+    return () => {
+      // A space's editors unmount as another space becomes active, which
+      // closes none of them.
+      if (spaces.active?.id === space && editors.title(uri) === undefined)
+        states.closed(uri);
+    };
+  }, [editors, spaces, states, uri]);
   const resources = useResources(services.discovery, input?.space ?? "");
   const resource =
     input && resources.state === "ready"

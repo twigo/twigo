@@ -32,7 +32,8 @@ const INITIAL: State = {
  * What each open list editor shows, by URI (ARCHITECTURE 4.4): its sort,
  * its text filter, its picked health, its collapsed groups, and the asks
  * for its filter field's focus, and the view its details show, so an
- * editor that mounts again shows the same.
+ * editor that mounts again shows the same. A list that closes opens again
+ * with the text and health of its URI (4.4).
  */
 export class ListStates {
   readonly changes = new Changes();
@@ -96,6 +97,16 @@ export class ListStates {
 
   setDetailsTab(uri: string, details: ObjectTab): void {
     if (this.#get(uri).details !== details) this.#update(uri, { details });
+  }
+
+  /** The list's editor closed: the text and health picked in it go. */
+  closed(uri: string): void {
+    const state = this.#lists.get(uri);
+    if (!state) return;
+    const { text, health, ...kept } = state;
+    if (text === undefined && health === undefined) return;
+    this.#lists.set(uri, kept);
+    this.changes.emit();
   }
 
   /** Asks the list's filter field to take the focus. */

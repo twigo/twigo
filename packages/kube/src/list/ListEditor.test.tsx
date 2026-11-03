@@ -1,6 +1,7 @@
 import {
   act,
   cleanup,
+  configure,
   fireEvent,
   screen,
   within,
@@ -237,20 +238,21 @@ test("two lists of a space keep their own selected row for the details and the r
   expect(writeText).toHaveBeenCalledWith(all);
 });
 
-test("a list reopened with a health picked subscribes with that health's values", async () => {
+test("a list whose space comes back keeps its health and subscribes with that health's values", async () => {
   const backend = createMockBackend("ready");
   const workbench = await openList(backend);
   fireEvent.click(health("Failing"));
   await settle();
   act(() => {
-    workbench.editors.close("k8s-list://prod-eu/v1/pods");
+    workbench.spaces.select("staging");
   });
   await settle();
   const subscribe = vi.spyOn(backend, "subscribe");
   act(() => {
-    workbench.editors.open("k8s-list://prod-eu/v1/pods");
+    workbench.spaces.select("prod-eu");
   });
   await settle();
+  expect(health("Failing").getAttribute("aria-pressed")).toBe("true");
   const values = subscribe.mock.calls.flatMap(([command, query]) =>
     command === "list_subscribe" &&
     typeof query === "object" &&
@@ -588,4 +590,69 @@ test("the pin keeps the list with its namespaces, text and health, opens it so, 
   await settle(1);
   expect(within(explorer()).queryByText("Pinned")).toBeNull();
   expect(pinButton("Pin to the explorer")).toBeTruthy();
+});
+
+test("a list opens with the text and health of its URI, and keeps what is picked in it while it stays open", async () => {
+  const uri = "k8s-list://prod-eu/v1/pods?q=api&h=error";
+  const workbench = await openList(createMockBackend("ready"), uri);
+  fireEvent.click(pinButton("Pin to the explorer"));
+  await settle(1);
+  fireEvent.click(health("All"));
+  fireEvent.change(filterField(), { target: { value: "web" } });
+  await settle();
+  act(() => {
+    workbench.editors.open("k8s-list://prod-eu/v1/nodes", { preview: false });
+  });
+  await settle();
+  act(() => {
+    workbench.editors.open(uri);
+  });
+  await settle();
+  expect(health("All").getAttribute("aria-pressed")).toBe("true");
+  expect(filterField()).toHaveProperty("value", "web");
+
+  act(() => {
+    workbench.editors.close(uri);
+  });
+  await settle();
+  fireEvent.click(
+    within(explorer()).getByRole("treeitem", { name: /^PodsFailing · “api”/ }),
+  );
+  await settle();
+  expect(workbench.editors.active).toBe(uri);
+  expect(health("Failing").getAttribute("aria-pressed")).toBe("true");
+  expect(filterField()).toHaveProperty("value", "api");
+  expect(pinButton("Unpin from the explorer")).toBeTruthy();
+});
+
+test("under StrictMode a list keeps what is picked in it as its space comes back, and takes its URI's once closed", async () => {
+  const uri = "k8s-list://prod-eu/v1/pods?h=error";
+  configure({ reactStrictMode: true });
+  try {
+    const workbench = await openList(createMockBackend("ready"), uri);
+    fireEvent.click(health("All"));
+    fireEvent.change(filterField(), { target: { value: "api" } });
+    await settle();
+    for (const space of ["staging", "prod-eu"]) {
+      act(() => {
+        workbench.spaces.select(space);
+      });
+      await settle();
+    }
+    expect(health("All").getAttribute("aria-pressed")).toBe("true");
+    expect(filterField()).toHaveProperty("value", "api");
+
+    act(() => {
+      workbench.editors.close(uri);
+    });
+    await settle();
+    act(() => {
+      workbench.editors.open(uri);
+    });
+    await settle();
+    expect(health("Failing").getAttribute("aria-pressed")).toBe("true");
+    expect(filterField()).toHaveProperty("value", "");
+  } finally {
+    configure({ reactStrictMode: false });
+  }
 });
