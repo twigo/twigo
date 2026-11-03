@@ -450,10 +450,17 @@ matches: LogMatches | null,
  */
 histogram: Histogram | null, 
 /**
- * Lines the buffer's bound dropped since the session opened (ARCHITECTURE
- * 4.6).
+ * Entries the buffer's bound dropped since the session opened
+ * (ARCHITECTURE 4.6).
  */
-dropped: number, };
+dropped: number, 
+/**
+ * Entries the view has kept as they came since the session opened or
+ * its source or view last changed, a count that only grows meanwhile:
+ * a paused list counts the new ones by it, since `total` stops growing
+ * at the bound.
+ */
+arrived: number, };
 
 export type LogContainer = { name: string, stream: StreamState, };
 
@@ -578,7 +585,7 @@ range: TimeRange | null, };
 /**
  * The lines of the view a window reads, markers included.
  */
-export type LogWindow = { "type": "tail", count: number, } | { "type": "range", start: number, end: number, };
+export type LogWindow = { "type": "tail", count: number, } | { "type": "range", start: number, end: number, } | { "type": "around", id: number, before: number, after: number, };
 
 /**
  * One flush of an open object. Rust sends the next only after the webview

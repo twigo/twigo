@@ -128,6 +128,12 @@ pub enum LogWindow {
     Tail { count: u32 },
     /// Exclusive of `end`.
     Range { start: u32, end: u32 },
+    /// `before` entries before the entry with `id` and `after` from it on,
+    /// wherever entries that enter or leave before it move it, so a paused
+    /// list keeps its place in one batch however many entries the bound
+    /// drops meanwhile. An entry the view no longer keeps stands where its
+    /// time would place it, and one the buffer dropped at the view's start.
+    Around { id: u64, before: u32, after: u32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -157,9 +163,14 @@ pub struct LogBatch {
     pub matches: Option<LogMatches>,
     /// Present when it changed.
     pub histogram: Option<Histogram>,
-    /// Lines the buffer's bound dropped since the session opened (ARCHITECTURE
-    /// 4.6).
+    /// Entries the buffer's bound dropped since the session opened
+    /// (ARCHITECTURE 4.6).
     pub dropped: u64,
+    /// Entries the view has kept as they came since the session opened or
+    /// its source or view last changed, a count that only grows meanwhile:
+    /// a paused list counts the new ones by it, since `total` stops growing
+    /// at the bound.
+    pub arrived: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -222,7 +233,7 @@ pub enum LogEntry {
         /// RFC 3339.
         time: String,
     },
-    /// The buffer's bound dropped `count` older lines; always the first
+    /// The buffer's bound dropped `count` older entries; always the first
     /// entry once it has.
     Dropped { id: u64, count: u64 },
 }
