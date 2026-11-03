@@ -296,8 +296,8 @@ export function ActionBar({
     <div
       role="toolbar"
       className={cn(
-        "flex items-center gap-0.5 text-xs whitespace-nowrap",
-        !inline && "rounded-lg bg-popover p-1 shadow-lg",
+        "flex items-center text-xs whitespace-nowrap",
+        inline ? "gap-1" : "gap-0.5 rounded-lg bg-popover p-1 shadow-lg",
         className,
       )}
     >

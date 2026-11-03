@@ -65,7 +65,7 @@ export function SearchField({
           <X aria-hidden className="size-3" />
         </button>
       ) : (
-        keys && <Kbd className="h-4 px-1">{keys}</Kbd>
+        keys && <Kbd>{keys}</Kbd>
       )}
     </div>
   );

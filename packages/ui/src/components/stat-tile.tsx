@@ -60,7 +60,7 @@ export function StatTile({
       {segments && value !== undefined && value > 0 && (
         <span
           aria-hidden
-          className="mt-1.5 flex h-1 overflow-hidden rounded-sm bg-[color-mix(in_oklab,var(--foreground)_12%,transparent)]"
+          className="mt-1.5 flex h-1 overflow-hidden rounded-xs bg-[color-mix(in_oklab,var(--foreground)_12%,transparent)]"
         >
           {segments.map((segment) => (
             <span
