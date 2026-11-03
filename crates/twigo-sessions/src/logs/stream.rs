@@ -409,7 +409,7 @@ impl Reader {
                     if unfinished
                         && last.is_none()
                         && status.previous() == Some(old.as_str())
-                        && self.tail(&old, None, pod, send).await.is_none()
+                        && self.tail(&old, from, None, pod, send).await.is_none()
                     {
                         return;
                     }
@@ -509,7 +509,7 @@ impl Reader {
                     }
                 }
                 Outcome::Moved { at } => {
-                    let Some(found) = self.tail(&id, at, pod, send).await else {
+                    let Some(found) = self.tail(&id, from, at, pod, send).await else {
                         return;
                     };
                     unfinished = false;
@@ -552,21 +552,23 @@ impl Reader {
     }
 
     /// Reads the rest of the instance `old` a read left, which the kubelet
-    /// reads as the previous one once a later one runs, up to `before`, the
-    /// time of the later one's first line, and tries again while the
-    /// cluster cannot be reached and the status names `old`. Whether the
-    /// log it read held any line from the resume's second on, which says
-    /// it was that instance's; None once the pod's channel closed.
+    /// reads as the previous one once a later one runs, from `from` while
+    /// the resume holds no line, up to `before`, the time of the later
+    /// one's first line, and tries again while the cluster cannot be
+    /// reached and the status names `old`. Whether the log it read held
+    /// any line from the resume's second on, which says it was that
+    /// instance's; None once the pod's channel closed.
     async fn tail(
         &mut self,
         old: &str,
+        from: ReadFrom,
         before: Option<i64>,
         pod: &mut watch::Receiver<Arc<Value>>,
         send: &impl Fn(Event),
     ) -> Option<bool> {
         loop {
             self.resume.reopen(false);
-            let start = self.resume.from().map_or(ReadFrom::Start, ReadFrom::Time);
+            let start = self.resume.from().map_or(from, ReadFrom::Time);
             match self.read(true, start, before, send).await {
                 Outcome::Ended { found, .. } => return Some(found),
                 Outcome::Cut => {}
@@ -890,6 +892,10 @@ mod tests {
 
     impl Followed {
         fn new(fake: &Fake, pod: Value, previous: bool) -> Self {
+            Self::since(fake, pod, Since::Start, previous)
+        }
+
+        fn since(fake: &Fake, pod: Value, since: Since, previous: bool) -> Self {
             let (hub, clients) = fake.hub();
             let stream = Stream {
                 hub,
@@ -897,7 +903,7 @@ mod tests {
                 namespace: NAMESPACE.to_owned(),
                 pod: "web-1".to_owned(),
                 container: "web".to_owned(),
-                since: Since::Start,
+                since,
                 previous,
             };
             let (told, followed) = watch::channel(Arc::new(pod));
@@ -1171,6 +1177,39 @@ mod tests {
             ]
         );
         assert_eq!(followed.ends(), [T0 + 5 * SECOND, T0 + 12 * SECOND]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_cut_before_any_line_reads_the_old_instance_from_the_sources_start() {
+        let fake = Fake::default();
+        fake.serve("web-1", "web", Some("web-a"), None);
+        let old = second(now()) - 3600 * SECOND;
+        for n in 1..=3 {
+            fake.write(
+                "web-1",
+                "web",
+                "web-a",
+                old + n * SECOND,
+                &format!("web-a old {n}"),
+            );
+        }
+        let followed = Followed::since(
+            &fake,
+            web(running(), json!({})),
+            Since::Seconds { seconds: 60 },
+            false,
+        );
+        followed
+            .until("following", |followed| {
+                followed.state() == Some(StreamState::Following)
+            })
+            .await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        fake.serve("web-1", "web", Some("web-b"), Some("web-a"));
+        fake.write("web-1", "web", "web-b", second(now()), "web-b 1");
+        followed.tell(restarted("web-b", "web-a"));
+        followed.until("web-b's line", has("web-b 1")).await;
+        assert_eq!(followed.entries(), ["ended", "web-b 1"]);
     }
 
     #[tokio::test(start_paused = true)]
