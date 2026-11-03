@@ -34,6 +34,9 @@
 
 ## Gotchas
 
+- On macOS a debug build's debug info stays in `.rcgu.o` files beside it (`split-debuginfo = "unpacked"`), and every incremental build leaves its own in `target/debug/deps` without removing the old ones.
+  At 492,498 of them (3 days of work, 2026-11-03) starting an FSEvents stream in a test binary there took 1–3 s, the same binary copied to `target/debug` 0.5 ms, so twigo-kube's kubeconfig watcher tests, which start one per watch and unwatch, timed out in parallel.
+  When they time out locally, count the files (`find target/debug/deps -maxdepth 1 | wc -l`) and `cargo clean`.
 - pnpm 12 comes from `packageManager`, and pnpm installs the Node of `devEngines.runtime`.
   An install fails on a package younger than a day (`minimumReleaseAge`): pin the previous version instead of excluding the new one.
 - `tsc` is TypeScript 7 (`@typescript/native`), while `typescript` is `@typescript/typescript6`, the API typescript-eslint needs.
