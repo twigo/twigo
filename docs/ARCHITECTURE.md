@@ -834,7 +834,7 @@ Progress shows in the status bar, or in a notification when the operation needs 
   `keybindings.json` works the same way.
 - **State** is what the UI leaves behind and nobody edits by hand: layouts, recent items, command history, column choices ([research](research/state.md)).
   - It has two scopes, as VS Code's storage has: the app's, and each space's.
-    The app keeps the rail's spaces in order, the active space, part sizes, quick-access history and the columns chosen per kind.
+    The app keeps the rail's spaces in order, the active space, part sizes, quick-access history, the columns chosen per kind and the colours chosen for contexts.
     A space keeps its editors, which parts show and their containers, moved views, its namespace scope, the editors it opened recently and each view's own state.
   - Part sizes are the app's, so switching spaces never moves the splits; VS Code keeps them per profile for the same reason.
   - Each value is a key that one module owns, such as `parts`, `namespaces`, `recent` or `view/<id>` in a space, and `parts/sizes` or `quickaccess/history` in the app.
@@ -946,6 +946,9 @@ interface CommandDescriptor {
   The menu IDs:
   - `commandPalette`
   - `resource/context` (row context menu)
+  - `resource/details` (details header, 4.3)
+  - `resource/inline` (row icon buttons on hover, 4.4)
+  - `resource/marked` (marked rows' bar, 4.4)
   - `resource/title` (resource editor toolbar)
   - `view/title`, `view/item`
   - `editor/title`
