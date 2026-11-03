@@ -40,4 +40,13 @@ The owner took the list mockup as a whole, with the darker editor and grouping:
 - a status bar in the shell's colour, coloured only in its context item;
 - text tiers at 4.5:1 or more, pending drawn as a ring, a solid focus ring, and in dark the editor darker than the shell.
 
-Left for when their data exists: the production label (environment types, M2) and CPU and memory columns (metrics, M2).
+The owner then took the other mockups as well:
+
+- the details beside the list as an inspector, with their state, owner, actions with keys and the object's views as tabs, Space to show them;
+- quick access with icons, matches in bold, abnormal states, Recent first and a footer of keys, under the title bar's search;
+- the context picker with each space's tile, server, connection and version, and the contexts by kubeconfig file;
+- the cluster's home: its tiles, what needs attention in words, its recent items;
+- the logs viewer of ARCHITECTURE 4.6, built with step 10;
+- production as a mode and friction by blast radius, ARCHITECTURE 6.4, built with M2.
+
+Left for when their data exists: the production label (environment types, M2), CPU and memory columns (metrics, M2), the container card and the reason a pod fails (describers, step 9).

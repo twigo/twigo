@@ -661,12 +661,17 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 | `untitled://manifest-n`                                             | New manifest; Apply asks for the target context                                                                               |
 | `twigo://settings`, `twigo://keybindings`, `twigo://extension/<id>` | Settings UI, keybindings UI, extension details                                                                                |
 
-- **Preview tabs.**
-  A click or Enter on a row opens its details, sliding in over the list from the right, as Lens's drawer; arrows move them along and Esc closes them.
-  After a 150 ms pause they hold the object's Object upstream and follow it, as an editor does ([research](research/details.md#following-the-object)).
-  The upstreams it leaves behind linger as a list's do, and give way to any watch that waits for the budget (3.2).
-  Opening the resource from its details opens a preview tab (italic title); editing it or double-clicking its tab pins it.
-  Opening an object from a list's details, or following a link in an object, pins the tab it came from, so the object opens beside it rather than in its place.
+- **Details and preview tabs.**
+  A click or Enter on a row opens its details, and Space shows or hides them, as Linear's peek; arrows move them along and Esc closes them.
+  - In an editor at least 960 px wide they stand beside the list as an inspector, and the list keeps only its name, ready and status columns, so the selected row stays in view (WCAG 2.4.11); in a narrower one they slide over the list from the right, as Lens's drawer.
+  - Their header says what the object is and how it is: the name, its generated part quieter; the status as a pill; the namespace; the controlling owner as a link; the age.
+    Then the commands of `resource/details` with their keys, such as Show YAML (`e`) and Open in Editor, and later Logs (`l`), Shell (`s`) and Forward (`f`) as their commands come.
+  - Below, the object's views as tabs, Overview, YAML, Events with its warnings counted, and Related, the same views the editor shows; the tab shown stays as the selection moves.
+  - The Diagnostics section of step 9 comes first in the Overview when something is wrong: why, in words, with its exit code, restarts, next try and last log line, and a button to the previous container's logs.
+    After a 150 ms pause they hold the object's Object upstream and follow it, as an editor does ([research](research/details.md#following-the-object)).
+    The upstreams it leaves behind linger as a list's do, and give way to any watch that waits for the budget (3.2).
+    Opening the resource from its details opens a preview tab (italic title); editing it or double-clicking its tab pins it.
+    Opening an object from a list's details, or following a link in an object, pins the tab it came from, so the object opens beside it rather than in its place.
 - **Object URIs.**
   The core group is an empty segment, `k8s://prod//v1/pods/payments/api-0`, so an object in a namespace has five path segments and a cluster-scoped one four.
 - **Sub-tabs.**
@@ -701,7 +706,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 - Grouping by a column (Namespace, Node, a status) puts a header before each group with its rows and how many fail or wait; a click or Enter folds it, Left goes to it from a row, and folded groups are kept per list.
 - The last column is the row's actions: a ⋯ button on hover and on the selected row, and the same menu on a right click, from `resource/context`; a hovered row also shows the commands of `resource/inline` that have icons.
   They act on the selected row of the active list.
-- Marks: X or Space marks the row under the cursor, ⇧↓ and ⇧↑ mark as they move, a click on a row's box marks it.
+- Marks: X marks the row under the cursor, ⇧↓ and ⇧↑ mark as they move, a click on a row's box marks it; Space shows the details (4.3).
   Marked rows get a bar at the bottom with the commands of `resource/marked`; Esc clears them.
   Marks are row IDs (3.4).
 - Focus model: arrows or `j`/`k` move, Enter opens, Left and Right fold, `/` or ⌘F filters, Esc clears.
@@ -740,8 +745,12 @@ Extensions add commands, not prefixes.
   - Search is done in Rust (regex) and returns a match index.
   - Supported: follow, wrap, timestamps, previous container, download, and switching between containers.
   - On EOF the stream reopens with `sinceTime` set to the last timestamp and drops duplicates.
-  - Logs aggregated across a workload's pods, stern-style, come in v1.x.
-    Watch the log budget (3.2).
+  - Designed with the owner on 2026-11-03 ([research](research/workbench-design.md)), for step 10:
+    - a logs tab follows an owner, not a pod: `deployment auth-api` merges its pods' lines and picks up the new pods of a rollout, since a tab tied to one pod dies with each rollout (lens#8163); watch the log budget (3.2);
+    - one toolbar: the pods and container, a time range, follow, wrap and timestamps, a level filter, a filter that keeps only matching lines, and apart from it a search that steps through matches as `3 of 5`;
+    - a volume histogram above the lines, warnings and errors in their tones, where a drag picks the time range;
+    - a narrow pod column of each line's generated suffix, levels read from structured fields, and only warning and error lines tinted;
+    - a container's end as a separator line with its exit code and when it restarts.
 - **Exec and attach.**
   xterm.js 6 with the WebGL addon.
   It falls back to the DOM renderer on context loss, which happens on WebKitGTK.
@@ -1355,6 +1364,16 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   A command switches a `read-only` context to `guarded` for a limited time.
   A banner shows the countdown, and the context relocks by itself.
 - **Every blocked request** returns a typed `permissions` error with the mode and its source, and the UI shows which rule blocked it.
+- **How the UI shows a mode and asks before damage**, designed with the owner on 2026-11-03 ([research](research/workbench-design.md)), for M2:
+  - Environment types, Production, Staging, Development and Local, set a context's colour and its default mode; the type is data, like the colour, from kubeconfig metadata or rules over context names.
+  - A production context is a mode with two cues (NN/g): a chip in the title bar after its name that says the type and the lock (`Production · read-only`), a 2 px line of its colour along the title bar's top, and the status bar tinted in it.
+  - Friction grows with the blast radius (Primer):
+    - scale, cordon and suspend run at once with an undo (⌘Z);
+    - deleting a pod that a controller replaces, outside production, sends after a 5 s toast with Cancel, as Headlamp holds it;
+    - deleting one object asks in a dialog that names the cluster in its question and lists what follows, with the equivalent kubectl command;
+    - a namespace, a node or a bulk delete asks for the object's name typed, as the guarded mode asks for the context's;
+    - the confirming button names its action, `Delete namespace`, never Yes or OK.
+  - Delete is ⌘⌫, never a bare key (4.4).
 
 ### 6.5 YAML apply: dry-run diff, then server-side apply
 
