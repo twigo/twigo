@@ -165,7 +165,7 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
   const provider = params && editors.resolve(params.uri);
   return (
     <div
-      className="flex h-full items-center gap-1.5 pr-1 pl-2 text-[13px]"
+      className="flex h-full items-center gap-1.5 pr-[3px] pl-2 text-[13px]"
       onDoubleClick={() => {
         if (params) editors.pin(params.uri);
       }}
@@ -174,7 +174,10 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
       }}
     >
       {params && provider?.icon && (
-        <provider.icon uri={params.uri} className="size-4 shrink-0" />
+        <provider.icon
+          uri={params.uri}
+          className="size-4 shrink-0 text-muted-foreground"
+        />
       )}
       <span data-preview={params?.preview ?? false} className="truncate">
         {api.title}
@@ -187,7 +190,7 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
           api.close();
         }}
         className={cn(
-          "twigo-tab-close flex size-5 items-center justify-center rounded",
+          "twigo-tab-close -ml-[3px] flex size-5 items-center justify-center rounded",
           "hover:bg-row-hover",
         )}
       >

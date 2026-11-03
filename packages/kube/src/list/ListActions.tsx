@@ -110,7 +110,7 @@ export function ListActions({
         }}
         {...(find && { keys: keybindings.label(find.presses) })}
         inputRef={field}
-        className="w-52"
+        className="w-58"
       />
       {groupable.length > 0 && (
         <ActionDropdown
@@ -139,7 +139,7 @@ export function ListActions({
         >
           <button
             type="button"
-            className="inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground outline-none hover:bg-row-hover hover:text-foreground focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-hover"
+            className="inline-flex h-6.5 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground outline-none hover:bg-row-hover hover:text-foreground focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-hover"
           >
             <ListTree aria-hidden className="size-3.5" />
             {groupable.some((candidate) => candidate.name === preset.group)
