@@ -28,5 +28,6 @@ twigo-kube.workspace = true
 
 [dev-dependencies]
 dhat.workspace = true
+fastrand.workspace = true
 k8s-openapi.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }

@@ -5821,6 +5821,7 @@ dependencies = [
  "anstyle-parse",
  "backon",
  "dhat",
+ "fastrand",
  "futures",
  "jiff",
  "k8s-openapi",
