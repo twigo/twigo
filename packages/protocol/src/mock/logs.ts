@@ -237,8 +237,13 @@ export class MockLogs {
     for (const name of this.#members) {
       if (current.has(name)) continue;
       this.#members.delete(name);
+      // The kubelet deletes a rolled-out pod once its containers ended, so
+      // their ends come before its `left` (ARCHITECTURE 4.6).
       for (const [id, stream] of this.#streams) {
-        if (stream.pod.name === name) this.#streams.delete(id);
+        if (stream.pod.name !== name) continue;
+        if (writes(stream.pod) && stream.restartAt === undefined)
+          incoming.push(this.#ended(stream, at, 0, "Completed"));
+        this.#streams.delete(id);
       }
       incoming.push([at, { type: "left", pod: name, time: rfc3339(at) }]);
       this.#dirty.pods = true;
@@ -332,7 +337,7 @@ export class MockLogs {
     return [read(stream, kubelet(at, fill(template(random), random)))];
   }
 
-  #ended(stream: Stream, at: bigint): Timed {
+  #ended(stream: Stream, at: bigint, exitCode = 1, reason = "Error"): Timed {
     return [
       at,
       {
@@ -340,8 +345,8 @@ export class MockLogs {
         pod: stream.pod.name,
         container: stream.container,
         time: rfc3339(at),
-        exitCode: 1,
-        reason: "Error",
+        exitCode,
+        reason,
         restarting: null,
       },
     ];

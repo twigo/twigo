@@ -121,13 +121,37 @@ test("the warn level keeps warnings and errors", async () => {
   logs.close();
 });
 
-test("a rollout replaces a followed pod: it leaves and its successor joins from its ReplicaSet", async () => {
+test("a rollout replaces a followed pod: its followed containers end, it leaves, and its successor joins from its ReplicaSet", async () => {
   const { logs, batches } = session();
   await vi.advanceTimersByTimeAsync(26_000);
-  const entries = batches.flatMap((batch) => batch.window?.entries ?? []);
-  const left = entries.find((entry) => entry.type === "left");
+  const at = batches.findIndex((batch) =>
+    batch.window?.entries.some((entry) => entry.type === "left"),
+  );
+  const entries = batches[at]?.window?.entries ?? [];
+  const left = entries.findIndex((entry) => entry.type === "left");
+  const pod = entries[left]?.type === "left" ? entries[left].pod : "";
+  const listed = batches
+    .slice(0, at)
+    .filter((batch) => batch.pods !== null)
+    .pop()
+    ?.pods?.find((each) => each.name === pod);
+  const following = (listed?.containers ?? [])
+    .filter((container) => container.stream.state === "following")
+    .map((container) => container.name);
+  const ended = entries
+    .slice(0, left)
+    .flatMap((entry) =>
+      entry.type === "ended" && entry.pod === pod && entry.exitCode === 0
+        ? [entry.container]
+        : [],
+    );
+  const after = entries
+    .slice(left + 1)
+    .filter((entry) => entry.type === "line" && entry.pod === pod);
   const joined = entries.find((entry) => entry.type === "joined");
-  expect(left).toBeDefined();
+  expect(following).toEqual(["api"]);
+  expect(ended).toEqual(following);
+  expect(after).toEqual([]);
   expect(joined?.type === "joined" && joined.owner?.kind).toBe("ReplicaSet");
   logs.close();
 });
