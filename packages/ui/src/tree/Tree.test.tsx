@@ -57,6 +57,13 @@ test("a click folds a section and opens a leaf, a double click keeps it", () => 
   expect(screen.queryByRole("treeitem", { name: /Pinned/ })).toBeNull();
 });
 
+test("before the cursor reaches a row, the active descendant is no heading", () => {
+  tree();
+  expect(
+    screen.getByRole("tree").getAttribute("aria-activedescendant"),
+  ).toBeNull();
+});
+
 test("the cursor passes headings by, Left goes to the parent, Right opens a closed section", () => {
   const { onOpen, onToggle, controller } = tree();
   act(() => {

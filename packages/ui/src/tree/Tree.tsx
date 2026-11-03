@@ -118,7 +118,9 @@ export function Tree({
       role="tree"
       tabIndex={0}
       aria-label={label}
-      aria-activedescendant={current ? rowId(at) : undefined}
+      aria-activedescendant={
+        current && !current.heading ? rowId(at) : undefined
+      }
       className="group/tree h-full overflow-auto pb-2 outline-none"
     >
       {rows.map((row, index) =>
