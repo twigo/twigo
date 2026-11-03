@@ -171,6 +171,11 @@ enum Outcome {
     /// The connection was retired or its clients abandoned under it.
     Cut,
     Failed(IpcError),
+    /// The kubelet could not read the instance's log and said why in the
+    /// body, after the zero-byte write that sends its headers
+    /// (`GetKubeletContainerLogs`, kubernetes v1.37.0), as when it has
+    /// removed the container already.
+    Unreadable(IpcError),
     /// Rejected credentials: retrying would run a plugin by itself.
     Unauthorized(IpcError),
 }
@@ -340,21 +345,27 @@ impl Reader {
             }
             let id = id.to_owned();
             reading = Some(id.clone());
-            match self.read(false, from, send).await {
+            let outcome = self.read(false, from, send).await;
+            if let Outcome::Ended { .. } | Outcome::Unreadable(_) = &outcome {
+                let current = Arc::clone(&pod.borrow_and_update());
+                let status = Status::of(&current, &self.stream.container);
+                if let Some(status) = &status
+                    && let Some(terminated) = status.termination(&id)
+                {
+                    if let Outcome::Unreadable(error) = outcome {
+                        send(Event::State(StreamState::Error { error }));
+                    }
+                    send(self.ended(terminated, status));
+                    reading = None;
+                    read = Some(id);
+                    self.resume = Resume::default();
+                    from = ReadFrom::Start;
+                    continue;
+                }
+            }
+            match outcome {
                 Outcome::Cut => from = self.resumed(from),
                 Outcome::Ended { fresh } => {
-                    let current = Arc::clone(&pod.borrow_and_update());
-                    let status = Status::of(&current, &self.stream.container);
-                    if let Some(status) = &status
-                        && let Some(terminated) = status.termination(&id)
-                    {
-                        send(self.ended(terminated, status));
-                        reading = None;
-                        read = Some(id);
-                        self.resume = Resume::default();
-                        from = ReadFrom::Start;
-                        continue;
-                    }
                     // The status may not say yet that it ended; or the
                     // server ended the log of one that runs.
                     if fresh {
@@ -365,7 +376,7 @@ impl Reader {
                         return;
                     }
                 }
-                Outcome::Failed(error) => {
+                Outcome::Failed(error) | Outcome::Unreadable(error) => {
                     send(Event::State(StreamState::Error { error }));
                     if !self.pause(pod).await {
                         return;
@@ -401,7 +412,7 @@ impl Reader {
             let id = id.to_owned();
             match self.read(true, from, send).await {
                 Outcome::Cut => from = self.resumed(from),
-                Outcome::Ended { .. } => {
+                outcome @ (Outcome::Ended { .. } | Outcome::Unreadable(_)) => {
                     let current = Arc::clone(&pod.borrow_and_update());
                     let status = Status::of(&current, &self.stream.container);
                     if let Some(status) = &status
@@ -409,7 +420,10 @@ impl Reader {
                     {
                         send(self.ended(terminated, status));
                     }
-                    send(Event::State(StreamState::Ended));
+                    send(Event::State(match outcome {
+                        Outcome::Unreadable(error) => StreamState::Error { error },
+                        _ => StreamState::Ended,
+                    }));
                     send(Event::Finished);
                     return;
                 }
@@ -581,10 +595,13 @@ impl Reader {
                 Err(_) => return Outcome::Ended { fresh },
             }
             let parsed = line::parse(&buffer);
-            let at = parsed
-                .at
-                .or_else(|| self.resume.last_at())
-                .unwrap_or_else(now);
+            // With timestamps every line the container wrote has its time.
+            let Some(at) = parsed.at else {
+                return Outcome::Unreadable(IpcError {
+                    kind: ErrorKind::Unavailable,
+                    message: parsed.text,
+                });
+            };
             if !self.resume.admit(at) {
                 continue;
             }
