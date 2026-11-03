@@ -908,6 +908,41 @@ fn a_pod_that_stops_or_cannot_mount_or_inspect_says_why() {
         [(Tone::Danger, "The pod's sandbox cannot be created")],
         "a container that ran before its node restarted"
     );
+    let reinitializing = edited("pod", |recorded| {
+        let status = &mut recorded.object["status"];
+        status["initContainerStatuses"] = serde_json::json!([{
+            "name": "migrate",
+            "state": { "terminated": { "reason": "Completed", "exitCode": 0 } },
+        }]);
+        status["containerStatuses"][0]["state"] =
+            serde_json::json!({ "waiting": { "reason": "PodInitializing" } });
+        status["containerStatuses"][0]["lastState"] = serde_json::json!({
+            "terminated": { "reason": "ContainerStatusUnknown", "exitCode": 137 },
+        });
+        recorded.events = vec![warning(
+            "FailedCreatePodSandBox",
+            "failed to create pod sandbox: network not ready",
+        )];
+    });
+    assert_eq!(
+        titles(&reinitializing),
+        [(Tone::Danger, "The pod's sandbox cannot be created")],
+        "an init container that completed before its node restarted"
+    );
+    let remounting = edited("pod-crashing", |recorded| {
+        recorded.events.insert(
+            0,
+            warning(
+                "FailedMount",
+                "MountVolume.SetUp failed for volume \"cfg\" : configmap \"cfg\" not found",
+            ),
+        );
+    });
+    assert_eq!(
+        titles(&remounting),
+        [(Tone::Danger, "Container api keeps crashing")],
+        "a remount that failed under a container that runs"
+    );
     let inspecting = edited("pod-pulling", |recorded| {
         recorded.object["status"]["containerStatuses"][0]["state"]["waiting"]["reason"] =
             "ImageInspectError".into();
