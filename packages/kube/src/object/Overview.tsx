@@ -16,20 +16,27 @@ import type {
   Field,
   ObjectRef,
   Overview as Document,
+  Section,
 } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
-import { cn, PropertyList, Section, Table } from "@twigo/ui";
+import { cn, PropertyList, Section as Folding, Table } from "@twigo/ui";
+import { useChanges } from "@twigo/workbench";
 import { formatBytes } from "@twigo/utils";
 import { Containers } from "./Containers";
 import { Diagnostics } from "./Diagnostics";
 import { EmbeddedList } from "./EmbeddedList";
 import { Properties } from "./Properties";
+import type { OverviewStates } from "./overviewStates";
 import { Age, ValueView } from "./values";
 
 export interface OverviewProps {
   readonly overview: Document;
   /** The space the object is in, which its live lists query. */
   readonly space: string;
+  /** What the person chose in the Overviews of the object's kind. */
+  readonly states: OverviewStates;
+  /** The object's resource, `apps/deployments`, which keys `states`. */
+  readonly kind: string;
   /** Opens the object a link points at. */
   readonly onOpen: (target: ObjectRef) => void;
   /** The values of a ConfigMap's keys, null for a binary one. */
@@ -38,39 +45,46 @@ export interface OverviewProps {
 
 /**
  * An object described in Rust (ARCHITECTURE 4.3): its sections in order,
- * each folding by its id, each block drawn by its type.
+ * each folding by its id as the kind's other objects do, each block drawn
+ * by its type.
  */
-export function Overview({ overview, space, onOpen, values }: OverviewProps) {
-  const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
+export function Overview({
+  overview,
+  space,
+  states,
+  kind,
+  onOpen,
+  values,
+}: OverviewProps) {
+  useChanges(states.changes);
   return (
     <div className="flex flex-col gap-4 px-3.5 pt-3 pb-4 text-[13px]">
       {overview.sections.map((section) => {
-        const open = !folded.has(section.id);
+        const open = states.open(kind, section.id, true);
         return (
-          <Section
+          <Folding
             key={section.id}
             title={section.title}
             open={open}
             onToggle={() => {
-              const next = new Set(folded);
-              if (open) next.add(section.id);
-              else next.delete(section.id);
-              setFolded(next);
+              states.toggle(kind, section.id);
             }}
           >
             <div className="flex flex-col gap-3">
               {section.blocks.map((block, index) => (
                 <BlockView
                   key={index}
-                  title={section.title}
+                  section={section}
                   block={block}
                   space={space}
+                  states={states}
+                  kind={kind}
                   onOpen={onOpen}
                   values={values}
                 />
               ))}
             </div>
-          </Section>
+          </Folding>
         );
       })}
     </div>
@@ -78,16 +92,20 @@ export function Overview({ overview, space, onOpen, values }: OverviewProps) {
 }
 
 function BlockView({
-  title,
+  section,
   block,
   space,
+  states,
+  kind,
   onOpen,
   values,
 }: {
-  /** The section's, which names a table. */
-  title: string;
+  /** Whose title names a table and whose id keys a list's state. */
+  section: Section;
   block: Block;
   space: string;
+  states: OverviewStates;
+  kind: string;
   onOpen: (target: ObjectRef) => void;
   values: OverviewProps["values"];
 }) {
@@ -110,11 +128,18 @@ function BlockView({
     case "diagnostics":
       return <Diagnostics findings={block.findings} />;
     case "containers":
-      return <Containers containers={block.containers} onOpen={onOpen} />;
+      return (
+        <Containers
+          containers={block.containers}
+          states={states}
+          kind={kind}
+          onOpen={onOpen}
+        />
+      );
     case "table":
       return (
         <Table
-          label={title}
+          label={section.title}
           columns={block.columns}
           rows={block.rows.map((row) =>
             row.map((value, index) => (
@@ -124,7 +149,16 @@ function BlockView({
         />
       );
     case "list":
-      return <EmbeddedList list={block} space={space} onOpen={onOpen} />;
+      return (
+        <EmbeddedList
+          list={block}
+          space={space}
+          states={states}
+          kind={kind}
+          id={section.id}
+          onOpen={onOpen}
+        />
+      );
   }
 }
 

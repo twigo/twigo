@@ -6,6 +6,7 @@ export * from "./components/tooltip";
 export * from "./components/command";
 export * from "./components/dialog";
 export * from "./components/empty-state";
+export * from "./components/frame";
 export * from "./components/kbd";
 export * from "./components/skeleton";
 export { cn } from "./lib/cn";

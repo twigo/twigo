@@ -3,6 +3,7 @@ import { Discovery } from "./discovery";
 import { ListStatuses } from "./list/listStatus";
 import { ListStates } from "./listState";
 import { PinnedLists } from "./explorer/pinned";
+import { OverviewStates } from "./object/overviewStates";
 import { ListPresets } from "./presets";
 import { Selection } from "./selection";
 
@@ -19,6 +20,8 @@ export interface ListServices {
   readonly statuses: ListStatuses;
   /** The lists each space pinned to its explorer. */
   readonly pinned: PinnedLists;
+  /** What the person chose in each kind's Overviews. */
+  readonly overviews: OverviewStates;
 }
 
 export function createServices(workbench: Workbench): ListServices {
@@ -33,5 +36,6 @@ export function createServices(workbench: Workbench): ListServices {
     selection: new Selection(),
     statuses: new ListStatuses(),
     pinned: new PinnedLists(workbench.spaces),
+    overviews: new OverviewStates(),
   };
 }

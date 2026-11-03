@@ -100,6 +100,7 @@ export function registerKube(workbench: Workbench): void {
       <ObjectEditor
         uri={uri}
         discovery={services.discovery}
+        overviews={services.overviews}
         tabs={objectTabs}
       />
     ),

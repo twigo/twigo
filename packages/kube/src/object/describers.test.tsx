@@ -4,6 +4,7 @@ import type { Overview as Document } from "@twigo/protocol";
 import { inWorkbench, testWorkbench } from "@twigo/workbench/testing";
 import OBJECTS from "../../../protocol/src/mock/objects.json";
 import { Overview } from "./Overview";
+import { OverviewStates } from "./overviewStates";
 
 afterEach(() => {
   cleanup();
@@ -18,7 +19,13 @@ async function shown(name: string) {
   if (!overview) throw new Error(`no recorded ${name}`);
   const workbench = await testWorkbench("ready");
   render(
-    <Overview overview={overview} space="prod-eu" onOpen={() => undefined} />,
+    <Overview
+      overview={overview}
+      space="prod-eu"
+      states={new OverviewStates()}
+      kind="/pods"
+      onOpen={() => undefined}
+    />,
     { wrapper: inWorkbench(workbench) },
   );
   await act(async () => {
@@ -64,7 +71,7 @@ test("a crashing pod says why first, and its container's card folds its details"
   await shown("pod-crashing");
   const regions = screen.getAllByRole("region");
   expect(regions[0]?.getAttribute("aria-label")).toBe("Diagnostics");
-  const alert = within(section("Diagnostics")).getByRole("alert");
+  const alert = section("Diagnostics");
   expect(alert.textContent).toContain("Container api keeps crashing");
   expect(alert.textContent).toMatch(/Exited with code 1, \d+ restarts, last /);
   expect(alert.textContent).toContain(

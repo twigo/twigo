@@ -16,7 +16,8 @@ const TITLE = {
 /**
  * What is wrong, in words, on its tone's tint with its title in the tone:
  * an object's diagnostics. The tone has its own icon, so it does not rest
- * on hue alone.
+ * on hue alone. It is no live region: it is there when its view opens,
+ * and its times tick, which a screen reader would read out each second.
  */
 export function Callout({
   tone,
@@ -32,7 +33,6 @@ export function Callout({
   const { icon: Icon, className: titleClass } = TITLE[tone];
   return (
     <div
-      role={tone === "error" ? "alert" : "status"}
       className={cn(
         "grid gap-1.5 rounded-md px-3 py-2.5",
         TINT[tone],

@@ -5,6 +5,7 @@ import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { sameGvr, useResources, type Discovery } from "../discovery";
 import { parseObjectUri } from "../uri";
 import { ObjectContent } from "./ObjectContent";
+import type { OverviewStates } from "./overviewStates";
 import { OBJECT_TABS, type ObjectTab, type ObjectTabs } from "./tabs";
 import { refUri, useObject } from "./useObject";
 
@@ -16,8 +17,13 @@ import { refUri, useObject } from "./useObject";
 export function ObjectEditor({
   uri,
   discovery,
+  overviews,
   tabs,
-}: EditorProps & { discovery: Discovery; tabs: ObjectTabs }) {
+}: EditorProps & {
+  discovery: Discovery;
+  overviews: OverviewStates;
+  tabs: ObjectTabs;
+}) {
   const { backend, editors } = useWorkbench();
   const input = useMemo(() => parseObjectUri(uri), [uri]);
   const resources = useResources(discovery, input?.space ?? "");
@@ -52,6 +58,8 @@ export function ObjectEditor({
     <ObjectContent
       tab={tab}
       space={input.space}
+      states={overviews}
+      kind={`${input.gvr.group}/${input.gvr.resource}`}
       snapshot={snapshot}
       values={values}
       onOpen={open}

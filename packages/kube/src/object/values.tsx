@@ -18,7 +18,9 @@ export function ValueView({
 }): ReactNode {
   switch (value.type) {
     case "text":
-      return (
+      return compact ? (
+        <span>{value.text}</span>
+      ) : (
         <span className="break-words whitespace-pre-wrap">{value.text}</span>
       );
     case "code":

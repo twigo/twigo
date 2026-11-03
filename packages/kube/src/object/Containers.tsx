@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type {
   Container,
   ContainerRole,
@@ -6,6 +5,8 @@ import type {
   ObjectRef,
 } from "@twigo/protocol";
 import { Card, Pill, PropertyList, Section } from "@twigo/ui";
+import { useChanges } from "@twigo/workbench";
+import type { OverviewStates } from "./overviewStates";
 import { TONE } from "./tone";
 import { ValueView } from "./values";
 
@@ -24,17 +25,33 @@ const ROLE: Readonly<Record<ContainerRole, string | null>> = {
  */
 export function Containers({
   containers,
+  states,
+  kind,
   onOpen,
 }: {
   containers: readonly Container[];
+  /** Where the folds are kept, for every object of `kind`. */
+  states: OverviewStates;
+  kind: string;
   onOpen: (target: ObjectRef) => void;
 }) {
+  useChanges(states.changes);
   return (
     <div className="flex flex-col gap-2">
       {containers.map((container) => (
         <ContainerCard
           key={`${container.role}/${container.name}`}
           container={container}
+          fold={(title) => ({
+            open: states.open(
+              kind,
+              `containers/${container.name}/${title}`,
+              false,
+            ),
+            onToggle: () => {
+              states.toggle(kind, `containers/${container.name}/${title}`);
+            },
+          })}
           onOpen={onOpen}
         />
       ))}
@@ -42,11 +59,16 @@ export function Containers({
   );
 }
 
+/** Whether a folded part of a card is open, and how it toggles. */
+type Fold = (title: string) => { open: boolean; onToggle: () => void };
+
 function ContainerCard({
   container,
+  fold,
   onOpen,
 }: {
   container: Container;
+  fold: Fold;
   onOpen: (target: ObjectRef) => void;
 }) {
   const { name, role, image, state, ports, fields, details, env, mounts } =
@@ -83,9 +105,9 @@ function ContainerCard({
         <span className="text-foreground">{version}</span>
       </code>
       {fields.length > 0 && <Fields fields={fields} onOpen={onOpen} />}
-      <Folded title="Details" fields={details} onOpen={onOpen} />
-      <Folded title="Environment" fields={env} onOpen={onOpen} />
-      <Folded title="Mounts" fields={mounts} onOpen={onOpen} />
+      <Folded title="Details" fields={details} fold={fold} onOpen={onOpen} />
+      <Folded title="Environment" fields={env} fold={fold} onOpen={onOpen} />
+      <Folded title="Mounts" fields={mounts} fold={fold} onOpen={onOpen} />
     </Card>
   );
 }
@@ -119,21 +141,21 @@ function Fields({
 function Folded({
   title,
   fields,
+  fold,
   onOpen,
 }: {
   title: string;
   fields: readonly Field[];
+  fold: Fold;
   onOpen: (target: ObjectRef) => void;
 }) {
-  const [open, setOpen] = useState(false);
   if (fields.length === 0) return null;
+  const { open, onToggle } = fold(title);
   return (
     <Section
       title={`${title} ${fields.length}`}
       open={open}
-      onToggle={() => {
-        setOpen(!open);
-      }}
+      onToggle={onToggle}
     >
       <Fields fields={fields} onOpen={onOpen} mono />
     </Section>

@@ -4,18 +4,22 @@ import type {
   ListQuery,
   ObjectRef,
   Row,
-  Sort,
 } from "@twigo/protocol";
 import {
   Count,
   DataGrid,
   EmptyState,
+  Frame,
   ROW_HEIGHT,
   TonedText,
   type GridColumn,
   type GridItem,
 } from "@twigo/ui";
-import { useWorkbench } from "@twigo/workbench";
+import {
+  useChanges,
+  useListRegistration,
+  useWorkbench,
+} from "@twigo/workbench";
 import { cellTone, columnRule, statusColumn, type CellKind } from "../columns";
 import { kindIcon } from "../kinds";
 import { CellView, type ShownColumn } from "../list/cells";
@@ -25,6 +29,7 @@ import { objectOf } from "../selection";
 import { useNow } from "../useNow";
 import { useWidth } from "../useWidth";
 import { ViewStatus } from "../ViewStatus";
+import type { OverviewStates } from "./overviewStates";
 
 /** Rows an embedded list shows before it scrolls. */
 const VISIBLE = 8;
@@ -44,18 +49,28 @@ const NARROW_NAME = 160;
 export function EmbeddedList({
   list,
   space,
+  states,
+  kind,
+  id,
   onOpen,
 }: {
   list: Spec;
   space: string;
+  /** Where its sort and widths are kept, for every object of `kind`. */
+  states: OverviewStates;
+  kind: string;
+  /** Its section's, which keys its state. */
+  id: string;
   onOpen: (target: ObjectRef) => void;
 }) {
   const { backend } = useWorkbench();
+  const register = useListRegistration();
   const { gvr } = list;
   const countBy = statusColumn(gvr);
-  const [sort, setSort] = useState<Sort | null>(null);
+  useChanges(states.changes);
+  const sort = states.sort(kind, id);
+  const widths = states.widths(kind, id);
   const [selected, setSelected] = useState<string>();
-  const [widths, setWidths] = useState<Readonly<Record<string, number>>>({});
   const query: ListQuery = {
     space,
     gvr,
@@ -173,19 +188,18 @@ export function EmbeddedList({
           })}
         </p>
       )}
-      <div
-        className="overflow-hidden rounded-md shadow-[inset_0_0_0_1px_var(--border)]"
-        style={{ height: HEADER + rows * ROW_HEIGHT + 2 }}
-      >
+      <Frame style={{ height: HEADER + rows * ROW_HEIGHT + 2 }}>
         <DataGrid<Row, never>
           label={gvr.resource}
           columns={gridColumns}
           widths={widths}
           onResize={(column, width) => {
-            setWidths({ ...widths, [column]: width });
+            states.resize(kind, id, column, width);
           }}
           sort={sort}
-          onSort={setSort}
+          onSort={(next) => {
+            states.setSort(kind, id, next);
+          }}
           length={snapshot.total}
           query={JSON.stringify(query)}
           item={item}
@@ -206,12 +220,13 @@ export function EmbeddedList({
             open(row);
           }}
           loading={loading}
+          register={register}
           flash={(id, column) => {
             const index = byName.get(column)?.index;
             return index === undefined ? undefined : flash?.since(id, index);
           }}
         />
-      </div>
+      </Frame>
     </div>
   );
 }

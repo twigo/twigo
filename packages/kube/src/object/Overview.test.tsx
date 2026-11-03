@@ -8,6 +8,7 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import type { Overview as Document } from "@twigo/protocol";
 import { Overview } from "./Overview";
+import { OverviewStates } from "./overviewStates";
 
 afterEach(() => {
   cleanup();
@@ -43,6 +44,8 @@ test("a ConfigMap of 2,000 keys puts in the DOM the values of the keys opened on
   );
   render(
     <Overview
+      states={new OverviewStates()}
+      kind="/pods"
       space="kind-test"
       overview={configMap()}
       onOpen={() => undefined}
@@ -71,6 +74,8 @@ test("a link opens the object it points at", () => {
   };
   render(
     <Overview
+      states={new OverviewStates()}
+      kind="/pods"
       space="kind-test"
       overview={{
         sections: [
@@ -98,17 +103,28 @@ test("a link opens the object it points at", () => {
   expect(onOpen).toHaveBeenCalledWith(target);
 });
 
-test("a section folds by its title", () => {
-  render(
-    <Overview
-      space="kind-test"
-      overview={configMap()}
-      onOpen={() => undefined}
-    />,
-  );
+test("a section folds by its title, and stays folded for the kind's next object", () => {
+  const states = new OverviewStates();
+  const shown = (kind: string) =>
+    render(
+      <Overview
+        states={states}
+        kind={kind}
+        space="kind-test"
+        overview={configMap()}
+        onOpen={() => undefined}
+      />,
+    );
+  shown("/configmaps");
   expect(screen.getByText("key-0")).toBeDefined();
   fireEvent.click(screen.getByRole("button", { name: "Data" }));
   expect(screen.queryByText("key-0")).toBeNull();
+  cleanup();
+  shown("/configmaps");
+  expect(screen.queryByText("key-0")).toBeNull();
+  cleanup();
+  shown("/secrets");
+  expect(screen.getByText("key-0")).toBeDefined();
 });
 
 function data(readable: boolean, bytes = 3): Document {
@@ -134,6 +150,8 @@ test("an open value is read again when the object changes", async () => {
   const values = vi.fn(() => Promise.resolve([current]));
   const { rerender } = render(
     <Overview
+      states={new OverviewStates()}
+      kind="/pods"
       space="kind-test"
       overview={data(true)}
       onOpen={() => undefined}
@@ -149,6 +167,8 @@ test("an open value is read again when the object changes", async () => {
   await act(async () => {
     rerender(
       <Overview
+        states={new OverviewStates()}
+        kind="/pods"
         space="kind-test"
         overview={data(true, 5)}
         onOpen={() => undefined}
@@ -167,6 +187,8 @@ test("a value that cannot be read says why", async () => {
   );
   render(
     <Overview
+      states={new OverviewStates()}
+      kind="/pods"
       space="kind-test"
       overview={data(true)}
       onOpen={() => undefined}
@@ -184,6 +206,8 @@ test("a Secret's keys do not open", () => {
   const values = vi.fn(() => Promise.resolve([null]));
   render(
     <Overview
+      states={new OverviewStates()}
+      kind="/pods"
       space="kind-test"
       overview={data(false)}
       onOpen={() => undefined}
@@ -197,6 +221,8 @@ test("a Secret's keys do not open", () => {
 test("events that cannot be listed say why instead of none", () => {
   render(
     <Overview
+      states={new OverviewStates()}
+      kind="/pods"
       space="kind-test"
       overview={{
         sections: [
@@ -223,6 +249,8 @@ test("events that cannot be listed say why instead of none", () => {
 test("a multiline value keeps its lines", () => {
   render(
     <Overview
+      states={new OverviewStates()}
+      kind="/pods"
       space="kind-test"
       overview={{
         sections: [
@@ -260,6 +288,8 @@ const AT = "2026-11-02T21:04:52Z";
 test("conditions read as chips with a mark in their tone, and the wrong ones say why below them", () => {
   render(
     <Overview
+      states={new OverviewStates()}
+      kind="/pods"
       space="kind-test"
       overview={{
         sections: [

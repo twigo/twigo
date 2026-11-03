@@ -19,6 +19,8 @@ import { OBJECT_TABS, type ObjectTab } from "./tabs";
 export function ObjectContent({
   tab,
   space,
+  states,
+  kind,
   snapshot,
   values,
   onOpen,
@@ -26,6 +28,9 @@ export function ObjectContent({
   tab: ObjectTab;
   /** The object's space, which its Overview's live lists query. */
   space: string;
+  states: OverviewProps["states"];
+  /** The object's resource, `apps/deployments`. */
+  kind: string;
   snapshot: ObjectSnapshot;
   values: OverviewProps["values"];
   onOpen: (target: ObjectRef) => void;
@@ -46,6 +51,8 @@ export function ObjectContent({
             <Overview
               overview={snapshot.overview}
               space={space}
+              states={states}
+              kind={kind}
               onOpen={onOpen}
               values={values}
             />
