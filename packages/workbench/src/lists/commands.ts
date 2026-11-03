@@ -61,8 +61,14 @@ export function registerListCommands(
     {
       id: "list.toggleMark",
       title: "Mark Row",
-      keys: ["x", "space"],
+      keys: ["x"],
       run: () => lists.focused("toggleMark")?.toggleMark(),
+    },
+    {
+      id: "list.togglePeek",
+      title: "Show or Hide Details",
+      keys: ["space"],
+      run: () => lists.focused("peek")?.peek(),
     },
     {
       id: "list.collapse",

@@ -11,6 +11,7 @@ import { Changes } from "../changes";
 export type MenuId =
   | "commandPalette"
   | "resource/context"
+  | "resource/details"
   | "resource/inline"
   | "resource/marked"
   | "resource/title"

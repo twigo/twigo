@@ -9,6 +9,8 @@ export interface ListTarget extends Partial<ListController> {
   filter?(): void;
   /** Closes what the list shows beside it, such as a row's details. */
   close?(): void;
+  /** Shows or hides what the list shows beside it, as Linear's peek. */
+  peek?(): void;
 }
 
 type Capability = keyof ListTarget;
