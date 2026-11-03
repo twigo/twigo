@@ -679,11 +679,11 @@ impl Run {
         let mut restarts = Vec::new();
         let mut freed = false;
         let now = Instant::now();
-        for stopped in &mut self.stopped {
+        // An abort only schedules the task's end, so its place frees once
+        // the task has ended, as when it ends by itself.
+        for stopped in &self.stopped {
             if stopped.finishing.is_some_and(|until| until <= now) {
                 stopped.task.0.abort();
-                stopped.finishing = None;
-                freed = true;
             }
         }
         // A stopped stream whose task has ended has said all it will.
@@ -1450,10 +1450,19 @@ mod tests {
             .collect()
     }
 
-    /// The most follows open at once while web-1's ten containers are
-    /// followed, the pod is made again under its name with new instances,
-    /// and `after` lets the old streams end, until the new ones' lines came.
-    async fn replaced(fake: &Fake, after: impl FnOnce()) -> usize {
+    fn alive(run: &Run) -> usize {
+        let stopped = run
+            .stopped
+            .iter()
+            .filter(|stopped| !stopped.task.0.is_finished());
+        run.streams.len() + stopped.count()
+    }
+
+    /// The most follows open at once, and the most streams whose tasks had
+    /// not ended after a tick, while web-1's ten containers are followed,
+    /// the pod is made again under its name with new instances, and `after`
+    /// lets the old streams end, until the new ones' lines came.
+    async fn replaced(fake: &Fake, after: impl FnOnce()) -> (usize, usize) {
         fake.pod(containers("uid-a", "a"));
         served(fake, "a", "up");
         let (hub, _) = fake.hub();
@@ -1492,8 +1501,10 @@ mod tests {
         });
 
         after();
+        let tasks = std::cell::Cell::new(alive(&run));
         until(&mut run, "the new pod's lines", |run| {
             most.set(most.get().max(fake.follows()));
+            tasks.set(tasks.get().max(alive(run)));
             texts(run)
                 .iter()
                 .filter(|text| text.starts_with('c') && text.contains("-b "))
@@ -1502,24 +1513,26 @@ mod tests {
         })
         .await;
         assert_eq!(fake.follows(), STREAMS);
-        most.get()
+        (most.get(), tasks.get())
     }
 
     #[tokio::test(start_paused = true)]
     async fn a_left_pods_finishing_streams_keep_their_places_until_they_end() {
         let fake = Fake::default();
-        let most = replaced(&fake, || {
+        let (follows, tasks) = replaced(&fake, || {
             each("a", |container, id| fake.stop("web-1", container, id));
         })
         .await;
-        assert!(most <= STREAMS, "{most} follows");
+        assert!(follows <= STREAMS, "{follows} follows");
+        assert!(tasks <= STREAMS, "{tasks} tasks");
     }
 
     #[tokio::test(start_paused = true)]
     async fn a_left_pods_streams_that_read_on_give_their_places_up_at_the_bound() {
         let fake = Fake::default();
-        let most = replaced(&fake, || {}).await;
-        assert!(most <= STREAMS, "{most} follows");
+        let (follows, tasks) = replaced(&fake, || {}).await;
+        assert!(follows <= STREAMS, "{follows} follows");
+        assert!(tasks <= STREAMS, "{tasks} tasks");
     }
 
     /// A session's state over a hub that never connects.
