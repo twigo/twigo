@@ -152,7 +152,6 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     length,
     item,
     indexOf,
-    first,
     onActivate,
     onToggleGroup,
     marked,
@@ -168,7 +167,6 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       length,
       item,
       indexOf,
-      first,
       onActivate,
       onToggleGroup,
       marked,
@@ -217,7 +215,14 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     return {
       move(delta, extend) {
         const index = at();
-        go(index < 0 ? latest.current.first : index + delta, extend);
+        if (index >= 0) {
+          go(index + delta, extend);
+          return;
+        }
+        const top = virtualizer.getVirtualItemForOffset(
+          (virtualizer.scrollOffset ?? 0) + HEADER_HEIGHT,
+        );
+        go(top?.index ?? 0, extend);
       },
       moveToEdge(edge) {
         go(edge === "first" ? 0 : latest.current.length - 1);

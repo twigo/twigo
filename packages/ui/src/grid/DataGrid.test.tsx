@@ -230,6 +230,17 @@ test("a move to a row still loading is dropped once the list no longer reaches i
   expect(handlers.onSelect).not.toHaveBeenCalled();
 });
 
+test("without a cursor, a move lands on the first row below the header", () => {
+  const { handlers, controller } = grid(list(PODS));
+  scroll(scrollable(PODS.length), 1040);
+  act(() => {
+    controller()?.move(1);
+  });
+  expect(handlers.onSelect).toHaveBeenLastCalledWith("p40", {
+    name: "pod-40",
+  });
+});
+
 test("a move down scrolls the cursor's row clear of the bottom, a move up clear of the sticky header", () => {
   const { controller } = grid({ ...list(PODS), selected: "p22" });
   const element = scrollable(PODS.length);
