@@ -160,7 +160,7 @@ impl Pod {
 
 /// A stream under way: dropping it ends its task.
 struct Running {
-    /// What it says comes under it.
+    /// The id its events come under, its own in the session.
     id: u64,
     task: JoinHandle<()>,
     pod: watch::Sender<Arc<Value>>,
@@ -212,8 +212,8 @@ struct Run {
     stopped: Vec<Running>,
     /// Streams that read all there was, with their last state.
     finished: HashMap<Key, StreamState>,
-    /// Counts the streams started, each saying what it says under its own
-    /// id, so what a stream of an old source still says goes.
+    /// Counts the streams started, which gives each its id, so the events
+    /// of a stream neither running nor stopped, as of an old source, go.
     started: u64,
     events: mpsc::UnboundedSender<(u64, Event)>,
     incoming: mpsc::UnboundedReceiver<(u64, Event)>,
