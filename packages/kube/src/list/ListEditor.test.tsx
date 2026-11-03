@@ -199,11 +199,12 @@ test("two lists of a space keep their own selected row for the details and the r
   });
   await settle();
   expect(details()?.textContent).toContain(all);
-  await act(() =>
-    workbench.commands.execute("k8s.resource.copyName", (key) =>
-      key === "listFocus" ? true : undefined,
-    ),
+  fireEvent.click(
+    within(details() ?? document.body).getByRole("button", {
+      name: "Copy Name",
+    }),
   );
+  await settle(1);
   expect(writeText).toHaveBeenCalledWith(all);
 });
 
@@ -446,7 +447,10 @@ test("the details show the document of the row the selection rests on", async ()
   expect(metadata()).not.toContain(nameOf(first));
 });
 
-const markBar = () => screen.queryByRole("toolbar");
+const markBar = () =>
+  screen
+    .queryAllByRole("toolbar")
+    .find((bar) => bar.textContent.includes("marked")) ?? null;
 const isMarked = (row: HTMLElement | undefined) =>
   row?.querySelector("[role=checkbox]")?.getAttribute("aria-checked");
 

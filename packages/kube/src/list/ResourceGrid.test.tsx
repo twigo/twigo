@@ -256,27 +256,49 @@ test("the name takes the free width until an edge's drag sizes it, and the kind 
   expect(template().startsWith("28px 48px ")).toBe(true);
 });
 
-test("a double click on a header's edge fits the column to its widest cell", async () => {
+test("a double click on a header's edge fits the column to its widest text or its title, narrowing it too", async () => {
+  const measured = (element: Element) => element.textContent.length * 10;
+  Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+    configurable: true,
+    value(this: HTMLElement) {
+      return this.hasAttribute("data-fit")
+        ? new DOMRect(0, 0, measured(this), 10)
+        : Element.prototype.getBoundingClientRect.call(this);
+    },
+  });
   Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
     configurable: true,
     get(this: HTMLElement) {
-      return this.textContent.length * 10;
+      return this.hasAttribute("data-fit-header") ? measured(this) : 0;
     },
   });
   try {
     await openList();
-    const widest = Math.max(
-      ...rows().map((row) => textOf(row, "Status").length * 10),
+    const name = Math.max(
+      ...rows().map((row) => textOf(row, "Name").length * 10 + 16),
     );
-    expect(widest).toBeGreaterThan(48);
+    expect(name).toBeLessThan(280);
     fireEvent.doubleClick(
-      screen.getByRole("separator", { name: "Resize Status" }),
+      screen.getByRole("separator", { name: "Resize Name" }),
     );
     await settle(1);
     expect(template()).toBe(
-      `28px minmax(280px, 1fr) 120px 56px ${String(widest + 2)}px 112px 64px 32px`,
+      `28px ${String(name)}px 120px 56px 160px 112px 64px minmax(0, 1fr) 32px`,
+    );
+
+    const ready = Math.max(
+      ...rows().map((row) => textOf(row, "Ready").length * 10 + 16),
+    );
+    expect(ready).toBeLessThan("Ready".length * 10 + 32);
+    fireEvent.doubleClick(
+      screen.getByRole("separator", { name: "Resize Ready" }),
+    );
+    await settle(1);
+    expect(template()).toBe(
+      `28px ${String(name)}px 120px 82px 160px 112px 64px minmax(0, 1fr) 32px`,
     );
   } finally {
+    Reflect.deleteProperty(HTMLElement.prototype, "getBoundingClientRect");
     Reflect.deleteProperty(HTMLElement.prototype, "scrollWidth");
   }
 });
@@ -364,30 +386,8 @@ test("the first subscription already carries the column choices the text filter 
   expect(queries).toEqual([{ IP: true }]);
 });
 
-function generatedNames(): Backend {
-  const mock = createMockBackend("ready");
-  return {
-    invoke: (command, request) => mock.invoke(command, request),
-    subscribe(command, request, onMessage) {
-      if (command !== "list_subscribe")
-        return mock.subscribe(command, request, onMessage);
-      const send = onMessage as (batch: ListBatch) => void;
-      return mock.subscribe(command, request, (message) => {
-        const batch = message as ListBatch;
-        send({
-          ...batch,
-          upserts: batch.upserts.map((row) => ({
-            ...row,
-            generated: String(row.cells[0]).lastIndexOf("-") + 1,
-          })),
-        });
-      });
-    },
-  };
-}
-
 test("a failing row has an edge, a name's generated part reads quieter, and restarts read as a count and its age", async () => {
-  await openList(generatedNames());
+  await openList();
   const parts = (row: HTMLElement | undefined, column: string) => [
     ...(cellOf(row, column)?.querySelectorAll(":scope > span > span > span") ??
       []),
@@ -403,14 +403,15 @@ test("a failing row has an edge, a name's generated part reads quieter, and rest
   const running = rows().find((row) => textOf(row, "Status") === "Running");
   expect(running?.className).not.toMatch(/var\(--(error|warn)\)/);
   const whole = textOf(running, "Name");
-  const cut = whole.lastIndexOf("-") + 1;
+  const cut = whole.lastIndexOf("-", whole.lastIndexOf("-") - 1) + 1;
   const name = parts(running, "Name");
   expect(name.map((part) => part.textContent)).toEqual([
     whole.slice(0, cut),
     whole.slice(cut),
   ]);
+  expect(name[1]?.textContent).toMatch(/^[0-9a-z]+-[0-9a-z]{5}$/);
   expect(name[0]?.className).not.toContain("text-muted-foreground");
-  expect(name[1]?.className).toContain("text-muted-foreground");
+  expect(name[1]?.className).toContain("text-muted-foreground-2");
 
   const failing = await filter("CrashLoopBackOff");
   expect(textOf(failing, "Status")).toBe("CrashLoopBackOff");

@@ -1,6 +1,6 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
-import { RelatedView } from "./ObjectEditor";
+import { RelatedView } from "./ObjectContent";
 
 afterEach(() => {
   cleanup();
