@@ -213,7 +213,8 @@ pub enum LogEntry {
         exit_code: Option<i32>,
         reason: Option<String>,
         /// RFC 3339, when the kubelet starts it again, in a crash loop's
-        /// back-off.
+        /// back-off. The kubelet tells it only once the back-off's waiting
+        /// state shows, so a later batch fills it in under the same id.
         restarting: Option<String>,
     },
     /// A pod joined the target, as a rollout's new pod does.

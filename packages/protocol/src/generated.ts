@@ -497,7 +497,8 @@ marks: Array<TextRange>, } | { "type": "ended", id: number, pod: string, contain
 time: string, exitCode: number | null, reason: string | null, 
 /**
  * RFC 3339, when the kubelet starts it again, in a crash loop's
- * back-off.
+ * back-off. The kubelet tells it only once the back-off's waiting
+ * state shows, so a later batch fills it in under the same id.
  */
 restarting: string | null, } | { "type": "joined", id: number, pod: string, 
 /**

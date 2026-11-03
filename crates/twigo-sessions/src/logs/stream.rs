@@ -44,6 +44,11 @@ pub enum Event {
         reason: Option<String>,
         restarting: Option<String>,
     },
+    /// When the kubelet starts the instance of the last `Ended` again,
+    /// which it tells only once its back-off's waiting state shows.
+    Restarts {
+        restarting: String,
+    },
     /// It reads nothing more, so its place among the tab's streams is free.
     Finished,
 }
@@ -350,6 +355,8 @@ impl Reader {
         let mut unfinished = false;
         let mut read: Option<String> = None;
         let mut moved: Option<String> = None;
+        // Whether the last Ended said its next start.
+        let mut told = false;
         loop {
             let current = Arc::clone(&pod.borrow_and_update());
             let status = Status::of(&current, &self.stream.container);
@@ -365,7 +372,7 @@ impl Reader {
                         return;
                     }
                     if let Some(terminated) = status.termination(&old) {
-                        send(self.ended(terminated, status));
+                        told = self.end(terminated, status, send);
                     }
                 }
                 read = Some(old);
@@ -391,6 +398,14 @@ impl Reader {
                     send(Event::State(StreamState::Ended));
                     send(Event::Finished);
                     return;
+                }
+                if !told
+                    && let Some(terminated) = status.termination(id)
+                    && let Some(restarting) =
+                        status.restarting(terminated["finishedAt"].as_str().unwrap_or_default())
+                {
+                    send(Event::Restarts { restarting });
+                    told = true;
                 }
                 send(Event::State(StreamState::Waiting {
                     reason: status.waiting(),
@@ -419,7 +434,7 @@ impl Reader {
                     if let Outcome::Unreadable(error) = outcome {
                         send(Event::State(StreamState::Error { error }));
                     }
-                    send(self.ended(terminated, status));
+                    told = self.end(terminated, status, send);
                     reading = None;
                     read = Some(id);
                     unfinished = false;
@@ -558,6 +573,21 @@ impl Reader {
                 }
             }
         }
+    }
+
+    /// Sends the Ended entry of an instance, and says whether it has its
+    /// next start.
+    fn end(&self, terminated: &Value, status: &Status<'_>, send: &impl Fn(Event)) -> bool {
+        let ended = self.ended(terminated, status);
+        let told = matches!(
+            ended,
+            Event::Ended {
+                restarting: Some(_),
+                ..
+            }
+        );
+        send(ended);
+        told
     }
 
     fn ended(&self, terminated: &Value, status: &Status<'_>) -> Event {
@@ -922,6 +952,45 @@ mod tests {
         followed.until("the new instance", has("web-b 12")).await;
         assert_eq!(followed.entries(), ACROSS);
         assert_eq!(followed.ends(), [T0 + 5 * SECOND]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_crash_loops_end_gets_its_next_start_once_the_kubelet_tells_it() {
+        let fake = Fake::default();
+        fake.serve("web-1", "web", Some("web-a"), None);
+        numbered(&fake, "web-a", 1..=2);
+        let followed = Followed::new(&fake, web(running(), json!({})), false);
+        followed.until("two lines", has("web-a 2")).await;
+        fake.stop("web-1", "web", "web-a");
+        followed.tell(web(crashed("web-a"), json!({})));
+        followed.until("its end", has("ended")).await;
+        let backoff = json!({ "waiting": {
+            "reason": "CrashLoopBackOff",
+            "message": "back-off 10s restarting failed container=web pod=web-1_shop(uid)",
+        } });
+        followed.tell(web(backoff, crashed("web-a")));
+        let restarts = Event::Restarts {
+            restarting: "2026-11-03T10:00:15Z".to_owned(),
+        };
+        followed
+            .until("its next start", |followed| {
+                followed.events.lock().unwrap().contains(&restarts)
+            })
+            .await;
+        let events = followed.events.lock().unwrap();
+        let ended = events
+            .iter()
+            .find(|event| matches!(event, Event::Ended { .. }));
+        assert!(
+            matches!(
+                ended,
+                Some(Event::Ended {
+                    restarting: None,
+                    ..
+                })
+            ),
+            "{ended:?}"
+        );
     }
 
     #[tokio::test(start_paused = true)]

@@ -500,6 +500,7 @@ impl Run {
     /// their states, and the places of those that finished for the next.
     fn take_events(&mut self) {
         let mut entries = Vec::new();
+        let mut restarts = Vec::new();
         let mut freed = false;
         while let Ok((generation, key, event)) = self.incoming.try_recv() {
             if generation != self.generation {
@@ -539,6 +540,9 @@ impl Run {
                         restarting: restarting.map(Into::into),
                     },
                 )),
+                Event::Restarts { restarting } => {
+                    restarts.push((Arc::clone(&running.origin), restarting));
+                }
                 Event::State(state) => {
                     if running.state != state {
                         running.state = state;
@@ -555,6 +559,9 @@ impl Run {
             }
         }
         self.insert(entries);
+        for (origin, restarting) in restarts {
+            self.dirty.view |= self.buffer.restarts(&origin, restarting.into());
+        }
         if freed {
             self.plan();
         }

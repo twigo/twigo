@@ -1,8 +1,9 @@
 //! Logs sessions against a kind cluster, on every supported release: a
 //! followed pod, a container's previous instance after a forced restart, a
-//! cut stream that reopens, the cluster's budget of followed logs, and a
-//! Deployment's pods through a rollout. They need a kubelet, so kwok's
-//! pods will not do; the pods run an image kind's node holds already.
+//! crash loop's next start, a cut stream that reopens, the cluster's
+//! budget of followed logs, and a Deployment's pods through a rollout.
+//! They need a kubelet, so kwok's pods will not do; the pods run an image
+//! kind's node holds already.
 
 use std::process::Command;
 use std::sync::Arc;
@@ -427,6 +428,53 @@ async fn a_restarted_container_ends_its_instance_and_keeps_its_previous() {
         "{:?}",
         previous.entries.last()
     );
+    live.delete().await;
+}
+
+/// Writes a line and exits with 1, so the kubelet starts it again at once,
+/// then after back-offs of 10 s and more.
+const CRASHES: &str = "echo started; exit 1";
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_crash_loops_end_gets_its_next_start() {
+    let live = live("logs-crash").await;
+    let pod: Pod = serde_json::from_value(json!({
+        "metadata": { "name": "crash" },
+        "spec": live.spec(&[("app", CRASHES)]),
+    }))
+    .unwrap();
+    live.pods()
+        .create(&PostParams::default(), &pod)
+        .await
+        .unwrap();
+    let mut tab = live
+        .open(
+            ("", "pods"),
+            "crash",
+            source(Containers::Default, Since::Start, false),
+        )
+        .await;
+    tab.until("an Ended entry with its next start", |tab| {
+        tab.entries.iter().any(|entry| {
+            matches!(
+                entry,
+                LogEntry::Ended {
+                    restarting: Some(_),
+                    ..
+                }
+            )
+        })
+    })
+    .await;
+    for entry in &tab.entries {
+        if let LogEntry::Ended {
+            exit_code, reason, ..
+        } = entry
+        {
+            assert_eq!((*exit_code, reason.as_deref()), (Some(1), Some("Error")));
+        }
+    }
     live.delete().await;
 }
 

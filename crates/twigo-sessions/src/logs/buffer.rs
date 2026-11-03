@@ -187,6 +187,30 @@ impl Buffer {
         });
     }
 
+    /// Gives the last entry from `origin` its next start while that entry
+    /// is its end, as the kubelet tells it only later; whether it did.
+    pub fn restarts(&mut self, origin: &Arc<Origin>, restarts: Box<str>) -> bool {
+        let last = self
+            .entries
+            .iter_mut()
+            .rev()
+            .find(|entry| match &entry.kind {
+                Kind::Line { origin: from, .. } | Kind::Ended { origin: from, .. } => {
+                    Arc::ptr_eq(from, origin)
+                }
+                Kind::Joined { .. } | Kind::Left { .. } => false,
+            });
+        let Some(Entry {
+            kind: Kind::Ended { restarting, .. },
+            ..
+        }) = last
+        else {
+            return false;
+        };
+        *restarting = Some(restarts);
+        true
+    }
+
     /// Empties it for a source read anew; ids go on from where they were.
     pub fn clear(&mut self) {
         self.entries.clear();
@@ -301,6 +325,52 @@ mod tests {
         assert_eq!(texts(&buffer), [(2, "67890"), (3, "x")]);
         assert_eq!(buffer.bytes(), 6);
         assert_eq!(buffer.dropped().map(|dropped| dropped.count), Some(1));
+    }
+
+    #[test]
+    fn an_end_gets_its_next_start_until_its_stream_writes_again() {
+        let origin = Arc::new(Origin {
+            pod: "web-1".into(),
+            container: "web".into(),
+        });
+        let other = Arc::new(Origin {
+            pod: "web-2".into(),
+            container: "web".into(),
+        });
+        let line = |origin: &Arc<Origin>| Kind::Line {
+            origin: Arc::clone(origin),
+            level: None,
+            text: "up".into(),
+            styles: Box::new([]),
+        };
+        let ended = Kind::Ended {
+            origin: Arc::clone(&origin),
+            time: "2026-11-03T10:00:05Z".into(),
+            exit_code: Some(1),
+            reason: None,
+            restarting: None,
+        };
+        fn restarting(buffer: &Buffer) -> Vec<Option<&str>> {
+            buffer
+                .entries()
+                .iter()
+                .filter_map(|entry| match &entry.kind {
+                    Kind::Ended { restarting, .. } => Some(restarting.as_deref()),
+                    _ => None,
+                })
+                .collect()
+        }
+        let mut buffer = Buffer::new(LIMITS);
+        buffer.insert(
+            vec![(1, line(&origin)), (2, ended), (3, line(&other))],
+            judged,
+        );
+        assert!(buffer.restarts(&origin, "2026-11-03T10:00:15Z".into()));
+        assert_eq!(restarting(&buffer), [Some("2026-11-03T10:00:15Z")]);
+        buffer.insert(vec![(4, line(&origin))], judged);
+        assert!(!buffer.restarts(&origin, "2026-11-03T10:00:35Z".into()));
+        assert!(!buffer.restarts(&Arc::clone(&other), "2026-11-03T10:00:35Z".into()));
+        assert_eq!(restarting(&buffer), [Some("2026-11-03T10:00:15Z")]);
     }
 
     #[test]
