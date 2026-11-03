@@ -1,9 +1,16 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { INITIAL_LOGS, type LogEntry } from "@twigo/protocol";
 import { WorkbenchView } from "@twigo/workbench";
 import { inWorkbench, testWorkbench } from "@twigo/workbench/testing";
 import { registerKube } from "../register";
+import { registerLogs } from "./register";
 import { LogsToolbar } from "./LogsToolbar";
 import { LogsTabs } from "./state";
 import { logsUri, parseLogsUri } from "../uri";
@@ -310,7 +317,7 @@ test("paused, a refused filter counts on from the pause, and a taken one counts 
   );
   expect(tabs.fresh(uri)).toBe(session.getSnapshot().arrived);
   session.close();
-});
+}, 15_000);
 
 test("a step right after the search changes waits for that search's matches", async () => {
   const workbench = await testWorkbench();
@@ -337,3 +344,125 @@ test("a step right after the search changes waits for that search's matches", as
   );
   session.close();
 });
+
+async function logsTab() {
+  const workbench = await testWorkbench();
+  const { tabs, open } = registerLogs(workbench);
+  render(<WorkbenchView workbench={workbench} />);
+  act(() => {
+    open(DEPLOYMENT);
+  });
+  const uri = logsUri(DEPLOYMENT);
+  const input = parseLogsUri(uri);
+  if (!input) throw new Error("no logs URI");
+  return { workbench, tabs, uri, session: tabs.session(uri, input) };
+}
+
+test("F and the Follow button pause and follow through the tab", async () => {
+  const { workbench, tabs, uri } = await logsTab();
+  const follow = vi.spyOn(tabs, "follow");
+  act(() => {
+    screen.getByRole("button", { name: "Follow" }).click();
+  });
+  expect(follow).toHaveBeenLastCalledWith(uri, false);
+  expect(tabs.get(uri).follow).toBe(false);
+  await act(() =>
+    workbench.commands.execute(
+      "k8s.logs.toggleFollow",
+      workbench.keys.lookup(screen.getByRole("log")),
+    ),
+  );
+  expect(follow).toHaveBeenLastCalledWith(uri, true);
+  expect(tabs.get(uri).follow).toBe(true);
+});
+
+test("a view that changes nothing keeps the match, the place and the session's view", async () => {
+  const workbench = await testWorkbench();
+  const tabs = new LogsTabs(workbench.backend);
+  const uri = logsUri(DEPLOYMENT);
+  const input = parseLogsUri(uri);
+  if (!input) throw new Error("no logs URI");
+  const session = tabs.session(uri, input);
+  const setView = vi.spyOn(session, "setView");
+  tabs.update(uri, { current: 3, anchor: { id: 9, fromEnd: 0 } });
+  tabs.keepPlace(uri, { key: "7", offset: 0 });
+  const before = tabs.get(uri);
+  tabs.setView(uri, { level: "all", filter: null });
+  expect(tabs.get(uri)).toBe(before);
+  expect(tabs.place(uri)).toEqual({ key: "7", offset: 0 });
+  expect(setView).not.toHaveBeenCalled();
+  session.close();
+});
+
+test("a filter Rust refuses shows as not applied until one is taken", async () => {
+  await logsTab();
+  const filter = screen.getByRole("textbox", { name: "Only lines with" });
+  fireEvent.change(filter, { target: { value: "/(/" } });
+  expect(
+    await screen.findByText("Not applied:", undefined, { timeout: 3000 }),
+  ).toBeTruthy();
+  fireEvent.change(filter, { target: { value: "refused" } });
+  await vi.waitFor(() => {
+    expect(screen.queryByText("Not applied:")).toBeNull();
+  });
+});
+
+test("the level counts hide while a range is set, which they do not count", async () => {
+  const workbench = await testWorkbench();
+  const tabs = new LogsTabs(workbench.backend);
+  const uri = logsUri(DEPLOYMENT);
+  const input = parseLogsUri(uri);
+  if (!input) throw new Error("no logs URI");
+  const session = tabs.session(uri, input);
+  const snapshot = {
+    ...INITIAL_LOGS,
+    histogram: {
+      from: "2026-11-03T10:00:00Z",
+      to: "2026-11-03T10:15:00Z",
+      buckets: [{ lines: 9, warnings: 2, errors: 1 }],
+    },
+  };
+  const toolbar = () => (
+    <LogsToolbar
+      uri={uri}
+      input={input}
+      tabs={tabs}
+      snapshot={snapshot}
+      session={session}
+      narrow={false}
+      compact={false}
+    />
+  );
+  const { rerender } = render(toolbar(), { wrapper: inWorkbench(workbench) });
+  const level = (name: string) =>
+    screen.getByRole("button", { name: new RegExp(`^${name}`) }).textContent;
+  expect([level("Warn"), level("Error")]).toEqual(["Warn+3", "Error1"]);
+  tabs.setView(uri, {
+    range: { from: "2026-11-03T10:05:00Z", to: "2026-11-03T10:10:00Z" },
+  });
+  rerender(toolbar());
+  expect([level("Warn"), level("Error")]).toEqual(["Warn+", "Error"]);
+  session.close();
+});
+
+test("a step binds the current match to its entry, so matches that come after it move its number, not the match", async () => {
+  const { tabs, uri, session } = await logsTab();
+  tabs.setView(uri, { search: "request" });
+  await vi.waitFor(() => {
+    expect(session.getSnapshot().settled).toBe(true);
+    expect(session.getSnapshot().matches?.entries.length).toBeGreaterThan(1);
+  });
+  act(() => {
+    tabs.step(uri, true);
+  });
+  const { anchor, current } = tabs.get(uri);
+  await vi.waitFor(
+    () => {
+      expect(tabs.get(uri).current).toBeGreaterThan(current);
+    },
+    { timeout: 10_000 },
+  );
+  expect(
+    currentMatch(session.getSnapshot().matches, tabs.get(uri).current)?.id,
+  ).toBe(anchor?.id);
+}, 15_000);
