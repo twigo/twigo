@@ -28,7 +28,12 @@ twigo-keyboard = { path = "crates/twigo-keyboard" }
 twigo-kube = { path = "crates/twigo-kube" }
 twigo-netmon = { path = "crates/twigo-netmon" }
 twigo-policy = { path = "crates/twigo-policy" }
+twigo-sessions = { path = "crates/twigo-sessions" }
 
+aho-corasick = "1.1.5"
+anstyle = "1.0.14"
+anstyle-lossy = "1.1.5"
+anstyle-parse = "1.0.0"
 atomic-write-file = "0.3.1"
 backon = { version = "1.6.0", default-features = false, features = ["std"] }
 base64 = "0.23.1"

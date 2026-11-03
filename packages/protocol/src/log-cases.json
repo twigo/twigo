@@ -1,0 +1,1860 @@
+{
+  "about": "Log cases that the mock and Rust's logs view (crates/twigo-sessions/tests/log_cases.rs) both run, so they read lines and show a buffer alike (ARCHITECTURE 4.6). A line case reads one line as the kubelet sends it with timestamps, its time with nine digits or null when it has none, and its text without escapes, with its level and the styles of its SGR sequences in UTF-16 units. A view case puts its entries in a buffer at once, in the order given, so their ids count from 1 in that order, and orders them by time, ties by id; ended entries are ordered by their time. The buffer holds 50,000 entries and 32 MiB of text unless the case sets its limits. The expected window lists the ids of the window's entries, the Dropped entry's among them; marks list the search's marks by entry id, and lines left out have none; a histogram lists its non-empty buckets by index as [lines, warnings, errors], of 60 when it has a time span and none when its times are empty; a case that expects refused expects the view refused with that error kind.",
+  "lines": [
+    {
+      "name": "a line's time comes off its text",
+      "raw": "2026-11-03T10:00:00.123456789Z GET /healthz 200",
+      "expect": {
+        "time": "2026-11-03T10:00:00.123456789Z",
+        "text": "GET /healthz 200",
+        "level": null,
+        "styles": []
+      }
+    },
+    {
+      "name": "a time with fewer digits reads as nine",
+      "raw": "2026-11-03T10:00:00.5Z ready",
+      "expect": {
+        "time": "2026-11-03T10:00:00.500000000Z",
+        "text": "ready",
+        "level": null,
+        "styles": []
+      }
+    },
+    {
+      "name": "a line without a time is all text",
+      "raw": "continued without a time",
+      "expect": {
+        "time": null,
+        "text": "continued without a time",
+        "level": null,
+        "styles": []
+      }
+    },
+    {
+      "name": "escapes leave their text and style it",
+      "raw": "2026-11-03T10:00:01Z \u001b[1;31mERROR\u001b[0m db \u001b[2mslow\u001b[22m\r",
+      "expect": {
+        "time": "2026-11-03T10:00:01.000000000Z",
+        "text": "ERROR db slow",
+        "level": "error",
+        "styles": [
+          {
+            "range": {
+              "start": 0,
+              "end": 5
+            },
+            "fg": "red",
+            "bg": null,
+            "bold": true,
+            "dim": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "range": {
+              "start": 9,
+              "end": 13
+            },
+            "fg": null,
+            "bg": null,
+            "bold": false,
+            "dim": true,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "256 and true colours come as the nearest of the sixteen",
+      "raw": "2026-11-03T10:00:02Z \u001b[38;5;196ma\u001b[38;2;0;0;200mb\u001b[38:2::0:200:0mc\u001b[48;5;9md\u001b[0me",
+      "expect": {
+        "time": "2026-11-03T10:00:02.000000000Z",
+        "text": "abcde",
+        "level": null,
+        "styles": [
+          {
+            "range": {
+              "start": 0,
+              "end": 1
+            },
+            "fg": "red",
+            "bg": null,
+            "bold": false,
+            "dim": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "range": {
+              "start": 1,
+              "end": 2
+            },
+            "fg": "blue",
+            "bg": null,
+            "bold": false,
+            "dim": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "range": {
+              "start": 2,
+              "end": 3
+            },
+            "fg": "green",
+            "bg": null,
+            "bold": false,
+            "dim": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "range": {
+              "start": 3,
+              "end": 4
+            },
+            "fg": "green",
+            "bg": "brightRed",
+            "bold": false,
+            "dim": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "ranges count UTF-16 units and runs of one style join",
+      "raw": "2026-11-03T10:00:03Z \u001b[32m✓ 😀\u001b[32m!\u001b[39m\tok",
+      "expect": {
+        "time": "2026-11-03T10:00:03.000000000Z",
+        "text": "✓ 😀!\tok",
+        "level": null,
+        "styles": [
+          {
+            "range": {
+              "start": 0,
+              "end": 5
+            },
+            "fg": "green",
+            "bg": null,
+            "bold": false,
+            "dim": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "italic and underline, and their ends",
+      "raw": "2026-11-03T10:00:04Z \u001b[3;4mnote\u001b[23mtail\u001b[24m.",
+      "expect": {
+        "time": "2026-11-03T10:00:04.000000000Z",
+        "text": "notetail.",
+        "level": null,
+        "styles": [
+          {
+            "range": {
+              "start": 0,
+              "end": 4
+            },
+            "fg": null,
+            "bg": null,
+            "bold": false,
+            "dim": false,
+            "italic": true,
+            "underline": true
+          },
+          {
+            "range": {
+              "start": 4,
+              "end": 8
+            },
+            "fg": null,
+            "bg": null,
+            "bold": false,
+            "dim": false,
+            "italic": false,
+            "underline": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "other sequences go without a trace",
+      "raw": "2026-11-03T10:00:05Z \u001b[2K\u001b]8;;https://twigo.io\u001b\\link\u001b]8;;\u001b\\\u001b[?25l done",
+      "expect": {
+        "time": "2026-11-03T10:00:05.000000000Z",
+        "text": "link done",
+        "level": null,
+        "styles": []
+      }
+    },
+    {
+      "name": "JSON says its level in level",
+      "raw": "2026-11-03T10:00:06Z {\"level\":\"warn\",\"msg\":\"slow\"}",
+      "expect": {
+        "time": "2026-11-03T10:00:06.000000000Z",
+        "text": "{\"level\":\"warn\",\"msg\":\"slow\"}",
+        "level": "warn",
+        "styles": []
+      }
+    },
+    {
+      "name": "pino's numbers",
+      "raw": "2026-11-03T10:00:06Z {\"level\":50,\"msg\":\"boom\"}",
+      "expect": {
+        "time": "2026-11-03T10:00:06.000000000Z",
+        "text": "{\"level\":50,\"msg\":\"boom\"}",
+        "level": "error",
+        "styles": []
+      }
+    },
+    {
+      "name": "pino's fatal is an error",
+      "raw": "2026-11-03T10:00:06Z {\"level\":60}",
+      "expect": {
+        "time": "2026-11-03T10:00:06.000000000Z",
+        "text": "{\"level\":60}",
+        "level": "error",
+        "styles": []
+      }
+    },
+    {
+      "name": "severity, critical as an error",
+      "raw": "2026-11-03T10:00:06Z {\"severity\":\"CRITICAL\"}",
+      "expect": {
+        "time": "2026-11-03T10:00:06.000000000Z",
+        "text": "{\"severity\":\"CRITICAL\"}",
+        "level": "error",
+        "styles": []
+      }
+    },
+    {
+      "name": "Python's levelname",
+      "raw": "2026-11-03T10:00:06Z {\"levelname\":\"DEBUG\"}",
+      "expect": {
+        "time": "2026-11-03T10:00:06.000000000Z",
+        "text": "{\"levelname\":\"DEBUG\"}",
+        "level": "debug",
+        "styles": []
+      }
+    },
+    {
+      "name": "ECS's log.level as a dotted key",
+      "raw": "2026-11-03T10:00:06Z {\"log.level\":\"info\"}",
+      "expect": {
+        "time": "2026-11-03T10:00:06.000000000Z",
+        "text": "{\"log.level\":\"info\"}",
+        "level": "info",
+        "styles": []
+      }
+    },
+    {
+      "name": "log.level nested",
+      "raw": "2026-11-03T10:00:06Z {\"log\":{\"level\":\"error\"}}",
+      "expect": {
+        "time": "2026-11-03T10:00:06.000000000Z",
+        "text": "{\"log\":{\"level\":\"error\"}}",
+        "level": "error",
+        "styles": []
+      }
+    },
+    {
+      "name": "lvl in JSON",
+      "raw": "2026-11-03T10:00:06Z {\"lvl\":\"trace\"}",
+      "expect": {
+        "time": "2026-11-03T10:00:06.000000000Z",
+        "text": "{\"lvl\":\"trace\"}",
+        "level": "trace",
+        "styles": []
+      }
+    },
+    {
+      "name": "JSON without a level field has none",
+      "raw": "2026-11-03T10:00:06Z {\"msg\":\"error: nothing says it\"}",
+      "expect": {
+        "time": "2026-11-03T10:00:06.000000000Z",
+        "text": "{\"msg\":\"error: nothing says it\"}",
+        "level": null,
+        "styles": []
+      }
+    },
+    {
+      "name": "logfmt's level",
+      "raw": "2026-11-03T10:00:07Z time=2026-11-03T10:00:07Z level=WARN msg=slow",
+      "expect": {
+        "time": "2026-11-03T10:00:07.000000000Z",
+        "text": "time=2026-11-03T10:00:07Z level=WARN msg=slow",
+        "level": "warn",
+        "styles": []
+      }
+    },
+    {
+      "name": "logfmt's lvl, quoted",
+      "raw": "2026-11-03T10:00:07Z lvl=\"error\" msg=boom",
+      "expect": {
+        "time": "2026-11-03T10:00:07.000000000Z",
+        "text": "lvl=\"error\" msg=boom",
+        "level": "error",
+        "styles": []
+      }
+    },
+    {
+      "name": "a level word after a time",
+      "raw": "2026-11-03T10:00:08Z 2026-11-03T10:00:08.123Z  WARN 1 --- [main] slow",
+      "expect": {
+        "time": "2026-11-03T10:00:08.000000000Z",
+        "text": "2026-11-03T10:00:08.123Z  WARN 1 --- [main] slow",
+        "level": "warn",
+        "styles": []
+      }
+    },
+    {
+      "name": "a level word after a thread in brackets",
+      "raw": "2026-11-03T10:00:08Z 10:00:08.123 [main] ERROR c.e.App - boom",
+      "expect": {
+        "time": "2026-11-03T10:00:08.000000000Z",
+        "text": "10:00:08.123 [main] ERROR c.e.App - boom",
+        "level": "error",
+        "styles": []
+      }
+    },
+    {
+      "name": "a level word in brackets",
+      "raw": "2026-11-03T10:00:08Z 2026/11/03 10:00:08 [error] 29#29: open() failed",
+      "expect": {
+        "time": "2026-11-03T10:00:08.000000000Z",
+        "text": "2026/11/03 10:00:08 [error] 29#29: open() failed",
+        "level": "error",
+        "styles": []
+      }
+    },
+    {
+      "name": "a level word before a colon",
+      "raw": "2026-11-03T10:00:08Z WARNING:root:disk almost full",
+      "expect": {
+        "time": "2026-11-03T10:00:08.000000000Z",
+        "text": "WARNING:root:disk almost full",
+        "level": "warn",
+        "styles": []
+      }
+    },
+    {
+      "name": "a lower-case level word",
+      "raw": "2026-11-03T10:00:08Z warning: deprecated flag",
+      "expect": {
+        "time": "2026-11-03T10:00:08.000000000Z",
+        "text": "warning: deprecated flag",
+        "level": "warn",
+        "styles": []
+      }
+    },
+    {
+      "name": "panic is an error",
+      "raw": "2026-11-03T10:00:08Z panic: runtime error",
+      "expect": {
+        "time": "2026-11-03T10:00:08.000000000Z",
+        "text": "panic: runtime error",
+        "level": "error",
+        "styles": []
+      }
+    },
+    {
+      "name": "klog's header",
+      "raw": "2026-11-03T10:00:08Z E1103 10:00:08.000000       1 reflector.go:200] failed",
+      "expect": {
+        "time": "2026-11-03T10:00:08.000000000Z",
+        "text": "E1103 10:00:08.000000       1 reflector.go:200] failed",
+        "level": "error",
+        "styles": []
+      }
+    },
+    {
+      "name": "logrus's text",
+      "raw": "2026-11-03T10:00:08Z INFO[0000] listening",
+      "expect": {
+        "time": "2026-11-03T10:00:08.000000000Z",
+        "text": "INFO[0000] listening",
+        "level": "info",
+        "styles": []
+      }
+    },
+    {
+      "name": "the message says no level",
+      "raw": "2026-11-03T10:00:09Z No error found",
+      "expect": {
+        "time": "2026-11-03T10:00:09.000000000Z",
+        "text": "No error found",
+        "level": null,
+        "styles": []
+      }
+    },
+    {
+      "name": "an access log says none",
+      "raw": "2026-11-03T10:00:09Z 10.244.0.1 - - [03/Nov/2026:10:00:09 +0000] \"GET /error HTTP/1.1\" 500",
+      "expect": {
+        "time": "2026-11-03T10:00:09.000000000Z",
+        "text": "10.244.0.1 - - [03/Nov/2026:10:00:09 +0000] \"GET /error HTTP/1.1\" 500",
+        "level": null,
+        "styles": []
+      }
+    },
+    {
+      "name": "the first other word starts the message",
+      "raw": "2026-11-03T10:00:09Z a b c d error",
+      "expect": {
+        "time": "2026-11-03T10:00:09.000000000Z",
+        "text": "a b c d error",
+        "level": null,
+        "styles": []
+      }
+    }
+  ],
+  "views": [
+    {
+      "name": "every stream's entries in time order, markers among them",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": "info",
+          "text": "started"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": "warn",
+          "text": "slow request"
+        },
+        {
+          "type": "line",
+          "pod": "web-2",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "GET / 200"
+        },
+        {
+          "type": "joined",
+          "pod": "web-2",
+          "time": "2026-11-03T10:00:00Z"
+        },
+        {
+          "type": "ended",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:04Z",
+          "exitCode": 1,
+          "reason": "Error",
+          "restarting": "2026-11-03T10:00:14Z"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:05Z",
+          "level": "error",
+          "text": "connection refused"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": null,
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "total": 6,
+        "window": {
+          "start": 0,
+          "ids": [4, 1, 3, 2, 5, 6]
+        },
+        "histogram": {
+          "from": "2026-11-03T09:59:06Z",
+          "to": "2026-11-03T10:00:06Z",
+          "counts": {
+            "55": [1, 0, 0],
+            "56": [1, 0, 0],
+            "57": [1, 1, 0],
+            "59": [1, 0, 1]
+          }
+        }
+      }
+    },
+    {
+      "name": "warn keeps warnings, errors and markers",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": "info",
+          "text": "started"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": "warn",
+          "text": "slow request"
+        },
+        {
+          "type": "line",
+          "pod": "web-2",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "GET / 200"
+        },
+        {
+          "type": "joined",
+          "pod": "web-2",
+          "time": "2026-11-03T10:00:00Z"
+        },
+        {
+          "type": "ended",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:04Z",
+          "exitCode": 1,
+          "reason": "Error",
+          "restarting": "2026-11-03T10:00:14Z"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:05Z",
+          "level": "error",
+          "text": "connection refused"
+        }
+      ],
+      "view": {
+        "level": "warn",
+        "filter": null,
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "total": 4,
+        "window": {
+          "start": 0,
+          "ids": [4, 2, 5, 6]
+        },
+        "histogram": {
+          "from": "2026-11-03T09:59:06Z",
+          "to": "2026-11-03T10:00:06Z",
+          "counts": {
+            "57": [1, 1, 0],
+            "59": [1, 0, 1]
+          }
+        }
+      }
+    },
+    {
+      "name": "error keeps errors and markers",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": "info",
+          "text": "started"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": "warn",
+          "text": "slow request"
+        },
+        {
+          "type": "line",
+          "pod": "web-2",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "GET / 200"
+        },
+        {
+          "type": "joined",
+          "pod": "web-2",
+          "time": "2026-11-03T10:00:00Z"
+        },
+        {
+          "type": "ended",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:04Z",
+          "exitCode": 1,
+          "reason": "Error",
+          "restarting": "2026-11-03T10:00:14Z"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:05Z",
+          "level": "error",
+          "text": "connection refused"
+        }
+      ],
+      "view": {
+        "level": "error",
+        "filter": null,
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "total": 3,
+        "window": {
+          "start": 0,
+          "ids": [4, 5, 6]
+        }
+      }
+    },
+    {
+      "name": "the filter keeps the lines with its text in any case, and the markers",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": "info",
+          "text": "started"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": "warn",
+          "text": "slow request"
+        },
+        {
+          "type": "line",
+          "pod": "web-2",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "GET / 200"
+        },
+        {
+          "type": "joined",
+          "pod": "web-2",
+          "time": "2026-11-03T10:00:00Z"
+        },
+        {
+          "type": "ended",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:04Z",
+          "exitCode": 1,
+          "reason": "Error",
+          "restarting": "2026-11-03T10:00:14Z"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:05Z",
+          "level": "error",
+          "text": "connection refused"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": "REQUEST",
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "total": 3,
+        "window": {
+          "start": 0,
+          "ids": [4, 2, 5]
+        }
+      }
+    },
+    {
+      "name": "a bang keeps the lines without it",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": "info",
+          "text": "started"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": "warn",
+          "text": "slow request"
+        },
+        {
+          "type": "line",
+          "pod": "web-2",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "GET / 200"
+        },
+        {
+          "type": "joined",
+          "pod": "web-2",
+          "time": "2026-11-03T10:00:00Z"
+        },
+        {
+          "type": "ended",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:04Z",
+          "exitCode": 1,
+          "reason": "Error",
+          "restarting": "2026-11-03T10:00:14Z"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:05Z",
+          "level": "error",
+          "text": "connection refused"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": "!request",
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "total": 5,
+        "window": {
+          "start": 0,
+          "ids": [4, 1, 3, 5, 6]
+        }
+      }
+    },
+    {
+      "name": "slashes make the filter a regex in any case",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": "info",
+          "text": "started"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": "warn",
+          "text": "slow request"
+        },
+        {
+          "type": "line",
+          "pod": "web-2",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "GET / 200"
+        },
+        {
+          "type": "joined",
+          "pod": "web-2",
+          "time": "2026-11-03T10:00:00Z"
+        },
+        {
+          "type": "ended",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:04Z",
+          "exitCode": 1,
+          "reason": "Error",
+          "restarting": "2026-11-03T10:00:14Z"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:05Z",
+          "level": "error",
+          "text": "connection refused"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": "/^(get|slow)/",
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "total": 4,
+        "window": {
+          "start": 0,
+          "ids": [4, 3, 2, 5]
+        }
+      }
+    },
+    {
+      "name": "a filter's regex that does not parse is refused",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": "info",
+          "text": "started"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": "warn",
+          "text": "slow request"
+        },
+        {
+          "type": "line",
+          "pod": "web-2",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "GET / 200"
+        },
+        {
+          "type": "joined",
+          "pod": "web-2",
+          "time": "2026-11-03T10:00:00Z"
+        },
+        {
+          "type": "ended",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:04Z",
+          "exitCode": 1,
+          "reason": "Error",
+          "restarting": "2026-11-03T10:00:14Z"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:05Z",
+          "level": "error",
+          "text": "connection refused"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": "/web-[/",
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "refused": "invalidInput"
+      }
+    },
+    {
+      "name": "a search's regex that does not parse is refused",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": "info",
+          "text": "started"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": "warn",
+          "text": "slow request"
+        },
+        {
+          "type": "line",
+          "pod": "web-2",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "GET / 200"
+        },
+        {
+          "type": "joined",
+          "pod": "web-2",
+          "time": "2026-11-03T10:00:00Z"
+        },
+        {
+          "type": "ended",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:04Z",
+          "exitCode": 1,
+          "reason": "Error",
+          "restarting": "2026-11-03T10:00:14Z"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:05Z",
+          "level": "error",
+          "text": "connection refused"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": null,
+        "search": "/(/",
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "refused": "invalidInput"
+      }
+    },
+    {
+      "name": "a range that is no time is refused",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": "info",
+          "text": "started"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": "warn",
+          "text": "slow request"
+        },
+        {
+          "type": "line",
+          "pod": "web-2",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "GET / 200"
+        },
+        {
+          "type": "joined",
+          "pod": "web-2",
+          "time": "2026-11-03T10:00:00Z"
+        },
+        {
+          "type": "ended",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:04Z",
+          "exitCode": 1,
+          "reason": "Error",
+          "restarting": "2026-11-03T10:00:14Z"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:05Z",
+          "level": "error",
+          "text": "connection refused"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": null,
+        "search": null,
+        "range": {
+          "from": "10:00",
+          "to": "2026-11-03T10:00:04Z"
+        }
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "refused": "invalidInput"
+      }
+    },
+    {
+      "name": "a search marks its matches in UTF-16 units, and lists their entries",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": null,
+          "text": "😀 error ERROR"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "no match"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": null,
+          "text": "error"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": null,
+        "search": "error",
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "total": 3,
+        "window": {
+          "start": 0,
+          "ids": [1, 2, 3]
+        },
+        "marks": {
+          "1": [
+            {
+              "start": 3,
+              "end": 8
+            },
+            {
+              "start": 9,
+              "end": 14
+            }
+          ],
+          "3": [
+            {
+              "start": 0,
+              "end": 5
+            }
+          ]
+        },
+        "matches": {
+          "count": 3,
+          "entries": [0, 0, 2]
+        }
+      }
+    },
+    {
+      "name": "a search between slashes is a regex in any case",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": null,
+          "text": "😀 error ERROR"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "no match"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": null,
+          "text": "error"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": null,
+        "search": "/er{2}or$/",
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "total": 3,
+        "window": {
+          "start": 0,
+          "ids": [1, 2, 3]
+        },
+        "marks": {
+          "1": [
+            {
+              "start": 9,
+              "end": 14
+            }
+          ],
+          "3": [
+            {
+              "start": 0,
+              "end": 5
+            }
+          ]
+        },
+        "matches": {
+          "count": 2,
+          "entries": [0, 2]
+        }
+      }
+    },
+    {
+      "name": "a regex that matches only empty text marks nothing",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": null,
+          "text": "😀 error ERROR"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "no match"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": null,
+          "text": "error"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": null,
+        "search": "/z*/",
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "total": 3,
+        "window": {
+          "start": 0,
+          "ids": [1, 2, 3]
+        },
+        "matches": {
+          "count": 0,
+          "entries": []
+        }
+      }
+    },
+    {
+      "name": "a search finds only in the lines the filter keeps",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": null,
+          "text": "😀 error ERROR"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "no match"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": null,
+          "text": "error"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": "!😀",
+        "search": "error",
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "total": 2,
+        "window": {
+          "start": 0,
+          "ids": [2, 3]
+        },
+        "marks": {
+          "3": [
+            {
+              "start": 0,
+              "end": 5
+            }
+          ]
+        },
+        "matches": {
+          "count": 1,
+          "entries": [1]
+        }
+      }
+    },
+    {
+      "name": "the range keeps its start and stops before its end; the histogram ignores it",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": "info",
+          "text": "started"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": "warn",
+          "text": "slow request"
+        },
+        {
+          "type": "line",
+          "pod": "web-2",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "GET / 200"
+        },
+        {
+          "type": "joined",
+          "pod": "web-2",
+          "time": "2026-11-03T10:00:00Z"
+        },
+        {
+          "type": "ended",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:04Z",
+          "exitCode": 1,
+          "reason": "Error",
+          "restarting": "2026-11-03T10:00:14Z"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:05Z",
+          "level": "error",
+          "text": "connection refused"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": null,
+        "search": null,
+        "range": {
+          "from": "2026-11-03T10:00:02Z",
+          "to": "2026-11-03T10:00:04Z"
+        }
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "total": 2,
+        "window": {
+          "start": 0,
+          "ids": [3, 2]
+        },
+        "histogram": {
+          "from": "2026-11-03T09:59:06Z",
+          "to": "2026-11-03T10:00:06Z",
+          "counts": {
+            "55": [1, 0, 0],
+            "56": [1, 0, 0],
+            "57": [1, 1, 0],
+            "59": [1, 0, 1]
+          }
+        }
+      }
+    },
+    {
+      "name": "a tail window reads the last entries",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": "info",
+          "text": "started"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": "warn",
+          "text": "slow request"
+        },
+        {
+          "type": "line",
+          "pod": "web-2",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "GET / 200"
+        },
+        {
+          "type": "joined",
+          "pod": "web-2",
+          "time": "2026-11-03T10:00:00Z"
+        },
+        {
+          "type": "ended",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:04Z",
+          "exitCode": 1,
+          "reason": "Error",
+          "restarting": "2026-11-03T10:00:14Z"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:05Z",
+          "level": "error",
+          "text": "connection refused"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": null,
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 2
+      },
+      "expect": {
+        "total": 6,
+        "window": {
+          "start": 4,
+          "ids": [5, 6]
+        }
+      }
+    },
+    {
+      "name": "a range window reads from its start to before its end",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": "info",
+          "text": "started"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": "warn",
+          "text": "slow request"
+        },
+        {
+          "type": "line",
+          "pod": "web-2",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "GET / 200"
+        },
+        {
+          "type": "joined",
+          "pod": "web-2",
+          "time": "2026-11-03T10:00:00Z"
+        },
+        {
+          "type": "ended",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:04Z",
+          "exitCode": 1,
+          "reason": "Error",
+          "restarting": "2026-11-03T10:00:14Z"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:05Z",
+          "level": "error",
+          "text": "connection refused"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": null,
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "range",
+        "start": 1,
+        "end": 3
+      },
+      "expect": {
+        "total": 6,
+        "window": {
+          "start": 1,
+          "ids": [1, 3]
+        }
+      }
+    },
+    {
+      "name": "a range window past the end reads what there is",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": "info",
+          "text": "started"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": "warn",
+          "text": "slow request"
+        },
+        {
+          "type": "line",
+          "pod": "web-2",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "GET / 200"
+        },
+        {
+          "type": "joined",
+          "pod": "web-2",
+          "time": "2026-11-03T10:00:00Z"
+        },
+        {
+          "type": "ended",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:04Z",
+          "exitCode": 1,
+          "reason": "Error",
+          "restarting": "2026-11-03T10:00:14Z"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:05Z",
+          "level": "error",
+          "text": "connection refused"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": null,
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "range",
+        "start": 5,
+        "end": 50
+      },
+      "expect": {
+        "total": 6,
+        "window": {
+          "start": 5,
+          "ids": [6]
+        }
+      }
+    },
+    {
+      "name": "the bound drops the oldest, with one Dropped entry first",
+      "limits": {
+        "entries": 3,
+        "bytes": 1048576
+      },
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": null,
+          "text": "line 1"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "line 2"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": null,
+          "text": "line 3"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:04Z",
+          "level": null,
+          "text": "line 4"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": null,
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "total": 4,
+        "window": {
+          "start": 0,
+          "ids": [5, 2, 3, 4]
+        },
+        "dropped": {
+          "id": 5,
+          "count": 1
+        }
+      }
+    },
+    {
+      "name": "the Dropped entry stays whatever the view keeps",
+      "limits": {
+        "entries": 3,
+        "bytes": 1048576
+      },
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": null,
+          "text": "line 1"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "line 2"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": null,
+          "text": "line 3"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:04Z",
+          "level": null,
+          "text": "line 4"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": "nothing",
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "total": 1,
+        "window": {
+          "start": 0,
+          "ids": [5]
+        },
+        "dropped": {
+          "id": 5,
+          "count": 1
+        }
+      }
+    },
+    {
+      "name": "the bound counts the bytes of the lines' text",
+      "limits": {
+        "entries": 100,
+        "bytes": 10
+      },
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": null,
+          "text": "12345"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "67890"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": null,
+          "text": "x"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": null,
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "total": 3,
+        "window": {
+          "start": 0,
+          "ids": [4, 2, 3]
+        },
+        "dropped": {
+          "id": 4,
+          "count": 1
+        }
+      }
+    },
+    {
+      "name": "the histogram's spans grow until they reach the first line",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:00Z",
+          "level": "warn",
+          "text": "first"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:30:00.5Z",
+          "level": null,
+          "text": "last"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": null,
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "total": 2,
+        "window": {
+          "start": 0,
+          "ids": [1, 2]
+        },
+        "histogram": {
+          "from": "2026-11-03T09:31:00Z",
+          "to": "2026-11-03T10:31:00Z",
+          "counts": {
+            "29": [1, 1, 0],
+            "59": [1, 0, 0]
+          }
+        }
+      }
+    },
+    {
+      "name": "one line has a histogram of one-second spans",
+      "entries": [
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:00.25Z",
+          "level": null,
+          "text": "only"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": null,
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "total": 1,
+        "window": {
+          "start": 0,
+          "ids": [1]
+        },
+        "histogram": {
+          "from": "2026-11-03T09:59:01Z",
+          "to": "2026-11-03T10:00:01Z",
+          "counts": {
+            "59": [1, 0, 0]
+          }
+        }
+      }
+    },
+    {
+      "name": "markers alone have no histogram",
+      "entries": [
+        {
+          "type": "joined",
+          "pod": "web-2",
+          "time": "2026-11-03T10:00:00Z"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": null,
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "total": 1,
+        "window": {
+          "start": 0,
+          "ids": [1]
+        },
+        "histogram": {
+          "from": "",
+          "to": "",
+          "counts": {}
+        }
+      }
+    }
+  ]
+}
