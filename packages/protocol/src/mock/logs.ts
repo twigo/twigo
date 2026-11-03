@@ -34,6 +34,8 @@ const BOUND = 50_000;
 const MATCHES = 10_000;
 const BUCKETS = 80;
 const TICK_MS = 100;
+/** How often a workload's tab sees one of its pods replaced, as in a rollout. */
+const ROLLOUT_MS = 25_000;
 const NAMES = ["app", "istio-proxy", "log-shipper"];
 
 type Stored = LogEntry & { readonly at: number };
@@ -71,6 +73,7 @@ export class MockLogs {
   #unacked: number | undefined;
   #dirty = { pods: true, lines: true };
   #lastHistogram = 0;
+  #rolledAt = Date.now();
   #timer: ReturnType<typeof setInterval>;
 
   /** `budget` grants the session some of the cluster's followed logs. */
@@ -214,6 +217,7 @@ export class MockLogs {
 
   /** Writes what each stream wrote since the last tick, and follows the target's pods as they come and go. */
   #follow(now: number): void {
+    this.#rollOut(now);
     const current = new Set(this.#pods().map((pod) => pod.name));
     for (const name of this.#members) {
       if (current.has(name)) continue;
@@ -260,6 +264,16 @@ export class MockLogs {
         if (written.some((entry) => entry.type === "ended")) break;
       }
     }
+  }
+
+  /** Now and then replaces a pod the tab follows, so a workload's tab shows a rollout. */
+  #rollOut(now: number): void {
+    if (this.#target.gvr.resource === "pods" || !this.#cluster) return;
+    if (now - this.#rolledAt < ROLLOUT_MS) return;
+    this.#rolledAt = now;
+    const followed = [...this.#streams.values()].map((stream) => stream.pod);
+    const pod = followed[Math.floor(Math.random() * followed.length)];
+    if (pod) this.#cluster.rollOut(pod, now);
   }
 
   #push(entry: Stored): void {
