@@ -267,6 +267,12 @@ impl<'a> Status<'a> {
             .filter(|id| !id.is_empty())
     }
 
+    /// Whether it names the instance `id`, as the one the kubelet reads or
+    /// the one before.
+    fn names(&self, id: &str) -> bool {
+        self.current().is_some_and(|(current, _)| current == id) || self.previous() == Some(id)
+    }
+
     /// Whether the kubelet reads another instance than `id`, as the
     /// status says.
     fn moved_from(&self, id: &str) -> bool {
@@ -402,7 +408,7 @@ impl Reader {
                     if unfinished
                         && last.is_none()
                         && status.previous() == Some(old.as_str())
-                        && self.tail(None, pod, send).await.is_none()
+                        && self.tail(&old, None, pod, send).await.is_none()
                     {
                         return;
                     }
@@ -502,7 +508,7 @@ impl Reader {
                     }
                 }
                 Outcome::Moved { at } => {
-                    let Some(found) = self.tail(at, pod, send).await else {
+                    let Some(found) = self.tail(&id, at, pod, send).await else {
                         return;
                     };
                     unfinished = false;
@@ -544,13 +550,15 @@ impl Reader {
         }
     }
 
-    /// Reads the rest of the instance a read left, which the kubelet reads
-    /// as the previous one once a later one runs, up to `before`, the time
-    /// of the later one's first line. Whether the log it read held any line
-    /// from the resume's second on, which says it was that instance's;
-    /// None once the pod's channel closed.
+    /// Reads the rest of the instance `old` a read left, which the kubelet
+    /// reads as the previous one once a later one runs, up to `before`, the
+    /// time of the later one's first line, and tries again while the
+    /// cluster cannot be reached and the status names `old`. Whether the
+    /// log it read held any line from the resume's second on, which says
+    /// it was that instance's; None once the pod's channel closed.
     async fn tail(
         &mut self,
+        old: &str,
         before: Option<i64>,
         pod: &mut watch::Receiver<Arc<Value>>,
         send: &impl Fn(Event),
@@ -564,6 +572,21 @@ impl Reader {
                 Outcome::Broken => {
                     if !self.pause(pod).await {
                         return None;
+                    }
+                }
+                // The kubelet's 400, that it has no previous instance, is
+                // final.
+                Outcome::Failed(error)
+                    if matches!(error.kind, ErrorKind::Unavailable | ErrorKind::Timeout) =>
+                {
+                    send(Event::State(StreamState::Error { error }));
+                    if !self.pause(pod).await {
+                        return None;
+                    }
+                    let current = Arc::clone(&pod.borrow_and_update());
+                    let status = Status::of(&current, &self.stream.container);
+                    if !status.is_some_and(|status| status.names(old)) {
+                        return Some(false);
                     }
                 }
                 _ => return Some(false),
@@ -1044,6 +1067,54 @@ mod tests {
         followed.until("the new instance", has("web-b 12")).await;
         assert_eq!(followed.entries(), ACROSS);
         assert_eq!(followed.ends(), [T0 + 5 * SECOND]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_tail_the_kubelet_cannot_give_at_once_is_read_once_it_can() {
+        let fake = Fake::default();
+        let followed = cut_across_a_restart(&fake).await;
+        fake.fail_previous("web-1", "web");
+        followed.tell(restarted("web-b", "web-a"));
+        followed.until("the new instance", has("web-b 12")).await;
+        assert_eq!(followed.entries(), ACROSS);
+        let unavailable = followed.events.lock().unwrap().iter().any(|event| {
+            matches!(event, Event::State(StreamState::Error { error }) if error.kind == ErrorKind::Unavailable)
+        });
+        assert!(unavailable);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_tail_on_a_stale_status_is_read_once_the_kubelet_can_give_it() {
+        let fake = Fake::default();
+        let followed = cut_across_a_restart(&fake).await;
+        fake.fail_previous("web-1", "web");
+        followed
+            .until("the old instance's tail", has("web-a 5"))
+            .await;
+        followed.tell(restarted("web-b", "web-a"));
+        followed.until("the new instance", has("web-b 12")).await;
+        assert_eq!(followed.entries(), ACROSS);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_tail_the_kubelet_cannot_give_is_given_up_once_the_status_names_others() {
+        let fake = Fake::default();
+        let followed = cut_across_a_restart(&fake).await;
+        fake.fail_previous("web-1", "web");
+        followed.tell(restarted("web-b", "web-a"));
+        followed
+            .until("the error", |followed| {
+                matches!(followed.state(), Some(StreamState::Error { .. }))
+            })
+            .await;
+        fake.serve("web-1", "web", Some("web-c"), Some("web-b"));
+        numbered(&fake, "web-c", 21..=21);
+        followed.tell(restarted("web-c", "web-b"));
+        followed.until("the latest instance", has("web-c 21")).await;
+        assert_eq!(
+            followed.entries(),
+            ["web-a 1", "web-a 2", "web-a 3", "ended", "web-c 21"]
+        );
     }
 
     const OLD: [&str; 6] = [

@@ -58,6 +58,8 @@ struct Container {
     previous: Option<String>,
     /// The next read's body breaks after this many lines.
     breaks: Option<usize>,
+    /// The next read of the previous instance gets a 503.
+    fails: bool,
 }
 
 #[derive(Default)]
@@ -179,6 +181,11 @@ impl Fake {
             stranded.extend(instance.followers.drain(..).map(|(_, sender)| sender));
         }
         state.stranded.extend(stranded);
+    }
+
+    /// The next read of a container's previous instance gets a 503.
+    pub fn fail_previous(&self, pod: &str, container: &str) {
+        self.state().container(pod, container).fails = true;
     }
 
     /// The next read of a container breaks after `lines` lines.
@@ -306,6 +313,12 @@ impl State {
             i64::try_from(since.as_nanosecond()).unwrap()
         });
         let served = self.container(pod, container);
+        if param("previous") == Some("true") && std::mem::take(&mut served.fails) {
+            return full(
+                StatusCode::SERVICE_UNAVAILABLE,
+                json!({ "kind": "Status", "apiVersion": "v1", "status": "Failure", "reason": "ServiceUnavailable", "code": 503, "message": "the kubelet cannot be reached" }),
+            );
+        }
         let id = if param("previous") == Some("true") {
             served.previous.clone()
         } else {
