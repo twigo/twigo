@@ -1,5 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, TriangleAlert } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Minus,
+  TriangleAlert,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import type {
   Block,
   Condition,
@@ -215,46 +223,69 @@ function Age({ at }: { at: string | null }) {
   );
 }
 
-const TONE_TEXT = {
-  neutral: "text-muted-foreground",
-  success: "",
-  warning: "text-warn-foreground",
-  danger: "text-error",
-} as const;
+const CONDITION: Readonly<
+  Record<Condition["tone"], { icon: LucideIcon; className: string }>
+> = {
+  success: { icon: Check, className: "text-ok" },
+  danger: { icon: X, className: "text-error" },
+  warning: { icon: TriangleAlert, className: "text-warn-foreground" },
+  neutral: { icon: Minus, className: "text-muted-foreground" },
+};
 
+/**
+ * Conditions as chips that read at a glance (ARCHITECTURE 4.3): a mark in
+ * the condition's tone, its type, and its reason, message and age in the
+ * chip's tooltip; what is wrong says why below them.
+ */
 function Conditions({ conditions }: { conditions: readonly Condition[] }) {
+  const wrong = conditions.filter(
+    (condition) =>
+      (condition.tone === "danger" || condition.tone === "warning") &&
+      (condition.message ?? condition.reason) !== null,
+  );
   return (
-    <table className="w-full table-fixed border-collapse">
-      <thead className="text-left text-xs text-muted-foreground">
-        <tr>
-          <th className="w-[30%] pb-1 font-normal">Type</th>
-          <th className="w-[14%] pb-1 font-normal">Status</th>
-          <th className="pb-1 font-normal">Reason</th>
-          <th className="w-[14%] pb-1 text-right font-normal">Since</th>
-        </tr>
-      </thead>
-      <tbody>
-        {conditions.map((condition) => (
-          <tr key={condition.type} className="align-top">
-            <td className="truncate py-0.5 pr-2">{condition.type}</td>
-            <td className={cn("py-0.5 pr-2", TONE_TEXT[condition.tone])}>
-              {condition.status}
-            </td>
-            <td className="py-0.5 pr-2 break-words">
-              {condition.reason}
-              {condition.message && (
-                <div className="text-xs text-muted-foreground">
-                  {condition.message}
-                </div>
-              )}
-            </td>
-            <td className="py-0.5 text-right text-muted-foreground">
-              <Age at={condition.lastTransition} />
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="flex flex-col gap-2">
+      <ul className="flex flex-wrap gap-1.5">
+        {conditions.map((condition) => {
+          const { icon: Icon, className } = CONDITION[condition.tone];
+          return (
+            <li
+              key={condition.type}
+              title={[
+                `${condition.type}: ${condition.status}`,
+                condition.reason,
+                condition.message,
+              ]
+                .filter(Boolean)
+                .join("\n")}
+              className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-xs shadow-[inset_0_0_0_1px_var(--border)]"
+            >
+              <Icon
+                aria-label={condition.status}
+                className={cn("size-3", className)}
+              />
+              {condition.type}
+              <span className="text-muted-foreground-2">
+                <Age at={condition.lastTransition} />
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      {wrong.map((condition) => (
+        <p key={condition.type} className="break-words">
+          <span className="font-semibold">{condition.type}</span>
+          {condition.reason && (
+            <span className="text-muted-foreground"> · {condition.reason}</span>
+          )}
+          {condition.message && (
+            <span className="block text-muted-foreground">
+              {condition.message}
+            </span>
+          )}
+        </p>
+      ))}
+    </div>
   );
 }
 

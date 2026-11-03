@@ -19,6 +19,7 @@ import {
   byHealth,
   cellTone,
   columnRule,
+  type CellKind,
   HEALTH,
   healthValues,
   statusColumn,
@@ -35,6 +36,9 @@ import { useListView } from "./useListView";
 
 const GROUP = "group:";
 
+/** The cells a list beside the details keeps. */
+const NARROW: ReadonlySet<CellKind> = new Set(["name", "status", "ratio"]);
+
 /**
  * A list editor's rows (ARCHITECTURE 4.4): the editor's state and its
  * kind's preset make the query, Rust sorts, filters, groups and windows,
@@ -47,6 +51,8 @@ export function ResourceGrid(props: {
   /** Plural, as the explorer names the kind: "Pods". */
   title: string;
   services: ListServices;
+  /** Beside the details: only the columns that say what a row is and how it is. */
+  narrow: boolean;
   onActivate: () => void;
 }) {
   const [attempt, setAttempt] = useState(0);
@@ -67,6 +73,7 @@ function Grid({
   resource,
   title,
   services,
+  narrow,
   onActivate,
   onRetry,
 }: {
@@ -75,6 +82,7 @@ function Grid({
   resource: Resource;
   title: string;
   services: ListServices;
+  narrow: boolean;
   onActivate: () => void;
   onRetry: () => void;
 }) {
@@ -141,7 +149,8 @@ function Grid({
       (column) =>
         column.name === "Name" ||
         (column.name !== grouping?.column &&
-          (preset.columns[column.name] ?? column.priority === 0)),
+          (preset.columns[column.name] ?? column.priority === 0) &&
+          (!narrow || NARROW.has(column.rule.cell))),
     );
   const byName = new Map(columns.map((column) => [column.name, column]));
   const gridColumns: readonly GridColumn[] = columns.map((column) => ({

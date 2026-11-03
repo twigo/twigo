@@ -10,10 +10,15 @@ import type { ListServices } from "../services";
 import { parseListUri, type ListInput } from "../uri";
 import { ResourceGrid } from "./ResourceGrid";
 
+/** Below this width the details slide over the list instead of beside it. */
+const DOCK_WIDTH = 960;
+
 /**
  * A `k8s-list://` editor (ARCHITECTURE 4.3, 4.4). Without `ns` in its URI
- * it follows the space's namespace scope. An opened row's details slide in
- * over the list; marked rows get a bar of what can be done to them.
+ * it follows the space's namespace scope. An opened row's details stand
+ * beside the list, which narrows to its name, ready and status columns,
+ * or slide over it in a narrow editor; marked rows get a bar of what can
+ * be done to them.
  */
 export function ListEditor({
   uri,
@@ -115,12 +120,15 @@ function Loaded({
     if (selected?.reveal) setOpen(true);
   }
   const [wrapper, setWrapper] = useState<HTMLDivElement | null>(null);
+  const width = useWidth(wrapper);
+  const docked = width >= DOCK_WIDTH;
 
   useEffect(() => {
     if (!wrapper) return;
     const scope = keys.scope(wrapper);
     scope.set("detailsOpen", open);
     scope.set("listMarked", marks.size > 0);
+    scope.set("resource.selected", selected !== undefined);
     const unregister = lists.register(wrapper, {
       filter: () => {
         states.focus(uri);
@@ -128,44 +136,55 @@ function Loaded({
       close: () => {
         setOpen(false);
       },
+      peek: () => {
+        setOpen(!open);
+      },
     });
     return () => {
       unregister();
       scope.dispose();
     };
-  }, [wrapper, keys, lists, states, uri, open, marks.size]);
+  }, [wrapper, keys, lists, states, uri, open, marks.size, selected]);
 
   return (
-    <div ref={setWrapper} className="relative h-full overflow-hidden">
-      <ResourceGrid
-        uri={uri}
-        input={input}
-        resource={resource}
-        title={title}
-        services={services}
-        onActivate={() => {
-          setOpen(true);
-        }}
-      />
-      {marks.size > 0 && (
-        <div className="absolute bottom-3 left-1/2 z-[5] -translate-x-1/2">
-          <ActionBar
-            actions={workbench.actions("resource/marked", keys.lookup(wrapper))}
-          >
-            <span className="px-2 tabular-nums">
-              <span className="font-semibold">
-                {marks.size.toLocaleString("en")}
-              </span>{" "}
-              marked
-            </span>
-          </ActionBar>
-        </div>
-      )}
+    <div ref={setWrapper} className="relative flex h-full overflow-hidden">
+      <div className="relative h-full min-w-0 flex-1">
+        <ResourceGrid
+          uri={uri}
+          input={input}
+          resource={resource}
+          title={title}
+          services={services}
+          narrow={open && docked && selected !== undefined}
+          onActivate={() => {
+            setOpen(true);
+          }}
+        />
+        {marks.size > 0 && (
+          <div className="absolute bottom-3 left-1/2 z-[5] -translate-x-1/2">
+            <ActionBar
+              actions={workbench.actions(
+                "resource/marked",
+                keys.lookup(wrapper),
+              )}
+            >
+              <span className="px-2 tabular-nums">
+                <span className="font-semibold">
+                  {marks.size.toLocaleString("en")}
+                </span>{" "}
+                marked
+              </span>
+            </ActionBar>
+          </div>
+        )}
+      </div>
       {open && selected && (
         <Details
+          uri={uri}
           selected={selected}
           space={input.space}
-          discovery={services.discovery}
+          services={services}
+          docked={docked}
           onOpen={(object) => {
             editors.pin(uri);
             editors.open(object, { preview: true });
@@ -177,4 +196,20 @@ function Loaded({
       )}
     </div>
   );
+}
+
+/** An element's width as it lays out, 0 until it is mounted. */
+function useWidth(element: HTMLElement | null): number {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setWidth(Math.round(entry.contentRect.width));
+    });
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+    };
+  }, [element]);
+  return width;
 }

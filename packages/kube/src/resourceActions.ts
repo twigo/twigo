@@ -1,4 +1,10 @@
-import { Copy, PanelRight, SquareArrowOutUpRight, X } from "lucide-react";
+import {
+  Copy,
+  FileCode,
+  PanelRight,
+  SquareArrowOutUpRight,
+  X,
+} from "lucide-react";
 import type { MenuId, Workbench } from "@twigo/workbench";
 import type { ListServices } from "./services";
 import { objectOf, type Selected } from "./selection";
@@ -12,7 +18,7 @@ import { objectUri, parseListUri } from "./uri";
  */
 export function registerResourceActions(
   workbench: Workbench,
-  { selection, statuses }: ListServices,
+  { selection, statuses, states }: ListServices,
 ): void {
   const { commands, menus, editors, keybindings } = workbench;
   /** The active list editor and its selected row. */
@@ -29,6 +35,7 @@ export function registerResourceActions(
     id: string;
     title: string;
     icon?: typeof Copy;
+    key?: string;
     when?: string;
     menus: readonly (readonly [MenuId, string])[];
     run: () => void | Promise<void>;
@@ -48,12 +55,29 @@ export function registerResourceActions(
       },
     },
     {
+      id: "k8s.resource.yaml",
+      title: "Show YAML",
+      icon: FileCode,
+      key: "e",
+      menus: [
+        ["resource/context", "navigation"],
+        ["resource/details", "navigation"],
+      ],
+      run: () => {
+        const found = target();
+        if (!found) return;
+        states.setDetailsTab(found.uri, "yaml");
+        selection.set(found.uri, { ...found.selected, reveal: true });
+      },
+    },
+    {
       id: "k8s.resource.openEditor",
       title: "Open in Editor",
       icon: SquareArrowOutUpRight,
       menus: [
         ["resource/context", "navigation"],
         ["resource/inline", "navigation"],
+        ["resource/details", "navigation"],
       ],
       run: () => {
         const found = target();
@@ -99,7 +123,6 @@ export function registerResourceActions(
       id: "k8s.resource.copyMarkedNames",
       title: "Copy Names",
       icon: Copy,
-      when: "listMarked",
       menus: [["resource/marked", "1_copy"]],
       run: async () => {
         const uri = editors.active;
@@ -115,7 +138,6 @@ export function registerResourceActions(
       id: "k8s.list.clearMarks",
       title: "Clear Marks",
       icon: X,
-      when: "listMarked",
       menus: [["resource/marked", "9_clear"]],
       run: () => {
         const uri = editors.active;
@@ -123,25 +145,36 @@ export function registerResourceActions(
       },
     },
   ];
-  actions.forEach(({ id, title, icon, when, menus: placed, run }, order) => {
-    commands.register({
-      id,
-      title,
-      category: "Resource",
-      ...(icon && { icon }),
-      // The marked rows' bar sits outside the grid, where `listFocus` is unset.
-      enablement: placed.some(([menu]) => menu === "resource/marked")
-        ? (when ?? "listMarked")
-        : when
-          ? `listFocus && ${when}`
-          : "listFocus",
-      run,
-    });
-    for (const [menu, group] of placed) {
-      menus.append(menu, { command: id, group, order, ...(when && { when }) });
-    }
-  });
+  const keys: { key: string; command: string; when: string }[] = [];
+  actions.forEach(
+    ({ id, title, icon, key, when, menus: placed, run }, order) => {
+      // The row's details and the marked rows' bar sit beside the grid, so a
+      // command needs a selected row or marks, not the grid's focus; its key
+      // works only in the grid.
+      const needs = placed.some(([menu]) => menu === "resource/marked")
+        ? "listMarked"
+        : "resource.selected";
+      commands.register({
+        id,
+        title,
+        category: "Resource",
+        ...(icon && { icon }),
+        enablement: when ? `${needs} && ${when}` : needs,
+        run,
+      });
+      if (key) keys.push({ key, command: id, when: "listFocus" });
+      for (const [menu, group] of placed) {
+        menus.append(menu, {
+          command: id,
+          group,
+          order,
+          ...(when && { when }),
+        });
+      }
+    },
+  );
   keybindings.register("core", [
+    ...keys,
     {
       key: "escape",
       command: "k8s.list.clearMarks",
