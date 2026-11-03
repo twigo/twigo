@@ -277,7 +277,8 @@ pub struct LogMatches {
     /// Every match in the view.
     pub count: u32,
     /// The view's index of the entry of each match, in order, so an entry
-    /// with two matches comes twice; the first 10,000 matches.
+    /// with two matches comes twice: the last 10,000 matches, since a
+    /// search steps back from the newest.
     pub entries: Vec<u32>,
 }
 

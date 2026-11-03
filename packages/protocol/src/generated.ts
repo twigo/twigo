@@ -492,7 +492,8 @@ export type LogMatches = {
 count: number, 
 /**
  * The view's index of the entry of each match, in order, so an entry
- * with two matches comes twice; the first 10,000 matches.
+ * with two matches comes twice: the last 10,000 matches, since a
+ * search steps back from the newest.
  */
 entries: Array<number>, };
 
