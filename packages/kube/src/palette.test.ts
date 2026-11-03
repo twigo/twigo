@@ -29,7 +29,10 @@ test("every registered command appears in the palette", async () => {
   const shown = await resolved?.provider.items("", {
     lookup: workbench.keys.lookup(document.body),
   });
-  const ids = workbench.commands.all().map((command) => command.id);
+  const ids = workbench.commands
+    .all()
+    .map((command) => command.id)
+    .filter((id) => id !== "k8s.logs.open");
   expect(ids.length).toBeGreaterThan(25);
   expect(shown?.map((item) => item.id).sort()).toEqual([...ids].sort());
 });

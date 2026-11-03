@@ -75,8 +75,8 @@ export function LineList({
   timestamps: boolean;
   /** The tag column's width in characters. */
   tagWidth?: number;
-  /** An index to scroll to, such as the current search match. */
-  reveal?: number | undefined;
+  /** An index to scroll to, such as the current search match, each time its token changes. */
+  reveal?: { readonly index: number; readonly token: number } | undefined;
   onWindow: (window: LineWindow) => void;
   onFollowChange: (follow: boolean) => void;
   /** Scopes the list's keys while it is mounted and routes the list commands to it, as a grid's. */
@@ -144,10 +144,12 @@ export function LineList({
     anchor.current = { key: held.key, index };
   }, [element, follow, items, start, total, virtualizer]);
 
+  const revealed = useRef<number | undefined>(undefined);
   useLayoutEffect(() => {
-    if (reveal === undefined) return;
+    if (!reveal || reveal.token === revealed.current) return;
+    revealed.current = reveal.token;
     programmatic.current = true;
-    virtualizer.scrollToIndex(reveal, { align: "center" });
+    virtualizer.scrollToIndex(reveal.index, { align: "center" });
   }, [reveal, virtualizer]);
 
   useEffect(() => {

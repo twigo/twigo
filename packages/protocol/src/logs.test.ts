@@ -48,7 +48,7 @@ function fakeBackend() {
     },
     subscribe(_command, request, onMessage) {
       calls.push(["logs_open", request]);
-      send = onMessage as (batch: LogBatch) => void;
+      send = onMessage;
       return new Promise((res) => {
         resolve = res;
       });

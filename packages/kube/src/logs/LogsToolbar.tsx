@@ -18,6 +18,7 @@ import type {
   LogsSession,
   LogsSnapshot,
   Since,
+  StreamState,
 } from "@twigo/protocol";
 import {
   ActionDropdown,
@@ -35,9 +36,9 @@ import {
   Segmented,
   StatusLabel,
   type Action,
+  type Tone,
 } from "@twigo/ui";
 import { useChanges, useWorkbench } from "@twigo/workbench";
-import { TONE } from "../object/tone";
 import type { LogsInput } from "../uri";
 import { clock, currentMatch, followed, logsKind, podTag } from "./entries";
 import { TAB_STREAMS, type LogsTabs } from "./state";
@@ -83,7 +84,8 @@ export function LogsToolbar({
   session: LogsSession;
   narrow: boolean;
 }) {
-  const { keybindings } = useWorkbench();
+  const workbench = useWorkbench();
+  const { keybindings } = workbench;
   useChanges(keybindings.changes);
   const tab = tabs.get(uri);
   const { view, source } = tab;
@@ -114,7 +116,7 @@ export function LogsToolbar({
     const shown = snapshot.matches?.entries.length ?? 0;
     if (shown === 0) return;
     const current = (tab.current + (older ? 1 : shown - 1)) % shown;
-    tabs.update(uri, { current, follow: false });
+    tabs.step(uri, current, undefined);
   };
   const range = view.range;
 
@@ -201,13 +203,17 @@ export function LogsToolbar({
           {
             value: "warn",
             label: "Warn+",
-            ...(!narrow && counts && { count: counts.warnings }),
+            ...(!narrow &&
+              view.level === "all" &&
+              counts && { count: counts.warnings }),
           },
           {
             value: "error",
             label: "Error",
             tone: "error",
-            ...(!narrow && counts && { count: counts.errors }),
+            ...(!narrow &&
+              view.level === "all" &&
+              counts && { count: counts.errors }),
           },
         ]}
       />
@@ -231,7 +237,9 @@ export function LogsToolbar({
         onChange={(text) => {
           tabs.setView(uri, { search: text === "" ? null : text });
         }}
-        onEnter={step}
+        onEnter={(shift) => {
+          step(!shift);
+        }}
         {...(key("k8s.logs.find") && { keys: key("k8s.logs.find") })}
         inputRef={search}
         trailing={
@@ -270,7 +278,7 @@ export function LogsToolbar({
               if (path !== null) notify.success(`Saved to ${path}`);
             },
             (error: unknown) => {
-              notify.error(String(error));
+              workbench.report(error);
             },
           );
         }}
@@ -444,17 +452,41 @@ function Tick({ on }: { on: boolean }) {
   );
 }
 
-/** A pod's state, or why its stream does not follow. */
+/** How a stream stands, worst first, as the picker words it. */
+const STREAM: Readonly<
+  Record<
+    StreamState["state"],
+    { readonly rank: number; readonly tone: Tone; readonly label: string }
+  >
+> = {
+  error: { rank: 0, tone: "error", label: "Cannot read" },
+  queued: { rank: 1, tone: "warn", label: "Queued" },
+  waiting: { rank: 2, tone: "warn", label: "Waiting" },
+  connecting: { rank: 3, tone: "idle", label: "Connecting" },
+  following: { rank: 4, tone: "ok", label: "Following" },
+  ended: { rank: 5, tone: "idle", label: "Ended" },
+  overLimit: { rank: 6, tone: "idle", label: "Not followed" },
+  off: { rank: 7, tone: "idle", label: "Off" },
+};
+
+/** A pod's streams, by the one that stands worst, with why when the kubelet or the server says. */
 function StreamLabel({ pod }: { pod: LogPod }) {
-  const states = followed(pod).map((container) => container.stream);
-  if (states.some((state) => state.state === "queued"))
-    return <StatusLabel tone="warn">Queued</StatusLabel>;
-  if (pod.tone !== "neutral")
-    return <StatusLabel tone={TONE[pod.tone]}>{pod.status}</StatusLabel>;
-  if (states.some((state) => state.state === "overLimit"))
-    return <StatusLabel tone="idle">Not followed</StatusLabel>;
-  if (states.length === 0) return <StatusLabel tone="idle">Off</StatusLabel>;
-  return <StatusLabel tone="ok">Following</StatusLabel>;
+  const [worst] = pod.containers
+    .map((container) => container.stream)
+    .sort((a, b) => STREAM[a.state].rank - STREAM[b.state].rank);
+  if (!worst) return <StatusLabel tone="idle">Off</StatusLabel>;
+  const { tone, label } = STREAM[worst.state];
+  const why =
+    worst.state === "waiting"
+      ? worst.reason
+      : worst.state === "error"
+        ? worst.error.message
+        : null;
+  return (
+    <StatusLabel tone={tone} pulse={worst.state === "connecting"}>
+      {why ? `${label} · ${why}` : label}
+    </StatusLabel>
+  );
 }
 
 /** The container the label names: the one picked, or the one the pods follow. */

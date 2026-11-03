@@ -17,8 +17,21 @@ export interface LogsTab {
   readonly timestamps: boolean;
   /** The match the search stands on, counted back from the newest: 0 is the last. */
   readonly current: number;
+  /**
+   * The entry and the mark the current match is, by the entry's id and its
+   * place counted from the line's last mark, once the person stepped to it:
+   * matches that come or go around it move `current`, not the match.
+   */
+  readonly anchor: MatchAnchor | undefined;
+  /** Counts the steps, so the list scrolls to the current match on a step and not as lines come. */
+  readonly steps: number;
   /** A field asked to take the focus and has not yet. */
   readonly focus: "filter" | "search" | undefined;
+}
+
+export interface MatchAnchor {
+  readonly id: number;
+  readonly fromEnd: number;
 }
 
 /** The containers a tab follows at once (ARCHITECTURE 4.6); Rust holds the rest back. */
@@ -46,6 +59,8 @@ const INITIAL: LogsTab = {
   wrap: false,
   timestamps: true,
   current: 0,
+  anchor: undefined,
+  steps: 0,
   focus: undefined,
 };
 
@@ -69,7 +84,7 @@ export class LogsTabs {
 
   /** What a tab opens with, set before it opens: Previous logs picks the container and its previous instance. */
   prepare(uri: string, source: Partial<LogSource>): void {
-    this.update(uri, { source: { ...this.get(uri).source, ...source } });
+    this.setSource(uri, source);
   }
 
   update(uri: string, change: Partial<LogsTab>): void {
@@ -84,18 +99,33 @@ export class LogsTabs {
     this.changes.emit();
   }
 
+  /** A new view or source has other matches, so the search starts again from the newest. */
   setView(uri: string, change: Partial<LogView>): void {
     const tab = this.get(uri);
-    const searched =
-      change.search !== undefined && change.search !== tab.view.search;
     this.update(uri, {
       view: { ...tab.view, ...change },
-      ...(searched && { current: 0 }),
+      current: 0,
+      anchor: undefined,
     });
   }
 
   setSource(uri: string, change: Partial<LogSource>): void {
-    this.update(uri, { source: { ...this.get(uri).source, ...change } });
+    this.update(uri, {
+      source: { ...this.get(uri).source, ...change },
+      current: 0,
+      anchor: undefined,
+    });
+  }
+
+  /** Steps the search to a match and scrolls to it, which pauses following. */
+  step(uri: string, current: number, anchor: MatchAnchor | undefined): void {
+    const tab = this.get(uri);
+    this.update(uri, {
+      current,
+      anchor,
+      steps: tab.steps + 1,
+      follow: false,
+    });
   }
 
   /** The tab's session, opened the first time a tab asks for it. */

@@ -23,7 +23,7 @@ export function registerLogs(workbench: Workbench): {
   tabs: LogsTabs;
   open: (object: LogsObject) => void;
 } {
-  const { editors, commands, keybindings } = workbench;
+  const { editors, commands, keybindings, menus } = workbench;
   const tabs = new LogsTabs(workbench.backend);
   editors.onClose((uri) => {
     tabs.closed(uri);
@@ -49,22 +49,32 @@ export function registerLogs(workbench: Workbench): {
     choice?: { container: string; previous: boolean },
   ) => {
     const uri = logsUri(object);
+    // A finding's instance may have ended long before the tab's 15 minutes.
     if (choice) {
       tabs.prepare(uri, {
         containers: { type: "named", name: choice.container },
         previous: choice.previous,
+        since: { type: "start" },
       });
     }
     editors.open(uri);
   };
   commands.register({
     id: "k8s.logs.open",
-    title: "Open Logs",
+    title: "Logs",
     category: "Logs",
+    icon: ScrollText,
     run: (args) => {
       const asked = logsRequest(args);
       if (asked) open(asked.object, asked.choice);
     },
+  });
+  // It acts on the object its caller names, so the palette has nothing to give it.
+  menus.append("commandPalette", { command: "k8s.logs.open", when: "false" });
+  menus.append("editor/title", {
+    command: "k8s.logs.open",
+    group: "navigation",
+    when: "resource.logs",
   });
 
   const active = () => editors.activeIn("panel");

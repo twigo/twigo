@@ -5,7 +5,14 @@ import { cn } from "../lib/cn";
 const TINT = {
   info: "bg-brand/8",
   warn: "bg-warn/10",
+  error: "bg-error/8",
 } as const;
+
+const ICON: Readonly<Record<keyof typeof TINT, string>> = {
+  info: "text-brand",
+  warn: "text-warn-foreground",
+  error: "text-error",
+};
 
 /**
  * A slim bar across a view that says what holds for all of it: logs of a
@@ -34,13 +41,7 @@ export function Banner({
         className,
       )}
     >
-      <Icon
-        aria-hidden
-        className={cn(
-          "size-3.5 shrink-0",
-          tone === "warn" ? "text-warn-foreground" : "text-brand",
-        )}
-      />
+      <Icon aria-hidden className={cn("size-3.5 shrink-0", ICON[tone])} />
       <div className="min-w-0 flex-1 truncate">{children}</div>
       {action}
     </div>

@@ -5,7 +5,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { History, Hourglass, ScrollText } from "lucide-react";
+import { CircleAlert, History, Hourglass, ScrollText } from "lucide-react";
 import type { LogTarget, LogView } from "@twigo/protocol";
 import {
   Banner,
@@ -27,11 +27,16 @@ import { useNow } from "../useNow";
 import { useWidth } from "../useWidth";
 import { parseLogsUri } from "../uri";
 import { ViewStatus } from "../ViewStatus";
-import { currentMatch, followed, lineItem, podTag } from "./entries";
+import { viewProblem } from "../viewProblem";
+import {
+  anchoredMatch,
+  currentMatch,
+  followed,
+  lineItem,
+  podTag,
+} from "./entries";
 import { LogsToolbar } from "./LogsToolbar";
 import type { LogsTabs } from "./state";
-
-const SHOWN = new Set(["ready", "relisting", "stale", "syncing"]);
 
 /**
  * A logs tab in the panel (ARCHITECTURE 4.6): one toolbar, the volume over
@@ -86,6 +91,33 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
     if (entries) tabs.saw(uri, entries);
   }, [entries, tabs, uri]);
 
+  // Matches come and go around the one the person stepped to; it stays the
+  // current one while its entry is in the window.
+  const matchesNow = snapshot?.matches;
+  const windowNow = snapshot?.window;
+  const { anchor, current } = tabs.get(uri);
+  const { steps, follow } = tabs.get(uri);
+  useEffect(() => {
+    if (!matchesNow || !windowNow || follow || steps === 0) return;
+    if (!anchor) {
+      // The match stepped to holds once its entry is in the window.
+      const found = currentMatch(matchesNow, current);
+      const entry = found && windowNow.entries[found.index - windowNow.start];
+      if (found && entry)
+        tabs.update(uri, { anchor: { id: entry.id, fromEnd: found.fromEnd } });
+      return;
+    }
+    const at = windowNow.entries.findIndex((entry) => entry.id === anchor.id);
+    if (at < 0) return;
+    const back = anchoredMatch(
+      matchesNow,
+      windowNow.start + at,
+      anchor.fromEnd,
+    );
+    if (back !== undefined && back !== current)
+      tabs.update(uri, { current: back });
+  }, [anchor, current, follow, matchesNow, steps, windowNow, tabs, uri]);
+
   const onWindow = useCallback(
     (window: LineWindow) => {
       session?.setWindow(
@@ -116,7 +148,7 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
     lineItem(entry, {
       tag,
       accent: (pod) => tabs.joined(uri, pod),
-      current: match?.index === start + index ? match.ordinal : undefined,
+      current: match?.index === start + index ? match.fromEnd : undefined,
       now,
     }),
   );
@@ -128,6 +160,19 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
   const queued = (pods ?? []).filter((pod) =>
     pod.containers.some((container) => container.stream.state === "queued"),
   ).length;
+  const failed = (pods ?? []).flatMap((pod) =>
+    pod.containers.flatMap((container) =>
+      container.stream.state === "error"
+        ? [
+            {
+              name: `${podTag(pod.name)}/${container.name}`,
+              error: container.stream.error,
+            },
+          ]
+        : [],
+    ),
+  );
+  const problem = viewProblem(status, "logs");
   const narrowed = viewNarrows(tab.view);
 
   const span: HistogramSpan | undefined =
@@ -145,7 +190,7 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
         session={session}
         narrow={width > 0 && width < 1100}
       />
-      {histogram && (
+      {histogram && histogram.buckets.length > 0 && (
         <Histogram
           label="Lines over time"
           buckets={histogram.buckets.map((bucket) => ({
@@ -198,7 +243,29 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
           cluster; close a logs tab to free some.
         </Banner>
       )}
-      {!SHOWN.has(status.state) && status.state !== "connecting" ? (
+      {failed[0] && (
+        <Banner tone="error" icon={CircleAlert}>
+          <span className="font-medium">
+            {failed.length === 1
+              ? `Cannot read the logs of ${failed[0].name}:`
+              : `Cannot read the logs of ${String(failed.length)} containers, ${failed[0].name} first:`}
+          </span>{" "}
+          {failed[0].error.message}
+        </Banner>
+      )}
+      {problem && total > 0 && (
+        <Banner tone="error" icon={problem.icon}>
+          <span className="font-medium">{problem.title}.</span> {problem.body}{" "}
+          The lines read so far stay.
+        </Banner>
+      )}
+      {status.state === "queued" && (
+        <Banner tone="warn" icon={Hourglass}>
+          <span className="font-medium">Waiting for a watch of the pods.</span>{" "}
+          The cluster's watches are taken; one frees as a list closes.
+        </Banner>
+      )}
+      {problem && total === 0 ? (
         <ViewStatus status={status} what="logs" />
       ) : (
         // The list stays mounted under what covers it, since its window is
@@ -213,7 +280,11 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
             wrap={tab.wrap}
             timestamps={tab.timestamps}
             tagWidth={tagWidth}
-            reveal={match?.index}
+            reveal={
+              match && tab.steps > 0
+                ? { index: match.index, token: tab.steps }
+                : undefined
+            }
             onWindow={onWindow}
             onFollowChange={onFollowChange}
             register={register}

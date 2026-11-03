@@ -1,11 +1,17 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import type { LogEntry } from "@twigo/protocol";
 import { WorkbenchView } from "@twigo/workbench";
 import { testWorkbench } from "@twigo/workbench/testing";
 import { registerKube } from "../register";
 import { logsUri } from "../uri";
-import { currentMatch, lineItem, logsKind, podTag } from "./entries";
+import {
+  anchoredMatch,
+  currentMatch,
+  lineItem,
+  logsKind,
+  podTag,
+} from "./entries";
 
 afterEach(cleanup);
 
@@ -46,25 +52,34 @@ test("a line's tag is its pod's last part", () => {
   expect(podTag("ledger-0")).toBe("0");
 });
 
-test("the current match counts back from the newest, and knows its place in its entry", () => {
+test("the current match counts back from the newest, and its mark from its entry's last", () => {
   const matches = { count: 12, entries: [3, 7, 7, 9] };
   expect(currentMatch(matches, 0)).toEqual({
     index: 9,
-    ordinal: 0,
+    fromEnd: 0,
     number: 12,
   });
   expect(currentMatch(matches, 1)).toEqual({
     index: 7,
-    ordinal: 1,
+    fromEnd: 0,
     number: 11,
   });
   expect(currentMatch(matches, 2)).toEqual({
     index: 7,
-    ordinal: 0,
+    fromEnd: 1,
     number: 10,
   });
   expect(currentMatch(matches, 4)).toBeUndefined();
   expect(currentMatch(undefined, 0)).toBeUndefined();
+});
+
+test("an anchored match keeps its entry and mark as matches come after it and drop before it", () => {
+  const before = { count: 4, entries: [3, 7, 7, 9] };
+  expect(anchoredMatch(before, 7, 1)).toBe(2);
+  const after = { count: 5, entries: [5, 5, 10, 12, 14] };
+  expect(anchoredMatch(after, 5, 1)).toBe(4);
+  expect(anchoredMatch(after, 5, 0)).toBe(3);
+  expect(anchoredMatch(after, 6, 0)).toBeUndefined();
 });
 
 test("entries become lines and markers: a level's tone, the current mark, a crash and a rollout", () => {
@@ -95,8 +110,8 @@ test("entries become lines and markers: a level's tone, the current mark, a cras
     tagAccent: true,
     tone: "error",
     marks: [
-      { start: 0, end: 7, current: false },
-      { start: 9, end: 16, current: true },
+      { start: 0, end: 7, current: true },
+      { start: 9, end: 16, current: false },
     ],
   });
   const ended: LogEntry = {
@@ -137,38 +152,78 @@ test("entries become lines and markers: a level's tone, the current mark, a cras
   });
 });
 
-test("a finding's Previous logs opens its pod's tab in the panel on that container's previous instance", async () => {
+function spied(workbench: Awaited<ReturnType<typeof testWorkbench>>) {
+  const opened = vi.spyOn(workbench.backend, "subscribe");
+  const invoked = vi.spyOn(workbench.backend, "invoke");
+  return {
+    sources: () =>
+      opened.mock.calls
+        .filter(([command]) => command === "logs_open")
+        .map(([, request]) => (request as { source: unknown }).source),
+    sets: () =>
+      invoked.mock.calls
+        .filter(([command]) => command === "logs_set_source")
+        .map(([, request]) => (request as { source: unknown }).source),
+  };
+}
+
+test("a finding's Previous logs opens its pod's tab on that container's previous instance from its start, and Logs switches it back", async () => {
   const workbench = await mounted();
-  await act(() =>
-    workbench.commands.execute("k8s.logs.open", workbench.keys.lookup(null), {
-      ...POD,
-      container: "api",
-      previous: true,
-    }),
-  );
+  const backend = spied(workbench);
+  const open = (previous: boolean) =>
+    act(() =>
+      workbench.commands.execute("k8s.logs.open", workbench.keys.lookup(null), {
+        ...POD,
+        container: "api",
+        previous,
+      }),
+    );
+  await open(true);
   const uri = logsUri(POD);
   expect(workbench.editors.openIn("panel")).toEqual([uri]);
   expect(workbench.editors.title(uri)).toBe(
     "Logs · pod auth-api-7f9c8d6b5-h8lbx",
   );
-  const space = workbench.spaces.active?.id ?? "";
-  expect(workbench.spaces.state(space).parts.panel.visible).toBe(true);
+  expect(backend.sources()).toEqual([
+    {
+      containers: { type: "named", name: "api" },
+      pods: null,
+      since: { type: "start" },
+      previous: true,
+    },
+  ]);
   expect(screen.getByText("Previous container")).toBeTruthy();
-  expect(
-    screen.getByRole("button", { name: /pod …-h8lbx · api/ }),
-  ).toBeTruthy();
+  await open(false);
+  await act(() =>
+    vi.waitFor(() => {
+      expect(backend.sets()).toContainEqual({
+        containers: { type: "named", name: "api" },
+        pods: null,
+        since: { type: "start" },
+        previous: false,
+      });
+    }),
+  );
+  expect(backend.sources()).toHaveLength(1);
 });
 
-test("an object editor's Logs opens its workload's tab once, focusing it after", async () => {
+test("an object editor's Logs opens its workload's tab once and focuses it after", async () => {
   const workbench = await mounted();
+  const backend = spied(workbench);
   const run = () =>
     workbench.commands.execute(
-      "k8s.object.logs",
-      (key) =>
-        key === "resource.logs" ? true : workbench.keys.lookup(null)(key),
-      "k8s://prod-eu/apps/v1/deployments/auth/auth-api",
+      "k8s.logs.open",
+      workbench.keys.lookup(null),
+      DEPLOYMENT,
     );
   await act(run);
+  await act(() => {
+    workbench.editors.open(logsUri(POD));
+  });
   await act(run);
-  expect(workbench.editors.openIn("panel")).toEqual([logsUri(DEPLOYMENT)]);
+  expect(workbench.editors.openIn("panel").sort()).toEqual(
+    [logsUri(DEPLOYMENT), logsUri(POD)].sort(),
+  );
+  expect(workbench.editors.activeIn("panel")).toBe(logsUri(DEPLOYMENT));
+  expect(backend.sources()).toHaveLength(2);
 });

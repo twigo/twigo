@@ -10,7 +10,7 @@ import type { MenuId, Workbench } from "@twigo/workbench";
 import type { LogsObject } from "./logs/register";
 import type { ListServices } from "./services";
 import { objectOf, type Selected } from "./selection";
-import { objectUri, parseListUri, parseObjectUri } from "./uri";
+import { objectUri, parseListUri } from "./uri";
 
 /**
  * Commands on the active list's selected row and on its marked rows, and
@@ -196,23 +196,6 @@ export function registerResourceActions(
       }
     },
   );
-  commands.register({
-    id: "k8s.object.logs",
-    title: "Logs",
-    category: "Resource",
-    icon: ScrollText,
-    enablement: "resource.logs",
-    run: (uri) => {
-      const object = typeof uri === "string" ? parseObjectUri(uri) : undefined;
-      if (object?.namespace === undefined) return;
-      openLogs({ ...object, namespace: object.namespace });
-    },
-  });
-  menus.append("editor/title", {
-    command: "k8s.object.logs",
-    group: "navigation",
-    when: "resource.logs",
-  });
   keybindings.register("core", [
     ...keys,
     {

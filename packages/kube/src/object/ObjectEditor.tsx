@@ -101,7 +101,15 @@ export function ObjectTabSwitch({
   return (
     <div className="flex items-center gap-2">
       <InlineActions
-        actions={workbench.actions("editor/title", scoped, uri).flat()}
+        actions={workbench
+          .actions(
+            "editor/title",
+            scoped,
+            input?.namespace === undefined
+              ? undefined
+              : { ...input, namespace: input.namespace },
+          )
+          .flat()}
       />
       <Segmented<ObjectTab>
         label="Views of the object"

@@ -50,25 +50,45 @@ export function clock(time: string): string {
 }
 
 /**
- * The current match, `back` from the newest: its entry's index in the
- * view, its place within the entry, and its number among all the matches.
+ * The current match, `back` from the newest: its entry's index in the view,
+ * its place counted from the entry's last mark, which the matches' cut at
+ * 10,000 leaves whole, and its number among all the matches.
  */
 export function currentMatch(
   matches: LogMatches | undefined,
   back: number,
-): { index: number; ordinal: number; number: number } | undefined {
+): { index: number; fromEnd: number; number: number } | undefined {
   if (!matches) return undefined;
   const at = matches.entries.length - 1 - back;
   const index = matches.entries[at];
   if (index === undefined) return undefined;
-  let ordinal = 0;
+  let fromEnd = 0;
   for (
-    let before = at - 1;
-    before >= 0 && matches.entries[before] === index;
-    before--
+    let after = at + 1;
+    after < matches.entries.length && matches.entries[after] === index;
+    after++
   )
-    ordinal++;
-  return { index, ordinal, number: matches.count - back };
+    fromEnd++;
+  return { index, fromEnd, number: matches.count - back };
+}
+
+/**
+ * Where an anchored match is now, counted back from the newest: the entry
+ * with its id at `index` in the view, and its mark `fromEnd`; undefined
+ * when its entry is no longer in the matches.
+ */
+export function anchoredMatch(
+  matches: LogMatches,
+  index: number,
+  fromEnd: number,
+): number | undefined {
+  let seen = 0;
+  for (let at = matches.entries.length - 1; at >= 0; at--) {
+    if (matches.entries[at] !== index) continue;
+    if (seen === fromEnd) return matches.entries.length - 1 - at;
+    seen++;
+  }
+  return undefined;
 }
 
 /**
@@ -87,7 +107,7 @@ export function lineItem(
     /** What the tag column shows of a pod's line. */
     tag: (pod: string, container: string) => string;
     accent: (pod: string) => boolean;
-    /** The current match's place in this entry, if it is in it. */
+    /** The current match's place in this entry counted from its last mark, if it is in it. */
     current: number | undefined;
     now: number;
   },
@@ -107,7 +127,7 @@ export function lineItem(
         runs: entry.styles.map(run),
         marks: entry.marks.map((mark, ordinal): TextMark => ({
           ...mark,
-          current: ordinal === current,
+          current: entry.marks.length - 1 - ordinal === current,
         })),
       };
     case "ended": {
