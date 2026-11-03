@@ -124,21 +124,20 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     onRange(first, last + 1);
   }, [onRange, first, last]);
 
-  const land = (target: GridItem<R, G>, extendFrom?: string) => {
+  const land = (target: GridItem<R, G>, marks?: readonly string[]) => {
     setCursor(target.id);
     if (target.type !== "row") return;
     onSelect(target.id, target.data);
-    if (extendFrom !== undefined && onMark) {
-      onMark(
-        extendFrom === target.id ? [target.id] : [extendFrom, target.id],
-        true,
-      );
-    }
+    if (marks && onMark)
+      onMark(marks.includes(target.id) ? marks : [...marks, target.id], true);
   };
 
   // A keyboard move can land outside the loaded window; the cursor lands
   // once the item arrives.
-  const [wanted, setWanted] = useState<{ index: number; from?: string }>();
+  const [wanted, setWanted] = useState<{
+    index: number;
+    marks?: readonly string[];
+  }>();
   const wantedItem = wanted === undefined ? undefined : item(wanted.index);
   const latest = useRef({
     cursor,
@@ -152,8 +151,9 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     onMark,
     land,
   });
-  // Where the cursor was last seen, to move on from once it leaves the window.
-  const seen = useRef<{ id: string; index: number }>(undefined);
+  // Where the cursor was last seen, to move on from once it leaves the
+  // window, and whether on a group header, which marks never hold.
+  const seen = useRef<{ id: string; index: number; group: boolean }>(undefined);
   useEffect(() => {
     latest.current = {
       cursor,
@@ -169,11 +169,15 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     };
     const at = cursor === undefined ? -1 : indexOf(cursor);
     if (cursor !== undefined && at >= 0)
-      seen.current = { id: cursor, index: at };
+      seen.current = {
+        id: cursor,
+        index: at,
+        group: item(at)?.type === "group",
+      };
   });
   useEffect(() => {
     if (!wanted || !wantedItem) return;
-    latest.current.land(wantedItem, wanted.from);
+    latest.current.land(wantedItem, wanted.marks);
     setWanted(undefined);
   }, [wanted, wantedItem]);
 
@@ -195,9 +199,10 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       if (count === 0) return;
       const target = Math.min(Math.max(index, 0), count - 1);
       virtualizer.scrollToIndex(target);
+      const header = seen.current?.group === true && seen.current.id === from;
       setWanted({
         index: target,
-        ...(extend && from !== undefined && { from }),
+        ...(extend && from !== undefined && { marks: header ? [] : [from] }),
       });
     };
     return {

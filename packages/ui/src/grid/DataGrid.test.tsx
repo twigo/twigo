@@ -170,6 +170,17 @@ test("the controller moves the cursor, marks as it moves, folds back to the head
   expect(handlers.onToggleGroup).toHaveBeenLastCalledWith("g:auth");
 });
 
+test("a marking move from a group header marks the row it lands on, never the header", () => {
+  const { handlers, controller } = grid({ selected: "a2" });
+  act(() => {
+    controller()?.move(1);
+  });
+  act(() => {
+    controller()?.move(1, true);
+  });
+  expect(handlers.onMark.mock.calls).toEqual([[["e1"], true]]);
+});
+
 test("a move down scrolls the cursor's row clear of the bottom, a move up clear of the sticky header", () => {
   const { controller } = grid({ ...list(PODS), selected: "p22" });
   const element = scrollable(PODS.length);
