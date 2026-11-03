@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 function grid(
-  title: number,
+  title: number | { natural: number; cut: number },
   cells: readonly (
     number | { natural: number; cut?: number; margin?: string }
   )[],
@@ -25,8 +25,10 @@ function grid(
   const element = document.createElement("div");
   const header = document.createElement("span");
   header.dataset.fitHeader = "Name";
-  header.dataset.natural = String(title);
-  header.dataset.cut = String(title);
+  const { natural, cut } =
+    typeof title === "number" ? { natural: title, cut: title } : title;
+  header.dataset.natural = String(natural);
+  header.dataset.cut = String(cut);
   element.append(header);
   for (const width of cells) {
     const {
@@ -50,8 +52,8 @@ test("a fit gives the header its title, padding, sort arrow and right border, an
   expect(fitWidth(grid(4, [10]), "Name")).toBe(48);
 });
 
-test("a fit counts a title's fraction of a pixel", () => {
-  expect(fitWidth(grid(37.4, []), "Name")).toBe(71);
+test("a fit counts a cut title whole, and its fraction of a pixel", () => {
+  expect(fitWidth(grid({ natural: 37.4, cut: 30 }, []), "Name")).toBe(71);
 });
 
 test("a fit counts a cut cell whole, and without its content's negative margins", () => {
