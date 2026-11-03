@@ -180,6 +180,24 @@ test("paused, the person's scroll that reaches the end follows again, and the li
   expect(onFollowChange).toHaveBeenLastCalledWith(true);
 });
 
+test("a scroll against the way the person's wheel turned is not theirs", () => {
+  const paused = mount({ follow: false, total: 300, items: lines(0, 300) });
+  act(() => {
+    fireEvent.wheel(paused.log, { deltaY: -40 });
+    paused.log.scrollTop = 19 * 300 - 600;
+    fireEvent.scroll(paused.log);
+  });
+  expect(paused.onFollowChange).not.toHaveBeenCalled();
+  cleanup();
+  const following = mount({ total: 300, items: lines(0, 300) });
+  act(() => {
+    fireEvent.wheel(following.log, { deltaY: 40 });
+    following.log.scrollTop = 19 * 100;
+    fireEvent.scroll(following.log);
+  });
+  expect(following.onFollowChange).not.toHaveBeenCalled();
+});
+
 test("paused, the lines that came meanwhile show on a button that follows again", () => {
   const { onFollowChange } = mount({ follow: false, fresh: 2 });
   act(() => {

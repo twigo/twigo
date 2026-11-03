@@ -115,34 +115,41 @@ function askedBy(mode: Mode): string | undefined {
 
 /** How long after the person's wheel, scroll key or touch a scroll is still theirs. */
 const INPUT_MS = 300;
-const SCROLL_KEYS = new Set([
-  "ArrowUp",
-  "ArrowDown",
-  "PageUp",
-  "PageDown",
-  "Home",
-  "End",
-  " ",
-]);
+type Toward = "up" | "down";
+const SCROLL_KEYS: Readonly<Record<string, Toward>> = {
+  ArrowUp: "up",
+  PageUp: "up",
+  Home: "up",
+  ArrowDown: "down",
+  PageDown: "down",
+  End: "down",
+};
 
 /**
- * Whether the person scrolls the list, from their input: a wheel, a scroll
- * key or a touch that just ended, or a pointer or a touch that holds it,
- * its scrollbar included. The list's own scrolls and the virtualizer's are
- * never theirs.
+ * Whether the person scrolls the list up or down, from their input: a
+ * wheel or a scroll key just now, or a pointer or a touch that holds the
+ * list, its scrollbar included, or just let it go, either way. The list's
+ * own scrolls are never theirs, nor are the virtualizer's, which move rows
+ * that mount above the top by their measured size while the person
+ * scrolls.
  */
 class Input {
   #until = 0;
+  #toward: Toward | undefined;
   #held = { pointer: false, touch: false };
 
-  get scrolling(): boolean {
+  scrolls(toward: Toward): boolean {
+    if (this.#held.pointer || this.#held.touch) return true;
     return (
-      this.#held.pointer || this.#held.touch || performance.now() < this.#until
+      performance.now() < this.#until &&
+      (this.#toward === undefined || this.#toward === toward)
     );
   }
 
-  touched(): void {
+  /** Either way, as a release lets the list go on. */
+  touched(toward?: Toward): void {
     this.#until = performance.now() + INPUT_MS;
+    this.#toward = toward;
   }
 
   hold(by: "pointer" | "touch"): void {
@@ -412,7 +419,7 @@ export function LineList({
     if (!element || !register) return;
     return register(element, {
       move: (delta) => {
-        input.touched();
+        input.touched(delta < 0 ? "up" : "down");
         if (delta < 0) onFollowChange(false);
         virtualizer.scrollBy(delta * ROW);
       },
@@ -421,7 +428,7 @@ export function LineList({
           onFollowChange(true);
           return;
         }
-        input.touched();
+        input.touched("up");
         onFollowChange(false);
         virtualizer.scrollToOffset(0);
       },
@@ -431,17 +438,17 @@ export function LineList({
 
   const onScroll = () => {
     if (!element) return;
-    const person = input.scrolling;
     const atEnd =
       element.scrollHeight - element.scrollTop - element.clientHeight < ROW;
     if (follow) {
-      if (person && !atEnd) onFollowChange(false);
+      if (!atEnd && input.scrolls("up")) onFollowChange(false);
       return;
     }
-    if (person && atEnd) {
+    if (atEnd && input.scrolls("down")) {
       onFollowChange(true);
       return;
     }
+    const person = input.scrolls("up") || input.scrolls("down");
     const now = mode.current;
     if (now.kind === "seek" && !person) return;
     const top = topLine();
@@ -467,11 +474,18 @@ export function LineList({
         tabIndex={0}
         onScroll={onScroll}
         onWheel={(event) => {
-          input.touched();
+          if (event.deltaY === 0) return;
+          input.touched(event.deltaY < 0 ? "up" : "down");
           if (follow && event.deltaY < 0) onFollowChange(false);
         }}
         onKeyDown={(event) => {
-          if (SCROLL_KEYS.has(event.key)) input.touched();
+          const toward =
+            event.key === " "
+              ? event.shiftKey
+                ? "up"
+                : "down"
+              : SCROLL_KEYS[event.key];
+          if (toward) input.touched(toward);
         }}
         onPointerDown={() => {
           input.hold("pointer");
