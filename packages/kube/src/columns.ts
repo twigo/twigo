@@ -27,6 +27,8 @@ export interface ColumnRule {
   readonly quiet: boolean;
   /** The table can group its rows by the column's values. */
   readonly groups: boolean;
+  /** Rows take their health from this column: the list counts and filters by it. */
+  readonly health: boolean;
   /** The tone of an abnormal value; healthy values have none. */
   readonly tone?: (text: string) => Tone | undefined;
 }
@@ -51,6 +53,11 @@ function ratio(text: string): Tone | undefined {
     : undefined;
 }
 
+/** A node's Status: not ready, or never reported, fails. */
+function nodeStatus(text: string): Tone | undefined {
+  return /^(NotReady|Unknown)/.test(text) ? "error" : undefined;
+}
+
 /** States still in flight, whose dot pulses. */
 export const IN_FLIGHT =
   /^(ContainerCreating|PodInitializing|Terminating|Init:)/;
@@ -66,8 +73,28 @@ const BY_NAME: Readonly<Record<string, Partial<ColumnRule>>> = {
 /** Rules for one resource's column, by `group/resource/column`, over those by name. */
 const BY_RESOURCE: Readonly<Record<string, Partial<ColumnRule>>> = {
   "/pods/Ready": { cell: "ratio", width: 56, align: "end", tone: ratio },
-  "/pods/Status": { cell: "status", width: 160, groups: true, tone: podStatus },
+  "/pods/Status": {
+    cell: "status",
+    width: 160,
+    groups: true,
+    health: true,
+    tone: podStatus,
+  },
   "/pods/Restarts": { cell: "restarts", width: 112 },
+  "/nodes/Status": {
+    cell: "status",
+    width: 160,
+    groups: true,
+    health: true,
+    tone: nodeStatus,
+  },
+  "apps/deployments/Ready": {
+    cell: "ratio",
+    width: 64,
+    align: "end",
+    health: true,
+    tone: ratio,
+  },
 };
 
 function key(gvr: Gvr, column: string): string {
@@ -85,16 +112,17 @@ export function columnRule(gvr: Gvr, column: Column): ColumnRule {
     align: age || numeric ? "end" : "start",
     quiet: age,
     groups: false,
+    health: false,
     ...BY_NAME[column.name],
     ...BY_RESOURCE[key(gvr, column.name)],
   };
 }
 
-/** The column that carries a resource's status, which health counts and filters by. */
+/** The column that carries a resource's health, which its list counts and filters by. */
 export function statusColumn(gvr: Gvr): string | undefined {
   const prefix = `${gvr.group}/${gvr.resource}/`;
   const found = Object.entries(BY_RESOURCE).find(
-    ([id, rule]) => id.startsWith(prefix) && rule.cell === "status",
+    ([id, rule]) => id.startsWith(prefix) && rule.health === true,
   );
   return found?.[0].slice(prefix.length);
 }

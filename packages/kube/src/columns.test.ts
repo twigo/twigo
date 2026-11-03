@@ -35,7 +35,10 @@ test("a column's rule comes from its kind, then its name, then its resource", ()
     align: "end",
   });
   expect(
-    columnRule({ ...PODS, resource: "deployments" }, column("Ready")),
+    columnRule(
+      { ...PODS, group: "apps", resource: "statefulsets" },
+      column("Ready"),
+    ),
   ).toMatchObject({ cell: "text", align: "start" });
   expect(columnRule(PODS, column("Restarts", "integer"))).toMatchObject({
     cell: "restarts",
@@ -51,6 +54,22 @@ test("a pod's status column is Status, and its abnormal values have tones", () =
   expect(cellTone(PODS, "Status", "Running")).toBeUndefined();
   expect(cellTone(PODS, "Ready", "1/2")).toBe("warn");
   expect(cellTone(PODS, "Ready", "2/2")).toBeUndefined();
+});
+
+test("a node's health is its Status, and a deployment's its Ready", () => {
+  const nodes = { ...PODS, resource: "nodes" };
+  const deployments = { group: "apps", version: "v1", resource: "deployments" };
+  expect(statusColumn(nodes)).toBe("Status");
+  expect(cellTone(nodes, "Status", "NotReady")).toBe("error");
+  expect(cellTone(nodes, "Status", "NotReady,SchedulingDisabled")).toBe(
+    "error",
+  );
+  expect(cellTone(nodes, "Status", "Unknown")).toBe("error");
+  expect(cellTone(nodes, "Status", "Ready")).toBeUndefined();
+  expect(cellTone(nodes, "Status", "Ready,SchedulingDisabled")).toBeUndefined();
+  expect(statusColumn(deployments)).toBe("Ready");
+  expect(cellTone(deployments, "Ready", "0/1")).toBe("warn");
+  expect(cellTone(deployments, "Ready", "2/2")).toBeUndefined();
 });
 
 test("a health's values stay the same when their counts swap", () => {
