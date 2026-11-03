@@ -466,3 +466,60 @@ test("a step binds the current match to its entry, so matches that come after it
     currentMatch(session.getSnapshot().matches, tabs.get(uri).current)?.id,
   ).toBe(anchor?.id);
 }, 15_000);
+
+test("a filter keeps the match stepped to while the view keeps it, a refused one too, and one that hides it goes back to the newest", async () => {
+  const { tabs, uri, session } = await logsTab();
+  tabs.setView(uri, { search: "request" });
+  await vi.waitFor(() => {
+    expect(session.getSnapshot().settled).toBe(true);
+    expect(session.getSnapshot().matches?.entries.length).toBeGreaterThan(1);
+  });
+  act(() => {
+    tabs.step(uri, true);
+  });
+  const { anchor } = tabs.get(uri);
+  expect(anchor).toBeDefined();
+  const stepped = () =>
+    currentMatch(session.getSnapshot().matches, tabs.get(uri).current)?.id;
+  act(() => {
+    tabs.setView(uri, { filter: "/(/" });
+  });
+  await vi.waitFor(() => {
+    expect(session.getSnapshot().refused).toBeDefined();
+  });
+  expect(tabs.get(uri).anchor).toEqual(anchor);
+  expect(stepped()).toBe(anchor?.id);
+  act(() => {
+    tabs.setView(uri, { filter: "request" });
+  });
+  await vi.waitFor(() => {
+    expect(session.getSnapshot()).toMatchObject({
+      settled: true,
+      refused: undefined,
+    });
+  });
+  expect(tabs.get(uri).anchor).toEqual(anchor);
+  expect(stepped()).toBe(anchor?.id);
+  act(() => {
+    tabs.setView(uri, { filter: "no line says this" });
+  });
+  await vi.waitFor(() => {
+    expect(tabs.get(uri)).toMatchObject({ current: 0, anchor: undefined });
+  });
+  act(() => {
+    tabs.setView(uri, { filter: null });
+  });
+  await vi.waitFor(() => {
+    expect(session.getSnapshot().settled).toBe(true);
+    expect(session.getSnapshot().matches?.entries.length).toBeGreaterThan(1);
+  });
+  act(() => {
+    tabs.step(uri, true);
+  });
+  expect(tabs.get(uri).anchor).toBeDefined();
+  act(() => {
+    tabs.setView(uri, { search: "token" });
+  });
+  expect(tabs.get(uri)).toMatchObject({ current: 0, anchor: undefined });
+  session.close();
+}, 20_000);

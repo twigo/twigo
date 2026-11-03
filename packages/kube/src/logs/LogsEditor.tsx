@@ -85,14 +85,15 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
   }, [entries, tabs, uri]);
 
   // Matches come and go around the one the person stepped to, which stays
-  // the current one by its entry's id while the matches hold it.
+  // the current one by its entry's id while the matches hold it, and gives
+  // way to the newest once they do not.
   const matchesNow = snapshot?.matches;
   const { anchor, current } = tabs.get(uri);
   useEffect(() => {
     if (!anchor || !matchesNow) return;
     const back = anchoredMatch(matchesNow, anchor.id, anchor.fromEnd);
-    if (back !== undefined && back !== current)
-      tabs.update(uri, { current: back });
+    if (back === undefined) tabs.update(uri, { current: 0, anchor: undefined });
+    else if (back !== current) tabs.update(uri, { current: back });
   }, [anchor, current, matchesNow, tabs, uri]);
 
   const onWindow = useCallback(

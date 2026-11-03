@@ -112,13 +112,23 @@ export class LogsTabs {
     this.changes.emit();
   }
 
-  /** A new view or source has other matches, so the search starts again from the newest. */
+  /**
+   * A new search has other matches, so it starts again from the newest; a
+   * filter, level or range keeps the match stepped to while the view keeps
+   * it, and while Rust refuses the view.
+   */
   setView(uri: string, change: Partial<LogView>): void {
     const tab = this.get(uri);
     const view = { ...tab.view, ...change };
     if (same(view, tab.view)) return;
     this.#places.delete(uri);
-    this.update(uri, { view, current: 0, anchor: undefined });
+    this.update(uri, {
+      view,
+      ...(view.search !== tab.view.search && {
+        current: 0,
+        anchor: undefined,
+      }),
+    });
   }
 
   /** A new source reads the buffer anew, so the list follows its end. */
