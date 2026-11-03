@@ -33,16 +33,38 @@ export interface ColumnRule {
   readonly tone?: (text: string) => Tone | undefined;
 }
 
-const POD_ERROR =
-  /Err|BackOff|OOMKilled|Evicted|Unknown|NodeLost|InvalidImageName/;
-const POD_WARN =
-  /^(Pending|ContainerCreating|PodInitializing|Terminating|Init:)/;
+/**
+ * A pod's Status as Kubernetes prints it (printPod in kubernetes v1.37.1
+ * pkg/printers/internalversion/printers.go): the phase or the pod's
+ * reason; a container's waiting or terminated reason, else `Signal:N` or
+ * `ExitCode:N`; an init container's the same after `Init:`, or `Init:i/n`
+ * while they run; `SchedulingGated`, `NotReady`, `Terminating`, `Unknown`.
+ * Kubelets, runtimes and admission keep adding reasons (`OutOfcpu`,
+ * `NodeAffinity`), so a status neither healthy nor waiting fails.
+ */
+const POD_HEALTHY: ReadonlySet<string> = new Set([
+  "Running",
+  "Completed",
+  "Succeeded",
+  "ExitCode:0",
+]);
+const POD_WAITING: ReadonlySet<string> = new Set([
+  "Pending",
+  "ContainerCreating",
+  "PodInitializing",
+  "SchedulingGated",
+  "NotReady",
+  "Terminating",
+  "RestartingAllContainers",
+]);
+const INIT_RUNNING = /^Init:\d+\/\d+$/;
 
 /** A pod's status: what fails, and what waits. */
 function podStatus(text: string): Tone | undefined {
-  if (POD_ERROR.test(text)) return "error";
-  if (POD_WARN.test(text)) return "warn";
-  return undefined;
+  if (INIT_RUNNING.test(text)) return "warn";
+  const state = text.startsWith("Init:") ? text.slice("Init:".length) : text;
+  if (POD_HEALTHY.has(state)) return undefined;
+  return POD_WAITING.has(state) ? "warn" : "error";
 }
 
 /** A ratio such as Ready's `1/2` is pending until both sides match. */
@@ -60,7 +82,7 @@ function nodeStatus(text: string): Tone | undefined {
 
 /** States still in flight, whose dot pulses. */
 export const IN_FLIGHT =
-  /^(ContainerCreating|PodInitializing|Terminating|Init:)/;
+  /^(ContainerCreating|PodInitializing|Terminating|RestartingAllContainers|Init:\d+\/\d+)$/;
 
 /** Rules for a column of any kind, by name. */
 const BY_NAME: Readonly<Record<string, Partial<ColumnRule>>> = {
