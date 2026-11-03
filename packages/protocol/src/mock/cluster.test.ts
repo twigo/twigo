@@ -45,6 +45,9 @@ test("a long generateName is cut to what the API server keeps", () => {
   ).toBe(51);
   const long = "w".repeat(58);
   expect(generatedAt(`${long}x2kq9`, `${long}-7f9c8d6b5-`, hash)).toBe(58);
+  const accented = `${"é".repeat(30)}-`;
+  expect(generatedAt(`${"é".repeat(29)}x2kq9`, accented, {})).toBe(29);
+  expect(generatedAt(`a${"é".repeat(29)}x2kq9`, `a${accented}`, {})).toBeNull();
 });
 
 test("a name that does not start with its generateName has none", () => {

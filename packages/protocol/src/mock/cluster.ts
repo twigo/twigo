@@ -217,14 +217,29 @@ export function generatedAt(
 ): number | null {
   if (!generateName) return null;
   if (labels["statefulset.kubernetes.io/pod-name"] === name) return null;
-  const kept = generateName.slice(0, KEPT_BASE);
-  if (!name.startsWith(kept)) return null;
+  const kept = keptBase(generateName);
+  if (kept === null || !name.startsWith(kept)) return null;
   const suffix = name.slice(kept.length);
   if (Array.from(suffix).length !== GENERATED_LENGTH) return null;
   const hash = labels["pod-template-hash"];
   return hash && generateName.endsWith(`-${hash}-`)
     ? Math.min(kept.length, generateName.length - hash.length - 1)
     : kept.length;
+}
+
+/** What the API server keeps of a generateName: its first 58 bytes, none if they end inside a character. */
+function keptBase(base: string): string | null {
+  const encoder = new TextEncoder();
+  let bytes = 0;
+  let end = 0;
+  for (const char of base) {
+    const size = encoder.encode(char).length;
+    if (bytes + size > KEPT_BASE)
+      return bytes === KEPT_BASE ? base.slice(0, end) : null;
+    bytes += size;
+    end += char.length;
+  }
+  return base;
 }
 
 function pick<T>(items: readonly T[], random: () => number): T {

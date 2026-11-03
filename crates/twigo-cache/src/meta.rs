@@ -412,6 +412,14 @@ mod tests {
             "labels": { "pod-template-hash": "7f9c8d6b5" },
         });
         assert_eq!(decoded(late), Some(58), "the hash fell in what was cut");
+        let accented = format!("{}-", "é".repeat(30));
+        let bytes = json!({ "name": format!("{}x2kq9", "é".repeat(29)), "generateName": accented });
+        assert_eq!(decoded(bytes), Some(29), "58 bytes, 29 UTF-16 units");
+        let inside = json!({
+            "name": format!("a{}x2kq9", "é".repeat(29)),
+            "generateName": format!("a{accented}"),
+        });
+        assert_eq!(decoded(inside), None, "58 bytes end inside a character");
     }
 
     #[test]
