@@ -171,6 +171,10 @@ pub struct LogBatch {
     /// a paused list counts the new ones by it, since `total` stops growing
     /// at the bound.
     pub arrived: u64,
+    /// The source and view changes the session has applied since it
+    /// opened, a no-op among them, so the webview knows which of those it
+    /// sent `arrived` and the window already reflect.
+    pub changes: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

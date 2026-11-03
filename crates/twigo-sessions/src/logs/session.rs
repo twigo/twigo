@@ -53,6 +53,9 @@ struct Pending {
     window: Option<LogWindow>,
     acked: Option<u32>,
     lines: Vec<(bool, oneshot::Sender<Vec<u8>>)>,
+    /// The source and view changes asked for, each counted though only the
+    /// last of each kind applies.
+    changes: u32,
 }
 
 impl Session {
@@ -88,13 +91,19 @@ impl Session {
 
     /// Reopens the streams for what the source reads, into an empty buffer.
     pub fn set_source(&self, source: LogSource) {
-        self.ask(|pending| pending.source = Some(source));
+        self.ask(|pending| {
+            pending.source = Some(source);
+            pending.changes += 1;
+        });
     }
 
     /// Filters the buffer again; refuses a view that does not parse.
     pub fn set_view(&self, view: &LogView) -> Result<(), IpcError> {
         let spec = Spec::new(view)?;
-        self.ask(|pending| pending.view = Some(spec));
+        self.ask(|pending| {
+            pending.view = Some(spec);
+            pending.changes += 1;
+        });
         Ok(())
     }
 
@@ -191,6 +200,7 @@ struct Sent {
     histogram: Histogram,
     dropped: u64,
     arrived: u64,
+    changes: u32,
 }
 
 struct Run {
@@ -222,6 +232,8 @@ struct Run {
     /// The entries the view kept as they came since the source or the view
     /// last changed.
     arrived: u64,
+    /// The source and view changes applied.
+    changes: u32,
 }
 
 async fn run(mut session: Run, control: Arc<Control>, mut send: impl FnMut(LogBatch) -> bool) {
@@ -241,6 +253,7 @@ async fn run(mut session: Run, control: Arc<Control>, mut send: impl FnMut(LogBa
             window,
             acked,
             lines,
+            changes,
         } = std::mem::take(&mut *control.pending.lock().expect("session lock"));
         if let Some(source) = source {
             session.set_source(source);
@@ -248,6 +261,7 @@ async fn run(mut session: Run, control: Arc<Control>, mut send: impl FnMut(LogBa
         if let Some(spec) = view {
             session.set_view(spec);
         }
+        session.changes += changes;
         if let Some(window) = window {
             session.window = Some(window);
             session.dirty.view = true;
@@ -306,6 +320,7 @@ impl Run {
             dirty: Dirty::default(),
             sent: None,
             arrived: 0,
+            changes: 0,
         })
     }
 
@@ -672,6 +687,7 @@ impl Run {
         let status = self.followed.state(&self.target);
         let dropped = self.buffer.dropped_ever();
         let arrived = self.arrived;
+        let changes = self.changes;
         let pods = (self.dirty.pods || self.sent.is_none()).then(|| self.log_pods());
         let shown = (self.dirty.view || self.sent.is_none()).then(|| {
             (
@@ -694,6 +710,7 @@ impl Run {
                 histogram: histogram.clone(),
                 dropped,
                 arrived,
+                changes,
             });
             return Some(LogBatch {
                 seq,
@@ -705,6 +722,7 @@ impl Run {
                 histogram: Some(histogram),
                 dropped,
                 arrived,
+                changes,
             });
         };
         let pods = pods.filter(|pods| *pods != sent.pods);
@@ -724,7 +742,8 @@ impl Run {
             && matches.is_none()
             && histogram.is_none()
             && dropped == sent.dropped
-            && arrived == sent.arrived;
+            && arrived == sent.arrived
+            && changes == sent.changes;
         if unchanged {
             return None;
         }
@@ -732,6 +751,7 @@ impl Run {
         sent.total = total;
         sent.dropped = dropped;
         sent.arrived = arrived;
+        sent.changes = changes;
         if let Some(pods) = &pods {
             sent.pods = pods.clone();
         }
@@ -754,6 +774,7 @@ impl Run {
             histogram,
             dropped,
             arrived,
+            changes,
         })
     }
 }
@@ -955,6 +976,51 @@ mod tests {
         let second = batches.recv().await.unwrap();
         assert_eq!(tokio::time::Instant::now(), acked, "it waited for a tick");
         assert_eq!(lines(&second), ["line 1"]);
+    }
+
+    /// Acknowledges batches until none comes for a second; the last.
+    async fn settled(
+        session: &Session,
+        batches: &mut mpsc::UnboundedReceiver<LogBatch>,
+    ) -> LogBatch {
+        let mut last = None;
+        while let Ok(Some(batch)) =
+            tokio::time::timeout(std::time::Duration::from_secs(1), batches.recv()).await
+        {
+            session.ack(batch.seq);
+            last = Some(batch);
+        }
+        last.expect("a batch")
+    }
+
+    async fn next(batches: &mut mpsc::UnboundedReceiver<LogBatch>) -> LogBatch {
+        tokio::time::timeout(std::time::Duration::from_secs(10), batches.recv())
+            .await
+            .expect("a batch within ten seconds")
+            .unwrap()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_batch_counts_every_source_and_view_change_applied() {
+        let fake = Fake::default();
+        let (session, mut batches) = opened(&fake).await;
+        assert_eq!(settled(&session, &mut batches).await.changes, 0);
+
+        session.set_source(request("web-1").source);
+        session.set_view(&view(None)).unwrap();
+        let changed = next(&mut batches).await;
+        assert_eq!(changed.changes, 2);
+        session.ack(changed.seq);
+        let refilled = settled(&session, &mut batches).await;
+        assert_eq!((refilled.changes, refilled.arrived), (2, 3));
+
+        session.set_view(&view(None)).unwrap();
+        let viewed = next(&mut batches).await;
+        assert_eq!((viewed.changes, viewed.arrived), (3, 0));
+        session.ack(viewed.seq);
+        session.set_view(&view(None)).unwrap();
+        let again = next(&mut batches).await;
+        assert_eq!((again.changes, again.arrived, again.window), (4, 0, None));
     }
 
     #[tokio::test(start_paused = true)]

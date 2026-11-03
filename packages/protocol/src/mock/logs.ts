@@ -71,6 +71,8 @@ export class MockLogs {
   #members = new Set<string>();
   /** The entries the view kept as they came since the source or the view last changed. */
   #arrived = 0;
+  /** The source and view changes applied, a no-op among them. */
+  #changes = 0;
   #seq = 0;
   #unacked: number | undefined;
   #dirty = { pods: true, lines: true };
@@ -105,6 +107,7 @@ export class MockLogs {
 
   setSource(source: LogSource): void {
     this.#source = source;
+    this.#changes++;
     this.#buffer.clear();
     this.#arrived = 0;
     this.#streams.clear();
@@ -115,6 +118,7 @@ export class MockLogs {
   /** Refuses a view whose filter, search or range does not parse, as Rust does. */
   setView(view: LogView): void {
     this.#spec = spec(view);
+    this.#changes++;
     this.#buffer.judge((kind) => judge(this.#spec, kind));
     this.#arrived = 0;
     this.#dirty.lines = true;
@@ -356,6 +360,7 @@ export class MockLogs {
       histogram: histogram(buffer),
       dropped: buffer.droppedEver,
       arrived: this.#arrived,
+      changes: this.#changes,
     });
     this.#dirty = { pods: false, lines: false };
   }

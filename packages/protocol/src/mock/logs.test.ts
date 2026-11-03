@@ -150,6 +150,23 @@ test("arrived counts the entries the view kept as they came, and starts again wi
   logs.close();
 });
 
+test("a batch counts every source and view change applied, a no-op among them", async () => {
+  const { logs, batches } = session();
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(batches[batches.length - 1]?.changes).toBe(0);
+  logs.setView(VIEW);
+  logs.setView(VIEW);
+  logs.setSource(SOURCE);
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(batches[batches.length - 1]?.changes).toBe(3);
+  expect(() => {
+    logs.setView({ ...VIEW, search: "/(/" });
+  }).toThrow(/no regex/);
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(batches[batches.length - 1]?.changes).toBe(3);
+  logs.close();
+});
+
 test("an around window reads the entries before one and from it on, by its id", async () => {
   const { logs, batches } = session();
   await vi.advanceTimersByTimeAsync(3_000);

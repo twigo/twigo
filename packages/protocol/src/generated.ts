@@ -460,7 +460,13 @@ dropped: number,
  * a paused list counts the new ones by it, since `total` stops growing
  * at the bound.
  */
-arrived: number, };
+arrived: number, 
+/**
+ * The source and view changes the session has applied since it
+ * opened, a no-op among them, so the webview knows which of those it
+ * sent `arrived` and the window already reflect.
+ */
+changes: number, };
 
 export type LogContainer = { name: string, stream: StreamState, };
 
