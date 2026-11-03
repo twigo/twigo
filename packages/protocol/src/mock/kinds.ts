@@ -193,15 +193,15 @@ const PENDING: ReadonlySet<string> = new Set([
  * v1.37.1 `pkg/registry/core/pod/strategy.go` `ToSelectableFields`), read
  * from what the mock knows of it. Its pods restart always, so one whose
  * containers have run stays Running whatever they did, as the kubelet's
- * `getPhase` keeps it; `status.podIPs`, which conversion accepts but the
- * set lacks, is empty.
+ * `getPhase` keeps it; a Pending one is not scheduled, so it has no node;
+ * `status.podIPs`, which conversion accepts but the set lacks, is empty.
  */
 function podFields(pod: Pod): Readonly<Record<string, string>> {
   const phase = PENDING.has(pod.status) ? "Pending" : "Running";
   return {
     "metadata.name": pod.name,
     "metadata.namespace": pod.namespace,
-    "spec.nodeName": pod.node,
+    "spec.nodeName": pod.status === "Pending" ? "" : pod.node,
     "spec.restartPolicy": "Always",
     "spec.schedulerName": "default-scheduler",
     "spec.serviceAccountName": "default",

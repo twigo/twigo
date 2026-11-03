@@ -88,13 +88,32 @@ test("a crashing pod says why first, and its container's card folds its details"
   ).toBeDefined();
 });
 
-test("a finding is announced by its title and its tone has a name", async () => {
-  await shown("pod-crashing");
-  const live = document.querySelector("[aria-live=polite]");
-  expect(live?.textContent).toBe("Container api keeps crashing");
+test("a finding that comes or goes is announced once, and its tone has a name", async () => {
+  const crashing = RECORDED["pod-crashing"]?.overview;
+  const healthy = RECORDED.pod?.overview;
+  if (!crashing || !healthy) throw new Error("the pods");
+  const workbench = await testWorkbench("ready");
+  const view = (overview: Document) => (
+    <Overview
+      overview={overview}
+      space="prod-eu"
+      states={new OverviewStates()}
+      kind="/pods"
+      onOpen={() => undefined}
+    />
+  );
+  const { rerender } = render(view(crashing), {
+    wrapper: inWorkbench(workbench),
+  });
+  const live = () => document.querySelector("[aria-live=polite]")?.textContent;
+  expect(live()).toBe("");
   expect(
     within(section("Diagnostics")).getByRole("img", { name: "Error" }),
   ).toBeDefined();
+  rerender(view(healthy));
+  expect(live()).toBe("Resolved: Container api keeps crashing");
+  rerender(view(crashing));
+  expect(live()).toBe("Container api keeps crashing");
 });
 
 test("a container's folds stay open for the kind's next object", async () => {
@@ -129,6 +148,42 @@ test("a container's folds stay open for the kind's next object", async () => {
   cleanup();
   mounted("/other");
   expect(details().getAttribute("aria-expanded")).toBe("false");
+});
+
+test("a node's condition tells its last heartbeat in its tooltip", async () => {
+  const node = RECORDED.node?.overview;
+  if (!node) throw new Error("the node");
+  const beating: Document = {
+    sections: node.sections.map((section) => ({
+      ...section,
+      blocks: section.blocks.map((block) =>
+        block.type === "conditions"
+          ? {
+              ...block,
+              conditions: block.conditions.map((condition) => ({
+                ...condition,
+                lastHeartbeat: "2026-11-03T10:00:00Z",
+              })),
+            }
+          : block,
+      ),
+    })),
+  };
+  const workbench = await testWorkbench("ready");
+  render(
+    <Overview
+      overview={beating}
+      space="prod-eu"
+      states={new OverviewStates()}
+      kind="/nodes"
+      onOpen={() => undefined}
+    />,
+    { wrapper: inWorkbench(workbench) },
+  );
+  const ready = within(section("Conditions")).getByText("Ready").closest("li");
+  expect(ready?.getAttribute("title")).toContain(
+    `Last heartbeat ${new Date("2026-11-03T10:00:00Z").toLocaleString()}`,
+  );
 });
 
 test("a node adds up its pods' requests in its resources table", async () => {

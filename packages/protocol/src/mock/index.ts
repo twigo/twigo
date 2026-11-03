@@ -690,26 +690,31 @@ type FieldSelector = (fields: Readonly<Record<string, string>>) => boolean;
 /**
  * A field selector as the API server reads one (apimachinery v0.37.1
  * `fields.ParseSelector`): terms joined by commas, empty ones skipped,
- * each `field=value`, `field==value` or `field!=value`, an old name as
- * conversion renames it; a field the kind cannot be selected by is the
- * message the server refuses it with, which Rust shows as the list's
- * error.
+ * sorted, each `field=value`, `field==value` or `field!=value`, all of
+ * them parsed before any field is converted, an old name as conversion
+ * renames it; a field the kind cannot be selected by is the message the
+ * server refuses it with, which Rust shows as the list's error.
  */
 function parseFields(
   selector: string | null,
   kind: MockKind,
 ): FieldSelector | string {
-  const terms: { field: string; value: string; negated: boolean }[] = [];
-  for (const term of (selector ?? "").split(",")) {
-    if (term === "") continue;
-    const match = /^([^!=]+)(!=|==|=)(.*)$/.exec(term);
-    const [, label = "", operator, value = ""] = match ?? [];
+  const parts = (selector ?? "").split(",").filter((part) => part !== "");
+  parts.sort();
+  const parsed = [];
+  for (const part of parts) {
+    const match = /^([^!=]+)(!=|==|=)(.*)$/.exec(part);
     if (!match)
-      return `invalid selector: '${selector ?? ""}'; can't understand '${term}'`;
+      return `invalid selector: '${selector ?? ""}'; can't understand '${part}'`;
+    const [, label = "", operator, value = ""] = match;
+    parsed.push({ label, value, negated: operator === "!=" });
+  }
+  const terms: { field: string; value: string; negated: boolean }[] = [];
+  for (const { label, value, negated } of parsed) {
     const field = kind.aliases?.[label] ?? label;
     if (!kind.fields.includes(field))
       return `field label not supported: ${label}`;
-    terms.push({ field, value, negated: operator === "!=" });
+    terms.push({ field, value, negated });
   }
   return (fields) =>
     terms.every(

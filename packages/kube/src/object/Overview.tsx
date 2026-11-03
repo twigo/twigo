@@ -46,7 +46,7 @@ export interface OverviewProps {
 /**
  * An object described in Rust (ARCHITECTURE 4.3): its sections in order,
  * each folding by its id as the kind's other objects do, each block drawn
- * by its type. A finding that comes or goes while the object is shown is
+ * by its type. While the object is shown, a finding that comes or goes is
  * announced by its title, which, unlike its times, does not tick.
  */
 export function Overview({
@@ -58,16 +58,16 @@ export function Overview({
   values,
 }: OverviewProps) {
   useChanges(states.changes);
-  const findings = overview.sections.flatMap((section) =>
+  const titles = overview.sections.flatMap((section) =>
     section.blocks.flatMap((block) =>
-      block.type === "diagnostics" ? block.findings : [],
+      block.type === "diagnostics"
+        ? block.findings.map((finding) => finding.title)
+        : [],
     ),
   );
   return (
     <div className="flex flex-col gap-4 px-3.5 pt-3 pb-4 text-[13px]">
-      <p className="sr-only" aria-live="polite">
-        {findings.map((finding) => finding.title).join(". ")}
-      </p>
+      <Announcer titles={titles} />
       {overview.sections.map((section) => {
         const open = states.open(kind, section.id, true);
         return (
@@ -97,6 +97,32 @@ export function Overview({
         );
       })}
     </div>
+  );
+}
+
+/**
+ * What changed among the findings, said once: the titles that came, and
+ * those that went as resolved. A live region reads text that changes, not
+ * text that leaves, so it is told the change rather than the list; the
+ * findings an object opens with are on screen, and nothing is said.
+ */
+function Announcer({ titles }: { titles: readonly string[] }) {
+  const key = titles.join("\n");
+  const [seen, setSeen] = useState({ key, said: "" });
+  if (seen.key !== key) {
+    const before = new Set(seen.key === "" ? [] : seen.key.split("\n"));
+    const now = new Set(titles);
+    const came = titles.filter((title) => !before.has(title));
+    const went = [...before].filter((title) => !now.has(title));
+    setSeen({
+      key,
+      said: [...came, ...went.map((title) => `Resolved: ${title}`)].join(". "),
+    });
+  }
+  return (
+    <p className="sr-only" aria-live="polite">
+      {seen.said}
+    </p>
   );
 }
 

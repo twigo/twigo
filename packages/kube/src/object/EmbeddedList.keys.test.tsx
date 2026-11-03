@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 test("keys in a Deployment's pods list inside its details act on that list alone", async () => {
-  await openList(
+  const workbench = await openList(
     createMockBackend("ready"),
     "k8s-list://prod-eu/apps/v1/deployments",
   );
@@ -55,4 +55,14 @@ test("keys in a Deployment's pods list inside its details act on that list alone
   expect(
     screen.getByRole("complementary", { name: "Deployment details" }),
   ).toBeDefined();
+  fireEvent.keyDown(pods, { code: "Slash", key: "/" });
+  await settle(2);
+  expect(document.activeElement).toBe(pods);
+  expect(workbench.keys.lookup(pods)("resource.selected")).toBe(false);
+  expect(workbench.keys.lookup(pods)("listMarked")).toBe(false);
+  fireEvent.keyDown(pods, { code: "Escape", key: "Escape" });
+  await settle(4);
+  expect(
+    screen.queryByRole("complementary", { name: "Deployment details" }),
+  ).toBeNull();
 });

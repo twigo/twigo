@@ -464,7 +464,7 @@ test("a field selector keeps the pods of one node, and one on a field pods lack 
     query({ fieldSelector: `spec.nodeName=${node},` }),
   );
   expect(on.batches[0]?.total).toBe(
-    pods.filter((pod) => pod.node === node).length,
+    pods.filter((pod) => pod.node === node && pod.status !== "Pending").length,
   );
   const off = await open(
     "ready",
@@ -473,7 +473,7 @@ test("a field selector keeps the pods of one node, and one on a field pods lack 
     }),
   );
   expect(off.batches[0]?.total).toBe(
-    pods.filter((pod) => pod.node !== node).length,
+    pods.filter((pod) => pod.node !== node || pod.status === "Pending").length,
   );
   const wrong = await open(
     "ready",
@@ -497,7 +497,7 @@ test("a field selector takes old names and fields the server matches as empty, a
     query({ fieldSelector: `spec.host=${node}` }),
   );
   expect(old.batches[0]?.total).toBe(
-    pods.filter((pod) => pod.node === node).length,
+    pods.filter((pod) => pod.node === node && pod.status !== "Pending").length,
   );
   const empty = await open("ready", query({ fieldSelector: "status.podIPs=" }));
   expect(empty.batches[0]?.total).toBe(5000);
@@ -509,11 +509,26 @@ test("a field selector takes old names and fields the server matches as empty, a
     }),
   );
   expect(running.batches[0]?.total).toBe(1);
-  const broken = await open("ready", query({ fieldSelector: "spec.nodeName" }));
+  const broken = await open(
+    "ready",
+    query({ fieldSelector: "spec.foo=1,spec.nodeName" }),
+  );
   expect(broken.batches[0]?.status).toMatchObject({
     state: "error",
-    error: { kind: "invalidInput" },
+    error: {
+      kind: "invalidInput",
+      message:
+        "invalid selector: 'spec.foo=1,spec.nodeName'; can't understand 'spec.nodeName'",
+    },
   });
+  const pending = pods.find((pod) => pod.status === "Pending");
+  const unscheduled = await open(
+    "ready",
+    query({
+      fieldSelector: `spec.nodeName=${pending?.node ?? ""},metadata.name=${pending?.name ?? ""}`,
+    }),
+  );
+  expect(unscheduled.batches[0]?.total).toBe(0);
 });
 
 test("a pod that churn puts in a Deployment with a new hash joins its live list", () => {
