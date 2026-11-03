@@ -28,8 +28,8 @@ use crate::logs::target::{Followed, Target};
 use crate::logs::view::{self, Spec};
 use crate::logs::{now, plan};
 
-/// The streams a tab follows at most, so one workload cannot take the
-/// cluster's 32 followed logs.
+/// The streams a tab follows at most, a left pod's that finish their reads
+/// among them, so one workload cannot take the cluster's 32 followed logs.
 const STREAMS: usize = 10;
 
 /// How long a left pod's streams may take to finish their reads: the
@@ -526,9 +526,10 @@ impl Run {
 
     /// Starts a stream for each chosen container without one, those with
     /// an instance to read first, then the newest pods, while the tab has
-    /// fewer than [`STREAMS`]; stops those the source no longer chooses.
-    /// Streams under way keep their places, but one with nothing to read
-    /// gives its place up to one that can be read.
+    /// fewer than [`STREAMS`], a left pod's streams that finish their reads
+    /// among them; stops those the source no longer chooses. Streams under
+    /// way keep their places, but one with nothing to read gives its place
+    /// up to one that can be read.
     fn plan(&mut self) {
         let mut order: Vec<&Pod> = self
             .pods
@@ -563,7 +564,13 @@ impl Run {
             .iter()
             .filter(|(key, _, readable)| *readable && !self.streams.contains_key(key))
             .count();
-        let mut yielding = lacking.saturating_sub(STREAMS - self.streams.len());
+        let finishing = self
+            .stopped
+            .iter()
+            .filter(|stopped| stopped.finishing.is_some() && !stopped.task.0.is_finished())
+            .count();
+        let mut yielding =
+            lacking.saturating_sub(STREAMS.saturating_sub(self.streams.len() + finishing));
         for (key, _, readable) in wanted.iter().rev() {
             if yielding == 0 {
                 break;
@@ -573,9 +580,9 @@ impl Run {
             }
         }
         let mut started = Vec::new();
-        let mut held = self.streams.len();
+        let mut held = self.streams.len() + finishing;
         for (key, pod, _) in wanted {
-            if held == STREAMS {
+            if held >= STREAMS {
                 break;
             }
             if self.streams.contains_key(&key) {
@@ -634,6 +641,7 @@ impl Run {
             if stopped.finishing.is_some_and(|until| until <= now) {
                 stopped.task.0.abort();
                 stopped.finishing = None;
+                freed = true;
             }
         }
         // A stopped stream whose task has ended has said all it will.
@@ -643,6 +651,10 @@ impl Run {
             .filter(|stopped| stopped.task.0.is_finished())
             .map(|stopped| stopped.id)
             .collect();
+        freed |= self
+            .stopped
+            .iter()
+            .any(|stopped| stopped.finishing.is_some() && ended.contains(&stopped.id));
         while let Ok((id, event)) = self.incoming.try_recv() {
             let key = self
                 .streams
@@ -1274,6 +1286,116 @@ mod tests {
         until(&mut run, "the pod gone", |run| run.pods.is_empty()).await;
         until(&mut run, "its stream ended", |run| run.stopped.is_empty()).await;
         assert_eq!(texts(&run), ["ahead", "web-1 left"]);
+    }
+
+    fn containers(uid: &str, instance: &str) -> serde_json::Value {
+        let names: Vec<String> = (0..STREAMS).map(|n| format!("c{n}")).collect();
+        serde_json::json!({
+            "metadata": { "name": "web-1", "uid": uid, "creationTimestamp": "2026-11-03T10:00:00Z" },
+            "spec": { "containers": names.iter().map(|name| serde_json::json!({ "name": name })).collect::<Vec<_>>() },
+            "status": { "phase": "Running", "containerStatuses": names.iter().map(|name| serde_json::json!({
+                "name": name,
+                "containerID": format!("{name}-{instance}"),
+                "state": { "running": { "startedAt": "2026-11-03T10:00:00Z" } },
+            })).collect::<Vec<_>>() },
+        })
+    }
+
+    fn each(instance: &str, mut act: impl FnMut(&str, &str)) {
+        for n in 0..STREAMS {
+            let container = format!("c{n}");
+            act(&container, &format!("{container}-{instance}"));
+        }
+    }
+
+    fn served(fake: &Fake, instance: &str, text: &str) {
+        each(instance, |container, id| {
+            fake.serve("web-1", container, Some(id), None);
+            fake.write("web-1", container, id, now(), &format!("{id} {text}"));
+        });
+    }
+
+    fn states(run: &Run) -> Vec<StreamState> {
+        run.log_pods()
+            .iter()
+            .flat_map(|pod| {
+                pod.containers
+                    .iter()
+                    .map(|container| container.stream.clone())
+            })
+            .collect()
+    }
+
+    /// The most follows open at once while web-1's ten containers are
+    /// followed, the pod is made again under its name with new instances,
+    /// and `after` lets the old streams end, until the new ones' lines came.
+    async fn replaced(fake: &Fake, after: impl FnOnce()) -> usize {
+        fake.pod(containers("uid-a", "a"));
+        served(fake, "a", "up");
+        let (hub, _) = fake.hub();
+        let mut request = request("web-1");
+        request.source.containers = Containers::All;
+        let mut run = Run::new(hub, "kind-test".to_owned(), request)
+            .await
+            .unwrap();
+        until(&mut run, "the first pod's lines", |run| {
+            texts(run).len() == STREAMS
+        })
+        .await;
+        assert_eq!(fake.follows(), STREAMS);
+
+        fake.delete("web-1");
+        fake.pod(containers("uid-b", "b"));
+        served(fake, "b", "up");
+        until(&mut run, "the pod made again", |run| {
+            run.pods.first().is_some_and(|pod| &*pod.uid == "uid-b")
+        })
+        .await;
+        let most = std::cell::Cell::new(0);
+        let count = |_: &Run| {
+            most.set(most.get().max(fake.follows()));
+            most.get() > STREAMS
+        };
+        let more = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            until(&mut run, "more than ten follows", count),
+        )
+        .await;
+        assert!(more.is_err(), "{} follows", most.get());
+        assert_eq!(states(&run), vec![StreamState::OverLimit; STREAMS]);
+        each("b", |container, id| {
+            fake.write("web-1", container, id, now(), &format!("{id} waited"));
+        });
+
+        after();
+        until(&mut run, "the new pod's lines", |run| {
+            most.set(most.get().max(fake.follows()));
+            texts(run)
+                .iter()
+                .filter(|text| text.starts_with('c') && text.contains("-b "))
+                .count()
+                == 2 * STREAMS
+        })
+        .await;
+        assert_eq!(fake.follows(), STREAMS);
+        most.get()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_left_pods_finishing_streams_keep_their_places_until_they_end() {
+        let fake = Fake::default();
+        let most = replaced(&fake, || {
+            each("a", |container, id| fake.stop("web-1", container, id));
+        })
+        .await;
+        assert!(most <= STREAMS, "{most} follows");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_left_pods_streams_that_read_on_give_their_places_up_at_the_bound() {
+        let fake = Fake::default();
+        let most = replaced(&fake, || {}).await;
+        assert!(most <= STREAMS, "{most} follows");
     }
 
     /// A session's state over a hub that never connects.

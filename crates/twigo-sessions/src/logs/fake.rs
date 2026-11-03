@@ -182,6 +182,16 @@ impl Fake {
         state.stranded.extend(stranded);
     }
 
+    pub fn follows(&self) -> usize {
+        self.state()
+            .containers
+            .values()
+            .flat_map(|container| container.instances.values())
+            .flat_map(|instance| &instance.followers)
+            .filter(|(_, sender)| !sender.is_closed())
+            .count()
+    }
+
     pub fn fail_previous(&self, pod: &str, container: &str) {
         self.state().container(pod, container).fails = true;
     }
