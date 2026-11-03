@@ -288,7 +288,7 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
                 ? { key: String(match.id), token: tab.steps }
                 : undefined
             }
-            fresh={Math.max(0, snapshot.arrived - tab.pausedAt)}
+            fresh={tabs.fresh(uri)}
             place={tabs.place(uri)}
             onWindow={onWindow}
             onFollowChange={onFollowChange}

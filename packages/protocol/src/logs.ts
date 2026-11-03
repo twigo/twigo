@@ -26,11 +26,12 @@ export interface LogsSnapshot {
   /** Entries the buffer's bound dropped. */
   readonly dropped: number;
   /**
-   * Entries the view kept as they came since its source or view last
-   * changed: 0 while Rust has yet to apply a change sent, whose batches
-   * still count the old view's.
+   * Entries the view kept as they came since the session opened or its
+   * source or view last changed, as of the batch's `changes`.
    */
   readonly arrived: number;
+  /** The source and view changes Rust had applied when it made the batch. */
+  readonly changes: number;
   /**
    * Whether the batch reflects every source and view change sent and not
    * refused; until then its matches may be an earlier search's.
@@ -54,6 +55,7 @@ export const INITIAL_LOGS: LogsSnapshot = {
   histogram: undefined,
   dropped: 0,
   arrived: 0,
+  changes: 0,
   settled: true,
   refused: undefined,
 };
@@ -78,7 +80,6 @@ export class LogsSession {
   #closed = false;
   /** Source and view changes sent and not refused, as Rust counts those it applied. */
   #changes = 0;
-  #applied = { arrived: 0, changes: 0 };
   readonly #refusals: {
     source: IpcError | undefined;
     view: IpcError | undefined;
@@ -197,7 +198,6 @@ export class LogsSession {
   #apply(batch: LogBatch): void {
     if (this.#closed) return;
     const previous = this.#snapshot;
-    this.#applied = { arrived: batch.arrived, changes: batch.changes };
     this.#publish({
       seq: batch.seq,
       status: batch.status,
@@ -207,8 +207,9 @@ export class LogsSession {
       matches: batch.matches ?? previous.matches,
       histogram: batch.histogram ?? previous.histogram,
       dropped: batch.dropped,
-      arrived: this.#arrived(),
-      settled: this.#applied.changes === this.#changes,
+      arrived: batch.arrived,
+      changes: batch.changes,
+      settled: batch.changes === this.#changes,
       refused: previous.refused,
     });
     this.#unacked = batch.seq;
@@ -237,20 +238,10 @@ export class LogsSession {
   /** Publishes what the changes sent, taken and refused make of the last batch. */
   #refresh(): void {
     const refused = this.#refusals.view ?? this.#refusals.source;
-    const arrived = this.#arrived();
-    const settled = this.#applied.changes === this.#changes;
     const now = this.#snapshot;
-    if (
-      now.refused !== refused ||
-      now.arrived !== arrived ||
-      now.settled !== settled
-    )
-      this.#publish({ ...now, refused, arrived, settled });
-  }
-
-  #arrived(): number {
-    const { arrived, changes } = this.#applied;
-    return changes === this.#changes ? arrived : 0;
+    const settled = now.changes === this.#changes;
+    if (now.refused !== refused || now.settled !== settled)
+      this.#publish({ ...now, refused, settled });
   }
 
   #fail(error: unknown): void {

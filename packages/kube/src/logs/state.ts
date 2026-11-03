@@ -29,8 +29,8 @@ export interface LogsTab {
   readonly steps: number;
   /** A step to an older match, or a newer one, asked before Rust applied the search it follows: done once it has. */
   readonly waiting: "older" | "newer" | undefined;
-  /** The view's `arrived` when the list paused, from which it counts the lines that came since. */
-  readonly pausedAt: number;
+  /** The view's `arrived` when the list paused, and the changes Rust had applied then, from which it counts the lines that came since. */
+  readonly pausedAt: { readonly changes: number; readonly arrived: number };
   /** A field asked to take the focus and has not yet. */
   readonly focus: "filter" | "search" | undefined;
   /** A narrow tab's row of fields is open, once a key or its icon asked for a field. */
@@ -70,7 +70,7 @@ const INITIAL: LogsTab = {
   anchor: undefined,
   steps: 0,
   waiting: undefined,
-  pausedAt: 0,
+  pausedAt: { changes: 0, arrived: 0 },
   focus: undefined,
   fields: false,
 };
@@ -118,12 +118,7 @@ export class LogsTabs {
     const view = { ...tab.view, ...change };
     if (same(view, tab.view)) return;
     this.#places.delete(uri);
-    this.update(uri, {
-      view,
-      current: 0,
-      anchor: undefined,
-      pausedAt: 0,
-    });
+    this.update(uri, { view, current: 0, anchor: undefined });
   }
 
   /** A new source reads the buffer anew, so the list follows its end. */
@@ -137,17 +132,37 @@ export class LogsTabs {
       current: 0,
       anchor: undefined,
       follow: true,
-      pausedAt: 0,
     });
   }
 
-  /** Follows the end, or pauses, counting the lines that come from the view's `arrived` now. */
+  /** Follows the end, or pauses, counting the lines that come from what the view kept until now. */
   follow(uri: string, follow: boolean): void {
     const tab = this.get(uri);
     if (tab.follow === follow) return;
-    const arrived = this.#sessions.get(uri)?.getSnapshot().arrived ?? 0;
     if (follow) this.#places.delete(uri);
-    this.update(uri, { follow, ...(!follow && { pausedAt: arrived }) });
+    this.update(uri, { follow, ...(!follow && { pausedAt: this.#now(uri) }) });
+  }
+
+  /**
+   * The lines that came since the list paused: counted from the pause
+   * while Rust applies the changes it had then; after a change, every line
+   * the new view kept, since all of them came after the pause.
+   */
+  fresh(uri: string): number {
+    const snapshot = this.#sessions.get(uri)?.getSnapshot();
+    if (!snapshot) return 0;
+    const { pausedAt } = this.get(uri);
+    return snapshot.changes === pausedAt.changes
+      ? Math.max(0, snapshot.arrived - pausedAt.arrived)
+      : snapshot.arrived;
+  }
+
+  #now(uri: string): LogsTab["pausedAt"] {
+    const snapshot = this.#sessions.get(uri)?.getSnapshot();
+    return {
+      changes: snapshot?.changes ?? 0,
+      arrived: snapshot?.arrived ?? 0,
+    };
   }
 
   place(uri: string): LinePlace | undefined {
@@ -186,7 +201,7 @@ export class LogsTabs {
       steps: tab.steps + 1,
       waiting: undefined,
       follow: false,
-      ...(tab.follow && { pausedAt: snapshot.arrived }),
+      ...(tab.follow && { pausedAt: this.#now(uri) }),
     });
   }
 

@@ -263,16 +263,52 @@ test("a pause counts from what has arrived; a source that changes nothing resets
   await vi.waitFor(() => {
     expect(session.getSnapshot().arrived).toBeGreaterThan(0);
   });
-  const arrived = session.getSnapshot().arrived;
+  const pausedAt = { changes: 0, arrived: session.getSnapshot().arrived };
   tabs.follow(uri, false);
-  expect(tabs.get(uri)).toMatchObject({ follow: false, pausedAt: arrived });
+  expect(tabs.get(uri)).toMatchObject({ follow: false, pausedAt });
   tabs.keepPlace(uri, { key: "7", offset: 0 });
   tabs.setSource(uri, { since: { type: "seconds", seconds: 900 } });
-  expect(tabs.get(uri)).toMatchObject({ follow: false, pausedAt: arrived });
+  expect(tabs.get(uri)).toMatchObject({ follow: false, pausedAt });
   expect(tabs.place(uri)).toEqual({ key: "7", offset: 0 });
   tabs.setSource(uri, { since: { type: "start" } });
-  expect(tabs.get(uri)).toMatchObject({ follow: true, pausedAt: 0 });
+  expect(tabs.get(uri)).toMatchObject({ follow: true });
   expect(tabs.place(uri)).toBeUndefined();
+  session.close();
+});
+
+test("paused, a refused filter counts on from the pause, and a taken one counts every line its view kept", async () => {
+  const workbench = await testWorkbench();
+  const tabs = new LogsTabs(workbench.backend);
+  const uri = logsUri(DEPLOYMENT);
+  const input = parseLogsUri(uri);
+  if (!input) throw new Error("no logs URI");
+  const session = tabs.session(uri, input);
+  session.setWindow({ type: "tail", count: 50 });
+  await vi.waitFor(() => {
+    expect(session.getSnapshot().arrived).toBeGreaterThan(0);
+  });
+  tabs.follow(uri, false);
+  const { pausedAt } = tabs.get(uri);
+  tabs.setView(uri, { filter: "/(/" });
+  await vi.waitFor(() => {
+    expect(session.getSnapshot().refused).toBeDefined();
+  });
+  expect(tabs.get(uri).pausedAt).toEqual(pausedAt);
+  expect(tabs.fresh(uri)).toBe(
+    session.getSnapshot().arrived - pausedAt.arrived,
+  );
+  tabs.setView(uri, { filter: "request" });
+  await vi.waitFor(
+    () => {
+      expect(session.getSnapshot()).toMatchObject({
+        changes: 1,
+        settled: true,
+      });
+      expect(session.getSnapshot().arrived).toBeGreaterThan(0);
+    },
+    { timeout: 10_000 },
+  );
+  expect(tabs.fresh(uri)).toBe(session.getSnapshot().arrived);
   session.close();
 });
 
