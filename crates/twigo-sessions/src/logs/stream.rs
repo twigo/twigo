@@ -347,7 +347,8 @@ fn restarts(pod: &Value, container: &str, exit_code: Option<i64>) -> bool {
 }
 
 /// Reads the container's log, as the pod it is told of says, until it has
-/// nothing more to read; `pod` ends with the session.
+/// nothing more to read; once `pod` closes, as when the pod left, it ends
+/// as soon as the read under way does.
 pub async fn run(stream: Stream, mut pod: watch::Receiver<Arc<Value>>, send: impl Fn(Event)) {
     let mut reader = Reader {
         stream,

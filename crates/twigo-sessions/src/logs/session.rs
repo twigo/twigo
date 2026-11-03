@@ -7,11 +7,12 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde_json::Value;
 use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
-use tokio::time::MissedTickBehavior;
+use tokio::time::{Instant, MissedTickBehavior};
 use twigo_cache::batcher::FLUSH;
 use twigo_cache::hub::Hub;
 use twigo_cache::object::Object;
@@ -30,6 +31,13 @@ use crate::logs::{now, plan};
 /// The streams a tab follows at most, so one workload cannot take the
 /// cluster's 32 followed logs.
 const STREAMS: usize = 10;
+
+/// How long a left pod's streams may take to finish their reads: the
+/// kubelet ends a follow up to `logForceCheckPeriod`, a second, after the
+/// container exits (cri-client v1.37.0, `waitLogs`), and its status
+/// manager deletes a finished pod right after it patches its status
+/// (kubernetes v1.37.0, `pkg/kubelet/status/status_manager.go`, `syncPod`).
+const FINISHING: Duration = Duration::from_secs(5);
 
 /// A running session: dropping it ends its task, its streams and its
 /// subscriptions.
@@ -167,19 +175,34 @@ impl Pod {
     }
 }
 
-/// A stream under way: dropping it ends its task.
+/// A stream under way.
 struct Running {
     /// The id its events come under, its own in the session.
     id: u64,
-    task: JoinHandle<()>,
+    task: Task,
+    /// Tells it its pod; dropped, it lets the stream end once its read
+    /// does.
     pod: watch::Sender<Arc<Value>>,
     state: StreamState,
     origin: Arc<Origin>,
 }
 
-impl Drop for Running {
+/// A stream stopped, as when its pod left: kept until its task has ended
+/// and what it said is taken, which may come after.
+struct Stopped {
+    id: u64,
+    task: Task,
+    origin: Arc<Origin>,
+    /// Until when the stream of a pod that left may finish its read.
+    finishing: Option<Instant>,
+}
+
+/// A stream's task, ended when dropped.
+struct Task(JoinHandle<()>);
+
+impl Drop for Task {
     fn drop(&mut self) {
-        self.task.abort();
+        self.0.abort();
     }
 }
 
@@ -217,9 +240,7 @@ struct Run {
     /// The target's pods were listed once, so those that come later join.
     listed: bool,
     streams: HashMap<Key, Running>,
-    /// Streams stopped, as when their pod left: kept until their task has
-    /// ended and what they said is taken, which may come after.
-    stopped: Vec<Running>,
+    stopped: Vec<Stopped>,
     /// Streams that read all there was, with their last state.
     finished: HashMap<Key, StreamState>,
     /// Counts the streams started, which gives each its id, so the events
@@ -428,7 +449,7 @@ impl Run {
             .cloned()
             .collect();
         for key in &left {
-            stop(&mut self.streams, &mut self.stopped, key);
+            stop(&mut self.streams, &mut self.stopped, key, true);
         }
         self.finished
             .retain(|(uid, _), _| pods.iter().any(|pod| pod.uid == *uid));
@@ -492,7 +513,7 @@ impl Run {
             .cloned()
             .collect();
         for key in &unwanted {
-            stop(&mut self.streams, &mut self.stopped, key);
+            stop(&mut self.streams, &mut self.stopped, key, false);
         }
         let lacking = wanted
             .iter()
@@ -503,7 +524,7 @@ impl Run {
             if yielding == 0 {
                 break;
             }
-            if !readable && stop(&mut self.streams, &mut self.stopped, key) {
+            if !readable && stop(&mut self.streams, &mut self.stopped, key, false) {
                 yielding -= 1;
             }
         }
@@ -549,7 +570,7 @@ impl Run {
             key,
             Running {
                 id,
-                task,
+                task: Task(task),
                 pod: told,
                 state: StreamState::Connecting,
                 origin,
@@ -564,25 +585,33 @@ impl Run {
         let mut entries = Vec::new();
         let mut restarts = Vec::new();
         let mut freed = false;
+        let now = Instant::now();
+        for stopped in &mut self.stopped {
+            if stopped.finishing.is_some_and(|until| until <= now) {
+                stopped.task.0.abort();
+                stopped.finishing = None;
+            }
+        }
         // A stopped stream whose task has ended has said all it will.
         let ended: Vec<u64> = self
             .stopped
             .iter()
-            .filter(|running| running.task.is_finished())
-            .map(|running| running.id)
+            .filter(|stopped| stopped.task.0.is_finished())
+            .map(|stopped| stopped.id)
             .collect();
         while let Ok((id, event)) = self.incoming.try_recv() {
             let key = self
                 .streams
                 .iter()
                 .find_map(|(key, running)| (running.id == id).then(|| key.clone()));
-            let running = match &key {
-                Some(key) => self.streams.get_mut(key),
-                None => self.stopped.iter_mut().find(|running| running.id == id),
+            let origin = match &key {
+                Some(key) => &self.streams[key].origin,
+                None => match self.stopped.iter().find(|stopped| stopped.id == id) {
+                    Some(stopped) => &stopped.origin,
+                    None => continue,
+                },
             };
-            let Some(running) = running else {
-                continue;
-            };
+            let origin = Arc::clone(origin);
             match event {
                 Event::Line {
                     at,
@@ -592,7 +621,7 @@ impl Run {
                 } => entries.push((
                     at,
                     Kind::Line {
-                        origin: Arc::clone(&running.origin),
+                        origin,
                         level,
                         text: text.into(),
                         styles: styles.into(),
@@ -607,20 +636,20 @@ impl Run {
                 } => entries.push((
                     at,
                     Kind::Ended {
-                        origin: Arc::clone(&running.origin),
+                        origin,
                         time: time.into(),
                         exit_code,
                         reason: reason.map(Into::into),
                         restarting: restarting.map(Into::into),
                     },
                 )),
-                Event::Restarts { restarting } => {
-                    restarts.push((Arc::clone(&running.origin), restarting));
-                }
+                Event::Restarts { restarting } => restarts.push((origin, restarting)),
                 Event::State(state) => {
-                    if running.state != state {
+                    if let Some(running) = key.and_then(|key| self.streams.get_mut(&key))
+                        && running.state != state
+                    {
                         running.state = state;
-                        self.dirty.pods |= key.is_some();
+                        self.dirty.pods = true;
                     }
                 }
                 Event::Finished => {
@@ -634,7 +663,7 @@ impl Run {
                 }
             }
         }
-        self.stopped.retain(|running| !ended.contains(&running.id));
+        self.stopped.retain(|stopped| !ended.contains(&stopped.id));
         self.insert(entries);
         for (origin, restarting) in restarts {
             self.dirty.view |= self.buffer.restarts(&origin, restarting.into());
@@ -779,13 +808,29 @@ impl Run {
     }
 }
 
-/// Stops a stream, which may yet have said things not taken.
-fn stop(streams: &mut HashMap<Key, Running>, stopped: &mut Vec<Running>, key: &Key) -> bool {
-    let Some(running) = streams.remove(key) else {
+/// Stops a stream, which may yet have said things not taken: at once, or,
+/// when its pod left, once its read ends, within [`FINISHING`].
+fn stop(
+    streams: &mut HashMap<Key, Running>,
+    stopped: &mut Vec<Stopped>,
+    key: &Key,
+    left: bool,
+) -> bool {
+    let Some(Running {
+        id, task, origin, ..
+    }) = streams.remove(key)
+    else {
         return false;
     };
-    running.task.abort();
-    stopped.push(running);
+    if !left {
+        task.0.abort();
+    }
+    stopped.push(Stopped {
+        id,
+        task,
+        origin,
+        finishing: left.then(|| Instant::now() + FINISHING),
+    });
     true
 }
 
@@ -1084,12 +1129,64 @@ mod tests {
         };
         run.events.send((id, late("late"))).unwrap();
         run.tick();
-        tokio::time::sleep(FLUSH).await;
-        run.tick();
+        fake.stop("web-1", "web", "web-a");
+        let read = tokio::time::Instant::now();
+        until(&mut run, "its task ended", |run| run.stopped.is_empty()).await;
+        assert!(read.elapsed() < FINISHING, "{:?}", read.elapsed());
         run.events.send((id, late("after its end"))).unwrap();
         run.tick();
         assert_eq!(texts(&run), ["up", "late", "web-1 left"]);
-        assert!(run.stopped.is_empty());
+    }
+
+    fn deleted(run: &Run) -> bool {
+        run.pods
+            .first()
+            .is_some_and(|pod| pod.json["metadata"]["deletionTimestamp"].is_string())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pods_end_arrives_when_the_pod_leaves_before_its_follow_ends() {
+        let fake = Fake::default();
+        fake.pod(web(false));
+        fake.serve("web-1", "web", Some("web-a"), None);
+        fake.write("web-1", "web", "web-a", T0 + SECOND, "up");
+        let (hub, _) = fake.hub();
+        let mut run = Run::new(hub, "kind-test".to_owned(), request("web-1"))
+            .await
+            .unwrap();
+        until(&mut run, "its line", |run| texts(run) == ["up"]).await;
+
+        fake.pod(web(true));
+        until(&mut run, "the pod deleted", deleted).await;
+        fake.delete("web-1");
+        until(&mut run, "the pod gone", |run| run.pods.is_empty()).await;
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        fake.stop("web-1", "web", "web-a");
+        until(&mut run, "its stream ended", |run| run.stopped.is_empty()).await;
+        assert_eq!(texts(&run), ["up", "web ended", "web-1 left"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_left_pods_stream_that_reads_on_ends_within_a_few_seconds() {
+        let fake = Fake::default();
+        fake.pod(web(false));
+        fake.serve("web-1", "web", Some("web-a"), None);
+        fake.write("web-1", "web", "web-a", T0 + SECOND, "up");
+        let (hub, _) = fake.hub();
+        let mut run = Run::new(hub, "kind-test".to_owned(), request("web-1"))
+            .await
+            .unwrap();
+        until(&mut run, "its line", |run| texts(run) == ["up"]).await;
+
+        fake.delete("web-1");
+        until(&mut run, "the pod gone", |run| run.pods.is_empty()).await;
+        let left = tokio::time::Instant::now();
+        until(&mut run, "its stream ended", |run| run.stopped.is_empty()).await;
+        let lasted = left.elapsed();
+        assert!(
+            (FINISHING..FINISHING + std::time::Duration::from_secs(1)).contains(&lasted),
+            "{lasted:?}"
+        );
     }
 
     /// A session's state over a hub that never connects.
