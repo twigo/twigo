@@ -26,7 +26,6 @@ Findings that belong to no step yet.
 - Open objects (`twigo_core::objects`, ARCHITECTURE 4.3):
   - The Related tab lists the objects that the core controllers own (`twigo_describe::owned`); a custom resource's owned objects need an owner index across kinds.
 - Overviews (`twigo_describe`, ARCHITECTURE 4.3):
-  - A crashing container's finding has no button to its previous container's logs nor its last log line, which the logs of step 10 can give; until then the termination message stands in, when the container writes one.
   - A CronJob shows its last schedule and last success but not its next run, which needs its schedule read in its time zone.
   - A claim's Used By follows the whole objects of every pod in its namespace while its Overview is shown, as kubectl lists them; a projection watch (3.3) that keeps only their volumes would cost less (decision 8 of M1).
   - A node's Overview asks for `resource.k8s.io/v1` ResourceSlices, which Kubernetes 1.33 does not serve: there the need fails and retries while the Overview is shown, and the section stays out, as kubectl leaves it out.
