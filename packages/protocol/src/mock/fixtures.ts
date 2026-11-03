@@ -24,6 +24,15 @@ export const VERSIONS: Readonly<Record<string, string>> = {
   "kind-local": "v1.37.0",
 };
 
+/**
+ * The lists each context's credentials may not read in the live scenario:
+ * prod-eu's read-only role may not list nodes, as roles bound in one
+ * namespace never may.
+ */
+export const FORBIDDEN: Readonly<Record<string, readonly string[]>> = {
+  "prod-eu": ["nodes"],
+};
+
 /** Pods per context; dev has none, to show the empty state. */
 export const POD_COUNT: Readonly<Record<string, number>> = {
   "prod-eu": 5000,
@@ -44,6 +53,54 @@ export const POD_COLUMNS: readonly Column[] = [
   { name: "Node", kind: "string", priority: 1 },
   { name: "Nominated Node", kind: "string", priority: 1 },
   { name: "Readiness Gates", kind: "string", priority: 1 },
+];
+
+/** The columns kube-apiserver sends for nodes (crates/twigo-cache/tests/fixtures/nodes-list.json). */
+export const NODE_COLUMNS: readonly Column[] = [
+  { name: "Name", kind: "string", priority: 0 },
+  { name: "Status", kind: "string", priority: 0 },
+  { name: "Roles", kind: "string", priority: 0 },
+  { name: "Age", kind: "age", priority: 0 },
+  { name: "Version", kind: "string", priority: 0 },
+  { name: "Internal-IP", kind: "string", priority: 1 },
+  { name: "External-IP", kind: "string", priority: 1 },
+  { name: "OS-Image", kind: "string", priority: 1 },
+  { name: "Kernel-Version", kind: "string", priority: 1 },
+  { name: "Container-Runtime", kind: "string", priority: 1 },
+];
+
+/**
+ * The columns kube-apiserver sends for Deployments
+ * (crates/twigo-cache/tests/fixtures/deployments-list.json): Up-to-date and
+ * Available are declared strings and sent as integers.
+ */
+export const DEPLOYMENT_COLUMNS: readonly Column[] = [
+  { name: "Name", kind: "string", priority: 0 },
+  { name: "Ready", kind: "string", priority: 0 },
+  { name: "Up-to-date", kind: "string", priority: 0 },
+  { name: "Available", kind: "string", priority: 0 },
+  { name: "Age", kind: "age", priority: 0 },
+  { name: "Containers", kind: "string", priority: 1 },
+  { name: "Images", kind: "string", priority: 1 },
+  { name: "Selector", kind: "string", priority: 1 },
+];
+
+/**
+ * The columns kube-apiserver sends for core events
+ * (crates/twigo-cache/tests/fixtures/events-list.json): no Age, Name last
+ * and wide only, Count declared a string and sent as an integer.
+ */
+export const EVENT_COLUMNS: readonly Column[] = [
+  { name: "Last Seen", kind: "string", priority: 0 },
+  { name: "Type", kind: "string", priority: 0 },
+  { name: "Reason", kind: "string", priority: 0 },
+  { name: "Object", kind: "string", priority: 0 },
+  { name: "Subobject", kind: "string", priority: 1 },
+  { name: "Source", kind: "string", priority: 1 },
+  { name: "Message", kind: "string", priority: 0 },
+  { name: "First Seen", kind: "string", priority: 1 },
+  { name: "Count", kind: "string", priority: 1 },
+  { name: "Name", kind: "string", priority: 1 },
 ];
 
 export const NAMESPACES = [

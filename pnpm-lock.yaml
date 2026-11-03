@@ -330,6 +330,9 @@ importers:
       '@tauri-apps/api':
         specifier: ^2.12.4
         version: 2.12.4
+      '@twigo/utils':
+        specifier: workspace:*
+        version: link:../utils
     devDependencies:
       jsdom:
         specifier: ^30.1.3

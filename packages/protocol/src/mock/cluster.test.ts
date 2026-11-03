@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
-import { Cluster, generatedAt, podRow } from "./cluster";
+import { Cluster, generatedAt } from "./cluster";
+import { KINDS } from "./kinds";
 
 test("a Deployment's pod is generated from its template hash", () => {
   expect(
@@ -42,8 +43,12 @@ test("the start counts UTF-16 units", () => {
 
 test("the mock's pods read as a Deployment's", () => {
   const cluster = new Cluster("kind-local", 40, Date.UTC(2026, 10, 3));
+  const rows = new Map(
+    KINDS["/v1/pods"]?.rows(cluster, true).map((row) => [row.id, row]),
+  );
   for (const pod of cluster.pods) {
-    const row = podRow(pod, true);
+    const row = rows.get(pod.id);
+    if (!row) throw new Error(`no row for ${pod.id}`);
     expect(row.generated, pod.name).not.toBeNull();
     expect(pod.name.slice(row.generated ?? 0)).toBe(
       pod.name.slice(pod.generateName.length - pod.templateHash.length - 1),

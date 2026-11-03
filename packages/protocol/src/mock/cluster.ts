@@ -1,4 +1,4 @@
-import type { Cell, Row, RowId } from "../generated";
+import type { Cell, RowId } from "../generated";
 import { NAMESPACES, WORKLOADS } from "./fixtures";
 
 export interface Pod {
@@ -29,15 +29,30 @@ const ABNORMAL: [string, number][] = [
   ["Error", 0.005],
 ];
 
+export interface Node {
+  id: RowId;
+  name: string;
+  /** As kube-apiserver prints it: `Ready`, `NotReady`, `Ready,SchedulingDisabled`. */
+  status: string;
+  created: number;
+  ip: string;
+}
+
 const DAY = 86_400_000;
 
-/** Deterministic pods for one context, so screenshots repeat. */
+/** The nodes of a cluster with pods, which the pods spread over. */
+const NODES = 40;
+
+/** Deterministic pods and nodes for one context, so screenshots repeat. */
 export class Cluster {
   readonly pods: Pod[] = [];
+  readonly nodes: Node[] = [];
   /** Bumped on every change, so query results can be cached. */
   version = 0;
-  /** Set once the first subscription has synced; later ones start ready, as on a shared upstream. */
-  synced = false;
+  /** When the cluster last changed, which the times its events print count from. */
+  now: number;
+  /** The kinds whose first subscription has synced; later ones start ready, as on a shared upstream. */
+  readonly synced = new Set<string>();
   readonly #random: () => number;
   #serial = 0;
 
@@ -46,8 +61,27 @@ export class Cluster {
     count: number,
     now: number,
   ) {
+    this.now = now;
     this.#random = mulberry32(hash(context));
     for (let i = 0; i < count; i++) this.pods.push(this.#pod(now));
+    // A stream of their own, so the pods and their churn stay as they were.
+    const random = mulberry32(hash(`${context}/nodes`));
+    for (let i = 0; i < (count > 0 ? NODES : 0); i++) {
+      const name = `${context}-node-${i}`;
+      const roll = random();
+      this.nodes.push({
+        id: `${context}/${name}`,
+        name,
+        status:
+          roll < 0.05
+            ? "NotReady"
+            : roll < 0.08
+              ? "Ready,SchedulingDisabled"
+              : "Ready",
+        created: now - Math.floor((30 + random() * 60) * DAY),
+        ip: `10.0.${Math.floor(i / 200)}.${10 + (i % 200)}`,
+      });
+    }
   }
 
   /** Changes `count` random pods plus every pod in `focus`, and replaces one pod. */
@@ -67,6 +101,7 @@ export class Cluster {
       const gone = Math.floor(this.#random() * this.pods.length);
       this.pods.splice(gone, 1, this.#pod(now, now));
     }
+    this.now = now;
     this.version++;
   }
 
@@ -144,7 +179,7 @@ export class Cluster {
           : `${restarts} (${1 + Math.floor(random() * 59)}m ago)`,
       created: created ?? now - Math.floor(random() * random() * 90 * DAY),
       ip: `10.244.${this.#serial % 250}.${1 + Math.floor(random() * 250)}`,
-      node: `${this.context}-node-${Math.floor(random() * 40)}`,
+      node: `${this.context}-node-${Math.floor(random() * NODES)}`,
       version: 0,
     };
   }
@@ -164,17 +199,6 @@ export function podCells(pod: Pod, withNamespace: boolean): Cell[] {
     "<none>",
     "<none>",
   ];
-}
-
-export function podRow(pod: Pod, withNamespace: boolean): Row {
-  return {
-    id: pod.id,
-    created: new Date(pod.created).toISOString(),
-    generated: generatedAt(pod.name, pod.generateName, {
-      "pod-template-hash": pod.templateHash,
-    }),
-    cells: podCells(pod, withNamespace),
-  };
 }
 
 /** The characters the API server appends to a `generateName`. */
@@ -205,7 +229,8 @@ function pick<T>(items: readonly T[], random: () => number): T {
   return item;
 }
 
-function hash(text: string): number {
+/** FNV-1a, for seeds and names that stay the same for the same text. */
+export function hash(text: string): number {
   let h = 2166136261;
   for (let i = 0; i < text.length; i++) {
     h ^= text.charCodeAt(i);

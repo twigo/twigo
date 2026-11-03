@@ -21,12 +21,13 @@ import {
   MockAuth,
   type AuthScenario,
 } from "./auth";
-import { Cluster, podCells, podRow, type Pod } from "./cluster";
+import { Cluster } from "./cluster";
+import { KINDS, wireRow, type MockKind, type MockRow } from "./kinds";
 import { MockObject } from "./objects";
 import {
   CONTEXTS,
+  FORBIDDEN,
   NAMESPACES,
-  POD_COLUMNS,
   POD_COUNT,
   SPACES,
   VERSIONS,
@@ -43,10 +44,12 @@ import {
   runQuery,
   type CompiledQuery,
   type QueryResult,
-  type QueryRow,
 } from "./query";
 
-/** `live` connects, syncs and then changes pods every second; any other value pins that state. */
+/**
+ * `live` connects, syncs and then changes pods every second, and refuses
+ * the lists `FORBIDDEN` names; any other value pins that state.
+ */
 type ListScenario = "live" | ViewState["state"];
 
 /**
@@ -104,8 +107,9 @@ const RATE_TICK_MS = 100;
 
 /**
  * Runs the UI in a plain browser on fixtures (ARCHITECTURE 2.3): spaces,
- * pods behind a query view with the same windowing and flow control as Rust,
- * and a keyboard layout that never changes.
+ * pods, their nodes, Deployments and events behind a query view with the
+ * same windowing and flow control as Rust, and a keyboard layout that never
+ * changes.
  *
  * A live list changes pods every second, more of them where they are on
  * screen; with `changesPerSecond`, each cluster changes that many random
@@ -314,18 +318,36 @@ export function createMockBackend(
         throw new IpcError("notFound", `space ${query.space} has no context`);
       }
       const { group, version, resource } = query.gvr;
-      if (group !== "" || version !== "v1" || resource !== "pods") {
+      const kind = KINDS[`${group}/${version}/${resource}`];
+      if (!kind) {
         throw new IpcError(
           "notFound",
-          `the mock backend serves only pods, not ${resource}`,
+          `the mock backend serves only pods, nodes, deployments and events, not ${resource}`,
         );
       }
-      const columns = queryColumns(POD_COLUMNS, query);
+      const columns = queryColumns(kind.columns, query);
       const compiled = compileQuery(query, columns);
       const id = nextId++;
+      const forbidden: ViewState = {
+        state: "forbidden",
+        verb: "list",
+        resource,
+      };
+      const state: Exclude<ListScenario, "forbidden"> | ViewState =
+        lists === "forbidden" ||
+        (lists === "live" && FORBIDDEN[context]?.includes(resource))
+          ? forbidden
+          : lists;
       subscriptions.set(
         id,
-        new Subscription(compiled, columns, cluster(context), lists, onMessage),
+        new Subscription(
+          compiled,
+          columns,
+          kind,
+          cluster(context),
+          state,
+          onMessage,
+        ),
       );
       if (lists === "live" && churn === undefined) {
         churn =
@@ -402,14 +424,15 @@ function settle<T>(run: () => T): Promise<T> {
   });
 }
 
-const PINNED: Readonly<Record<Exclude<ListScenario, "live">, ViewState>> = {
+const PINNED: Readonly<
+  Record<Exclude<ListScenario, "live" | "forbidden">, ViewState>
+> = {
   queued: { state: "queued" },
   connecting: { state: "connecting" },
   syncing: { state: "syncing", loaded: 1850 },
   ready: { state: "ready" },
   relisting: { state: "relisting" },
   stale: { state: "stale" },
-  forbidden: { state: "forbidden", verb: "list", resource: "pods" },
   unauthorized: { state: "unauthorized" },
   error: {
     state: "error",
@@ -431,13 +454,11 @@ const KNOWS_COLUMNS = new Set<ViewState["state"]>([
   "stale",
 ]);
 
-interface PodRow extends QueryRow {
-  readonly pod: Pod;
-}
-
 /** The batcher of one subscription: one unacknowledged batch at a time, the latest state wins. */
 class Subscription {
   readonly #query: CompiledQuery;
+  readonly #kind: MockKind;
+  readonly #key: string;
   readonly #cluster: Cluster;
   readonly #columns: Column[];
   readonly #onMessage: (batch: ListBatch) => void;
@@ -450,12 +471,13 @@ class Subscription {
   #seq = 0;
   #acked = 0;
   #dirty = true;
-  #cache: { version: number; result: QueryResult<PodRow> } | undefined;
+  #cache: { version: number; result: QueryResult<MockRow> } | undefined;
   #sent: {
     total: number;
     start: number;
     ids: readonly RowId[];
-    versions: ReadonlyMap<RowId, number>;
+    /** What each row of the window was sent as. */
+    rows: ReadonlyMap<RowId, string>;
     status: string;
     counts: string;
     groups: string;
@@ -464,7 +486,7 @@ class Subscription {
     total: -1,
     start: 0,
     ids: [],
-    versions: new Map(),
+    rows: new Map(),
     status: "",
     counts: "",
     groups: "null",
@@ -474,19 +496,24 @@ class Subscription {
   constructor(
     query: CompiledQuery,
     columns: Column[],
+    kind: MockKind,
     cluster: Cluster,
-    scenario: ListScenario,
+    scenario: Exclude<ListScenario, "forbidden"> | ViewState,
     onMessage: (batch: ListBatch) => void,
   ) {
     this.#query = query;
+    this.#kind = kind;
+    this.#key = JSON.stringify(query.query.gvr);
     this.#cluster = cluster;
     this.#columns = columns;
     this.#onMessage = onMessage;
-    if (scenario === "live" && cluster.synced) {
+    if (typeof scenario !== "string") {
+      this.#status = scenario;
+    } else if (scenario === "live" && cluster.synced.has(this.#key)) {
       this.#status = { state: "ready" };
     } else if (scenario === "live") {
       this.#status = { state: "connecting" };
-      const total = cluster.pods.length;
+      const total = kind.rows(cluster, false).length;
       [0.25, 0.6, 0.9].forEach((share, step) => {
         this.#later(300 + step * 250, {
           state: "syncing",
@@ -494,7 +521,7 @@ class Subscription {
         });
       });
       this.#later(1100, { state: "ready" }, () => {
-        cluster.synced = true;
+        cluster.synced.add(this.#key);
       });
     } else {
       this.#status = PINNED[scenario];
@@ -554,7 +581,7 @@ class Subscription {
     );
   }
 
-  #rows(): QueryResult<PodRow> {
+  #rows(): QueryResult<MockRow> {
     if (!SHOWS_ROWS.has(this.#status.state)) {
       const knows = KNOWS_COLUMNS.has(this.#status.state);
       return {
@@ -564,17 +591,10 @@ class Subscription {
         groups: this.#query.group === null || !knows ? null : [],
       };
     }
-    const { version, pods } = this.#cluster;
+    const { version } = this.#cluster;
     if (this.#cache?.version !== version) {
       const withNamespace = this.#columns.some((c) => c.name === "Namespace");
-      const rows = pods.map((pod): PodRow => ({
-        id: pod.id,
-        namespace: pod.namespace,
-        created: pod.created,
-        labels: {},
-        cells: podCells(pod, withNamespace),
-        pod,
-      }));
+      const rows = this.#kind.rows(this.#cluster, withNamespace);
       this.#cache = { version, result: runQuery(rows, this.#query) };
     }
     return this.#cache.result;
@@ -587,8 +607,11 @@ class Subscription {
     const { rows, readable, counts, groups } = this.#rows();
     const total = rows.length;
     const [start, end] = this.#window;
-    const visible = readable.slice(start, end).map((row) => row.pod);
-    const ids = visible.map((pod) => pod.id);
+    const visible = readable.slice(start, end);
+    const ids = visible.map((row) => row.id);
+    const sent = new Map(
+      visible.map((row) => [row.id, JSON.stringify(wireRow(row))]),
+    );
     const status = JSON.stringify(this.#status);
     const countsJson = JSON.stringify(counts);
     const countsChanged = countsJson !== this.#sent.counts;
@@ -603,7 +626,7 @@ class Subscription {
       ids.length !== this.#sent.ids.length ||
       ids.some((id, i) => id !== this.#sent.ids[i]);
     const upserts = visible.filter(
-      (pod) => this.#sent.versions.get(pod.id) !== pod.version,
+      (row) => this.#sent.rows.get(row.id) !== sent.get(row.id),
     );
     if (
       !windowChanged &&
@@ -616,12 +639,11 @@ class Subscription {
     ) {
       return;
     }
-    const withNamespace = this.#columns.some((c) => c.name === "Namespace");
     this.#sent = {
       total,
       start,
       ids,
-      versions: new Map(visible.map((pod) => [pod.id, pod.version])),
+      rows: sent,
       status,
       counts: countsJson,
       groups: groupsJson,
@@ -633,7 +655,7 @@ class Subscription {
       total,
       columns: columnsChanged ? (knows ? this.#columns : []) : null,
       window: windowChanged ? { start, ids } : null,
-      upserts: upserts.map((pod) => podRow(pod, withNamespace)),
+      upserts: upserts.map(wireRow),
       status: this.#status,
       counts: counts && (first || countsChanged) ? counts : null,
       groups: groupsChanged ? (groups ?? []) : null,

@@ -315,6 +315,79 @@ test("pinned states keep or drop rows as Rust does", async () => {
   }
 });
 
+test("a forbidden list names its resource; live, prod-eu may not list nodes, staging may", async () => {
+  const nodes = {
+    gvr: { group: "", version: "v1", resource: "nodes" },
+    namespaced: false,
+  };
+  const pinned = await open("forbidden", query(nodes));
+  expect(pinned.batches[0]?.status).toEqual({
+    state: "forbidden",
+    verb: "list",
+    resource: "nodes",
+  });
+  const prod = await open("live", query(nodes));
+  expect(prod.batches[0]?.status.state).toBe("forbidden");
+  const staging = await open("live", query({ ...nodes, space: "staging" }));
+  await staging.window(0, 50);
+  for (let ms = 0; ms < 1500; ms += 50) {
+    await staging.ack();
+    await vi.advanceTimersByTimeAsync(50);
+  }
+  const latest = last(staging.batches);
+  expect(latest?.status.state).toBe("ready");
+  expect(latest?.total).toBe(40);
+});
+
+test("nodes, deployments and events come behind the same query view as pods", async () => {
+  const deployments = await open(
+    "ready",
+    query({
+      gvr: { group: "apps", version: "v1", resource: "deployments" },
+      countBy: "Ready",
+    }),
+  );
+  expect(deployments.batches[0]?.columns?.map((column) => column.name)).toEqual(
+    [
+      "Name",
+      "Namespace",
+      "Ready",
+      "Up-to-date",
+      "Available",
+      "Age",
+      "Containers",
+      "Images",
+      "Selector",
+    ],
+  );
+  expect(
+    deployments.batches[0]?.counts?.reduce(
+      (sum, value) => sum + value.count,
+      0,
+    ),
+  ).toBe(deployments.batches[0]?.total);
+  const warnings = await open(
+    "ready",
+    query({
+      gvr: { group: "", version: "v1", resource: "events" },
+      countBy: "Type",
+    }),
+  );
+  expect(
+    warnings.batches[0]?.counts?.find((value) => value.value === "Warning")
+      ?.count,
+  ).toBeGreaterThan(0);
+  const refused = createMockBackend("ready")
+    .subscribe(
+      "list_subscribe",
+      query({ gvr: { group: "", version: "v1", resource: "secrets" } }),
+      () => undefined,
+    )
+    .catch((error: unknown) => error);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(await refused).toMatchObject({ kind: "notFound" });
+});
+
 test("text matches the columns of priority 0 and those the query's choices show", async () => {
   const total = async (text: string, columns: Record<string, boolean> | null) =>
     (await open("ready", query({ text, columns }))).batches[0]?.total;
