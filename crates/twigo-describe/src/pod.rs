@@ -618,7 +618,7 @@ pub fn status_tone(status: &str) -> Tone {
 /// the last exit, which it names in the waiting message as Go writes a
 /// duration (kubernetes v1.37.1, `kuberuntime_manager.go` `doBackOff`:
 /// `back-off 5m0s restarting failed container=…`), a form jiff's friendly
-/// format reads.
+/// format reads; none past jiff's range, which a crafted message reaches.
 pub fn next_start(finished: &str, message: &str) -> Option<String> {
     let backoff: SignedDuration = message
         .strip_prefix("back-off ")?
@@ -627,7 +627,7 @@ pub fn next_start(finished: &str, message: &str) -> Option<String> {
         .parse()
         .ok()?;
     let finished: Timestamp = finished.parse().ok()?;
-    Some((finished + backoff).to_string())
+    Some(finished.checked_add(backoff).ok()?.to_string())
 }
 
 #[cfg(test)]
@@ -663,6 +663,13 @@ mod tests {
         );
         assert_eq!(
             next_start("2026-11-03T10:00:00Z", "Back-off pulling image"),
+            None
+        );
+        assert_eq!(
+            next_start(
+                "2026-11-03T10:00:00Z",
+                "back-off 99999999999h restarting failed"
+            ),
             None
         );
     }
