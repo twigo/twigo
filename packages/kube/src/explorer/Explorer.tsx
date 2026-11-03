@@ -1,14 +1,6 @@
 import type { ReactNode } from "react";
-import { CircleAlert } from "lucide-react";
 import type { Gvr, Resource } from "@twigo/protocol";
-import {
-  Count,
-  EmptyState,
-  Skeleton,
-  StatusDot,
-  Tree,
-  type TreeRow,
-} from "@twigo/ui";
+import { Count, Skeleton, StatusDot, Tree, type TreeRow } from "@twigo/ui";
 import {
   useChanges,
   useListRegistration,
@@ -20,6 +12,7 @@ import { kindIcon, pluralTitle, sections, type Section } from "../kinds";
 import { SHOWS_ROWS, type ListStatus } from "../list/listStatus";
 import type { ListServices } from "../services";
 import { listUri, parseListUri } from "../uri";
+import { ViewStatus } from "../ViewStatus";
 
 export const EXPLORER_VIEW = "kube.resources";
 
@@ -58,9 +51,11 @@ function SpaceExplorer({
   }
   if (resources.state === "failed") {
     return (
-      <EmptyState icon={CircleAlert} variant="error" density="inline">
-        {resources.error.message}
-      </EmptyState>
+      <ViewStatus
+        status={{ state: "error", error: resources.error }}
+        what="resources"
+        inline
+      />
     );
   }
   return (

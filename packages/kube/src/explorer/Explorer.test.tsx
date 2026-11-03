@@ -136,3 +136,25 @@ test("a kind whose open list shows no rows counts nothing", async () => {
   expect(screen.getByText("Access denied")).toBeTruthy();
   expect(item(/^Pods/).textContent).toBe("Pods");
 });
+
+test("a failed discovery says why in place of the tree", async () => {
+  const mock = createMockBackend("ready");
+  const backend: typeof mock = {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe(command, request, onMessage) {
+      if (command !== "resources_watch")
+        return mock.subscribe(command, request, onMessage);
+      setTimeout(() => {
+        (onMessage as (message: unknown) => void)({
+          state: "failed",
+          error: { kind: "unavailable", message: "no route to the cluster" },
+        });
+      }, 0);
+      return Promise.resolve(null as never);
+    },
+  };
+  await mountKube(backend);
+  const sideBar = screen.getByRole("region", { name: "Primary Side Bar" });
+  expect(within(sideBar).getByText("no route to the cluster")).toBeTruthy();
+  expect(screen.queryByRole("tree", { name: "Resources" })).toBeNull();
+});

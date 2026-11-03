@@ -4,10 +4,11 @@ import { EmptyState } from "@twigo/ui";
 import { viewProblem } from "./viewProblem";
 
 /**
- * What a view shows when Rust cannot give it rows or an object
- * (ARCHITECTURE 3.7): one rendering for lists, the explorer, details and
- * object editors. Other states draw nothing here; their view shows a
- * skeleton or its content.
+ * What a view shows when Rust cannot give it rows, an object or the
+ * cluster's kinds (ARCHITECTURE 3.7): one rendering for lists, the
+ * explorer, details and object editors; the home words the same problems
+ * in its tiles through `viewProblem`. Other states draw nothing here;
+ * their view shows a skeleton or its content.
  */
 export function ViewStatus({
   status,

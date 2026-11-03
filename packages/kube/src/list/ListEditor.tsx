@@ -8,6 +8,7 @@ import { sameGvr, useResources } from "../discovery";
 import { pluralTitle } from "../kinds";
 import type { ListServices } from "../services";
 import { parseListUri, type ListInput } from "../uri";
+import { ViewStatus } from "../ViewStatus";
 import { ResourceGrid } from "./ResourceGrid";
 
 /** Below this width the details slide over the list instead of beside it. */
@@ -53,14 +54,10 @@ export function ListEditor({
   const named = group ? `${plural}.${group}` : plural;
   if (resources.state === "failed") {
     return (
-      <EmptyState
-        icon={CircleAlert}
-        variant="error"
-        title={`Could not load ${named}`}
-        className="h-full"
-      >
-        <p className="max-w-md">{resources.error.message}</p>
-      </EmptyState>
+      <ViewStatus
+        status={{ state: "error", error: resources.error }}
+        what={named}
+      />
     );
   }
   if (resources.state === "ready" && !resource) {
