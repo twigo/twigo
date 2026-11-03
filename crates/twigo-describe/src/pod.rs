@@ -567,7 +567,7 @@ fn exited(terminated: &Value) -> String {
 /// duration (kubernetes v1.37.1, `kuberuntime_manager.go` `doBackOff`:
 /// `back-off 5m0s restarting failed container=…`), a form jiff's friendly
 /// format reads.
-fn next_start(finished: &str, message: &str) -> Option<String> {
+pub fn next_start(finished: &str, message: &str) -> Option<String> {
     let backoff: SignedDuration = message
         .strip_prefix("back-off ")?
         .split_once(' ')?

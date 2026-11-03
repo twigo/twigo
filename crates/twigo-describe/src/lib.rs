@@ -36,6 +36,7 @@ use twigo_ipc::{
 
 pub use events::{event, newest_first};
 pub use owned::{Owned, owned};
+pub use pod::next_start;
 
 /// What an object is described from.
 #[derive(Debug, Clone, Copy)]

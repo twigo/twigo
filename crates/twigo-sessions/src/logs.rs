@@ -5,4 +5,10 @@
 pub mod buffer;
 pub mod level;
 pub mod line;
+pub mod stream;
 pub mod view;
+
+/// Nanoseconds since the Unix epoch.
+fn now() -> i64 {
+    i64::try_from(jiff::Timestamp::now().as_nanosecond()).expect("before 2262")
+}
