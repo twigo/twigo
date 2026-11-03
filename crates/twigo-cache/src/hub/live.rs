@@ -544,7 +544,7 @@ async fn an_events_upstream_follows_the_events_of_one_object() {
             &live.context,
             resource,
             Some(namespace.clone()),
-            format!("regarding.uid={first}"),
+            Some(format!("regarding.uid={first}")),
         )
         .unwrap();
     until(&mut selected, |events| {

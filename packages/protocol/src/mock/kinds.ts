@@ -1,23 +1,41 @@
 import { humanDuration } from "@twigo/utils";
 import type { Cell, Column, Row } from "../generated";
-import { generatedAt, hash, podCells, type Cluster, type Pod } from "./cluster";
+import {
+  generatedAt,
+  hash,
+  podCells,
+  deploymentOf,
+  replicaSetUid,
+  type Cluster,
+  type Pod,
+} from "./cluster";
 import {
   DEPLOYMENT_COLUMNS,
   EVENT_COLUMNS,
+  JOB_COLUMNS,
   NODE_COLUMNS,
   POD_COLUMNS,
   VERSIONS,
 } from "./fixtures";
 import type { QueryRow } from "./query";
 
-/** A row as the mock serves it: what a query reads, and where its name was generated. */
+/**
+ * A row as the mock serves it: what a query reads, where its name was
+ * generated, and the fields a field selector reads, as the API server
+ * selects by them.
+ */
 export interface MockRow extends QueryRow {
   readonly generated: number | null;
+  readonly fields: Readonly<Record<string, string>>;
 }
 
 /** A kind the mock serves: the columns kube-apiserver sends for it, and its objects as rows. */
 export interface MockKind {
   readonly columns: readonly Column[];
+  /** The fields its rows can be selected by. */
+  readonly fields: readonly string[];
+  /** Old names of fields, as conversion maps them. */
+  readonly aliases?: Readonly<Record<string, string>>;
   /** The cells follow `queryColumns(columns, query)`: Namespace second when the list shows it. */
   rows(cluster: Cluster, withNamespace: boolean): MockRow[];
 }
@@ -31,24 +49,46 @@ export interface MockKind {
 export const KINDS: Readonly<Record<string, MockKind>> = {
   "/v1/pods": {
     columns: POD_COLUMNS,
+    fields: [
+      "metadata.name",
+      "metadata.namespace",
+      "spec.nodeName",
+      "spec.restartPolicy",
+      "spec.schedulerName",
+      "spec.serviceAccountName",
+      "spec.hostNetwork",
+      "status.phase",
+      "status.podIP",
+      "status.podIPs",
+      "status.nominatedNodeName",
+    ],
+    aliases: { "spec.host": "spec.nodeName" },
     rows: (cluster, withNamespace) =>
       cluster.pods.map((pod) => ({
         id: pod.id,
         namespace: pod.namespace,
         created: pod.created,
         labels: {},
+        controller: replicaSetUid(
+          cluster.context,
+          pod.namespace,
+          deploymentOf(pod),
+        ),
         cells: podCells(pod, withNamespace),
         generated: podGenerated(pod),
+        fields: podFields(pod),
       })),
   },
   "/v1/nodes": {
     columns: NODE_COLUMNS,
+    fields: ["metadata.name", "spec.unschedulable"],
     rows: (cluster) =>
       cluster.nodes.map((node) => ({
         id: node.id,
         namespace: null,
         created: node.created,
         labels: {},
+        controller: null,
         cells: [
           node.name,
           node.status,
@@ -62,16 +102,24 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
           "containerd://2.3.4",
         ],
         generated: null,
+        fields: {
+          "metadata.name": node.name,
+          "spec.unschedulable": String(
+            node.status.includes("SchedulingDisabled"),
+          ),
+        },
       })),
   },
   "apps/v1/deployments": {
     columns: DEPLOYMENT_COLUMNS,
+    fields: ["metadata.name", "metadata.namespace"],
     rows: (cluster, withNamespace) =>
       deployments(cluster).map((deployment) => ({
         id: `${cluster.context}/${deployment.namespace}/${deployment.name}`,
         namespace: deployment.namespace,
         created: deployment.created,
         labels: { app: deployment.name },
+        controller: null,
         cells: namespaced(
           [
             deployment.name,
@@ -87,16 +135,27 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
           withNamespace,
         ),
         generated: null,
+        fields: {
+          "metadata.name": deployment.name,
+          "metadata.namespace": deployment.namespace,
+        },
       })),
+  },
+  "batch/v1/jobs": {
+    columns: JOB_COLUMNS,
+    fields: ["metadata.name", "metadata.namespace"],
+    rows: () => [],
   },
   "/v1/events": {
     columns: EVENT_COLUMNS,
+    fields: ["metadata.name", "metadata.namespace"],
     rows: (cluster, withNamespace) =>
       events(cluster).map((event) => ({
         id: `${cluster.context}/${event.pod.namespace}/${event.name}`,
         namespace: event.pod.namespace,
         created: event.first,
         labels: {},
+        controller: null,
         cells: namespaced(
           [
             humanDuration(cluster.now - event.last),
@@ -114,9 +173,45 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
           withNamespace,
         ),
         generated: null,
+        fields: {
+          "metadata.name": event.name,
+          "metadata.namespace": event.pod.namespace,
+        },
       })),
   },
 };
+
+/** Statuses of a pod whose containers have never run. */
+const PENDING: ReadonlySet<string> = new Set([
+  "Pending",
+  "ContainerCreating",
+  "ImagePullBackOff",
+]);
+
+/**
+ * What a pod is selectable by, as kube-apiserver selects it (kubernetes
+ * v1.37.1 `pkg/registry/core/pod/strategy.go` `ToSelectableFields`), read
+ * from what the mock knows of it. Its pods restart always, so one whose
+ * containers have run stays Running whatever they did, as the kubelet's
+ * `getPhase` keeps it; a Pending one is not scheduled, so it has no node;
+ * `status.podIPs`, which conversion accepts but the set lacks, is empty.
+ */
+function podFields(pod: Pod): Readonly<Record<string, string>> {
+  const phase = PENDING.has(pod.status) ? "Pending" : "Running";
+  return {
+    "metadata.name": pod.name,
+    "metadata.namespace": pod.namespace,
+    "spec.nodeName": pod.status === "Pending" ? "" : pod.node,
+    "spec.restartPolicy": "Always",
+    "spec.schedulerName": "default-scheduler",
+    "spec.serviceAccountName": "default",
+    "spec.hostNetwork": "false",
+    "status.phase": phase,
+    "status.podIP": phase === "Pending" ? "" : pod.ip,
+    "status.podIPs": "",
+    "status.nominatedNodeName": "",
+  };
+}
 
 export function wireRow(row: MockRow): Row {
   return {
@@ -144,14 +239,9 @@ function namespaced(
     : [first ?? null, ...rest];
 }
 
-/** A pod's Deployment: its ReplicaSet's name without the template hash. */
-function ownerOf(pod: Pod): string {
-  return pod.generateName.slice(0, -(pod.templateHash.length + 2));
-}
-
 /** Its Deployment's one container, named after the workload. */
 function containerOf(pod: Pod): string {
-  return ownerOf(pod).slice(ownerOf(pod).indexOf("-") + 1);
+  return deploymentOf(pod).slice(deploymentOf(pod).indexOf("-") + 1);
 }
 
 function imageOf(pod: Pod): string {
@@ -176,7 +266,7 @@ interface Deployment {
 function deployments(cluster: Cluster): Deployment[] {
   const owned = new Map<string, Pod[]>();
   for (const pod of cluster.pods) {
-    const key = `${pod.namespace}/${ownerOf(pod)}`;
+    const key = `${pod.namespace}/${deploymentOf(pod)}`;
     const pods = owned.get(key);
     if (pods) pods.push(pod);
     else owned.set(key, [pod]);
@@ -187,7 +277,7 @@ function deployments(cluster: Cluster): Deployment[] {
     return [
       {
         namespace: first.namespace,
-        name: ownerOf(first),
+        name: deploymentOf(first),
         replicas: pods.length,
         ready: pods.filter(ready).length,
         created: Math.min(...pods.map((pod) => pod.created)),

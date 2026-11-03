@@ -367,11 +367,11 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
 
 ### 3.3 Three upstream kinds
 
-| Kind         | Request                                                                                                                                                                                 | Used for                                                                                                                         |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| **Table**    | `GET …?watch=true&allowWatchBookmarks=true&includeObject=Metadata` with `Accept: application/json;as=Table;v=v1;g=meta.k8s.io, application/json`, read through `Client::request_stream` | Every list, for built-in kinds and CRDs alike. The server computes the columns, the same as `kubectl get -w`.                    |
-| **Metadata** | List and watch with `Accept: application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1` and `…as=PartialObjectMetadata…`, managedFields skipped at deserialisation               | Indexes: namespaces (for the picker), CRDs and APIServices (discovery invalidation), and owner references for the "Related" tab. |
-| **Object**   | List and watch with `fieldSelector=metadata.name=…` as a Table with `includeObject=Object`: whole objects with their cells                                                              | An open editor: live YAML, overview, conflict detection.                                                                         |
+| Kind         | Request                                                                                                                                                                                 | Used for                                                                                                                                                                                                                     |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Table**    | `GET …?watch=true&allowWatchBookmarks=true&includeObject=Metadata` with `Accept: application/json;as=Table;v=v1;g=meta.k8s.io, application/json`, read through `Client::request_stream` | Every list, for built-in kinds and CRDs alike. The server computes the columns, the same as `kubectl get -w`.                                                                                                                |
+| **Metadata** | List and watch with `Accept: application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1` and `…as=PartialObjectMetadata…`, managedFields skipped at deserialisation               | Indexes: namespaces (for the picker), CRDs and APIServices (discovery invalidation), and owner references for the "Related" tab.                                                                                             |
+| **Object**   | List and watch with `fieldSelector=metadata.name=…`, another field selector or none, as a Table with `includeObject=Object`: whole objects with their cells                             | An open editor: live YAML, overview, conflict detection; an object's events; what its describer reads while its Overview is shown, such as a namespace's ReplicaSets or EndpointSlices, or a node's pods by `spec.nodeName`. |
 
 All three run on the hub's own list and watch rather than kube-runtime's `watcher`, which 4.2 cannot start from a `resourceVersion` once it is recreated, nor tell to re-watch on wake or after a probe: it reopens a quiet watch only after `timeoutSeconds` and 5 s, without a probe ([`next_with_idle_timeout`](https://github.com/kube-rs/kube/blob/4.2.0/kube-runtime/src/watcher.rs#L483-L505)).
 
@@ -421,7 +421,8 @@ The hub's row store adds about 130 bytes a row for its key and map, by `examples
 ### 3.4 Query views: Rust sorts, filters and windows
 
 The frontend never holds the full list.
-A subscription carries a `ListQuery { space, gvr, namespaced, namespaces, labelSelector, text, columns, sort, countBy, groupBy, values }`.
+A subscription carries a `ListQuery { space, gvr, namespaced, namespaces, labelSelector, fieldSelector, owners, text, columns, sort, countBy, groupBy, values }`.
+The field selector goes to the server with the list's requests, as a node's pods need; `owners` keeps the rows whose controller reference names one of its uids, an empty set none, after the labels and before the text and the counts, as a workload's pods are its ReplicaSets'.
 `namespaced` comes from discovery, which the webview holds already, so a list subscribes once its space's resources are known: Rust needs the scope for the request's path and for the Namespace column, which a cluster-scoped kind never has.
 The webview then sends `setWindow(start, end)` as the user scrolls, covering the visible rows plus about two screens of overscan.
 
@@ -690,11 +691,13 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   - Unsaved working copies survive a restart (backups per space).
 - **Overview.**
   One document per object, described in Rust by `twigo-describe` and rendered alike by the drawer, the Overview tab and MCP's describe-style summaries (6.6) ([research](research/details.md)).
-  - Sections have ids and an order: metadata first, then the kind's sections, conditions, extension sections, events last.
-    Each section holds blocks from a closed set (fields, tables, conditions, containers, data keys, live lists, events, a tree), which the webview renders with an exhaustive switch.
+  - Sections have ids and an order, the object's state first: Diagnostics when something is wrong, the kind's first section, conditions, the kind's other sections, extension sections, then metadata and events last.
+    Each section holds blocks from a closed set (fields, diagnostics, tables, conditions, containers, data keys, live lists, events, a tree), which the webview renders with a switch that lint holds exhaustive.
   - Core kinds get describers (Pod, Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, Ingress, Node, PVC, ConfigMap, Secret): at least what `kubectl describe` prints, plus a Diagnostics section when something is wrong.
-  - Any kind, CRDs included, gets a generic overview: metadata, the server's printer columns, a `status.conditions` table when present, spec and status as a tree with the descriptions of their schema, events.
-  - A workload's pods, a CronJob's jobs and a node's pods are live resource tables inside the Overview, run by query views with an owner filter.
+    A describer names the objects of other resources it reads, such as a Deployment its ReplicaSets, a Service its EndpointSlices or a node its pods, and `twigo-core` follows them through the hub while the Overview is shown.
+  - A container's card shows its state, how it last ended and its resources; the rest of what `kubectl describe` prints of it, its environment and its mounts fold.
+  - Any kind, CRDs included, gets a generic overview: the server's printer columns, a `status.conditions` table when present, spec and status as a tree with the descriptions of their schema, metadata, events.
+  - A workload's pods, a CronJob's jobs and a node's pods are live resource tables inside the Overview, run by query views: a workload's by the uids of what controls them, a node's by a field selector.
   - Extensions add declarative sections per GVK (5.4), and replace a core section only by naming its id.
 
 ### 4.4 Resource tables and the keyboard
@@ -919,6 +922,7 @@ It lives in `packages/ui`: the tokens, and primitives that draw every recurring 
   - the editor darker than the shell in dark;
   - text tiers at 4.5:1, a solid focus ring, tones drawn by shape;
   - the space's home in an empty editor area (4.1), without the mockup's capacity and trend, for which Twigo has no data.
+- **Settled with the owner** on 2026-11-03, from live variants of the Overview (4.3): the object's state before its metadata, and containers as cards whose less used fields fold.
 
 ## 5. Commands, keybindings and extensions
 

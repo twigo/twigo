@@ -1,0 +1,202 @@
+{
+  "events": [
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:36:41Z",
+      "last": "2026-11-03T11:36:41Z",
+      "message": "Create Claim data-db-0 Pod db-0 in StatefulSet db success",
+      "reason": "SuccessfulCreate",
+      "source": "statefulset-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:36:41Z",
+      "last": "2026-11-03T11:36:41Z",
+      "message": "Create Pod db-0 in StatefulSet db successful",
+      "reason": "SuccessfulCreate",
+      "source": "statefulset-controller",
+      "type": "Normal"
+    }
+  ],
+  "facts": [],
+  "object": {
+    "apiVersion": "apps/v1",
+    "kind": "StatefulSet",
+    "metadata": {
+      "creationTimestamp": "2026-11-03T11:36:41Z",
+      "generation": 1,
+      "managedFields": [
+        {
+          "apiVersion": "apps/v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:spec": {
+              "f:replicas": {},
+              "f:selector": {},
+              "f:serviceName": {},
+              "f:template": {
+                "f:metadata": {
+                  "f:labels": {
+                    "f:app": {}
+                  }
+                },
+                "f:spec": {
+                  "f:containers": {
+                    "k:{\"name\":\"db\"}": {
+                      ".": {},
+                      "f:image": {},
+                      "f:name": {},
+                      "f:volumeMounts": {
+                        "k:{\"mountPath\":\"/var/lib/db\"}": {
+                          ".": {},
+                          "f:mountPath": {},
+                          "f:name": {}
+                        }
+                      }
+                    }
+                  },
+                  "f:nodeSelector": {}
+                }
+              },
+              "f:volumeClaimTemplates": {}
+            }
+          },
+          "manager": "twigo-record",
+          "operation": "Apply",
+          "time": "2026-11-03T11:36:41Z"
+        },
+        {
+          "apiVersion": "apps/v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:status": {
+              "f:availableReplicas": {},
+              "f:collisionCount": {},
+              "f:currentReplicas": {},
+              "f:currentRevision": {},
+              "f:observedGeneration": {},
+              "f:readyReplicas": {},
+              "f:replicas": {},
+              "f:updateRevision": {},
+              "f:updatedReplicas": {}
+            }
+          },
+          "manager": "kube-controller-manager",
+          "operation": "Update",
+          "subresource": "status",
+          "time": "2026-11-03T11:36:45Z"
+        }
+      ],
+      "name": "db",
+      "namespace": "overview",
+      "resourceVersion": "2532",
+      "uid": "47e4660a-9b80-481b-a117-d69094325a94"
+    },
+    "spec": {
+      "persistentVolumeClaimRetentionPolicy": {
+        "whenDeleted": "Retain",
+        "whenScaled": "Retain"
+      },
+      "podManagementPolicy": "OrderedReady",
+      "replicas": 1,
+      "revisionHistoryLimit": 10,
+      "selector": {
+        "matchLabels": {
+          "app": "db"
+        }
+      },
+      "serviceName": "db",
+      "template": {
+        "metadata": {
+          "labels": {
+            "app": "db"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "image": "registry.k8s.io/pause:3.10",
+              "imagePullPolicy": "IfNotPresent",
+              "name": "db",
+              "resources": {},
+              "terminationMessagePath": "/dev/termination-log",
+              "terminationMessagePolicy": "File",
+              "volumeMounts": [
+                {
+                  "mountPath": "/var/lib/db",
+                  "name": "data"
+                }
+              ]
+            }
+          ],
+          "dnsPolicy": "ClusterFirst",
+          "nodeSelector": {
+            "kubernetes.io/hostname": "twigo-overviews-control-plane"
+          },
+          "restartPolicy": "Always",
+          "schedulerName": "default-scheduler",
+          "securityContext": {},
+          "terminationGracePeriodSeconds": 30
+        }
+      },
+      "updateStrategy": {
+        "rollingUpdate": {
+          "maxUnavailable": 1,
+          "partition": 0
+        },
+        "type": "RollingUpdate"
+      },
+      "volumeClaimTemplates": [
+        {
+          "apiVersion": "v1",
+          "kind": "PersistentVolumeClaim",
+          "metadata": {
+            "name": "data"
+          },
+          "spec": {
+            "accessModes": [
+              "ReadWriteOnce"
+            ],
+            "resources": {
+              "requests": {
+                "storage": "1Gi"
+              }
+            },
+            "volumeMode": "Filesystem"
+          },
+          "status": {
+            "phase": "Pending"
+          }
+        }
+      ]
+    },
+    "status": {
+      "availableReplicas": 1,
+      "collisionCount": 0,
+      "currentReplicas": 1,
+      "currentRevision": "db-5f675c5b56",
+      "observedGeneration": 1,
+      "readyReplicas": 1,
+      "replicas": 1,
+      "updateRevision": "db-5f675c5b56",
+      "updatedReplicas": 1
+    }
+  },
+  "printed": [
+    {
+      "column": "Ready",
+      "value": "1/1"
+    },
+    {
+      "column": "Containers",
+      "value": "db"
+    },
+    {
+      "column": "Images",
+      "value": "registry.k8s.io/pause:3.10"
+    }
+  ]
+}

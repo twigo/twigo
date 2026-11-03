@@ -23,6 +23,17 @@ pub(crate) fn section(id: &str, title: &str, value: &Value, skip: &[&str]) -> Op
     })
 }
 
+/// A map's entries as nodes, nulls and empty values left out; none when
+/// nothing is left or it is no map.
+pub(crate) fn nodes(value: &Value) -> Option<Vec<TreeNode>> {
+    let nodes: Vec<TreeNode> = value
+        .as_object()?
+        .iter()
+        .filter_map(|(key, value)| node(key.clone(), field(key), value))
+        .collect();
+    (!nodes.is_empty()).then_some(nodes)
+}
+
 /// Maps whose keys are data, not field names: labels, selectors, a
 /// ConfigMap's keys, resource names.
 const DATA_MAPS: &[&str] = &[

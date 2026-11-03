@@ -39,6 +39,7 @@ pub struct Spec {
     context: String,
     namespace_column: bool,
     labels: Option<Selector>,
+    owners: Option<HashSet<String>>,
     text: Option<TextFilter>,
     choices: Option<BTreeMap<String, bool>>,
     sort: Option<ipc::Sort>,
@@ -59,6 +60,10 @@ impl Spec {
                 .as_deref()
                 .map(Selector::parse)
                 .transpose()?,
+            owners: query
+                .owners
+                .as_ref()
+                .map(|uids| uids.iter().cloned().collect()),
             text: match &query.text {
                 Some(text) => TextFilter::parse(text)?,
                 None => None,
@@ -394,6 +399,15 @@ impl QueryView {
         let layout = &self.layout;
         if let Some(labels) = &self.spec.labels
             && !labels.matches(&row.meta.labels)
+        {
+            return;
+        }
+        if let Some(owners) = &self.spec.owners
+            && !row
+                .meta
+                .owners
+                .iter()
+                .any(|owner| owner.controller && owners.contains(&*owner.uid))
         {
             return;
         }

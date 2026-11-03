@@ -170,6 +170,8 @@ mod tests {
             namespaced: true,
             namespaces: vec!["a".to_owned()],
             label_selector: None,
+            field_selector: None,
+            owners: None,
             text: None,
             columns: None,
             sort: None,

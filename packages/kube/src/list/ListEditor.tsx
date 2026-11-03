@@ -8,6 +8,7 @@ import { sameGvr, useResources } from "../discovery";
 import { pluralTitle } from "../kinds";
 import type { ListServices } from "../services";
 import { parseListUri, type ListInput } from "../uri";
+import { useWidth } from "../useWidth";
 import { ViewStatus } from "../ViewStatus";
 import { ResourceGrid } from "./ResourceGrid";
 
@@ -193,20 +194,4 @@ function Loaded({
       )}
     </div>
   );
-}
-
-/** An element's width as it lays out, 0 until it is mounted. */
-function useWidth(element: HTMLElement | null): number {
-  const [width, setWidth] = useState(0);
-  useEffect(() => {
-    if (!element) return;
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry) setWidth(Math.round(entry.contentRect.width));
-    });
-    observer.observe(element);
-    return () => {
-      observer.disconnect();
-    };
-  }, [element]);
-  return width;
 }

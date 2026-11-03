@@ -110,6 +110,18 @@ export const DEPLOYMENT_COLUMNS: readonly Column[] = [
   { name: "Selector", kind: "string", priority: 1 },
 ];
 
+/** The columns kube-apiserver sends for Jobs (printers.go in kubernetes v1.37.1). */
+export const JOB_COLUMNS: readonly Column[] = [
+  { name: "Name", kind: "string", priority: 0 },
+  { name: "Status", kind: "string", priority: 0 },
+  { name: "Completions", kind: "string", priority: 0 },
+  { name: "Duration", kind: "string", priority: 0 },
+  { name: "Age", kind: "age", priority: 0 },
+  { name: "Containers", kind: "string", priority: 1 },
+  { name: "Images", kind: "string", priority: 1 },
+  { name: "Selector", kind: "string", priority: 1 },
+];
+
 /**
  * The columns kube-apiserver sends for core events
  * (crates/twigo-cache/tests/fixtures/events-list.json): no Age, Name last

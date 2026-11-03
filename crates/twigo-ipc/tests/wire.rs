@@ -57,6 +57,8 @@ fn queries_use_camel_case_and_newtypes_are_bare() {
         namespaced: true,
         namespaces: vec![],
         label_selector: Some("app=api".into()),
+        field_selector: Some("spec.nodeName=node-1".into()),
+        owners: Some(vec!["5c2f".into()]),
         text: None,
         columns: Some(BTreeMap::from([
             ("IP".into(), true),
@@ -78,6 +80,8 @@ fn queries_use_camel_case_and_newtypes_are_bare() {
     };
     assert_eq!(wire(&query)["namespaced"], json!(true));
     assert_eq!(wire(&query)["labelSelector"], json!("app=api"));
+    assert_eq!(wire(&query)["fieldSelector"], json!("spec.nodeName=node-1"));
+    assert_eq!(wire(&query)["owners"], json!(["5c2f"]));
     assert_eq!(wire(&query)["countBy"], json!("Status"));
     assert_eq!(
         wire(&query)["groupBy"],

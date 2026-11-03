@@ -20,6 +20,24 @@ export interface Pod {
   version: number;
 }
 
+/**
+ * The mock's uid of the ReplicaSet of a Deployment. The mock gives each
+ * Deployment one ReplicaSet, whose pods differ in their hash alone, so a
+ * pod that churn replaces stays the Deployment's.
+ */
+export function replicaSetUid(
+  context: string,
+  namespace: string,
+  deployment: string,
+): string {
+  return `${context}/${namespace}/${deployment}`;
+}
+
+/** The Deployment a pod's name says owns it. */
+export function deploymentOf(pod: Pod): string {
+  return pod.generateName.slice(0, -(pod.templateHash.length + 2));
+}
+
 const ABNORMAL: [string, number][] = [
   ["Pending", 0.02],
   ["ContainerCreating", 0.01],
@@ -187,6 +205,7 @@ export class Cluster {
 
 /** The cells of a pod, matching `queryColumns(POD_COLUMNS, query)`. */
 export function podCells(pod: Pod, withNamespace: boolean): Cell[] {
+  const scheduled = pod.status !== "Pending";
   return [
     pod.name,
     ...(withNamespace ? [pod.namespace] : []),
@@ -194,8 +213,8 @@ export function podCells(pod: Pod, withNamespace: boolean): Cell[] {
     pod.status,
     pod.restarts,
     null,
-    pod.ip,
-    pod.node,
+    scheduled ? pod.ip : "<none>",
+    scheduled ? pod.node : "<none>",
     "<none>",
     "<none>",
   ];

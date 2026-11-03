@@ -28,6 +28,12 @@ pub struct ListQuery {
     /// Empty for every namespace the space covers.
     pub namespaces: Vec<String>,
     pub label_selector: Option<String>,
+    /// Sent to the server, as `spec.nodeName=kind-control-plane` picks a
+    /// node's pods.
+    pub field_selector: Option<String>,
+    /// Keeps the rows whose controller is one of the objects with these
+    /// uids, as a workload's pods are its ReplicaSets'; empty keeps none.
+    pub owners: Option<Vec<String>>,
     /// A substring of a shown cell in any case of ASCII letters, `!` before
     /// it to keep the rows without one, or a regex between slashes, also in
     /// any case: `/^web-\d+/`, negated as `!/…/`.

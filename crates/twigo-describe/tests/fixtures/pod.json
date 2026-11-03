@@ -2,9 +2,29 @@
   "events": [
     {
       "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:36:41Z",
+      "last": "2026-11-03T11:36:41Z",
+      "message": "Successfully assigned overview/web-54454cf656-dvb7s to twigo-overviews-control-plane",
+      "reason": "Scheduled",
+      "source": "default-scheduler",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
       "fieldPath": "spec.containers{app}",
-      "first": "2026-11-02T21:04:52Z",
-      "last": "2026-11-02T21:04:52Z",
+      "first": "2026-11-03T11:36:41Z",
+      "last": "2026-11-03T11:36:41Z",
+      "message": "Container started",
+      "reason": "Started",
+      "source": "kubelet",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": "spec.containers{app}",
+      "first": "2026-11-03T11:36:41Z",
+      "last": "2026-11-03T11:36:41Z",
       "message": "Container image \"registry.k8s.io/pause:3.10\" already present on machine and can be accessed by the pod",
       "reason": "Pulled",
       "source": "kubelet",
@@ -13,44 +33,28 @@
     {
       "count": 1,
       "fieldPath": "spec.containers{app}",
-      "first": "2026-11-02T21:04:52Z",
-      "last": "2026-11-02T21:04:52Z",
+      "first": "2026-11-03T11:36:41Z",
+      "last": "2026-11-03T11:36:41Z",
       "message": "Container created",
       "reason": "Created",
       "source": "kubelet",
       "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-02T21:04:52Z",
-      "last": "2026-11-02T21:04:52Z",
-      "message": "Successfully assigned overview/web-8dc77bb87-4789m to twigo-editors-control-plane",
-      "reason": "Scheduled",
-      "source": "default-scheduler",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": "spec.containers{app}",
-      "first": "2026-11-02T21:04:52Z",
-      "last": "2026-11-02T21:04:52Z",
-      "message": "Container started",
-      "reason": "Started",
-      "source": "kubelet",
-      "type": "Normal"
     }
   ],
+  "facts": [],
   "object": {
     "apiVersion": "v1",
     "kind": "Pod",
     "metadata": {
-      "creationTimestamp": "2026-11-02T21:04:52Z",
-      "generateName": "web-8dc77bb87-",
+      "annotations": {
+        "twigo.io/revision": "2"
+      },
+      "creationTimestamp": "2026-11-03T11:36:41Z",
+      "generateName": "web-54454cf656-",
       "generation": 1,
       "labels": {
         "app": "web",
-        "pod-template-hash": "8dc77bb87"
+        "pod-template-hash": "54454cf656"
       },
       "managedFields": [
         {
@@ -58,6 +62,10 @@
           "fieldsType": "FieldsV1",
           "fieldsV1": {
             "f:metadata": {
+              "f:annotations": {
+                ".": {},
+                "f:twigo.io/revision": {}
+              },
               "f:generateName": {},
               "f:labels": {
                 ".": {},
@@ -66,13 +74,49 @@
               },
               "f:ownerReferences": {
                 ".": {},
-                "k:{\"uid\":\"6e6768fe-14d9-4dc3-b63f-6c36517ec5c8\"}": {}
+                "k:{\"uid\":\"cd05d603-d2a6-417d-ba62-1130a0711b7e\"}": {}
               }
             },
             "f:spec": {
               "f:containers": {
                 "k:{\"name\":\"app\"}": {
                   ".": {},
+                  "f:env": {
+                    ".": {},
+                    "k:{\"name\":\"MEMORY_MI\"}": {
+                      ".": {},
+                      "f:name": {},
+                      "f:valueFrom": {
+                        ".": {},
+                        "f:resourceFieldRef": {}
+                      }
+                    },
+                    "k:{\"name\":\"MODE\"}": {
+                      ".": {},
+                      "f:name": {},
+                      "f:valueFrom": {
+                        ".": {},
+                        "f:configMapKeyRef": {}
+                      }
+                    },
+                    "k:{\"name\":\"PASSWORD\"}": {
+                      ".": {},
+                      "f:name": {},
+                      "f:valueFrom": {
+                        ".": {},
+                        "f:secretKeyRef": {}
+                      }
+                    },
+                    "k:{\"name\":\"POD_IP\"}": {
+                      ".": {},
+                      "f:name": {},
+                      "f:valueFrom": {
+                        ".": {},
+                        "f:fieldRef": {}
+                      }
+                    }
+                  },
+                  "f:envFrom": {},
                   "f:image": {},
                   "f:imagePullPolicy": {},
                   "f:name": {},
@@ -87,6 +131,10 @@
                   },
                   "f:resources": {
                     ".": {},
+                    "f:limits": {
+                      ".": {},
+                      "f:memory": {}
+                    },
                     "f:requests": {
                       ".": {},
                       "f:cpu": {},
@@ -94,7 +142,16 @@
                     }
                   },
                   "f:terminationMessagePath": {},
-                  "f:terminationMessagePolicy": {}
+                  "f:terminationMessagePolicy": {},
+                  "f:volumeMounts": {
+                    ".": {},
+                    "k:{\"mountPath\":\"/etc/web\"}": {
+                      ".": {},
+                      "f:mountPath": {},
+                      "f:name": {},
+                      "f:readOnly": {}
+                    }
+                  }
                 }
               },
               "f:dnsPolicy": {},
@@ -103,12 +160,24 @@
               "f:restartPolicy": {},
               "f:schedulerName": {},
               "f:securityContext": {},
-              "f:terminationGracePeriodSeconds": {}
+              "f:terminationGracePeriodSeconds": {},
+              "f:volumes": {
+                ".": {},
+                "k:{\"name\":\"settings\"}": {
+                  ".": {},
+                  "f:configMap": {
+                    ".": {},
+                    "f:defaultMode": {},
+                    "f:name": {}
+                  },
+                  "f:name": {}
+                }
+              }
             }
           },
           "manager": "kube-controller-manager",
           "operation": "Update",
-          "time": "2026-11-02T21:04:52Z"
+          "time": "2026-11-03T11:36:41Z"
         },
         {
           "apiVersion": "v1",
@@ -172,6 +241,10 @@
               },
               "f:resources": {
                 ".": {},
+                "f:limits": {
+                  ".": {},
+                  "f:memory": {}
+                },
                 "f:requests": {
                   ".": {},
                   "f:memory": {}
@@ -183,10 +256,10 @@
           "manager": "kubelet",
           "operation": "Update",
           "subresource": "status",
-          "time": "2026-11-02T21:04:52Z"
+          "time": "2026-11-03T11:36:41Z"
         }
       ],
-      "name": "web-8dc77bb87-4789m",
+      "name": "web-54454cf656-dvb7s",
       "namespace": "overview",
       "ownerReferences": [
         {
@@ -194,16 +267,62 @@
           "blockOwnerDeletion": true,
           "controller": true,
           "kind": "ReplicaSet",
-          "name": "web-8dc77bb87",
-          "uid": "6e6768fe-14d9-4dc3-b63f-6c36517ec5c8"
+          "name": "web-54454cf656",
+          "uid": "cd05d603-d2a6-417d-ba62-1130a0711b7e"
         }
       ],
-      "resourceVersion": "4041",
-      "uid": "c84adae2-6088-4643-8984-80d61689fd78"
+      "resourceVersion": "2699",
+      "uid": "4d628f1b-063c-451b-8e42-d07498e421c6"
     },
     "spec": {
       "containers": [
         {
+          "env": [
+            {
+              "name": "MODE",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "key": "mode",
+                  "name": "settings"
+                }
+              }
+            },
+            {
+              "name": "PASSWORD",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "key": "password",
+                  "name": "credentials"
+                }
+              }
+            },
+            {
+              "name": "POD_IP",
+              "valueFrom": {
+                "fieldRef": {
+                  "apiVersion": "v1",
+                  "fieldPath": "status.podIP"
+                }
+              }
+            },
+            {
+              "name": "MEMORY_MI",
+              "valueFrom": {
+                "resourceFieldRef": {
+                  "divisor": "1Mi",
+                  "resource": "limits.memory"
+                }
+              }
+            }
+          ],
+          "envFrom": [
+            {
+              "configMapRef": {
+                "name": "settings"
+              },
+              "prefix": "APP_"
+            }
+          ],
           "image": "registry.k8s.io/pause:3.10",
           "imagePullPolicy": "IfNotPresent",
           "name": "app",
@@ -215,6 +334,9 @@
             }
           ],
           "resources": {
+            "limits": {
+              "memory": "64Mi"
+            },
             "requests": {
               "cpu": "10m",
               "memory": "16Mi"
@@ -224,8 +346,13 @@
           "terminationMessagePolicy": "File",
           "volumeMounts": [
             {
+              "mountPath": "/etc/web",
+              "name": "settings",
+              "readOnly": true
+            },
+            {
               "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-              "name": "kube-api-access-gf9dh",
+              "name": "kube-api-access-szhp5",
               "readOnly": true
             }
           ]
@@ -233,9 +360,9 @@
       ],
       "dnsPolicy": "ClusterFirst",
       "enableServiceLinks": true,
-      "nodeName": "twigo-editors-control-plane",
+      "nodeName": "twigo-overviews-control-plane",
       "nodeSelector": {
-        "kubernetes.io/hostname": "twigo-editors-control-plane"
+        "kubernetes.io/hostname": "twigo-overviews-control-plane"
       },
       "preemptionPolicy": "PreemptLowerPriority",
       "priority": 0,
@@ -261,7 +388,14 @@
       ],
       "volumes": [
         {
-          "name": "kube-api-access-gf9dh",
+          "configMap": {
+            "defaultMode": 420,
+            "name": "settings"
+          },
+          "name": "settings"
+        },
+        {
+          "name": "kube-api-access-szhp5",
           "projected": {
             "defaultMode": 420,
             "sources": [
@@ -308,35 +442,35 @@
       "conditions": [
         {
           "lastProbeTime": null,
-          "lastTransitionTime": "2026-11-02T21:04:52Z",
+          "lastTransitionTime": "2026-11-03T11:36:41Z",
           "observedGeneration": 1,
           "status": "True",
           "type": "PodReadyToStartContainers"
         },
         {
           "lastProbeTime": null,
-          "lastTransitionTime": "2026-11-02T21:04:52Z",
+          "lastTransitionTime": "2026-11-03T11:36:41Z",
           "observedGeneration": 1,
           "status": "True",
           "type": "Initialized"
         },
         {
           "lastProbeTime": null,
-          "lastTransitionTime": "2026-11-02T21:04:52Z",
+          "lastTransitionTime": "2026-11-03T11:36:41Z",
           "observedGeneration": 1,
           "status": "True",
           "type": "Ready"
         },
         {
           "lastProbeTime": null,
-          "lastTransitionTime": "2026-11-02T21:04:52Z",
+          "lastTransitionTime": "2026-11-03T11:36:41Z",
           "observedGeneration": 1,
           "status": "True",
           "type": "ContainersReady"
         },
         {
           "lastProbeTime": null,
-          "lastTransitionTime": "2026-11-02T21:04:52Z",
+          "lastTransitionTime": "2026-11-03T11:36:41Z",
           "observedGeneration": 1,
           "status": "True",
           "type": "PodScheduled"
@@ -348,13 +482,16 @@
             "cpu": "10m",
             "memory": "16Mi"
           },
-          "containerID": "containerd://2795f5b23dba47ad66e838199a09e4d1218c5ecf3c80a62eabac9f1338271238",
+          "containerID": "containerd://a221fdcc856190fdcc285c9d072643cea87e57d5e7d3cd8f8ca6241732cc7e66",
           "image": "registry.k8s.io/pause:3.10",
           "imageID": "sha256:afb61768ce381961ca0beff95337601f29dc70ff3ed14e5e4b3e5699057e6aa8",
           "lastState": {},
           "name": "app",
           "ready": true,
           "resources": {
+            "limits": {
+              "memory": "64Mi"
+            },
             "requests": {
               "cpu": "10m",
               "memory": "16Mi"
@@ -364,7 +501,7 @@
           "started": true,
           "state": {
             "running": {
-              "startedAt": "2026-11-02T21:04:52Z"
+              "startedAt": "2026-11-03T11:36:41Z"
             }
           },
           "user": {
@@ -378,8 +515,14 @@
           },
           "volumeMounts": [
             {
+              "mountPath": "/etc/web",
+              "name": "settings",
+              "readOnly": true,
+              "recursiveReadOnly": "Disabled"
+            },
+            {
               "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-              "name": "kube-api-access-gf9dh",
+              "name": "kube-api-access-szhp5",
               "readOnly": true,
               "recursiveReadOnly": "Disabled"
             }
@@ -402,11 +545,14 @@
       ],
       "qosClass": "Burstable",
       "resources": {
+        "limits": {
+          "memory": "64Mi"
+        },
         "requests": {
           "memory": "16Mi"
         }
       },
-      "startTime": "2026-11-02T21:04:52Z"
+      "startTime": "2026-11-03T11:36:41Z"
     }
   },
   "printed": [
@@ -428,7 +574,7 @@
     },
     {
       "column": "Node",
-      "value": "twigo-editors-control-plane"
+      "value": "twigo-overviews-control-plane"
     }
   ]
 }

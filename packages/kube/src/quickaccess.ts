@@ -292,6 +292,8 @@ export function resourceProvider(
           namespaced: true,
           namespaces: [...spaces.state(space.id).namespaces],
           labelSelector: null,
+          fieldSelector: null,
+          owners: null,
           text: filter.trim() === "" ? null : filter.trim(),
           columns: null,
           sort: null,

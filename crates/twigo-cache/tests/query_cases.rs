@@ -7,7 +7,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 use serde_json::Value;
 use twigo_cache::hub::Delta;
-use twigo_cache::meta::Meta;
+use twigo_cache::meta::{Meta, Owner};
 use twigo_cache::table::{Cell, Column, ColumnKind, Row};
 use twigo_cache::view::{QueryView, Spec};
 use twigo_ipc::{
@@ -37,7 +37,15 @@ struct CaseRow {
     name: String,
     created: Option<jiff::Timestamp>,
     labels: BTreeMap<String, String>,
+    #[serde(default)]
+    owners: Vec<CaseOwner>,
     cells: Vec<Value>,
+}
+
+#[derive(Deserialize)]
+struct CaseOwner {
+    uid: String,
+    controller: bool,
 }
 
 #[derive(Deserialize)]
@@ -53,6 +61,7 @@ struct Case {
 struct CaseQuery {
     namespaces: Vec<String>,
     label_selector: Option<String>,
+    owners: Option<Vec<String>>,
     text: Option<String>,
     columns: Option<BTreeMap<String, bool>>,
     sort: Option<Sort>,
@@ -120,7 +129,16 @@ fn row(row: &CaseRow, columns: &[Column], at: usize) -> Row {
                 .iter()
                 .map(|(key, value)| (key.as_str().into(), value.as_str().into()))
                 .collect(),
-            owners: Box::default(),
+            owners: row
+                .owners
+                .iter()
+                .map(|owner| Owner {
+                    kind: "ReplicaSet".into(),
+                    name: owner.uid.as_str().into(),
+                    uid: owner.uid.as_str().into(),
+                    controller: owner.controller,
+                })
+                .collect(),
             created: row.created,
             generated: None,
         },
@@ -145,6 +163,8 @@ fn the_query_cases_pass() {
                 namespaced: list.namespaced,
                 namespaces: case.query.namespaces.clone(),
                 label_selector: case.query.label_selector.clone(),
+                field_selector: None,
+                owners: case.query.owners.clone(),
                 text: case.query.text.clone(),
                 columns: case.query.columns.clone(),
                 sort: case.query.sort.clone(),

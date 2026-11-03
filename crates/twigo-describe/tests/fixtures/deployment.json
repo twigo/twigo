@@ -3,12 +3,849 @@
     {
       "count": 1,
       "fieldPath": null,
-      "first": "2026-11-02T21:04:52Z",
-      "last": "2026-11-02T21:04:52Z",
-      "message": "Scaled up replica set web-8dc77bb87 from 0 to 2",
+      "first": "2026-11-03T11:36:42Z",
+      "last": "2026-11-03T11:36:42Z",
+      "message": "Scaled down replica set web-6db7bd6549 from 1 to 0",
       "reason": "ScalingReplicaSet",
       "source": "deployment-controller",
       "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:36:41Z",
+      "last": "2026-11-03T11:36:41Z",
+      "message": "Scaled down replica set web-6db7bd6549 from 2 to 1",
+      "reason": "ScalingReplicaSet",
+      "source": "deployment-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:36:41Z",
+      "last": "2026-11-03T11:36:41Z",
+      "message": "Scaled up replica set web-54454cf656 from 1 to 2",
+      "reason": "ScalingReplicaSet",
+      "source": "deployment-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:36:41Z",
+      "last": "2026-11-03T11:36:41Z",
+      "message": "Scaled up replica set web-54454cf656 from 0 to 1",
+      "reason": "ScalingReplicaSet",
+      "source": "deployment-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:36:40Z",
+      "last": "2026-11-03T11:36:40Z",
+      "message": "Scaled up replica set web-6db7bd6549 from 0 to 2",
+      "reason": "ScalingReplicaSet",
+      "source": "deployment-controller",
+      "type": "Normal"
+    }
+  ],
+  "facts": [
+    {
+      "found": {
+        "objects": [
+          {
+            "apiVersion": "apps/v1",
+            "kind": "ReplicaSet",
+            "metadata": {
+              "annotations": {
+                "deployment.kubernetes.io/desired-replicas": "1",
+                "deployment.kubernetes.io/max-replicas": "2",
+                "deployment.kubernetes.io/revision": "1"
+              },
+              "creationTimestamp": "2026-11-03T12:13:01Z",
+              "generation": 1,
+              "labels": {
+                "app": "api",
+                "pod-template-hash": "c8894f678"
+              },
+              "managedFields": [
+                {
+                  "apiVersion": "apps/v1",
+                  "fieldsType": "FieldsV1",
+                  "fieldsV1": {
+                    "f:metadata": {
+                      "f:annotations": {
+                        ".": {},
+                        "f:deployment.kubernetes.io/desired-replicas": {},
+                        "f:deployment.kubernetes.io/max-replicas": {},
+                        "f:deployment.kubernetes.io/revision": {}
+                      },
+                      "f:labels": {
+                        ".": {},
+                        "f:app": {},
+                        "f:pod-template-hash": {}
+                      },
+                      "f:ownerReferences": {
+                        ".": {},
+                        "k:{\"uid\":\"1361df21-37c1-479e-bfd7-49c834086f43\"}": {}
+                      }
+                    },
+                    "f:spec": {
+                      "f:replicas": {},
+                      "f:selector": {},
+                      "f:template": {
+                        "f:metadata": {
+                          "f:labels": {
+                            ".": {},
+                            "f:app": {},
+                            "f:pod-template-hash": {}
+                          }
+                        },
+                        "f:spec": {
+                          "f:containers": {
+                            "k:{\"name\":\"api\"}": {
+                              ".": {},
+                              "f:command": {},
+                              "f:image": {},
+                              "f:imagePullPolicy": {},
+                              "f:name": {},
+                              "f:resources": {},
+                              "f:terminationMessagePath": {},
+                              "f:terminationMessagePolicy": {}
+                            }
+                          },
+                          "f:dnsPolicy": {},
+                          "f:nodeSelector": {},
+                          "f:restartPolicy": {},
+                          "f:schedulerName": {},
+                          "f:securityContext": {},
+                          "f:terminationGracePeriodSeconds": {}
+                        }
+                      }
+                    }
+                  },
+                  "manager": "kube-controller-manager",
+                  "operation": "Update",
+                  "time": "2026-11-03T12:13:01Z"
+                },
+                {
+                  "apiVersion": "apps/v1",
+                  "fieldsType": "FieldsV1",
+                  "fieldsV1": {
+                    "f:status": {
+                      "f:fullyLabeledReplicas": {},
+                      "f:observedGeneration": {},
+                      "f:replicas": {},
+                      "f:terminatingReplicas": {}
+                    }
+                  },
+                  "manager": "kube-controller-manager",
+                  "operation": "Update",
+                  "subresource": "status",
+                  "time": "2026-11-03T12:14:31Z"
+                }
+              ],
+              "name": "api-c8894f678",
+              "namespace": "overview",
+              "ownerReferences": [
+                {
+                  "apiVersion": "apps/v1",
+                  "blockOwnerDeletion": true,
+                  "controller": true,
+                  "kind": "Deployment",
+                  "name": "api",
+                  "uid": "1361df21-37c1-479e-bfd7-49c834086f43"
+                }
+              ],
+              "resourceVersion": "7550",
+              "uid": "d5a58dfc-d7c6-4945-8e5f-943c1c450598"
+            },
+            "spec": {
+              "replicas": 1,
+              "selector": {
+                "matchLabels": {
+                  "app": "api",
+                  "pod-template-hash": "c8894f678"
+                }
+              },
+              "template": {
+                "metadata": {
+                  "labels": {
+                    "app": "api",
+                    "pod-template-hash": "c8894f678"
+                  }
+                },
+                "spec": {
+                  "containers": [
+                    {
+                      "command": [
+                        "sh",
+                        "-c",
+                        "echo 'panic: dial tcp 10.96.0.20:5432: connect: connection refused' >&2; exit 1"
+                      ],
+                      "image": "docker.io/kindest/local-path-helper:v20260131-7181c60a",
+                      "imagePullPolicy": "IfNotPresent",
+                      "name": "api",
+                      "resources": {},
+                      "terminationMessagePath": "/dev/termination-log",
+                      "terminationMessagePolicy": "FallbackToLogsOnError"
+                    }
+                  ],
+                  "dnsPolicy": "ClusterFirst",
+                  "nodeSelector": {
+                    "kubernetes.io/hostname": "twigo-overviews-control-plane"
+                  },
+                  "restartPolicy": "Always",
+                  "schedulerName": "default-scheduler",
+                  "securityContext": {},
+                  "terminationGracePeriodSeconds": 30
+                }
+              }
+            },
+            "status": {
+              "fullyLabeledReplicas": 1,
+              "observedGeneration": 1,
+              "replicas": 1,
+              "terminatingReplicas": 0
+            }
+          },
+          {
+            "apiVersion": "apps/v1",
+            "kind": "ReplicaSet",
+            "metadata": {
+              "annotations": {
+                "deployment.kubernetes.io/desired-replicas": "2",
+                "deployment.kubernetes.io/max-replicas": "3",
+                "deployment.kubernetes.io/revision": "2"
+              },
+              "creationTimestamp": "2026-11-03T11:36:41Z",
+              "generation": 2,
+              "labels": {
+                "app": "web",
+                "pod-template-hash": "54454cf656"
+              },
+              "managedFields": [
+                {
+                  "apiVersion": "apps/v1",
+                  "fieldsType": "FieldsV1",
+                  "fieldsV1": {
+                    "f:metadata": {
+                      "f:annotations": {
+                        ".": {},
+                        "f:deployment.kubernetes.io/desired-replicas": {},
+                        "f:deployment.kubernetes.io/max-replicas": {},
+                        "f:deployment.kubernetes.io/revision": {}
+                      },
+                      "f:labels": {
+                        ".": {},
+                        "f:app": {},
+                        "f:pod-template-hash": {}
+                      },
+                      "f:ownerReferences": {
+                        ".": {},
+                        "k:{\"uid\":\"9bafb8d8-72d0-4d21-a63c-513a720633ae\"}": {}
+                      }
+                    },
+                    "f:spec": {
+                      "f:replicas": {},
+                      "f:selector": {},
+                      "f:template": {
+                        "f:metadata": {
+                          "f:annotations": {
+                            ".": {},
+                            "f:twigo.io/revision": {}
+                          },
+                          "f:labels": {
+                            ".": {},
+                            "f:app": {},
+                            "f:pod-template-hash": {}
+                          }
+                        },
+                        "f:spec": {
+                          "f:containers": {
+                            "k:{\"name\":\"app\"}": {
+                              ".": {},
+                              "f:env": {
+                                ".": {},
+                                "k:{\"name\":\"MEMORY_MI\"}": {
+                                  ".": {},
+                                  "f:name": {},
+                                  "f:valueFrom": {
+                                    ".": {},
+                                    "f:resourceFieldRef": {}
+                                  }
+                                },
+                                "k:{\"name\":\"MODE\"}": {
+                                  ".": {},
+                                  "f:name": {},
+                                  "f:valueFrom": {
+                                    ".": {},
+                                    "f:configMapKeyRef": {}
+                                  }
+                                },
+                                "k:{\"name\":\"PASSWORD\"}": {
+                                  ".": {},
+                                  "f:name": {},
+                                  "f:valueFrom": {
+                                    ".": {},
+                                    "f:secretKeyRef": {}
+                                  }
+                                },
+                                "k:{\"name\":\"POD_IP\"}": {
+                                  ".": {},
+                                  "f:name": {},
+                                  "f:valueFrom": {
+                                    ".": {},
+                                    "f:fieldRef": {}
+                                  }
+                                }
+                              },
+                              "f:envFrom": {},
+                              "f:image": {},
+                              "f:imagePullPolicy": {},
+                              "f:name": {},
+                              "f:ports": {
+                                ".": {},
+                                "k:{\"containerPort\":8080,\"protocol\":\"TCP\"}": {
+                                  ".": {},
+                                  "f:containerPort": {},
+                                  "f:name": {},
+                                  "f:protocol": {}
+                                }
+                              },
+                              "f:resources": {
+                                ".": {},
+                                "f:limits": {
+                                  ".": {},
+                                  "f:memory": {}
+                                },
+                                "f:requests": {
+                                  ".": {},
+                                  "f:cpu": {},
+                                  "f:memory": {}
+                                }
+                              },
+                              "f:terminationMessagePath": {},
+                              "f:terminationMessagePolicy": {},
+                              "f:volumeMounts": {
+                                ".": {},
+                                "k:{\"mountPath\":\"/etc/web\"}": {
+                                  ".": {},
+                                  "f:mountPath": {},
+                                  "f:name": {},
+                                  "f:readOnly": {}
+                                }
+                              }
+                            }
+                          },
+                          "f:dnsPolicy": {},
+                          "f:nodeSelector": {},
+                          "f:restartPolicy": {},
+                          "f:schedulerName": {},
+                          "f:securityContext": {},
+                          "f:terminationGracePeriodSeconds": {},
+                          "f:volumes": {
+                            ".": {},
+                            "k:{\"name\":\"settings\"}": {
+                              ".": {},
+                              "f:configMap": {
+                                ".": {},
+                                "f:defaultMode": {},
+                                "f:name": {}
+                              },
+                              "f:name": {}
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "manager": "kube-controller-manager",
+                  "operation": "Update",
+                  "time": "2026-11-03T11:36:41Z"
+                },
+                {
+                  "apiVersion": "apps/v1",
+                  "fieldsType": "FieldsV1",
+                  "fieldsV1": {
+                    "f:status": {
+                      "f:availableReplicas": {},
+                      "f:fullyLabeledReplicas": {},
+                      "f:observedGeneration": {},
+                      "f:readyReplicas": {},
+                      "f:replicas": {},
+                      "f:terminatingReplicas": {}
+                    }
+                  },
+                  "manager": "kube-controller-manager",
+                  "operation": "Update",
+                  "subresource": "status",
+                  "time": "2026-11-03T11:36:42Z"
+                }
+              ],
+              "name": "web-54454cf656",
+              "namespace": "overview",
+              "ownerReferences": [
+                {
+                  "apiVersion": "apps/v1",
+                  "blockOwnerDeletion": true,
+                  "controller": true,
+                  "kind": "Deployment",
+                  "name": "web",
+                  "uid": "9bafb8d8-72d0-4d21-a63c-513a720633ae"
+                }
+              ],
+              "resourceVersion": "2477",
+              "uid": "cd05d603-d2a6-417d-ba62-1130a0711b7e"
+            },
+            "spec": {
+              "replicas": 2,
+              "selector": {
+                "matchLabels": {
+                  "app": "web",
+                  "pod-template-hash": "54454cf656"
+                }
+              },
+              "template": {
+                "metadata": {
+                  "annotations": {
+                    "twigo.io/revision": "2"
+                  },
+                  "labels": {
+                    "app": "web",
+                    "pod-template-hash": "54454cf656"
+                  }
+                },
+                "spec": {
+                  "containers": [
+                    {
+                      "env": [
+                        {
+                          "name": "MODE",
+                          "valueFrom": {
+                            "configMapKeyRef": {
+                              "key": "mode",
+                              "name": "settings"
+                            }
+                          }
+                        },
+                        {
+                          "name": "PASSWORD",
+                          "valueFrom": {
+                            "secretKeyRef": {
+                              "key": "password",
+                              "name": "credentials"
+                            }
+                          }
+                        },
+                        {
+                          "name": "POD_IP",
+                          "valueFrom": {
+                            "fieldRef": {
+                              "apiVersion": "v1",
+                              "fieldPath": "status.podIP"
+                            }
+                          }
+                        },
+                        {
+                          "name": "MEMORY_MI",
+                          "valueFrom": {
+                            "resourceFieldRef": {
+                              "divisor": "1Mi",
+                              "resource": "limits.memory"
+                            }
+                          }
+                        }
+                      ],
+                      "envFrom": [
+                        {
+                          "configMapRef": {
+                            "name": "settings"
+                          },
+                          "prefix": "APP_"
+                        }
+                      ],
+                      "image": "registry.k8s.io/pause:3.10",
+                      "imagePullPolicy": "IfNotPresent",
+                      "name": "app",
+                      "ports": [
+                        {
+                          "containerPort": 8080,
+                          "name": "http",
+                          "protocol": "TCP"
+                        }
+                      ],
+                      "resources": {
+                        "limits": {
+                          "memory": "64Mi"
+                        },
+                        "requests": {
+                          "cpu": "10m",
+                          "memory": "16Mi"
+                        }
+                      },
+                      "terminationMessagePath": "/dev/termination-log",
+                      "terminationMessagePolicy": "File",
+                      "volumeMounts": [
+                        {
+                          "mountPath": "/etc/web",
+                          "name": "settings",
+                          "readOnly": true
+                        }
+                      ]
+                    }
+                  ],
+                  "dnsPolicy": "ClusterFirst",
+                  "nodeSelector": {
+                    "kubernetes.io/hostname": "twigo-overviews-control-plane"
+                  },
+                  "restartPolicy": "Always",
+                  "schedulerName": "default-scheduler",
+                  "securityContext": {},
+                  "terminationGracePeriodSeconds": 30,
+                  "volumes": [
+                    {
+                      "configMap": {
+                        "defaultMode": 420,
+                        "name": "settings"
+                      },
+                      "name": "settings"
+                    }
+                  ]
+                }
+              }
+            },
+            "status": {
+              "availableReplicas": 2,
+              "fullyLabeledReplicas": 2,
+              "observedGeneration": 2,
+              "readyReplicas": 2,
+              "replicas": 2,
+              "terminatingReplicas": 0
+            }
+          },
+          {
+            "apiVersion": "apps/v1",
+            "kind": "ReplicaSet",
+            "metadata": {
+              "annotations": {
+                "deployment.kubernetes.io/desired-replicas": "2",
+                "deployment.kubernetes.io/max-replicas": "3",
+                "deployment.kubernetes.io/revision": "1"
+              },
+              "creationTimestamp": "2026-11-03T11:36:40Z",
+              "generation": 3,
+              "labels": {
+                "app": "web",
+                "pod-template-hash": "6db7bd6549"
+              },
+              "managedFields": [
+                {
+                  "apiVersion": "apps/v1",
+                  "fieldsType": "FieldsV1",
+                  "fieldsV1": {
+                    "f:metadata": {
+                      "f:annotations": {
+                        ".": {},
+                        "f:deployment.kubernetes.io/desired-replicas": {},
+                        "f:deployment.kubernetes.io/max-replicas": {},
+                        "f:deployment.kubernetes.io/revision": {}
+                      },
+                      "f:labels": {
+                        ".": {},
+                        "f:app": {},
+                        "f:pod-template-hash": {}
+                      },
+                      "f:ownerReferences": {
+                        ".": {},
+                        "k:{\"uid\":\"9bafb8d8-72d0-4d21-a63c-513a720633ae\"}": {}
+                      }
+                    },
+                    "f:spec": {
+                      "f:replicas": {},
+                      "f:selector": {},
+                      "f:template": {
+                        "f:metadata": {
+                          "f:annotations": {
+                            ".": {},
+                            "f:twigo.io/revision": {}
+                          },
+                          "f:labels": {
+                            ".": {},
+                            "f:app": {},
+                            "f:pod-template-hash": {}
+                          }
+                        },
+                        "f:spec": {
+                          "f:containers": {
+                            "k:{\"name\":\"app\"}": {
+                              ".": {},
+                              "f:env": {
+                                ".": {},
+                                "k:{\"name\":\"MEMORY_MI\"}": {
+                                  ".": {},
+                                  "f:name": {},
+                                  "f:valueFrom": {
+                                    ".": {},
+                                    "f:resourceFieldRef": {}
+                                  }
+                                },
+                                "k:{\"name\":\"MODE\"}": {
+                                  ".": {},
+                                  "f:name": {},
+                                  "f:valueFrom": {
+                                    ".": {},
+                                    "f:configMapKeyRef": {}
+                                  }
+                                },
+                                "k:{\"name\":\"PASSWORD\"}": {
+                                  ".": {},
+                                  "f:name": {},
+                                  "f:valueFrom": {
+                                    ".": {},
+                                    "f:secretKeyRef": {}
+                                  }
+                                },
+                                "k:{\"name\":\"POD_IP\"}": {
+                                  ".": {},
+                                  "f:name": {},
+                                  "f:valueFrom": {
+                                    ".": {},
+                                    "f:fieldRef": {}
+                                  }
+                                }
+                              },
+                              "f:envFrom": {},
+                              "f:image": {},
+                              "f:imagePullPolicy": {},
+                              "f:name": {},
+                              "f:ports": {
+                                ".": {},
+                                "k:{\"containerPort\":8080,\"protocol\":\"TCP\"}": {
+                                  ".": {},
+                                  "f:containerPort": {},
+                                  "f:name": {},
+                                  "f:protocol": {}
+                                }
+                              },
+                              "f:resources": {
+                                ".": {},
+                                "f:limits": {
+                                  ".": {},
+                                  "f:memory": {}
+                                },
+                                "f:requests": {
+                                  ".": {},
+                                  "f:cpu": {},
+                                  "f:memory": {}
+                                }
+                              },
+                              "f:terminationMessagePath": {},
+                              "f:terminationMessagePolicy": {},
+                              "f:volumeMounts": {
+                                ".": {},
+                                "k:{\"mountPath\":\"/etc/web\"}": {
+                                  ".": {},
+                                  "f:mountPath": {},
+                                  "f:name": {},
+                                  "f:readOnly": {}
+                                }
+                              }
+                            }
+                          },
+                          "f:dnsPolicy": {},
+                          "f:nodeSelector": {},
+                          "f:restartPolicy": {},
+                          "f:schedulerName": {},
+                          "f:securityContext": {},
+                          "f:terminationGracePeriodSeconds": {},
+                          "f:volumes": {
+                            ".": {},
+                            "k:{\"name\":\"settings\"}": {
+                              ".": {},
+                              "f:configMap": {
+                                ".": {},
+                                "f:defaultMode": {},
+                                "f:name": {}
+                              },
+                              "f:name": {}
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "manager": "kube-controller-manager",
+                  "operation": "Update",
+                  "time": "2026-11-03T11:36:42Z"
+                },
+                {
+                  "apiVersion": "apps/v1",
+                  "fieldsType": "FieldsV1",
+                  "fieldsV1": {
+                    "f:status": {
+                      "f:observedGeneration": {},
+                      "f:replicas": {},
+                      "f:terminatingReplicas": {}
+                    }
+                  },
+                  "manager": "kube-controller-manager",
+                  "operation": "Update",
+                  "subresource": "status",
+                  "time": "2026-11-03T11:36:42Z"
+                }
+              ],
+              "name": "web-6db7bd6549",
+              "namespace": "overview",
+              "ownerReferences": [
+                {
+                  "apiVersion": "apps/v1",
+                  "blockOwnerDeletion": true,
+                  "controller": true,
+                  "kind": "Deployment",
+                  "name": "web",
+                  "uid": "9bafb8d8-72d0-4d21-a63c-513a720633ae"
+                }
+              ],
+              "resourceVersion": "2495",
+              "uid": "fc882f3f-4457-4cac-be72-545fff4aa7f9"
+            },
+            "spec": {
+              "replicas": 0,
+              "selector": {
+                "matchLabels": {
+                  "app": "web",
+                  "pod-template-hash": "6db7bd6549"
+                }
+              },
+              "template": {
+                "metadata": {
+                  "annotations": {
+                    "twigo.io/revision": "1"
+                  },
+                  "labels": {
+                    "app": "web",
+                    "pod-template-hash": "6db7bd6549"
+                  }
+                },
+                "spec": {
+                  "containers": [
+                    {
+                      "env": [
+                        {
+                          "name": "MODE",
+                          "valueFrom": {
+                            "configMapKeyRef": {
+                              "key": "mode",
+                              "name": "settings"
+                            }
+                          }
+                        },
+                        {
+                          "name": "PASSWORD",
+                          "valueFrom": {
+                            "secretKeyRef": {
+                              "key": "password",
+                              "name": "credentials"
+                            }
+                          }
+                        },
+                        {
+                          "name": "POD_IP",
+                          "valueFrom": {
+                            "fieldRef": {
+                              "apiVersion": "v1",
+                              "fieldPath": "status.podIP"
+                            }
+                          }
+                        },
+                        {
+                          "name": "MEMORY_MI",
+                          "valueFrom": {
+                            "resourceFieldRef": {
+                              "divisor": "1Mi",
+                              "resource": "limits.memory"
+                            }
+                          }
+                        }
+                      ],
+                      "envFrom": [
+                        {
+                          "configMapRef": {
+                            "name": "settings"
+                          },
+                          "prefix": "APP_"
+                        }
+                      ],
+                      "image": "registry.k8s.io/pause:3.10",
+                      "imagePullPolicy": "IfNotPresent",
+                      "name": "app",
+                      "ports": [
+                        {
+                          "containerPort": 8080,
+                          "name": "http",
+                          "protocol": "TCP"
+                        }
+                      ],
+                      "resources": {
+                        "limits": {
+                          "memory": "64Mi"
+                        },
+                        "requests": {
+                          "cpu": "10m",
+                          "memory": "16Mi"
+                        }
+                      },
+                      "terminationMessagePath": "/dev/termination-log",
+                      "terminationMessagePolicy": "File",
+                      "volumeMounts": [
+                        {
+                          "mountPath": "/etc/web",
+                          "name": "settings",
+                          "readOnly": true
+                        }
+                      ]
+                    }
+                  ],
+                  "dnsPolicy": "ClusterFirst",
+                  "nodeSelector": {
+                    "kubernetes.io/hostname": "twigo-overviews-control-plane"
+                  },
+                  "restartPolicy": "Always",
+                  "schedulerName": "default-scheduler",
+                  "securityContext": {},
+                  "terminationGracePeriodSeconds": 30,
+                  "volumes": [
+                    {
+                      "configMap": {
+                        "defaultMode": 420,
+                        "name": "settings"
+                      },
+                      "name": "settings"
+                    }
+                  ]
+                }
+              }
+            },
+            "status": {
+              "observedGeneration": 3,
+              "replicas": 0,
+              "terminatingReplicas": 0
+            }
+          }
+        ],
+        "state": "listed"
+      },
+      "need": {
+        "fieldSelector": null,
+        "group": "apps",
+        "namespace": "overview",
+        "namespaced": true,
+        "resource": "replicasets",
+        "version": "v1"
+      }
     }
   ],
   "object": {
@@ -16,14 +853,123 @@
     "kind": "Deployment",
     "metadata": {
       "annotations": {
-        "deployment.kubernetes.io/revision": "1"
+        "deployment.kubernetes.io/revision": "2"
       },
-      "creationTimestamp": "2026-11-02T21:04:52Z",
-      "generation": 1,
+      "creationTimestamp": "2026-11-03T11:36:40Z",
+      "generation": 2,
       "labels": {
         "app": "web"
       },
       "managedFields": [
+        {
+          "apiVersion": "apps/v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:metadata": {
+              "f:labels": {
+                "f:app": {}
+              }
+            },
+            "f:spec": {
+              "f:replicas": {},
+              "f:revisionHistoryLimit": {},
+              "f:selector": {},
+              "f:strategy": {
+                "f:rollingUpdate": {
+                  "f:maxSurge": {},
+                  "f:maxUnavailable": {}
+                }
+              },
+              "f:template": {
+                "f:metadata": {
+                  "f:annotations": {
+                    "f:twigo.io/revision": {}
+                  },
+                  "f:labels": {
+                    "f:app": {}
+                  }
+                },
+                "f:spec": {
+                  "f:containers": {
+                    "k:{\"name\":\"app\"}": {
+                      ".": {},
+                      "f:env": {
+                        "k:{\"name\":\"MEMORY_MI\"}": {
+                          ".": {},
+                          "f:name": {},
+                          "f:valueFrom": {
+                            "f:resourceFieldRef": {}
+                          }
+                        },
+                        "k:{\"name\":\"MODE\"}": {
+                          ".": {},
+                          "f:name": {},
+                          "f:valueFrom": {
+                            "f:configMapKeyRef": {}
+                          }
+                        },
+                        "k:{\"name\":\"PASSWORD\"}": {
+                          ".": {},
+                          "f:name": {},
+                          "f:valueFrom": {
+                            "f:secretKeyRef": {}
+                          }
+                        },
+                        "k:{\"name\":\"POD_IP\"}": {
+                          ".": {},
+                          "f:name": {},
+                          "f:valueFrom": {
+                            "f:fieldRef": {}
+                          }
+                        }
+                      },
+                      "f:envFrom": {},
+                      "f:image": {},
+                      "f:name": {},
+                      "f:ports": {
+                        "k:{\"containerPort\":8080,\"protocol\":\"TCP\"}": {
+                          ".": {},
+                          "f:containerPort": {},
+                          "f:name": {}
+                        }
+                      },
+                      "f:resources": {
+                        "f:limits": {
+                          "f:memory": {}
+                        },
+                        "f:requests": {
+                          "f:cpu": {},
+                          "f:memory": {}
+                        }
+                      },
+                      "f:volumeMounts": {
+                        "k:{\"mountPath\":\"/etc/web\"}": {
+                          ".": {},
+                          "f:mountPath": {},
+                          "f:name": {},
+                          "f:readOnly": {}
+                        }
+                      }
+                    }
+                  },
+                  "f:nodeSelector": {},
+                  "f:volumes": {
+                    "k:{\"name\":\"settings\"}": {
+                      ".": {},
+                      "f:configMap": {
+                        "f:name": {}
+                      },
+                      "f:name": {}
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "manager": "twigo-record",
+          "operation": "Apply",
+          "time": "2026-11-03T11:36:41Z"
+        },
         {
           "apiVersion": "apps/v1",
           "fieldsType": "FieldsV1",
@@ -67,90 +1013,18 @@
           "manager": "kube-controller-manager",
           "operation": "Update",
           "subresource": "status",
-          "time": "2026-11-02T21:04:52Z"
-        },
-        {
-          "apiVersion": "apps/v1",
-          "fieldsType": "FieldsV1",
-          "fieldsV1": {
-            "f:metadata": {
-              "f:labels": {
-                ".": {},
-                "f:app": {}
-              }
-            },
-            "f:spec": {
-              "f:progressDeadlineSeconds": {},
-              "f:replicas": {},
-              "f:revisionHistoryLimit": {},
-              "f:selector": {},
-              "f:strategy": {
-                "f:rollingUpdate": {
-                  ".": {},
-                  "f:maxSurge": {},
-                  "f:maxUnavailable": {}
-                },
-                "f:type": {}
-              },
-              "f:template": {
-                "f:metadata": {
-                  "f:labels": {
-                    ".": {},
-                    "f:app": {}
-                  }
-                },
-                "f:spec": {
-                  "f:containers": {
-                    "k:{\"name\":\"app\"}": {
-                      ".": {},
-                      "f:image": {},
-                      "f:imagePullPolicy": {},
-                      "f:name": {},
-                      "f:ports": {
-                        ".": {},
-                        "k:{\"containerPort\":8080,\"protocol\":\"TCP\"}": {
-                          ".": {},
-                          "f:containerPort": {},
-                          "f:name": {},
-                          "f:protocol": {}
-                        }
-                      },
-                      "f:resources": {
-                        ".": {},
-                        "f:requests": {
-                          ".": {},
-                          "f:cpu": {},
-                          "f:memory": {}
-                        }
-                      },
-                      "f:terminationMessagePath": {},
-                      "f:terminationMessagePolicy": {}
-                    }
-                  },
-                  "f:dnsPolicy": {},
-                  "f:nodeSelector": {},
-                  "f:restartPolicy": {},
-                  "f:schedulerName": {},
-                  "f:securityContext": {},
-                  "f:terminationGracePeriodSeconds": {}
-                }
-              }
-            }
-          },
-          "manager": "unknown",
-          "operation": "Update",
-          "time": "2026-11-02T21:04:52Z"
+          "time": "2026-11-03T11:36:42Z"
         }
       ],
       "name": "web",
       "namespace": "overview",
-      "resourceVersion": "3824",
-      "uid": "c3c9f25c-da7b-4941-b3ce-b7404644d3fa"
+      "resourceVersion": "2497",
+      "uid": "9bafb8d8-72d0-4d21-a63c-513a720633ae"
     },
     "spec": {
       "progressDeadlineSeconds": 600,
       "replicas": 2,
-      "revisionHistoryLimit": 10,
+      "revisionHistoryLimit": 3,
       "selector": {
         "matchLabels": {
           "app": "web"
@@ -159,12 +1033,15 @@
       "strategy": {
         "rollingUpdate": {
           "maxSurge": "25%",
-          "maxUnavailable": "25%"
+          "maxUnavailable": 0
         },
         "type": "RollingUpdate"
       },
       "template": {
         "metadata": {
+          "annotations": {
+            "twigo.io/revision": "2"
+          },
           "labels": {
             "app": "web"
           }
@@ -172,6 +1049,52 @@
         "spec": {
           "containers": [
             {
+              "env": [
+                {
+                  "name": "MODE",
+                  "valueFrom": {
+                    "configMapKeyRef": {
+                      "key": "mode",
+                      "name": "settings"
+                    }
+                  }
+                },
+                {
+                  "name": "PASSWORD",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "password",
+                      "name": "credentials"
+                    }
+                  }
+                },
+                {
+                  "name": "POD_IP",
+                  "valueFrom": {
+                    "fieldRef": {
+                      "apiVersion": "v1",
+                      "fieldPath": "status.podIP"
+                    }
+                  }
+                },
+                {
+                  "name": "MEMORY_MI",
+                  "valueFrom": {
+                    "resourceFieldRef": {
+                      "divisor": "1Mi",
+                      "resource": "limits.memory"
+                    }
+                  }
+                }
+              ],
+              "envFrom": [
+                {
+                  "configMapRef": {
+                    "name": "settings"
+                  },
+                  "prefix": "APP_"
+                }
+              ],
               "image": "registry.k8s.io/pause:3.10",
               "imagePullPolicy": "IfNotPresent",
               "name": "app",
@@ -183,23 +1106,42 @@
                 }
               ],
               "resources": {
+                "limits": {
+                  "memory": "64Mi"
+                },
                 "requests": {
                   "cpu": "10m",
                   "memory": "16Mi"
                 }
               },
               "terminationMessagePath": "/dev/termination-log",
-              "terminationMessagePolicy": "File"
+              "terminationMessagePolicy": "File",
+              "volumeMounts": [
+                {
+                  "mountPath": "/etc/web",
+                  "name": "settings",
+                  "readOnly": true
+                }
+              ]
             }
           ],
           "dnsPolicy": "ClusterFirst",
           "nodeSelector": {
-            "kubernetes.io/hostname": "twigo-editors-control-plane"
+            "kubernetes.io/hostname": "twigo-overviews-control-plane"
           },
           "restartPolicy": "Always",
           "schedulerName": "default-scheduler",
           "securityContext": {},
-          "terminationGracePeriodSeconds": 30
+          "terminationGracePeriodSeconds": 30,
+          "volumes": [
+            {
+              "configMap": {
+                "defaultMode": 420,
+                "name": "settings"
+              },
+              "name": "settings"
+            }
+          ]
         }
       }
     },
@@ -207,23 +1149,23 @@
       "availableReplicas": 2,
       "conditions": [
         {
-          "lastTransitionTime": "2026-11-02T21:04:52Z",
-          "lastUpdateTime": "2026-11-02T21:04:52Z",
+          "lastTransitionTime": "2026-11-03T11:36:41Z",
+          "lastUpdateTime": "2026-11-03T11:36:41Z",
           "message": "Deployment has minimum availability.",
           "reason": "MinimumReplicasAvailable",
           "status": "True",
           "type": "Available"
         },
         {
-          "lastTransitionTime": "2026-11-02T21:04:52Z",
-          "lastUpdateTime": "2026-11-02T21:04:52Z",
-          "message": "ReplicaSet \"web-8dc77bb87\" has successfully progressed.",
+          "lastTransitionTime": "2026-11-03T11:36:40Z",
+          "lastUpdateTime": "2026-11-03T11:36:42Z",
+          "message": "ReplicaSet \"web-54454cf656\" has successfully progressed.",
           "reason": "NewReplicaSetAvailable",
           "status": "True",
           "type": "Progressing"
         }
       ],
-      "observedGeneration": 1,
+      "observedGeneration": 2,
       "readyReplicas": 2,
       "replicas": 2,
       "terminatingReplicas": 0,

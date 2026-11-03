@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import deploymentsList from "../../../../crates/twigo-cache/tests/fixtures/deployments-list.json";
 import eventsList from "../../../../crates/twigo-cache/tests/fixtures/events-list.json";
+import jobsList from "../../../../crates/twigo-cache/tests/fixtures/jobs-list.json";
 import nodesList from "../../../../crates/twigo-cache/tests/fixtures/nodes-list.json";
 import podsList from "../../../../crates/twigo-cache/tests/fixtures/pods-list.json";
 import { Cluster } from "./cluster";
@@ -27,6 +28,7 @@ test("each kind's columns are those kube-apiserver sent, by name and priority", 
     "/v1/pods": podsList,
     "/v1/nodes": nodesList,
     "apps/v1/deployments": deploymentsList,
+    "batch/v1/jobs": jobsList,
     "/v1/events": eventsList,
   };
   expect(Object.keys(KINDS).sort()).toEqual(Object.keys(recorded).sort());

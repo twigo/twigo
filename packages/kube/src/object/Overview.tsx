@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -16,16 +16,27 @@ import type {
   Field,
   ObjectRef,
   Overview as Document,
-  Value,
+  Section,
 } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
-import { Chip, cn, LinkButton, PropertyList, Section } from "@twigo/ui";
-import { formatBytes, humanDuration } from "@twigo/utils";
-import { useNow } from "../useNow";
+import { cn, PropertyList, Section as Folding, Table } from "@twigo/ui";
+import { useChanges } from "@twigo/workbench";
+import { formatBytes } from "@twigo/utils";
+import { Containers } from "./Containers";
+import { Diagnostics } from "./Diagnostics";
+import { EmbeddedList } from "./EmbeddedList";
 import { Properties } from "./Properties";
+import type { OverviewStates } from "./overviewStates";
+import { Age, ValueView } from "./values";
 
 export interface OverviewProps {
   readonly overview: Document;
+  /** The space the object is in, which its live lists query. */
+  readonly space: string;
+  /** What the person chose in the Overviews of the object's kind. */
+  readonly states: OverviewStates;
+  /** The object's resource, `apps/deployments`, which keys `states`. */
+  readonly kind: string;
   /** Opens the object a link points at. */
   readonly onOpen: (target: ObjectRef) => void;
   /** The values of a ConfigMap's keys, null for a binary one. */
@@ -34,49 +45,104 @@ export interface OverviewProps {
 
 /**
  * An object described in Rust (ARCHITECTURE 4.3): its sections in order,
- * each folding by its id, each block drawn by its type.
+ * each folding by its id as the kind's other objects do, each block drawn
+ * by its type. While the object is shown, a finding that comes or goes is
+ * announced by its title, which, unlike its times, does not tick.
  */
-export function Overview({ overview, onOpen, values }: OverviewProps) {
-  const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
+export function Overview({
+  overview,
+  space,
+  states,
+  kind,
+  onOpen,
+  values,
+}: OverviewProps) {
+  useChanges(states.changes);
+  const titles = overview.sections.flatMap((section) =>
+    section.blocks.flatMap((block) =>
+      block.type === "diagnostics"
+        ? block.findings.map((finding) => finding.title)
+        : [],
+    ),
+  );
   return (
     <div className="flex flex-col gap-4 px-3.5 pt-3 pb-4 text-[13px]">
+      <Announcer titles={titles} />
       {overview.sections.map((section) => {
-        const open = !folded.has(section.id);
+        const open = states.open(kind, section.id, true);
         return (
-          <Section
+          <Folding
             key={section.id}
             title={section.title}
             open={open}
             onToggle={() => {
-              const next = new Set(folded);
-              if (open) next.add(section.id);
-              else next.delete(section.id);
-              setFolded(next);
+              states.toggle(kind, section.id);
             }}
           >
             <div className="flex flex-col gap-3">
               {section.blocks.map((block, index) => (
                 <BlockView
                   key={index}
+                  section={section}
                   block={block}
+                  space={space}
+                  states={states}
+                  kind={kind}
                   onOpen={onOpen}
                   values={values}
                 />
               ))}
             </div>
-          </Section>
+          </Folding>
         );
       })}
     </div>
   );
 }
 
+/**
+ * What changed among the findings, said once: the titles that came, and
+ * those that went as resolved. A live region reads text that changes, not
+ * text that leaves, so it is told the change rather than the list. The
+ * findings of the first document are on screen and not said; those that
+ * read the object's events come a moment later, once the events are
+ * listed, and are said as they come.
+ */
+function Announcer({ titles }: { titles: readonly string[] }) {
+  const key = titles.join("\n");
+  const [seen, setSeen] = useState({ key, said: "" });
+  if (seen.key !== key) {
+    const before = new Set(seen.key === "" ? [] : seen.key.split("\n"));
+    const now = new Set(titles);
+    const came = titles.filter((title) => !before.has(title));
+    const went = [...before].filter((title) => !now.has(title));
+    setSeen({
+      key,
+      said: [...came, ...went.map((title) => `Resolved: ${title}`)].join(". "),
+    });
+  }
+  return (
+    <p className="sr-only" aria-live="polite">
+      {seen.said}
+    </p>
+  );
+}
+
 function BlockView({
+  section,
   block,
+  space,
+  states,
+  kind,
   onOpen,
   values,
 }: {
+  /** Whose title names a table and whose id keys a list's state. */
+  section: Section;
   block: Block;
+  space: string;
+  states: OverviewStates;
+  kind: string;
   onOpen: (target: ObjectRef) => void;
   values: OverviewProps["values"];
 }) {
@@ -96,6 +162,40 @@ function BlockView({
       return <Properties nodes={block.nodes} depth={0} />;
     case "events":
       return <Events list={block} />;
+    case "diagnostics":
+      return <Diagnostics findings={block.findings} />;
+    case "containers":
+      return (
+        <Containers
+          containers={block.containers}
+          states={states}
+          kind={kind}
+          onOpen={onOpen}
+        />
+      );
+    case "table":
+      return (
+        <Table
+          label={section.title}
+          columns={block.columns}
+          rows={block.rows.map((row) =>
+            row.map((value, index) => (
+              <ValueView key={index} value={value} onOpen={onOpen} compact />
+            )),
+          )}
+        />
+      );
+    case "list":
+      return (
+        <EmbeddedList
+          list={block}
+          space={space}
+          states={states}
+          kind={kind}
+          id={section.id}
+          onOpen={onOpen}
+        />
+      );
   }
 }
 
@@ -114,111 +214,6 @@ function Fields({
         value: <ValueView value={field.value} onOpen={onOpen} />,
       }))}
     />
-  );
-}
-
-function ValueView({
-  value,
-  onOpen,
-}: {
-  value: Value;
-  onOpen: (target: ObjectRef) => void;
-}): ReactNode {
-  switch (value.type) {
-    case "text":
-      return (
-        <span className="break-words whitespace-pre-wrap">{value.text}</span>
-      );
-    case "time":
-      return <Time at={value.at} />;
-    case "link":
-      return (
-        <LinkButton
-          onClick={() => {
-            onOpen(value.target);
-          }}
-          className="break-all"
-        >
-          {value.text}
-        </LinkButton>
-      );
-    case "labels":
-      return (
-        <ul className="flex flex-wrap gap-1">
-          {value.labels.map((label) => (
-            <LabelChip key={label.key} name={label.key} value={label.value} />
-          ))}
-        </ul>
-      );
-    case "list":
-      return (
-        <ul className="flex flex-col">
-          {value.items.map((item, index) => (
-            <li key={index}>
-              <ValueView value={item} onOpen={onOpen} />
-            </li>
-          ))}
-        </ul>
-      );
-  }
-}
-
-/** Long and multiline values fold to one line and open whole on a click. */
-function LabelChip({ name, value }: { name: string; value: string }) {
-  const long = value.length > 60 || value.includes("\n");
-  const [open, setOpen] = useState(false);
-  const chip = (
-    <>
-      <span className="text-muted-foreground">{name}</span>
-      {value !== "" && <span>={value}</span>}
-    </>
-  );
-  if (!long)
-    return (
-      <li className="max-w-full">
-        <Chip>{chip}</Chip>
-      </li>
-    );
-  return (
-    <li className="max-w-full">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => {
-          setOpen(!open);
-        }}
-        className={cn(
-          "max-w-full rounded bg-muted px-1.5 py-px text-left text-xs",
-          open ? "break-all whitespace-pre-wrap" : "block truncate",
-        )}
-      >
-        {chip}
-      </button>
-    </li>
-  );
-}
-
-function Time({ at }: { at: string }) {
-  const now = useNow(1000);
-  const when = Date.parse(at);
-  if (Number.isNaN(when)) return <span>{at}</span>;
-  const date = new Date(when).toLocaleString();
-  return (
-    <span title={date}>
-      {humanDuration(Math.max(0, now - when))} ago
-      <span className="ml-2 text-muted-foreground">{date}</span>
-    </span>
-  );
-}
-
-function Age({ at }: { at: string | null }) {
-  const now = useNow(1000);
-  const when = at === null ? Number.NaN : Date.parse(at);
-  if (Number.isNaN(when)) return null;
-  return (
-    <span title={new Date(when).toLocaleString()} className="tabular-nums">
-      {humanDuration(Math.max(0, now - when))}
-    </span>
   );
 }
 
@@ -254,6 +249,8 @@ function Conditions({ conditions }: { conditions: readonly Condition[] }) {
                 `${condition.type}: ${condition.status}`,
                 condition.reason,
                 condition.message,
+                condition.lastHeartbeat &&
+                  `Last heartbeat ${new Date(condition.lastHeartbeat).toLocaleString()}`,
               ]
                 .filter(Boolean)
                 .join("\n")}

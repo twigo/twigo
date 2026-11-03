@@ -1,0 +1,373 @@
+{
+  "kind": "Table",
+  "apiVersion": "meta.k8s.io/v1",
+  "metadata": {
+    "resourceVersion": "7021"
+  },
+  "columnDefinitions": [
+    {
+      "name": "Name",
+      "type": "string",
+      "format": "name",
+      "description": "Name must be unique within a namespace. Is required when creating resources, although some resources may allow a client to request the generation of an appropriate name automatically. Name is primarily intended for creation idempotence and configuration definition. Cannot be updated. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names#names",
+      "priority": 0
+    },
+    {
+      "name": "Status",
+      "type": "string",
+      "format": "",
+      "description": "Status of the job.",
+      "priority": 0
+    },
+    {
+      "name": "Completions",
+      "type": "string",
+      "format": "",
+      "description": "The number of pods which reached phase Succeeded. The value increases monotonically for a given spec. However, it may decrease in reaction to scale down of elastic indexed jobs.",
+      "priority": 0
+    },
+    {
+      "name": "Duration",
+      "type": "string",
+      "format": "",
+      "description": "Time required to complete the job.",
+      "priority": 0
+    },
+    {
+      "name": "Age",
+      "type": "string",
+      "format": "",
+      "description": "CreationTimestamp is a timestamp representing the server time when this object was created. It is not guaranteed to be set in happens-before order across separate operations. Clients may not set this value. It is represented in RFC3339 form and is in UTC.\n\nPopulated by the system. Read-only. Null for lists. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
+      "priority": 0
+    },
+    {
+      "name": "Containers",
+      "type": "string",
+      "format": "",
+      "description": "Names of each container in the template.",
+      "priority": 1
+    },
+    {
+      "name": "Images",
+      "type": "string",
+      "format": "",
+      "description": "Images referenced by each container in the template.",
+      "priority": 1
+    },
+    {
+      "name": "Selector",
+      "type": "string",
+      "format": "",
+      "description": "A label query over pods that should match the pod count. Normally, the system sets this field for you. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors",
+      "priority": 1
+    }
+  ],
+  "rows": [
+    {
+      "cells": [
+        "migrate",
+        "Complete",
+        "1/1",
+        "3s",
+        "34m",
+        "migrate",
+        "docker.io/kindest/local-path-helper:v20260131-7181c60a",
+        "batch.kubernetes.io/controller-uid=23d14ace-b325-473f-bb93-bad78aaa7928"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "migrate",
+          "namespace": "overview",
+          "uid": "23d14ace-b325-473f-bb93-bad78aaa7928",
+          "resourceVersion": "2519",
+          "generation": 1,
+          "creationTimestamp": "2026-11-03T11:36:41Z",
+          "labels": {
+            "batch.kubernetes.io/controller-uid": "23d14ace-b325-473f-bb93-bad78aaa7928",
+            "batch.kubernetes.io/job-name": "migrate",
+            "controller-uid": "23d14ace-b325-473f-bb93-bad78aaa7928",
+            "job-name": "migrate"
+          },
+          "managedFields": [
+            {
+              "manager": "twigo-record",
+              "operation": "Apply",
+              "apiVersion": "batch/v1",
+              "time": "2026-11-03T11:36:41Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:spec": {
+                  "f:backoffLimit": {},
+                  "f:template": {
+                    "f:spec": {
+                      "f:containers": {
+                        "k:{\"name\":\"migrate\"}": {
+                          ".": {},
+                          "f:command": {},
+                          "f:image": {},
+                          "f:name": {}
+                        }
+                      },
+                      "f:nodeSelector": {},
+                      "f:restartPolicy": {}
+                    }
+                  },
+                  "f:ttlSecondsAfterFinished": {}
+                }
+              }
+            },
+            {
+              "manager": "kube-controller-manager",
+              "operation": "Update",
+              "apiVersion": "batch/v1",
+              "time": "2026-11-03T11:36:44Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:status": {
+                  "f:completionTime": {},
+                  "f:conditions": {},
+                  "f:ready": {},
+                  "f:startTime": {},
+                  "f:succeeded": {},
+                  "f:terminating": {},
+                  "f:uncountedTerminatedPods": {}
+                }
+              },
+              "subresource": "status"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "report-29895129",
+        "Complete",
+        "1/1",
+        "3s",
+        "111s",
+        "report",
+        "docker.io/kindest/local-path-helper:v20260131-7181c60a",
+        "batch.kubernetes.io/controller-uid=f098bd14-b43f-4da8-bfae-20ac04646c6b"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "report-29895129",
+          "namespace": "overview",
+          "uid": "f098bd14-b43f-4da8-bfae-20ac04646c6b",
+          "resourceVersion": "6817",
+          "generation": 1,
+          "creationTimestamp": "2026-11-03T12:09:00Z",
+          "labels": {
+            "batch.kubernetes.io/controller-uid": "f098bd14-b43f-4da8-bfae-20ac04646c6b",
+            "batch.kubernetes.io/job-name": "report-29895129",
+            "controller-uid": "f098bd14-b43f-4da8-bfae-20ac04646c6b",
+            "job-name": "report-29895129"
+          },
+          "annotations": {
+            "batch.kubernetes.io/cronjob-scheduled-timestamp": "2026-11-03T12:09:00Z"
+          },
+          "ownerReferences": [
+            {
+              "apiVersion": "batch/v1",
+              "kind": "CronJob",
+              "name": "report",
+              "uid": "d217e071-f9d8-46b4-83fb-3c7af5e08bd4",
+              "controller": true,
+              "blockOwnerDeletion": true
+            }
+          ],
+          "managedFields": [
+            {
+              "manager": "kube-controller-manager",
+              "operation": "Update",
+              "apiVersion": "batch/v1",
+              "time": "2026-11-03T12:09:00Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:metadata": {
+                  "f:annotations": {
+                    ".": {},
+                    "f:batch.kubernetes.io/cronjob-scheduled-timestamp": {}
+                  },
+                  "f:ownerReferences": {
+                    ".": {},
+                    "k:{\"uid\":\"d217e071-f9d8-46b4-83fb-3c7af5e08bd4\"}": {}
+                  }
+                },
+                "f:spec": {
+                  "f:backoffLimit": {},
+                  "f:completionMode": {},
+                  "f:completions": {},
+                  "f:manualSelector": {},
+                  "f:parallelism": {},
+                  "f:podReplacementPolicy": {},
+                  "f:suspend": {},
+                  "f:template": {
+                    "f:spec": {
+                      "f:containers": {
+                        "k:{\"name\":\"report\"}": {
+                          ".": {},
+                          "f:command": {},
+                          "f:image": {},
+                          "f:imagePullPolicy": {},
+                          "f:name": {},
+                          "f:resources": {},
+                          "f:terminationMessagePath": {},
+                          "f:terminationMessagePolicy": {}
+                        }
+                      },
+                      "f:dnsPolicy": {},
+                      "f:nodeSelector": {},
+                      "f:restartPolicy": {},
+                      "f:schedulerName": {},
+                      "f:securityContext": {},
+                      "f:terminationGracePeriodSeconds": {}
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "manager": "kube-controller-manager",
+              "operation": "Update",
+              "apiVersion": "batch/v1",
+              "time": "2026-11-03T12:09:03Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:status": {
+                  "f:completionTime": {},
+                  "f:conditions": {},
+                  "f:ready": {},
+                  "f:startTime": {},
+                  "f:succeeded": {},
+                  "f:terminating": {},
+                  "f:uncountedTerminatedPods": {}
+                }
+              },
+              "subresource": "status"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "cells": [
+        "report-29895130",
+        "Complete",
+        "1/1",
+        "2s",
+        "51s",
+        "report",
+        "docker.io/kindest/local-path-helper:v20260131-7181c60a",
+        "batch.kubernetes.io/controller-uid=2f423491-7afb-4d8a-a0bd-47ca0b6eced9"
+      ],
+      "object": {
+        "kind": "PartialObjectMetadata",
+        "apiVersion": "meta.k8s.io/v1",
+        "metadata": {
+          "name": "report-29895130",
+          "namespace": "overview",
+          "uid": "2f423491-7afb-4d8a-a0bd-47ca0b6eced9",
+          "resourceVersion": "6939",
+          "generation": 1,
+          "creationTimestamp": "2026-11-03T12:10:00Z",
+          "labels": {
+            "batch.kubernetes.io/controller-uid": "2f423491-7afb-4d8a-a0bd-47ca0b6eced9",
+            "batch.kubernetes.io/job-name": "report-29895130",
+            "controller-uid": "2f423491-7afb-4d8a-a0bd-47ca0b6eced9",
+            "job-name": "report-29895130"
+          },
+          "annotations": {
+            "batch.kubernetes.io/cronjob-scheduled-timestamp": "2026-11-03T12:10:00Z"
+          },
+          "ownerReferences": [
+            {
+              "apiVersion": "batch/v1",
+              "kind": "CronJob",
+              "name": "report",
+              "uid": "d217e071-f9d8-46b4-83fb-3c7af5e08bd4",
+              "controller": true,
+              "blockOwnerDeletion": true
+            }
+          ],
+          "managedFields": [
+            {
+              "manager": "kube-controller-manager",
+              "operation": "Update",
+              "apiVersion": "batch/v1",
+              "time": "2026-11-03T12:10:00Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:metadata": {
+                  "f:annotations": {
+                    ".": {},
+                    "f:batch.kubernetes.io/cronjob-scheduled-timestamp": {}
+                  },
+                  "f:ownerReferences": {
+                    ".": {},
+                    "k:{\"uid\":\"d217e071-f9d8-46b4-83fb-3c7af5e08bd4\"}": {}
+                  }
+                },
+                "f:spec": {
+                  "f:backoffLimit": {},
+                  "f:completionMode": {},
+                  "f:completions": {},
+                  "f:manualSelector": {},
+                  "f:parallelism": {},
+                  "f:podReplacementPolicy": {},
+                  "f:suspend": {},
+                  "f:template": {
+                    "f:spec": {
+                      "f:containers": {
+                        "k:{\"name\":\"report\"}": {
+                          ".": {},
+                          "f:command": {},
+                          "f:image": {},
+                          "f:imagePullPolicy": {},
+                          "f:name": {},
+                          "f:resources": {},
+                          "f:terminationMessagePath": {},
+                          "f:terminationMessagePolicy": {}
+                        }
+                      },
+                      "f:dnsPolicy": {},
+                      "f:nodeSelector": {},
+                      "f:restartPolicy": {},
+                      "f:schedulerName": {},
+                      "f:securityContext": {},
+                      "f:terminationGracePeriodSeconds": {}
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "manager": "kube-controller-manager",
+              "operation": "Update",
+              "apiVersion": "batch/v1",
+              "time": "2026-11-03T12:10:02Z",
+              "fieldsType": "FieldsV1",
+              "fieldsV1": {
+                "f:status": {
+                  "f:completionTime": {},
+                  "f:conditions": {},
+                  "f:ready": {},
+                  "f:startTime": {},
+                  "f:succeeded": {},
+                  "f:terminating": {},
+                  "f:uncountedTerminatedPods": {}
+                }
+              },
+              "subresource": "status"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

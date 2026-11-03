@@ -128,7 +128,9 @@ test("the mock answers with the recorded pod under the name asked for", async ()
   );
   await vi.runAllTimersAsync();
   const overview = view.getSnapshot().overview;
-  const metadata = overview?.sections[0]?.blocks[0];
+  const metadata = overview?.sections.find(
+    (section) => section.id === "core.metadata",
+  )?.blocks[0];
   expect(metadata?.type === "fields" && metadata.fields[0]).toEqual({
     label: "Name",
     value: { type: "text", text: "api-0" },

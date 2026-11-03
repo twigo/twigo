@@ -266,6 +266,9 @@ export function Details({
         {snapshot.overview || tab !== "overview" ? (
           <ObjectContent
             tab={tab}
+            space={space}
+            states={services.overviews}
+            kind={`${group}/${resource}`}
             snapshot={snapshot}
             values={values}
             onOpen={open}

@@ -1,0 +1,401 @@
+{
+  "events": [
+    {
+      "count": 25,
+      "fieldPath": null,
+      "first": "2026-11-03T11:48:03Z",
+      "last": "2026-11-03T12:12:03Z",
+      "message": "(combined from similar events): Deleted job report-29895130",
+      "reason": "SuccessfulDelete",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:47:03Z",
+      "last": "2026-11-03T11:47:03Z",
+      "message": "Deleted job report-29895105",
+      "reason": "SuccessfulDelete",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:45:03Z",
+      "last": "2026-11-03T11:45:03Z",
+      "message": "Deleted job report-29895103",
+      "reason": "SuccessfulDelete",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:45:00Z",
+      "last": "2026-11-03T11:45:00Z",
+      "message": "Created job report-29895105",
+      "reason": "SuccessfulCreate",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:44:03Z",
+      "last": "2026-11-03T11:44:03Z",
+      "message": "Deleted job report-29895102",
+      "reason": "SuccessfulDelete",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:44:03Z",
+      "last": "2026-11-03T11:44:03Z",
+      "message": "Saw completed job: report-29895104, condition: Complete",
+      "reason": "SawCompletedJob",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:44:00Z",
+      "last": "2026-11-03T11:44:00Z",
+      "message": "Created job report-29895104",
+      "reason": "SuccessfulCreate",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:43:03Z",
+      "last": "2026-11-03T11:43:03Z",
+      "message": "Saw completed job: report-29895103, condition: Complete",
+      "reason": "SawCompletedJob",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:43:03Z",
+      "last": "2026-11-03T11:43:03Z",
+      "message": "Deleted job report-29895101",
+      "reason": "SuccessfulDelete",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:43:00Z",
+      "last": "2026-11-03T11:43:00Z",
+      "message": "Created job report-29895103",
+      "reason": "SuccessfulCreate",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 2,
+      "fieldPath": null,
+      "first": "2026-11-03T11:42:02Z",
+      "last": "2026-11-03T11:42:02Z",
+      "message": "Saw completed job: report-29895102, condition: Complete",
+      "reason": "SawCompletedJob",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:42:02Z",
+      "last": "2026-11-03T11:42:02Z",
+      "message": "Deleted job report-29895100",
+      "reason": "SuccessfulDelete",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:42:00Z",
+      "last": "2026-11-03T11:42:00Z",
+      "message": "Created job report-29895102",
+      "reason": "SuccessfulCreate",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:41:03Z",
+      "last": "2026-11-03T11:41:03Z",
+      "message": "Deleted job report-29895099",
+      "reason": "SuccessfulDelete",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:41:03Z",
+      "last": "2026-11-03T11:41:03Z",
+      "message": "Saw completed job: report-29895101, condition: Complete",
+      "reason": "SawCompletedJob",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:41:00Z",
+      "last": "2026-11-03T11:41:00Z",
+      "message": "Created job report-29895101",
+      "reason": "SuccessfulCreate",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:40:03Z",
+      "last": "2026-11-03T11:40:03Z",
+      "message": "Deleted job report-29895098",
+      "reason": "SuccessfulDelete",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 2,
+      "fieldPath": null,
+      "first": "2026-11-03T11:40:03Z",
+      "last": "2026-11-03T11:40:03Z",
+      "message": "Saw completed job: report-29895100, condition: Complete",
+      "reason": "SawCompletedJob",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:40:00Z",
+      "last": "2026-11-03T11:40:00Z",
+      "message": "Created job report-29895100",
+      "reason": "SuccessfulCreate",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:39:02Z",
+      "last": "2026-11-03T11:39:02Z",
+      "message": "Deleted job report-29895097",
+      "reason": "SuccessfulDelete",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:39:02Z",
+      "last": "2026-11-03T11:39:02Z",
+      "message": "Saw completed job: report-29895099, condition: Complete",
+      "reason": "SawCompletedJob",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:39:00Z",
+      "last": "2026-11-03T11:39:00Z",
+      "message": "Created job report-29895099",
+      "reason": "SuccessfulCreate",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:38:02Z",
+      "last": "2026-11-03T11:38:02Z",
+      "message": "Saw completed job: report-29895098, condition: Complete",
+      "reason": "SawCompletedJob",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:38:00Z",
+      "last": "2026-11-03T11:38:00Z",
+      "message": "Created job report-29895098",
+      "reason": "SuccessfulCreate",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:37:03Z",
+      "last": "2026-11-03T11:37:03Z",
+      "message": "Saw completed job: report-29895097, condition: Complete",
+      "reason": "SawCompletedJob",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:37:00Z",
+      "last": "2026-11-03T11:37:00Z",
+      "message": "Created job report-29895097",
+      "reason": "SuccessfulCreate",
+      "source": "cronjob-controller",
+      "type": "Normal"
+    }
+  ],
+  "facts": [],
+  "object": {
+    "apiVersion": "batch/v1",
+    "kind": "CronJob",
+    "metadata": {
+      "creationTimestamp": "2026-11-03T11:36:41Z",
+      "generation": 1,
+      "managedFields": [
+        {
+          "apiVersion": "batch/v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:spec": {
+              "f:concurrencyPolicy": {},
+              "f:jobTemplate": {
+                "f:spec": {
+                  "f:template": {
+                    "f:spec": {
+                      "f:containers": {
+                        "k:{\"name\":\"report\"}": {
+                          ".": {},
+                          "f:command": {},
+                          "f:image": {},
+                          "f:name": {}
+                        }
+                      },
+                      "f:nodeSelector": {},
+                      "f:restartPolicy": {}
+                    }
+                  }
+                }
+              },
+              "f:schedule": {},
+              "f:successfulJobsHistoryLimit": {},
+              "f:timeZone": {}
+            }
+          },
+          "manager": "twigo-record",
+          "operation": "Apply",
+          "time": "2026-11-03T11:36:41Z"
+        },
+        {
+          "apiVersion": "batch/v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:status": {
+              "f:lastScheduleTime": {},
+              "f:lastSuccessfulTime": {}
+            }
+          },
+          "manager": "kube-controller-manager",
+          "operation": "Update",
+          "subresource": "status",
+          "time": "2026-11-03T12:15:03Z"
+        }
+      ],
+      "name": "report",
+      "namespace": "overview",
+      "resourceVersion": "7623",
+      "uid": "d217e071-f9d8-46b4-83fb-3c7af5e08bd4"
+    },
+    "spec": {
+      "concurrencyPolicy": "Forbid",
+      "failedJobsHistoryLimit": 1,
+      "jobTemplate": {
+        "metadata": {},
+        "spec": {
+          "template": {
+            "metadata": {},
+            "spec": {
+              "containers": [
+                {
+                  "command": [
+                    "sh",
+                    "-c",
+                    "echo report done"
+                  ],
+                  "image": "docker.io/kindest/local-path-helper:v20260131-7181c60a",
+                  "imagePullPolicy": "IfNotPresent",
+                  "name": "report",
+                  "resources": {},
+                  "terminationMessagePath": "/dev/termination-log",
+                  "terminationMessagePolicy": "File"
+                }
+              ],
+              "dnsPolicy": "ClusterFirst",
+              "nodeSelector": {
+                "kubernetes.io/hostname": "twigo-overviews-control-plane"
+              },
+              "restartPolicy": "Never",
+              "schedulerName": "default-scheduler",
+              "securityContext": {},
+              "terminationGracePeriodSeconds": 30
+            }
+          }
+        }
+      },
+      "schedule": "*/1 * * * *",
+      "successfulJobsHistoryLimit": 2,
+      "suspend": false,
+      "timeZone": "Etc/UTC"
+    },
+    "status": {
+      "lastScheduleTime": "2026-11-03T12:15:00Z",
+      "lastSuccessfulTime": "2026-11-03T12:15:03Z"
+    }
+  },
+  "printed": [
+    {
+      "column": "Schedule",
+      "value": "*/1 * * * *"
+    },
+    {
+      "column": "Timezone",
+      "value": "Etc/UTC"
+    },
+    {
+      "column": "Suspend",
+      "value": "False"
+    },
+    {
+      "column": "Active",
+      "value": "0"
+    },
+    {
+      "column": "Last Schedule",
+      "value": "42s"
+    },
+    {
+      "column": "Containers",
+      "value": "report"
+    },
+    {
+      "column": "Images",
+      "value": "docker.io/kindest/local-path-helper:v20260131-7181c60a"
+    }
+  ]
+}

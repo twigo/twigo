@@ -1,0 +1,367 @@
+{
+  "events": [
+    {
+      "count": 152,
+      "fieldPath": "spec.containers{api}",
+      "first": "2026-11-03T11:36:42Z",
+      "last": "2026-11-03T12:11:42Z",
+      "message": "Back-off pulling image \"registry.invalid/twigo/api:1.0\"",
+      "reason": "BackOff",
+      "source": "kubelet",
+      "type": "Normal"
+    },
+    {
+      "count": 152,
+      "fieldPath": "spec.containers{api}",
+      "first": "2026-11-03T11:36:42Z",
+      "last": "2026-11-03T12:11:42Z",
+      "message": "Error: ImagePullBackOff",
+      "reason": "Failed",
+      "source": "kubelet",
+      "type": "Warning"
+    },
+    {
+      "count": 5,
+      "fieldPath": "spec.containers{api}",
+      "first": "2026-11-03T11:36:41Z",
+      "last": "2026-11-03T11:39:40Z",
+      "message": "Pulling image \"registry.invalid/twigo/api:1.0\"",
+      "reason": "Pulling",
+      "source": "kubelet",
+      "type": "Normal"
+    },
+    {
+      "count": 5,
+      "fieldPath": "spec.containers{api}",
+      "first": "2026-11-03T11:36:41Z",
+      "last": "2026-11-03T11:39:40Z",
+      "message": "Failed to pull image \"registry.invalid/twigo/api:1.0\": failed to pull and unpack image \"registry.invalid/twigo/api:1.0\": failed to resolve reference \"registry.invalid/twigo/api:1.0\": failed to do request: Head \"https://registry.invalid/v2/twigo/api/manifests/1.0\": dial tcp: lookup registry.invalid on 192.168.65.254:53: no such host",
+      "reason": "Failed",
+      "source": "kubelet",
+      "type": "Warning"
+    },
+    {
+      "count": 5,
+      "fieldPath": "spec.containers{api}",
+      "first": "2026-11-03T11:36:41Z",
+      "last": "2026-11-03T11:39:40Z",
+      "message": "Error: ErrImagePull",
+      "reason": "Failed",
+      "source": "kubelet",
+      "type": "Warning"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-03T11:36:41Z",
+      "last": "2026-11-03T11:36:41Z",
+      "message": "Successfully assigned overview/pull to twigo-overviews-control-plane",
+      "reason": "Scheduled",
+      "source": "default-scheduler",
+      "type": "Normal"
+    }
+  ],
+  "facts": [],
+  "object": {
+    "apiVersion": "v1",
+    "kind": "Pod",
+    "metadata": {
+      "creationTimestamp": "2026-11-03T11:36:41Z",
+      "generation": 1,
+      "labels": {
+        "app": "pull"
+      },
+      "managedFields": [
+        {
+          "apiVersion": "v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:metadata": {
+              "f:labels": {
+                "f:app": {}
+              }
+            },
+            "f:spec": {
+              "f:containers": {
+                "k:{\"name\":\"api\"}": {
+                  ".": {},
+                  "f:image": {},
+                  "f:name": {}
+                }
+              },
+              "f:nodeSelector": {}
+            }
+          },
+          "manager": "twigo-record",
+          "operation": "Apply",
+          "time": "2026-11-03T11:36:41Z"
+        },
+        {
+          "apiVersion": "v1",
+          "fieldsType": "FieldsV1",
+          "fieldsV1": {
+            "f:status": {
+              "f:conditions": {
+                "k:{\"type\":\"ContainersReady\"}": {
+                  ".": {},
+                  "f:lastProbeTime": {},
+                  "f:lastTransitionTime": {},
+                  "f:message": {},
+                  "f:observedGeneration": {},
+                  "f:reason": {},
+                  "f:status": {},
+                  "f:type": {}
+                },
+                "k:{\"type\":\"Initialized\"}": {
+                  ".": {},
+                  "f:lastProbeTime": {},
+                  "f:lastTransitionTime": {},
+                  "f:observedGeneration": {},
+                  "f:status": {},
+                  "f:type": {}
+                },
+                "k:{\"type\":\"PodReadyToStartContainers\"}": {
+                  ".": {},
+                  "f:lastProbeTime": {},
+                  "f:lastTransitionTime": {},
+                  "f:observedGeneration": {},
+                  "f:status": {},
+                  "f:type": {}
+                },
+                "k:{\"type\":\"PodScheduled\"}": {
+                  "f:observedGeneration": {}
+                },
+                "k:{\"type\":\"Ready\"}": {
+                  ".": {},
+                  "f:lastProbeTime": {},
+                  "f:lastTransitionTime": {},
+                  "f:message": {},
+                  "f:observedGeneration": {},
+                  "f:reason": {},
+                  "f:status": {},
+                  "f:type": {}
+                }
+              },
+              "f:containerStatuses": {},
+              "f:hostIP": {},
+              "f:hostIPs": {},
+              "f:observedGeneration": {},
+              "f:podIP": {},
+              "f:podIPs": {
+                ".": {},
+                "k:{\"ip\":\"10.244.0.13\"}": {
+                  ".": {},
+                  "f:ip": {}
+                }
+              },
+              "f:resources": {},
+              "f:startTime": {}
+            }
+          },
+          "manager": "kubelet",
+          "operation": "Update",
+          "subresource": "status",
+          "time": "2026-11-03T12:13:39Z"
+        }
+      ],
+      "name": "pull",
+      "namespace": "overview",
+      "resourceVersion": "7424",
+      "uid": "1ad7b2f9-68b1-4215-89dd-1ff5c4486e16"
+    },
+    "spec": {
+      "containers": [
+        {
+          "image": "registry.invalid/twigo/api:1.0",
+          "imagePullPolicy": "IfNotPresent",
+          "name": "api",
+          "resources": {},
+          "terminationMessagePath": "/dev/termination-log",
+          "terminationMessagePolicy": "File",
+          "volumeMounts": [
+            {
+              "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+              "name": "kube-api-access-r286z",
+              "readOnly": true
+            }
+          ]
+        }
+      ],
+      "dnsPolicy": "ClusterFirst",
+      "enableServiceLinks": true,
+      "nodeName": "twigo-overviews-control-plane",
+      "nodeSelector": {
+        "kubernetes.io/hostname": "twigo-overviews-control-plane"
+      },
+      "preemptionPolicy": "PreemptLowerPriority",
+      "priority": 0,
+      "restartPolicy": "Always",
+      "schedulerName": "default-scheduler",
+      "securityContext": {},
+      "serviceAccount": "default",
+      "serviceAccountName": "default",
+      "terminationGracePeriodSeconds": 30,
+      "tolerations": [
+        {
+          "effect": "NoExecute",
+          "key": "node.kubernetes.io/not-ready",
+          "operator": "Exists",
+          "tolerationSeconds": 300
+        },
+        {
+          "effect": "NoExecute",
+          "key": "node.kubernetes.io/unreachable",
+          "operator": "Exists",
+          "tolerationSeconds": 300
+        }
+      ],
+      "volumes": [
+        {
+          "name": "kube-api-access-r286z",
+          "projected": {
+            "defaultMode": 420,
+            "sources": [
+              {
+                "serviceAccountToken": {
+                  "expirationSeconds": 3607,
+                  "path": "token"
+                }
+              },
+              {
+                "configMap": {
+                  "items": [
+                    {
+                      "key": "ca.crt",
+                      "path": "ca.crt"
+                    }
+                  ],
+                  "name": "kube-root-ca.crt"
+                }
+              },
+              {
+                "downwardAPI": {
+                  "items": [
+                    {
+                      "fieldRef": {
+                        "apiVersion": "v1",
+                        "fieldPath": "metadata.namespace"
+                      },
+                      "path": "namespace"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": {
+      "conditions": [
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-11-03T11:36:41Z",
+          "observedGeneration": 1,
+          "status": "True",
+          "type": "PodReadyToStartContainers"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-11-03T11:36:41Z",
+          "observedGeneration": 1,
+          "status": "True",
+          "type": "Initialized"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-11-03T11:36:41Z",
+          "message": "containers with unready status: [api]",
+          "observedGeneration": 1,
+          "reason": "ContainersNotReady",
+          "status": "False",
+          "type": "Ready"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-11-03T11:36:41Z",
+          "message": "containers with unready status: [api]",
+          "observedGeneration": 1,
+          "reason": "ContainersNotReady",
+          "status": "False",
+          "type": "ContainersReady"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-11-03T11:36:41Z",
+          "observedGeneration": 1,
+          "status": "True",
+          "type": "PodScheduled"
+        }
+      ],
+      "containerStatuses": [
+        {
+          "image": "registry.invalid/twigo/api:1.0",
+          "imageID": "",
+          "lastState": {},
+          "name": "api",
+          "ready": false,
+          "restartCount": 0,
+          "started": false,
+          "state": {
+            "waiting": {
+              "message": "Back-off pulling image \"registry.invalid/twigo/api:1.0\": ErrImagePull: failed to pull and unpack image \"registry.invalid/twigo/api:1.0\": failed to resolve reference \"registry.invalid/twigo/api:1.0\": failed to do request: Head \"https://registry.invalid/v2/twigo/api/manifests/1.0\": dial tcp: lookup registry.invalid on 192.168.65.254:53: no such host",
+              "reason": "ImagePullBackOff"
+            }
+          },
+          "volumeMounts": [
+            {
+              "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+              "name": "kube-api-access-r286z",
+              "readOnly": true,
+              "recursiveReadOnly": "Disabled"
+            }
+          ]
+        }
+      ],
+      "hostIP": "172.18.0.2",
+      "hostIPs": [
+        {
+          "ip": "172.18.0.2"
+        }
+      ],
+      "observedGeneration": 1,
+      "phase": "Pending",
+      "podIP": "10.244.0.13",
+      "podIPs": [
+        {
+          "ip": "10.244.0.13"
+        }
+      ],
+      "qosClass": "BestEffort",
+      "resources": {},
+      "startTime": "2026-11-03T11:36:41Z"
+    }
+  },
+  "printed": [
+    {
+      "column": "Ready",
+      "value": "0/1"
+    },
+    {
+      "column": "Status",
+      "value": "ImagePullBackOff"
+    },
+    {
+      "column": "Restarts",
+      "value": "0"
+    },
+    {
+      "column": "IP",
+      "value": "10.244.0.13"
+    },
+    {
+      "column": "Node",
+      "value": "twigo-overviews-control-plane"
+    }
+  ]
+}

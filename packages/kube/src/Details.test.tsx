@@ -90,14 +90,14 @@ describe("in a wide editor", () => {
     const header = shown().querySelector("header");
     const pill = within(header ?? document.body).getByText("CrashLoopBackOff");
     expect(pill.className).toContain("text-error");
-    fireEvent.click(
-      within(header ?? document.body).getByRole("button", {
-        name: "ReplicaSet web-8dc77bb87",
-      }),
-    );
+    const owner = within(header ?? document.body).getByRole("button", {
+      name: /^ReplicaSet /,
+    });
+    const name = owner.textContent.replace(/^ReplicaSet /, "");
+    fireEvent.click(owner);
     await settle();
     expect(workbench.editors.active).toBe(
-      "k8s://prod-eu/apps/v1/replicasets/overview/web-8dc77bb87",
+      `k8s://prod-eu/apps/v1/replicasets/overview/${name}`,
     );
   });
 

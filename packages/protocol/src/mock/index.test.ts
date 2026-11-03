@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { KeyboardLayout, ListBatch, ListQuery } from "../generated";
+import type {
+  KeyboardLayout,
+  ListBatch,
+  ListQuery,
+  ObjectBatch,
+  ObjectParts,
+} from "../generated";
+import { Cluster, deploymentOf } from "./cluster";
 import { createMockBackend, type MockScenario } from "./index";
+import { KINDS } from "./kinds";
+import { MockObject } from "./objects";
 import { natural } from "./query";
 
 function query(rest: Partial<ListQuery> = {}): ListQuery {
@@ -10,6 +19,8 @@ function query(rest: Partial<ListQuery> = {}): ListQuery {
     namespaced: true,
     namespaces: [],
     labelSelector: null,
+    fieldSelector: null,
+    owners: null,
     text: null,
     columns: null,
     sort: null,
@@ -393,7 +404,10 @@ test("text matches the columns of priority 0 and those the query's choices show"
     (await open("ready", query({ text, columns }))).batches[0]?.total;
   expect(await total("<none>", null)).toBe(0);
   expect(await total("10.244.", null)).toBe(0);
-  expect(await total("10.244.", { IP: true })).toBe(5000);
+  const scheduled = new Cluster("prod-eu", 5000, Date.now()).pods.filter(
+    (pod) => pod.status !== "Pending",
+  ).length;
+  expect(await total("10.244.", { IP: true })).toBe(scheduled);
   expect(await total("kube-system", null)).toBeGreaterThan(0);
   expect(await total("kube-system", { Namespace: false })).toBe(0);
 });
@@ -443,6 +457,206 @@ test("label selectors match the pods' labels, and one that does not parse is ref
   });
   await vi.advanceTimersByTimeAsync(0);
   await rejected;
+});
+
+test("a field selector keeps the pods of one node, and one on a field pods lack fails the list as the server does", async () => {
+  const pods = new Cluster("prod-eu", 5000, Date.now()).pods;
+  const node = pods[0]?.node ?? "";
+  const on = await open(
+    "ready",
+    query({ fieldSelector: `spec.nodeName=${node},` }),
+  );
+  expect(on.batches[0]?.total).toBe(
+    pods.filter((pod) => pod.node === node && pod.status !== "Pending").length,
+  );
+  const off = await open(
+    "ready",
+    query({
+      fieldSelector: `spec.nodeName!=${node},spec.restartPolicy=Always`,
+    }),
+  );
+  expect(off.batches[0]?.total).toBe(
+    pods.filter((pod) => pod.node !== node || pod.status === "Pending").length,
+  );
+  const wrong = await open(
+    "ready",
+    query({ fieldSelector: "spec.containers=api" }),
+  );
+  expect(wrong.batches[0]?.status).toEqual({
+    state: "error",
+    error: {
+      kind: "invalidInput",
+      message: "field label not supported: spec.containers",
+    },
+  });
+  expect(wrong.batches[0]?.total).toBe(0);
+});
+
+test("a field selector takes old names and fields the server matches as empty, and refuses what does not parse", async () => {
+  const pods = new Cluster("prod-eu", 5000, Date.now()).pods;
+  const node = pods[0]?.node ?? "";
+  const old = await open(
+    "ready",
+    query({ fieldSelector: `spec.host=${node}` }),
+  );
+  expect(old.batches[0]?.total).toBe(
+    pods.filter((pod) => pod.node === node && pod.status !== "Pending").length,
+  );
+  const empty = await open("ready", query({ fieldSelector: "status.podIPs=" }));
+  expect(empty.batches[0]?.total).toBe(5000);
+  const completed = pods.find((pod) => pod.status === "Completed");
+  const running = await open(
+    "ready",
+    query({
+      fieldSelector: `status.phase=Running,metadata.name=${completed?.name ?? ""}`,
+    }),
+  );
+  expect(running.batches[0]?.total).toBe(1);
+  const broken = await open(
+    "ready",
+    query({ fieldSelector: "spec.foo=1,spec.nodeName" }),
+  );
+  expect(broken.batches[0]?.status).toMatchObject({
+    state: "error",
+    error: {
+      kind: "invalidInput",
+      message:
+        "invalid selector: 'spec.foo=1,spec.nodeName'; can't understand 'spec.nodeName'",
+    },
+  });
+  const unsorted = await open(
+    "ready",
+    query({ fieldSelector: "spec.foo=1,metadata.bar=2" }),
+  );
+  expect(unsorted.batches[0]?.status).toMatchObject({
+    error: { message: "field label not supported: metadata.bar" },
+  });
+  const pending = pods.find((pod) => pod.status === "Pending");
+  const unscheduled = await open(
+    "ready",
+    query({
+      fieldSelector: `spec.nodeName=${pending?.node ?? ""},metadata.name=${pending?.name ?? ""}`,
+    }),
+  );
+  expect(unscheduled.batches[0]?.total).toBe(0);
+});
+
+test("a pod that churn puts in a Deployment with a new hash joins its live list", () => {
+  const cluster = new Cluster("prod-eu", 5000, Date.now());
+  const pod = cluster.pods[0];
+  if (!pod) throw new Error("a pod");
+  const deployment = deploymentOf(pod);
+  let owners: readonly string[] = [];
+  new MockObject(
+    {
+      space: "prod-eu",
+      gvr: { group: "apps", version: "v1", resource: "deployments" },
+      namespaced: true,
+      namespace: pod.namespace,
+      name: deployment,
+    },
+    OVERVIEW,
+    cluster,
+    (batch) => {
+      for (const section of batch.overview?.sections ?? [])
+        for (const block of section.blocks)
+          if (block.type === "list") owners = block.owners ?? [];
+    },
+  );
+  vi.advanceTimersByTime(1);
+  cluster.pods.push({
+    ...pod,
+    id: `${pod.id}-new`,
+    name: `${deployment}-zzzzzzzz-new01`,
+    generateName: `${deployment}-zzzzzzzz-`,
+    templateHash: "zzzzzzzz",
+  });
+  const rows = KINDS["/v1/pods"]?.rows(cluster, false) ?? [];
+  const listed = rows.filter(
+    (row) => row.controller !== null && owners.includes(row.controller),
+  );
+  expect(listed.map((row) => row.id)).toContain(`${pod.id}-new`);
+});
+
+const OVERVIEW: ObjectParts = {
+  overview: true,
+  manifest: false,
+  events: false,
+  related: false,
+};
+
+async function described(
+  resource: string,
+  group: string,
+  namespace: string,
+  name: string,
+): Promise<ObjectBatch> {
+  const backend = createMockBackend("ready");
+  const batches: ObjectBatch[] = [];
+  const pending = backend.subscribe(
+    "object_open",
+    {
+      object: {
+        space: "prod-eu",
+        gvr: { group, version: "v1", resource },
+        namespaced: true,
+        namespace,
+        name,
+      },
+      parts: OVERVIEW,
+    },
+    (batch) => batches.push(batch),
+  );
+  await vi.advanceTimersByTimeAsync(10);
+  await pending;
+  const first = batches[0];
+  if (!first) throw new Error("no batch");
+  return first;
+}
+
+test("a mock pod opens as the recorded pod in its state", async () => {
+  const pods = new Cluster("prod-eu", 5000, Date.now()).pods;
+  const crashing = pods.find((pod) => pod.status === "CrashLoopBackOff");
+  const running = pods.find(
+    (pod) => pod.status === "Running" && pod.ready === pod.containers,
+  );
+  if (!crashing || !running) throw new Error("prod-eu has both");
+  const broken = await described("pods", "", crashing.namespace, crashing.name);
+  expect(broken.overview?.sections[0]?.id).toBe("core.diagnostics");
+  const healthy = await described("pods", "", running.namespace, running.name);
+  expect(healthy.overview?.sections[0]?.id).toBe("core.pod");
+  const completed = pods.find((pod) => pod.status === "Completed");
+  if (!completed) throw new Error("prod-eu has a completed pod");
+  const done = await described("pods", "", completed.namespace, completed.name);
+  expect(done.overview?.sections[0]?.id).toBe("core.pod");
+});
+
+test("a mock Deployment lists the mock pods of its ReplicaSets", async () => {
+  const pods = new Cluster("prod-eu", 5000, Date.now()).pods;
+  const pod = pods[0];
+  if (!pod) throw new Error("a pod");
+  const name = pod.generateName.slice(0, -`${pod.templateHash}-`.length - 1);
+  const batch = await described("deployments", "apps", pod.namespace, name);
+  const list = batch.overview?.sections
+    .flatMap((section) => section.blocks)
+    .find((block) => block.type === "list");
+  if (list?.type !== "list") throw new Error("a live list");
+  expect(list.namespace).toBe(pod.namespace);
+  const owned = await open(
+    "ready",
+    query({
+      namespaces: [pod.namespace],
+      owners: list.owners,
+    }),
+  );
+  expect(owned.batches[0]?.total).toBe(
+    pods.filter(
+      (candidate) =>
+        candidate.namespace === pod.namespace &&
+        candidate.generateName === `${name}-${candidate.templateHash}-`,
+    ).length,
+  );
+  expect(owned.batches[0]?.total).toBeGreaterThan(0);
 });
 
 test("a regex that does not parse is refused at subscribe", async () => {

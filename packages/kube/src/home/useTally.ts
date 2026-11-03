@@ -44,6 +44,8 @@ export function useTally(
     namespaced: resource.namespaced,
     namespaces: [...namespaces],
     labelSelector: null,
+    fieldSelector: null,
+    owners: null,
     text: null,
     columns: null,
     sort: null,

@@ -45,6 +45,8 @@ fn query(context: &str) -> ListQuery {
         namespaced: true,
         namespaces: vec![NAMESPACE.to_owned()],
         label_selector: None,
+        field_selector: None,
+        owners: None,
         text: None,
         columns: None,
         sort: Some(Sort {

@@ -7,7 +7,7 @@ export type Block = { "type": "fields", fields: Array<Field>, } | { "type": "con
  * Whether [`GetValues`] sends their values: a ConfigMap's text
  * values, never a Secret's.
  */
-readable: boolean, } | { "type": "tree", nodes: Array<TreeNode>, } | { "type": "events" } & EventList;
+readable: boolean, } | { "type": "tree", nodes: Array<TreeNode>, } | { "type": "events" } & EventList | { "type": "diagnostics", findings: Array<Finding>, } | { "type": "containers", containers: Array<Container>, } | { "type": "table", columns: Array<string>, rows: Array<Array<Value>>, } | { "type": "list" } & EmbeddedList;
 
 export type Cell = null | boolean | number | number | string;
 
@@ -43,7 +43,49 @@ tone: Tone, reason: string | null, message: string | null,
 /**
  * RFC 3339.
  */
-lastTransition: string | null, };
+lastTransition: string | null, 
+/**
+ * RFC 3339, when its reporter last confirmed it, as a node's kubelet
+ * does.
+ */
+lastHeartbeat: string | null, };
+
+export type Container = { name: string, role: ContainerRole, image: string, 
+/**
+ * None in a pod template, and until the kubelet reports it.
+ */
+state: ContainerState | null, 
+/**
+ * As kubectl prints them: `8080/TCP (http)`.
+ */
+ports: Array<string>, 
+/**
+ * What its card shows: its state's times, how it last ended, its
+ * resources.
+ */
+fields: Array<Field>, 
+/**
+ * What else kubectl describe prints of it, folded: the last
+ * termination's message, command, probes, security, image and
+ * container IDs.
+ */
+details: Array<Field>, 
+/**
+ * Each variable by name, then each source of many as "From".
+ */
+env: Array<Field>, 
+/**
+ * By the path it is mounted at.
+ */
+mounts: Array<Field>, };
+
+export type ContainerRole = "init" | "sidecar" | "regular" | "ephemeral";
+
+export type ContainerState = { 
+/**
+ * "Running", "Waiting · CrashLoopBackOff", "Terminated · Completed".
+ */
+text: string, tone: Tone, ready: boolean, restarts: number, };
 
 /**
  * A context the catalog lists.
@@ -84,6 +126,24 @@ binary: boolean, };
  * `tls-server-name` and the CAs it is trusted with.
  */
 export type Discovered = { "state": "pending", cluster: string, } | { "state": "ready", cluster: string, resources: Array<Resource>, } | { "state": "failed", error: IpcError, };
+
+/**
+ * A list of objects of one resource, run as any list is: the webview
+ * subscribes with it in the object's space.
+ */
+export type EmbeddedList = { gvr: Gvr, 
+/**
+ * The kind of its objects, which opening a row names.
+ */
+kind: string, namespaced: boolean, 
+/**
+ * None for every namespace, as a node's pods are.
+ */
+namespace: string | null, fieldSelector: string | null, 
+/**
+ * As in [`crate::ListQuery`].
+ */
+owners: Array<string> | null, };
 
 export type EnvVar = { name: string, value: string, };
 
@@ -126,6 +186,26 @@ export type ExecReview = {
 reviewed: boolean, plugins: Array<ReviewedPlugin>, };
 
 export type Field = { label: string, value: Value, };
+
+export type Finding = { 
+/**
+ * Danger for what keeps the object from working, warning for what
+ * may.
+ */
+tone: Tone, 
+/**
+ * What is wrong: "Container api keeps crashing".
+ */
+title: string, 
+/**
+ * Why, as a sentence whose times are read when shown.
+ */
+detail: Array<Span>, 
+/**
+ * What the component that saw it said, shown as it said it: a
+ * termination message, a waiting reason's message, an event's note.
+ */
+message: string | null, };
 
 /**
  * Asks for the values of a ConfigMap's keys, which its Overview lists with
@@ -238,6 +318,16 @@ namespaced: boolean,
  * Empty for every namespace the space covers.
  */
 namespaces: Array<string>, labelSelector: string | null, 
+/**
+ * Sent to the server, as `spec.nodeName=kind-control-plane` picks a
+ * node's pods.
+ */
+fieldSelector: string | null, 
+/**
+ * Keeps the rows whose controller is one of the objects with these
+ * uids, as a workload's pods are its ReplicaSets'; empty keeps none.
+ */
+owners: Array<string> | null, 
 /**
  * A substring of a shown cell in any case of ASCII letters, `!` before
  * it to keep the rows without one, or a regex between slashes, also in
@@ -513,6 +603,8 @@ export type Space = { id: string, name: string,
  */
 contexts: Array<string>, };
 
+export type Span = { "type": "text", text: string, } | { "type": "ago", at: string, } | { "type": "until", at: string, };
+
 /**
  * UI state that is not settings (ARCHITECTURE 4.8), such as a space's
  * layout or the command history. The value is JSON that the webview writes
@@ -550,7 +642,7 @@ label: string, value: TreeValue, };
 
 export type TreeValue = { "type": "scalar", text: string, } | { "type": "map", entries: Array<TreeNode>, } | { "type": "list", items: Array<TreeNode>, };
 
-export type Value = { "type": "text", text: string, } | { "type": "time", at: string, } | { "type": "link", target: ObjectRef, text: string, } | { "type": "labels", labels: Array<Label>, } | { "type": "list", items: Array<Value>, };
+export type Value = { "type": "text", text: string, } | { "type": "time", at: string, } | { "type": "link", target: ObjectRef, text: string, } | { "type": "labels", labels: Array<Label>, } | { "type": "list", items: Array<Value>, } | { "type": "code", text: string, } | { "type": "toned", text: string, tone: Tone, };
 
 export type ValueCount = { value: string, count: number, };
 

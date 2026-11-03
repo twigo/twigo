@@ -299,7 +299,7 @@ impl Core {
                 },
                 format: RowFormat::Table,
                 namespaces: query.namespaces,
-                field_selector: None,
+                field_selector: query.field_selector,
             })
             .await?;
         self.lists.keep(ticket, Batcher::spawn(rows, spec, send))
