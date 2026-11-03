@@ -16,7 +16,7 @@
 - twigo-keyboard on Windows: after `rustup target add x86_64-pc-windows-msvc`, `cargo clippy -p twigo-keyboard --target x86_64-pc-windows-msvc --all-targets -- -D warnings` checks the code; nothing runs it yet (D2).
 - Live tests against kind, one release: `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/test-matrix.sh 1.37`.
   Without an argument it runs every supported release.
-- A cluster to keep: `export TWIGO_BENCH_DIR=$(mktemp -d)`, `kubeconfig=$(bench/cluster.sh up <name> 1.37 | tail -1)`, then `TWIGO_TEST_KUBECONFIG=$kubeconfig cargo test -p twigo-cache -p twigo-kube -p twigo-core -p twigo-bench -- --ignored`, and `bench/cluster.sh down <name>` with the same `TWIGO_BENCH_DIR` when done.
+- A cluster to keep: `export TWIGO_BENCH_DIR=$(mktemp -d)`, `kubeconfig=$(bench/cluster.sh up <name> 1.37 | tail -1)`, then `TWIGO_TEST_KUBECONFIG=$kubeconfig cargo test -p twigo-cache -p twigo-kube -p twigo-core -p twigo-bench -p twigo-sessions -- --ignored`, and `bench/cluster.sh down <name>` with the same `TWIGO_BENCH_DIR` when done.
 - `bench/harness/tests/view_live.rs` creates `bench/bench` at 5,000 pods, runs `twigo-bench churn` for 20 s and deletes the namespace `bench`, so it refuses a cluster that has it already, such as one the bench harness scaled.
 - The IPC bench: `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/ipc/run.sh frames` or `bench/ipc/run.sh cost 3` on macOS, and `bench/ipc/linux.sh frames` for WebKitGTK in Docker.
   Each run opens a window and exits by itself.
@@ -26,9 +26,11 @@
 - State across ⌘Q and a restart, on macOS with the screen unlocked: `bench/restart.sh <kind kubeconfig>` after the debug build; it runs the app with a temporary `HOME` and presses keys through System Events, which needs the terminal's Accessibility permission.
 - The churn generator alone: `cargo run --release -p twigo-bench -- churn --kubeconfig <path> --rate 100 --seconds 60 --log churn.jsonl`.
 - The hub's live tests sit in the library (`crates/twigo-cache/src/hub/live.rs`) and run with the others under `--ignored`; `crates/twigo-cache/tests/restart_live.rs` restarts the API server of a kind cluster through `docker exec … crictl stop`, so it refuses kwok contexts and waits for the controller manager before it ends.
+- The logs' live tests (`crates/twigo-sessions/tests/logs_live.rs`) and `objects_live`'s crash loop need a kubelet, so they refuse contexts other than `kind-*`.
+  Their pods run on kind's node from its `docker.io/kindest/local-path-helper` image with `imagePullPolicy: Never`, so nothing is pulled; it has bash and no other command, so their scripts sleep by reading a coprocess that never writes, and a forced restart is `crictl stop` through `docker exec`.
 - The hub's heap at 5,000 pods: `bench/pods.sh <kubeconfig> 5000`, then `TWIGO_TEST_KUBECONFIG=<kubeconfig> cargo run --release -p twigo-cache --example hub_memory`, next to `--example table_memory`.
 - Before a push, run only the checks the change affects.
-  CI runs the rest, the live tests on every release when `twigo-cache`, `twigo-kube`, `twigo-core`, `bench/harness`, `bench/cluster.sh`, `bench/pods.sh` or the Cargo files change, and the frame probe on WebKitGTK when `bench/ipc` or the Cargo files change.
+  CI runs the rest, the live tests on every release when `twigo-cache`, `twigo-kube`, `twigo-core`, `twigo-sessions`, `bench/harness`, `bench/cluster.sh`, `bench/pods.sh` or the Cargo files change, and the frame probe on WebKitGTK when `bench/ipc` or the Cargo files change.
 
 ## Gotchas
 
