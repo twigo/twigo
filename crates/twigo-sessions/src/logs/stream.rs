@@ -1236,6 +1236,25 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn an_old_instances_end_follows_its_last_line_when_a_later_ones_log_ends_under_it() {
+        let fake = Fake::default();
+        let followed = cut_across_a_restart(&fake).await;
+        followed.until("web-b's lines", has("web-b 12")).await;
+        followed.tell(web(crashed("web-a"), json!({})));
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        fake.stop("web-1", "web", "web-b");
+        followed.until("web-a's end", has("ended")).await;
+        assert_eq!(
+            followed.entries(),
+            [
+                "web-a 1", "web-a 2", "web-a 3", "web-a 4", "web-a 5", "web-b 11", "web-b 12",
+                "ended"
+            ]
+        );
+        assert_eq!(followed.ends(), [T0 + 5 * SECOND]);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn a_reread_of_a_rotated_log_reads_on_as_the_same_instance() {
         let fake = Fake::default();
         fake.serve("web-1", "web", Some("web-a"), None);
