@@ -396,14 +396,16 @@ export function LineList({
   }, [wrap, virtualizer]);
 
   // Sizes are kept by line, so following with wrap would keep one for every
-  // line that passed; the end is measured again at once.
+  // line that passed. Only those of lines no longer loaded go: a mounted row
+  // is measured again only when its size changes, so one that lost its size
+  // would stand at the estimate's height.
   useEffect(() => {
-    if (
-      follow &&
-      wrap &&
-      virtualizer.itemSizeCache.size > 4 * (rows + OVERSCAN)
-    )
-      virtualizer.measure();
+    const sizes = virtualizer.itemSizeCache;
+    if (!follow || !wrap || sizes.size <= 4 * (rows + OVERSCAN)) return;
+    const loaded = new Set(items.map((item) => item.key));
+    for (const key of sizes.keys()) {
+      if (typeof key !== "string" || !loaded.has(key)) sizes.delete(key);
+    }
   }, [follow, wrap, items, rows, virtualizer]);
 
   useEffect(() => {

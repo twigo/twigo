@@ -107,6 +107,19 @@ function wheel(log: HTMLElement, top: number) {
 
 const around = (key: string) => ({ around: key, before: 40, after: 40 });
 
+const height = (row: HTMLElement) => {
+  const key = /line (\d+)$/.exec(row.textContent)?.[1];
+  return key !== undefined && Number(key) % 3 === 0 ? 38 : 19;
+};
+
+function wrapped() {
+  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(
+    function (this: HTMLElement) {
+      return this.dataset.index === undefined ? 0 : height(this);
+    },
+  );
+}
+
 const CENTRE = (19 - 600) / 2;
 
 test("following, it asks for the tail and keeps the end in view", () => {
@@ -189,12 +202,7 @@ test("paused, the top line stays put as lines leave before it, through the virtu
 });
 
 test("with wrap, a held line is placed by its own start as lines leave before it", () => {
-  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(
-    function (this: HTMLElement) {
-      const key = Number(this.textContent.replace(/^.*line /, ""));
-      return this.dataset.index === undefined ? 0 : key % 3 === 0 ? 38 : 19;
-    },
-  );
+  wrapped();
   const { log, onPlace, update } = mount({
     follow: false,
     wrap: true,
@@ -212,6 +220,37 @@ test("with wrap, a held line is placed by its own start as lines leave before it
     /translateY\((.+)px\)/.exec(row?.style.transform ?? "")?.[1],
   );
   expect(log.scrollTop - start).toBe(held.offset);
+});
+
+test("following with wrap through many lines, the rows on screen keep their sizes", () => {
+  wrapped();
+  const { log, update } = mount({
+    wrap: true,
+    total: 100,
+    start: 60,
+    items: lines(60, 100),
+  });
+  for (let end = 110; end <= 600; end += 10) {
+    update({ total: end, start: end - 40, items: lines(end - 40, end) });
+    scroll(log, log.scrollTop);
+    const rows = [...log.querySelectorAll<HTMLElement>("[data-index]")]
+      .map((row) => ({
+        index: Number(row.dataset.index),
+        start: Number(/translateY\((.+)px\)/.exec(row.style.transform)?.[1]),
+        height: height(row),
+      }))
+      .sort((a, b) => a.index - b.index);
+    const gaps = rows
+      .slice(1)
+      .map(
+        (row, at) =>
+          row.start - (rows[at]?.start ?? 0) - (rows[at]?.height ?? 0),
+      );
+    expect({ end, gaps: gaps.filter((gap) => gap !== 0) }).toEqual({
+      end,
+      gaps: [],
+    });
+  }
 });
 
 test("a list that mounts paused goes back to where it stood", () => {
