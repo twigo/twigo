@@ -165,6 +165,10 @@ export default defineConfig(
           varsIgnorePattern: "^_",
         },
       ],
+      "@typescript-eslint/switch-exhaustiveness-check": [
+        "error",
+        { considerDefaultExhaustiveForUnions: true },
+      ],
       "@typescript-eslint/restrict-template-expressions": [
         "error",
         { allowNumber: true },
