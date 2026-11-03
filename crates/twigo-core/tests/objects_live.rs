@@ -716,7 +716,6 @@ async fn a_crashing_containers_finding_has_its_previous_instances_last_line() {
         .get(&node)
         .await
         .unwrap();
-    // kind's node holds it, and it has bash.
     let image = held
         .status
         .and_then(|status| status.images)
