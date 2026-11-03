@@ -122,12 +122,16 @@ function EntryView({ entry }: { entry: StatusEntry }) {
   );
 }
 
-/** The tint of a coloured context, as its rail tile has it. */
+/** A coloured context as a fill, as VS Code fills its remote indicator. */
 const ACCENT = {
-  red: "bg-context-red/20 text-foreground font-medium",
-  orange: "bg-context-orange/20 text-foreground font-medium",
-  yellow: "bg-context-yellow/20 text-foreground font-medium",
-  green: "bg-context-green/20 text-foreground font-medium",
-  blue: "bg-context-blue/20 text-foreground font-medium",
-  purple: "bg-context-purple/20 text-foreground font-medium",
+  red: "bg-context-red-solid text-context-solid-foreground font-medium hover:bg-context-red-solid/90",
+  orange:
+    "bg-context-orange-solid text-context-solid-foreground font-medium hover:bg-context-orange-solid/90",
+  yellow:
+    "bg-context-yellow-solid text-context-solid-foreground font-medium hover:bg-context-yellow-solid/90",
+  green:
+    "bg-context-green-solid text-context-solid-foreground font-medium hover:bg-context-green-solid/90",
+  blue: "bg-context-blue-solid text-context-solid-foreground font-medium hover:bg-context-blue-solid/90",
+  purple:
+    "bg-context-purple-solid text-context-solid-foreground font-medium hover:bg-context-purple-solid/90",
 } as const;

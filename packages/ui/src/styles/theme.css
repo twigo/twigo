@@ -92,6 +92,15 @@
   --context-green: oklch(0.62 0.14 150);
   --context-blue: oklch(0.58 0.15 245);
   --context-purple: oklch(0.58 0.17 300);
+  /* A context's colour as a fill under white text, as the status bar's
+     space entry: deep enough for 4.5:1 in both themes. */
+  --context-red-solid: oklch(0.52 0.19 25);
+  --context-orange-solid: oklch(0.52 0.14 55);
+  --context-yellow-solid: oklch(0.52 0.11 90);
+  --context-green-solid: oklch(0.52 0.13 150);
+  --context-blue-solid: oklch(0.52 0.15 245);
+  --context-purple-solid: oklch(0.52 0.17 300);
+  --context-solid-foreground: oklch(0.99 0 0);
 
   /* A changed table cell starts at this tint and fades out. */
   --flash: color-mix(in oklab, var(--brand) 18%, transparent);
@@ -226,6 +235,13 @@
   --color-context-green: var(--context-green);
   --color-context-blue: var(--context-blue);
   --color-context-purple: var(--context-purple);
+  --color-context-red-solid: var(--context-red-solid);
+  --color-context-orange-solid: var(--context-orange-solid);
+  --color-context-yellow-solid: var(--context-yellow-solid);
+  --color-context-green-solid: var(--context-green-solid);
+  --color-context-blue-solid: var(--context-blue-solid);
+  --color-context-purple-solid: var(--context-purple-solid);
+  --color-context-solid-foreground: var(--context-solid-foreground);
 
   --shadow-sm: var(--shadow-sm);
   --shadow-md: var(--shadow-md);

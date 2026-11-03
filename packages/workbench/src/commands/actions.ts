@@ -22,6 +22,7 @@ export function menuActions(
   },
   menu: MenuId,
   lookup: Lookup,
+  args?: unknown,
 ): ActionGroups {
   return menus
     .groups(menu, lookup)
@@ -38,7 +39,7 @@ export function menuActions(
             ...(binding && { keys: keybindings.label(binding.presses) }),
             disabled: !commands.enabled(item.command, lookup),
             run: () => {
-              void commands.execute(item.command, lookup);
+              void commands.execute(item.command, lookup, args);
             },
           },
         ];

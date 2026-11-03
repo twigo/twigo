@@ -634,8 +634,10 @@ The layout per space is persisted (dockview `toJSON` and which parts show); part
 - Switching spaces moves the whole workbench: explorer, editors, status bar, policy badge.
   The rail shows a tile per open space: two letters on the tint of its context's colour, the active one ringed and marked, a dot of its connection (connected, connecting, failed, or idle while another space is active), a lock badge on a locked context.
   The title bar's breadcrumb names the active space and its namespace scope and opens their pickers.
-  An optional user-chosen colour from the context's metadata (5.5) is the only extra colour, from six tokens: red, orange, yellow, green, blue and purple.
-  It tints the tile and the title bar's left end behind the breadcrumb, as JetBrains does with a project's colour.
+  Every context has a colour, the only extra colour, from six tokens: red, orange, yellow, green, blue and purple.
+  It comes from the context's kubeconfig metadata (5.5), else from the user's pick in Twigo (Set Space Colour… in the palette and the tile's menu, kept in the app's state), else from its name, the same each time, among blue, purple, green and orange: red and yellow stay for the user and the environment types (6.4), so neither says danger by chance.
+  Decided with the owner on 2026-11-03, after contexts without metadata left the workbench grey.
+  It tints the tile and the title bar's left end behind the breadcrumb, as JetBrains does with a project's colour, and fills the status bar's space entry.
   A space with several contexts shows none.
 - Every editor in a space belongs to that space's contexts.
   Opening another cluster's object means switching spaces or running **Compare with…**, which opens a diff editor against an object picked from any context and says so in its title.

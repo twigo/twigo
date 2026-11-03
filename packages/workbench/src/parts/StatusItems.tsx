@@ -1,6 +1,5 @@
 import { useChanges, useWorkbench } from "../react";
 import type { StatusEntry } from "../views/registry";
-import { onlyColor } from "./spaceBadge";
 
 /** VS Code's hint while a chord waits for its next key. */
 export function useChordEntries(): readonly StatusEntry[] {
@@ -21,12 +20,12 @@ export function useChordEntries(): readonly StatusEntry[] {
  * rail's tile has it; a click switches spaces.
  */
 export function useSpaceEntries(): readonly StatusEntry[] {
-  const { spaces, catalog, quickAccess } = useWorkbench();
+  const { spaces, colors, quickAccess } = useWorkbench();
   useChanges(spaces.changes);
-  useChanges(catalog.changes);
+  useChanges(colors.changes);
   const space = spaces.active;
   if (!space) return [];
-  const accent = onlyColor(space, catalog);
+  const accent = colors.ofSpace(space);
   return [
     {
       id: "space",

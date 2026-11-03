@@ -3,7 +3,6 @@ import { ChevronDown, ChevronRight, Search } from "lucide-react";
 import { Kbd } from "@twigo/ui";
 import type { Space } from "@twigo/protocol";
 import { useChanges, useWorkbench } from "../react";
-import { onlyColor } from "./spaceBadge";
 
 /**
  * Where you are (ARCHITECTURE 4.2): the space and its namespace scope as a
@@ -13,11 +12,11 @@ import { onlyColor } from "./spaceBadge";
  * project's colour.
  */
 export function TitleBar() {
-  const { spaces, catalog } = useWorkbench();
+  const { spaces, colors } = useWorkbench();
   useChanges(spaces.changes);
-  useChanges(catalog.changes);
+  useChanges(colors.changes);
   const space = spaces.active;
-  const color = space && onlyColor(space, catalog);
+  const color = space && colors.ofSpace(space);
   return (
     // 36 px pairs with trafficLightPosition in tauri.conf.json: change both or neither.
     <header

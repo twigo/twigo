@@ -64,7 +64,7 @@ test("the active space's tile shows its connection from discovery, a space left 
   const { backend, answer } = held();
   const workbench = await mountKube(backend);
   expect(dot("prod-eu")).toBe("warn, pulsing");
-  expect(dot("staging")).toBeUndefined();
+  expect(dot("staging")).toBe("idle");
   await answer("prod-eu");
   expect(dot("prod-eu")).toBe("ok");
 
@@ -76,7 +76,7 @@ test("the active space's tile shows its connection from discovery, a space left 
   expect(dot("prod-eu")).toBe("idle");
   await answer("staging");
   expect(dot("staging")).toBe("ok");
-  expect(dot("dev")).toBeUndefined();
+  expect(dot("dev")).toBe("idle");
 });
 
 test("a space whose discovery failed shows an error dot, active or not", async () => {

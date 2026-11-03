@@ -85,7 +85,7 @@ export function registerListCommands(
     {
       id: "list.find",
       title: "Filter Rows",
-      keys: ["/", "mod+f"],
+      keys: ["mod+f", "/"],
       run: () => lists.focused("filter")?.filter(),
     },
   ];

@@ -137,7 +137,10 @@ function registerSpaceStatus(
       if (last?.state === "failed")
         return { tone: "error", label: last.error.message };
       if (!active)
-        return last ? { tone: "idle", label: "In the background" } : undefined;
+        return {
+          tone: "idle",
+          label: last ? "In the background" : "Not connected yet",
+        };
       return last?.state === "ready"
         ? { tone: "ok", label: "Connected" }
         : { tone: "warn", label: "Connecting" };

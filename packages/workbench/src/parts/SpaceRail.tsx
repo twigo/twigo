@@ -1,6 +1,7 @@
 import { Plus } from "lucide-react";
 import type { ContextColor, Space } from "@twigo/protocol";
 import {
+  ActionContextMenu,
   cn,
   StatusDot,
   Tooltip,
@@ -9,7 +10,7 @@ import {
 } from "@twigo/ui";
 import type { SpaceConnection } from "../spaces/status";
 import { useChanges, useWorkbench } from "../react";
-import { initials, onlyColor } from "./spaceBadge";
+import { initials } from "./spaceBadge";
 
 /** The tint of a space's tile, from its one context's colour. */
 const TILE: Readonly<Record<ContextColor, string>> = {
@@ -27,12 +28,14 @@ const TILE: Readonly<Record<ContextColor, string>> = {
  * button that opens any context.
  */
 export function SpaceRail() {
-  const { spaces, catalog, keybindings, quickAccess, spaceStatus } =
-    useWorkbench();
+  const workbench = useWorkbench();
+  const { spaces, colors, keybindings, quickAccess, spaceStatus, keys, menus } =
+    workbench;
   useChanges(spaces.changes);
-  useChanges(catalog.changes);
+  useChanges(colors.changes);
   useChanges(keybindings.changes);
   useChanges(spaceStatus.changes);
+  useChanges(menus.changes);
   const active = spaces.active?.id;
   return (
     <nav
@@ -44,17 +47,27 @@ export function SpaceRail() {
           `workbench.action.selectSpace${String(index + 1)}`,
         );
         return (
-          <SpaceTile
+          <ActionContextMenu
             key={space.id}
-            space={space}
-            color={onlyColor(space, catalog)}
-            state={spaceStatus.get(space.id)}
-            selected={space.id === active}
-            shortcut={binding && keybindings.label(binding.presses)}
-            onSelect={() => {
-              spaces.select(space.id);
-            }}
-          />
+            actions={workbench.actions(
+              "space/context",
+              keys.lookup(null),
+              space.id,
+            )}
+          >
+            <div className="w-full">
+              <SpaceTile
+                space={space}
+                color={colors.ofSpace(space)}
+                state={spaceStatus.get(space.id)}
+                selected={space.id === active}
+                shortcut={binding && keybindings.label(binding.presses)}
+                onSelect={() => {
+                  spaces.select(space.id);
+                }}
+              />
+            </div>
+          </ActionContextMenu>
         );
       })}
       <Tooltip>

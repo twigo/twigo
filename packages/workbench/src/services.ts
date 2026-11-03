@@ -15,6 +15,7 @@ import { Lists } from "./lists/service";
 import { PartSizes } from "./parts/sizes";
 import { QuickAccess } from "./quickaccess/registry";
 import { Catalog } from "./spaces/catalog";
+import { ContextColors } from "./spaces/colors";
 import { SpaceStatus } from "./spaces/status";
 import { Spaces } from "./spaces/store";
 import { StateStore } from "./state/store";
@@ -38,6 +39,7 @@ export class Workbench {
   readonly spaceStatus = new SpaceStatus();
   readonly keybindings: Keybindings;
   readonly catalog: Catalog;
+  readonly colors: ContextColors;
   readonly spaces: Spaces;
   readonly sizes: PartSizes;
   readonly shellEnvironment: ShellEnvironmentStatus;
@@ -57,6 +59,7 @@ export class Workbench {
       platform,
     );
     this.catalog = new Catalog(backend);
+    this.colors = new ContextColors(this.catalog, state);
     this.spaces = new Spaces(
       backend,
       state,
@@ -73,9 +76,9 @@ export class Workbench {
     });
   }
 
-  /** A menu's commands as actions to draw, run against `lookup`. */
-  actions(menu: MenuId, lookup: Lookup): ActionGroups {
-    return menuActions(this, menu, lookup);
+  /** A menu's commands as actions to draw, run against `lookup` with `args`, such as the space a tile's menu is about. */
+  actions(menu: MenuId, lookup: Lookup, args?: unknown): ActionGroups {
+    return menuActions(this, menu, lookup, args);
   }
 
   /** Opens a sign-in link in the person's browser; Rust checks it first. */
