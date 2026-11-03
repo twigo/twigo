@@ -402,19 +402,22 @@ impl Reader {
             let status = Status::of(&current, &self.stream.container);
             let instance = status.as_ref().and_then(Status::current);
             if let Some(old) = reading.take_if(|old| instance.map(|(id, _)| id) != Some(old)) {
-                let last = over.take();
+                let mut last = over.take();
                 if let Some(status) = &status {
                     // It ended and the next began while its read was cut:
                     // the kubelet reads its rest as the previous instance.
-                    if unfinished
-                        && last.is_none()
-                        && status.previous() == Some(old.as_str())
-                        && self.tail(&old, from, None, pod, send).await.is_none()
-                    {
-                        return;
+                    if unfinished && last.is_none() && status.previous() == Some(old.as_str()) {
+                        let Some(found) = self.tail(&old, from, None, pod, send).await else {
+                            return;
+                        };
+                        // Unless its log holds lines from the resume's second
+                        // on, those were a later instance's, read on a stale
+                        // status, and its Ended stands at its finish alone.
+                        last = if found { self.resume.last_at() } else { None };
+                    } else {
+                        last = last.or_else(|| self.resume.last_at());
                     }
                     if let Some(terminated) = status.termination(&old) {
-                        let last = last.or_else(|| self.resume.last_at());
                         told = end(terminated, status, last, send);
                     }
                 }
@@ -1156,6 +1159,26 @@ mod tests {
         followed.until("both ends", both_ended).await;
         assert_eq!(followed.entries()[..6], OLD);
         assert_eq!(followed.entries().len(), 7);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stream_started_on_a_stale_status_ends_the_old_instance_when_it_finished() {
+        let fake = Fake::default();
+        fake.serve("web-1", "web", Some("web-b"), Some("web-a"));
+        numbered(&fake, "web-a", 1..=5);
+        fake.stop("web-1", "web", "web-a");
+        numbered(&fake, "web-b", 11..=12);
+        let followed = Followed::new(&fake, web(running(), json!({})), false);
+        followed.until("web-b's lines", has("web-b 12")).await;
+        followed.tell(restarted("web-b", "web-a"));
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        numbered(&fake, "web-b", 13..=13);
+        followed.until("web-b's next line", has("web-b 13")).await;
+        assert_eq!(
+            followed.entries(),
+            ["web-b 11", "web-b 12", "ended", "web-b 13"]
+        );
+        assert_eq!(followed.ends(), [T0 + 5 * SECOND]);
     }
 
     #[tokio::test(start_paused = true)]
