@@ -209,13 +209,26 @@ impl Resume {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Read {
+    Follow,
+    /// The kubelet's previous instance, to its end.
+    Previous,
+    /// The rest of the instance the resume's lines may have come from, as
+    /// the kubelet's previous one.
+    Rest,
+}
+
 /// How a read ended.
 enum Outcome {
     /// The server ended the log; `fresh` if it sent lines this read had
-    /// not had, `found` if it sent any.
+    /// not had, and `held` unless it was a rest's that ended before it gave
+    /// the latest line read, which a log holding the lines read never does,
+    /// as the kubelet sends again first those at or after their second, in
+    /// the log's order: they were another instance's.
     Ended {
         fresh: bool,
-        found: bool,
+        held: bool,
     },
     /// The connection was retired or its clients abandoned under it.
     Cut,
@@ -240,9 +253,10 @@ enum Outcome {
 
 /// What the rest of an old instance's log held of the lines read.
 enum Tail {
-    /// Lines from the resume's second on, so they were its.
+    /// The latest of them, or lines after it, so they were its.
     Found,
-    /// None of them, so they were a later instance's.
+    /// None of them, as it ended before their latest: they were a later
+    /// instance's.
     Lacked,
     /// It was not read, which says nothing of them.
     GaveUp,
@@ -420,10 +434,10 @@ impl Reader {
                         let Some(tail) = self.tail(&old, from, None, pod, send).await else {
                             return;
                         };
-                        // A log that holds none of the lines from the resume's
-                        // second on says they were a later instance's, read on
-                        // a stale status, and its Ended stands at its finish
-                        // alone; one not read says nothing of them.
+                        // A log that holds none of the lines read says they
+                        // were a later instance's, read on a stale status, so
+                        // its Ended stands at its finish alone; one not read
+                        // says nothing of them.
                         last = match tail {
                             Tail::Lacked => None,
                             Tail::Found | Tail::GaveUp => self.resume.last_at(),
@@ -496,7 +510,7 @@ impl Reader {
             reading = Some(id.clone());
             let container = self.stream.container.clone();
             let outcome = tokio::select! {
-                outcome = self.read(false, start, None, send) => outcome,
+                outcome = self.read(Read::Follow, start, None, send) => outcome,
                 () = moved_off(pod, &container, &id) => Outcome::Cut,
             };
             if let Outcome::Ended { .. } | Outcome::Unreadable(_) = &outcome {
@@ -575,8 +589,9 @@ impl Reader {
     /// reads as the previous one once a later one runs, from `from` while
     /// the resume holds no line, up to `before`, the time of the later
     /// one's first line, and tries again while the cluster cannot be
-    /// reached and the status names `old`. What its log held; None once the
-    /// pod's channel closed.
+    /// reached and the status names `old`. What its log held, the resume
+    /// left as it was when it held none of the lines read, for the instance
+    /// they came from; None once the pod's channel closed.
     async fn tail(
         &mut self,
         old: &str,
@@ -585,15 +600,19 @@ impl Reader {
         pod: &mut watch::Receiver<Arc<Value>>,
         send: &impl Fn(Event),
     ) -> Option<Tail> {
+        let kept = self.resume;
         loop {
             if gone(pod) {
                 return None;
             }
             self.resume.reopen(false);
             let start = self.resume.from().map_or(from, ReadFrom::Time);
-            match self.read(true, start, before, send).await {
-                Outcome::Ended { found: true, .. } => return Some(Tail::Found),
-                Outcome::Ended { found: false, .. } => return Some(Tail::Lacked),
+            match self.read(Read::Rest, start, before, send).await {
+                Outcome::Ended { held: true, .. } => return Some(Tail::Found),
+                Outcome::Ended { held: false, .. } => {
+                    self.resume = kept;
+                    return Some(Tail::Lacked);
+                }
                 Outcome::Cut => {}
                 Outcome::Broken => {
                     if !self.pause(pod).await {
@@ -642,7 +661,7 @@ impl Reader {
             let id = id.to_owned();
             self.resume.reopen(true);
             let start = self.resume.from().map_or(from, ReadFrom::Time);
-            match self.read(true, start, None, send).await {
+            match self.read(Read::Previous, start, None, send).await {
                 Outcome::Cut => {}
                 Outcome::Broken => {
                     if !self.pause(pod).await {
@@ -703,7 +722,7 @@ impl Reader {
     /// `before`.
     async fn read(
         &mut self,
-        previous: bool,
+        kind: Read,
         from: ReadFrom,
         before: Option<i64>,
         send: &impl Fn(Event),
@@ -716,21 +735,21 @@ impl Reader {
             }
             Err(error) => return Outcome::Failed(error),
         };
-        self.read_over(&clients, previous, from, before, send).await
+        self.read_over(&clients, kind, from, before, send).await
     }
 
     async fn read_over(
         &mut self,
         clients: &Clients,
-        previous: bool,
+        kind: Read,
         from: ReadFrom,
         before: Option<i64>,
         send: &impl Fn(Event),
     ) -> Outcome {
         let mut params = LogParams {
             container: Some(self.stream.container.clone()),
-            follow: !previous,
-            previous,
+            follow: kind == Read::Follow,
+            previous: kind != Read::Follow,
             timestamps: true,
             ..LogParams::default()
         };
@@ -802,7 +821,8 @@ impl Reader {
         let mut lines = std::pin::pin!(lines);
         let mut fresh = false;
         let mut buffer = Vec::new();
-        let mut found = false;
+        // Until a rest gives the latest line read, it may not hold them.
+        let mut holding = self.resume.last_at().filter(|_| kind == Read::Rest);
         loop {
             buffer.clear();
             let read = tokio::select! {
@@ -812,7 +832,12 @@ impl Reader {
             };
             match read {
                 Ok(0) if self.resume.lacks() => return Outcome::Moved { at: None },
-                Ok(0) => return Outcome::Ended { fresh, found },
+                Ok(0) => {
+                    return Outcome::Ended {
+                        fresh,
+                        held: holding.is_none(),
+                    };
+                }
                 Ok(_) => {}
                 Err(_) => return Outcome::Broken,
             }
@@ -825,13 +850,23 @@ impl Reader {
                 });
             };
             if before.is_some_and(|before| at >= before) {
-                return Outcome::Ended { fresh, found };
+                return Outcome::Ended {
+                    fresh,
+                    held: holding.is_none(),
+                };
             }
-            found = true;
+            if holding.is_some_and(|latest| at >= latest) {
+                holding = None;
+            }
             match self.resume.admit(at) {
                 Admit::New => fresh = true,
                 Admit::Again => continue,
                 Admit::Moved => return Outcome::Moved { at: Some(at) },
+            }
+            // Before it, a rest's line is none it had: another instance's,
+            // or one of that second before where a tail of lines started.
+            if holding.is_some() {
+                continue;
             }
             send(Event::Line {
                 at,
@@ -1267,6 +1302,30 @@ mod tests {
         assert_eq!(
             followed.entries(),
             ["web-b 11", "web-b 12", "ended", "web-b 13"]
+        );
+        assert_eq!(followed.ends(), [T0 + 5 * SECOND]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stale_start_shows_none_of_the_old_log_in_the_second_it_resumes_from() {
+        let fake = Fake::default();
+        let write = |instance, ms, text| fake.write("web-1", "web", instance, T0 + ms * MS, text);
+        fake.serve("web-1", "web", Some("web-b"), Some("web-a"));
+        write("web-a", 5_100, "web-a x");
+        write("web-a", 5_200, "web-a y");
+        fake.stop("web-1", "web", "web-a");
+        write("web-b", 5_800, "web-b 1");
+        let followed = Followed::new(&fake, web(running(), json!({})), false);
+        followed.until("web-b's line", has("web-b 1")).await;
+        fake.strand("web-1", "web");
+        write("web-b", 5_700, "web-b late");
+        followed.tell(restarted("web-b", "web-a"));
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        write("web-b", 7_000, "web-b 2");
+        followed.until("web-b's next line", has("web-b 2")).await;
+        assert_eq!(
+            followed.entries(),
+            ["web-b 1", "ended", "web-b late", "web-b 2"]
         );
         assert_eq!(followed.ends(), [T0 + 5 * SECOND]);
     }
