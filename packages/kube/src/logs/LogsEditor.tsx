@@ -81,10 +81,10 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
     };
   }, [element, keys, lists, tabs, uri]);
 
-  const pods = snapshot?.pods;
+  const entries = snapshot?.window?.entries;
   useEffect(() => {
-    if (pods) tabs.listed(uri, pods);
-  }, [pods, tabs, uri]);
+    if (entries) tabs.saw(uri, entries);
+  }, [entries, tabs, uri]);
 
   const onWindow = useCallback(
     (window: LineWindow) => {
@@ -106,7 +106,7 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
   if (!input || !session || !snapshot)
     return <EmptyState title="Not a logs tab">{uri}</EmptyState>;
 
-  const { status, window, matches, histogram, total } = snapshot;
+  const { status, pods, window, matches, histogram, total } = snapshot;
   const several = (pods ?? []).some((pod) => followed(pod).length > 1);
   const tag = (pod: string, container: string) =>
     several ? `${podTag(pod)}/${container}` : podTag(pod);
@@ -120,10 +120,11 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
       now,
     }),
   );
-  const tagWidth = Math.min(
-    24,
-    Math.max(5, ...items.map((item) => item.tag?.length ?? 0)),
-  );
+  // One character to spare: WebKit cut a five-character tag in 5ch with an
+  // ellipsis.
+  const tagWidth =
+    1 +
+    Math.min(24, Math.max(5, ...items.map((item) => item.tag?.length ?? 0)));
   const queued = (pods ?? []).filter((pod) =>
     pod.containers.some((container) => container.stream.state === "queued"),
   ).length;
@@ -272,11 +273,14 @@ function spanOf(
 function ticks(from: string, to: string, now: number): string[] {
   const begin = Date.parse(from);
   const end = Date.parse(to);
+  const seconds = end - begin < 15 * 60_000;
   const label = (at: number) =>
     new Date(at).toLocaleTimeString("en-GB", {
       hour: "2-digit",
       minute: "2-digit",
+      ...(seconds && { second: "2-digit" }),
     });
+
   return [0, 1, 2, 3].map((step) => {
     const at = begin + ((end - begin) * step) / 3;
     return step === 3 && now - end < 5000 ? "now" : label(at);

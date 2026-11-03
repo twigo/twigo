@@ -1,6 +1,7 @@
 import {
   LogsSession,
   type Backend,
+  type LogEntry,
   type LogSource,
   type LogTarget,
   type LogView,
@@ -57,8 +58,8 @@ export class LogsTabs {
   readonly changes = new Changes();
   readonly #tabs = new Map<string, LogsTab>();
   readonly #sessions = new Map<string, LogsSession>();
-  /** Each tab's pods as it first listed them, so the pods that join later stand out. */
-  readonly #first = new Map<string, ReadonlySet<string>>();
+  /** The pods each tab saw join, from their Joined entries, which stand out in its lines. */
+  readonly #joined = new Map<string, Set<string>>();
 
   constructor(private readonly backend: Backend) {}
 
@@ -108,16 +109,22 @@ export class LogsTabs {
     return session;
   }
 
-  /** Keeps the pods a tab first lists. */
-  listed(uri: string, pods: readonly { name: string }[]): void {
-    if (!this.#first.has(uri))
-      this.#first.set(uri, new Set(pods.map((pod) => pod.name)));
+  /** Keeps the pods whose Joined entries a tab's window shows. */
+  saw(uri: string, entries: readonly LogEntry[]): void {
+    for (const entry of entries) {
+      if (entry.type !== "joined") continue;
+      let joined = this.#joined.get(uri);
+      if (!joined) {
+        joined = new Set();
+        this.#joined.set(uri, joined);
+      }
+      joined.add(entry.pod);
+    }
   }
 
   /** Whether a pod joined the tab after it first listed its pods, as a rollout's new pods do. */
   joined(uri: string, pod: string): boolean {
-    const first = this.#first.get(uri);
-    return first !== undefined && !first.has(pod);
+    return this.#joined.get(uri)?.has(pod) ?? false;
   }
 
   focus(uri: string, field: "filter" | "search"): void {
@@ -132,7 +139,7 @@ export class LogsTabs {
   closed(uri: string): void {
     this.#sessions.get(uri)?.close();
     this.#sessions.delete(uri);
-    this.#first.delete(uri);
+    this.#joined.delete(uri);
     if (this.#tabs.delete(uri)) this.changes.emit();
   }
 }
