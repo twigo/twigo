@@ -237,10 +237,11 @@ fn entry(shown: Shown<'_>, spec: &Spec) -> LogEntry {
             reason: reason.as_deref().map(str::to_owned),
             restarting: restarting.as_deref().map(str::to_owned),
         },
-        Kind::Joined { pod, time } => LogEntry::Joined {
+        Kind::Joined { pod, time, owner } => LogEntry::Joined {
             id,
             pod: pod.to_string(),
             time: time.to_string(),
+            owner: owner.as_deref().cloned(),
         },
         Kind::Left { pod, time } => LogEntry::Left {
             id,

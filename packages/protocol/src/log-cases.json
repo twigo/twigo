@@ -445,7 +445,14 @@
         {
           "type": "joined",
           "pod": "web-2",
-          "time": "2026-11-03T10:00:00Z"
+          "time": "2026-11-03T10:00:00Z",
+          "owner": {
+            "group": "apps",
+            "version": "v1",
+            "kind": "ReplicaSet",
+            "namespace": "shop",
+            "name": "web-7f9c8d6b5"
+          }
         },
         {
           "type": "ended",
@@ -523,7 +530,14 @@
         {
           "type": "joined",
           "pod": "web-2",
-          "time": "2026-11-03T10:00:00Z"
+          "time": "2026-11-03T10:00:00Z",
+          "owner": {
+            "group": "apps",
+            "version": "v1",
+            "kind": "ReplicaSet",
+            "namespace": "shop",
+            "name": "web-7f9c8d6b5"
+          }
         },
         {
           "type": "ended",
@@ -599,7 +613,14 @@
         {
           "type": "joined",
           "pod": "web-2",
-          "time": "2026-11-03T10:00:00Z"
+          "time": "2026-11-03T10:00:00Z",
+          "owner": {
+            "group": "apps",
+            "version": "v1",
+            "kind": "ReplicaSet",
+            "namespace": "shop",
+            "name": "web-7f9c8d6b5"
+          }
         },
         {
           "type": "ended",
@@ -667,7 +688,14 @@
         {
           "type": "joined",
           "pod": "web-2",
-          "time": "2026-11-03T10:00:00Z"
+          "time": "2026-11-03T10:00:00Z",
+          "owner": {
+            "group": "apps",
+            "version": "v1",
+            "kind": "ReplicaSet",
+            "namespace": "shop",
+            "name": "web-7f9c8d6b5"
+          }
         },
         {
           "type": "ended",
@@ -735,7 +763,14 @@
         {
           "type": "joined",
           "pod": "web-2",
-          "time": "2026-11-03T10:00:00Z"
+          "time": "2026-11-03T10:00:00Z",
+          "owner": {
+            "group": "apps",
+            "version": "v1",
+            "kind": "ReplicaSet",
+            "namespace": "shop",
+            "name": "web-7f9c8d6b5"
+          }
         },
         {
           "type": "ended",
@@ -803,7 +838,14 @@
         {
           "type": "joined",
           "pod": "web-2",
-          "time": "2026-11-03T10:00:00Z"
+          "time": "2026-11-03T10:00:00Z",
+          "owner": {
+            "group": "apps",
+            "version": "v1",
+            "kind": "ReplicaSet",
+            "namespace": "shop",
+            "name": "web-7f9c8d6b5"
+          }
         },
         {
           "type": "ended",
@@ -871,7 +913,14 @@
         {
           "type": "joined",
           "pod": "web-2",
-          "time": "2026-11-03T10:00:00Z"
+          "time": "2026-11-03T10:00:00Z",
+          "owner": {
+            "group": "apps",
+            "version": "v1",
+            "kind": "ReplicaSet",
+            "namespace": "shop",
+            "name": "web-7f9c8d6b5"
+          }
         },
         {
           "type": "ended",
@@ -935,7 +984,14 @@
         {
           "type": "joined",
           "pod": "web-2",
-          "time": "2026-11-03T10:00:00Z"
+          "time": "2026-11-03T10:00:00Z",
+          "owner": {
+            "group": "apps",
+            "version": "v1",
+            "kind": "ReplicaSet",
+            "namespace": "shop",
+            "name": "web-7f9c8d6b5"
+          }
         },
         {
           "type": "ended",
@@ -999,7 +1055,14 @@
         {
           "type": "joined",
           "pod": "web-2",
-          "time": "2026-11-03T10:00:00Z"
+          "time": "2026-11-03T10:00:00Z",
+          "owner": {
+            "group": "apps",
+            "version": "v1",
+            "kind": "ReplicaSet",
+            "namespace": "shop",
+            "name": "web-7f9c8d6b5"
+          }
         },
         {
           "type": "ended",
@@ -1306,7 +1369,14 @@
         {
           "type": "joined",
           "pod": "web-2",
-          "time": "2026-11-03T10:00:00Z"
+          "time": "2026-11-03T10:00:00Z",
+          "owner": {
+            "group": "apps",
+            "version": "v1",
+            "kind": "ReplicaSet",
+            "namespace": "shop",
+            "name": "web-7f9c8d6b5"
+          }
         },
         {
           "type": "ended",
@@ -1387,7 +1457,14 @@
         {
           "type": "joined",
           "pod": "web-2",
-          "time": "2026-11-03T10:00:00Z"
+          "time": "2026-11-03T10:00:00Z",
+          "owner": {
+            "group": "apps",
+            "version": "v1",
+            "kind": "ReplicaSet",
+            "namespace": "shop",
+            "name": "web-7f9c8d6b5"
+          }
         },
         {
           "type": "ended",
@@ -1455,7 +1532,14 @@
         {
           "type": "joined",
           "pod": "web-2",
-          "time": "2026-11-03T10:00:00Z"
+          "time": "2026-11-03T10:00:00Z",
+          "owner": {
+            "group": "apps",
+            "version": "v1",
+            "kind": "ReplicaSet",
+            "namespace": "shop",
+            "name": "web-7f9c8d6b5"
+          }
         },
         {
           "type": "ended",
@@ -1524,7 +1608,14 @@
         {
           "type": "joined",
           "pod": "web-2",
-          "time": "2026-11-03T10:00:00Z"
+          "time": "2026-11-03T10:00:00Z",
+          "owner": {
+            "group": "apps",
+            "version": "v1",
+            "kind": "ReplicaSet",
+            "namespace": "shop",
+            "name": "web-7f9c8d6b5"
+          }
         },
         {
           "type": "ended",

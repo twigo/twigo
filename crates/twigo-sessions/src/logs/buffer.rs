@@ -6,7 +6,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use twigo_ipc::{Level, TextStyle};
+use twigo_ipc::{Level, ObjectRef, TextStyle};
 
 /// What the buffer holds at most: 50,000 entries and 32 MiB of their text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +46,8 @@ pub enum Kind {
     Joined {
         pod: Box<str>,
         time: Box<str>,
+        /// Boxed, as few entries have one.
+        owner: Option<Box<ObjectRef>>,
     },
     Left {
         pod: Box<str>,

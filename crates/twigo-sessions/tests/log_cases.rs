@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use serde_json::Value;
-use twigo_ipc::{ErrorKind, Level, LogEntry, LogView, LogWindow, TextRange};
+use twigo_ipc::{ErrorKind, Level, LogEntry, LogView, LogWindow, ObjectRef, TextRange};
 use twigo_sessions::logs::buffer::{Buffer, Dropped, Kind, LIMITS, Limits, Origin};
 use twigo_sessions::logs::view::{self, BUCKETS, Spec, rfc3339};
 use twigo_sessions::logs::{level, line};
@@ -67,6 +67,8 @@ enum CaseEntry {
     Joined {
         pod: String,
         time: String,
+        #[serde(default)]
+        owner: Option<ObjectRef>,
     },
     Left {
         pod: String,
@@ -151,11 +153,12 @@ fn kind(entry: CaseEntry) -> (i64, Kind) {
                 time: time.into(),
             },
         ),
-        CaseEntry::Joined { pod, time } => (
+        CaseEntry::Joined { pod, time, owner } => (
             at(&time),
             Kind::Joined {
                 pod: pod.into(),
                 time: time.into(),
+                owner: owner.map(Box::new),
             },
         ),
         CaseEntry::Left { pod, time } => (
