@@ -92,6 +92,32 @@ export function anchoredMatch(
 }
 
 /**
+ * The match a tab stands on: the one its step anchored while the matches
+ * list it, and still that one when they list only the last 10,000 and it is
+ * older than those, numbered then by the most it can be; else the match
+ * `back` from the newest.
+ */
+export function standingMatch(
+  matches: LogMatches | undefined,
+  back: number,
+  anchor: { readonly id: number; readonly fromEnd: number } | undefined,
+): { id: number; fromEnd: number; number: number; atMost?: true } | undefined {
+  if (!matches) return undefined;
+  if (anchor) {
+    const listed = anchoredMatch(matches, anchor.id, anchor.fromEnd);
+    if (listed !== undefined) return currentMatch(matches, listed);
+    if (matches.count > matches.entries.length)
+      return {
+        id: anchor.id,
+        fromEnd: anchor.fromEnd,
+        number: matches.count - matches.entries.length,
+        atMost: true,
+      };
+  }
+  return currentMatch(matches, back);
+}
+
+/**
  * A view's entry as the line list draws it: a line's level as its tone,
  * its ANSI runs and marks; a container's end, a pod that came or went,
  * or what the buffer dropped, as a marker.

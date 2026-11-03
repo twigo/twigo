@@ -20,6 +20,7 @@ import {
   lineItem,
   logsKind,
   podTag,
+  standingMatch,
 } from "./entries";
 
 afterEach(cleanup);
@@ -76,6 +77,28 @@ test("an anchored match keeps its entry and mark as matches come after it and dr
   expect(anchoredMatch(after, 70, 1)).toBe(4);
   expect(anchoredMatch(after, 70, 0)).toBe(3);
   expect(anchoredMatch(after, 30, 0)).toBeUndefined();
+});
+
+test("a stepped match stands while the matches list it, and beyond the last they list while they list only those", () => {
+  const capped = { count: 12, entries: [30, 70, 90] };
+  expect(standingMatch(capped, 1, { id: 70, fromEnd: 0 })).toEqual({
+    id: 70,
+    fromEnd: 0,
+    number: 11,
+  });
+  expect(standingMatch(capped, 2, { id: 20, fromEnd: 0 })).toEqual({
+    id: 20,
+    fromEnd: 0,
+    number: 9,
+    atMost: true,
+  });
+  const every = { count: 3, entries: [30, 70, 90] };
+  expect(standingMatch(every, 2, { id: 20, fromEnd: 0 })).toEqual({
+    id: 30,
+    fromEnd: 0,
+    number: 1,
+  });
+  expect(standingMatch(every, 0, undefined)?.id).toBe(90);
 });
 
 test("entries become lines and markers: a level's tone, the current mark, a crash and a rollout", () => {
@@ -406,6 +429,64 @@ test("a paused list keeps its place across a new filter, level and search", asyn
   tabs.setView(uri, { filter: "request" });
   tabs.setView(uri, { search: "token", level: "warn" });
   expect(tabs.place(uri)).toEqual({ key: "3923", offset: -4 });
+  session.close();
+});
+
+test("a step's match the last 10,000 no longer list stays current, the line the list shows, and the steps from it go on from the oldest listed", async () => {
+  const { tabs, uri, session } = await logsTab();
+  await vi.waitFor(() => {
+    expect(session.getSnapshot().window?.entries.length).toBeGreaterThan(3);
+  });
+  act(() => {
+    tabs.setView(uri, { search: "request" });
+  });
+  await vi.waitFor(() => {
+    expect(session.getSnapshot().settled).toBe(true);
+    expect(session.getSnapshot().matches?.count).toBeGreaterThan(0);
+  });
+  const now = session.getSnapshot();
+  const line = now.window?.entries.find(
+    (entry) => entry.type === "line" && entry.marks.length > 0,
+  );
+  if (line?.type !== "line") throw new Error("no matching line in the window");
+  vi.spyOn(session, "getSnapshot").mockReturnValue({
+    ...now,
+    settled: true,
+    matches: { count: 12, entries: [line.id + 1, line.id + 2, line.id + 3] },
+  });
+  const height = vi
+    .spyOn(Element.prototype, "clientHeight", "get")
+    .mockReturnValue(600);
+  act(() => {
+    tabs.update(uri, {
+      anchor: { id: line.id, fromEnd: 0 },
+      current: 2,
+      steps: 1,
+      follow: false,
+    });
+  });
+  expect(tabs.get(uri).anchor).toEqual({ id: line.id, fromEnd: 0 });
+  expect(screen.getByText("≤ 9 of 12")).toBeTruthy();
+  expect(tabs.place(uri)?.key).toBe(String(line.id));
+  act(() => {
+    tabs.step(uri, false);
+  });
+  expect(tabs.get(uri)).toMatchObject({
+    current: 2,
+    anchor: { id: line.id + 1, fromEnd: 0 },
+  });
+  expect(screen.getByText("10 of 12")).toBeTruthy();
+  act(() => {
+    tabs.update(uri, { anchor: { id: line.id, fromEnd: 0 }, current: 2 });
+  });
+  act(() => {
+    tabs.step(uri, true);
+  });
+  expect(tabs.get(uri)).toMatchObject({
+    current: 0,
+    anchor: { id: line.id + 3, fromEnd: 0 },
+  });
+  height.mockRestore();
   session.close();
 });
 

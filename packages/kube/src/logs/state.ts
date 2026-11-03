@@ -8,7 +8,7 @@ import {
 } from "@twigo/protocol";
 import type { LinePlace } from "@twigo/ui";
 import { Changes } from "@twigo/workbench";
-import { currentMatch } from "./entries";
+import { currentMatch, standingMatch } from "./entries";
 
 /** What a logs tab shows (ARCHITECTURE 4.6); its lines live in Rust. */
 export interface LogsTab {
@@ -187,7 +187,9 @@ export class LogsTabs {
   /**
    * Steps the search to the next older or newer match and scrolls to it,
    * which pauses following; asked before Rust applied the search, it waits
-   * for that search's matches.
+   * for that search's matches. From a match older than the 10,000 listed it
+   * goes on from the oldest listed: newer to that one, older round to the
+   * newest.
    */
   step(uri: string, older: boolean): void {
     const snapshot = this.#sessions.get(uri)?.getSnapshot();
@@ -203,7 +205,9 @@ export class LogsTabs {
       return;
     }
     // `current` counts back from the newest, so an older match is a larger one.
-    const current = (tab.current + (older ? 1 : shown - 1)) % shown;
+    let current = (tab.current + (older ? 1 : shown - 1)) % shown;
+    if (standingMatch(snapshot.matches, tab.current, tab.anchor)?.atMost)
+      current = older ? 0 : shown - 1;
     const next = currentMatch(snapshot.matches, current);
     this.update(uri, {
       current,

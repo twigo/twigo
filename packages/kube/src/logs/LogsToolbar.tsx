@@ -40,7 +40,7 @@ import {
 } from "@twigo/ui";
 import { useChanges, useWorkbench } from "@twigo/workbench";
 import type { LogsInput } from "../uri";
-import { clock, currentMatch, followed, logsKind, podTag } from "./entries";
+import { clock, followed, logsKind, podTag, standingMatch } from "./entries";
 import { TAB_STREAMS, type LogsTabs } from "./state";
 
 /** Where a session starts, as the range offers it (ARCHITECTURE 4.6). */
@@ -142,7 +142,7 @@ export function LogsToolbar({
     { warnings: 0, errors: 0 },
   );
   const matches = snapshot.matches?.count ?? 0;
-  const match = currentMatch(snapshot.matches, tab.current);
+  const match = standingMatch(snapshot.matches, tab.current, tab.anchor);
   const step = (older: boolean) => {
     tabs.step(uri, older);
   };
@@ -184,7 +184,7 @@ export function LogsToolbar({
             <span className="pr-0.5 text-[11px] whitespace-nowrap tabular-nums">
               {match === undefined
                 ? "No results"
-                : `${match.number.toLocaleString("en")} of ${matches.toLocaleString("en")}`}
+                : `${match.atMost ? "≤ " : ""}${match.number.toLocaleString("en")} of ${matches.toLocaleString("en")}`}
             </span>
             <IconButton
               icon={ChevronUp}

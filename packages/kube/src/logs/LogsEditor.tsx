@@ -31,10 +31,10 @@ import { ViewStatus } from "../ViewStatus";
 import { viewProblem } from "../viewProblem";
 import {
   anchoredMatch,
-  currentMatch,
   followed,
   lineItem,
   podTag,
+  standingMatch,
 } from "./entries";
 import { LogsToolbar } from "./LogsToolbar";
 import type { LogsTabs } from "./state";
@@ -85,15 +85,18 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
   }, [entries, tabs, uri]);
 
   // Matches come and go around the one the person stepped to, which stays
-  // the current one by its entry's id while the matches hold it, and gives
-  // way to the newest once they do not.
+  // the current one by its entry's id while the matches hold it, or may
+  // hold it beyond the last 10,000 they list, and gives way to the newest
+  // once a list of every match does not hold it.
   const matchesNow = snapshot?.matches;
   const { anchor, current } = tabs.get(uri);
   useEffect(() => {
     if (!anchor || !matchesNow) return;
     const back = anchoredMatch(matchesNow, anchor.id, anchor.fromEnd);
-    if (back === undefined) tabs.update(uri, { current: 0, anchor: undefined });
-    else if (back !== current) tabs.update(uri, { current: back });
+    if (back !== undefined) {
+      if (back !== current) tabs.update(uri, { current: back });
+    } else if (matchesNow.count <= matchesNow.entries.length)
+      tabs.update(uri, { current: 0, anchor: undefined });
   }, [anchor, current, matchesNow, tabs, uri]);
 
   const onWindow = useCallback(
@@ -133,7 +136,7 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
   const several = (pods ?? []).some((pod) => followed(pod).length > 1);
   const tag = (pod: string, container: string) =>
     several ? `${podTag(pod)}/${container}` : podTag(pod);
-  const match = currentMatch(matches, tab.current);
+  const match = standingMatch(matches, tab.current, tab.anchor);
   const start = window?.start ?? 0;
   const items = (window?.entries ?? []).map((entry) =>
     lineItem(entry, {
