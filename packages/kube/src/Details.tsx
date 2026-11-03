@@ -17,7 +17,7 @@ import { useResources } from "./discovery";
 import { KindIcon } from "./KindIcon";
 import { ObjectContent } from "./object/ObjectContent";
 import { OBJECT_TABS } from "./object/tabs";
-import { refUri, useObject } from "./object/useObject";
+import { refResource, refUri, useObject } from "./object/useObject";
 import { objectOf, type Selected } from "./selection";
 import type { ListServices } from "./services";
 import { objectUri } from "./uri";
@@ -64,7 +64,7 @@ export function Details({
   useChanges(menus.changes);
   useChanges(keys.changes);
   const resources = useResources(discovery, space);
-  const [width, setWidth] = useState(460);
+  const [width, setWidth] = useState(470);
   const [element, setElement] = useState<HTMLElement | null>(null);
   const { gvr, kind, namespaced, row } = selected;
   const { namespace, name } = objectOf(selected);
@@ -107,6 +107,10 @@ export function Details({
   const owner = snapshot.related?.owners.find(
     (candidate) => candidate.controller,
   );
+  const ownerGvr =
+    owner && resources.state === "ready"
+      ? refResource(resources.value, owner.target)?.gvr
+      : undefined;
   const statusAt = selected.columns.findIndex(
     (column) => column.name === statusColumn(gvr),
   );
@@ -155,7 +159,7 @@ export function Details({
         }}
         className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize"
       />
-      <header className="flex shrink-0 flex-col gap-1.5 border-b border-border-subtle pt-2 pr-1 pb-1.5 pl-3">
+      <header className="flex shrink-0 flex-col gap-1.5 border-b border-border-subtle pt-2.5 pr-2 pb-2 pl-3.5">
         <div className="flex items-center gap-1.5">
           <KindIcon
             gvr={gvr}
@@ -196,24 +200,49 @@ export function Details({
           {tone && typeof status === "string" && (
             <Pill tone={tone}>{status}</Pill>
           )}
-          {namespace !== undefined && (
-            <span className="truncate">{namespace}</span>
-          )}
-          {owner && (
-            <LinkButton
-              onClick={() => {
-                open(owner.target);
-              }}
-              className="truncate"
-            >
-              {owner.target.kind} {owner.target.name}
-            </LinkButton>
-          )}
-          {row.created && (
-            <span className="ml-auto shrink-0 pr-2 tabular-nums">
-              {humanDuration(now - Date.parse(row.created))}
-            </span>
-          )}
+          {[
+            namespace !== undefined && (
+              <span key="namespace" className="truncate">
+                {namespace}
+              </span>
+            ),
+            owner && (
+              <LinkButton
+                key="owner"
+                onClick={() => {
+                  open(owner.target);
+                }}
+                className="flex min-w-0 items-center gap-1"
+              >
+                {ownerGvr && (
+                  <KindIcon gvr={ownerGvr} className="size-3 shrink-0" />
+                )}
+                <span className="truncate">
+                  {owner.target.kind} {owner.target.name}
+                </span>
+              </LinkButton>
+            ),
+            row.created && (
+              <span key="age" className="shrink-0 tabular-nums">
+                {humanDuration(now - Date.parse(row.created))}
+              </span>
+            ),
+          ]
+            .filter(Boolean)
+            .flatMap((part, index) =>
+              index === 0
+                ? [part]
+                : [
+                    <span
+                      key={`dot-${String(index)}`}
+                      aria-hidden
+                      className="text-muted-foreground-2"
+                    >
+                      ·
+                    </span>,
+                    part,
+                  ],
+            )}
         </div>
         <ActionBar
           inline
