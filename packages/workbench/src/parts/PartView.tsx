@@ -3,12 +3,12 @@ import { PanelsTopLeft } from "lucide-react";
 import { cn, EmptyState, InlineActions, Section } from "@twigo/ui";
 import type { Lookup } from "../contextkey/when";
 import { useChanges, useWorkbench } from "../react";
-import { LOCATION_TITLES, type Location, type View } from "../views/registry";
+import { LOCATION_TITLES, type SideBar, type View } from "../views/registry";
 import { activeContainer } from "./activeContainer";
 import { PanelBoundary } from "./PanelBoundary";
 
-/** A side bar or the panel: a header with its containers, then the active one's views. */
-export function PartView({ location }: { location: Location }) {
+/** A side bar: a header with its containers, then the active one's views. */
+export function PartView({ location }: { location: SideBar }) {
   const workbench = useWorkbench();
   const { views, spaces, keys } = workbench;
   useChanges(views.changes);
@@ -26,10 +26,7 @@ export function PartView({ location }: { location: Location }) {
   return (
     <section
       aria-label={LOCATION_TITLES[location]}
-      className={cn(
-        "flex h-full min-h-0 flex-col",
-        location === "panel" ? "bg-panel" : "bg-sidebar",
-      )}
+      className="flex h-full min-h-0 flex-col bg-sidebar"
     >
       <header className="flex h-[34px] shrink-0 items-center gap-1 pr-2 pl-3">
         {containers.length < 2 ? (

@@ -1,3 +1,4 @@
+import { ChevronDown, ChevronUp, X, type LucideIcon } from "lucide-react";
 import type { Workbench } from "./services";
 import type { MenuId } from "./commands/menus";
 import type { KeybindingRule } from "./keybindings/resolver";
@@ -7,7 +8,7 @@ import {
   spacesProvider,
   symbolsProvider,
 } from "./quickaccess/providers";
-import { LOCATION_TITLES, LOCATIONS, type Location } from "./views/registry";
+import { LOCATION_TITLES, SIDE_BARS, type Location } from "./views/registry";
 import { useChordEntries, useSpaceEntries } from "./parts/StatusItems";
 import { useShellEnvironmentEntries } from "./parts/shellEnvironment";
 import {
@@ -120,7 +121,7 @@ export function registerCore(workbench: Workbench): void {
       if (!view || !space) return;
       const target = await quickAccess.pick(
         `Move ${view.label} to`,
-        LOCATIONS.flatMap((location) =>
+        SIDE_BARS.flatMap((location) =>
           views.containers(location).map((container) => ({
             id: container.id,
             label: container.title,
@@ -150,6 +151,53 @@ export function registerCore(workbench: Workbench): void {
     });
     rules.push({ key, command: id });
   }
+  const panel: readonly {
+    id: string;
+    title: string;
+    icon: LucideIcon;
+    when: string;
+    part: { visible?: boolean; maximized?: boolean };
+  }[] = [
+    {
+      id: "workbench.action.maximizePanel",
+      title: "Maximize Panel Size",
+      icon: ChevronUp,
+      when: "!panelMaximized",
+      part: { maximized: true },
+    },
+    {
+      id: "workbench.action.restorePanel",
+      title: "Restore Panel Size",
+      icon: ChevronDown,
+      when: "panelMaximized",
+      part: { maximized: false },
+    },
+    {
+      id: "workbench.action.closePanel",
+      title: "Hide Panel",
+      icon: X,
+      when: "true",
+      part: { visible: false },
+    },
+  ];
+  panel.forEach(({ id, title, icon, when, part }, order) => {
+    commands.register({
+      id,
+      title,
+      category: "View",
+      icon,
+      run: () => {
+        const space = spaces.active;
+        if (space) spaces.setPart(space.id, "panel", part);
+      },
+    });
+    menus.append("panel/title", {
+      command: id,
+      group: "navigation",
+      order,
+      when,
+    });
+  });
 
   for (let index = 1; index <= 9; index++) {
     const id = `workbench.action.selectSpace${String(index)}`;

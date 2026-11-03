@@ -16,6 +16,7 @@ export type MenuId =
   | "resource/marked"
   | "resource/title"
   | "view/title"
+  | "panel/title"
   | "view/item"
   | "editor/title"
   | "space/context"

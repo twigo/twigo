@@ -7,6 +7,9 @@ export interface EditorProps {
   readonly uri: string;
 }
 
+/** Where editors open: the editor area, or the panel, which holds sessions such as logs (ARCHITECTURE 4.1). */
+export type Area = "editor" | "panel";
+
 /**
  * An editor pane for a URI scheme (ARCHITECTURE 4.3). The resolver takes the
  * provider with the highest priority, as VS Code's editor resolver does.
@@ -16,6 +19,8 @@ export interface EditorProvider {
   readonly id: string;
   readonly scheme: string;
   readonly priority?: number;
+  /** Where its editors open; the editor area by default. */
+  readonly area?: Area;
   readonly title: (uri: URL) => string;
   /** The tab's icon, which may depend on the URI (the kind of a list). */
   readonly icon?: ComponentType<{ uri: string; className?: string }>;
@@ -42,19 +47,23 @@ export const EDITOR_COMPONENT = "editor";
 export const EDITOR_TAB = "editor-tab";
 
 /**
- * Opens editors in the active space's editor area. The area attaches its
- * dockview while it is mounted; panels are keyed by URI, so opening an open
- * URI focuses it.
+ * Opens editors in the active space's editor area and its panel. Each area
+ * attaches its dockview while it is mounted; panels are keyed by URI, so
+ * opening an open URI focuses it, in whichever area holds it.
  */
 export class Editors {
   readonly changes = new Changes();
   readonly #providers = new Set<EditorProvider>();
   readonly #symbols = new Map<string, readonly EditorSymbol[]>();
   readonly #closed = new Set<(uri: string) => void>();
-  #api: DockviewApi | undefined;
+  readonly #apis = new Map<Area, DockviewApi>();
   #active: string | undefined;
 
-  constructor(private readonly keys: ContextKeys) {}
+  /** `reveal` shows a hidden area before an editor opens in it. */
+  constructor(
+    private readonly keys: ContextKeys,
+    private readonly reveal: (area: Area) => void,
+  ) {}
 
   register(provider: EditorProvider): () => void {
     this.#providers.add(provider);
@@ -76,9 +85,23 @@ export class Editors {
     return best;
   }
 
-  /** The URI of the active editor. */
+  /** The URI of the editor area's active editor; the panel's does not count. */
   get active(): string | undefined {
     return this.#active;
+  }
+
+  /** The active editor of an area. */
+  activeIn(area: Area): string | undefined {
+    const panel = this.#apis.get(area)?.activePanel;
+    return panel && paramsOf(panel)?.uri;
+  }
+
+  /** The URIs open in an area, in no particular order. */
+  openIn(area: Area): string[] {
+    return (this.#apis.get(area)?.panels ?? []).flatMap((panel) => {
+      const uri = paramsOf(panel)?.uri;
+      return uri === undefined ? [] : [uri];
+    });
   }
 
   /**
@@ -88,49 +111,66 @@ export class Editors {
    */
   onClose(listener: (uri: string) => void): () => void {
     this.#closed.add(listener);
-    return () => this.#closed.delete(listener);
+    return () => {
+      this.#closed.delete(listener);
+    };
   }
 
-  attach(api: DockviewApi): () => void {
-    this.#api = api;
-    const listener = api.onDidActivePanelChange(({ panel }) => {
-      this.#setActive(panel);
+  /** An area's dockview while it is mounted. */
+  attach(api: DockviewApi, area: Area = "editor"): () => void {
+    this.#apis.set(area, api);
+    const active = api.onDidActivePanelChange(({ panel }) => {
+      if (area === "editor") this.#setActive(panel);
+      else this.changes.emit();
     });
     const removal = api.onDidRemovePanel((panel) => {
       for (const closed of this.#closed) closed(panel.id);
+      if (area === "panel") this.changes.emit();
     });
-    this.#setActive(api.activePanel);
+    const added =
+      area === "panel"
+        ? api.onDidAddPanel(() => {
+            this.changes.emit();
+          })
+        : undefined;
+    if (area === "editor") this.#setActive(api.activePanel);
     return () => {
-      listener.dispose();
+      active.dispose();
       removal.dispose();
-      if (this.#api === api) {
-        this.#api = undefined;
-        this.#setActive(undefined);
+      added?.dispose();
+      if (this.#apis.get(area) === api) {
+        this.#apis.delete(area);
+        if (area === "editor") this.#setActive(undefined);
       }
     };
   }
 
   /**
-   * Opens an editor in the active group, or with `side` in a new group to
-   * its right; an open URI is focused where it is, since a URI is one panel.
+   * Opens an editor in its provider's area, unless `area` names another:
+   * in the area's active group, or with `side` in a new group to its
+   * right. An open URI is focused where it is, since a URI is one panel.
    */
   open(
     uri: string,
     {
       preview = false,
       side = false,
-    }: { preview?: boolean; side?: boolean } = {},
+      area,
+    }: { preview?: boolean; side?: boolean; area?: Area } = {},
   ): void {
-    const api = this.#api;
-    if (!api) throw new Error("no editor area is mounted");
     const provider = this.resolve(uri);
     if (!provider) throw new Error(`no editor opens ${uri}`);
-    const open = api.getPanel(uri);
+    const open = this.#find(uri);
     if (open) {
       if (!preview) this.pin(uri);
-      open.api.setActive();
+      this.reveal(open.area);
+      open.panel.api.setActive();
       return;
     }
+    const target = area ?? provider.area ?? "editor";
+    const api = this.#apis.get(target);
+    if (!api) throw new Error(`no ${target} area is mounted`);
+    this.reveal(target);
     const group = api.activeGroup;
     const replaced =
       preview && !side
@@ -157,7 +197,7 @@ export class Editors {
 
   /** Turns a preview tab into an ordinary one. */
   pin(uri: string): void {
-    const panel = this.#api?.getPanel(uri);
+    const panel = this.#find(uri)?.panel;
     const params = panel && paramsOf(panel);
     if (!panel || !params?.preview) return;
     panel.api.updateParameters({ ...params, preview: false });
@@ -176,26 +216,34 @@ export class Editors {
   }
 
   title(uri: string): string | undefined {
-    return this.#api?.getPanel(uri)?.title;
+    return this.#find(uri)?.panel.title;
   }
 
   /** Renames an open editor's tab, once the editor knows a better title. */
   setTitle(uri: string, title: string): void {
-    const panel = this.#api?.getPanel(uri);
+    const panel = this.#find(uri)?.panel;
     if (!panel || panel.title === title) return;
     panel.api.setTitle(title);
     this.changes.emit();
   }
 
   close(uri: string): void {
-    this.#api?.getPanel(uri)?.api.close();
+    this.#find(uri)?.panel.api.close();
   }
 
   /** Moves the active editor into a new group beside its own. */
   moveActive(side: "right" | "bottom"): void {
-    const panel = this.#api?.activePanel;
+    const panel = this.#apis.get("editor")?.activePanel;
     if (!panel || panel.group.panels.length < 2) return;
     panel.api.moveTo({ group: panel.group, position: side });
+  }
+
+  #find(uri: string): { area: Area; panel: IDockviewPanel } | undefined {
+    for (const [area, api] of this.#apis) {
+      const panel = api.getPanel(uri);
+      if (panel) return { area, panel };
+    }
+    return undefined;
   }
 
   #setActive(panel: IDockviewPanel | undefined) {

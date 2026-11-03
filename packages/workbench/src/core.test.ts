@@ -38,7 +38,7 @@ test("moveView moves one view, then another", async () => {
     id: "forwards",
     title: "Forwards",
     icon: Waypoints,
-    location: "panel",
+    location: "secondary",
   });
   for (const id of ["tree", "list"]) {
     views.registerView({

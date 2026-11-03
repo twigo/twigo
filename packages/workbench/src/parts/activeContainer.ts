@@ -1,10 +1,10 @@
 import type { Workbench } from "../services";
-import type { Location, ViewContainer } from "../views/registry";
+import type { SideBar, ViewContainer } from "../views/registry";
 
 /** The container a part shows: the user's pick while it exists there, else the first. */
 export function activeContainer(
   workbench: Workbench,
-  location: Location,
+  location: SideBar,
 ): ViewContainer | undefined {
   const containers = workbench.views.containers(location);
   const space = workbench.spaces.active;

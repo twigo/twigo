@@ -34,7 +34,12 @@ export class Workbench {
   });
   readonly menus = new Menus();
   readonly views = new Views();
-  readonly editors = new Editors(this.keys);
+  readonly editors = new Editors(this.keys, (area) => {
+    const space = this.spaces.active;
+    if (area === "panel" && space) {
+      this.spaces.setPart(space.id, "panel", { visible: true });
+    }
+  });
   readonly quickAccess = new QuickAccess(this.keys);
   readonly lists = new Lists();
   readonly spaceStatus = new SpaceStatus();
