@@ -66,7 +66,7 @@ test("> puts what ran last first and remembers it in the backend", async () => {
   );
 });
 
-test("ctx lists the open spaces, then the other contexts by the file that defines them", async () => {
+test("ctx lists the open spaces, then the other contexts by the file that defines them, in their colours", async () => {
   const { found, workbench, provider } = await items("ctx ");
   expect(found.map((item) => [item.group, item.label])).toEqual([
     ["Open spaces", "prod-eu"],
@@ -81,10 +81,16 @@ test("ctx lists the open spaces, then the other contexts by the file that define
     keybinding: "⌘1",
   });
   expect(found[3]).toMatchObject({
-    tile: { name: "qa", color: undefined },
+    tile: { name: "qa", color: workbench.colors.of("qa") },
     description: "qa.internal:6443",
   });
   expect(found[3]?.keybinding).toBeUndefined();
+  workbench.colors.choose("qa", "purple");
+  const again = await provider.items("", NOWHERE);
+  expect(again.find((item) => item.label === "qa")?.tile).toEqual({
+    name: "qa",
+    color: "purple",
+  });
   expect(provider.acceptLabel).toBe("Switch");
   const local = found.find((item) => item.label === "kind-local");
   if (!local) throw new Error("no kind-local");

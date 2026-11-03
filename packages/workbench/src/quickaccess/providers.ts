@@ -1,6 +1,5 @@
 import * as v from "valibot";
 import { fuzzyMatch } from "@twigo/ui";
-import { onlyColor } from "../parts/spaceBadge";
 import type { Workbench } from "../services";
 import type { QuickAccessProvider, QuickPickItem } from "./registry";
 
@@ -123,7 +122,7 @@ export function helpProvider(workbench: Workbench): QuickAccessProvider {
  * keys, then the other contexts by the kubeconfig file that defines them.
  */
 export function spacesProvider(workbench: Workbench): QuickAccessProvider {
-  const { spaces, catalog, spaceStatus, keybindings } = workbench;
+  const { spaces, catalog, colors, spaceStatus, keybindings } = workbench;
   return {
     prefix: "ctx ",
     placeholder: "Switch to a space, or open one for a context",
@@ -144,7 +143,7 @@ export function spacesProvider(workbench: Workbench): QuickAccessProvider {
         return {
           id: `space:${space.id}`,
           label: space.name,
-          tile: { name: space.name, color: onlyColor(space, catalog) },
+          tile: { name: space.name, color: colors.ofSpace(space) },
           ...(context
             ? server && { description: server }
             : { description: space.contexts.join(" + ") }),
@@ -176,7 +175,7 @@ export function spacesProvider(workbench: Workbench): QuickAccessProvider {
           {
             id: `context:${context.name}`,
             label: context.name,
-            tile: { name: context.name, color: context.color ?? undefined },
+            tile: { name: context.name, color: colors.of(context.name) },
             ...(server && { description: server }),
             group: context.source,
           },
