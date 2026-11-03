@@ -224,7 +224,24 @@ detail: Array<Span>,
  * What the component that saw it said, shown as it said it: a
  * termination message, a waiting reason's message, an event's note.
  */
-message: string | null, };
+message: string | null, 
+/**
+ * A container's finding's logs, for its Previous logs and the last
+ * line its previous instance wrote.
+ */
+logs: FindingLogs | null, };
+
+export type FindingLogs = { container: string, 
+/**
+ * It has a previous instance, which a logs tab reads with `previous`.
+ */
+previous: boolean, 
+/**
+ * The last line of its instance that ended last, without its escapes,
+ * once it has a previous one: null until Twigo has read it, or when it
+ * wrote none.
+ */
+lastLine: string | null, };
 
 /**
  * Asks for the values of a ConfigMap's keys, which its Overview lists with

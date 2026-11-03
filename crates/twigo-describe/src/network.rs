@@ -213,6 +213,7 @@ pub(crate) fn service(input: &Input<'_>) -> Described {
         })
     {
         findings.push(Finding {
+            logs: None,
             tone: Tone::Warning,
             title: "No ready pod serves it".to_owned(),
             detail: vec![Span::Text {
@@ -398,6 +399,7 @@ pub(crate) fn ingress(input: &Input<'_>) -> Described {
     unserved.sort();
     unserved.dedup();
     let finding = |title: String| Finding {
+        logs: None,
         tone: Tone::Warning,
         title,
         detail: vec![Span::Text {

@@ -3,7 +3,9 @@
 
 use jiff::{SignedDuration, Timestamp};
 use serde_json::Value;
-use twigo_ipc::{Block, Finding, Section, Span, Tone, TreeNode, TreeValue, Value as Shown};
+use twigo_ipc::{
+    Block, Finding, FindingLogs, Section, Span, Tone, TreeNode, TreeValue, Value as Shown,
+};
 
 use crate::show::{
     Fields, NODE, SERVICE_ACCOUNT, code, labels, link, list, plain, quantities, toned,
@@ -269,6 +271,7 @@ fn findings(input: &Input<'_>) -> Vec<Finding> {
     if status["phase"] == "Failed" {
         let reason = text(&status["reason"]);
         findings.push(Finding {
+            logs: None,
             tone: Tone::Danger,
             title: match reason.as_deref() {
                 Some("Evicted") => "The pod was evicted".to_owned(),
@@ -281,6 +284,7 @@ fn findings(input: &Input<'_>) -> Vec<Finding> {
     }
     if status["phase"] == "Unknown" {
         findings.push(Finding {
+            logs: None,
             tone: Tone::Warning,
             title: "Its node does not report the pod's state".to_owned(),
             detail: Vec::new(),
@@ -303,6 +307,7 @@ fn findings(input: &Input<'_>) -> Vec<Finding> {
             detail.push(span("."));
         }
         findings.push(Finding {
+            logs: None,
             tone: Tone::Danger,
             title: "The pod cannot be scheduled".to_owned(),
             detail,
@@ -360,6 +365,7 @@ fn terminating(pod: &Value) -> Option<Finding> {
         .filter_map(Value::as_str)
         .collect();
     Some(Finding {
+        logs: None,
         tone: Tone::Warning,
         title: "The pod is terminating".to_owned(),
         detail,
@@ -413,6 +419,7 @@ fn creating(input: &Input<'_>) -> Option<Finding> {
     }
     detail.push(span("."));
     Some(Finding {
+        logs: None,
         tone: Tone::Danger,
         title: (*title).to_owned(),
         detail,
@@ -441,13 +448,19 @@ fn span(text: &str) -> Span {
 }
 
 /// What is wrong with one container: it keeps crashing, its image cannot
-/// be pulled, it cannot be created, it failed, or it runs but is not ready.
+/// be pulled, it cannot be created, it failed, or it runs but is not ready;
+/// with its logs, whose previous instance's last line twigo-core reads.
 fn container(input: &Input<'_>, status: &Value, noun: &str, serving: bool) -> Option<Finding> {
     let name = status["name"].as_str().unwrap_or_default();
     let state = &status["state"];
     let waiting = &state["waiting"];
     let reason = waiting["reason"].as_str().unwrap_or_default();
     let last = &status["lastState"]["terminated"];
+    let logs = Some(FindingLogs {
+        container: name.to_owned(),
+        previous: last.is_object(),
+        last_line: None,
+    });
     match reason {
         "CrashLoopBackOff" => {
             let mut detail = vec![span(&exited(last))];
@@ -470,6 +483,7 @@ fn container(input: &Input<'_>, status: &Value, noun: &str, serving: bool) -> Op
                 detail.push(span("."));
             }
             Some(Finding {
+                logs: logs.clone(),
                 tone: Tone::Danger,
                 title: format!("{noun} {name} keeps crashing"),
                 detail,
@@ -478,6 +492,7 @@ fn container(input: &Input<'_>, status: &Value, noun: &str, serving: bool) -> Op
         }
         "ImagePullBackOff" | "ErrImagePull" | "ErrImageNeverPull" | "InvalidImageName"
         | "ImageInspectError" => Some(Finding {
+            logs: logs.clone(),
             tone: Tone::Danger,
             title: format!(
                 "The image of {} {name} cannot be pulled",
@@ -494,6 +509,7 @@ fn container(input: &Input<'_>, status: &Value, noun: &str, serving: bool) -> Op
         | "PreCreateHookError"
         | "PreStartHookError"
         | "PostStartHookError" => Some(Finding {
+            logs: logs.clone(),
             tone: Tone::Danger,
             title: format!("{noun} {name} cannot start"),
             detail: vec![span(reason)],
@@ -512,6 +528,7 @@ fn container(input: &Input<'_>, status: &Value, noun: &str, serving: bool) -> Op
             }
             detail.push(span("."));
             Some(Finding {
+                logs: logs.clone(),
                 tone: Tone::Danger,
                 title: format!("{noun} {name} failed"),
                 detail,
@@ -541,6 +558,7 @@ fn container(input: &Input<'_>, status: &Value, noun: &str, serving: bool) -> Op
                 })
                 .map(|event| event.message.trim().to_owned());
             Some(Finding {
+                logs: logs.clone(),
                 tone: Tone::Warning,
                 title: format!("{noun} {name} is not ready"),
                 detail,

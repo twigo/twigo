@@ -1372,7 +1372,8 @@
                       "text": "The ingress sends traffic to it."
                     }
                   ],
-                  "message": null
+                  "message": null,
+                  "logs": null
                 }
               ]
             }
@@ -3643,7 +3644,12 @@
                       "text": "."
                     }
                   ],
-                  "message": "panic: dial tcp 10.96.0.20:5432: connect: connection refused"
+                  "message": "panic: dial tcp 10.96.0.20:5432: connect: connection refused",
+                  "logs": {
+                    "container": "api",
+                    "previous": true,
+                    "lastLine": null
+                  }
                 }
               ]
             }
@@ -4168,7 +4174,8 @@
                       "text": "."
                     }
                   ],
-                  "message": "0/3 nodes are available: 1 node(s) didn't match Pod's node affinity/selector, 2 node(s) had untolerated taint(s). preemption: 0/3 nodes are available: 3 Preemption is not helpful for scheduling."
+                  "message": "0/3 nodes are available: 1 node(s) didn't match Pod's node affinity/selector, 2 node(s) had untolerated taint(s). preemption: 0/3 nodes are available: 3 Preemption is not helpful for scheduling.",
+                  "logs": null
                 }
               ]
             }
@@ -4495,7 +4502,12 @@
                       "text": "registry.invalid/twigo/api:1.0"
                     }
                   ],
-                  "message": "Back-off pulling image \"registry.invalid/twigo/api:1.0\": ErrImagePull: failed to pull and unpack image \"registry.invalid/twigo/api:1.0\": failed to resolve reference \"registry.invalid/twigo/api:1.0\": failed to do request: Head \"https://registry.invalid/v2/twigo/api/manifests/1.0\": dial tcp: lookup registry.invalid on 192.168.65.254:53: no such host"
+                  "message": "Back-off pulling image \"registry.invalid/twigo/api:1.0\": ErrImagePull: failed to pull and unpack image \"registry.invalid/twigo/api:1.0\": failed to resolve reference \"registry.invalid/twigo/api:1.0\": failed to do request: Head \"https://registry.invalid/v2/twigo/api/manifests/1.0\": dial tcp: lookup registry.invalid on 192.168.65.254:53: no such host",
+                  "logs": {
+                    "container": "api",
+                    "previous": false,
+                    "lastLine": null
+                  }
                 }
               ]
             }
@@ -4968,7 +4980,12 @@
                       "text": "."
                     }
                   ],
-                  "message": "Readiness probe failed: dial tcp 10.244.0.14:9: connect: connection refused"
+                  "message": "Readiness probe failed: dial tcp 10.244.0.14:9: connect: connection refused",
+                  "logs": {
+                    "container": "api",
+                    "previous": false,
+                    "lastLine": null
+                  }
                 }
               ]
             }

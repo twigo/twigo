@@ -135,6 +135,7 @@ fn job_findings(job: &Value) -> Vec<Finding> {
         })
         .into_iter()
         .map(|failed| Finding {
+            logs: None,
             tone: Tone::Danger,
             title: match text(&failed["reason"]).as_deref() {
                 Some("BackoffLimitExceeded") => "The job failed too many times".to_owned(),
@@ -256,6 +257,7 @@ fn cron_findings(status: &Value) -> Vec<Finding> {
         None => vec![span("It has never succeeded.")],
     };
     vec![Finding {
+        logs: None,
         tone: Tone::Warning,
         title: "Its last run did not succeed".to_owned(),
         detail,

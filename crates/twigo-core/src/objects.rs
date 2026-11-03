@@ -4,10 +4,11 @@
 //! flow control, as lists are (3.5): one task per open object flushes on a
 //! 50 ms interval and keeps at most one batch unacknowledged.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
-use tokio::sync::Notify;
+use tokio::sync::{Notify, mpsc};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 use twigo_cache::batcher::FLUSH;
@@ -17,8 +18,8 @@ use twigo_cache::request::field_value;
 use twigo_cache::table::{Cell, Column, ColumnKind, Row};
 use twigo_describe::{Fact, Found, Input, Need, Owned, Printed};
 use twigo_ipc::{
-    ErrorKind, EventList, IpcError, ObjectBatch, ObjectEvent, ObjectParts, ObjectRef, Related,
-    RelatedObject, ViewState,
+    Block, ErrorKind, EventList, IpcError, ObjectBatch, ObjectEvent, ObjectParts, ObjectRef,
+    Overview, Related, RelatedObject, ViewState,
 };
 
 /// An open object: dropping it ends its task and its upstreams.
@@ -164,10 +165,16 @@ async fn run(
     let mut events = EventList::default();
     let mut related = Related::default();
     let mut facts: Vec<Fact> = Vec::new();
+    let mut last_lines = LastLines::new();
     loop {
         let ticked = tokio::select! {
             _ = interval.tick() => true,
             () = control.wake.notified() => false,
+            Some((key, line)) = last_lines.read.recv() => {
+                last_lines.lines.insert(key, line);
+                dirty.overview = true;
+                false
+            }
         };
         let Pending {
             parts: asked,
@@ -314,7 +321,10 @@ async fn run(
             related: &related,
             facts: &facts,
         };
-        let batch = shown.batch(seq, state.clone());
+        let mut batch = shown.batch(seq, state.clone());
+        if let (Some(overview), Some(json), Some(uid)) = (&mut batch.overview, &parsed, &uid) {
+            last_lines.fill(overview, json, uid, &hub, &target);
+        }
         dirty.overview &= !parts.overview;
         dirty.manifest &= !parts.manifest;
         dirty.events &= !parts.events;
@@ -325,6 +335,135 @@ async fn run(
             return;
         }
     }
+}
+
+/// A container's previous instance, by its pod's uid, its name and its
+/// restart count, so a restart reads it again.
+type Previous = (Box<str>, String, u64);
+
+/// The last lines of the previous instances that a pod's findings name,
+/// read once each with `tailLines=1&previous=true`.
+struct LastLines {
+    lines: HashMap<Previous, Option<String>>,
+    asked: HashSet<Previous>,
+    sent: mpsc::UnboundedSender<(Previous, Option<String>)>,
+    read: mpsc::UnboundedReceiver<(Previous, Option<String>)>,
+}
+
+impl LastLines {
+    fn new() -> Self {
+        let (sent, read) = mpsc::unbounded_channel();
+        Self {
+            lines: HashMap::new(),
+            asked: HashSet::new(),
+            sent,
+            read,
+        }
+    }
+
+    /// Gives each container finding with a previous instance the last line
+    /// read, and asks for those not read yet.
+    fn fill(
+        &mut self,
+        overview: &mut Overview,
+        pod: &Value,
+        uid: &str,
+        hub: &Hub,
+        target: &Target,
+    ) {
+        let findings = overview
+            .sections
+            .iter_mut()
+            .flat_map(|section| &mut section.blocks)
+            .filter_map(|block| match block {
+                Block::Diagnostics { findings } => Some(findings),
+                _ => None,
+            })
+            .flatten();
+        for finding in findings {
+            let Some(logs) = finding.logs.as_mut().filter(|logs| logs.previous) else {
+                continue;
+            };
+            let key = (
+                uid.into(),
+                logs.container.clone(),
+                restarts(pod, &logs.container),
+            );
+            if let Some(line) = self.lines.get(&key) {
+                logs.last_line.clone_from(line);
+                continue;
+            }
+            let (Some(namespace), Some(name)) =
+                (&target.namespace, pod["metadata"]["name"].as_str())
+            else {
+                continue;
+            };
+            if self.asked.insert(key.clone()) {
+                let (hub, context, namespace, name) = (
+                    hub.clone(),
+                    target.context.clone(),
+                    namespace.clone(),
+                    name.to_owned(),
+                );
+                let sent = self.sent.clone();
+                let running = status(pod, &logs.container)
+                    .is_some_and(|status| status["state"]["running"].is_object());
+                tokio::spawn(async move {
+                    let line = last_line(&hub, &context, &namespace, &name, &key.1, running).await;
+                    // The object may have closed meanwhile.
+                    let _ = sent.send((key, line));
+                });
+            }
+        }
+    }
+}
+
+fn status<'a>(pod: &'a Value, container: &str) -> Option<&'a Value> {
+    ["containerStatuses", "initContainerStatuses"]
+        .iter()
+        .flat_map(|key| pod["status"][key].as_array().into_iter().flatten())
+        .find(|status| status["name"] == container)
+}
+
+fn restarts(pod: &Value, container: &str) -> u64 {
+    status(pod, container)
+        .and_then(|status| status["restartCount"].as_u64())
+        .unwrap_or_default()
+}
+
+/// The last line the container's instance that ended last wrote, without
+/// its escapes; None when it wrote none or it cannot be read.
+///
+/// The kubelet keeps one ended instance of a container, so that one is
+/// read: the previous instance while a new one runs, else the one the
+/// kubelet reads without `previous`, the ended current one or, in a crash
+/// loop's back-off, the last (`validateContainerLogStatus`, kubernetes
+/// v1.37.0). With `previous` there a quick crash loop's status may still
+/// name an instance the kubelet removed. A body it cannot read says why in
+/// a line without a time.
+async fn last_line(
+    hub: &Hub,
+    context: &str,
+    namespace: &str,
+    pod: &str,
+    container: &str,
+    running: bool,
+) -> Option<String> {
+    let clients = hub.clients(context).await.ok()?;
+    let params = kube::api::LogParams {
+        container: Some(container.to_owned()),
+        previous: running,
+        tail_lines: Some(1),
+        timestamps: true,
+        ..kube::api::LogParams::default()
+    };
+    let request = kube::core::Request::new(format!("/api/v1/namespaces/{namespace}/pods"))
+        .logs(pod, &params)
+        .ok()?;
+    let text = clients.api.request_text(request).await.ok()?;
+    let line = twigo_sessions::logs::line::parse(text.lines().last()?.as_bytes());
+    line.at?;
+    Some(line.text).filter(|text| !text.is_empty())
 }
 
 /// What a batch is made of.
@@ -778,6 +917,74 @@ mod tests {
         );
         assert_eq!(follow_needs(&mut held, None, &hub, &target), None);
         assert!(held.is_none(), "let go once the Overview hides");
+    }
+
+    #[tokio::test]
+    async fn a_crashed_containers_last_line_is_read_once_per_restart() {
+        let connect: twigo_cache::hub::Connect = Arc::new(|_context| {
+            Box::pin(async {
+                Err(IpcError {
+                    kind: ErrorKind::Unavailable,
+                    message: "no cluster".to_owned(),
+                })
+            })
+        });
+        let hub = Hub::new(connect);
+        let target = Target {
+            context: "kind-test".to_owned(),
+            namespace: Some("shop".to_owned()),
+        };
+        let pod = |restarts: u64| {
+            json!({
+                "metadata": { "name": "api-0" },
+                "status": { "containerStatuses": [{ "name": "api", "restartCount": restarts }] },
+            })
+        };
+        let overview = || Overview {
+            sections: vec![twigo_ipc::Section {
+                id: "core.diagnostics".to_owned(),
+                title: "Diagnostics".to_owned(),
+                blocks: vec![Block::Diagnostics {
+                    findings: vec![twigo_ipc::Finding {
+                        tone: twigo_ipc::Tone::Danger,
+                        title: "Container api keeps crashing".to_owned(),
+                        detail: Vec::new(),
+                        message: None,
+                        logs: Some(twigo_ipc::FindingLogs {
+                            container: "api".to_owned(),
+                            previous: true,
+                            last_line: None,
+                        }),
+                    }],
+                }],
+            }],
+        };
+        let last_line = |overview: &Overview| {
+            let Block::Diagnostics { findings } = &overview.sections[0].blocks[0] else {
+                unreachable!();
+            };
+            findings[0].logs.as_ref().unwrap().last_line.clone()
+        };
+        let mut lines = LastLines::new();
+        let mut shown = overview();
+        lines.fill(&mut shown, &pod(3), "5c2f", &hub, &target);
+        let (key, read) = lines.read.recv().await.unwrap();
+        assert_eq!(
+            (key.clone(), read),
+            (("5c2f".into(), "api".to_owned(), 3), None)
+        );
+        lines.lines.insert(key, Some("panic: boom".to_owned()));
+
+        let mut shown = overview();
+        lines.fill(&mut shown, &pod(3), "5c2f", &hub, &target);
+        assert_eq!(last_line(&shown).as_deref(), Some("panic: boom"));
+        assert!(lines.read.try_recv().is_err(), "read once");
+
+        let mut shown = overview();
+        lines.fill(&mut shown, &pod(4), "5c2f", &hub, &target);
+        assert_eq!(last_line(&shown), None);
+        let (key, _) = lines.read.recv().await.unwrap();
+        assert_eq!(key.2, 4, "read again after a restart");
     }
 
     #[test]

@@ -121,6 +121,7 @@ pub(crate) fn describe(input: &Input<'_>) -> Described {
     }
     if phase == "Lost" {
         findings.push(Finding {
+            logs: None,
             tone: Tone::Danger,
             title: "The claim lost its volume".to_owned(),
             detail: vec![Span::Text {
@@ -166,6 +167,7 @@ fn unbound(claim: &Value, events: &[ObjectEvent]) -> Option<Finding> {
         (None, None) => return None,
     };
     Some(Finding {
+        logs: None,
         tone: Tone::Warning,
         title: "The claim is not bound".to_owned(),
         detail: vec![Span::Text { text: detail }],

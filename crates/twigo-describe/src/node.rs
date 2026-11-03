@@ -661,6 +661,7 @@ fn findings(node: &Value) -> Vec<Finding> {
             None => Vec::new(),
         };
         findings.push(Finding {
+            logs: None,
             tone,
             title,
             detail,
@@ -669,6 +670,7 @@ fn findings(node: &Value) -> Vec<Finding> {
     }
     if node["spec"]["unschedulable"].as_bool() == Some(true) {
         findings.push(Finding {
+            logs: None,
             tone: Tone::Warning,
             title: "The node is cordoned".to_owned(),
             detail: vec![Span::Text {

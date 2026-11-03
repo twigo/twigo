@@ -31,9 +31,9 @@ pub use logs::{
 };
 pub use object::{
     Block, Condition, Container, ContainerRole, ContainerState, DataEntry, EmbeddedList, EventList,
-    Field, Finding, GetValues, Label, ObjectBatch, ObjectEvent, ObjectParts, ObjectQuery,
-    ObjectRef, OpenObject, Overview, Related, RelatedObject, Section, SetParts, Span, Tone,
-    TreeNode, TreeValue, Value,
+    Field, Finding, FindingLogs, GetValues, Label, ObjectBatch, ObjectEvent, ObjectParts,
+    ObjectQuery, ObjectRef, OpenObject, Overview, Related, RelatedObject, Section, SetParts, Span,
+    Tone, TreeNode, TreeValue, Value,
 };
 pub use space::{Context, ContextColor, Space};
 pub use state::{StateEntry, StateSnapshot};
