@@ -357,6 +357,8 @@ impl Reader {
         let mut moved: Option<String> = None;
         // Whether the last Ended said its next start.
         let mut told = false;
+        // The kubelet's error for an instance it could not read.
+        let mut unreadable: Option<(String, IpcError)> = None;
         loop {
             let current = Arc::clone(&pod.borrow_and_update());
             let status = Status::of(&current, &self.stream.container);
@@ -394,8 +396,14 @@ impl Reader {
                 let exit_code = status
                     .termination(id)
                     .and_then(|ended| ended["exitCode"].as_i64());
+                let error = unreadable
+                    .as_ref()
+                    .filter(|(of, _)| of == id)
+                    .map(|(_, error)| StreamState::Error {
+                        error: error.clone(),
+                    });
                 if !restarts(&current, &self.stream.container, exit_code) {
-                    send(Event::State(StreamState::Ended));
+                    send(Event::State(error.unwrap_or(StreamState::Ended)));
                     send(Event::Finished);
                     return;
                 }
@@ -407,9 +415,9 @@ impl Reader {
                     send(Event::Restarts { restarting });
                     told = true;
                 }
-                send(Event::State(StreamState::Waiting {
+                send(Event::State(error.unwrap_or(StreamState::Waiting {
                     reason: status.waiting(),
-                }));
+                })));
                 if pod.changed().await.is_err() {
                     return;
                 }
@@ -432,7 +440,10 @@ impl Reader {
                     && let Some(terminated) = status.termination(&id)
                 {
                     if let Outcome::Unreadable(error) = outcome {
-                        send(Event::State(StreamState::Error { error }));
+                        send(Event::State(StreamState::Error {
+                            error: error.clone(),
+                        }));
+                        unreadable = Some((id.clone(), error));
                     }
                     told = self.end(terminated, status, send);
                     reading = None;
@@ -991,6 +1002,56 @@ mod tests {
             ),
             "{ended:?}"
         );
+    }
+
+    impl Followed {
+        fn state(&self) -> Option<StreamState> {
+            self.events
+                .lock()
+                .unwrap()
+                .iter()
+                .rev()
+                .find_map(|event| match event {
+                    Event::State(state) => Some(state.clone()),
+                    _ => None,
+                })
+        }
+    }
+
+    fn unreadable(state: Option<StreamState>) -> bool {
+        matches!(
+            state,
+            Some(StreamState::Error { error }) if error.message.starts_with("failed to try resolving symlinks")
+        )
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_kubelets_error_stays_while_the_next_instance_waits() {
+        let fake = Fake::default();
+        fake.serve("web-1", "web", Some("web-a"), None);
+        fake.remove("web-1", "web", "web-a");
+        let followed = Followed::new(&fake, web(crashed("web-a"), json!({})), false);
+        followed.until("its end", has("ended")).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert!(unreadable(followed.state()), "{:?}", followed.state());
+
+        fake.serve("web-1", "web", Some("web-b"), Some("web-a"));
+        numbered(&fake, "web-b", 11..=11);
+        followed.tell(restarted("web-b", "web-a"));
+        followed.until("the new instance", has("web-b 11")).await;
+        assert_eq!(followed.state(), Some(StreamState::Following));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_kubelets_error_stays_once_the_container_runs_no_more() {
+        let fake = Fake::default();
+        fake.serve("web-1", "web", Some("web-a"), None);
+        fake.remove("web-1", "web", "web-a");
+        let mut pod = web(crashed("web-a"), json!({}));
+        pod["spec"]["restartPolicy"] = json!("Never");
+        let followed = Followed::new(&fake, pod, false);
+        followed.until("finished", Followed::finished).await;
+        assert!(unreadable(followed.state()), "{:?}", followed.state());
     }
 
     #[tokio::test(start_paused = true)]

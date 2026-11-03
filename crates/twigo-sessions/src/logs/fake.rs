@@ -52,6 +52,8 @@ struct Container {
 struct Instance {
     lines: Vec<(i64, String)>,
     stopped: bool,
+    /// Its log is gone, so the kubelet says it cannot read it.
+    removed: bool,
     /// The open follows, with their `sinceTime`.
     followers: Vec<(i64, Sender)>,
 }
@@ -102,6 +104,14 @@ impl Fake {
         let mut state = self.state();
         let instance = state.instance(pod, container, instance);
         instance.stopped = true;
+        instance.followers.clear();
+    }
+
+    /// The kubelet removes an instance and its log.
+    pub fn remove(&self, pod: &str, container: &str, instance: &str) {
+        let mut state = self.state();
+        let instance = state.instance(pod, container, instance);
+        instance.removed = true;
         instance.followers.clear();
     }
 
@@ -183,6 +193,11 @@ impl State {
         };
         let breaks = served.breaks.take();
         let instance = served.instances.entry(id).or_default();
+        if instance.removed {
+            let gone = "failed to try resolving symlinks in path \"/var/log/pods/0.log\": lstat /var/log/pods/0.log: no such file or directory\n";
+            let body = Full::new(Bytes::from(gone)).map_err(|never| match never {});
+            return Response::new(body.boxed_unsync());
+        }
         let lines: Vec<Bytes> = instance
             .lines
             .iter()
