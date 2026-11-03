@@ -102,7 +102,7 @@ function grid(): HTMLElement {
 function headers(table: HTMLElement): HTMLButtonElement[] {
   return [
     ...table.querySelectorAll<HTMLButtonElement>(
-      '[aria-rowindex="1"] button[role="columnheader"]',
+      '[aria-rowindex="1"] [role="columnheader"][aria-sort] > button',
     ),
   ];
 }

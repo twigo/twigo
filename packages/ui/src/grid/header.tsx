@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { ArrowDown, ArrowUp, Check, Minus } from "lucide-react";
 import { cn } from "../lib/cn";
 import type { GridColumn, GridSort } from "./types";
@@ -24,17 +25,22 @@ export function HeaderCell({
   onResize: (width: number) => void;
   onFit: () => void;
 }) {
+  const title = useId();
   const active = sort?.column === column.id;
   const Arrow = active && sort.descending ? ArrowDown : ArrowUp;
   const end = column.align === "end";
   return (
-    <div className="relative h-full border-r border-transparent group-hover/header:border-border-subtle">
+    <div
+      role="columnheader"
+      aria-sort={
+        active ? (sort.descending ? "descending" : "ascending") : "none"
+      }
+      // Its content would add the resize edge's label to its name.
+      aria-labelledby={title}
+      className="relative h-full border-r border-transparent group-hover/header:border-border-subtle"
+    >
       <button
         type="button"
-        role="columnheader"
-        aria-sort={
-          active ? (sort.descending ? "descending" : "ascending") : "none"
-        }
         onClick={() => {
           onSort({
             column: column.id,
@@ -47,7 +53,7 @@ export function HeaderCell({
           active && "text-foreground",
         )}
       >
-        <span data-fit-header={column.id} className="truncate">
+        <span id={title} data-fit-header={column.id} className="truncate">
           {column.title}
         </span>
         {active && <Arrow aria-hidden className="size-3 shrink-0" />}

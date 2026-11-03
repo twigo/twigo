@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
 } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 import { Copy } from "lucide-react";
@@ -314,12 +315,17 @@ test("a hovered row's actions run on that row", () => {
   expect(run).toHaveBeenCalledOnce();
 });
 
-test("a header sorts, and a double click on its edge fits the column", () => {
-  const { handlers } = grid();
-  fireEvent.click(screen.getByRole("columnheader", { name: "Name" }));
+test("a header is a column header with a button that sorts, and a double click on its edge fits the column", () => {
+  const { handlers } = grid({ sort: { column: "Name", descending: false } });
+  const [header] = screen.getAllByRole("row");
+  for (const child of header?.children ?? [])
+    expect(child.getAttribute("role")).toBe("columnheader");
+  const name = screen.getByRole("columnheader", { name: "Name" });
+  expect(name.getAttribute("aria-sort")).toBe("ascending");
+  fireEvent.click(within(name).getByRole("button", { name: "Name" }));
   expect(handlers.onSort).toHaveBeenCalledWith({
     column: "Name",
-    descending: false,
+    descending: true,
   });
   fireEvent.doubleClick(screen.getByRole("separator", { name: "Resize Name" }));
   expect(handlers.onResize).toHaveBeenCalledWith("Name", expect.any(Number));

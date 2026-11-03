@@ -10,7 +10,10 @@ function table(rows: (readonly [string, string] | null)[]): HTMLElement {
     "Namespace",
     "Status",
   ]
-    .map((name) => `<button role="columnheader">${name}</button>`)
+    .map(
+      (name) =>
+        `<div role="columnheader" aria-sort="none"><button type="button">${name}</button></div>`,
+    )
     .join("")}</div>`;
   rows.forEach((row, index) => {
     const element = document.createElement("div");
