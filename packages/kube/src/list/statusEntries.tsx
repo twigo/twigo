@@ -1,8 +1,7 @@
-import { useEffect, useState } from "react";
 import type { ViewState } from "@twigo/protocol";
 import type { Tone } from "@twigo/ui";
 import { useChanges, useWorkbench, type StatusEntry } from "@twigo/workbench";
-import type { Discovery } from "../discovery";
+import { useClusterVersion, type Discovery } from "../discovery";
 import {
   byHealth,
   HEALTH,
@@ -39,40 +38,19 @@ export function clusterEntries(
   discovery: Discovery,
 ): () => readonly StatusEntry[] {
   return function useClusterEntries() {
-    const { spaces, editors, credentials } = useWorkbench();
+    const { spaces, editors } = useWorkbench();
     useChanges(spaces.changes);
     useChanges(editors.changes);
     useChanges(statuses.changes);
-    useChanges(credentials.changes);
-    // The version is asked again once the context's credential comes.
-    const { ready } = credentials;
     const [only, ...more] = spaces.active?.contexts ?? [];
-    const context = more.length === 0 ? only : undefined;
-    const [version, setVersion] = useState<{
-      context: string;
-      value: string;
-    }>();
-    useEffect(() => {
-      if (!context) return;
-      let live = true;
-      discovery.version(context).then(
-        (value) => {
-          if (live) setVersion({ context, value });
-        },
-        () => undefined,
-      );
-      return () => {
-        live = false;
-      };
-    }, [context, ready]);
+    const known = useClusterVersion(
+      discovery,
+      more.length === 0 ? only : undefined,
+    );
 
     const active = editors.active;
     const list = active === undefined ? undefined : statuses.get(active);
     const connection = list && CONNECTION[list.status.state];
-    const known =
-      version !== undefined && version.context === context
-        ? version.value
-        : undefined;
     if (!connection && !known) return [];
     const healthy = !connection || connection.tone === "ok";
     return [

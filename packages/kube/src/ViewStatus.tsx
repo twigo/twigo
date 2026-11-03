@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
-import { CircleAlert, KeyRound, ShieldOff } from "lucide-react";
 import type { ViewState } from "@twigo/protocol";
 import { EmptyState } from "@twigo/ui";
+import { viewProblem } from "./viewProblem";
 
 /**
  * What a view shows when Rust cannot give it rows or an object
@@ -23,7 +23,7 @@ export function ViewStatus({
   inline?: boolean;
 }): ReactNode {
   const retry = onRetry && { label: "Retry", onClick: onRetry };
-  const shown = describe(status, what);
+  const shown = viewProblem(status, what);
   if (!shown) return null;
   if (inline) {
     return (
@@ -48,32 +48,4 @@ export function ViewStatus({
       <p className="max-w-md">{shown.body}</p>
     </EmptyState>
   );
-}
-
-function describe(status: ViewState, what: string) {
-  switch (status.state) {
-    case "forbidden":
-      return {
-        icon: ShieldOff,
-        variant: "muted" as const,
-        title: "Access denied",
-        body: `These credentials may not ${status.verb} ${status.resource}.`,
-      };
-    case "unauthorized":
-      return {
-        icon: KeyRound,
-        variant: "muted" as const,
-        title: "Sign-in needed",
-        body: "The cluster rejected the credentials.",
-      };
-    case "error":
-      return {
-        icon: CircleAlert,
-        variant: "error" as const,
-        title: `Could not load ${what}`,
-        body: status.error.message,
-      };
-    default:
-      return undefined;
-  }
 }

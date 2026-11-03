@@ -16,7 +16,7 @@ Decided 2026-11-03 with the workbench redesign (ARCHITECTURE 2.3, 4.1, 4.4, 4.9;
 ### Rules
 
 1. **Contributions are data.**
-   A view, an editor, a status-bar entry, a menu item, a quick-pick item, an explorer node and a column rule are descriptors.
+   A view, an editor, a watermark, a status-bar entry, a menu item, a quick-pick item, an explorer node and a column rule are descriptors.
    The workbench renders them; a feature supplies data and callbacks, not chrome.
 2. **One action model.**
    A command (id, title, icon, enablement, keybinding) is the only way to act on objects and the workbench.

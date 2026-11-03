@@ -1,6 +1,7 @@
 import { FolderTree } from "lucide-react";
 import { Changes, type Workbench } from "@twigo/workbench";
 import { Explorer, EXPLORER_VIEW } from "./explorer/Explorer";
+import { Home } from "./home/Home";
 import { ListIcon, ObjectIcon } from "./KindIcon";
 import { ListActions } from "./list/ListActions";
 import { ListEditor } from "./list/ListEditor";
@@ -71,6 +72,11 @@ export function registerKube(workbench: Workbench): void {
     useEntries: listEntries(services),
   });
   registerSpaceStatus(workbench, services);
+  views.registerWatermark({
+    id: "kube.home",
+    when: "!space.multiContext",
+    component: ({ space }) => <Home space={space} services={services} />,
+  });
 
   editors.register({
     id: "kube.list",

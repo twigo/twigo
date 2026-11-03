@@ -615,13 +615,17 @@ The bench also replays the cases that broke other clients, and one that loopback
 | Title bar          | Breadcrumb of the space and its namespace scope; in the middle a search field with its key that opens quick access, as VS Code's Command Center; drag region; native traffic lights on macOS. Parts show and hide by keys (⌘B, ⌘J, ⌥⌘B), the View menu and the palette, not buttons                                                                                                               |
 | Space rail         | Tiles of the open spaces (D6, Lens's hotbar), each with a dot of its connection, ⌘1..9 by position, a button that opens any context                                                                                                                                                                                                                                                               |
 | Primary side bar   | View containers as tabs in its header (Explorer, Port forwards, Helm, Extensions and contributed ones); the active one's views: resource tree, saved filters                                                                                                                                                                                                                                      |
-| Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups                                                                                                                                                                                                                                                                                                                   |
+| Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups; with no editor open, the space's home                                                                                                                                                                                                                                                                            |
 | Panel              | Terminal (pty), cluster Events stream, Output (Twigo logs per channel), Agent activity (audit, 6.6)                                                                                                                                                                                                                                                                                               |
 | Secondary side bar | The ACP agent panel later; hidden while nothing lives there, as is the panel                                                                                                                                                                                                                                                                                                                      |
 | Status bar         | In the shell's colour, entries as data: on the left the active space in its context's colour, a warning while the login shell's environment is missing (6.1), credentials that need the person, the cluster's version, or its connection in words when it is not connected (later policy mode, port-forwards, sync); on the right the active list's rows and how many fail or wait, each a filter |
 
 The parts sit flush, split by hairlines, with no cards or gaps: the owner tried islands, as JetBrains Islands and VS Code's 2026 layout ([research](research/workbench-chrome.md)), and preferred flat parts.
 Views are descriptors (ID, title, container, `when`, provider), so the user can move a view to another container, VS Code style.
+An editor area with no editor open shows the first watermark a feature registered whose `when` holds, else the workbench's key hints.
+`kube` registers the space's home for spaces of one context: the space's tile, name, Kubernetes version and node count; a tile each for nodes, pods, Deployments and warning events, which opens its list with the filter that shows what is wrong (`h=` or `q=`); what needs attention, the abnormal pod statuses by count in words and then nodes not ready and Deployments short of ready, each with a Show; and the keys that open things.
+Rust counts each tile's list in a query view with `countBy` and an empty window, so no row crosses the IPC (3.4), and only while the home shows (3.2).
+A list the credentials may not read shows "–" and why, never 0.
 The layout per space is persisted (dockview `toJSON` and which parts show); part sizes are the app's (4.8).
 
 ### 4.2 Spaces (D6)
@@ -713,7 +717,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   Marks are row IDs (3.4).
 - Focus model: arrows or `j`/`k` move, Enter opens, Left and Right fold, `/` or ⌘F filters, Esc clears.
   These are the workbench's `list.*` commands, which drive every list and tree.
-- A list's filters sit at the right of its group's tab strip, as the editor's actions (`editor/title`): its health as one control of All, Failing, Pending and Healthy with their counts, for kinds with a status column; the text field, which names its syntax and its key; the grouping; and a pin.
+- A list's filters sit at the right of its group's tab strip, as the editor's actions (`editor/title`): its health as one control of All, Failing, Pending and Healthy with their counts, for kinds with a health column, a pod's or a node's Status or a Deployment's Ready; the text field, which names its syntax and its key; the grouping; and a pin.
   They take no row of their own, so a table sits under three bars: title, tabs, header.
   Each open list keeps its own; a count in the status bar picks the same health.
 - A pinned list keeps its namespaces, text and health in its URI and shows at the top of the explorer; a kind whose list is open shows its rows and its worst health there.
@@ -901,7 +905,8 @@ It lives in `packages/ui`: the tokens, and primitives that draw every recurring 
 - **Settled with the owner** on 2026-11-03, from live mockups after [research](research/workbench-design.md) into Kubernetes clients, IDEs, operations tools and guidelines:
   - the resource list of 4.4 as a whole, grouping included: search in the middle of the title bar, connection dots on the rail, counts and pins in the explorer, a status bar in the shell's colour;
   - the editor darker than the shell in dark;
-  - text tiers at 4.5:1, a solid focus ring, tones drawn by shape.
+  - text tiers at 4.5:1, a solid focus ring, tones drawn by shape;
+  - the space's home in an empty editor area (4.1), without the mockup's capacity and trend, for which Twigo has no data.
 
 ## 5. Commands, keybindings and extensions
 

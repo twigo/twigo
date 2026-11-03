@@ -5,7 +5,13 @@ import {
   type IpcError,
   type Resource,
 } from "@twigo/protocol";
-import { Changes, useChanges, type Workbench } from "@twigo/workbench";
+import { useEffect, useState } from "react";
+import {
+  Changes,
+  useChanges,
+  useWorkbench,
+  type Workbench,
+} from "@twigo/workbench";
 
 export type Loaded<T> =
   | { readonly state: "loading" }
@@ -153,4 +159,31 @@ export function sameGvr(a: Gvr, b: Gvr): boolean {
   return (
     a.group === b.group && a.version === b.version && a.resource === b.resource
   );
+}
+
+/** A context's Kubernetes version once Rust answers, asked again once its credential comes. */
+export function useClusterVersion(
+  discovery: Discovery,
+  context: string | undefined,
+): string | undefined {
+  const { credentials } = useWorkbench();
+  useChanges(credentials.changes);
+  const { ready } = credentials;
+  const [version, setVersion] = useState<{ context: string; value: string }>();
+  useEffect(() => {
+    if (!context) return;
+    let live = true;
+    discovery.version(context).then(
+      (value) => {
+        if (live) setVersion({ context, value });
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [discovery, context, ready]);
+  return version !== undefined && version.context === context
+    ? version.value
+    : undefined;
 }
