@@ -161,15 +161,21 @@ export function runQuery<R extends QueryRow>(
     kept.push({ row, group });
   }
   const { sort } = compiled;
+  const groupOrder = new Map(
+    [...new Set(kept.map(({ group }) => group ?? ""))]
+      .sort(compareGroups)
+      .map((value, index) => [value, index]),
+  );
   const keyed = kept.map(({ row, group }) => ({
     row,
     group,
+    rank: groupOrder.get(group ?? "") ?? 0,
     key: sort ? sortKey(row.cells[sort.at], sort.age, row.created) : NULL,
   }));
   keyed.sort((a, b) => {
     const order = compareKeys(a.key, b.key);
     return (
-      compareGroups(a.group, b.group) ||
+      a.rank - b.rank ||
       (sort?.descending ? -order : order) ||
       natural(a.row.id, b.row.id)
     );
@@ -384,6 +390,12 @@ function codePoints(a: string, b: string): number {
   return x.length - y.length;
 }
 
+/** A character's code point, an ASCII capital as its small letter. */
+function foldAscii(char: string): number {
+  const code = char.codePointAt(0) ?? 0;
+  return code >= 65 && code <= 90 ? code + 32 : code;
+}
+
 function digit(char: string | undefined): boolean {
   return char !== undefined && char >= "0" && char <= "9";
 }
@@ -418,7 +430,7 @@ export function natural(a: string, b: string): number {
       j = q;
       continue;
     }
-    const order = codePoints(lowerAscii(c), lowerAscii(d));
+    const order = foldAscii(c) - foldAscii(d);
     if (order !== 0) return order;
     i++;
     j++;

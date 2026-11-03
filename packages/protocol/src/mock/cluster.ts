@@ -229,11 +229,11 @@ export function generatedAt(
 
 /** What the API server keeps of a generateName: its first 58 bytes, none if they end inside a character. */
 function keptBase(base: string): string | null {
-  const encoder = new TextEncoder();
   let bytes = 0;
   let end = 0;
   for (const char of base) {
-    const size = encoder.encode(char).length;
+    const code = char.codePointAt(0) ?? 0;
+    const size = code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
     if (bytes + size > KEPT_BASE)
       return bytes === KEPT_BASE ? base.slice(0, end) : null;
     bytes += size;
