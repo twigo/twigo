@@ -14,6 +14,8 @@ async function withEveryEnablement() {
   workbench.keys.set("resource.logs", true);
   workbench.keys.set("logsFocus", true);
   workbench.keys.set("logLines", true);
+  workbench.keys.set("panelVisible", true);
+  workbench.keys.set("panelMaximized", true);
   workbench.keys.set("editor.open", true);
   workbench.keys.set("editor.type", "kube.list");
   workbench.keys.set("space.count", 9);

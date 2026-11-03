@@ -187,7 +187,8 @@ export function registerCore(workbench: Workbench): void {
       title,
       category: "View",
       icon,
-      enablement: when,
+      // Maximizing a maximized panel changes nothing, so only the others wait for their state.
+      ...(id !== "workbench.action.maximizePanel" && { enablement: when }),
       run: () => {
         const space = spaces.active;
         if (space) spaces.setPart(space.id, "panel", part);
