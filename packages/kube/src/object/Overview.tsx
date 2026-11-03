@@ -103,8 +103,10 @@ export function Overview({
 /**
  * What changed among the findings, said once: the titles that came, and
  * those that went as resolved. A live region reads text that changes, not
- * text that leaves, so it is told the change rather than the list; the
- * findings an object opens with are on screen, and nothing is said.
+ * text that leaves, so it is told the change rather than the list. The
+ * findings of the first document are on screen and not said; those that
+ * read the object's events come a moment later, once the events are
+ * listed, and are said as they come.
  */
 function Announcer({ titles }: { titles: readonly string[] }) {
   const key = titles.join("\n");

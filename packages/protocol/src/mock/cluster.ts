@@ -205,6 +205,7 @@ export class Cluster {
 
 /** The cells of a pod, matching `queryColumns(POD_COLUMNS, query)`. */
 export function podCells(pod: Pod, withNamespace: boolean): Cell[] {
+  const scheduled = pod.status !== "Pending";
   return [
     pod.name,
     ...(withNamespace ? [pod.namespace] : []),
@@ -212,8 +213,8 @@ export function podCells(pod: Pod, withNamespace: boolean): Cell[] {
     pod.status,
     pod.restarts,
     null,
-    pod.ip,
-    pod.node,
+    scheduled ? pod.ip : "<none>",
+    scheduled ? pod.node : "<none>",
     "<none>",
     "<none>",
   ];

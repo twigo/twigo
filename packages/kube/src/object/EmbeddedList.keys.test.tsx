@@ -30,6 +30,13 @@ test("keys in a Deployment's pods list inside its details act on that list alone
   const main = screen.getAllByRole("grid")[0];
   const first = main && within(main).getAllByRole("row")[1];
   if (!first) throw new Error("a deployment");
+  act(() => {
+    main.focus();
+  });
+  fireEvent.keyDown(main, { code: "KeyJ", key: "j" });
+  fireEvent.keyDown(main, { code: "KeyX", key: "x" });
+  await settle(2);
+  expect(workbench.keys.lookup(main)("listMarked")).toBe(true);
   fireEvent.click(first);
   await act(() => vi.advanceTimersByTimeAsync(DWELL_MS + 50));
   await settle(10);

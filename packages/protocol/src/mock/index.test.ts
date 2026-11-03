@@ -404,7 +404,10 @@ test("text matches the columns of priority 0 and those the query's choices show"
     (await open("ready", query({ text, columns }))).batches[0]?.total;
   expect(await total("<none>", null)).toBe(0);
   expect(await total("10.244.", null)).toBe(0);
-  expect(await total("10.244.", { IP: true })).toBe(5000);
+  const scheduled = new Cluster("prod-eu", 5000, Date.now()).pods.filter(
+    (pod) => pod.status !== "Pending",
+  ).length;
+  expect(await total("10.244.", { IP: true })).toBe(scheduled);
   expect(await total("kube-system", null)).toBeGreaterThan(0);
   expect(await total("kube-system", { Namespace: false })).toBe(0);
 });
@@ -520,6 +523,13 @@ test("a field selector takes old names and fields the server matches as empty, a
       message:
         "invalid selector: 'spec.foo=1,spec.nodeName'; can't understand 'spec.nodeName'",
     },
+  });
+  const unsorted = await open(
+    "ready",
+    query({ fieldSelector: "spec.foo=1,metadata.bar=2" }),
+  );
+  expect(unsorted.batches[0]?.status).toMatchObject({
+    error: { message: "field label not supported: metadata.bar" },
   });
   const pending = pods.find((pod) => pod.status === "Pending");
   const unscheduled = await open(
