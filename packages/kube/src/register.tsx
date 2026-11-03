@@ -30,7 +30,7 @@ export function registerKube(workbench: Workbench): void {
 
   quickAccess.register(listProvider(workbench, services.discovery));
   quickAccess.register(namespaceProvider(workbench));
-  quickAccess.register(resourceProvider(workbench, services.selection));
+  quickAccess.register(resourceProvider(workbench, services));
   [
     { id: "k8s.list.open", title: "Open Resource List…", prefix: ":" },
     { id: "k8s.namespace.select", title: "Select Namespace…", prefix: "ns " },
@@ -123,13 +123,36 @@ export function registerKube(workbench: Workbench): void {
  * Each space's connection on its rail tile (ARCHITECTURE 4.2), as
  * discovery last answered: Rust follows the active space only, so a space
  * left behind shows idle until it is active again, or the failure it had.
+ * A one-context space's Kubernetes version comes once it first connects.
  */
 function registerSpaceStatus(
   workbench: Workbench,
   { discovery }: ListServices,
 ): void {
   const changes = new Changes();
+  const versions = new Map<string, string>();
+  const asked = new Set<string>();
   discovery.changes.subscribe(() => {
+    const space = workbench.spaces.active;
+    const [only, ...more] = space?.contexts ?? [];
+    if (
+      space &&
+      only !== undefined &&
+      more.length === 0 &&
+      !asked.has(space.id) &&
+      discovery.last(space.id)?.state === "ready"
+    ) {
+      asked.add(space.id);
+      discovery.version(only).then(
+        (version) => {
+          versions.set(space.id, version);
+          changes.emit();
+        },
+        () => {
+          asked.delete(space.id);
+        },
+      );
+    }
     changes.emit();
   });
   workbench.spaces.changes.subscribe(() => {
@@ -140,16 +163,19 @@ function registerSpaceStatus(
     status: (space) => {
       const last = discovery.last(space);
       const active = workbench.spaces.active?.id === space;
+      const version = versions.get(space);
+      const known = version === undefined ? {} : { version };
       if (last?.state === "failed")
-        return { tone: "error", label: last.error.message };
+        return { tone: "error", label: last.error.message, ...known };
       if (!active)
         return {
           tone: "idle",
           label: last ? "In the background" : "Not connected yet",
+          ...known,
         };
       return last?.state === "ready"
-        ? { tone: "ok", label: "Connected" }
-        : { tone: "warn", label: "Connecting" };
+        ? { tone: "ok", label: "Connected", ...known }
+        : { tone: "warn", label: "Connecting", ...known };
     },
   });
 }
