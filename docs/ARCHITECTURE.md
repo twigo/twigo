@@ -807,7 +807,7 @@ Extensions add commands, not prefixes.
     - the list follows the end until the person scrolls up, then counts what came since the pause, or since a later view Rust applied, on a button that follows again, and keeps its place by the entries' ids as entries enter and leave before it;
       the list writes its scroll itself and its virtualizer only lays out the rows, so a scroll to where the list did not put it is the person's, and after every change of the layout, rows that wrap measured included, the list puts the line it holds back at its offset;
       a wheel up pauses at once, and the person's scroll down to the end follows again: a wheel's at once, a key's where the browser stops it at the end as it stood, though lines came before it got there;
-      a window asked around a line says where that line stands, so an earlier window is not taken for the answer and a line a new filter hides keeps its place where its time puts it;
+      a window asked around a line says where that line stands, so an earlier window is not taken for the answer, and a paused list keeps its place across a new view and a remount, a line the view hides where its time puts it;
     - a line shows its text as the container wrote it, ANSI colours as tokens at 4.5:1 or more on the editor, warnings and errors tinted with an edge as failing rows are; markers say that a container ended, with its code and next start, that a pod joined from its ReplicaSet or left, and what the buffer dropped;
     - F, W and T toggle follow, wrap and timestamps while the lines have the focus, ⌘F finds and `/` filters; below 1,100 px the toolbar drops the level counts and narrows its fields, so a split panel keeps every control.
 - **Exec and attach.**

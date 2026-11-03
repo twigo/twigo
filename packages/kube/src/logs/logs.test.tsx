@@ -394,6 +394,21 @@ test("a view that changes nothing keeps the match, the place and the session's v
   session.close();
 });
 
+test("a paused list keeps its place across a new filter, level and search", async () => {
+  const workbench = await testWorkbench();
+  const tabs = new LogsTabs(workbench.backend);
+  const uri = logsUri(DEPLOYMENT);
+  const input = parseLogsUri(uri);
+  if (!input) throw new Error("no logs URI");
+  const session = tabs.session(uri, input);
+  tabs.follow(uri, false);
+  tabs.keepPlace(uri, { key: "3923", offset: -4 });
+  tabs.setView(uri, { filter: "request" });
+  tabs.setView(uri, { search: "token", level: "warn" });
+  expect(tabs.place(uri)).toEqual({ key: "3923", offset: -4 });
+  session.close();
+});
+
 test("a filter Rust refuses shows as not applied until one is taken", async () => {
   await logsTab();
   const filter = screen.getByRole("textbox", { name: "Only lines with" });

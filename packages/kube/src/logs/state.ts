@@ -115,13 +115,13 @@ export class LogsTabs {
   /**
    * A new search has other matches, so it starts again from the newest; a
    * filter, level or range keeps the match stepped to while the view keeps
-   * it, and while Rust refuses the view.
+   * it, and while Rust refuses the view. A paused list keeps its place, which
+   * a remount seeks, where its time puts it if the view hides its line.
    */
   setView(uri: string, change: Partial<LogView>): void {
     const tab = this.get(uri);
     const view = { ...tab.view, ...change };
     if (same(view, tab.view)) return;
-    this.#places.delete(uri);
     this.update(uri, {
       view,
       ...(view.search !== tab.view.search && {
