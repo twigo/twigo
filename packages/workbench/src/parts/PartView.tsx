@@ -31,9 +31,9 @@ export function PartView({ location }: { location: Location }) {
         location === "panel" ? "bg-panel" : "bg-sidebar",
       )}
     >
-      <header className="flex h-9 shrink-0 items-center gap-1 px-3">
+      <header className="flex h-[34px] shrink-0 items-center gap-1 pr-2 pl-3">
         {containers.length < 2 ? (
-          <h2 className="text-xs font-medium">{container?.title}</h2>
+          <h2 className="font-medium">{container?.title}</h2>
         ) : (
           <div role="tablist" className="flex items-center gap-1">
             {containers.map((candidate) => (

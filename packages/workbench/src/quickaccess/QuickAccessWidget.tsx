@@ -257,7 +257,7 @@ function Row({
             {item.kind}
           </span>
         )}
-        {item.keybinding && <Kbd className="h-4 px-1">{item.keybinding}</Kbd>}
+        {item.keybinding && <Kbd>{item.keybinding}</Kbd>}
       </span>
     </CommandItem>
   );
@@ -322,9 +322,7 @@ function Hint({
     <span className="flex items-center gap-1">
       <span className="flex gap-0.5">
         {keys.map((key) => (
-          <Kbd key={key} className="h-4 min-w-4 justify-center px-1">
-            {key}
-          </Kbd>
+          <Kbd key={key}>{key}</Kbd>
         ))}
       </span>
       {children}

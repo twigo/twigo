@@ -96,13 +96,11 @@ function CommandCenter({ space }: { space: Space | undefined }) {
       onClick={() => {
         quickAccess.show("");
       }}
-      className="flex h-6 w-[min(36vw,420px)] items-center gap-2 rounded-md bg-foreground/5 pr-1 pl-2 text-xs text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)] outline-none hover:bg-foreground/8 hover:text-foreground focus-visible:shadow-[var(--focus-ring)]"
+      className="flex h-6 w-[min(36vw,300px)] items-center gap-2 rounded-md bg-foreground/5 pr-1 pl-2 text-xs text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)] outline-none hover:bg-foreground/8 hover:text-foreground focus-visible:shadow-[var(--focus-ring)]"
     >
       <Search aria-hidden className="size-3.5 shrink-0" />
       <span className="flex-1 truncate text-left">{label}</span>
-      {binding && (
-        <Kbd className="h-4 px-1">{keybindings.label(binding.presses)}</Kbd>
-      )}
+      {binding && <Kbd>{keybindings.label(binding.presses)}</Kbd>}
     </button>
   );
 }

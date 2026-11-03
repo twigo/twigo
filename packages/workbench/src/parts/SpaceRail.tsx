@@ -120,7 +120,7 @@ function RailTile({
                 tone={state.tone}
                 pulse={state.tone === "warn"}
                 size="md"
-                className="absolute -right-0.5 -bottom-0.5 ring-2 ring-shell"
+                className="absolute -right-[3px] -bottom-[3px] size-[9px] ring-2 ring-shell"
               />
             )}
           </SpaceTile>

@@ -16,7 +16,7 @@ import { PanelBoundary, PartCrash } from "./PanelBoundary";
  */
 export function StatusBar() {
   return (
-    <footer className="flex h-6 shrink-0 items-center justify-between gap-2 border-t border-border bg-shell px-1 text-xs text-muted-foreground">
+    <footer className="flex h-6 shrink-0 items-center justify-between gap-2 bg-shell px-0.5 text-xs text-muted-foreground shadow-[inset_0_1px_0_var(--border)]">
       <Side alignment="left" />
       <Side alignment="right" />
     </footer>
@@ -75,7 +75,7 @@ function EntryView({ entry }: { entry: StatusEntry }) {
     "flex h-full items-center gap-1.5 px-1.5 whitespace-nowrap tabular-nums",
     (entry.run !== undefined || entry.popover !== undefined) &&
       "outline-none hover:bg-row-hover hover:text-foreground focus-visible:shadow-[inset_var(--focus-ring)]",
-    entry.accent && ACCENT[entry.accent],
+    entry.accent && ["-ml-0.5 px-2.5", ACCENT[entry.accent]],
   );
   if (entry.popover) {
     const { open, onOpenChange, content } = entry.popover;
@@ -122,7 +122,10 @@ function EntryView({ entry }: { entry: StatusEntry }) {
   );
 }
 
-/** A coloured context as a fill, as VS Code fills its remote indicator. */
+/**
+ * A coloured context as a fill at the bar's start, flush with its edge, as
+ * VS Code fills its remote indicator.
+ */
 const ACCENT = {
   red: "bg-context-red-solid text-context-solid-foreground font-medium hover:bg-context-red-solid/90",
   orange:
