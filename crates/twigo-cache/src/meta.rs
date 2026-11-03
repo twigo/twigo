@@ -153,36 +153,55 @@ impl RawMeta {
     }
 }
 
-/// The characters the API server appends to a `generateName`
-/// (`randomLength` in k8s.io/apiserver v0.37.1, pkg/storage/names/generate.go).
+/// The characters the API server appends to a `generateName`, and the
+/// longest part of it that it keeps (`randomLength` and
+/// `MaxGeneratedNameLength` in k8s.io/apiserver v0.37.1,
+/// pkg/storage/names/generate.go).
 const GENERATED_LENGTH: usize = 5;
+const KEPT_BASE: usize = 58;
 
 const POD_TEMPLATE_HASH: &str = "pod-template-hash";
+/// The StatefulSet controller sets it to the name it gives the pod
+/// (`updateIdentity` in kubernetes v1.37.1,
+/// pkg/controller/statefulset/stateful_set_utils.go).
+const STATEFUL_SET_POD_NAME: &str = "statefulset.kubernetes.io/pod-name";
 
 /// Where the generated part of `name` starts, in UTF-16 units as the
-/// webview indexes text: after `generate_name` when the API server
-/// appended its characters to it, or at the `pod-template-hash` that ends
-/// `generate_name`, since a Deployment generates its ReplicaSet's name.
-/// A StatefulSet's pod has its set's name and a dash as `generate_name`
-/// too (`GetPodFromTemplate` in kubernetes v1.37.1,
-/// pkg/controller/controller_utils.go), but its controller names it,
-/// with an ordinal rather than the API server's characters.
+/// webview indexes text: after what the API server kept of
+/// `generate_name` when it appended its characters to it, or at the
+/// `pod-template-hash` within it, since a Deployment generates its
+/// ReplicaSet's name. A StatefulSet's pod has its set's name and a dash as
+/// `generate_name` too (`GetPodFromTemplate` in kubernetes v1.37.1,
+/// pkg/controller/controller_utils.go), but its controller names it with
+/// an ordinal, which can be five digits long.
 fn generated(name: &str, generate_name: Option<&str>, labels: &Labels) -> Option<u32> {
+    let label = |key: &str| {
+        labels
+            .iter()
+            .find(|(found, _)| &**found == key)
+            .map(|(_, value)| &**value)
+    };
     let base = generate_name.filter(|base| !base.is_empty())?;
-    let suffix = name.strip_prefix(base)?;
+    if label(STATEFUL_SET_POD_NAME) == Some(name) {
+        return None;
+    }
+    let kept = if base.len() > KEPT_BASE {
+        base.get(..KEPT_BASE)?
+    } else {
+        base
+    };
+    let suffix = name.strip_prefix(kept)?;
     if suffix.chars().count() != GENERATED_LENGTH {
         return None;
     }
-    let start = labels
-        .iter()
-        .find(|(key, _)| &**key == POD_TEMPLATE_HASH)
-        .filter(|(_, hash)| !hash.is_empty())
-        .and_then(|(_, hash)| {
+    let start = label(POD_TEMPLATE_HASH)
+        .filter(|hash| !hash.is_empty())
+        .and_then(|hash| {
             base.strip_suffix('-')?
-                .strip_suffix(&**hash)?
+                .strip_suffix(hash)?
                 .strip_suffix('-')
         })
-        .map_or(base.len(), |before| before.len() + 1);
+        .map_or(kept.len(), |before| kept.len().min(before.len() + 1));
     u32::try_from(name[..start].encode_utf16().count()).ok()
 }
 
@@ -362,12 +381,46 @@ mod tests {
     }
 
     #[test]
+    fn a_stateful_set_pod_with_a_five_digit_ordinal_has_no_generated_part() {
+        let pod = json!({
+            "name": "db-24567",
+            "generateName": "db-",
+            "labels": { "statefulset.kubernetes.io/pod-name": "db-24567" },
+        });
+        assert_eq!(decoded(pod), None);
+    }
+
+    #[test]
+    fn a_long_generate_name_is_cut_to_what_the_api_server_keeps() {
+        let base = format!("{}-", "a".repeat(59));
+        let pod = json!({ "name": format!("{}x2kq9", &base[..58]), "generateName": base });
+        assert_eq!(decoded(pod), Some(58));
+        let owner = "w".repeat(50);
+        let hashed = json!({
+            "name": format!("{owner}-7f9c8d6x2kq9"),
+            "generateName": format!("{owner}-7f9c8d6b5-"),
+            "labels": { "pod-template-hash": "7f9c8d6b5" },
+        });
+        assert_eq!(
+            decoded(hashed),
+            Some(51),
+            "the hash starts inside what was kept"
+        );
+        let late = json!({
+            "name": format!("{}x2kq9", "w".repeat(58)),
+            "generateName": format!("{}-7f9c8d6b5-", "w".repeat(58)),
+            "labels": { "pod-template-hash": "7f9c8d6b5" },
+        });
+        assert_eq!(decoded(late), Some(58), "the hash fell in what was cut");
+    }
+
+    #[test]
     fn a_name_that_does_not_start_with_its_generate_name_has_none() {
         let other = json!({ "name": "web-x2kq9", "generateName": "api-" });
         assert_eq!(decoded(other), None);
         let base = format!("{}-", "a".repeat(59));
-        let cut = json!({ "name": format!("{}x2kq9", &base[..58]), "generateName": base });
-        assert_eq!(decoded(cut), None, "the API server cut the base to 58");
+        let uncut = json!({ "name": format!("{base}x2kq9"), "generateName": base });
+        assert_eq!(decoded(uncut), None, "the API server cuts the base to 58");
         assert_eq!(decoded(json!({ "name": "web-x2kq9" })), None);
         let hash = json!({
             "name": "api-x2kq9",

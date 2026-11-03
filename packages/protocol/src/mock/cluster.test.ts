@@ -27,10 +27,30 @@ test("a StatefulSet's pod has no generated part", () => {
   ).toBeNull();
 });
 
+test("a StatefulSet's pod with a five-digit ordinal has no generated part", () => {
+  expect(
+    generatedAt("db-24567", "db-", {
+      "statefulset.kubernetes.io/pod-name": "db-24567",
+    }),
+  ).toBeNull();
+});
+
+test("a long generateName is cut to what the API server keeps", () => {
+  const base = `${"a".repeat(59)}-`;
+  expect(generatedAt(`${base.slice(0, 58)}x2kq9`, base, {})).toBe(58);
+  const owner = "w".repeat(50);
+  const hash = { "pod-template-hash": "7f9c8d6b5" };
+  expect(
+    generatedAt(`${owner}-7f9c8d6x2kq9`, `${owner}-7f9c8d6b5-`, hash),
+  ).toBe(51);
+  const long = "w".repeat(58);
+  expect(generatedAt(`${long}x2kq9`, `${long}-7f9c8d6b5-`, hash)).toBe(58);
+});
+
 test("a name that does not start with its generateName has none", () => {
   expect(generatedAt("web-x2kq9", "api-", {})).toBeNull();
   const base = `${"a".repeat(59)}-`;
-  expect(generatedAt(`${base.slice(0, 58)}x2kq9`, base, {})).toBeNull();
+  expect(generatedAt(`${base}x2kq9`, base, {})).toBeNull();
   expect(generatedAt("web-x2kq9", null, {})).toBeNull();
   expect(
     generatedAt("api-x2kq9", "api-", { "pod-template-hash": "7f9c8d6b5" }),

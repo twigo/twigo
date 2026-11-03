@@ -203,6 +203,7 @@ export function podCells(pod: Pod, withNamespace: boolean): Cell[] {
 
 /** The characters the API server appends to a `generateName`. */
 const GENERATED_LENGTH = 5;
+const KEPT_BASE = 58;
 
 /**
  * Where the generated part of a name starts, as Rust's row metadata finds
@@ -214,13 +215,16 @@ export function generatedAt(
   generateName: string | null,
   labels: Readonly<Record<string, string>>,
 ): number | null {
-  if (!generateName || !name.startsWith(generateName)) return null;
-  const suffix = name.slice(generateName.length);
+  if (!generateName) return null;
+  if (labels["statefulset.kubernetes.io/pod-name"] === name) return null;
+  const kept = generateName.slice(0, KEPT_BASE);
+  if (!name.startsWith(kept)) return null;
+  const suffix = name.slice(kept.length);
   if (Array.from(suffix).length !== GENERATED_LENGTH) return null;
   const hash = labels["pod-template-hash"];
   return hash && generateName.endsWith(`-${hash}-`)
-    ? generateName.length - hash.length - 1
-    : generateName.length;
+    ? Math.min(kept.length, generateName.length - hash.length - 1)
+    : kept.length;
 }
 
 function pick<T>(items: readonly T[], random: () => number): T {
