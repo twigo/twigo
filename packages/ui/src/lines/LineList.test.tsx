@@ -530,6 +530,31 @@ test("paused at the end, turning wrap on keeps the top line where it stood, thou
   expect(log.scrollTop - startOf(log, "268")).toBe(8);
 });
 
+test("with wrap, a new window keeps the sizes of the rows that just left it, so the lines below them stay put", () => {
+  wrapped();
+  const { log, update } = mount({
+    follow: false,
+    wrap: true,
+    total: 300,
+    start: 60,
+    items: lines(60, 300),
+  });
+  for (const top of [19 * 100, 19 * 130]) {
+    scroll(log, top);
+    act(() => {
+      resize();
+    });
+  }
+  scroll(log, log.scrollTop);
+  const before = log.scrollTop;
+  update({ start: 115, items: lines(115, 300) });
+  expect(log.scrollTop).toBe(before);
+  update({ start: 200, items: lines(200, 300) });
+  expect(log.scrollTop).toBe(before);
+  update({ start: 105, items: lines(105, 290) });
+  expect(log.scrollTop).toBe(before);
+});
+
 test("with wrap, a revealed line stays centred as the rows before it are measured", () => {
   wrapped();
   const { log, update } = mount({

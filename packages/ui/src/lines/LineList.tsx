@@ -134,6 +134,69 @@ function moveOf({
   }
 }
 
+/** The keys of lines no longer loaded, by index, and the window they were taken from. */
+interface Loaded {
+  readonly start: number;
+  readonly items: readonly LineItem[];
+  readonly left: ReadonlyMap<number, string>;
+}
+
+/**
+ * The lines that left the loaded ones, by the index they stand at now, so
+ * their rows keep the sizes they were measured at and a new window does
+ * not move the lines below them: the window before's and those it kept,
+ * each moved as far as the nearest line both windows hold, within `reach`
+ * of the loaded lines.
+ */
+function leftOf(
+  was: Loaded,
+  start: number,
+  items: readonly LineItem[],
+  reach: number,
+  total: number,
+): ReadonlyMap<number, string> {
+  const now = new Map(items.map((item, at) => [item.key, start + at]));
+  const first = was.items.findIndex((item) => now.has(item.key));
+  let last = was.items.length - 1;
+  while (last > first && !now.has(was.items[last]?.key ?? "")) last--;
+  const moved = (at: number) => {
+    const item = was.items[at];
+    return item && (now.get(item.key) ?? 0) - (was.start + at);
+  };
+  const above = moved(first);
+  const below = moved(last);
+  if (above === undefined || below === undefined) return NONE;
+  const end = start + items.length;
+  const left = new Map<number, string>();
+  const keep = (index: number, key: string) => {
+    const at = index + (index < was.start + first ? above : below);
+    if (now.has(key) || (at >= start && at < end)) return;
+    if (at >= Math.max(0, start - reach) && at < Math.min(total, end + reach))
+      left.set(at, key);
+  };
+  for (const [index, key] of was.left) keep(index, key);
+  was.items.forEach((item, at) => {
+    keep(was.start + at, item.key);
+  });
+  return left;
+}
+
+const NONE: ReadonlyMap<number, string> = new Map();
+
+/** Whether a window holds the lines it held, by its bounds: the items are made anew on every render. */
+function sameLines(
+  was: Loaded,
+  start: number,
+  items: readonly LineItem[],
+): boolean {
+  return (
+    was.start === start &&
+    was.items.length === items.length &&
+    was.items[0]?.key === items[0]?.key &&
+    was.items[was.items.length - 1]?.key === items[items.length - 1]?.key
+  );
+}
+
 /** What a page keeps in view of the one before, about what the browsers keep. */
 const OVERLAP = 2 * ROW;
 
@@ -229,11 +292,28 @@ export function LineList({
   const known = useRef(0);
   /** Hidden, the list has no layout to place its lines in; shown again, it places them anew. */
   const hidden = useRef(false);
+  const rows = Math.ceil(height / ROW);
+  const [loaded, setLoaded] = useState<Loaded>({ start, items, left: NONE });
+  if (!sameLines(loaded, start, items))
+    setLoaded({
+      start,
+      items,
+      left: leftOf(
+        loaded,
+        start,
+        items,
+        follow ? rows + OVERSCAN : total,
+        total,
+      ),
+    });
   const virtualizer = useVirtualizer({
     count: total,
     getScrollElement: () => element,
     estimateSize: () => ROW,
-    getItemKey: (index) => items[index - start]?.key ?? `#${String(index)}`,
+    getItemKey: (index) =>
+      items[index - start]?.key ??
+      loaded.left.get(index) ??
+      `#${String(index)}`,
     overscan: 10,
     initialRect: { width: 0, height: 400 },
   });
@@ -244,7 +324,6 @@ export function LineList({
   const size = virtualizer.getTotalSize();
   const first = virtual[0]?.index ?? 0;
   const last = virtual[virtual.length - 1]?.index ?? first;
-  const rows = Math.ceil(height / ROW);
 
   const enter = (next: Mode) => {
     mode.current = next;
