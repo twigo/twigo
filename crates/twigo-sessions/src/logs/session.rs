@@ -234,14 +234,15 @@ struct Dirty {
     view: bool,
 }
 
-/// What the last batch said.
+/// What the batches said last, None for a part none has sent yet.
+#[derive(Default)]
 struct Sent {
-    status: ViewState,
-    pods: Vec<LogPod>,
+    status: Option<ViewState>,
+    pods: Option<Vec<LogPod>>,
     total: u32,
-    window: LogEntries,
-    matches: LogMatches,
-    histogram: Histogram,
+    window: Option<LogEntries>,
+    matches: Option<LogMatches>,
+    histogram: Option<Histogram>,
     dropped: u64,
     arrived: u64,
     changes: u32,
@@ -282,7 +283,7 @@ struct Run {
     events: mpsc::UnboundedSender<(u64, Event)>,
     incoming: mpsc::UnboundedReceiver<(u64, Event)>,
     dirty: Dirty,
-    sent: Option<Sent>,
+    sent: Sent,
     /// The entries the view kept as they came since the source or the view
     /// last changed.
     arrived: u64,
@@ -375,7 +376,7 @@ impl Run {
             events,
             incoming,
             dirty: Dirty::default(),
-            sent: None,
+            sent: Sent::default(),
             arrived: 0,
             changes: 0,
         })
@@ -846,99 +847,56 @@ impl Run {
     /// None when nothing did.
     fn batch(&mut self, seq: u32) -> Option<LogBatch> {
         let window = self.window?;
-        let status = self.followed.state(&self.target);
-        let dropped = self.buffer.dropped_ever();
-        let arrived = self.arrived;
-        let changes = self.changes;
-        let pods = (self.dirty.pods || self.sent.is_none()).then(|| self.log_pods());
-        let shown = (self.dirty.view || self.sent.is_none()).then(|| {
-            (
-                view::total(&self.buffer, &self.spec),
-                view::window(&self.buffer, &self.spec, window),
-                view::matches(&self.buffer, &self.spec),
-                view::histogram(&self.buffer),
-            )
-        });
+        let first = self.sent.window.is_none();
+        let pods = (self.dirty.pods || first).then(|| self.log_pods());
+        let view = self.dirty.view || first;
         self.dirty = Dirty::default();
-        let Some(sent) = &mut self.sent else {
-            let pods = pods.expect("made for the first batch");
-            let (total, window, matches, histogram) = shown.expect("made for the first batch");
-            self.sent = Some(Sent {
-                status: status.clone(),
-                pods: pods.clone(),
-                total,
-                window: window.clone(),
-                matches: matches.clone(),
-                histogram: histogram.clone(),
-                dropped,
-                arrived,
-                changes,
-            });
-            return Some(LogBatch {
-                seq,
-                status,
-                pods: Some(pods),
-                total,
-                window: Some(window),
-                matches: Some(matches),
-                histogram: Some(histogram),
-                dropped,
-                arrived,
-                changes,
-            });
-        };
-        let pods = pods.filter(|pods| *pods != sent.pods);
-        let (total, window, matches, histogram) = match shown {
-            Some((total, window, matches, histogram)) => (
-                total,
-                Some(window).filter(|window| *window != sent.window),
-                Some(matches).filter(|matches| *matches != sent.matches),
-                Some(histogram).filter(|histogram| *histogram != sent.histogram),
+        let (buffer, spec, sent) = (&self.buffer, &self.spec, &mut self.sent);
+        let batch = LogBatch {
+            seq,
+            status: self.followed.state(&self.target),
+            pods: fresh(&mut sent.pods, pods),
+            total: if view {
+                view::total(buffer, spec)
+            } else {
+                sent.total
+            },
+            window: fresh(
+                &mut sent.window,
+                view.then(|| view::window(buffer, spec, window)),
             ),
-            None => (sent.total, None, None, None),
+            matches: fresh(&mut sent.matches, view.then(|| view::matches(buffer, spec))),
+            histogram: fresh(&mut sent.histogram, view.then(|| view::histogram(buffer))),
+            dropped: buffer.dropped_ever(),
+            arrived: self.arrived,
+            changes: self.changes,
         };
-        let unchanged = status == sent.status
-            && pods.is_none()
-            && total == sent.total
-            && window.is_none()
-            && matches.is_none()
-            && histogram.is_none()
-            && dropped == sent.dropped
-            && arrived == sent.arrived
-            && changes == sent.changes;
+        let unchanged = sent.status.as_ref() == Some(&batch.status)
+            && batch.pods.is_none()
+            && batch.total == sent.total
+            && batch.window.is_none()
+            && batch.matches.is_none()
+            && batch.histogram.is_none()
+            && batch.dropped == sent.dropped
+            && batch.arrived == sent.arrived
+            && batch.changes == sent.changes;
         if unchanged {
             return None;
         }
-        sent.status = status.clone();
-        sent.total = total;
-        sent.dropped = dropped;
-        sent.arrived = arrived;
-        sent.changes = changes;
-        if let Some(pods) = &pods {
-            sent.pods = pods.clone();
-        }
-        if let Some(window) = &window {
-            sent.window = window.clone();
-        }
-        if let Some(matches) = &matches {
-            sent.matches = matches.clone();
-        }
-        if let Some(histogram) = &histogram {
-            sent.histogram = histogram.clone();
-        }
-        Some(LogBatch {
-            seq,
-            status,
-            pods,
-            total,
-            window,
-            matches,
-            histogram,
-            dropped,
-            arrived,
-            changes,
-        })
+        sent.status = Some(batch.status.clone());
+        sent.total = batch.total;
+        sent.dropped = batch.dropped;
+        sent.arrived = batch.arrived;
+        sent.changes = batch.changes;
+        Some(batch)
     }
+}
+
+/// `new` unless the part sent last is the same, remembering what it gives.
+fn fresh<T: PartialEq + Clone>(sent: &mut Option<T>, new: Option<T>) -> Option<T> {
+    let new = new.filter(|new| sent.as_ref() != Some(new))?;
+    *sent = Some(new.clone());
+    Some(new)
 }
 
 /// Stops a stream, which may yet have said things not taken: at once, or,
