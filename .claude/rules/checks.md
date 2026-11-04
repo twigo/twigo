@@ -64,7 +64,7 @@
   `UCKeyTranslate` takes the keyboard type (`LMGetKbdType`), so a Mac with another keyboard may record other characters; the committed ones come from an ANSI keyboard, type 91 (2026-10-31).
 - The live X11 test changes the X server's keymap and group, so it runs only where `TWIGO_TEST_X11_DISPLAY` equals `DISPLAY`, as under `xvfb-run`.
 - The live Wayland test changes sway's keyboard, so it runs only where `TWIGO_TEST_WAYLAND_DISPLAY` equals `WAYLAND_DISPLAY`, as under `crates/twigo-keyboard/linux/wayland.sh`.
-  Headless sway has no input devices, so the script holds a virtual keyboard open with `wtype`; `swaymsg` reads a comma as a command separator, so a layout list is quoted.
+  Headless sway has no input devices, so the test gives its seat a virtual keyboard of its own and sets the keymap and the group through it: sway 1.11, unlike 1.9, applies no input config to a virtual keyboard, `swaymsg input … xkb_layout` included (`sway/input/keyboard.c`, `sway_keyboard_configure`), and Ubuntu 26.04, which `ubuntu-latest` became on 2026-11-04, ships 1.11.
 - `crates/twigo-env/tests/live.rs` runs bash and zsh from `PATH` as login shells and fails if either is missing, so CI installs zsh.
   It runs without the test harness, because the shells re-run it with `--dump-env`.
 - TIS must run on the main thread, so `crates/twigo-keyboard/tests/layouts.rs` runs without the test harness.

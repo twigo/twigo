@@ -1,7 +1,7 @@
 # The Linux side of twigo-keyboard's tests: Ubuntu's GTK, Wayland and
-# xkbcommon, Xvfb for the live X11 test, as in CI, and a headless sway with
-# wtype's virtual keyboard for the live Wayland test.
-FROM ubuntu:24.04
+# xkbcommon, Xvfb for the live X11 test, as in CI, and a headless sway for
+# the live Wayland test.
+FROM ubuntu:26.04
 
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -12,7 +12,6 @@ RUN apt-get update \
     libxkbcommon-x11-dev \
     pkg-config \
     sway \
-    wtype \
     x11-xkb-utils \
     xauth \
     xvfb \
