@@ -6,6 +6,7 @@
 //! webview's first window.
 
 use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -208,14 +209,6 @@ struct Leaving {
     at: i64,
 }
 
-/// A pod that joined, whose `Joined` entry waits while a pod of its name is
-/// leaving, so it comes after that one's `Left`.
-struct Joining {
-    pod: Arc<str>,
-    created: i64,
-    kind: Kind,
-}
-
 /// A stream's task, ended when dropped.
 struct Task(JoinHandle<()>);
 
@@ -262,11 +255,15 @@ struct Run {
     stopped: Vec<Stopped>,
     /// Streams that read all there was, with their last state.
     finished: HashMap<Key, StreamState>,
-    /// The time of each pod's latest entry, by its uid, which its `Left`
-    /// follows though the node's clock may run ahead of the session's.
-    latest: HashMap<Arc<str>, i64>,
+    /// The times of each pod's first and latest entries, by its uid: its
+    /// `Joined` stands just before the first and its `Left` just after the
+    /// latest, whatever the clocks of its node, the API server and the
+    /// session say.
+    written: HashMap<Arc<str>, (i64, i64)>,
+    /// The id and time of each `Joined` entry, by its pod's uid, until the
+    /// pod left.
+    joined: HashMap<Arc<str>, (u64, i64)>,
     leaving: Vec<Leaving>,
-    joining: Vec<Joining>,
     /// Counts the streams started, which gives each its id, so the events
     /// of a stream neither running nor stopped, as of an old source, go.
     started: u64,
@@ -358,9 +355,9 @@ impl Run {
             streams: HashMap::new(),
             stopped: Vec::new(),
             finished: HashMap::new(),
-            latest: HashMap::new(),
+            written: HashMap::new(),
+            joined: HashMap::new(),
             leaving: Vec::new(),
-            joining: Vec::new(),
             started: 0,
             events,
             incoming,
@@ -376,9 +373,9 @@ impl Run {
         self.streams.clear();
         self.stopped.clear();
         self.finished.clear();
-        self.latest.clear();
+        self.written.clear();
+        self.joined.clear();
         self.leaving.clear();
-        self.joining.clear();
         self.buffer.clear();
         self.arrived = 0;
         self.dirty = Dirty {
@@ -441,24 +438,37 @@ impl Run {
             })
             .collect();
         pods.sort_by(|a, b| a.name.cmp(&b.name));
+        let mut joined = Vec::new();
         for pod in &pods {
             match before.remove(&pod.uid) {
                 Some(_) => {}
                 None if self.listed && self.reads(&pod.name) => {
                     let created = pod.created.unwrap_or_else(jiff::Timestamp::now);
-                    self.joining.push(Joining {
-                        pod: Arc::clone(&pod.name),
-                        created: nanos(created),
-                        kind: Kind::Joined {
+                    joined.push((
+                        Arc::clone(&pod.uid),
+                        nanos(created),
+                        Kind::Joined {
                             pod: (*pod.name).into(),
                             time: created.to_string().into(),
                             owner: controller(&pod.json).map(Box::new),
                         },
-                    });
+                    ));
                 }
                 None => {}
             }
         }
+        // At its creation while the pod has no entry; its streams start
+        // below, so its id is lower than any of their entries'.
+        let (uids, marks): (Vec<_>, Vec<_>) = joined
+            .into_iter()
+            .map(|(uid, at, kind)| ((uid, at), (at, kind)))
+            .unzip();
+        let ids = self.insert(marks);
+        self.joined.extend(
+            uids.into_iter()
+                .zip(ids)
+                .map(|((uid, at), id)| (uid, (id, at))),
+        );
         for gone in before.values() {
             if self.reads(&gone.name) {
                 self.leaving.push(Leaving {
@@ -493,9 +503,8 @@ impl Run {
     }
 
     /// Adds the `Left` entry of each pod that left once its streams have
-    /// ended, after their last entry, then the `Joined` entry of each pod
-    /// that joined once no pod of its name is leaving, after the `Left` of
-    /// the one it replaces.
+    /// ended, so every entry of the pod came: just after the last of them,
+    /// or at the leave while it has none, though not before its `Joined`.
     fn leave(&mut self) {
         let (gone, waiting): (Vec<Leaving>, Vec<Leaving>) = std::mem::take(&mut self.leaving)
             .into_iter()
@@ -509,9 +518,13 @@ impl Run {
         let marks = gone
             .into_iter()
             .map(|leaving| {
-                let last = self.latest.remove(&leaving.uid).unwrap_or(leaving.at);
+                let joined = self.joined.remove(&leaving.uid);
+                let at = match self.written.remove(&leaving.uid) {
+                    Some((_, last)) => last,
+                    None => joined.map_or(leaving.at, |(_, at)| at.max(leaving.at)),
+                };
                 (
-                    leaving.at.max(last),
+                    at,
                     Kind::Left {
                         pod: leaving.pod,
                         time: view::rfc3339(leaving.at).into(),
@@ -520,50 +533,41 @@ impl Run {
             })
             .collect();
         self.insert(marks);
-        let (ready, waiting): (Vec<Joining>, Vec<Joining>) = std::mem::take(&mut self.joining)
-            .into_iter()
-            .partition(|joining| {
-                !self
-                    .leaving
-                    .iter()
-                    .any(|leaving| *leaving.pod == *joining.pod)
-            });
-        self.joining = waiting;
-        let marks = ready
-            .into_iter()
-            .map(|joining| (self.joins(&joining.pod, joining.created), joining.kind))
-            .collect();
-        self.insert(marks);
     }
 
-    /// Where the `Joined` of a pod created at `created` stands: then, or
-    /// after a later `Left` of a pod of its name, which its creation's whole
-    /// seconds may come before.
-    fn joins(&self, pod: &str, created: i64) -> i64 {
-        self.buffer
-            .entries()
-            .iter()
-            .rev()
-            .take_while(|entry| entry.at >= created)
-            .find_map(|entry| match &entry.kind {
-                Kind::Left { pod: left, .. } if **left == *pod => Some(entry.at),
-                _ => None,
-            })
-            .unwrap_or(created)
+    /// Moves each `Joined` entry just before its pod's first entry, which
+    /// may come long after the creation it stood at, or before it from a
+    /// node whose clock runs behind the API server's: under its id, lower
+    /// than those of its pod's entries, so it comes first at their time.
+    fn place_joined(&mut self) {
+        let (buffer, written) = (&mut self.buffer, &self.written);
+        let mut moved = false;
+        self.joined.retain(|uid, (id, at)| {
+            let Some(&(first, _)) = written.get(uid) else {
+                return true;
+            };
+            if first == *at {
+                return true;
+            }
+            moved = true;
+            let kept = buffer.place(*id, *at, first);
+            *at = first;
+            kept
+        });
+        self.dirty.view |= moved;
     }
 
-    fn insert(&mut self, entries: Vec<(i64, Kind)>) {
-        if entries.is_empty() {
-            return;
-        }
+    /// The ids the entries got, in the order they came.
+    fn insert(&mut self, entries: Vec<(i64, Kind)>) -> Range<u64> {
         let spec = &self.spec;
         let arrived = &mut self.arrived;
-        self.buffer.insert(entries, |at, kind| {
+        let ids = self.buffer.insert(entries, |at, kind| {
             let judged = spec.judge(kind);
             *arrived += u64::from(spec.keeps(at, judged));
             judged
         });
-        self.dirty.view = true;
+        self.dirty.view |= !ids.is_empty();
+        ids
     }
 
     /// Starts a stream for each chosen container without one, those with
@@ -711,7 +715,8 @@ impl Run {
             };
             let origin = Arc::clone(origin);
             if let Event::Line { at, .. } | Event::Ended { at, .. } = &event {
-                let latest = self.latest.entry(Arc::clone(uid)).or_insert(*at);
+                let (first, latest) = self.written.entry(Arc::clone(uid)).or_insert((*at, *at));
+                *first = (*first).min(*at);
                 *latest = (*latest).max(*at);
             }
             match event {
@@ -767,6 +772,7 @@ impl Run {
         }
         self.stopped.retain(|stopped| !ended.contains(&stopped.id));
         self.insert(entries);
+        self.place_joined();
         for (origin, restarting) in restarts {
             self.dirty.view |= self.buffer.restarts(&origin, restarting.into());
         }
@@ -1409,6 +1415,109 @@ mod tests {
                 "web-1 joined",
                 "new up"
             ]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pod_made_again_seen_late_joins_before_its_first_line() {
+        let fake = Fake::default();
+        let mut run = followed_web_a(&fake).await;
+        fake.stop("web-1", "web", "web-a");
+        tokio::time::sleep(FLUSH).await;
+        fake.delete("web-1");
+        let created = now().div_euclid(SECOND) * SECOND;
+        made_again(&fake, created);
+        fake.write("web-1", "web", "web-b", now(), "new early");
+        until(&mut run, "the old pod left and the new one wrote", |run| {
+            run.leaving.is_empty() && texts(run).iter().any(|text| text == "new early")
+        })
+        .await;
+        assert_eq!(
+            texts(&run),
+            ["old up", "web-1 left", "web-1 joined", "new early"]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pod_made_again_while_the_old_one_still_writes_bounds_each_ones_lines() {
+        let fake = Fake::default();
+        let mut run = followed_web_a(&fake).await;
+        let created = now().div_euclid(SECOND) * SECOND;
+        fake.delete("web-1");
+        made_again(&fake, created);
+        until(&mut run, "the pod made again", |run| {
+            run.pods.first().is_some_and(|pod| &*pod.uid == "uid-b")
+        })
+        .await;
+        fake.write("web-1", "web", "web-b", now(), "new early");
+        until(&mut run, "the new pod's first line", |run| {
+            texts(run).iter().any(|text| text == "new early")
+        })
+        .await;
+        fake.write("web-1", "web", "web-a", now(), "old after");
+        fake.stop("web-1", "web", "web-a");
+        until(&mut run, "the old pod left", |run| run.leaving.is_empty()).await;
+        new_up(&fake, &mut run).await;
+        assert_eq!(
+            texts(&run),
+            [
+                "old up",
+                "web-1 joined",
+                "new early",
+                "old after",
+                "web-1 left",
+                "new up"
+            ]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pod_made_again_that_leaves_first_joins_before_its_own_left() {
+        let fake = Fake::default();
+        let mut run = followed_web_a(&fake).await;
+        let created = now().div_euclid(SECOND) * SECOND;
+        fake.delete("web-1");
+        made_again(&fake, created);
+        until(&mut run, "the pod made again", |run| {
+            run.pods.first().is_some_and(|pod| &*pod.uid == "uid-b")
+        })
+        .await;
+        new_up(&fake, &mut run).await;
+        fake.stop("web-1", "web", "web-b");
+        fake.delete("web-1");
+        until(&mut run, "the new pod left", |run| {
+            run.pods.is_empty() && !run.leaving.iter().any(|leaving| &*leaving.uid == "uid-b")
+        })
+        .await;
+        fake.stop("web-1", "web", "web-a");
+        until(&mut run, "the old pod left", |run| run.leaving.is_empty()).await;
+        assert_eq!(
+            texts(&run),
+            [
+                "old up",
+                "web-1 left",
+                "web-1 joined",
+                "new up",
+                "web-1 left"
+            ]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pods_joined_entry_comes_before_its_lines_from_a_clock_behind_the_api_servers() {
+        let fake = Fake::default();
+        let mut run = followed_web_a(&fake).await;
+        fake.stop("web-1", "web", "web-a");
+        fake.delete("web-1");
+        until(&mut run, "the old pod left", |run| {
+            run.pods.is_empty() && run.leaving.is_empty()
+        })
+        .await;
+        made_again(&fake, (now().div_euclid(SECOND) + 10) * SECOND);
+        new_up(&fake, &mut run).await;
+        assert_eq!(
+            texts(&run),
+            ["old up", "web-1 left", "web-1 joined", "new up"]
         );
     }
 

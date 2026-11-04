@@ -1,7 +1,8 @@
 //! Logs sessions against a kind cluster, on every supported release: a
 //! followed pod, a container's previous instance after a forced restart, a
 //! crash loop's next start, a cut stream that reopens, the cluster's
-//! budget of followed logs, and a Deployment's pods through a rollout.
+//! budget of followed logs, a Deployment's pods through a rollout, and a
+//! StatefulSet's pod made again under its name.
 //! They need a kubelet, so kwok's pods will not do; the pods run an image
 //! kind's node holds already.
 
@@ -9,7 +10,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use k8s_openapi::api::apps::v1::Deployment;
+use k8s_openapi::api::apps::v1::{Deployment, StatefulSet};
 use k8s_openapi::api::core::v1::{Namespace, Node, Pod, ServiceAccount};
 use kube::api::{DeleteParams, Patch, PatchParams, PostParams};
 use kube::config::{KubeConfigOptions, Kubeconfig};
@@ -475,6 +476,104 @@ async fn a_crash_loops_end_gets_its_next_start() {
             assert_eq!((*exit_code, reason.as_deref()), (Some(1), Some("Error")));
         }
     }
+    live.delete().await;
+}
+
+const UIDS: &str =
+    "trap '' TERM; i=0; while true; do i=$((i+1)); echo \"$POD_UID line $i\"; pause 0.05; done";
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_statefulsets_pod_made_again_under_its_name_bounds_each_ones_lines() {
+    let live = live("logs-made-again").await;
+    let mut spec = live.spec(&[("web", UIDS)]);
+    spec["containers"][0]["env"] = json!([{
+        "name": "POD_UID",
+        "valueFrom": { "fieldRef": { "fieldPath": "metadata.uid" } },
+    }]);
+    let set: StatefulSet = serde_json::from_value(json!({
+        "metadata": { "name": "web" },
+        "spec": {
+            "replicas": 1,
+            "serviceName": "web",
+            "selector": { "matchLabels": { "app": "web" } },
+            "template": { "metadata": { "labels": { "app": "web" } }, "spec": spec },
+        },
+    }))
+    .unwrap();
+    Api::<StatefulSet>::namespaced(live.admin(), &live.namespace)
+        .create(&PostParams::default(), &set)
+        .await
+        .unwrap();
+    let old = live.until_pod("web-0", |pod| running(pod, 1)).await;
+    let old = old.metadata.uid.expect("a uid");
+    let mut tab = live
+        .open(
+            ("apps", "statefulsets"),
+            "web",
+            source(Containers::Default, Since::Start, false),
+        )
+        .await;
+    let of = |tab: &Tab, uid: &str| -> Vec<usize> {
+        tab.entries
+            .iter()
+            .enumerate()
+            .filter_map(|(at, entry)| match entry {
+                LogEntry::Line { text, .. } if text.starts_with(uid) => Some(at),
+                _ => None,
+            })
+            .collect()
+    };
+    tab.until("the old pod's lines", |tab| of(tab, &old).len() >= 20)
+        .await;
+
+    live.pods()
+        .delete("web-0", &DeleteParams::default())
+        .await
+        .unwrap();
+    let new = live
+        .until_pod("web-0", |pod| {
+            pod.metadata.uid.as_deref() != Some(old.as_str()) && running(pod, 1)
+        })
+        .await;
+    let new = new.metadata.uid.expect("a uid");
+    let marks = |tab: &Tab| -> (Vec<usize>, Vec<usize>) {
+        let at = |joined: bool| {
+            tab.entries
+                .iter()
+                .enumerate()
+                .filter_map(|(at, entry)| match entry {
+                    LogEntry::Joined { .. } if joined => Some(at),
+                    LogEntry::Left { .. } if !joined => Some(at),
+                    _ => None,
+                })
+                .collect()
+        };
+        (at(true), at(false))
+    };
+    tab.until("the old pod left and the new one wrote", |tab| {
+        let (joined, left) = marks(tab);
+        joined.len() == 1 && left.len() == 1 && of(tab, &new).len() >= 20
+    })
+    .await;
+    let (old_lines, new_lines) = (of(&tab, &old), of(&tab, &new));
+    let (joined, left) = marks(&tab);
+    let order = format!(
+        "old lines {:?}..={:?}, its Left {left:?}; new lines {:?}..={:?}, its Joined {joined:?}",
+        old_lines.first(),
+        old_lines.last(),
+        new_lines.first(),
+        new_lines.last()
+    );
+    assert!(old_lines.iter().all(|line| *line < left[0]), "{order}");
+    assert!(new_lines.iter().all(|line| *line > joined[0]), "{order}");
+    if old_lines.last() < new_lines.first() {
+        assert!(left[0] < joined[0], "{order}");
+    }
+    let lines = tab.lines();
+    numbered(&lines, &format!("{old} line"));
+    numbered(&lines, &format!("{new} line"));
+    eprintln!("{order}");
     live.delete().await;
 }
 

@@ -4,6 +4,7 @@
 //! them once any went.
 
 use std::collections::VecDeque;
+use std::ops::Range;
 use std::sync::Arc;
 
 use twigo_ipc::{Level, ObjectRef, TextStyle};
@@ -126,12 +127,14 @@ impl Buffer {
     }
 
     /// Adds entries in the order they came, each with the next id and what
-    /// `judge` makes of it and its time, at its place in time.
+    /// `judge` makes of it and its time, at its place in time; the ids
+    /// they got, in that order.
     pub fn insert(
         &mut self,
         incoming: Vec<(i64, Kind)>,
         mut judge: impl FnMut(i64, &Kind) -> Judged,
-    ) {
+    ) -> Range<u64> {
+        let ids = self.next + 1..self.next + 1 + incoming.len() as u64;
         let mut fresh: Vec<Entry> = incoming
             .into_iter()
             .map(|(at, kind)| Entry {
@@ -143,7 +146,7 @@ impl Buffer {
             .collect();
         fresh.sort_by_key(Entry::key);
         let Some(first) = fresh.first().map(Entry::key) else {
-            return;
+            return ids;
         };
         self.bytes += fresh.iter().map(|entry| entry.kind.bytes()).sum::<usize>();
         // Lines mostly come in order, so only the few entries after the
@@ -161,6 +164,22 @@ impl Buffer {
             self.entries.extend(next);
         }
         self.bound();
+        ids
+    }
+
+    /// Moves the entry `id`, which stands at `at`, to `to` under its id;
+    /// false when the buffer no longer holds it.
+    pub fn place(&mut self, id: u64, at: i64, to: i64) -> bool {
+        let Ok(index) = self.entries.binary_search_by_key(&(at, id), Entry::key) else {
+            return false;
+        };
+        let mut entry = self.entries.remove(index).expect("it was found there");
+        entry.at = to;
+        let index = self
+            .entries
+            .partition_point(|other| other.key() < entry.key());
+        self.entries.insert(index, entry);
+        true
     }
 
     fn bound(&mut self) {
@@ -287,6 +306,23 @@ mod tests {
             texts(&buffer),
             [(5, "b5"), (1, "a10"), (3, "b20"), (2, "a30"), (4, "b30")]
         );
+    }
+
+    #[test]
+    fn an_entry_moves_under_its_id_to_its_place_in_time() {
+        let mut buffer = Buffer::new(LIMITS);
+        let ids = buffer.insert(
+            vec![(10, line("a")), (30, line("c")), (20, line("b"))],
+            judged,
+        );
+        assert_eq!(ids, 1..4);
+        assert!(buffer.place(1, 10, 30));
+        assert_eq!(texts(&buffer), [(3, "b"), (1, "a"), (2, "c")]);
+        assert!(buffer.place(1, 30, 5));
+        assert_eq!(texts(&buffer), [(1, "a"), (3, "b"), (2, "c")]);
+        assert!(!buffer.place(1, 30, 40));
+        assert!(!buffer.place(4, 5, 40));
+        assert_eq!(buffer.insert(Vec::new(), judged), 4..4);
     }
 
     #[test]
