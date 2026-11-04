@@ -57,7 +57,7 @@ export type LineWindow =
       readonly after: number;
     };
 
-/** Where a paused list stands: the key of its top line, and how far that line's start lies above the list's top. */
+/** Where a paused list stands, or is going: the key of its top line, or of the line a reveal centres, and how far that line's start lies above the list's top, negative below it. */
 export interface LinePlace {
   readonly key: string;
   readonly offset: number;
