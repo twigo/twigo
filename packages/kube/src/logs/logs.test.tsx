@@ -250,13 +250,17 @@ test("an object editor's Logs opens its workload's tab once and focuses it after
   expect(backend.sources()).toHaveLength(2);
 });
 
-test("a narrow tab's fields open in a row of their own from their icons", async () => {
+async function logsSession() {
   const workbench = await testWorkbench();
   const tabs = new LogsTabs(workbench.backend);
   const uri = logsUri(DEPLOYMENT);
   const input = parseLogsUri(uri);
   if (!input) throw new Error("no logs URI");
-  const session = tabs.session(uri, input);
+  return { workbench, tabs, uri, input, session: tabs.session(uri, input) };
+}
+
+test("a narrow tab's fields open in a row of their own from their icons", async () => {
+  const { workbench, tabs, uri, input, session } = await logsSession();
   const toolbar = () => (
     <LogsToolbar
       uri={uri}
@@ -286,12 +290,7 @@ test("a narrow tab's fields open in a row of their own from their icons", async 
 });
 
 test("a pause counts from what has arrived; a source that changes nothing resets nothing, and a new one follows", async () => {
-  const workbench = await testWorkbench();
-  const tabs = new LogsTabs(workbench.backend);
-  const uri = logsUri(DEPLOYMENT);
-  const input = parseLogsUri(uri);
-  if (!input) throw new Error("no logs URI");
-  const session = tabs.session(uri, input);
+  const { tabs, uri, session } = await logsSession();
   session.setWindow({ type: "tail", count: 50 });
   await vi.waitFor(() => {
     expect(session.getSnapshot().arrived).toBeGreaterThan(0);
@@ -310,12 +309,7 @@ test("a pause counts from what has arrived; a source that changes nothing resets
 });
 
 test("paused, a refused filter counts on from the pause, and a taken one counts every line its view kept", async () => {
-  const workbench = await testWorkbench();
-  const tabs = new LogsTabs(workbench.backend);
-  const uri = logsUri(DEPLOYMENT);
-  const input = parseLogsUri(uri);
-  if (!input) throw new Error("no logs URI");
-  const session = tabs.session(uri, input);
+  const { tabs, uri, session } = await logsSession();
   session.setWindow({ type: "tail", count: 50 });
   await vi.waitFor(() => {
     expect(session.getSnapshot().arrived).toBeGreaterThan(0);
@@ -346,12 +340,7 @@ test("paused, a refused filter counts on from the pause, and a taken one counts 
 }, 15_000);
 
 test("a step right after the search changes waits for that search's matches", async () => {
-  const workbench = await testWorkbench();
-  const tabs = new LogsTabs(workbench.backend);
-  const uri = logsUri(DEPLOYMENT);
-  const input = parseLogsUri(uri);
-  if (!input) throw new Error("no logs URI");
-  const session = tabs.session(uri, input);
+  const { tabs, uri, session } = await logsSession();
   session.setWindow({ type: "tail", count: 50 });
   tabs.setView(uri, { search: "request" });
   await vi.waitFor(() => {
@@ -415,12 +404,7 @@ test("F and the Follow button pause and follow through the tab", async () => {
 });
 
 test("a view that changes nothing keeps the match, the place and the session's view", async () => {
-  const workbench = await testWorkbench();
-  const tabs = new LogsTabs(workbench.backend);
-  const uri = logsUri(DEPLOYMENT);
-  const input = parseLogsUri(uri);
-  if (!input) throw new Error("no logs URI");
-  const session = tabs.session(uri, input);
+  const { tabs, uri, session } = await logsSession();
   const setView = vi.spyOn(session, "setView");
   tabs.update(uri, { anchor: { id: 9, fromEnd: 0 } });
   tabs.keepPlace(uri, { key: "7", offset: 0 });
@@ -433,12 +417,7 @@ test("a view that changes nothing keeps the match, the place and the session's v
 });
 
 test("a paused list keeps its place across a new filter, level and search", async () => {
-  const workbench = await testWorkbench();
-  const tabs = new LogsTabs(workbench.backend);
-  const uri = logsUri(DEPLOYMENT);
-  const input = parseLogsUri(uri);
-  if (!input) throw new Error("no logs URI");
-  const session = tabs.session(uri, input);
+  const { tabs, uri, session } = await logsSession();
   tabs.follow(uri, false);
   tabs.keepPlace(uri, { key: "3923", offset: -4 });
   tabs.setView(uri, { filter: "request" });
@@ -679,12 +658,7 @@ test("a filter Rust refuses shows as not applied until one is taken", async () =
 });
 
 test("the level counts hide while a range is set, which they do not count", async () => {
-  const workbench = await testWorkbench();
-  const tabs = new LogsTabs(workbench.backend);
-  const uri = logsUri(DEPLOYMENT);
-  const input = parseLogsUri(uri);
-  if (!input) throw new Error("no logs URI");
-  const session = tabs.session(uri, input);
+  const { workbench, tabs, uri, input, session } = await logsSession();
   const snapshot = {
     ...INITIAL_LOGS,
     histogram: {
