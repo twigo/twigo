@@ -1,4 +1,5 @@
 import { ScrollText } from "lucide-react";
+import * as v from "valibot";
 import type { LogTarget } from "@twigo/protocol";
 import type { Workbench } from "@twigo/workbench";
 import { LOGS_SCHEME, logsUri, parseLogsUri } from "../uri";
@@ -117,34 +118,30 @@ export function registerLogs(workbench: Workbench, tabs: LogsTabs): void {
   ]);
 }
 
-/** A `k8s.logs.open` request, as a finding's button sends it. */
+/** A `k8s.logs.open` request, as a finding's button sends it: a target, and maybe a container and its previous instance. */
+const REQUEST = v.object({
+  space: v.string(),
+  gvr: v.object({
+    group: v.string(),
+    version: v.string(),
+    resource: v.string(),
+  }),
+  namespace: v.string(),
+  name: v.string(),
+  container: v.optional(v.string()),
+  previous: v.optional(v.boolean()),
+});
+
 function logsRequest(
   args: unknown,
 ):
   | { object: LogTarget; choice?: { container: string; previous: boolean } }
   | undefined {
-  if (typeof args !== "object" || args === null) return undefined;
-  const { space, gvr, namespace, name, container, previous } = args as Record<
-    string,
-    unknown
-  >;
-  if (
-    typeof space !== "string" ||
-    typeof namespace !== "string" ||
-    typeof name !== "string" ||
-    typeof gvr !== "object" ||
-    gvr === null
-  )
-    return undefined;
-  const { group, version, resource } = gvr as Record<string, unknown>;
-  if (
-    typeof group !== "string" ||
-    typeof version !== "string" ||
-    typeof resource !== "string"
-  )
-    return undefined;
-  const object = { space, gvr: { group, version, resource }, namespace, name };
-  return typeof container === "string"
-    ? { object, choice: { container, previous: previous === true } }
-    : { object };
+  const parsed = v.safeParse(REQUEST, args);
+  if (!parsed.success) return undefined;
+  const { space, gvr, namespace, name, container, previous } = parsed.output;
+  const object = { space, gvr, namespace, name };
+  return container === undefined
+    ? { object }
+    : { object, choice: { container, previous: previous === true } };
 }
