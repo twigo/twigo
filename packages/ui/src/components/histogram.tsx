@@ -42,7 +42,6 @@ export function Histogram({
     return Math.max(0, Math.min(1, (event.clientX - box.left) / box.width));
   };
   const shown = clamp(drag ?? selection);
-  const empty = buckets.length === 0;
   return (
     <div className={cn("flex-none px-3 pt-1", className)}>
       <div
@@ -50,7 +49,6 @@ export function Histogram({
         role="img"
         aria-label={label}
         onPointerDown={(event) => {
-          if (empty) return;
           event.currentTarget.setPointerCapture(event.pointerId);
           const from = at(event);
           setDrag({ from, to: from });
@@ -62,7 +60,7 @@ export function Histogram({
           if (!drag) return;
           const to = at(event);
           setDrag(undefined);
-          const width = 1 / Math.max(1, buckets.length);
+          const width = 1 / buckets.length;
           const [low, high] =
             drag.from <= to ? [drag.from, to] : [to, drag.from];
           // A click picks its bucket's span.

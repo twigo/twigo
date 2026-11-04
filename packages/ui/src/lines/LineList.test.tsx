@@ -89,6 +89,7 @@ function mount(props: Partial<Props> = {}) {
     follow: true,
     wrap: false,
     timestamps: true,
+    tagWidth: 6,
     fresh: 0,
     onWindow,
     onFollowChange,

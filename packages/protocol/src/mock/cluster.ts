@@ -127,7 +127,7 @@ export class Cluster {
   }
 
   /** Replaces a pod with a new one of its Deployment, as a rollout's step does. */
-  rollOut(pod: Pod, now: number): Pod {
+  rollOut(pod: Pod, now: number): void {
     const random = this.#rollouts;
     const templateHash = Math.floor(random() * 0xffffffff)
       .toString(36)
@@ -152,7 +152,6 @@ export class Cluster {
     this.pods.splice(this.pods.indexOf(pod), 1, next);
     this.now = now;
     this.version++;
-    return next;
   }
 
   /** Changes `count` distinct random pods. */

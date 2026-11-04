@@ -10,12 +10,12 @@ const BUCKETS = Array.from({ length: 4 }, () => ({
   errors: 1,
 }));
 
-function histogram(buckets = BUCKETS) {
+function histogram() {
   const onSelect = vi.fn();
   render(
     <Histogram
       label="Lines over time"
-      buckets={buckets}
+      buckets={BUCKETS}
       ticks={["10:00", "now"]}
       onSelect={onSelect}
     />,
@@ -36,11 +36,4 @@ test("a click picks its bucket's span, a drag the span it covers", () => {
   fireEvent.pointerMove(bars, { clientX: 100, pointerId: 1 });
   fireEvent.pointerUp(bars, { clientX: 100, pointerId: 1 });
   expect(onSelect).toHaveBeenLastCalledWith({ from: 0.25, to: 0.75 });
-});
-
-test("a histogram without buckets picks nothing", () => {
-  const { bars, onSelect } = histogram([]);
-  fireEvent.pointerDown(bars, { clientX: 150, pointerId: 1 });
-  fireEvent.pointerUp(bars, { clientX: 150, pointerId: 1 });
-  expect(onSelect).not.toHaveBeenCalled();
 });

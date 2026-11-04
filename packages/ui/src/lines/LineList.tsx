@@ -157,7 +157,7 @@ export function LineList({
   follow,
   wrap,
   timestamps,
-  tagWidth = 6,
+  tagWidth,
   fresh,
   initialPlace,
   reveal,
@@ -179,7 +179,7 @@ export function LineList({
   wrap: boolean;
   timestamps: boolean;
   /** The tag column's width in characters. */
-  tagWidth?: number;
+  tagWidth: number;
   /** Lines that came while paused, on a button that follows again. */
   fresh: number;
   /** Where the list stood or was going when it last paused, which it goes back to when it mounts paused. */
@@ -193,7 +193,7 @@ export function LineList({
   onWindow: (window: LineWindow) => void;
   onFollowChange: (follow: boolean) => void;
   /** Where the paused list stands, or the line it reveals, for `initialPlace`. */
-  onPlace?: (place: LinePlace) => void;
+  onPlace: (place: LinePlace) => void;
   /** Scopes the list's keys while it is mounted and routes the list commands to it, as a grid's. */
   register?: (element: HTMLElement, controller: ListController) => () => void;
   /**
@@ -254,7 +254,7 @@ export function LineList({
   };
   const hold = (key: string, offset: number, ask: string) => {
     enter({ kind: "hold", key, offset, asked: ask });
-    onPlace?.({ key, offset });
+    onPlace({ key, offset });
   };
   const indexOf = (key: string) => {
     const found = items.findIndex((item) => item.key === key);
@@ -436,7 +436,7 @@ export function LineList({
     const revealing = untaken && !follow;
     if (revealing) {
       enter({ kind: "seek", key: reveal.key, offset: "centre" });
-      onPlace?.({ key: reveal.key, offset: centred(scroller, ROW) });
+      onPlace({ key: reveal.key, offset: centred(scroller, ROW) });
     }
     if (follow !== followed.current) {
       followed.current = follow;

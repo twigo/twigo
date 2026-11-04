@@ -24,21 +24,18 @@ export function Banner({
   icon: Icon,
   children,
   action,
-  className,
 }: {
   tone: keyof typeof TINT;
   icon: LucideIcon;
   children: ReactNode;
   /** A button at its end. */
   action?: ReactNode;
-  className?: string;
 }) {
   return (
     <div
       className={cn(
         "flex min-h-8 flex-none items-center gap-2 border-b border-border-subtle pr-2 pl-3 text-xs",
         TINT[tone],
-        className,
       )}
     >
       <Icon aria-hidden className={cn("size-3.5 shrink-0", ICON[tone])} />
