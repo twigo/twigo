@@ -13,8 +13,22 @@ import { LineList, type LineItem } from "./LineList";
 import { StyledText } from "./StyledText";
 
 let shown = 600;
+const tops = new WeakMap<HTMLElement, number>();
+const maxOf = (element: HTMLElement) =>
+  Math.max(0, element.scrollHeight - element.clientHeight);
 
 beforeAll(() => {
+  Object.defineProperty(HTMLElement.prototype, "scrollTop", {
+    configurable: true,
+    get(this: HTMLElement) {
+      const top = Math.min(tops.get(this) ?? 0, maxOf(this));
+      tops.set(this, top);
+      return top;
+    },
+    set(this: HTMLElement, top: number) {
+      tops.set(this, Math.min(Math.max(0, top), maxOf(this)));
+    },
+  });
   Object.defineProperty(HTMLElement.prototype, "clientHeight", {
     configurable: true,
     get: () => shown,
@@ -37,6 +51,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  Reflect.deleteProperty(HTMLElement.prototype, "scrollTop");
   Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
   Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
   Reflect.deleteProperty(HTMLElement.prototype, "scrollTo");
@@ -304,6 +319,26 @@ test("a key's end is the end only for the scroll it began, not after a wheel or 
   scroll(log, 19 * 200);
   scroll(log, 19 * 400 - 600);
   expect(onFollowChange).not.toHaveBeenCalledWith(true);
+});
+
+test("paused near the end, a list made taller holds where the end cut it short, and the lines that come next move nothing", () => {
+  const { log, onPlace, update } = mount({
+    follow: false,
+    total: 300,
+    items: lines(0, 300),
+  });
+  scroll(log, 19 * 300 - 600 - 150);
+  act(() => {
+    shown = 900;
+    resize();
+  });
+  expect(log.scrollTop).toBe(19 * 300 - 900);
+  expect(onPlace).toHaveBeenLastCalledWith({
+    key: "260",
+    offset: 19 * 300 - 900 - 19 * 260,
+  });
+  update({ total: 320, items: lines(0, 320) });
+  expect(log.scrollTop).toBe(19 * 300 - 900);
 });
 
 test("paused, the lines that came meanwhile show on a button that follows again", () => {

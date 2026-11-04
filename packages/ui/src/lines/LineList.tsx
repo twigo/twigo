@@ -319,13 +319,11 @@ export function LineList({
   // once it is loaded or the answer says where it would stand. A scroll of
   // the person's whose event has not come yet moves the place with it.
   const arrange = (scroller: HTMLElement, shown: boolean) => {
-    // How far it scrolls with the rows as measured now, which asking for the
-    // total rebuilds for `startOf`: the rows this commit measured moved the
-    // lines below them, and the sizer shows that only once it renders again.
-    const max = Math.max(
-      0,
-      maxOf(scroller) + virtualizer.getTotalSize() - size,
-    );
+    // The rows this commit measured moved the lines below them, which the
+    // sizer shows only once it renders again: asking for the total rebuilds
+    // the starts `startOf` reads, and says how far the list scrolls.
+    const measured = virtualizer.getTotalSize();
+    const max = Math.max(0, maxOf(scroller) + measured - size);
     const revealing = reveal !== undefined && reveal.token !== revealed.current;
     if (revealing) {
       revealed.current = reveal.token;
@@ -348,14 +346,18 @@ export function LineList({
     if (now.kind === "hold") {
       const index = placed(now.key);
       if (index !== undefined) {
-        const at = startOf(index) + now.offset;
+        const begin = startOf(index);
+        const at = begin + now.offset;
         // The lines under the top moved, and the end the person's scroll
         // began against with them: the browser adds its scroll to where the
         // list writes it.
         if (at !== from && began.current !== undefined)
           began.current += at - from;
-        write(scroller, at + moved);
+        // What the end cuts short is where the list now stands.
+        const top = Math.min(Math.max(0, at + moved), max);
+        write(scroller, top);
         if (moved !== 0) personal(scroller, at);
+        else if (top !== at) hold(now.key, top - begin, now.asked);
       } else if (moved !== 0) personal(scroller, from);
       else if (around?.key === now.asked && now.asked !== now.key)
         enter({ ...now, asked: now.key });
