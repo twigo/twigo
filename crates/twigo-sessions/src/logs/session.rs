@@ -29,8 +29,9 @@ use crate::logs::target::{Followed, Target};
 use crate::logs::view::{self, Spec};
 use crate::logs::{now, plan};
 
-/// The streams a tab follows at most, a left pod's that finish their reads
-/// among them, so one workload cannot take the cluster's 32 followed logs.
+/// The streams a tab follows at most, those stopped among them until their
+/// tasks have ended, so one workload cannot take the cluster's 32 followed
+/// logs.
 const STREAMS: usize = 10;
 
 /// How long a left pod's streams may take to finish their reads: the
@@ -253,6 +254,9 @@ struct Run {
     listed: bool,
     streams: HashMap<Key, Running>,
     stopped: Vec<Stopped>,
+    /// The streams of an old source, aborted, which keep their places until
+    /// their tasks have ended; what they said goes.
+    ending: Vec<Task>,
     /// Streams that read all there was, with their last state.
     finished: HashMap<Key, StreamState>,
     /// The times of each pod's first and latest entries, by its uid: its
@@ -354,6 +358,7 @@ impl Run {
             listed: false,
             streams: HashMap::new(),
             stopped: Vec::new(),
+            ending: Vec::new(),
             finished: HashMap::new(),
             written: HashMap::new(),
             joined: HashMap::new(),
@@ -370,8 +375,12 @@ impl Run {
 
     fn set_source(&mut self, source: LogSource) {
         self.source = source;
-        self.streams.clear();
-        self.stopped.clear();
+        let old = self.streams.drain().map(|(_, running)| running.task);
+        self.ending
+            .extend(old.chain(self.stopped.drain(..).map(|stopped| stopped.task)));
+        for task in &self.ending {
+            task.0.abort();
+        }
         self.finished.clear();
         self.written.clear();
         self.joined.clear();
@@ -572,10 +581,11 @@ impl Run {
 
     /// Starts a stream for each chosen container without one, those with
     /// an instance to read first, then the newest pods, while the tab has
-    /// fewer than [`STREAMS`], a left pod's streams that finish their reads
-    /// among them; stops those the source no longer chooses. Streams under
-    /// way keep their places, but one with nothing to read gives its place
-    /// up to one that can be read.
+    /// fewer than [`STREAMS`], the stopped streams whose tasks have not
+    /// ended among them; stops those the source no longer chooses. Streams
+    /// under way keep their places, but one with nothing to read gives its
+    /// place up to one that can be read, as many of them as the places the
+    /// stopped streams will free leave short.
     fn plan(&mut self) {
         let mut order: Vec<&Pod> = self
             .pods
@@ -610,13 +620,7 @@ impl Run {
             .iter()
             .filter(|(key, _, readable)| *readable && !self.streams.contains_key(key))
             .count();
-        let finishing = self
-            .stopped
-            .iter()
-            .filter(|stopped| stopped.finishing.is_some() && !stopped.task.0.is_finished())
-            .count();
-        let mut yielding =
-            lacking.saturating_sub(STREAMS.saturating_sub(self.streams.len() + finishing));
+        let mut yielding = lacking.saturating_sub(STREAMS.saturating_sub(self.streams.len()));
         for (key, _, readable) in wanted.iter().rev() {
             if yielding == 0 {
                 break;
@@ -626,7 +630,7 @@ impl Run {
             }
         }
         let mut started = Vec::new();
-        let mut held = self.streams.len() + finishing;
+        let mut held = self.streams.len() + self.stopping();
         for (key, pod, _) in wanted {
             if held >= STREAMS {
                 break;
@@ -640,6 +644,16 @@ impl Run {
         for (key, pod, json) in started {
             self.start(key, &pod, json);
         }
+    }
+
+    /// The stopped streams whose tasks have not ended: an abort only
+    /// schedules a task's end, so each keeps its place until then.
+    fn stopping(&self) -> usize {
+        let stopped = self.stopped.iter().map(|stopped| &stopped.task);
+        stopped
+            .chain(&self.ending)
+            .filter(|task| !task.0.is_finished())
+            .count()
     }
 
     fn start(&mut self, key: Key, pod: &str, json: Arc<Value>) {
@@ -683,24 +697,22 @@ impl Run {
         let mut restarts = Vec::new();
         let mut freed = false;
         let now = Instant::now();
-        // An abort only schedules the task's end, so its place frees once
-        // the task has ended, as when it ends by itself.
         for stopped in &self.stopped {
             if stopped.finishing.is_some_and(|until| until <= now) {
                 stopped.task.0.abort();
             }
         }
-        // A stopped stream whose task has ended has said all it will.
+        // A stopped stream whose task has ended has said all it will, and
+        // frees its place, as one that ends by itself does.
         let ended: Vec<u64> = self
             .stopped
             .iter()
             .filter(|stopped| stopped.task.0.is_finished())
             .map(|stopped| stopped.id)
             .collect();
-        freed |= self
-            .stopped
-            .iter()
-            .any(|stopped| stopped.finishing.is_some() && ended.contains(&stopped.id));
+        let ending = self.ending.len();
+        self.ending.retain(|task| !task.0.is_finished());
+        freed |= !ended.is_empty() || self.ending.len() < ending;
         while let Ok((id, event)) = self.incoming.try_recv() {
             let key = self
                 .streams
@@ -1560,11 +1572,7 @@ mod tests {
     }
 
     fn alive(run: &Run) -> usize {
-        let stopped = run
-            .stopped
-            .iter()
-            .filter(|stopped| !stopped.task.0.is_finished());
-        run.streams.len() + stopped.count()
+        run.streams.len() + run.stopping()
     }
 
     /// The most follows open at once, and the most streams whose tasks had
@@ -1634,6 +1642,37 @@ mod tests {
         .await;
         assert!(follows <= STREAMS, "{follows} follows");
         assert!(tasks <= STREAMS, "{tasks} tasks");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_source_change_keeps_the_old_streams_places_until_their_tasks_ended() {
+        let fake = Fake::default();
+        fake.pod(containers("uid-a", "a"));
+        served(&fake, "a", "up");
+        let (hub, _) = fake.hub();
+        let mut request = request("web-1");
+        request.source.containers = Containers::All;
+        let source = request.source.clone();
+        let mut run = Run::new(hub, "kind-test".to_owned(), request)
+            .await
+            .unwrap();
+        until(&mut run, "the lines", |run| texts(run).len() == STREAMS).await;
+        let metrics = tokio::runtime::Handle::current().metrics();
+        let before = metrics.num_alive_tasks();
+
+        run.set_source(source);
+        let most = std::cell::Cell::new(metrics.num_alive_tasks());
+        until(&mut run, "the lines read again", |run| {
+            most.set(most.get().max(metrics.num_alive_tasks()));
+            texts(run).len() == STREAMS
+        })
+        .await;
+        assert!(
+            most.get() <= before,
+            "{} tasks, {before} before",
+            most.get()
+        );
+        assert_eq!(fake.follows(), STREAMS);
     }
 
     #[tokio::test(start_paused = true)]
@@ -1715,6 +1754,14 @@ mod tests {
 
         run.pods.push(pod("older", 0, true));
         run.plan();
+        assert_eq!(alive(&run), STREAMS);
+        assert!(!followed(&run).contains(&"older".to_owned()));
+        run.plan();
+        assert_eq!(run.streams.len(), STREAMS - 1);
+        until(&mut run, "the older pod followed", |run| {
+            followed(run).contains(&"older".to_owned())
+        })
+        .await;
         assert_eq!(run.streams.len(), STREAMS);
         let names = followed(&run);
         assert!(
