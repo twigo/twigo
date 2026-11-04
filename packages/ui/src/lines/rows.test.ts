@@ -120,7 +120,7 @@ test("only the rows kept keep their sizes, a blank row's included", () => {
     itemSizeCache: new Map<string | number | bigint, number>([
       ["4", 38],
       ["9", 38],
-      [12, 19],
+      ["#12", 19],
     ]),
   };
   renderHook(() => {

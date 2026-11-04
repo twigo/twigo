@@ -8,8 +8,18 @@ import {
 import { ScrollText } from "lucide-react";
 import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 import { resize } from "../../test/resize";
+
+vi.mock("./rows", async (importOriginal) => {
+  const rows = await importOriginal<typeof import("./rows")>();
+  return {
+    ...rows,
+    useKeptSizes: vi.fn(rows.useKeptSizes),
+    useRowKeys: vi.fn(rows.useRowKeys),
+  };
+});
 import type { ListController } from "../lib/list";
 import { LineList, type LineItem } from "./LineList";
+import { useKeptSizes, useRowKeys } from "./rows";
 
 let shown = 600;
 const tops = new WeakMap<HTMLElement, number>();
@@ -473,6 +483,52 @@ test("the list's own keys move it itself at once, so neither the browser nor the
     0,
   ]);
   expect(onPlace).toHaveBeenLastCalledWith({ key: "0", offset: 0 });
+});
+
+test("the list's page keys move it up as well as down, by the page it shows", () => {
+  const { log } = mount({ follow: false, total: 300, items: lines(0, 300) });
+  scroll(log, 19 * 100);
+  const tops = [
+    [press(log, "PageUp"), log.scrollTop],
+    [press(log, " ", { shiftKey: true }), log.scrollTop],
+    [press(log, " "), log.scrollTop],
+  ];
+  expect(tops).toEqual([
+    [false, 19 * 100 - PAGE],
+    [false, 19 * 100 - 2 * PAGE],
+    [false, 19 * 100 - PAGE],
+  ]);
+});
+
+test("the list scrolls a wheel's lines by rows and its pages by the page it shows, along the wheel's own axis", () => {
+  const { log } = mount({ follow: false, total: 300, items: lines(0, 300) });
+  wide(log);
+  scroll(log, 19 * 100);
+  spin(log, { deltaY: 3, deltaMode: WheelEvent.DOM_DELTA_LINE });
+  spin(log, { deltaY: 1, deltaMode: WheelEvent.DOM_DELTA_PAGE });
+  spin(log, { deltaX: 1, deltaMode: WheelEvent.DOM_DELTA_PAGE });
+  expect([log.scrollTop, log.scrollLeft]).toEqual([
+    19 * 100 + 3 * 19 + PAGE,
+    700 - 2 * 19,
+  ]);
+});
+
+test("following, the list keeps the sizes of the rows near its end alone, and paused every row's, and trims to the rows it keeps", () => {
+  const keys = vi.mocked(useRowKeys);
+  const kept = vi.mocked(useKeptSizes);
+  const { update } = mount({
+    total: 1000,
+    start: 900,
+    items: lines(900, 1000),
+  });
+  expect(keys.mock.lastCall?.[3]).toBeLessThan(1000);
+  update({ follow: false });
+  expect(keys.mock.lastCall?.[3]).toBe(1000);
+  const last = keys.mock.results[keys.mock.results.length - 1];
+  expect(last?.type).toBe("return");
+  expect(kept.mock.lastCall?.[1]).toBe(
+    last?.type === "return" ? last.value.kept : undefined,
+  );
 });
 
 test("paused, a page down that reaches the end follows again, one at the end too, and ⌘↓ at once", () => {
