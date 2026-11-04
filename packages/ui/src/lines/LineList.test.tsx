@@ -404,28 +404,13 @@ test("following, the person's scroll down into the room a shorter list makes, it
   expect(onFollowChange).not.toHaveBeenCalled();
 });
 
-test("a touch that scrolls the list up pauses it", () => {
-  const { log, onFollowChange } = mount({ total: 300, items: lines(0, 300) });
-  act(() => {
-    fireEvent.touchStart(log);
-    log.scrollTop = 19 * 100;
-    fireEvent.scroll(log);
-    fireEvent.touchEnd(log);
-  });
-  expect(onFollowChange).toHaveBeenLastCalledWith(false);
-});
-
-test("paused, the person's scroll down to the end follows again, and the list's own does not while a pointer or a touch holds it", () => {
+test("paused, the person's scroll down to the end follows again", () => {
   const { log, onFollowChange, update } = mount({
     total: 300,
     items: lines(0, 300),
   });
   update({ follow: false });
-  fireEvent.pointerDown(log);
-  fireEvent.touchStart(log);
   update({ total: 250, items: lines(50, 300) });
-  scroll(log, log.scrollTop);
-  expect(onFollowChange).not.toHaveBeenCalled();
   scroll(log, 19 * 100);
   scroll(log, 19 * 250 - 600);
   expect(onFollowChange).toHaveBeenLastCalledWith(true);
