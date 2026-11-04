@@ -687,12 +687,15 @@ impl Run {
 
     fn start(&mut self, key: Key, pod: &str, json: Arc<Value>) {
         let (told, followed) = watch::channel(json);
+        let origin = Arc::new(Origin {
+            pod: pod.into(),
+            container: (*key.1).into(),
+        });
         let stream = Stream::new(
             self.hub.clone(),
             &self.context,
             &self.target.namespace,
-            pod,
-            &key.1,
+            Arc::clone(&origin),
             &self.source,
         );
         let events = self.events.clone();
@@ -702,10 +705,6 @@ impl Run {
             // The session may have ended, and its streams with it.
             let _ = events.send((id, event));
         }));
-        let origin = Arc::new(Origin {
-            pod: pod.into(),
-            container: (*key.1).into(),
-        });
         self.streams.insert(
             key,
             Running {
@@ -761,42 +760,12 @@ impl Run {
                     None => continue,
                 },
             };
-            let origin = Arc::clone(origin);
-            if let Event::Line { at, .. } | Event::Ended { at, .. } = &event {
-                whose.push((Arc::clone(uid), *at));
-            }
             match event {
-                Event::Line {
-                    at,
-                    level,
-                    text,
-                    styles,
-                } => entries.push((
-                    at,
-                    Kind::Line {
-                        origin,
-                        level,
-                        text: text.into(),
-                        styles: styles.into(),
-                    },
-                )),
-                Event::Ended {
-                    at,
-                    time,
-                    exit_code,
-                    reason,
-                    restarting,
-                } => entries.push((
-                    at,
-                    Kind::Ended {
-                        origin,
-                        time: time.into(),
-                        exit_code,
-                        reason: reason.map(Into::into),
-                        restarting: restarting.map(Into::into),
-                    },
-                )),
-                Event::Restarts { restarting } => restarts.push((origin, restarting)),
+                Event::Entry { at, kind } => {
+                    whose.push((Arc::clone(uid), at));
+                    entries.push((at, kind));
+                }
+                Event::Restarts { restarting } => restarts.push((Arc::clone(origin), restarting)),
                 Event::State(state) => {
                     if let Some(running) = key.and_then(|key| self.streams.get_mut(&key))
                         && running.state != state
@@ -1285,11 +1254,17 @@ mod tests {
         fake.delete("web-1");
         until(&mut run, "the pod gone", |run| run.streams.is_empty()).await;
 
-        let late = |text: &str| Event::Line {
+        let late = |text: &str| Event::Entry {
             at: T0 + 2 * SECOND,
-            level: None,
-            text: text.to_owned(),
-            styles: Vec::new(),
+            kind: Kind::Line {
+                origin: Arc::new(Origin {
+                    pod: "web-1".into(),
+                    container: "web".into(),
+                }),
+                level: None,
+                text: text.into(),
+                styles: Box::new([]),
+            },
         };
         run.events.send((id, late("late"))).unwrap();
         run.tick();

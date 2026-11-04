@@ -21,30 +21,23 @@ use kube::api::LogParams;
 use serde_json::Value;
 use tokio::sync::watch;
 use twigo_cache::hub::Hub;
-use twigo_ipc::{ErrorKind, IpcError, Level, LogSource, Since, StreamState, TextStyle};
+use twigo_ipc::{ErrorKind, IpcError, LogSource, Since, StreamState};
 use twigo_kube::client::{Clients, Waiting};
 
+use crate::logs::buffer::{Kind, Origin};
 use crate::logs::level::level;
 use crate::logs::{line, now};
 
 /// What a stream tells its session.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
-    Line {
+    /// A line at its time, or an instance's end at a time after its last
+    /// line.
+    Entry {
         at: i64,
-        level: Option<Level>,
-        text: String,
-        styles: Vec<TextStyle>,
+        kind: Kind,
     },
     State(StreamState),
-    /// An instance ended; `at` orders it after its last line.
-    Ended {
-        at: i64,
-        time: String,
-        exit_code: Option<i32>,
-        reason: Option<String>,
-        restarting: Option<String>,
-    },
     /// When the kubelet starts the instance of the last `Ended` again,
     /// which it tells only once its back-off's waiting state shows.
     Restarts {
@@ -58,8 +51,8 @@ pub struct Stream {
     pub hub: Hub,
     pub context: String,
     pub namespace: String,
-    pub pod: String,
-    pub container: String,
+    /// The pod and container, which its entries carry.
+    pub origin: Arc<Origin>,
     pub since: Since,
     pub previous: bool,
 }
@@ -69,16 +62,14 @@ impl Stream {
         hub: Hub,
         context: &str,
         namespace: &str,
-        pod: &str,
-        container: &str,
+        origin: Arc<Origin>,
         source: &LogSource,
     ) -> Self {
         Self {
             hub,
             context: context.to_owned(),
             namespace: namespace.to_owned(),
-            pod: pod.to_owned(),
-            container: container.to_owned(),
+            origin,
             since: source.since,
             previous: source.previous,
         }
@@ -552,7 +543,7 @@ impl Reader {
         let mut done: Option<Done> = None;
         loop {
             let current = Arc::clone(&pod.borrow_and_update());
-            let status = Status::of(&current, &self.stream.container);
+            let status = Status::of(&current, &self.stream.origin.container);
             let instance = status.as_ref().and_then(Status::current).map(|(id, _)| id);
             if let Some(old) = reading.take_if(|reading| instance != Some(reading.id.as_str())) {
                 done = Some(self.finish(old, status.as_ref(), from, pod, send).await);
@@ -570,7 +561,7 @@ impl Reader {
             };
             if let Some(done) = done.as_mut().filter(|done| done.id == id) {
                 let status = status.expect("its instance came from it");
-                if !done.tell(&status, &current, &self.stream.container, send)
+                if !done.tell(&status, &current, &self.stream.origin.container, send)
                     || pod.changed().await.is_err()
                 {
                     return;
@@ -585,7 +576,7 @@ impl Reader {
                     && let Some(status) = &status
                     && let Some(terminated) = status.termination(id)
                 {
-                    end(terminated, status, reading.last(&self.resume), send);
+                    self.end(terminated, status, reading.last(&self.resume), send);
                 }
                 return;
             }
@@ -597,14 +588,14 @@ impl Reader {
                 !std::mem::take(&mut reading.rotated) && reading.own_last.is_none()
             });
             reading.get_or_insert_with(|| Reading::new(id));
-            let container = self.stream.container.clone();
+            let origin = Arc::clone(&self.stream.origin);
             let outcome = tokio::select! {
                 outcome = self.read(Read::Follow { same }, from, None, send) => outcome,
-                () = moved_off(pod, &container, id) => Outcome::Cut,
+                () = moved_off(pod, &origin.container, id) => Outcome::Cut,
             };
             if let Outcome::Ended { .. } | Outcome::Unreadable(_) = &outcome {
                 let current = Arc::clone(&pod.borrow_and_update());
-                let status = Status::of(&current, &self.stream.container);
+                let status = Status::of(&current, &self.stream.origin.container);
                 if let Some(status) = &status
                     && let Some(terminated) = status.termination(id)
                 {
@@ -618,7 +609,7 @@ impl Reader {
                         _ => None,
                     };
                     let read = reading.take().expect("a read started on it");
-                    let told = end(terminated, status, read.last(&self.resume), send);
+                    let told = self.end(terminated, status, read.last(&self.resume), send);
                     done = Some(Done {
                         id: read.id,
                         told,
@@ -701,7 +692,7 @@ impl Reader {
                 _ => old.last(&self.resume),
             };
             if let Some(terminated) = status.termination(&old.id) {
-                told = end(terminated, status, last, send);
+                told = self.end(terminated, status, last, send);
             }
         }
         Done {
@@ -747,7 +738,7 @@ impl Reader {
                     send(Event::State(StreamState::Error { error }));
                     self.pause(pod).await;
                     let current = Arc::clone(&pod.borrow_and_update());
-                    let status = Status::of(&current, &self.stream.container);
+                    let status = Status::of(&current, &self.stream.origin.container);
                     if !status.is_some_and(|status| status.names(old)) {
                         return Tail::GaveUp;
                     }
@@ -767,12 +758,15 @@ impl Reader {
         let mut unfinished: Option<String> = None;
         loop {
             let current = Arc::clone(&pod.borrow_and_update());
-            let status = Status::of(&current, &self.stream.container);
+            let status = Status::of(&current, &self.stream.origin.container);
             let Some(id) = status.as_ref().and_then(Status::previous) else {
                 send(Event::State(StreamState::Error {
                     error: IpcError {
                         kind: ErrorKind::NotFound,
-                        message: format!("{} has no previous instance", self.stream.container),
+                        message: format!(
+                            "{} has no previous instance",
+                            self.stream.origin.container
+                        ),
                     },
                 }));
                 return;
@@ -782,7 +776,7 @@ impl Reader {
                     && let Some(status) = &status
                     && let Some(terminated) = status.termination(read)
                 {
-                    send(ended(terminated, status, self.resume.last_at()));
+                    self.end(terminated, status, self.resume.last_at(), send);
                 }
                 return;
             }
@@ -803,11 +797,11 @@ impl Reader {
                 }
                 outcome @ (Outcome::Ended { .. } | Outcome::Unreadable(_)) => {
                     let current = Arc::clone(&pod.borrow_and_update());
-                    let status = Status::of(&current, &self.stream.container);
+                    let status = Status::of(&current, &self.stream.origin.container);
                     if let Some(status) = &status
                         && let Some(terminated) = status.termination(&id)
                     {
-                        send(ended(terminated, status, self.resume.last_at()));
+                        self.end(terminated, status, self.resume.last_at(), send);
                     }
                     send(Event::State(match outcome {
                         Outcome::Unreadable(error) => StreamState::Error { error },
@@ -871,7 +865,7 @@ impl Reader {
         send: &impl Fn(Event),
     ) -> Outcome {
         let mut params = LogParams {
-            container: Some(self.stream.container.clone()),
+            container: Some(self.stream.origin.container.to_string()),
             follow: matches!(kind, Read::Follow { .. }),
             previous: !matches!(kind, Read::Follow { .. }),
             timestamps: true,
@@ -885,15 +879,16 @@ impl Reader {
             }
         }
         let path = format!("/api/v1/namespaces/{}/pods", self.stream.namespace);
-        let mut request = match kube::core::Request::new(path).logs(&self.stream.pod, &params) {
-            Ok(request) => request,
-            Err(error) => {
-                return Outcome::Failed(IpcError {
-                    kind: ErrorKind::Internal,
-                    message: format!("could not build the log request: {error}"),
-                });
-            }
-        };
+        let mut request =
+            match kube::core::Request::new(path).logs(&self.stream.origin.pod, &params) {
+                Ok(request) => request,
+                Err(error) => {
+                    return Outcome::Failed(IpcError {
+                        kind: ErrorKind::Internal,
+                        message: format!("could not build the log request: {error}"),
+                    });
+                }
+            };
         let (queued, mut waiting) = watch::channel(false);
         request.extensions_mut().insert(Waiting(Arc::new(move |is| {
             queued.send_replace(is);
@@ -973,11 +968,14 @@ impl Reader {
                 Admit::Again | Admit::Held => continue,
                 Admit::Moved => return Outcome::Moved { at: Some(at) },
             }
-            send(Event::Line {
+            send(Event::Entry {
                 at,
-                level: level(&parsed.text),
-                text: parsed.text,
-                styles: parsed.styles,
+                kind: Kind::Line {
+                    origin: Arc::clone(&self.stream.origin),
+                    level: level(&parsed.text),
+                    text: parsed.text.into(),
+                    styles: parsed.styles.into(),
+                },
             });
         }
         if self.resume.lacks() {
@@ -988,42 +986,40 @@ impl Reader {
     }
 }
 
-/// Sends the Ended entry of an instance whose last line came at `last`,
-/// and says whether it has its next start.
-fn end(terminated: &Value, status: &Status<'_>, last: Option<i64>, send: &impl Fn(Event)) -> bool {
-    let ended = ended(terminated, status, last);
-    let told = matches!(
-        ended,
-        Event::Ended {
-            restarting: Some(_),
-            ..
-        }
-    );
-    send(ended);
-    told
-}
-
-fn ended(terminated: &Value, status: &Status<'_>, last: Option<i64>) -> Event {
-    let time = terminated["finishedAt"]
-        .as_str()
-        .unwrap_or_default()
-        .to_owned();
-    let finished = time
-        .parse::<jiff::Timestamp>()
-        .ok()
-        .and_then(|at| i64::try_from(at.as_nanosecond()).ok());
-    let at = match (finished, last) {
-        (Some(finished), Some(last)) => finished.max(last),
-        (finished, last) => finished.or(last).unwrap_or_else(now),
-    };
-    Event::Ended {
-        at,
-        restarting: status.restarting(&time),
-        time,
-        exit_code: terminated["exitCode"]
-            .as_i64()
-            .and_then(|code| i32::try_from(code).ok()),
-        reason: terminated["reason"].as_str().map(str::to_owned),
+impl Reader {
+    /// Sends the Ended entry of an instance whose last line came at
+    /// `last`, and says whether it has its next start.
+    fn end(
+        &self,
+        terminated: &Value,
+        status: &Status<'_>,
+        last: Option<i64>,
+        send: &impl Fn(Event),
+    ) -> bool {
+        let time = terminated["finishedAt"].as_str().unwrap_or_default();
+        let finished = time
+            .parse::<jiff::Timestamp>()
+            .ok()
+            .and_then(|at| i64::try_from(at.as_nanosecond()).ok());
+        let at = match (finished, last) {
+            (Some(finished), Some(last)) => finished.max(last),
+            (finished, last) => finished.or(last).unwrap_or_else(now),
+        };
+        let restarting = status.restarting(time);
+        let told = restarting.is_some();
+        send(Event::Entry {
+            at,
+            kind: Kind::Ended {
+                origin: Arc::clone(&self.stream.origin),
+                time: time.into(),
+                exit_code: terminated["exitCode"]
+                    .as_i64()
+                    .and_then(|code| i32::try_from(code).ok()),
+                reason: terminated["reason"].as_str().map(Into::into),
+                restarting: restarting.map(Into::into),
+            },
+        });
+        told
     }
 }
 
@@ -1081,8 +1077,10 @@ mod tests {
                 hub,
                 context: "kind-test".to_owned(),
                 namespace: NAMESPACE.to_owned(),
-                pod: "web-1".to_owned(),
-                container: "web".to_owned(),
+                origin: Arc::new(Origin {
+                    pod: "web-1".into(),
+                    container: "web".into(),
+                }),
                 since,
                 previous,
             };
@@ -1119,8 +1117,14 @@ mod tests {
                 .unwrap()
                 .iter()
                 .filter_map(|event| match event {
-                    Event::Line { text, .. } => Some(text.clone()),
-                    Event::Ended { .. } => Some("ended".to_owned()),
+                    Event::Entry {
+                        kind: Kind::Line { text, .. },
+                        ..
+                    } => Some(text.to_string()),
+                    Event::Entry {
+                        kind: Kind::Ended { .. },
+                        ..
+                    } => Some("ended".to_owned()),
                     _ => None,
                 })
                 .collect()
@@ -1133,7 +1137,10 @@ mod tests {
                 .unwrap()
                 .iter()
                 .filter_map(|event| match event {
-                    Event::Ended { at, .. } => Some(*at),
+                    Event::Entry {
+                        at,
+                        kind: Kind::Ended { .. },
+                    } => Some(*at),
                     _ => None,
                 })
                 .collect()
@@ -1814,19 +1821,14 @@ mod tests {
             })
             .await;
         let events = followed.events.lock().unwrap();
-        let ended = events
-            .iter()
-            .find(|event| matches!(event, Event::Ended { .. }));
-        assert!(
-            matches!(
-                ended,
-                Some(Event::Ended {
-                    restarting: None,
-                    ..
-                })
-            ),
-            "{ended:?}"
-        );
+        let ended = events.iter().find_map(|event| match event {
+            Event::Entry {
+                kind: Kind::Ended { restarting, .. },
+                ..
+            } => Some(restarting),
+            _ => None,
+        });
+        assert_eq!(ended, Some(&None));
     }
 
     impl Followed {
