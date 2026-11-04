@@ -289,6 +289,44 @@ test("a narrow tab's fields open in a row of their own from their icons", async 
   session.close();
 });
 
+test("the pod picker sets each pod's generated part apart, its hash and suffix", async () => {
+  const { workbench, tabs, uri, input, session } = await logsSession();
+  const pod = (name: string, generated: number | null) => ({
+    name,
+    generated,
+    status: "Running",
+    tone: "neutral" as const,
+    containers: [{ name: "api", stream: { state: "following" as const } }],
+  });
+  render(
+    <LogsToolbar
+      uri={uri}
+      input={input}
+      tabs={tabs}
+      snapshot={{
+        ...INITIAL_LOGS,
+        pods: [
+          pod("auth-api-7f9c8d6b5-h8lbx", 9),
+          pod("auth-api-canary", null),
+        ],
+      }}
+      session={session}
+      narrow={false}
+      compact={false}
+    />,
+    { wrapper: inWorkbench(workbench) },
+  );
+  act(() => {
+    screen.getByRole("button", { name: /^2 pods/ }).click();
+  });
+  expect(
+    ["7f9c8d6b5-h8lbx", "auth-api-canary"].map(
+      (text) => screen.getByText(text).previousSibling?.textContent ?? "",
+    ),
+  ).toEqual(["auth-api-", ""]);
+  session.close();
+});
+
 test("a pause counts from what has arrived; a source that changes nothing resets nothing, and a new one follows", async () => {
   const { tabs, uri, session } = await logsSession();
   session.setWindow({ type: "tail", count: 50 });

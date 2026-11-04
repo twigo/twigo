@@ -468,9 +468,9 @@ function PodPicker({
                   >
                     <Tick on={chosen(pod.name)} />
                     <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
-                      {pod.name.slice(0, pod.name.lastIndexOf("-") + 1)}
+                      {pod.name.slice(0, pod.generated ?? 0)}
                       <span className="text-foreground">
-                        {podTag(pod.name)}
+                        {pod.name.slice(pod.generated ?? 0)}
                       </span>
                     </span>
                     <StreamLabel pod={pod} />
