@@ -423,12 +423,13 @@ export function LineList({
   const move = (scroller: HTMLElement, to: Move) => {
     if (to === "last") followAgain();
     else if (to === "first") go(scroller, 0);
-    else
-      go(
-        scroller,
-        scroller.scrollTop +
-          (to === "down" ? 1 : -1) * (scroller.clientHeight - OVERLAP),
-      );
+    else {
+      // A short list moves Chromium's share of itself, more than WebKit's
+      // 4/5, so its page is never less than a browser's.
+      const height = scroller.clientHeight;
+      const page = Math.max(height - OVERLAP, Math.floor((height * 7) / 8));
+      go(scroller, scroller.scrollTop + (to === "down" ? page : -page));
+    }
   };
 
   useEffect(() => {

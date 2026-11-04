@@ -384,6 +384,30 @@ test("⌃↑ and ⌃↓, alone or with ⇧ or ⌥, move the list a page itself, 
   expect(log.scrollTop).toBe(19 * 100);
 });
 
+test("in a short list a page moves seven eighths of it, never the wrong way", () => {
+  const pages = [30, 50, 90, 400].map((height) => {
+    shown = height;
+    const { log } = mount({
+      follow: false,
+      total: 300,
+      items: lines(0, 300),
+    });
+    scroll(log, 19 * 100);
+    press(log, "PageDown");
+    const down = log.scrollTop - 19 * 100;
+    press(log, "PageUp");
+    const up = log.scrollTop - 19 * 100 - down;
+    cleanup();
+    return [height, down, up];
+  });
+  expect(pages).toEqual([
+    [30, 26, -26],
+    [50, 43, -43],
+    [90, 78, -78],
+    [400, 400 - 38, -(400 - 38)],
+  ]);
+});
+
 test("paused, a page down that reaches the end follows again, one at the end too, and ⌘↓ at once", () => {
   const { log, onFollowChange, update } = mount({
     follow: false,
