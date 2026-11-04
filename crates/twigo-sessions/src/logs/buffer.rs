@@ -189,19 +189,32 @@ impl Buffer {
     }
 
     /// Drops the oldest entries while it holds more than its limits, but
-    /// keeps those `held` names, first, among the entries it counts.
+    /// keeps those `held` names, first, among the entries it counts, and
+    /// drops a `Joined` only along with the entries at its time, where the
+    /// session places its pod's first.
     pub fn bound(&mut self, held: &[u64]) {
         let mut kept = Vec::new();
+        let mut joined = None;
         let mut count = 0;
-        while self.entries.len() + kept.len() > self.limits.entries
-            || self.bytes > self.limits.bytes
-        {
+        loop {
+            let over = self.entries.len() + kept.len() > self.limits.entries
+                || self.bytes > self.limits.bytes;
+            let along = self
+                .entries
+                .front()
+                .is_some_and(|oldest| joined == Some(oldest.at));
+            if !over && !along {
+                break;
+            }
             let Some(oldest) = self.entries.pop_front() else {
                 break;
             };
             if held.contains(&oldest.id) {
                 kept.push(oldest);
                 continue;
+            }
+            if let Kind::Joined { .. } = oldest.kind {
+                joined = Some(oldest.at);
             }
             self.bytes -= oldest.kind.bytes();
             count += 1;
@@ -388,6 +401,27 @@ mod tests {
         buffer.bound(&[]);
         assert_eq!(texts(&buffer), [(4, "c"), (5, "d"), (7, "e")]);
         assert_eq!(buffer.dropped_ever(), 3);
+    }
+
+    #[test]
+    fn the_bound_drops_a_joined_only_along_with_the_entries_at_its_time() {
+        let mut buffer = Buffer::new(Limits {
+            entries: 3,
+            bytes: 1 << 20,
+        });
+        let joined = Kind::Joined {
+            pod: "web-1".into(),
+            time: "2026-11-03T10:00:00Z".into(),
+            owner: None,
+        };
+        buffer.insert(
+            vec![(1, joined), (1, line("first")), (2, line("second"))],
+            judged,
+        );
+        buffer.insert(vec![(3, line("other"))], judged);
+        buffer.bound(&[]);
+        assert_eq!(texts(&buffer), [(3, "second"), (4, "other")]);
+        assert_eq!(buffer.dropped(), Some(Dropped { id: 5, count: 2 }));
     }
 
     #[test]

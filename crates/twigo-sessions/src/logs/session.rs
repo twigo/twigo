@@ -1645,6 +1645,18 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn a_pods_joined_entry_goes_only_along_with_its_first_line() {
+        let fake = Fake::default();
+        let mut run = made_again_after_it_left(&fake, now().div_euclid(SECOND) * SECOND).await;
+        run.insert(vec![other("other 1"), other("other 2")]);
+        new_up(&fake, &mut run).await;
+        run.insert(vec![other("other 3")]);
+        assert_eq!(texts(&run), ["web-1 joined", "new up", "other 3"]);
+        run.insert(vec![other("other 4")]);
+        assert_eq!(texts(&run), ["other 3", "other 4"]);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn a_pods_joined_entry_stays_through_the_bound_until_its_first_line() {
         let fake = Fake::default();
         let mut run = made_again_after_it_left(&fake, now().div_euclid(SECOND) * SECOND).await;
