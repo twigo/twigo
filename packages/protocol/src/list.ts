@@ -1,3 +1,4 @@
+import { FrameAcks } from "./acks";
 import type { Backend } from "./backend";
 import { toIpcError } from "./error";
 import type {
@@ -54,7 +55,13 @@ export class ListView {
   readonly #listeners = new Set<() => void>();
   #snapshot = INITIAL_SNAPSHOT;
   #id: SubscriptionId | undefined;
-  #unacked: number | undefined;
+  readonly #acks = new FrameAcks(
+    (id, seq) => this.#backend.invoke("list_ack", { id, seq }),
+    () => this.#closed,
+    (error) => {
+      this.#fail(error);
+    },
+  );
   #window: [number, number] | undefined;
   #closed = false;
 
@@ -72,7 +79,7 @@ export class ListView {
             return;
           }
           if (this.#window) this.#sendWindow(...this.#window);
-          if (this.#unacked !== undefined) this.#ack(this.#unacked);
+          this.#acks.opened(id);
         },
         (error: unknown) => {
           this.#fail(error);
@@ -147,20 +154,7 @@ export class ListView {
       groups: batch.groups ?? previous.groups,
       changed,
     });
-    this.#unacked = batch.seq;
-    if (this.#id !== undefined) this.#ack(batch.seq);
-  }
-
-  #ack(seq: number): void {
-    requestAnimationFrame(() => {
-      if (this.#closed || this.#id === undefined) return;
-      this.#unacked = undefined;
-      this.#backend
-        .invoke("list_ack", { id: this.#id, seq })
-        .catch((error: unknown) => {
-          this.#fail(error);
-        });
-    });
+    this.#acks.took(batch.seq);
   }
 
   #fail(error: unknown): void {

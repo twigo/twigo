@@ -1,4 +1,5 @@
 import { sameData } from "@twigo/utils";
+import { FrameAcks } from "./acks";
 import type { Backend } from "./backend";
 import { toIpcError, type IpcError } from "./error";
 import type {
@@ -89,7 +90,13 @@ export class LogsSession {
   #view: LogView;
   #window: LogWindow | undefined;
   #sent: { source: LogSource; view: LogView; window: LogWindow | undefined };
-  #unacked: number | undefined;
+  readonly #acks = new FrameAcks(
+    (id, seq) => this.#backend.invoke("logs_ack", { id, seq }),
+    () => this.#closed,
+    (error) => {
+      this.#fail(error);
+    },
+  );
   #closed = false;
   /** Source and view changes sent and not refused, as Rust counts those it applied. */
   #changes = 0;
@@ -118,7 +125,7 @@ export class LogsSession {
           return;
         }
         this.#flush();
-        if (this.#unacked !== undefined) this.#ack(this.#unacked);
+        this.#acks.opened(id);
       },
       (error: unknown) => {
         this.#fail(error);
@@ -225,20 +232,7 @@ export class LogsSession {
       settled: batch.changes === this.#changes,
       refused: previous.refused,
     });
-    this.#unacked = batch.seq;
-    if (this.#id !== undefined) this.#ack(batch.seq);
-  }
-
-  #ack(seq: number): void {
-    requestAnimationFrame(() => {
-      if (this.#closed || this.#id === undefined) return;
-      this.#unacked = undefined;
-      this.#backend
-        .invoke("logs_ack", { id: this.#id, seq })
-        .catch((error: unknown) => {
-          this.#fail(error);
-        });
-    });
+    this.#acks.took(batch.seq);
   }
 
   /** Each kind stays refused until a change of its own is taken. */

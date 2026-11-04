@@ -1,3 +1,4 @@
+import { FrameAcks } from "./acks";
 import type { Backend } from "./backend";
 import { IpcError, toIpcError } from "./error";
 import type {
@@ -47,7 +48,13 @@ export class ObjectView {
   readonly #opened: Promise<SubscriptionId>;
   #parts: ObjectParts;
   #partsSent: ObjectParts;
-  #unacked: number | undefined;
+  readonly #acks = new FrameAcks(
+    (id, seq) => this.#backend.invoke("object_ack", { id, seq }),
+    () => this.#closed,
+    (error) => {
+      this.#fail(error);
+    },
+  );
   #closed = false;
 
   constructor(backend: Backend, object: ObjectQuery, parts: ObjectParts) {
@@ -69,7 +76,7 @@ export class ObjectView {
           return;
         }
         if (!sameParts(this.#parts, this.#partsSent)) this.#sendParts();
-        if (this.#unacked !== undefined) this.#ack(this.#unacked);
+        this.#acks.opened(id);
       },
       (error: unknown) => {
         this.#fail(error);
@@ -135,20 +142,7 @@ export class ObjectView {
       events: batch.events ?? previous.events,
       related: batch.related ?? previous.related,
     });
-    this.#unacked = batch.seq;
-    if (this.#id !== undefined) this.#ack(batch.seq);
-  }
-
-  #ack(seq: number): void {
-    requestAnimationFrame(() => {
-      if (this.#closed || this.#id === undefined) return;
-      this.#unacked = undefined;
-      this.#backend
-        .invoke("object_ack", { id: this.#id, seq })
-        .catch((error: unknown) => {
-          this.#fail(error);
-        });
-    });
+    this.#acks.took(batch.seq);
   }
 
   #fail(error: unknown): void {
