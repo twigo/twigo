@@ -72,7 +72,7 @@ function session(
     limits,
   );
   logs.setWindow({ type: "tail", count: 200 });
-  return { logs, batches, pods: busiest?.[1] ?? 0 };
+  return { logs, batches, cluster, pods: busiest?.[1] ?? 0 };
 }
 
 test("a workload's tab follows ten of its pods and tells the rest are over the limit", async () => {
@@ -226,6 +226,46 @@ test("a pod that joins and writes nothing keeps its joined through the bound", a
   expect(
     entries.some((entry) => entry.type === "line" && entry.pod === pod),
   ).toBe(false);
+  logs.close();
+});
+
+test("a pod whose last line is the oldest the bound keeps still shows its left when it leaves as another joins", async () => {
+  vi.setSystemTime(Date.UTC(2026, 10, 3, 10, 0, 0));
+  let cut = false;
+  const { logs, batches, cluster } = session(
+    VIEW,
+    (_session, wanted) => (cut ? 1 : wanted),
+    { entries: 10, bytes: 1 << 20 },
+  );
+  await vi.advanceTimersByTimeAsync(2_000);
+  const listed = batches.find((batch) => batch.pods !== null)?.pods ?? [];
+  const quiet = listed
+    .filter((pod) =>
+      pod.containers.some(
+        (container) => container.stream.state === "following",
+      ),
+    )
+    .pop()?.name;
+  cut = true;
+  const oldest = () => {
+    const entries = batches[batches.length - 1]?.window?.entries ?? [];
+    return (
+      entries[0]?.type === "dropped" &&
+      podOf(entries[1]) === quiet &&
+      !entries.slice(2).some((entry) => podOf(entry) === quiet)
+    );
+  };
+  for (let tick = 0; tick < 150 && !oldest(); tick++)
+    await vi.advanceTimersByTimeAsync(100);
+  expect(oldest()).toBe(true);
+  const pod = cluster.pods.find((each) => each.name === quiet);
+  if (!pod) throw new Error("no quiet pod");
+  cluster.rollOut(pod, Date.now());
+  await vi.advanceTimersByTimeAsync(100);
+  const entries = batches[batches.length - 1]?.window?.entries ?? [];
+  expect(entries.filter((entry) => entry.type === "left").map(podOf)).toEqual([
+    quiet,
+  ]);
   logs.close();
 });
 

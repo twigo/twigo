@@ -243,7 +243,9 @@ export class MockLogs {
   #follow(now: number): void {
     this.#rollOut(now);
     const at = nanos(now);
-    const incoming: Timed[] = [];
+    const streamed: Timed[] = [];
+    const joins: Timed[] = [];
+    const leaving: string[] = [];
     const current = new Set(this.#pods().map((pod) => pod.name));
     const reading = new Set(
       [...this.#streams.keys()].slice(
@@ -259,35 +261,33 @@ export class MockLogs {
       // The kubelet deletes a rolled-out pod once its containers ended, so
       // their ends come before its `left` (ARCHITECTURE 4.6); a queued
       // stream's read finds no pod by then, so it gets none.
-      let last = this.#lastOf(name);
       for (const [id, stream] of this.#streams) {
         if (stream.pod.name !== name) continue;
         if (
           reading.has(id) &&
           writes(stream.pod) &&
           stream.restartAt === undefined
-        ) {
-          incoming.push(this.#ended(stream, at, 0, "Completed"));
-          last = at;
-        }
+        )
+          streamed.push(this.#ended(stream, at, 0, "Completed"));
         this.#streams.delete(id);
       }
-      incoming.push([
-        last ?? at,
-        { type: "left", pod: name, time: rfc3339(at) },
-      ]);
+      leaving.push(name);
       this.#dirty.pods = true;
     }
+    // A successor is made a millisecond after the pod it replaces left, so
+    // its `joined` and first line follow that `left` rather than share the
+    // one time every entry of the mock's tick has.
+    const created = now + 1;
     for (const pod of this.#pods()) {
       if (this.#members.has(pod.name)) continue;
       this.#members.add(pod.name);
       if (!this.#reads(pod.name)) continue;
-      incoming.push([
-        at,
+      joins.push([
+        nanos(created),
         {
           type: "joined",
           pod: pod.name,
-          time: rfc3339(at),
+          time: rfc3339(nanos(created)),
           owner: {
             group: "apps",
             version: "v1",
@@ -301,7 +301,7 @@ export class MockLogs {
       // before its first entry, where Rust moves it once that entry came.
       for (const container of this.#chosen(pod)) {
         if (this.#streams.size < TAB_STREAMS)
-          this.#stream(pod, container, now).next = now;
+          this.#stream(pod, container, created).next = created;
       }
       this.#dirty.pods = true;
     }
@@ -322,11 +322,21 @@ export class MockLogs {
       }
       while (stream.next < now) {
         const written = this.#write(stream);
-        incoming.push(...written);
+        streamed.push(...written);
         if (written.some(([, kind]) => kind.type === "ended")) break;
       }
     }
-    this.#insert(incoming);
+    // In Rust's order, each bounded: the streams' entries, the pods that
+    // joined, then the `left` of each that went, just after the last of
+    // its entries the buffer still holds, or at the leave.
+    this.#insert(streamed);
+    this.#insert(joins);
+    this.#insert(
+      leaving.map((name) => [
+        this.#lastOf(name) ?? at,
+        { type: "left", pod: name, time: rfc3339(at) },
+      ]),
+    );
   }
 
   /** Now and then replaces a pod the tab follows, so a workload's tab shows a rollout. */
