@@ -8,7 +8,7 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import { INITIAL_LOGS, type LogEntry, type LogsSession } from "@twigo/protocol";
 import { WorkbenchView } from "@twigo/workbench";
-import { inWorkbench, testWorkbench } from "@twigo/workbench/testing";
+import { inWorkbench, tabsIn, testWorkbench } from "@twigo/workbench/testing";
 import { registerKube } from "../register";
 import { registerLogs } from "./register";
 import { LogsToolbar } from "./LogsToolbar";
@@ -202,7 +202,7 @@ test("a finding's Previous logs opens its pod's tab on that container's previous
     );
   await open(true);
   const uri = logsUri(POD);
-  expect(workbench.editors.openIn("panel")).toEqual([uri]);
+  expect(tabsIn("panel")).toEqual([uri]);
   expect(workbench.editors.title(uri)).toBe(
     "Logs · pod auth-api-7f9c8d6b5-h8lbx",
   );
@@ -243,7 +243,7 @@ test("an object editor's Logs opens its workload's tab once and focuses it after
     workbench.editors.open(logsUri(POD));
   });
   await act(run);
-  expect(workbench.editors.openIn("panel").sort()).toEqual(
+  expect(tabsIn("panel").sort()).toEqual(
     [logsUri(DEPLOYMENT), logsUri(POD)].sort(),
   );
   expect(workbench.editors.activeIn("panel")).toBe(logsUri(DEPLOYMENT));

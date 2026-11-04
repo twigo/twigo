@@ -1,6 +1,6 @@
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { testWorkbench } from "../testing";
+import { tabsIn, testWorkbench } from "../testing";
 import { WorkbenchView } from "../WorkbenchView";
 
 afterEach(cleanup);
@@ -38,8 +38,8 @@ test("an editor of the panel opens there, shows the panel, and leaves the editor
   expect(panel().visible).toBe(true);
   expect(editors.active).toBe("note://a");
   expect(editors.activeIn("panel")).toBe("session://x");
-  expect(editors.openIn("panel")).toEqual(["session://x"]);
-  expect(editors.openIn("editor")).toEqual(["note://a"]);
+  expect(tabsIn("panel")).toEqual(["session://x"]);
+  expect(tabsIn("editor")).toEqual(["note://a"]);
 });
 
 test("an open URI is focused where it is, in either area", async () => {
@@ -54,10 +54,7 @@ test("an open URI is focused where it is, in either area", async () => {
   act(() => {
     editors.open("session://x");
   });
-  expect(editors.openIn("panel").sort()).toEqual([
-    "session://x",
-    "session://y",
-  ]);
+  expect(tabsIn("panel").sort()).toEqual(["session://x", "session://y"]);
   expect(editors.activeIn("panel")).toBe("session://x");
   expect(workbench.spaces.state(space()).parts.panel.visible).toBe(true);
 });
@@ -77,7 +74,7 @@ test("closing a panel editor tells the close listeners, and its title can change
     editors.close("session://x");
   });
   expect(closed).toHaveBeenCalledWith("session://x");
-  expect(editors.openIn("panel")).toEqual([]);
+  expect(tabsIn("panel")).toEqual([]);
 });
 
 test("the panel maximizes, restores and hides by its commands, and its menu offers the one that applies", async () => {
@@ -124,7 +121,7 @@ test("the panel's layout comes back with its space", async () => {
   expect(JSON.stringify(saved)).toContain("session://x");
   cleanup();
   render(<WorkbenchView workbench={workbench} />);
-  expect(workbench.editors.openIn("panel")).toEqual(["session://x"]);
+  expect(tabsIn("panel")).toEqual(["session://x"]);
 });
 
 test("an editor that opens in the editor area restores a maximized panel", async () => {
@@ -161,8 +158,8 @@ test("closing the active editor closes the panel's while the panel has the focus
       workbench.keys.lookup(document.activeElement),
     ),
   );
-  expect(editors.openIn("panel")).toEqual([]);
-  expect(editors.openIn("editor")).toEqual(["note://a"]);
+  expect(tabsIn("panel")).toEqual([]);
+  expect(tabsIn("editor")).toEqual(["note://a"]);
 });
 
 test("the panel's tabs come back after a switch to another space and back", async () => {
@@ -176,9 +173,9 @@ test("the panel's tabs come back after a switch to another space and back", asyn
   act(() => {
     workbench.spaces.select(other.id);
   });
-  expect(editors.openIn("panel")).toEqual([]);
+  expect(tabsIn("panel")).toEqual([]);
   act(() => {
     workbench.spaces.select(first);
   });
-  expect(editors.openIn("panel")).toEqual(["session://x"]);
+  expect(tabsIn("panel")).toEqual(["session://x"]);
 });

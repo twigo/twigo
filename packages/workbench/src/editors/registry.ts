@@ -96,14 +96,6 @@ export class Editors {
     return panel && paramsOf(panel)?.uri;
   }
 
-  /** The URIs open in an area, in no particular order. */
-  openIn(area: Area): string[] {
-    return (this.#apis.get(area)?.panels ?? []).flatMap((panel) => {
-      const uri = paramsOf(panel)?.uri;
-      return uri === undefined ? [] : [uri];
-    });
-  }
-
   /**
    * Tells `listener` the URI of each editor that closes. Moving an editor
    * to another group closes none (dockview reports no removal while it
@@ -146,17 +138,16 @@ export class Editors {
   }
 
   /**
-   * Opens an editor in its provider's area, unless `area` names another:
-   * in the area's active group, or with `side` in a new group to its
-   * right. An open URI is focused where it is, since a URI is one panel.
+   * Opens an editor in its provider's area: in the area's active group, or
+   * with `side` in a new group to its right. An open URI is focused where
+   * it is, since a URI is one panel.
    */
   open(
     uri: string,
     {
       preview = false,
       side = false,
-      area,
-    }: { preview?: boolean; side?: boolean; area?: Area } = {},
+    }: { preview?: boolean; side?: boolean } = {},
   ): void {
     const provider = this.resolve(uri);
     if (!provider) throw new Error(`no editor opens ${uri}`);
@@ -167,7 +158,7 @@ export class Editors {
       open.panel.api.setActive();
       return;
     }
-    const target = area ?? provider.area ?? "editor";
+    const target = provider.area ?? "editor";
     const api = this.#apis.get(target);
     if (!api) throw new Error(`no ${target} area is mounted`);
     this.reveal(target);
