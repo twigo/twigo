@@ -732,8 +732,14 @@ impl Run {
                 stopped.task.0.abort();
             }
         }
-        // A stopped stream whose task has ended has said all it will, and
-        // frees its place, as one that ends by itself does.
+        // A stream whose task has ended has said all it will, and frees its
+        // place; one that ended by itself read all there was.
+        let done: Vec<Key> = self
+            .streams
+            .iter()
+            .filter(|(_, running)| running.task.0.is_finished())
+            .map(|(key, _)| key.clone())
+            .collect();
         let ended: Vec<u64> = self
             .stopped
             .iter()
@@ -799,18 +805,15 @@ impl Run {
                         self.dirty.pods = true;
                     }
                 }
-                Event::Finished => {
-                    if let Some(key) = key
-                        && let Some(running) = self.streams.remove(&key)
-                    {
-                        self.finished.insert(key, running.state.clone());
-                        self.dirty.pods = true;
-                        freed = true;
-                    }
-                }
             }
         }
         self.stopped.retain(|stopped| !ended.contains(&stopped.id));
+        for key in done {
+            let running = self.streams.remove(&key).expect("it was running");
+            self.finished.insert(key, running.state);
+            self.dirty.pods = true;
+            freed = true;
+        }
         let ids = self.add(entries);
         for (id, (uid, at)) in ids.zip(whose) {
             self.written

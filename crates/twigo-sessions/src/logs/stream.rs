@@ -50,8 +50,6 @@ pub enum Event {
     Restarts {
         restarting: String,
     },
-    /// It reads nothing more, so its place among the tab's streams is free.
-    Finished,
 }
 
 /// Where a stream reads.
@@ -531,7 +529,6 @@ impl Reader {
                     });
                 if !restarts(&current, &self.stream.container, exit_code) {
                     send(Event::State(error.unwrap_or(StreamState::Ended)));
-                    send(Event::Finished);
                     return;
                 }
                 if !told
@@ -635,7 +632,6 @@ impl Reader {
                 }
                 Outcome::Unauthorized(error) => {
                     send(Event::State(StreamState::Error { error }));
-                    send(Event::Finished);
                     return;
                 }
             }
@@ -707,7 +703,6 @@ impl Reader {
                         message: format!("{} has no previous instance", self.stream.container),
                     },
                 }));
-                send(Event::Finished);
                 return;
             };
             if gone(pod) {
@@ -733,7 +728,6 @@ impl Reader {
                 // longer the one the kubelet reads as the previous.
                 Outcome::Moved { .. } => {
                     send(Event::State(StreamState::Ended));
-                    send(Event::Finished);
                     return;
                 }
                 outcome @ (Outcome::Ended { .. } | Outcome::Unreadable(_)) => {
@@ -748,7 +742,6 @@ impl Reader {
                         Outcome::Unreadable(error) => StreamState::Error { error },
                         _ => StreamState::Ended,
                     }));
-                    send(Event::Finished);
                     return;
                 }
                 Outcome::Failed(error) => {
@@ -757,7 +750,6 @@ impl Reader {
                 }
                 Outcome::Unauthorized(error) => {
                     send(Event::State(StreamState::Error { error }));
-                    send(Event::Finished);
                     return;
                 }
             }
@@ -1089,7 +1081,7 @@ mod tests {
         }
 
         fn finished(&self) -> bool {
-            self.events.lock().unwrap().contains(&Event::Finished)
+            self.task.is_finished()
         }
 
         async fn until(&self, what: &str, done: impl Fn(&Self) -> bool) {
