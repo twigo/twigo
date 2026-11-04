@@ -60,7 +60,9 @@ struct Container {
     breaks: Option<usize>,
     /// The next read's body stays open after what the log holds.
     holds: bool,
+    /// The next read of the previous instance, or the next follow, fails.
     fails: bool,
+    follow_fails: bool,
 }
 
 #[derive(Default)]
@@ -196,6 +198,10 @@ impl Fake {
         self.state().container(pod, container).fails = true;
     }
 
+    pub fn fail_follow(&self, pod: &str, container: &str) {
+        self.state().container(pod, container).follow_fails = true;
+    }
+
     /// The next read of a container breaks after `lines` lines.
     pub fn break_after(&self, pod: &str, container: &str, lines: usize) {
         self.state().container(pod, container).breaks = Some(lines);
@@ -325,7 +331,12 @@ impl State {
             i64::try_from(since.as_nanosecond()).unwrap()
         });
         let served = self.container(pod, container);
-        if param("previous") == Some("true") && std::mem::take(&mut served.fails) {
+        let fails = if param("previous") == Some("true") {
+            &mut served.fails
+        } else {
+            &mut served.follow_fails
+        };
+        if std::mem::take(fails) {
             return full(
                 StatusCode::SERVICE_UNAVAILABLE,
                 json!({ "kind": "Status", "apiVersion": "v1", "status": "Failure", "reason": "ServiceUnavailable", "code": 503, "message": "the kubelet cannot be reached" }),

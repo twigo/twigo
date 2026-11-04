@@ -262,6 +262,17 @@ enum Tail {
     GaveUp,
 }
 
+/// What the reads of the instance under way got of its log.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Got {
+    /// None of it, as while no read got through.
+    Nothing,
+    /// It up to a cut or a broken body, which left the rest unread.
+    Cut,
+    /// It as far as the server gave it.
+    Read,
+}
+
 /// A container's status in the pod's: its instance now, the one before.
 struct Status<'a>(&'a Value);
 
@@ -407,11 +418,11 @@ impl Reader {
     async fn follow(&mut self, pod: &mut watch::Receiver<Arc<Value>>, send: &impl Fn(Event)) {
         // Where a read starts while the resume holds no line.
         let mut from = ReadFrom::source(self.stream.since);
-        // The instance a read started on, and whether a cut left the rest
-        // of its log unread; the last one read to its end; and one whose
-        // reread got a log without what came, as after it was rotated.
+        // The instance a read started on, and what its reads got of its
+        // log; the last one read to its end; and one whose reread got a log
+        // without what came, as after it was rotated.
         let mut reading: Option<String> = None;
-        let mut unfinished = false;
+        let mut got = Got::Nothing;
         let mut read: Option<String> = None;
         let mut moved: Option<String> = None;
         // The last line of the instance a read started on, once the
@@ -431,7 +442,8 @@ impl Reader {
                 if let Some(status) = &status {
                     // It ended and the next began while its read was cut:
                     // the kubelet reads its rest as the previous instance.
-                    if unfinished && last.is_none() && status.previous() == Some(old.as_str()) {
+                    if got == Got::Cut && last.is_none() && status.previous() == Some(old.as_str())
+                    {
                         let tail = self.tail(&old, from, None, pod, send).await;
                         // A log that holds none of the lines read says they
                         // were a later instance's, read on a stale status, so
@@ -449,7 +461,7 @@ impl Reader {
                     }
                 }
                 read = Some(old);
-                unfinished = false;
+                got = Got::Nothing;
                 from = ReadFrom::Start;
                 continue;
             }
@@ -495,8 +507,9 @@ impl Reader {
                 continue;
             }
             if gone(pod) {
-                // A cut or a broken body left its rest unread for good.
-                if unfinished
+                // Its reads got its log, whole or in part, and no new read
+                // comes, so its end, once the status says it, follows them.
+                if got != Got::Nothing
                     && let Some(status) = &status
                     && let Some(terminated) = status.termination(id)
                 {
@@ -540,20 +553,20 @@ impl Reader {
                     told = end(terminated, status, last, send);
                     reading = None;
                     read = Some(id);
-                    unfinished = false;
+                    got = Got::Nothing;
                     from = ReadFrom::Start;
                     continue;
                 }
             }
             match outcome {
-                Outcome::Cut => unfinished = true,
+                Outcome::Cut => got = Got::Cut,
                 Outcome::Broken => {
-                    unfinished = true;
+                    got = Got::Cut;
                     self.pause(pod).await;
                 }
                 Outcome::Moved { at } => {
                     let tail = self.tail(&id, from, at, pod, send).await;
-                    unfinished = false;
+                    got = Got::Read;
                     // The kubelet's previous instance held what came, so it
                     // reads a later one; else the log was rotated, and the
                     // previous instance is an older one, or none.
@@ -562,26 +575,20 @@ impl Reader {
                     } else {
                         moved = Some(id);
                     }
-                    if !self.pause(pod).await {
-                        return;
-                    }
+                    self.pause(pod).await;
                 }
                 Outcome::Ended { fresh, .. } => {
                     // The status may not say yet that it ended; or the
                     // server ended the log of one that runs.
-                    unfinished = false;
+                    got = Got::Read;
                     if fresh {
                         self.backoff = backoff();
                     }
-                    if !self.pause(pod).await {
-                        return;
-                    }
+                    self.pause(pod).await;
                 }
                 Outcome::Failed(error) | Outcome::Unreadable(error) => {
                     send(Event::State(StreamState::Error { error }));
-                    if !self.pause(pod).await {
-                        return;
-                    }
+                    self.pause(pod).await;
                 }
                 Outcome::Unauthorized(error) => {
                     send(Event::State(StreamState::Error { error }));
@@ -707,9 +714,7 @@ impl Reader {
                 }
                 Outcome::Failed(error) => {
                     send(Event::State(StreamState::Error { error }));
-                    if !self.pause(pod).await {
-                        return;
-                    }
+                    self.pause(pod).await;
                 }
                 Outcome::Unauthorized(error) => {
                     send(Event::State(StreamState::Error { error }));
@@ -720,16 +725,16 @@ impl Reader {
         }
     }
 
-    /// Waits for the pod to change, or the backoff; false once the session
-    /// has ended.
-    async fn pause(&mut self, pod: &mut watch::Receiver<Arc<Value>>) -> bool {
+    /// Waits for the pod to change, or the backoff; not at all once the
+    /// pod's channel has closed, which the read loops then find gone.
+    async fn pause(&mut self, pod: &mut watch::Receiver<Arc<Value>>) {
         let delay = self
             .backoff
             .next()
             .expect("the backoff has no maximum of attempts");
         tokio::select! {
-            () = tokio::time::sleep(delay) => true,
-            changed = pod.changed() => changed.is_ok(),
+            () = tokio::time::sleep(delay) => {}
+            _ = pod.changed() => {}
         }
     }
 
@@ -1521,6 +1526,72 @@ mod tests {
         numbered(&fake, "web-a", 6..=6);
         followed.leave();
         followed.cut();
+        followed
+            .until("its end", |followed| followed.task.is_finished())
+            .await;
+        assert_eq!(followed.entries(), OLD);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_left_pods_stream_whose_reread_fails_after_a_cut_ends_its_instance_from_the_status() {
+        let fake = Fake::default();
+        fake.serve("web-1", "web", Some("web-a"), None);
+        numbered(&fake, "web-a", 1..=2);
+        let mut followed = Followed::new(&fake, web(running(), json!({})), false);
+        followed.until("its lines", has("web-a 2")).await;
+        followed.tell(web(crashed("web-a"), json!({})));
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        fake.fail_follow("web-1", "web");
+        fake.strand("web-1", "web");
+        followed.cut();
+        followed
+            .until("the error", |followed| {
+                matches!(followed.state(), Some(StreamState::Error { .. }))
+            })
+            .await;
+        followed.leave();
+        followed
+            .until("its end", |followed| followed.task.is_finished())
+            .await;
+        assert_eq!(followed.entries(), ["web-a 1", "web-a 2", "ended"]);
+        assert_eq!(followed.ends(), [T0 + 5 * SECOND]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_left_pods_stream_read_to_its_end_ends_its_instance_from_the_status_told_last() {
+        let fake = Fake::default();
+        fake.serve("web-1", "web", Some("web-a"), None);
+        numbered(&fake, "web-a", 1..=2);
+        let mut followed = Followed::new(&fake, web(running(), json!({})), false);
+        followed.until("its lines", has("web-a 2")).await;
+        fake.stop("web-1", "web", "web-a");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        followed.tell(web(crashed("web-a"), json!({})));
+        followed.leave();
+        followed
+            .until("its end", |followed| followed.task.is_finished())
+            .await;
+        assert_eq!(followed.entries(), ["web-a 1", "web-a 2", "ended"]);
+        assert_eq!(followed.ends(), [T0 + 5 * SECOND]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_left_pods_previous_read_whose_reread_fails_after_a_cut_ends_it_from_the_status() {
+        let fake = Fake::default();
+        fake.serve("web-1", "web", Some("web-b"), Some("web-a"));
+        numbered(&fake, "web-a", 1..=5);
+        fake.stop("web-1", "web", "web-a");
+        fake.hold("web-1", "web");
+        let mut followed = Followed::new(&fake, restarted("web-b", "web-a"), true);
+        followed.until("its lines", has("web-a 5")).await;
+        fake.fail_previous("web-1", "web");
+        followed.cut();
+        followed
+            .until("the error", |followed| {
+                matches!(followed.state(), Some(StreamState::Error { .. }))
+            })
+            .await;
+        followed.leave();
         followed
             .until("its end", |followed| followed.task.is_finished())
             .await;
