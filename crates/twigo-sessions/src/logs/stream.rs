@@ -102,11 +102,12 @@ enum Outcome {
     },
     /// The connection was retired or its clients abandoned under it.
     Cut,
-    /// A reread of the instance read before got a later instance's log,
-    /// whose first line came at `at`, or a log that ended before the lines
-    /// it had: the kubelet's status had moved on before the one the stream
-    /// was told of; or a rest ended before it gave the latest line read,
-    /// so the lines read were a later instance's.
+    /// A reread of the instance read before got a log without the lines it
+    /// had, whose first line came at `at`, or that ended before them: a
+    /// later instance's, as the kubelet's status had moved on before the
+    /// one the stream was told of, or its own rotated; or a rest ended
+    /// before it gave the latest line read, so those were a later
+    /// instance's.
     Moved {
         at: Option<i64>,
     },

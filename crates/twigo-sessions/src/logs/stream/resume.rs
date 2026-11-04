@@ -89,7 +89,8 @@ struct Skip {
     left: u32,
     latest: i64,
     /// It reads the instance it read before, so a later line first says
-    /// the kubelet reads another.
+    /// the log holds none of what came: the kubelet reads another, or the
+    /// log was rotated.
     same: bool,
     /// The first line a read of the last lines admitted, which it has yet
     /// to pass the lines before.

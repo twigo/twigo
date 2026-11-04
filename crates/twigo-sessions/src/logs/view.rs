@@ -1,7 +1,7 @@
 //! A session's view of its buffer: the entries its level, filter and range
-//! keep, markers always among them and the `Dropped` entry first, the
-//! search's matches, the histogram of its lines, and the window the
-//! webview reads.
+//! keep, the level and the filter keeping every marker, and the `Dropped`
+//! entry first; the search's matches, the histogram of its lines, and the
+//! window the webview reads.
 
 use std::collections::VecDeque;
 

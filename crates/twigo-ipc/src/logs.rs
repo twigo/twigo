@@ -1,7 +1,7 @@
 //! Logs (ARCHITECTURE 4.6): a session per logs tab follows the containers of
-//! a pod, or of a workload's pods, into a ring buffer in Rust, which filters,
-//! searches and windows them; its batches come with flow control, as a
-//! list's do (3.5).
+//! a pod, or of a workload's pods, into a buffer in Rust that merges them in
+//! time order, then filters, searches and windows them; its batches come
+//! with flow control, as a list's do (3.5).
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
