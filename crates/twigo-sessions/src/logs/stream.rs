@@ -645,7 +645,11 @@ impl Reader {
     /// Reads the container's previous instance to its end.
     async fn previous(&mut self, pod: &mut watch::Receiver<Arc<Value>>, send: &impl Fn(Event)) {
         let from = ReadFrom::source(self.stream.since);
-        let mut unfinished = false;
+        // The instance whose read a cut or a broken body left unfinished,
+        // whose end the stream gives once its pod left, though the status
+        // may name a later one as the previous by then; a reread of
+        // another gets a log without its lines, and ends as moved.
+        let mut unfinished: Option<String> = None;
         loop {
             let current = Arc::clone(&pod.borrow_and_update());
             let status = Status::of(&current, &self.stream.container);
@@ -660,9 +664,9 @@ impl Reader {
                 return;
             };
             if gone(pod) {
-                if unfinished
+                if let Some(read) = &unfinished
                     && let Some(status) = &status
-                    && let Some(terminated) = status.termination(id)
+                    && let Some(terminated) = status.termination(read)
                 {
                     send(ended(terminated, status, self.resume.last_at()));
                 }
@@ -672,9 +676,11 @@ impl Reader {
             self.resume.reopen(true);
             let start = self.resume.from().map_or(from, ReadFrom::Time);
             match self.read(Read::Previous, start, None, send).await {
-                Outcome::Cut => unfinished = true,
+                Outcome::Cut => {
+                    unfinished.get_or_insert(id);
+                }
                 Outcome::Broken => {
-                    unfinished = true;
+                    unfinished.get_or_insert(id);
                     self.pause(pod).await;
                 }
                 // It restarted meanwhile, so the instance read is no
@@ -1519,6 +1525,37 @@ mod tests {
             .until("its end", |followed| followed.task.is_finished())
             .await;
         assert_eq!(followed.entries(), OLD);
+    }
+
+    fn web_b_in_back_off() -> Value {
+        let mut pod = web(
+            json!({ "waiting": {
+                "reason": "CrashLoopBackOff",
+                "message": "back-off 10s restarting failed container=web pod=web-1_shop(uid)",
+            } }),
+            json!({ "terminated": { "containerID": "web-b", "exitCode": 2, "reason": "OOMKilled", "finishedAt": "2026-11-03T10:00:30Z" } }),
+        );
+        pod["status"]["containerStatuses"][0]["containerID"] = json!("web-b");
+        pod
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_left_pods_previous_read_cut_after_a_restart_gives_no_other_instances_end() {
+        let fake = Fake::default();
+        fake.serve("web-1", "web", Some("web-b"), Some("web-a"));
+        numbered(&fake, "web-a", 1..=5);
+        fake.stop("web-1", "web", "web-a");
+        fake.hold("web-1", "web");
+        let mut followed = Followed::new(&fake, restarted("web-b", "web-a"), true);
+        followed.until("its lines", has("web-a 5")).await;
+        followed.tell(web_b_in_back_off());
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        followed.leave();
+        followed.cut();
+        followed
+            .until("its end", |followed| followed.task.is_finished())
+            .await;
+        assert_eq!(followed.entries(), OLD[..5]);
     }
 
     #[tokio::test(start_paused = true)]
