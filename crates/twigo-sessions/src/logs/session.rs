@@ -1857,6 +1857,56 @@ mod tests {
         assert!(tasks <= STREAMS, "{tasks} tasks");
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn a_stream_that_read_everything_keeps_its_last_state_and_frees_its_place() {
+        let fake = Fake::default();
+        let names: Vec<String> = (0..=STREAMS).map(|n| format!("c{n}")).collect();
+        fake.pod(serde_json::json!({
+            "metadata": { "name": "web-1", "uid": "uid-a", "creationTimestamp": "2026-11-03T10:00:00Z" },
+            "spec": { "containers": names.iter().map(|name| serde_json::json!({ "name": name })).collect::<Vec<_>>() },
+            "status": { "phase": "Running", "containerStatuses": names.iter().map(|name| serde_json::json!({
+                "name": name,
+                "containerID": format!("{name}-b"),
+                "state": { "running": { "startedAt": "2026-11-03T10:00:10Z" } },
+                "lastState": { "terminated": { "containerID": format!("{name}-a"), "exitCode": 1, "finishedAt": "2026-11-03T10:00:05Z" } },
+            })).collect::<Vec<_>>() },
+        }));
+        for name in &names {
+            let (old, new) = (format!("{name}-a"), format!("{name}-b"));
+            fake.serve("web-1", name, Some(&new), Some(&old));
+            fake.write("web-1", name, &old, T0 + SECOND, &format!("{name} up"));
+            fake.stop("web-1", name, &old);
+        }
+        let (hub, _) = fake.hub();
+        let mut request = request("web-1");
+        request.source.containers = Containers::All;
+        request.source.previous = true;
+        let mut run = Run::new(hub, "kind-test".to_owned(), request)
+            .await
+            .unwrap();
+        until(&mut run, "every container's end", |run| {
+            texts(run)
+                .iter()
+                .filter(|text| text.ends_with(" ended"))
+                .count()
+                > STREAMS
+        })
+        .await;
+        for _ in 0..10 {
+            tokio::time::sleep(FLUSH).await;
+            run.tick();
+        }
+        assert_eq!(states(&run), vec![StreamState::Ended; STREAMS + 1]);
+        let mut texts = texts(&run);
+        texts.sort();
+        let mut each: Vec<String> = names
+            .iter()
+            .flat_map(|name| [format!("{name} up"), format!("{name} ended")])
+            .collect();
+        each.sort();
+        assert_eq!(texts, each);
+    }
+
     /// A session's state over a hub that never connects.
     async fn unconnected(name: &str) -> Run {
         let connect: twigo_cache::hub::Connect = Arc::new(|_| Box::pin(std::future::pending()));
