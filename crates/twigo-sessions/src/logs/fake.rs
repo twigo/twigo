@@ -3,8 +3,9 @@
 //! server without Table sends them, and the logs of each container's
 //! instances, which the kubelet reads as its own status says, the running
 //! instance or the previous one (`validateContainerLogStatus`, kubernetes
-//! v1.37.0), each line at or after `sinceTime` in the log's order
-//! (cri-client `logWriter.write`).
+//! v1.37.0), from its last `tailLines` lines, each one at or after
+//! `sinceTime` in the log's order (cri-client v0.37.0, `ReadLogs` and
+//! `logWriter.write`).
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -362,8 +363,11 @@ impl State {
             let body = Full::new(Bytes::from(gone)).map_err(|never| match never {});
             return Response::new(body.boxed_unsync());
         }
-        let lines: Vec<Bytes> = instance
-            .lines
+        let start = param("tailLines").map_or(0, |lines| {
+            let lines: usize = lines.parse().unwrap();
+            instance.lines.len().saturating_sub(lines)
+        });
+        let lines: Vec<Bytes> = instance.lines[start..]
             .iter()
             .filter(|(at, _)| *at >= since)
             .map(|(at, text)| Bytes::from(format!("{} {text}\n", rfc3339(*at))))

@@ -11,6 +11,7 @@
 //! moment later, so a reopened read may get a later instance's log, and
 //! then the rest of the old one is the previous instance.
 
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -117,6 +118,13 @@ fn second(at: i64) -> i64 {
     at.div_euclid(SECOND) * SECOND
 }
 
+/// A line as the kubelet sent it, its time included, by a hash.
+fn digest(line: &[u8]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    line.hash(&mut hasher);
+    hasher.finish()
+}
+
 /// The lines a reopened read has delivered already. It starts at the
 /// second of the latest line, since the server reads `sinceTime` to the
 /// second (the API server passes it on as `time.RFC3339`, kubernetes
@@ -127,11 +135,23 @@ fn second(at: i64) -> i64 {
 /// stdout and stderr in goroutines of their own, so they are counted, none
 /// later than the latest: a later line first says the log holds none of
 /// them, as the next instance's does.
+///
+/// A read of the log's last lines starts where they start (cri-client
+/// v0.37.0, `ReadLogs`), which may be inside a second after lines of it
+/// the read does not get, and a reread from that second gets those first.
+/// So while the latest line is in that second, a reread passes over the
+/// lines before the first one that read got, which it knows by its time
+/// and bytes, and counts from there.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Resume {
     /// The latest time admitted, and how many admitted lines came at or
     /// after its second.
     latest: Option<(i64, u32)>,
+    /// The read under way started at the log's last lines.
+    tail: bool,
+    /// The first line such a read admitted, by its time and the hash of
+    /// its bytes, while the latest line is in its second.
+    first: Option<(i64, u64)>,
     /// What a reopened read has still to skip.
     skip: Option<Skip>,
 }
@@ -143,13 +163,17 @@ struct Skip {
     /// It reads the instance it read before, so a later line first says
     /// the kubelet reads another.
     same: bool,
+    /// The first line a read of the last lines admitted, which it has yet
+    /// to pass the lines before.
+    first: Option<(i64, u64)>,
 }
 
 /// What a line read is to the stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Admit {
     New,
-    /// One it had.
+    /// One it had, or one before the first of the last lines it read, in
+    /// their second, which it never had nor will.
     Again,
     /// A reread of the same instance found a log without what it had.
     Moved,
@@ -158,25 +182,34 @@ pub enum Admit {
 const SECOND: i64 = 1_000_000_000;
 
 impl Resume {
-    /// Where a read after a cut starts: the second of the latest line.
-    fn from(&self) -> Option<i64> {
-        self.latest.map(|(at, _)| second(at))
-    }
-
     /// Starts a read that skips what came already, of the instance read
-    /// before when `same`.
-    fn reopen(&mut self, same: bool) {
-        self.skip = self
-            .latest
-            .map(|(latest, left)| Skip { left, latest, same });
+    /// before when `same`; where it starts: the second of the latest line,
+    /// or `from` while there is none.
+    fn start(&mut self, same: bool, from: ReadFrom) -> ReadFrom {
+        let first = self.first;
+        self.skip = self.latest.map(|(latest, left)| Skip {
+            left,
+            latest,
+            same,
+            first,
+        });
+        self.tail = self.latest.is_none() && matches!(from, ReadFrom::Lines(_));
+        self.latest
+            .map_or(from, |(at, _)| ReadFrom::Time(second(at)))
     }
 
     /// What a line read at `at` is, counting it if new and it `counts`:
     /// a line held back, which does not come, must not, or a later read
     /// would skip one that it never sent for it.
-    pub fn admit(&mut self, at: i64, counts: bool) -> Admit {
+    pub fn admit(&mut self, at: i64, line: &[u8], counts: bool) -> Admit {
         if let Some(skip) = &mut self.skip {
             if at <= skip.latest {
+                if let Some((first, hash)) = skip.first {
+                    if first != at || hash != digest(line) {
+                        return Admit::Again;
+                    }
+                    skip.first = None;
+                }
                 skip.left -= 1;
                 if skip.left == 0 {
                     self.skip = None;
@@ -192,12 +225,18 @@ impl Resume {
         if !counts {
             return Admit::New;
         }
-        self.latest = match self.latest {
-            Some((latest, count)) if second(at) == second(latest) => {
-                Some((latest.max(at), count + 1))
-            }
-            Some((latest, count)) if at < latest => Some((latest, count)),
-            _ => Some((at, 1)),
+        let tail = self.tail && self.latest.is_none();
+        let (latest, count) = match self.latest {
+            Some((latest, count)) if second(at) == second(latest) => (latest.max(at), count + 1),
+            Some((latest, count)) if at < latest => (latest, count),
+            _ => (at, 1),
+        };
+        self.latest = Some((latest, count));
+        self.first = if tail {
+            Some((at, digest(line)))
+        } else {
+            self.first
+                .filter(|(first, _)| second(*first) == second(latest))
         };
         Admit::New
     }
@@ -534,8 +573,7 @@ impl Reader {
             // gave its rest as the previous instance already.
             let moved_on = moved.take().as_deref() == Some(id.as_str()) || over.is_some();
             let same = reading.as_deref() == Some(id.as_str());
-            self.resume.reopen(same && !moved_on);
-            let start = self.resume.from().map_or(from, ReadFrom::Time);
+            let start = self.resume.start(same && !moved_on, from);
             reading = Some(id.clone());
             let container = self.stream.container.clone();
             let outcome = tokio::select! {
@@ -625,8 +663,7 @@ impl Reader {
             if gone(pod) {
                 return Tail::GaveUp;
             }
-            self.resume.reopen(false);
-            let start = self.resume.from().map_or(from, ReadFrom::Time);
+            let start = self.resume.start(false, from);
             match self.read(Read::Rest, start, before, send).await {
                 Outcome::Ended { held: true, .. } => return Tail::Found,
                 Outcome::Ended { held: false, .. } => return Tail::Lacked,
@@ -683,8 +720,7 @@ impl Reader {
                 return;
             }
             let id = id.to_owned();
-            self.resume.reopen(true);
-            let start = self.resume.from().map_or(from, ReadFrom::Time);
+            let start = self.resume.start(true, from);
             match self.read(Read::Previous, start, None, send).await {
                 Outcome::Cut => {
                     unfinished.get_or_insert(id);
@@ -881,7 +917,7 @@ impl Reader {
             if holding.is_some_and(|latest| at >= latest) {
                 holding = None;
             }
-            match self.resume.admit(at, holding.is_none()) {
+            match self.resume.admit(at, &buffer, holding.is_none()) {
                 Admit::New => fresh = true,
                 Admit::Again => continue,
                 Admit::Moved => return Outcome::Moved { at: Some(at) },
@@ -1455,6 +1491,29 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn a_reread_after_last_lines_read_from_inside_a_second_sends_none_of_them_again() {
+        let fake = Fake::default();
+        let write = |ms, text| fake.write("web-1", "web", "web-a", T0 + ms * MS, text);
+        fake.serve("web-1", "web", Some("web-a"), None);
+        write(5_100, "web-a 1");
+        write(5_200, "web-a 2");
+        write(5_300, "web-a 3");
+        let followed = Followed::since(
+            &fake,
+            web(running(), json!({})),
+            Since::Lines { lines: 2 },
+            false,
+        );
+        followed.until("its last two lines", has("web-a 3")).await;
+        fake.strand("web-1", "web");
+        followed.cut();
+        write(6_000, "web-a 4");
+        followed.until("its next line", has("web-a 4")).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert_eq!(followed.entries(), ["web-a 2", "web-a 3", "web-a 4"]);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn a_reread_of_a_rotated_log_reads_on_as_the_same_instance() {
         let fake = Fake::default();
         fake.serve("web-1", "web", Some("web-a"), None);
@@ -1829,18 +1888,22 @@ mod tests {
 
     use Admit::{Again, Moved, New};
 
+    fn admit(resume: &mut Resume, at: i64) -> Admit {
+        resume.admit(at, format!("{at} line").as_bytes(), true)
+    }
+
     fn reread(resume: &mut Resume, times: &[i64]) -> Vec<Admit> {
-        resume.reopen(true);
-        times.iter().map(|at| resume.admit(*at, true)).collect()
+        resume.start(true, ReadFrom::Start);
+        times.iter().map(|at| admit(resume, *at)).collect()
     }
 
     #[test]
     fn a_reopened_read_skips_what_came_already() {
         let mut resume = Resume::default();
         for at in [1_500, 2_000, 2_000] {
-            assert_eq!(resume.admit(at, true), New);
+            assert_eq!(admit(&mut resume, at), New);
         }
-        assert_eq!(resume.from(), Some(0));
+        assert_eq!(resume.start(true, ReadFrom::Start), ReadFrom::Time(0));
         let again = reread(&mut resume, &[1_500, 2_000, 2_000, 2_000, 2_500]);
         assert_eq!(again, [Again, Again, Again, New, New]);
     }
@@ -1850,9 +1913,12 @@ mod tests {
         let ms = |ms: i64| ms * 1_000_000;
         let mut resume = Resume::default();
         for at in [ms(1_900), ms(2_200), ms(2_300), ms(2_100)] {
-            assert_eq!(resume.admit(at, true), New);
+            assert_eq!(admit(&mut resume, at), New);
         }
-        assert_eq!(resume.from(), Some(2 * SECOND));
+        assert_eq!(
+            resume.start(true, ReadFrom::Start),
+            ReadFrom::Time(2 * SECOND)
+        );
         let again = reread(
             &mut resume,
             &[ms(2_200), ms(2_300), ms(2_100), ms(2_250), ms(2_400)],
@@ -1876,20 +1942,42 @@ mod tests {
     fn a_later_line_first_says_the_log_holds_none_of_what_came() {
         let mut resume = Resume::default();
         for at in [1_000, 2_000] {
-            assert_eq!(resume.admit(at, true), New);
+            assert_eq!(admit(&mut resume, at), New);
         }
         assert_eq!(reread(&mut resume, &[5_000, 6_000]), [Moved, New]);
-        resume.reopen(false);
-        assert_eq!(resume.admit(9_000, true), New);
-        assert_eq!(resume.admit(9_500, true), New);
+        resume.start(false, ReadFrom::Start);
+        assert_eq!(admit(&mut resume, 9_000), New);
+        assert_eq!(admit(&mut resume, 9_500), New);
     }
 
     #[test]
     fn a_reopened_read_resumes_from_the_latest_lines_second() {
         let mut resume = Resume::default();
-        assert_eq!(resume.admit(5 * SECOND + 700, true), New);
-        assert_eq!(resume.from(), Some(5 * SECOND));
-        assert_eq!(Resume::default().from(), None);
+        assert_eq!(admit(&mut resume, 5 * SECOND + 700), New);
+        assert_eq!(
+            resume.start(true, ReadFrom::Lines(10)),
+            ReadFrom::Time(5 * SECOND)
+        );
+        assert_eq!(
+            Resume::default().start(true, ReadFrom::Lines(10)),
+            ReadFrom::Lines(10)
+        );
+    }
+
+    #[test]
+    fn a_reread_from_the_second_last_lines_started_in_passes_the_lines_before_them() {
+        let mut resume = Resume::default();
+        resume.start(true, ReadFrom::Lines(2));
+        for at in [1_200, 1_300] {
+            assert_eq!(admit(&mut resume, at), New);
+        }
+        let again = reread(&mut resume, &[1_100, 1_200, 1_300, 1_400]);
+        assert_eq!(again, [Again, Again, Again, New]);
+        let again = reread(&mut resume, &[1_100, 1_250, 1_500]);
+        assert_eq!(again, [Again, Again, Moved]);
+        assert_eq!(admit(&mut resume, SECOND + 100), New);
+        let again = reread(&mut resume, &[SECOND + 100, SECOND + 200]);
+        assert_eq!(again, [Again, New]);
     }
 
     #[test]
