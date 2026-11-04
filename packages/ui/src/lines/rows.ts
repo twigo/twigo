@@ -68,7 +68,7 @@ export function useRowKeys(
   total: number,
   reach: number,
 ): {
-  keyOf: (index: number) => string | number;
+  keyOf: (index: number) => string;
   kept: ReadonlySet<string>;
 } {
   const [loaded, setLoaded] = useState<Loaded>({ start, keys, left: NONE });
@@ -76,7 +76,9 @@ export function useRowKeys(
     setLoaded({ start, keys, left: leftOf(loaded, start, keys, reach, total) });
   const keyOf = useCallback(
     (index: number) =>
-      loaded.keys[index - loaded.start] ?? loaded.left.get(index) ?? index,
+      loaded.keys[index - loaded.start] ??
+      loaded.left.get(index) ??
+      `#${String(index)}`,
     [loaded],
   );
   const kept = useMemo(

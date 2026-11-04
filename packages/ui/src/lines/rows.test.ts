@@ -100,7 +100,7 @@ test("paused at the head of a bounded buffer as lines come, the rows keep the ke
   expect(result.current.kept).toEqual(new Set(keys(1000, 1112)));
 });
 
-test("a row's key is its line's, else that of a line that left there, else its index, from the same function until the window changes", () => {
+test("a row's key is its line's, else that of a line that left there, else one of its index apart from any line's, from the same function until the window changes", () => {
   const { result, rerender } = renderHook(
     ({ start }: { start: number }) =>
       useRowKeys(start, keys(start, start + 10), 100, 100),
@@ -108,7 +108,7 @@ test("a row's key is its line's, else that of a line that left there, else its i
   );
   rerender({ start: 5 });
   const { keyOf } = result.current;
-  expect([keyOf(5), keyOf(2), keyOf(50)]).toEqual(["5", "2", 50]);
+  expect([keyOf(5), keyOf(2), keyOf(50)]).toEqual(["5", "2", "#50"]);
   rerender({ start: 5 });
   expect(result.current.keyOf).toBe(keyOf);
   rerender({ start: 6 });

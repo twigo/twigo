@@ -803,6 +803,21 @@ test("following with wrap through many lines, the rows on screen keep their size
   }
 });
 
+test("a row without its line is keyed apart from the lines, whose keys may read as its index", () => {
+  const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const { log } = mount({
+    follow: false,
+    total: 100,
+    items: lines(20, 30),
+  });
+  const rows = [...log.querySelectorAll<HTMLElement>("[data-index]")].map(
+    (row) => [row.dataset.index, row.textContent.endsWith("line 20")],
+  );
+  expect(rows.filter(([, line]) => line)).toEqual([["0", true]]);
+  expect(new Set(rows.map(([index]) => index)).size).toBe(rows.length);
+  expect(errors).not.toHaveBeenCalled();
+});
+
 test("a list that mounts paused goes back to where it stood", () => {
   const { log, onWindow } = mount({
     follow: false,
