@@ -108,6 +108,7 @@ fn main() {
             })
             .collect();
         buffer.insert(entries, |_, kind| spec.judge(kind));
+        buffer.bound(&[]);
     }
     let after = dhat::HeapStats::get();
     let held = after.curr_bytes - before.curr_bytes;

@@ -273,7 +273,7 @@ struct Run {
     /// and the session say.
     written: HashMap<Arc<str>, Written>,
     /// The id and time of each `Joined` entry, by its pod's uid, until the
-    /// pod left.
+    /// pod left; the bound keeps it while the pod has written nothing.
     joined: HashMap<Arc<str>, (u64, i64)>,
     leaving: Vec<Leaving>,
     /// Counts the streams started, which gives each its id, so the events
@@ -480,12 +480,13 @@ impl Run {
             .into_iter()
             .map(|(uid, at, kind)| ((uid, at), (at, kind)))
             .unzip();
-        let ids = self.insert(marks);
+        let ids = self.add(marks);
         self.joined.extend(
             uids.into_iter()
                 .zip(ids)
                 .map(|((uid, at), id)| (uid, (id, at))),
         );
+        self.bound();
         for gone in before.values() {
             if self.reads(&gone.name) {
                 self.leaving.push(Leaving {
@@ -575,8 +576,9 @@ impl Run {
         self.dirty.view |= moved;
     }
 
-    /// The ids the entries got, in the order they came.
-    fn insert(&mut self, entries: Vec<(i64, Kind)>) -> Range<u64> {
+    /// Adds entries to the buffer, which holds them all until
+    /// [`Run::bound`]; the ids they got, in the order they came.
+    fn add(&mut self, entries: Vec<(i64, Kind)>) -> Range<u64> {
         let spec = &self.spec;
         let arrived = &mut self.arrived;
         let ids = self.buffer.insert(entries, |at, kind| {
@@ -586,6 +588,24 @@ impl Run {
         });
         self.dirty.view |= !ids.is_empty();
         ids
+    }
+
+    /// Bounds the buffer, which keeps the `Joined` of each pod in view that
+    /// has written nothing, at its creation, so that it moves to the pod's
+    /// first entry once one comes.
+    fn bound(&mut self) {
+        let held: Vec<u64> = self
+            .joined
+            .iter()
+            .filter(|(uid, _)| !self.written.contains_key(*uid))
+            .map(|(_, &(id, _))| id)
+            .collect();
+        self.buffer.bound(&held);
+    }
+
+    fn insert(&mut self, entries: Vec<(i64, Kind)>) {
+        self.add(entries);
+        self.bound();
     }
 
     /// Starts a stream for each chosen container without one, those with
@@ -791,7 +811,7 @@ impl Run {
             }
         }
         self.stopped.retain(|stopped| !ended.contains(&stopped.id));
-        let ids = self.insert(entries);
+        let ids = self.add(entries);
         for (id, (uid, at)) in ids.zip(whose) {
             self.written
                 .entry(uid)
@@ -805,6 +825,7 @@ impl Run {
                 });
         }
         self.place_joined();
+        self.bound();
         for (origin, restarting) in restarts {
             self.dirty.view |= self.buffer.restarts(&origin, restarting.into());
         }
@@ -1379,6 +1400,10 @@ mod tests {
     }
 
     async fn followed_web_a(fake: &Fake) -> Run {
+        followed_web_a_in(fake, Buffer::new(LIMITS)).await
+    }
+
+    async fn followed_web_a_in(fake: &Fake, buffer: Buffer) -> Run {
         fake.pod(web_1("uid-a", "web-a", "2026-11-03T10:00:00Z"));
         fake.serve("web-1", "web", Some("web-a"), None);
         fake.write("web-1", "web", "web-a", now() - SECOND, "old up");
@@ -1386,6 +1411,7 @@ mod tests {
         let mut run = Run::new(hub, "kind-test".to_owned(), request("web-1"))
             .await
             .unwrap();
+        run.buffer = buffer;
         until(&mut run, "its line", |run| texts(run) == ["old up"]).await;
         run
     }
@@ -1578,15 +1604,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_left_pods_entry_stands_at_the_leave_once_the_bound_dropped_its_lines() {
         let fake = Fake::default();
-        fake.pod(web_1("uid-a", "web-a", "2026-11-03T10:00:00Z"));
-        fake.serve("web-1", "web", Some("web-a"), None);
-        fake.write("web-1", "web", "web-a", now() - SECOND, "old up");
-        let (hub, _) = fake.hub();
-        let mut run = Run::new(hub, "kind-test".to_owned(), request("web-1"))
-            .await
-            .unwrap();
-        run.buffer = small();
-        until(&mut run, "its line", |run| texts(run) == ["old up"]).await;
+        let mut run = followed_web_a_in(&fake, small()).await;
         run.insert(vec![other("other 1"), other("other 2"), other("other 3")]);
         assert_eq!(run.buffer.dropped_ever(), 1);
 
@@ -1597,6 +1615,84 @@ mod tests {
         })
         .await;
         assert_eq!(texts(&run), ["other 2", "other 3", "web-1 left"]);
+    }
+
+    async fn made_again_after_it_left(fake: &Fake, created: i64) -> Run {
+        let mut run = followed_web_a(fake).await;
+        fake.stop("web-1", "web", "web-a");
+        fake.delete("web-1");
+        until(&mut run, "the old pod left", |run| {
+            run.pods.is_empty() && run.leaving.is_empty()
+        })
+        .await;
+        run.buffer = small();
+        made_again(fake, created);
+        until(&mut run, "the pod made again", |run| {
+            run.pods.first().is_some_and(|pod| &*pod.uid == "uid-b")
+        })
+        .await;
+        run
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pods_joined_entry_moves_to_its_first_line_that_comes_as_the_bound_reaches_it() {
+        let fake = Fake::default();
+        let mut run = made_again_after_it_left(&fake, now().div_euclid(SECOND) * SECOND).await;
+        run.insert(vec![other("other 1"), other("other 2")]);
+        assert_eq!(texts(&run), ["web-1 joined", "other 1", "other 2"]);
+        new_up(&fake, &mut run).await;
+        assert_eq!(texts(&run), ["other 2", "web-1 joined", "new up"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pods_joined_entry_stays_through_the_bound_until_its_first_line() {
+        let fake = Fake::default();
+        let mut run = made_again_after_it_left(&fake, now().div_euclid(SECOND) * SECOND).await;
+        run.insert(vec![other("other 1"), other("other 2"), other("other 3")]);
+        assert_eq!(texts(&run), ["web-1 joined", "other 2", "other 3"]);
+        new_up(&fake, &mut run).await;
+        assert_eq!(texts(&run), ["other 3", "web-1 joined", "new up"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pod_that_joins_long_after_its_creation_keeps_its_joined_through_the_bound() {
+        let fake = Fake::default();
+        let mut run = followed_web_a_in(&fake, small()).await;
+        fake.stop("web-1", "web", "web-a");
+        fake.delete("web-1");
+        until(&mut run, "the old pod left", |run| {
+            run.pods.is_empty() && run.leaving.is_empty()
+        })
+        .await;
+        run.insert(vec![other("other 1"), other("other 2"), other("other 3")]);
+        made_again(&fake, now() - 3600 * SECOND);
+        until(&mut run, "the pod made again", |run| {
+            run.pods.first().is_some_and(|pod| &*pod.uid == "uid-b")
+        })
+        .await;
+        assert_eq!(texts(&run), ["web-1 joined", "other 2", "other 3"]);
+        new_up(&fake, &mut run).await;
+        assert_eq!(texts(&run), ["other 3", "web-1 joined", "new up"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pod_made_again_while_the_old_ones_streams_finish_keeps_its_joined_through_the_bound()
+    {
+        let fake = Fake::default();
+        let mut run = followed_web_a_in(&fake, small()).await;
+        fake.delete("web-1");
+        made_again(&fake, now().div_euclid(SECOND) * SECOND);
+        until(&mut run, "the pod made again", |run| {
+            run.pods.first().is_some_and(|pod| &*pod.uid == "uid-b")
+        })
+        .await;
+        for n in 1..=3 {
+            fake.write("web-1", "web", "web-a", now(), &format!("old after {n}"));
+        }
+        fake.stop("web-1", "web", "web-a");
+        until(&mut run, "the old pod left", |run| run.leaving.is_empty()).await;
+        new_up(&fake, &mut run).await;
+        assert_eq!(texts(&run), ["web-1 left", "web-1 joined", "new up"]);
     }
 
     fn containers(uid: &str, instance: &str) -> serde_json::Value {

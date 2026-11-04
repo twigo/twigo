@@ -1,7 +1,7 @@
 //! A session's buffer (ARCHITECTURE 4.6): the entries of every stream in
 //! time order, each with an id it keeps while buffered, bounded by lines
-//! and bytes of text, oldest out first, with one `Dropped` entry before
-//! them once any went.
+//! and bytes of text, oldest out first but those the session holds, with
+//! one `Dropped` entry before them once any went.
 
 use std::collections::VecDeque;
 use std::ops::Range;
@@ -127,8 +127,8 @@ impl Buffer {
     }
 
     /// Adds entries in the order they came, each with the next id and what
-    /// `judge` makes of it and its time, at its place in time; the ids
-    /// they got, in that order.
+    /// `judge` makes of it and its time, at its place in time, all of them
+    /// until [`Buffer::bound`]; the ids they got, in that order.
     pub fn insert(
         &mut self,
         incoming: Vec<(i64, Kind)>,
@@ -163,7 +163,6 @@ impl Buffer {
             };
             self.entries.extend(next);
         }
-        self.bound();
         ids
     }
 
@@ -189,14 +188,26 @@ impl Buffer {
             .is_ok()
     }
 
-    fn bound(&mut self) {
+    /// Drops the oldest entries while it holds more than its limits, but
+    /// keeps those `held` names, first, among the entries it counts.
+    pub fn bound(&mut self, held: &[u64]) {
+        let mut kept = Vec::new();
         let mut count = 0;
-        while self.entries.len() > self.limits.entries || self.bytes > self.limits.bytes {
+        while self.entries.len() + kept.len() > self.limits.entries
+            || self.bytes > self.limits.bytes
+        {
             let Some(oldest) = self.entries.pop_front() else {
                 break;
             };
+            if held.contains(&oldest.id) {
+                kept.push(oldest);
+                continue;
+            }
             self.bytes -= oldest.kind.bytes();
             count += 1;
+        }
+        for entry in kept.into_iter().rev() {
+            self.entries.push_front(entry);
         }
         if count == 0 {
             return;
@@ -342,9 +353,11 @@ mod tests {
             (1..=4).map(|at| (at, line(&format!("l{at}")))).collect(),
             judged,
         );
+        buffer.bound(&[]);
         assert_eq!(texts(&buffer), [(2, "l2"), (3, "l3"), (4, "l4")]);
         assert_eq!(buffer.dropped(), Some(Dropped { id: 5, count: 1 }));
         buffer.insert(vec![(5, line("l5")), (6, line("l6"))], judged);
+        buffer.bound(&[]);
         assert_eq!(texts(&buffer), [(4, "l4"), (6, "l5"), (7, "l6")]);
         assert_eq!(buffer.dropped(), Some(Dropped { id: 5, count: 3 }));
         assert_eq!(buffer.dropped_ever(), 3);
@@ -352,7 +365,28 @@ mod tests {
         buffer.clear();
         assert_eq!(buffer.dropped(), None);
         buffer.insert(vec![(1, line("again"))], judged);
+        buffer.bound(&[]);
         assert_eq!(texts(&buffer), [(8, "again")]);
+        assert_eq!(buffer.dropped_ever(), 3);
+    }
+
+    #[test]
+    fn the_bound_keeps_the_entries_held_first_among_those_it_counts() {
+        let mut buffer = Buffer::new(Limits {
+            entries: 3,
+            bytes: 1 << 20,
+        });
+        buffer.insert(
+            vec![(1, line("held")), (2, line("a")), (3, line("b"))],
+            judged,
+        );
+        buffer.insert(vec![(4, line("c")), (5, line("d"))], judged);
+        buffer.bound(&[1]);
+        assert_eq!(texts(&buffer), [(1, "held"), (4, "c"), (5, "d")]);
+        assert_eq!(buffer.dropped(), Some(Dropped { id: 6, count: 2 }));
+        buffer.insert(vec![(6, line("e"))], judged);
+        buffer.bound(&[]);
+        assert_eq!(texts(&buffer), [(4, "c"), (5, "d"), (7, "e")]);
         assert_eq!(buffer.dropped_ever(), 3);
     }
 
@@ -363,8 +397,10 @@ mod tests {
             bytes: 10,
         });
         buffer.insert(vec![(1, line("12345")), (2, line("67890"))], judged);
+        buffer.bound(&[]);
         assert_eq!((buffer.entries().len(), buffer.bytes()), (2, 10));
         buffer.insert(vec![(3, line("x"))], judged);
+        buffer.bound(&[]);
         assert_eq!(texts(&buffer), [(2, "67890"), (3, "x")]);
         assert_eq!(buffer.bytes(), 6);
         assert_eq!(buffer.dropped().map(|dropped| dropped.count), Some(1));
@@ -424,6 +460,7 @@ mod tests {
         });
         buffer.insert(vec![(10, line("new")), (20, line("newer"))], judged);
         buffer.insert(vec![(1, line("late"))], judged);
+        buffer.bound(&[]);
         assert_eq!(texts(&buffer), [(1, "new"), (2, "newer")]);
     }
 }
