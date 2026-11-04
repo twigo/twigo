@@ -79,8 +79,8 @@ export class MockLogs {
   readonly #buffer: LogBuffer;
   #streams = new Map<string, Stream>();
   #members = new Set<string>();
-  /** The `joined` of each pod in view that has written nothing, which the bound keeps, as Rust's does. */
-  #waiting = new Map<string, number>();
+  /** Where each pod's `joined` and entries stand, by its name, as Rust's `Marks` keeps them. */
+  #marks = new Map<string, PodMarks>();
   /** The entries the view kept as they came since the source or the view last changed. */
   #arrived = 0;
   #changes = 0;
@@ -127,7 +127,7 @@ export class MockLogs {
     this.#arrived = 0;
     this.#streams.clear();
     this.#members.clear();
-    this.#waiting.clear();
+    this.#marks.clear();
     this.#start(Date.now());
   }
 
@@ -265,8 +265,10 @@ export class MockLogs {
     for (const name of this.#members) {
       if (current.has(name)) continue;
       this.#members.delete(name);
-      this.#waiting.delete(name);
-      if (!this.#reads(name)) continue;
+      if (!this.#reads(name)) {
+        this.#marks.delete(name);
+        continue;
+      }
       // The kubelet deletes a rolled-out pod once its containers ended, so
       // their ends come before its `left` (ARCHITECTURE 4.6); a queued
       // stream's read finds no pod by then, so it gets none.
@@ -283,20 +285,19 @@ export class MockLogs {
       leaving.push(name);
       this.#dirty.pods = true;
     }
-    // A successor is made a millisecond after the pod it replaces left, so
-    // its `joined` and first line follow that `left` rather than share the
-    // one time every entry of the mock's tick has.
-    const created = now + 1;
     for (const pod of this.#pods()) {
       if (this.#members.has(pod.name)) continue;
       this.#members.add(pod.name);
       if (!this.#reads(pod.name)) continue;
+      // At its creation while the pod has no entry, as Rust's: its streams
+      // start below, so its id is lower than any of their entries'.
+      const created = nanos(pod.created);
       joins.push([
-        nanos(created),
+        created,
         {
           type: "joined",
           pod: pod.name,
-          time: rfc3339(nanos(created)),
+          time: rfc3339(created),
           owner: {
             group: "apps",
             version: "v1",
@@ -306,11 +307,9 @@ export class MockLogs {
           },
         },
       ]);
-      // Its containers write from its creation, so its `joined` stands just
-      // before its first entry, where Rust moves it once that entry came.
       for (const container of this.#chosen(pod)) {
         if (this.#streams.size < TAB_STREAMS)
-          this.#stream(pod, container, created).next = created;
+          this.#stream(pod, container, pod.created);
       }
       this.#dirty.pods = true;
     }
@@ -336,16 +335,15 @@ export class MockLogs {
       }
     }
     // In Rust's order, each bounded: the streams' entries, the pods that
-    // joined, then the `left` of each that went, just after the last of
-    // its entries the buffer still holds, or at the leave.
+    // joined, then the `left` of each that went.
     this.#insert(streamed);
     this.#insert(joins);
-    this.#insert(
-      leaving.map((name) => [
-        this.#lastOf(name) ?? at,
-        { type: "left", pod: name, time: rfc3339(at) },
-      ]),
-    );
+    const lefts = leaving.map((name): Timed => [
+      this.#leftAt(name, at),
+      { type: "left", pod: name, time: rfc3339(at) },
+    ]);
+    for (const name of leaving) this.#marks.delete(name);
+    this.#insert(lefts);
   }
 
   /** Now and then replaces a pod the tab follows, so a workload's tab shows a rollout. */
@@ -364,17 +362,31 @@ export class MockLogs {
     return pods === null || pods.includes(pod);
   }
 
-  /** When the pod's last line or end stands in the buffer. */
-  #lastOf(pod: string): bigint | undefined {
-    const entries = this.#buffer.entries;
-    for (let index = entries.length - 1; index >= 0; index--) {
-      const entry = entries[index];
-      if (!entry) continue;
-      const { kind } = entry;
-      if ((kind.type === "line" || kind.type === "ended") && kind.pod === pod)
-        return entry.at;
+  /**
+   * Where a pod's `left` stands: just after its latest entry while the
+   * buffer holds it, else at the leave, though not before its `joined`, as
+   * Rust's `Marks::leave` places it.
+   */
+  #leftAt(pod: string, left: bigint): bigint {
+    const { joined, written } = this.#marks.get(pod) ?? {};
+    if (written && this.#buffer.holds(written.last.id, written.last.at))
+      return written.last.at;
+    return joined && joined.at > left ? joined.at : left;
+  }
+
+  /**
+   * Moves each `joined` just before its pod's first entry, which comes
+   * after the creation it stood at, under its id, lower than those of its
+   * pod's entries, as Rust's `Marks::place` does.
+   */
+  #place(): void {
+    for (const marks of this.#marks.values()) {
+      const { joined, written } = marks;
+      if (!joined || !written || written.first === joined.at) continue;
+      marks.joined = this.#buffer.place(joined.id, joined.at, written.first)
+        ? { id: joined.id, at: written.first }
+        : undefined;
     }
-    return undefined;
   }
 
   #insert(incoming: readonly Timed[]): void {
@@ -385,14 +397,21 @@ export class MockLogs {
       if (keeps(checked, at, judged)) this.#arrived++;
       return judged;
     });
-    incoming.forEach(([, kind], index) => {
+    incoming.forEach(([at, kind], index) => {
       const id = ids[index];
-      if (kind.type === "joined" && id !== undefined)
-        this.#waiting.set(kind.pod, id);
-      else if (kind.type === "line" || kind.type === "ended")
-        this.#waiting.delete(kind.pod);
+      if (id === undefined || kind.type === "left") return;
+      const marks = this.#marks.get(kind.pod) ?? {};
+      this.#marks.set(kind.pod, marks);
+      if (kind.type === "joined") marks.joined = { id, at };
+      else marks.written = wrote(marks.written, at, id);
     });
-    this.#buffer.bound(new Set(this.#waiting.values()));
+    this.#place();
+    // The bound keeps the `joined` of each pod that has written nothing,
+    // so that it moves to its pod's first entry once one comes.
+    const held = [...this.#marks.values()].flatMap((marks) =>
+      marks.joined && !marks.written ? [marks.joined.id] : [],
+    );
+    this.#buffer.bound(new Set(held));
     this.#dirty.lines = true;
   }
 
@@ -527,6 +546,28 @@ export class MockLogs {
       return { state: "waiting", reason: "CrashLoopBackOff" };
     return { state: "following" };
   }
+}
+
+/** A pod's marks and what places them, as Rust's `PodMarks`. */
+interface PodMarks {
+  /** Its `joined`, until the pod left or the bound dropped it. */
+  joined?: { readonly id: number; readonly at: bigint };
+  /** When its first entry stands, and its latest. */
+  written?: Written;
+}
+
+interface Written {
+  readonly first: bigint;
+  readonly last: { readonly at: bigint; readonly id: number };
+}
+
+function wrote(written: Written | undefined, at: bigint, id: number): Written {
+  if (!written) return { first: at, last: { at, id } };
+  const { last } = written;
+  return {
+    first: at < written.first ? at : written.first,
+    last: at > last.at || (at === last.at && id > last.id) ? { at, id } : last,
+  };
 }
 
 interface Sent {

@@ -58,7 +58,10 @@ export interface Dropped {
   readonly count: number;
 }
 
-function order(a: Entry, b: Entry): number {
+function order(
+  a: Pick<Entry, "id" | "at">,
+  b: Pick<Entry, "id" | "at">,
+): number {
   return a.at < b.at ? -1 : a.at > b.at ? 1 : a.id - b.id;
 }
 
@@ -130,6 +133,40 @@ export class LogBuffer {
       }
     }
     return ids;
+  }
+
+  /** Moves the entry `id`, which stands at `at`, to `to` under its id; false when it no longer holds it. */
+  place(id: number, at: bigint, to: bigint): boolean {
+    const index = this.#indexOf(id, at);
+    const entry = this.#entries[index];
+    if (!entry) return false;
+    this.#entries.splice(index, 1);
+    const moved = { ...entry, at: to };
+    this.#entries.splice(this.#before(moved), 0, moved);
+    return true;
+  }
+
+  /** Whether it holds the entry `id`, which stands at `at`. */
+  holds(id: number, at: bigint): boolean {
+    return this.#entries[this.#indexOf(id, at)]?.id === id;
+  }
+
+  /** Where the entry `id` at `at` stands, or would. */
+  #indexOf(id: number, at: bigint): number {
+    return this.#before({ id, at });
+  }
+
+  /** How many entries come before one at `at` with `id`. */
+  #before(entry: Pick<Entry, "id" | "at">): number {
+    let low = 0;
+    let high = this.#entries.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      const other = this.#entries[middle];
+      if (other && order(other, entry) < 0) low = middle + 1;
+      else high = middle;
+    }
+    return low;
   }
 
   /**
