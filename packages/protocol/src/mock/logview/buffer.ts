@@ -138,7 +138,7 @@ export class LogBuffer {
   place(id: number, at: bigint, to: bigint): boolean {
     const index = this.#indexOf(id, at);
     const entry = this.#entries[index];
-    if (!entry) return false;
+    if (entry?.id !== id) return false;
     this.#entries.splice(index, 1);
     const moved = { ...entry, at: to };
     this.#entries.splice(this.#before(moved), 0, moved);
