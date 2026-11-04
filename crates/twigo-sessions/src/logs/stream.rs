@@ -54,13 +54,13 @@ pub enum Event {
 /// Where a stream reads.
 #[derive(Clone)]
 pub struct Stream {
-    pub hub: Hub,
-    pub context: String,
-    pub namespace: String,
+    hub: Hub,
+    context: String,
+    namespace: String,
     /// The pod and container, which its entries carry.
-    pub origin: Arc<Origin>,
-    pub since: Since,
-    pub previous: bool,
+    origin: Arc<Origin>,
+    since: Since,
+    previous: bool,
 }
 
 impl Stream {

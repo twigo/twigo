@@ -37,7 +37,7 @@ fn time(text: &[u8]) -> Option<i64> {
 /// The text without its escapes, and what their SGR sequences styled, in
 /// runs of UTF-16 units. A tab stays; other control characters go, a
 /// carriage return before the line feed among them.
-pub fn styled(bytes: &[u8]) -> (String, Vec<TextStyle>) {
+fn styled(bytes: &[u8]) -> (String, Vec<TextStyle>) {
     let mut parser = Parser::<anstyle_parse::DefaultCharAccumulator>::new();
     let mut styler = Styler::default();
     for byte in bytes {
