@@ -345,6 +345,45 @@ test("the page keys, Space, and Alt or ⌘ with an arrow move the list itself at
   expect(log.scrollTop).toBe(0);
 });
 
+test("⌃↑ and ⌃↓, alone or with ⇧ or ⌥, move the list a page itself, as WebKit pages on them, and with both or with ⌘ do nothing", () => {
+  const { log } = mount({
+    follow: false,
+    total: 300,
+    items: lines(0, 300),
+  });
+  scroll(log, 19 * 100);
+  const moves = [
+    press(log, "ArrowDown", { ctrlKey: true }),
+    log.scrollTop,
+    press(log, "ArrowDown", { ctrlKey: true, shiftKey: true }),
+    log.scrollTop,
+    press(log, "ArrowDown", { ctrlKey: true, altKey: true }),
+    log.scrollTop,
+    press(log, "ArrowUp", { ctrlKey: true }),
+    press(log, "ArrowUp", { ctrlKey: true, shiftKey: true }),
+    press(log, "ArrowUp", { ctrlKey: true, altKey: true }),
+    log.scrollTop,
+  ];
+  expect(moves).toEqual([
+    false,
+    19 * 100 + PAGE,
+    false,
+    19 * 100 + 2 * PAGE,
+    false,
+    19 * 100 + 3 * PAGE,
+    false,
+    false,
+    false,
+    19 * 100,
+  ]);
+  expect([
+    press(log, "ArrowDown", { ctrlKey: true, shiftKey: true, altKey: true }),
+    press(log, "ArrowDown", { ctrlKey: true, metaKey: true }),
+    press(log, " ", { ctrlKey: true }),
+  ]).toEqual([true, true, true]);
+  expect(log.scrollTop).toBe(19 * 100);
+});
+
 test("paused, a page down that reaches the end follows again, one at the end too, and ⌘↓ at once", () => {
   const { log, onFollowChange, update } = mount({
     follow: false,

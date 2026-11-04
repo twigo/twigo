@@ -105,10 +105,27 @@ const JUMP: Mode = { kind: "jump" };
 type Move = "up" | "down" | "first" | "last";
 
 /**
- * The keys that scroll a focused list natively, which the list moves
- * itself, at once: WebKit animates a key's scroll and stops it at the
- * list's next write of `scrollTop`.
+ * The keys that scroll a focused list natively, in Chromium or in WebKit,
+ * which the list moves itself, at once: WebKit animates a key's scroll and
+ * stops it at the list's next write of `scrollTop`.
  */
+const MOVES = new Map<string, Move>([
+  ["PageUp", "up"],
+  ["PageDown", "down"],
+  ["Space", "down"],
+  ["Shift+Space", "up"],
+  ["Alt+ArrowUp", "up"],
+  ["Alt+ArrowDown", "down"],
+  ["Control+ArrowUp", "up"],
+  ["Control+ArrowDown", "down"],
+  ["Shift+Control+ArrowUp", "up"],
+  ["Shift+Control+ArrowDown", "down"],
+  ["Control+Alt+ArrowUp", "up"],
+  ["Control+Alt+ArrowDown", "down"],
+  ["Meta+ArrowUp", "first"],
+  ["Meta+ArrowDown", "last"],
+]);
+
 function moveOf({
   key,
   altKey,
@@ -116,22 +133,15 @@ function moveOf({
   metaKey,
   shiftKey,
 }: KeyboardEvent): Move | undefined {
-  if (ctrlKey || (altKey && metaKey)) return undefined;
-  if (key === " ")
-    return altKey || metaKey ? undefined : shiftKey ? "up" : "down";
-  if (shiftKey) return undefined;
-  switch (key) {
-    case "PageUp":
-      return altKey || metaKey ? undefined : "up";
-    case "PageDown":
-      return altKey || metaKey ? undefined : "down";
-    case "ArrowUp":
-      return metaKey ? "first" : altKey ? "up" : undefined;
-    case "ArrowDown":
-      return metaKey ? "last" : altKey ? "down" : undefined;
-    default:
-      return undefined;
-  }
+  return MOVES.get(
+    [
+      shiftKey ? "Shift+" : "",
+      ctrlKey ? "Control+" : "",
+      altKey ? "Alt+" : "",
+      metaKey ? "Meta+" : "",
+      key === " " ? "Space" : key,
+    ].join(""),
+  );
 }
 
 /** The keys of lines no longer loaded, by index, and the window they were taken from. */
