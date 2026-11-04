@@ -246,17 +246,23 @@ export class MockLogs {
       // The kubelet deletes a rolled-out pod once its containers ended, so
       // their ends come before its `left` (ARCHITECTURE 4.6); a queued
       // stream's read finds no pod by then, so it gets none.
+      let last = this.#lastOf(name);
       for (const [id, stream] of this.#streams) {
         if (stream.pod.name !== name) continue;
         if (
           reading.has(id) &&
           writes(stream.pod) &&
           stream.restartAt === undefined
-        )
+        ) {
           incoming.push(this.#ended(stream, at, 0, "Completed"));
+          last = at;
+        }
         this.#streams.delete(id);
       }
-      incoming.push([at, { type: "left", pod: name, time: rfc3339(at) }]);
+      incoming.push([
+        last ?? at,
+        { type: "left", pod: name, time: rfc3339(at) },
+      ]);
       this.#dirty.pods = true;
     }
     for (const pod of this.#pods()) {
@@ -277,8 +283,11 @@ export class MockLogs {
           },
         },
       ]);
+      // Its containers write from its creation, so its `joined` stands just
+      // before its first entry, where Rust moves it once that entry came.
       for (const container of this.#chosen(pod)) {
-        if (this.#streams.size < TAB_STREAMS) this.#stream(pod, container, now);
+        if (this.#streams.size < TAB_STREAMS)
+          this.#stream(pod, container, now).next = now;
       }
       this.#dirty.pods = true;
     }
@@ -314,6 +323,19 @@ export class MockLogs {
     const followed = [...this.#streams.values()].map((stream) => stream.pod);
     const pod = followed[Math.floor(Math.random() * followed.length)];
     if (pod) this.#cluster.rollOut(pod, now);
+  }
+
+  /** When the pod's last line or end stands in the buffer. */
+  #lastOf(pod: string): bigint | undefined {
+    const entries = this.#buffer.entries;
+    for (let index = entries.length - 1; index >= 0; index--) {
+      const entry = entries[index];
+      if (!entry) continue;
+      const { kind } = entry;
+      if ((kind.type === "line" || kind.type === "ended") && kind.pod === pod)
+        return entry.at;
+    }
+    return undefined;
   }
 
   #insert(incoming: readonly Timed[]): void {

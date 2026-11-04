@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { LogBatch, LogSource, LogView } from "../generated";
-import { Cluster, deploymentOf } from "./cluster";
+import type { LogBatch, LogEntry, LogSource, LogView } from "../generated";
+import { Cluster, deploymentOf, type Pod } from "./cluster";
 import { MockLogs, TAB_STREAMS } from "./logs";
 import { level } from "./logview/level";
 
@@ -156,6 +156,105 @@ test("a rollout replaces a followed pod: its followed containers end, it leaves,
   expect(ended).toEqual(following);
   expect(after).toEqual([]);
   expect(joined?.type === "joined" && joined.owner?.kind).toBe("ReplicaSet");
+  logs.close();
+});
+
+function podOf(entry: LogEntry | undefined): string | undefined {
+  return entry && entry.type !== "dropped" ? entry.pod : undefined;
+}
+
+function bounds(entries: readonly LogEntry[], mark: number): void {
+  const entry = entries[mark];
+  const pod = podOf(entry);
+  const own = entries.flatMap((each, at) =>
+    podOf(each) === pod && (each.type === "line" || each.type === "ended")
+      ? [at]
+      : [],
+  );
+  if (entry?.type === "joined") {
+    expect(own.every((at) => at > mark)).toBe(true);
+    if (own.length > 0) expect(own[0]).toBe(mark + 1);
+  } else {
+    expect(entry?.type).toBe("left");
+    expect(own.every((at) => at < mark)).toBe(true);
+    if (own.length > 0) expect(own[own.length - 1]).toBe(mark - 1);
+  }
+}
+
+test("a rollout's left stands just after its pod's last entry, and its successor's joined just before its first", async () => {
+  const { logs, batches } = session();
+  await vi.advanceTimersByTimeAsync(27_000);
+  const entries = batches[batches.length - 1]?.window?.entries ?? [];
+  const left = entries.findIndex((entry) => entry.type === "left");
+  const joined = entries.findIndex((entry) => entry.type === "joined");
+  expect(left).toBeGreaterThan(0);
+  expect(joined).toBeGreaterThan(0);
+  bounds(entries, left);
+  bounds(entries, joined);
+  expect(entries[joined + 1]?.type).toBe("line");
+  logs.close();
+});
+
+test("a pod that leaves in its crash loop's back-off has its left just after its end", async () => {
+  const cluster = new Cluster("prod-eu", 5000, Date.now());
+  const pods = (pod: Pod) =>
+    cluster.pods.filter(
+      (each) =>
+        each.namespace === pod.namespace &&
+        deploymentOf(each) === deploymentOf(pod),
+    );
+  const crashing = cluster.pods.find((pod) => {
+    const followed = pods(pod).slice(0, TAB_STREAMS);
+    return (
+      pod.status === "CrashLoopBackOff" &&
+      followed.includes(pod) &&
+      followed.some((each) => each.status === "Running")
+    );
+  });
+  expect(crashing).toBeDefined();
+  if (!crashing) return;
+  const batches: LogBatch[] = [];
+  const logs = new MockLogs(
+    {
+      space: "prod-eu",
+      gvr: { group: "apps", version: "v1", resource: "deployments" },
+      namespace: crashing.namespace,
+      name: deploymentOf(crashing),
+    },
+    SOURCE,
+    VIEW,
+    cluster,
+    (_session, wanted) => wanted,
+    (batch) => {
+      batches.push(batch);
+      logs.ack(batch.seq);
+    },
+  );
+  logs.setWindow({ type: "tail", count: 1000 });
+  const backingOff = () =>
+    batches
+      .filter((batch) => batch.pods !== null)
+      .pop()
+      ?.pods?.find((pod) => pod.name === crashing.name)
+      ?.containers.some(
+        (container) =>
+          container.stream.state === "waiting" &&
+          container.stream.reason === "CrashLoopBackOff",
+      );
+  await vi.advanceTimersByTimeAsync(200);
+  while (!backingOff()) await vi.advanceTimersByTimeAsync(100);
+  await vi.advanceTimersByTimeAsync(5_000);
+  cluster.rollOut(crashing, Date.now());
+  await vi.advanceTimersByTimeAsync(200);
+  const entries = batches[batches.length - 1]?.window?.entries ?? [];
+  const left = entries.findIndex(
+    (entry) => entry.type === "left" && entry.pod === crashing.name,
+  );
+  expect(entries[left - 1]?.type).toBe("ended");
+  bounds(entries, left);
+  expect(entries.slice(left + 1).some((entry) => entry.type === "line")).toBe(
+    true,
+  );
   logs.close();
 });
 
