@@ -39,6 +39,7 @@ import {
   type Action,
   type Tone,
 } from "@twigo/ui";
+import { sameData } from "@twigo/utils";
 import { useChanges, useWorkbench } from "@twigo/workbench";
 import { clock, followed, logsKind, podTag, standingMatch } from "./entries";
 import { TAB_STREAMS, type LogsTabs } from "./state";
@@ -246,7 +247,7 @@ export function LogsToolbar({
               RANGES.map(({ id, label, since }): Action => ({
                 id,
                 label,
-                checked: sameSince(since, source.since),
+                checked: sameData(since, source.since),
                 run: () => {
                   tabs.setSource(uri, { since });
                 },
@@ -370,12 +371,8 @@ export function LogsToolbar({
 
 /** What the range's button says: the start picked, short on a narrow toolbar. */
 function rangeLabel(since: Since, narrow: boolean): string {
-  const picked = RANGES.find((range) => sameSince(range.since, since));
+  const picked = RANGES.find((range) => sameData(range.since, since));
   return (narrow ? picked?.short : picked?.label) ?? "Range";
-}
-
-function sameSince(a: Since, b: Since): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 /**

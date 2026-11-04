@@ -1,3 +1,4 @@
+import { sameData } from "@twigo/utils";
 import type { Backend } from "./backend";
 import { toIpcError, type IpcError } from "./error";
 import type {
@@ -170,20 +171,20 @@ export class LogsSession {
         },
       };
     };
-    if (!same(sent.source, this.#source)) {
+    if (!sameData(sent.source, this.#source)) {
       const { taken, refused } = answer("source");
       this.#backend
         .invoke("logs_set_source", { id, source: this.#source })
         .then(taken, refused);
     }
-    if (!same(sent.view, this.#view)) {
+    if (!sameData(sent.view, this.#view)) {
       const { taken, refused } = answer("view");
       this.#backend
         .invoke("logs_set_view", { id, view: this.#view })
         .then(taken, refused);
     }
     if (this.#changes !== changes) this.#refresh();
-    if (this.#window && !same(sent.window, this.#window)) {
+    if (this.#window && !sameData(sent.window, this.#window)) {
       this.#backend
         .invoke("logs_set_window", { id, window: this.#window })
         .catch(failed);
@@ -256,9 +257,4 @@ export class LogsSession {
     this.#snapshot = snapshot;
     for (const listener of this.#listeners) listener();
   }
-}
-
-/** The requests are plain data, so their JSON tells them apart. */
-function same(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
 }

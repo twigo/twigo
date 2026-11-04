@@ -7,6 +7,7 @@ import {
   type LogView,
 } from "@twigo/protocol";
 import type { LinePlace } from "@twigo/ui";
+import { sameData } from "@twigo/utils";
 import { Changes } from "@twigo/workbench";
 import { anchoredMatch, currentMatch, standingMatch } from "./entries";
 
@@ -118,7 +119,7 @@ export class LogsTabs {
   setView(uri: string, change: Partial<LogView>): void {
     const tab = this.get(uri);
     const view = { ...tab.view, ...change };
-    if (same(view, tab.view)) return;
+    if (sameData(view, tab.view)) return;
     this.update(uri, {
       view,
       ...(view.search !== tab.view.search && { anchor: undefined }),
@@ -129,7 +130,7 @@ export class LogsTabs {
   setSource(uri: string, change: Partial<LogSource>): void {
     const tab = this.get(uri);
     const source = { ...tab.source, ...change };
-    if (same(source, tab.source)) return;
+    if (sameData(source, tab.source)) return;
     this.#places.delete(uri);
     this.update(uri, {
       source,
@@ -291,9 +292,4 @@ function gone(snapshot: LogsSnapshot, anchor: MatchAnchor): boolean {
     (window?.around?.id === anchor.id &&
       !window.entries.some((entry) => entry.id === anchor.id))
   );
-}
-
-/** The choices are plain data, so their JSON tells them apart. */
-function same(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
 }
