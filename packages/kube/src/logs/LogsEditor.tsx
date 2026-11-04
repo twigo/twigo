@@ -29,13 +29,7 @@ import { useWidth } from "../useWidth";
 import { parseLogsUri } from "../uri";
 import { ViewStatus } from "../ViewStatus";
 import { viewProblem } from "../viewProblem";
-import {
-  anchoredMatch,
-  followed,
-  lineItem,
-  podTag,
-  standingMatch,
-} from "./entries";
+import { followed, lineItem, podTag, standingMatch } from "./entries";
 import { LogsToolbar } from "./LogsToolbar";
 import type { LogsTabs } from "./state";
 
@@ -78,31 +72,6 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
       scope.dispose();
     };
   }, [element, keys, lists, tabs, uri]);
-
-  const entries = snapshot?.window?.entries;
-  useEffect(() => {
-    if (entries) tabs.saw(uri, entries);
-  }, [entries, tabs, uri]);
-
-  // Matches come and go around the one the person stepped to, which stays
-  // the current one by its entry's id while the matches hold it, or may
-  // hold it beyond the last 10,000 they list, and gives way to the newest
-  // once its line is gone: a list of every match does not hold it, or the
-  // window asked around it does not, which the view keeps exactly.
-  const matchesNow = snapshot?.matches;
-  const windowNow = snapshot?.window;
-  const { anchor } = tabs.get(uri);
-  useEffect(() => {
-    if (!anchor || !matchesNow) return;
-    if (anchoredMatch(matchesNow, anchor.id, anchor.fromEnd) !== undefined)
-      return;
-    if (
-      matchesNow.count <= matchesNow.entries.length ||
-      (windowNow?.around?.id === anchor.id &&
-        !windowNow.entries.some((entry) => entry.id === anchor.id))
-    )
-      tabs.update(uri, { anchor: undefined });
-  }, [anchor, matchesNow, windowNow, tabs, uri]);
 
   const onWindow = useCallback(
     (window: LineWindow) => {

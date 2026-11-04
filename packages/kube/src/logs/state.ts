@@ -1,14 +1,14 @@
 import {
   LogsSession,
   type Backend,
-  type LogEntry,
   type LogSource,
+  type LogsSnapshot,
   type LogTarget,
   type LogView,
 } from "@twigo/protocol";
 import type { LinePlace } from "@twigo/ui";
 import { Changes } from "@twigo/workbench";
-import { currentMatch, standingMatch } from "./entries";
+import { anchoredMatch, currentMatch, standingMatch } from "./entries";
 
 /** What a logs tab shows (ARCHITECTURE 4.6); its lines live in Rust. */
 export interface LogsTab {
@@ -226,9 +226,7 @@ export class LogsTabs {
       const { source, view } = this.get(uri);
       const opened = new LogsSession(this.backend, { target, source, view });
       opened.subscribe(() => {
-        const { waiting } = this.get(uri);
-        if (waiting && opened.getSnapshot().settled)
-          this.step(uri, waiting === "older");
+        this.#onBatch(uri, opened.getSnapshot());
       });
       this.#sessions.set(uri, opened);
       session = opened;
@@ -236,9 +234,13 @@ export class LogsTabs {
     return session;
   }
 
-  /** Keeps the pods whose Joined entries a tab's window shows. */
-  saw(uri: string, entries: readonly LogEntry[]): void {
-    for (const entry of entries) {
+  /**
+   * What each batch changes of the tab, before it draws: the pods whose
+   * Joined entries its window shows, a stepped match that gives way to the
+   * newest once its line is gone, and a step that waited for its search.
+   */
+  #onBatch(uri: string, snapshot: LogsSnapshot): void {
+    for (const entry of snapshot.window?.entries ?? []) {
       if (entry.type !== "joined") continue;
       let joined = this.#joined.get(uri);
       if (!joined) {
@@ -247,6 +249,10 @@ export class LogsTabs {
       }
       joined.add(entry.pod);
     }
+    const { anchor, waiting } = this.get(uri);
+    if (anchor && gone(snapshot, anchor))
+      this.update(uri, { anchor: undefined });
+    if (waiting && snapshot.settled) this.step(uri, waiting === "older");
   }
 
   /** Whether a pod joined the tab after it first listed its pods, as a rollout's new pods do. */
@@ -270,6 +276,26 @@ export class LogsTabs {
     this.#places.delete(uri);
     if (this.#tabs.delete(uri)) this.changes.emit();
   }
+}
+
+/**
+ * Whether a stepped match's line is gone: matches come and go around it,
+ * and it stands while they hold it, or may hold it beyond the last 10,000
+ * they list, until a list of every match lacks it, or the window asked
+ * around it does, which the view keeps exactly.
+ */
+function gone(snapshot: LogsSnapshot, anchor: MatchAnchor): boolean {
+  const { matches, window } = snapshot;
+  if (
+    !matches ||
+    anchoredMatch(matches, anchor.id, anchor.fromEnd) !== undefined
+  )
+    return false;
+  return (
+    matches.count <= matches.entries.length ||
+    (window?.around?.id === anchor.id &&
+      !window.entries.some((entry) => entry.id === anchor.id))
+  );
 }
 
 /** The choices are plain data, so their JSON tells them apart. */

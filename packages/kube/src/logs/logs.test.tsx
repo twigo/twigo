@@ -6,7 +6,7 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { INITIAL_LOGS, type LogEntry } from "@twigo/protocol";
+import { INITIAL_LOGS, type LogEntry, type LogsSession } from "@twigo/protocol";
 import { WorkbenchView } from "@twigo/workbench";
 import { inWorkbench, testWorkbench } from "@twigo/workbench/testing";
 import { registerKube } from "../register";
@@ -371,6 +371,18 @@ test("a step right after the search changes waits for that search's matches", as
   session.close();
 });
 
+function published(session: LogsSession) {
+  return act(
+    () =>
+      new Promise<void>((done) => {
+        const off = session.subscribe(() => {
+          off();
+          done();
+        });
+      }),
+  );
+}
+
 async function logsTab() {
   const workbench = await testWorkbench();
   const { tabs, open } = registerLogs(workbench);
@@ -467,6 +479,7 @@ test("a step's match the last 10,000 no longer list stays current, the line the 
       follow: false,
     });
   });
+  await published(session);
   expect(tabs.get(uri).anchor).toEqual({ id: line.id, fromEnd: 0 });
   expect(screen.getByText("≤ 9 of 12")).toBeTruthy();
   expect(tabs.place(uri)?.key).toBe(String(line.id));
@@ -530,22 +543,63 @@ test("a step's match beyond the last 10,000 gives way to the newest once the win
     });
   });
   expect(tabs.get(uri).anchor).toEqual({ id: line.id, fromEnd: 0 });
-  const kept = [line.id + 1, null].map((id) => {
+  const kept = [];
+  for (const id of [line.id + 1, null]) {
     snapshot.mockReturnValue(around(lacking, id));
-    act(() => {
-      tabs.update(uri, {});
-    });
-    return tabs.get(uri).anchor;
-  });
+    await published(session);
+    kept.push(tabs.get(uri).anchor);
+  }
   expect(kept).toEqual([
     { id: line.id, fromEnd: 0 },
     { id: line.id, fromEnd: 0 },
   ]);
   snapshot.mockReturnValue(around(lacking));
-  act(() => {
-    tabs.update(uri, {});
-  });
+  await published(session);
   expect(tabs.get(uri)).toMatchObject({ anchor: undefined });
+  session.close();
+});
+
+test("a pod's lines stand out once the window shows it joined, from the render that draws them", async () => {
+  const height = vi
+    .spyOn(Element.prototype, "clientHeight", "get")
+    .mockReturnValue(600);
+  const { session } = await logsTab();
+  await vi.waitFor(() => {
+    expect(session.getSnapshot().window).toBeDefined();
+  });
+  const pod = "auth-api-63n3i1-fgcpn";
+  vi.spyOn(session, "getSnapshot").mockReturnValue({
+    ...session.getSnapshot(),
+    total: 2,
+    window: {
+      start: 0,
+      around: null,
+      entries: [
+        {
+          type: "joined",
+          id: 1,
+          pod,
+          time: "2026-11-03T10:41:00Z",
+          owner: null,
+        },
+        {
+          type: "line",
+          id: 2,
+          pod,
+          container: "api",
+          time: "2026-11-03T10:41:01Z",
+          level: null,
+          text: "ready to serve",
+          styles: [],
+          marks: [],
+        },
+      ],
+    },
+  });
+  await published(session);
+  const row = screen.getByText("ready to serve").closest("[data-index]");
+  expect(row?.querySelector(".text-brand")?.textContent).toMatch(/^fgcpn/);
+  height.mockRestore();
   session.close();
 });
 
