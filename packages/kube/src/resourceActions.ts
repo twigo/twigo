@@ -7,7 +7,7 @@ import {
   X,
 } from "lucide-react";
 import type { MenuId, Workbench } from "@twigo/workbench";
-import type { LogsObject } from "./logs/register";
+import type { LogTarget } from "@twigo/protocol";
 import type { ListServices } from "./services";
 import { objectOf, type Selected } from "./selection";
 import { objectUri, parseListUri } from "./uri";
@@ -21,7 +21,7 @@ import { objectUri, parseListUri } from "./uri";
 export function registerResourceActions(
   workbench: Workbench,
   { selection, statuses, states }: ListServices,
-  openLogs: (object: LogsObject) => void,
+  openLogs: (object: LogTarget) => void,
 ): void {
   const { commands, menus, editors, keybindings } = workbench;
   /** The active list editor and its selected row. */

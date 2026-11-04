@@ -159,7 +159,7 @@ export function LineList({
   timestamps,
   tagWidth = 6,
   fresh,
-  place,
+  initialPlace,
   reveal,
   onWindow,
   onFollowChange,
@@ -183,7 +183,7 @@ export function LineList({
   /** Lines that came while paused, on a button that follows again. */
   fresh: number;
   /** Where the list stood or was going when it last paused, which it goes back to when it mounts paused. */
-  place?: LinePlace | undefined;
+  initialPlace?: LinePlace | undefined;
   /**
    * A line to scroll to, such as a search step's match, each time its
    * token changes while the list is paused, after the one it mounts with;
@@ -192,7 +192,7 @@ export function LineList({
   reveal?: { readonly key: string; readonly token: number } | undefined;
   onWindow: (window: LineWindow) => void;
   onFollowChange: (follow: boolean) => void;
-  /** Where the paused list stands, or the line it reveals, for `place`. */
+  /** Where the paused list stands, or the line it reveals, for `initialPlace`. */
   onPlace?: (place: LinePlace) => void;
   /** Scopes the list's keys while it is mounted and routes the list commands to it, as a grid's. */
   register?: (element: HTMLElement, controller: ListController) => () => void;
@@ -210,8 +210,8 @@ export function LineList({
   const [initial] = useState<Mode>(() =>
     follow
       ? FOLLOW
-      : place
-        ? { kind: "seek", key: place.key, offset: place.offset }
+      : initialPlace
+        ? { kind: "seek", key: initialPlace.key, offset: initialPlace.offset }
         : JUMP,
   );
   const mode = useRef(initial);
@@ -260,7 +260,7 @@ export function LineList({
     const found = items.findIndex((item) => item.key === key);
     return found < 0 ? undefined : start + found;
   };
-  const placed = (key: string) =>
+  const standsAt = (key: string) =>
     indexOf(key) ?? (around?.key === key ? around.index : undefined);
   // Placed by its own start: with wrap, the line that held its old index
   // is another height.
@@ -403,7 +403,7 @@ export function LineList({
     };
   }, [element]);
 
-  const ask = useEffectEvent(() => {
+  const askWindow = useEffectEvent(() => {
     const now = mode.current;
     if (now.kind === "follow") onWindow({ tail: rows + OVERSCAN });
     else if (now.kind === "jump")
@@ -416,7 +416,7 @@ export function LineList({
       });
   });
   useEffect(() => {
-    ask();
+    askWindow();
   }, [follow, asked, rows, first, last, onWindow]);
 
   // After every change of the layout, the list places its lines: following,
@@ -431,9 +431,9 @@ export function LineList({
     const max = Math.max(0, maxOf(scroller) + measured - size);
     // A step pauses as it reveals: a token that comes while following is
     // not a step's.
-    const fresh = reveal !== undefined && reveal.token !== revealed.current;
-    if (fresh) revealed.current = reveal.token;
-    const revealing = fresh && !follow;
+    const untaken = reveal !== undefined && reveal.token !== revealed.current;
+    if (untaken) revealed.current = reveal.token;
+    const revealing = untaken && !follow;
     if (revealing) {
       enter({ kind: "seek", key: reveal.key, offset: "centre" });
       onPlace?.({ key: reveal.key, offset: centred(scroller, ROW) });
@@ -447,7 +447,7 @@ export function LineList({
     const moved = unseen(scroller);
     const now = mode.current;
     if (now.kind === "hold") {
-      const index = placed(now.key);
+      const index = standsAt(now.key);
       if (index !== undefined) {
         const begin = startOf(index);
         const at = begin + now.offset;
@@ -475,7 +475,7 @@ export function LineList({
       holdTop(scroller);
       return;
     }
-    const index = placed(now.key);
+    const index = standsAt(now.key);
     if (index === undefined) return;
     const begin = startOf(index);
     const offset =

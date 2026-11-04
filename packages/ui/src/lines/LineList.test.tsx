@@ -501,7 +501,7 @@ test("paused at the end, a page down follows again though it cannot scroll", () 
     follow: false,
     total: 300,
     items: lines(0, 300),
-    place: { key: "268", offset: 8 },
+    initialPlace: { key: "268", offset: 8 },
   });
   expect(log.scrollTop).toBe(19 * 300 - 600);
   press(log, "PageDown");
@@ -663,7 +663,7 @@ test("paused at the end, turning wrap on keeps the top line where it stood, thou
     follow: false,
     total: 300,
     items: lines(0, 300),
-    place: { key: "268", offset: 8 },
+    initialPlace: { key: "268", offset: 8 },
   });
   scroll(log, log.scrollTop);
   await act(() => new Promise((done) => setTimeout(done, 200)));
@@ -808,7 +808,7 @@ test("a list that mounts paused goes back to where it stood", () => {
     total: 300,
     start: 100,
     items: lines(100, 200),
-    place: { key: "150", offset: 7 },
+    initialPlace: { key: "150", offset: 7 },
   });
   expect(onWindow).toHaveBeenCalledWith(around("150"));
   expect(log.scrollTop).toBe(19 * 150 + 7);
@@ -821,7 +821,7 @@ test("a place that is not loaded waits for the answer around its line, not for a
     start: 400,
     items: lines(400, 550),
     around: { key: "450", index: 450 },
-    place: { key: "150", offset: 7 },
+    initialPlace: { key: "150", offset: 7 },
   });
   expect(onWindow).toHaveBeenLastCalledWith(around("150"));
   expect(log.scrollTop).toBe(0);
@@ -977,7 +977,7 @@ test("a list that mounts with a reveal it was given before goes to its place, no
     total: 5000,
     start: 100,
     items: lines(100, 200),
-    place: { key: "150", offset: 7 },
+    initialPlace: { key: "150", offset: 7 },
     reveal: { key: "4950", token: 3 },
   });
   expect(log.scrollTop).toBe(19 * 150 + 7);
@@ -1007,7 +1007,7 @@ test("the person's scroll ends a place still loading", () => {
     follow: false,
     total: 300,
     items: lines(0, 100),
-    place: { key: "250", offset: 0 },
+    initialPlace: { key: "250", offset: 0 },
   });
   expect(onWindow).toHaveBeenLastCalledWith(around("250"));
   wheel(log, 19 * 50);
@@ -1025,7 +1025,7 @@ test("following again ends a place still loading", () => {
     follow: false,
     total: 300,
     items: lines(0, 100),
-    place: { key: "250", offset: 0 },
+    initialPlace: { key: "250", offset: 0 },
   });
   update({ follow: true });
   update({

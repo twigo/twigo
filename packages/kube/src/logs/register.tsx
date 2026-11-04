@@ -1,18 +1,10 @@
 import { ScrollText } from "lucide-react";
-import type { Gvr } from "@twigo/protocol";
+import type { LogTarget } from "@twigo/protocol";
 import type { Workbench } from "@twigo/workbench";
 import { LOGS_SCHEME, logsUri, parseLogsUri } from "../uri";
 import { logsKind } from "./entries";
 import { LogsEditor } from "./LogsEditor";
 import { LogsTabs, type LogsTab } from "./state";
-
-/** What a command needs to open an object's logs. */
-export interface LogsObject {
-  readonly space: string;
-  readonly gvr: Gvr;
-  readonly namespace: string;
-  readonly name: string;
-}
 
 /**
  * Logs in the panel (ARCHITECTURE 4.6): the `logs://` editor, opened by
@@ -21,7 +13,7 @@ export interface LogsObject {
  */
 export function registerLogs(workbench: Workbench): {
   tabs: LogsTabs;
-  open: (object: LogsObject) => void;
+  open: (object: LogTarget) => void;
 } {
   const { editors, commands, keybindings, menus } = workbench;
   const tabs = new LogsTabs(workbench.backend);
@@ -45,7 +37,7 @@ export function registerLogs(workbench: Workbench): {
 
   /** Opens or focuses an object's logs, on one container and its previous instance when a finding asks. */
   const open = (
-    object: LogsObject,
+    object: LogTarget,
     choice?: { container: string; previous: boolean },
   ) => {
     const uri = logsUri(object);
@@ -134,7 +126,7 @@ export function registerLogs(workbench: Workbench): {
 function logsRequest(
   args: unknown,
 ):
-  | { object: LogsObject; choice?: { container: string; previous: boolean } }
+  | { object: LogTarget; choice?: { container: string; previous: boolean } }
   | undefined {
   if (typeof args !== "object" || args === null) return undefined;
   const { space, gvr, namespace, name, container, previous } = args as Record<

@@ -269,7 +269,7 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
               }
             }
             fresh={tabs.fresh(uri)}
-            place={tabs.place(uri)}
+            initialPlace={tabs.place(uri)}
             onWindow={onWindow}
             onFollowChange={onFollowChange}
             onPlace={onPlace}

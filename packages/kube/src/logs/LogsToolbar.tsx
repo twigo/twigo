@@ -16,6 +16,7 @@ import type {
   Containers,
   LogPod,
   LogsSession,
+  LogTarget,
   LogsSnapshot,
   Since,
   StreamState,
@@ -39,7 +40,6 @@ import {
   type Tone,
 } from "@twigo/ui";
 import { useChanges, useWorkbench } from "@twigo/workbench";
-import type { LogsInput } from "../uri";
 import { clock, followed, logsKind, podTag, standingMatch } from "./entries";
 import { TAB_STREAMS, type LogsTabs } from "./state";
 
@@ -107,7 +107,7 @@ export function LogsToolbar({
   compact,
 }: {
   uri: string;
-  input: LogsInput;
+  input: LogTarget;
   tabs: LogsTabs;
   snapshot: LogsSnapshot;
   session: LogsSession;
@@ -389,7 +389,7 @@ function PodPicker({
   pods,
 }: {
   uri: string;
-  input: LogsInput;
+  input: LogTarget;
   tabs: LogsTabs;
   pods: readonly LogPod[] | undefined;
 }) {
