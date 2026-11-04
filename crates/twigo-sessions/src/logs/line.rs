@@ -57,6 +57,28 @@ struct Style {
     underline: bool,
 }
 
+impl Style {
+    fn over(self, range: TextRange) -> TextStyle {
+        let Style {
+            fg,
+            bg,
+            bold,
+            dim,
+            italic,
+            underline,
+        } = self;
+        TextStyle {
+            range,
+            fg,
+            bg,
+            bold,
+            dim,
+            italic,
+            underline,
+        }
+    }
+}
+
 #[derive(Default)]
 struct Styler {
     text: String,
@@ -84,42 +106,20 @@ impl Styler {
     /// Ends the current run, joined to the one before when they touch with
     /// the same style.
     fn close(&mut self) {
-        let Style {
-            fg,
-            bg,
-            bold,
-            dim,
-            italic,
-            underline,
-        } = self.style;
         if self.at == self.from || self.style == Style::default() {
             return;
         }
         if let Some(last) = self.styles.last_mut()
             && last.range.end == self.from
-            && (
-                last.fg,
-                last.bg,
-                last.bold,
-                last.dim,
-                last.italic,
-                last.underline,
-            ) == (fg, bg, bold, dim, italic, underline)
+            && *last == self.style.over(last.range)
         {
             last.range.end = self.at;
         } else {
-            self.styles.push(TextStyle {
-                range: TextRange {
-                    start: self.from,
-                    end: self.at,
-                },
-                fg,
-                bg,
-                bold,
-                dim,
-                italic,
-                underline,
-            });
+            let range = TextRange {
+                start: self.from,
+                end: self.at,
+            };
+            self.styles.push(self.style.over(range));
         }
         self.from = self.at;
     }
