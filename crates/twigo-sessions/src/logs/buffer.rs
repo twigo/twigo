@@ -182,6 +182,13 @@ impl Buffer {
         true
     }
 
+    /// Whether it holds the entry `id`, which stands at `at`.
+    pub fn holds(&self, id: u64, at: i64) -> bool {
+        self.entries
+            .binary_search_by_key(&(at, id), Entry::key)
+            .is_ok()
+    }
+
     fn bound(&mut self) {
         let mut count = 0;
         while self.entries.len() > self.limits.entries || self.bytes > self.limits.bytes {

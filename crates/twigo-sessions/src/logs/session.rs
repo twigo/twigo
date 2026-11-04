@@ -210,6 +210,14 @@ struct Leaving {
     at: i64,
 }
 
+/// What a pod's streams wrote.
+struct Written {
+    /// When its first entry stands.
+    first: i64,
+    /// The time and id of its latest entry.
+    last: (i64, u64),
+}
+
 /// A stream's task, ended when dropped.
 struct Task(JoinHandle<()>);
 
@@ -259,11 +267,11 @@ struct Run {
     ending: Vec<Task>,
     /// Streams that read all there was, with their last state.
     finished: HashMap<Key, StreamState>,
-    /// The times of each pod's first and latest entries, by its uid: its
-    /// `Joined` stands just before the first and its `Left` just after the
-    /// latest, whatever the clocks of its node, the API server and the
-    /// session say.
-    written: HashMap<Arc<str>, (i64, i64)>,
+    /// What each pod's streams wrote, by its uid: its `Joined` stands just
+    /// before the first entry and its `Left` just after the latest while
+    /// the buffer holds it, whatever the clocks of its node, the API server
+    /// and the session say.
+    written: HashMap<Arc<str>, Written>,
     /// The id and time of each `Joined` entry, by its pod's uid, until the
     /// pod left.
     joined: HashMap<Arc<str>, (u64, i64)>,
@@ -512,8 +520,9 @@ impl Run {
     }
 
     /// Adds the `Left` entry of each pod that left once its streams have
-    /// ended, so every entry of the pod came: just after the last of them,
-    /// or at the leave while it has none, though not before its `Joined`.
+    /// ended, so every entry of the pod came: just after the latest of them
+    /// while the buffer holds it, else at the leave, though not before its
+    /// `Joined`.
     fn leave(&mut self) {
         let (gone, waiting): (Vec<Leaving>, Vec<Leaving>) = std::mem::take(&mut self.leaving)
             .into_iter()
@@ -529,8 +538,8 @@ impl Run {
             .map(|leaving| {
                 let joined = self.joined.remove(&leaving.uid);
                 let at = match self.written.remove(&leaving.uid) {
-                    Some((_, last)) => last,
-                    None => joined.map_or(leaving.at, |(_, at)| at.max(leaving.at)),
+                    Some(Written { last: (at, id), .. }) if self.buffer.holds(id, at) => at,
+                    _ => joined.map_or(leaving.at, |(_, at)| at.max(leaving.at)),
                 };
                 (
                     at,
@@ -552,7 +561,7 @@ impl Run {
         let (buffer, written) = (&mut self.buffer, &self.written);
         let mut moved = false;
         self.joined.retain(|uid, (id, at)| {
-            let Some(&(first, _)) = written.get(uid) else {
+            let Some(&Written { first, .. }) = written.get(uid) else {
                 return true;
             };
             if first == *at {
@@ -694,6 +703,7 @@ impl Run {
     /// their states, and the places of those that finished for the next.
     fn take_events(&mut self) {
         let mut entries = Vec::new();
+        let mut whose = Vec::new();
         let mut restarts = Vec::new();
         let mut freed = false;
         let now = Instant::now();
@@ -727,9 +737,7 @@ impl Run {
             };
             let origin = Arc::clone(origin);
             if let Event::Line { at, .. } | Event::Ended { at, .. } = &event {
-                let (first, latest) = self.written.entry(Arc::clone(uid)).or_insert((*at, *at));
-                *first = (*first).min(*at);
-                *latest = (*latest).max(*at);
+                whose.push((Arc::clone(uid), *at));
             }
             match event {
                 Event::Line {
@@ -783,7 +791,19 @@ impl Run {
             }
         }
         self.stopped.retain(|stopped| !ended.contains(&stopped.id));
-        self.insert(entries);
+        let ids = self.insert(entries);
+        for (id, (uid, at)) in ids.zip(whose) {
+            self.written
+                .entry(uid)
+                .and_modify(|written| {
+                    written.first = written.first.min(at);
+                    written.last = written.last.max((at, id));
+                })
+                .or_insert(Written {
+                    first: at,
+                    last: (at, id),
+                });
+        }
         self.place_joined();
         for (origin, restarting) in restarts {
             self.dirty.view |= self.buffer.restarts(&origin, restarting.into());
@@ -1531,6 +1551,52 @@ mod tests {
             texts(&run),
             ["old up", "web-1 left", "web-1 joined", "new up"]
         );
+    }
+
+    fn small() -> Buffer {
+        Buffer::new(Limits {
+            entries: 3,
+            bytes: 1 << 20,
+        })
+    }
+
+    fn other(text: &str) -> (i64, Kind) {
+        (
+            now(),
+            Kind::Line {
+                origin: Arc::new(Origin {
+                    pod: "web-2".into(),
+                    container: "web".into(),
+                }),
+                level: None,
+                text: text.into(),
+                styles: Box::new([]),
+            },
+        )
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_left_pods_entry_stands_at_the_leave_once_the_bound_dropped_its_lines() {
+        let fake = Fake::default();
+        fake.pod(web_1("uid-a", "web-a", "2026-11-03T10:00:00Z"));
+        fake.serve("web-1", "web", Some("web-a"), None);
+        fake.write("web-1", "web", "web-a", now() - SECOND, "old up");
+        let (hub, _) = fake.hub();
+        let mut run = Run::new(hub, "kind-test".to_owned(), request("web-1"))
+            .await
+            .unwrap();
+        run.buffer = small();
+        until(&mut run, "its line", |run| texts(run) == ["old up"]).await;
+        run.insert(vec![other("other 1"), other("other 2"), other("other 3")]);
+        assert_eq!(run.buffer.dropped_ever(), 1);
+
+        fake.stop("web-1", "web", "web-a");
+        fake.delete("web-1");
+        until(&mut run, "the pod left", |run| {
+            run.pods.is_empty() && run.leaving.is_empty()
+        })
+        .await;
+        assert_eq!(texts(&run), ["other 2", "other 3", "web-1 left"]);
     }
 
     fn containers(uid: &str, instance: &str) -> serde_json::Value {
