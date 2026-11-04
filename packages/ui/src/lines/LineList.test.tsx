@@ -431,6 +431,19 @@ test("paused, the person's scroll down to the end follows again, and the list's 
   expect(onFollowChange).toHaveBeenLastCalledWith(true);
 });
 
+test("within a row of the end the list follows: following, the person's scroll up there keeps it following, and paused, one down there follows again", () => {
+  const { log, onFollowChange, update } = mount({
+    total: 300,
+    items: lines(0, 300),
+  });
+  scroll(log, 19 * 300 - 600 - 10);
+  expect(onFollowChange).not.toHaveBeenCalled();
+  update({ follow: false });
+  scroll(log, 19 * 100);
+  scroll(log, 19 * 300 - 600 - 10);
+  expect(onFollowChange).toHaveBeenLastCalledWith(true);
+});
+
 test("paused at the end, the person's scroll up within a row of it keeps it paused", () => {
   const { log, onFollowChange, update } = mount({
     total: 300,
@@ -609,13 +622,13 @@ test("a line revealed near the end stands where the end lets it, says so as it l
     total: 300,
     items: lines(0, 300),
   });
+  onPlace.mockClear();
   update({ reveal: { key: "295", token: 1 } });
   expect(log.scrollTop).toBe(19 * 300 - 600);
-  expect(onPlace).toHaveBeenLastCalledWith({
-    key: "295",
-    offset: 19 * 300 - 600 - 19 * 295,
-  });
-  expect(onPlace).not.toHaveBeenCalledWith({ key: "295", offset: CENTRE });
+  expect(onPlace.mock.calls).toEqual([
+    [{ key: "295", offset: CENTRE }],
+    [{ key: "295", offset: 19 * 300 - 600 - 19 * 295 }],
+  ]);
   update({ total: 320, items: lines(0, 320) });
   expect(log.scrollTop).toBe(19 * 300 - 600);
 });
@@ -883,10 +896,7 @@ test("a line to reveal that is not loaded is asked for around its key, and is th
   });
   update({ reveal: { key: "1200", token: 1 } });
   expect(onWindow).toHaveBeenLastCalledWith(around("1200"));
-  expect(onPlace).toHaveBeenLastCalledWith({
-    key: "1200",
-    offset: -Math.round((600 - 19) / 2),
-  });
+  expect(onPlace).toHaveBeenLastCalledWith({ key: "1200", offset: CENTRE });
 });
 
 test("a loaded line to reveal replaces a reveal still loading, whose answer then moves nothing", () => {

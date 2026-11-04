@@ -122,6 +122,21 @@ function maxLeftOf(element: HTMLElement): number {
   return Math.max(0, element.scrollWidth - element.clientWidth);
 }
 
+/** Whether `top` stands within a row of the end, where the list follows. */
+function nearEnd(element: HTMLElement, top: number): boolean {
+  return maxOf(element) - top < ROW;
+}
+
+/** Whether a scroll from `from` to `to` goes down to within a row of the end, which follows again. */
+function reachesEnd(element: HTMLElement, from: number, to: number): boolean {
+  return to > from && nearEnd(element, to);
+}
+
+/** The offset that centres a line `size` px tall in the list. */
+function centred(element: HTMLElement, size: number): number {
+  return -(element.clientHeight - size) / 2;
+}
+
 /** Whether a scroll by `delta` from `at` moves within `[0, max]`. */
 function within(delta: number, at: number, max: number): boolean {
   return delta < 0 ? at > 0 : delta > 0 && at < max;
@@ -290,22 +305,26 @@ export function LineList({
     known.current = top;
     const now = mode.current;
     if (now.kind === "follow") {
-      if (top > from || maxOf(scroller) - top < ROW) return;
+      if (top > from || nearEnd(scroller, top)) return;
       onFollowChange(false);
-    } else if (top > from && maxOf(scroller) - top < ROW) {
+    } else if (reachesEnd(scroller, from, top)) {
       followAgain();
       return;
     }
+    holdTop(scroller, now.kind === "hold" ? now.asked : undefined);
+  };
+  // Holds the line now on top, asked around `near` while it stays within
+  // DRIFT of it; a top line not loaded is a jump.
+  const holdTop = (scroller: HTMLElement, near?: string) => {
     const line = topLine(scroller);
     if (!line) {
       enter(JUMP);
       return;
     }
     let ask = line.key;
-    if (now.kind === "hold") {
-      const was = indexOf(now.asked);
-      if (was !== undefined && Math.abs(was - line.index) <= DRIFT)
-        ask = now.asked;
+    if (near !== undefined) {
+      const was = indexOf(near);
+      if (was !== undefined && Math.abs(was - line.index) <= DRIFT) ask = near;
     }
     hold(line.key, line.offset, ask);
   };
@@ -315,8 +334,7 @@ export function LineList({
     const from = known.current;
     scroller.scrollTop = top;
     if (unseen(scroller) !== 0) personal(scroller, from);
-    else if (top > from && maxOf(scroller) - scroller.scrollTop < ROW)
-      followAgain();
+    else if (reachesEnd(scroller, from, top)) followAgain();
   };
   const move = (scroller: HTMLElement, to: Move) => {
     if (to === "last") followAgain();
@@ -350,8 +368,7 @@ export function LineList({
     const from = event.cancelable ? top : known.current;
     if (follow) {
       if (dy < 0) onFollowChange(false);
-    } else if (dy > 0 && maxOf(scroller) - from - dy < ROW)
-      onFollowChange(true);
+    } else if (reachesEnd(scroller, from, from + dy)) onFollowChange(true);
     if (!event.cancelable) return;
     const sideways = within(dx, left, maxLeftOf(scroller));
     const vertical = within(dy, top, maxOf(scroller));
@@ -419,10 +436,7 @@ export function LineList({
     const revealing = fresh && !follow;
     if (revealing) {
       enter({ kind: "seek", key: reveal.key, offset: "centre" });
-      onPlace?.({
-        key: reveal.key,
-        offset: -Math.round((scroller.clientHeight - ROW) / 2),
-      });
+      onPlace?.({ key: reveal.key, offset: centred(scroller, ROW) });
     }
     if (follow !== followed.current) {
       followed.current = follow;
@@ -453,17 +467,12 @@ export function LineList({
     }
     if (now.kind === "follow") {
       if (follow || shown) write(scroller, max);
-      if (!follow) {
-        const top = topLine(scroller);
-        if (top) hold(top.key, top.offset, top.key);
-        else enter(JUMP);
-      }
+      if (!follow) holdTop(scroller);
       return;
     }
     if (now.kind === "jump") {
       if (shown) write(scroller, from);
-      const top = topLine(scroller);
-      if (top) hold(top.key, top.offset, top.key);
+      holdTop(scroller);
       return;
     }
     const index = placed(now.key);
@@ -471,10 +480,7 @@ export function LineList({
     const begin = startOf(index);
     const offset =
       now.offset === "centre"
-        ? -(
-            scroller.clientHeight -
-            (virtualizer.measurementsCache[index]?.size ?? ROW)
-          ) / 2
+        ? centred(scroller, virtualizer.measurementsCache[index]?.size ?? ROW)
         : now.offset;
     const at = Math.min(Math.max(0, begin + offset), max);
     write(scroller, at);
