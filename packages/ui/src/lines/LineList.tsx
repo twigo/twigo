@@ -553,18 +553,20 @@ export function LineList({
     virtualizer.measure();
   }, [wrap, virtualizer]);
 
-  // Sizes are kept by line, so following with wrap would keep one for every
-  // line that passed. Only those of lines no longer loaded go: a mounted row
-  // is measured again only when its size changes, so one that lost its size
-  // would stand at the estimate's height.
+  // Sizes are kept by line, so they would keep one for every line that
+  // passed: only the loaded rows and those that left them keep theirs. A
+  // mounted row is measured again only when its size changes, and is one of
+  // those or a blank one of the estimate's height.
   useEffect(() => {
+    const kept = new Set([
+      ...items.map((item) => item.key),
+      ...loaded.left.values(),
+    ]);
     const sizes = virtualizer.itemSizeCache;
-    if (!follow || !wrap || sizes.size <= 4 * (rows + OVERSCAN)) return;
-    const loaded = new Set(items.map((item) => item.key));
     for (const key of sizes.keys()) {
-      if (typeof key !== "string" || !loaded.has(key)) sizes.delete(key);
+      if (typeof key !== "string" || !kept.has(key)) sizes.delete(key);
     }
-  }, [follow, wrap, items, rows, virtualizer]);
+  }, [items, loaded.left, virtualizer]);
 
   const keyed = useEffectEvent((to: Move | number) => {
     if (!element) return;
