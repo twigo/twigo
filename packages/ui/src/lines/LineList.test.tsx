@@ -321,6 +321,36 @@ test("a key's end is the end only for the scroll it began, not after a wheel or 
   expect(onFollowChange).not.toHaveBeenCalledWith(true);
 });
 
+test("following, the person's scroll back to the end before their pause reached `follow` follows on as lines come", () => {
+  const { log, onFollowChange, update } = mount({
+    total: 300,
+    items: lines(0, 300),
+  });
+  scroll(log, 19 * 100);
+  expect(onFollowChange).toHaveBeenLastCalledWith(false);
+  scroll(log, 19 * 300 - 600);
+  expect(onFollowChange).toHaveBeenLastCalledWith(true);
+  update({ total: 310, items: lines(0, 310) });
+  expect(log.scrollTop).toBe(19 * 310 - 600);
+});
+
+test("following, a reveal is no step's and moves nothing, not even once the list pauses", () => {
+  const { log, onFollowChange, onPlace, update } = mount({
+    total: 300,
+    start: 260,
+    items: lines(260, 300),
+  });
+  update({ reveal: { key: "280", token: 1 } });
+  update({ total: 320, start: 280, items: lines(280, 320) });
+  expect(log.scrollTop).toBe(19 * 320 - 600);
+  update({ follow: false });
+  expect(log.scrollTop).toBe(19 * 320 - 600);
+  expect(onFollowChange).not.toHaveBeenCalled();
+  expect(onPlace).not.toHaveBeenCalledWith(
+    expect.objectContaining({ key: "280" }),
+  );
+});
+
 test("paused near the end, a list made taller holds where the end cut it short, and the lines that come next move nothing", () => {
   const { log, onPlace, update } = mount({
     follow: false,

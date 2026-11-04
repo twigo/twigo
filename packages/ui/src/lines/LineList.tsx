@@ -159,9 +159,9 @@ export function LineList({
   /** Where the list stood or was going when it last paused, which it goes back to when it mounts paused. */
   place?: LinePlace | undefined;
   /**
-   * A line to scroll to, such as the current search match, each time its
-   * token changes, after the one it mounts with; one not loaded is asked
-   * for around its key first.
+   * A line to scroll to, such as a search step's match, each time its
+   * token changes while the list is paused, after the one it mounts with;
+   * one not loaded is asked for around its key first.
    */
   reveal?: { readonly key: string; readonly token: number } | undefined;
   onWindow: (window: LineWindow) => void;
@@ -254,6 +254,12 @@ export function LineList({
     }
     return top - known.current;
   };
+  // While `follow` is on, as when a pause the person made has not reached
+  // it yet, no change of it is coming to follow by.
+  const followAgain = () => {
+    onFollowChange(true);
+    if (follow) enter(FOLLOW);
+  };
   // Following, the person's scroll away from the end pauses; paused, one
   // down to the end follows again, and so does one a key sent to the end as
   // it stood then, though lines came or rows were measured before it got
@@ -270,7 +276,7 @@ export function LineList({
       (maxOf(scroller) - top < ROW ||
         (began.current !== undefined && Math.abs(began.current - top) < 1))
     ) {
-      onFollowChange(true);
+      followAgain();
       return;
     }
     const line = topLine(scroller);
@@ -324,9 +330,12 @@ export function LineList({
     // the starts `startOf` reads, and says how far the list scrolls.
     const measured = virtualizer.getTotalSize();
     const max = Math.max(0, maxOf(scroller) + measured - size);
-    const revealing = reveal !== undefined && reveal.token !== revealed.current;
+    // A step pauses as it reveals: a token that comes while following is
+    // not a step's.
+    const fresh = reveal !== undefined && reveal.token !== revealed.current;
+    if (fresh) revealed.current = reveal.token;
+    const revealing = fresh && !follow;
     if (revealing) {
-      revealed.current = reveal.token;
       enter({ kind: "seek", key: reveal.key, offset: "centre" });
       onPlace?.({
         key: reveal.key,
