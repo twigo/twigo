@@ -25,8 +25,12 @@ export interface LogsTab {
    * matches that come or go around it move `current`, not the match.
    */
   readonly anchor: MatchAnchor | undefined;
-  /** Counts the steps, so the list scrolls to the current match on a step and not as lines come. */
-  readonly steps: number;
+  /**
+   * The entry the last step went to, by its id, and a token each step
+   * changes: the list scrolls to it on a step, not as lines come, and not
+   * again when it mounts anew, whatever the search shows since.
+   */
+  readonly reveal: { readonly id: number; readonly token: number } | undefined;
   /** A step to an older match, or a newer one, asked before Rust applied the search it follows: done once it has. */
   readonly waiting: "older" | "newer" | undefined;
   /** The view's `arrived` when the list paused, and the changes Rust had applied then, from which it counts the lines that came since. */
@@ -68,7 +72,7 @@ const INITIAL: LogsTab = {
   timestamps: true,
   current: 0,
   anchor: undefined,
-  steps: 0,
+  reveal: undefined,
   waiting: undefined,
   pausedAt: { changes: 0, arrived: 0 },
   focus: undefined,
@@ -212,7 +216,7 @@ export class LogsTabs {
     this.update(uri, {
       current,
       anchor: next && { id: next.id, fromEnd: next.fromEnd },
-      steps: tab.steps + 1,
+      reveal: next && { id: next.id, token: (tab.reveal?.token ?? 0) + 1 },
       waiting: undefined,
       follow: false,
       ...(tab.follow && { pausedAt: this.#now(uri) }),

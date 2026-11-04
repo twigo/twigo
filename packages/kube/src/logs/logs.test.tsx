@@ -357,9 +357,9 @@ test("a step right after the search changes waits for that search's matches", as
   });
   tabs.setView(uri, { search: "token" });
   tabs.step(uri, true);
-  expect(tabs.get(uri)).toMatchObject({ waiting: "older", steps: 0 });
+  expect(tabs.get(uri)).toMatchObject({ waiting: "older", reveal: undefined });
   await vi.waitFor(() => {
-    expect(tabs.get(uri).steps).toBe(1);
+    expect(tabs.get(uri).reveal?.token).toBe(1);
   });
   expect(tabs.get(uri).waiting).toBeUndefined();
   expect(session.getSnapshot().matches?.entries).toContain(
@@ -461,7 +461,7 @@ test("a step's match the last 10,000 no longer list stays current, the line the 
     tabs.update(uri, {
       anchor: { id: line.id, fromEnd: 0 },
       current: 2,
-      steps: 1,
+      reveal: { id: line.id, token: 1 },
       follow: false,
     });
   });
@@ -489,6 +489,68 @@ test("a step's match the last 10,000 no longer list stays current, the line the 
   height.mockRestore();
   session.close();
 });
+
+async function remountAfterSteps(follow: boolean) {
+  const { workbench, tabs, uri, session } = await logsTab();
+  act(() => {
+    tabs.setView(uri, { search: "request" });
+  });
+  await vi.waitFor(() => {
+    expect(session.getSnapshot().settled).toBe(true);
+    expect(session.getSnapshot().matches?.count).toBeGreaterThan(5);
+  });
+  act(() => {
+    tabs.step(uri, true);
+  });
+  act(() => {
+    tabs.step(uri, true);
+  });
+  act(() => {
+    tabs.setView(uri, { search: "no line says this" });
+  });
+  await vi.waitFor(() => {
+    expect(session.getSnapshot().settled).toBe(true);
+    expect(session.getSnapshot().matches?.count).toBe(0);
+  });
+  if (follow)
+    act(() => {
+      tabs.follow(uri, true);
+    });
+  const place = tabs.place(uri);
+  cleanup();
+  render(<WorkbenchView workbench={workbench} />);
+  act(() => {
+    tabs.setView(uri, { search: "request" });
+  });
+  await vi.waitFor(() => {
+    expect(session.getSnapshot().settled).toBe(true);
+    expect(session.getSnapshot().matches?.count).toBeGreaterThan(5);
+  });
+  await screen.findByText(/^\d[\d,]* of [\d,]+$/);
+  return { tabs, uri, session, place };
+}
+
+test("following, a step's reveal does not come back after a remount when a search finds matches again", async () => {
+  const height = vi
+    .spyOn(Element.prototype, "clientHeight", "get")
+    .mockReturnValue(600);
+  const { tabs, uri, session } = await remountAfterSteps(true);
+  expect(tabs.get(uri).follow).toBe(true);
+  expect(tabs.place(uri)).toBeUndefined();
+  height.mockRestore();
+  session.close();
+}, 20_000);
+
+test("paused, a step's reveal does not pull the list off its place after a remount when a search finds matches again", async () => {
+  const height = vi
+    .spyOn(Element.prototype, "clientHeight", "get")
+    .mockReturnValue(600);
+  const { tabs, uri, session, place } = await remountAfterSteps(false);
+  expect(place).toBeDefined();
+  expect(tabs.place(uri)).toEqual(place);
+  height.mockRestore();
+  session.close();
+}, 20_000);
 
 test("a filter Rust refuses shows as not applied until one is taken", async () => {
   await logsTab();

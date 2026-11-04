@@ -814,7 +814,7 @@ Extensions add commands, not prefixes.
       the list writes its scroll itself and its virtualizer only lays out the rows, so a scroll to where the list did not put it is the person's, and after every change of the layout, rows that wrap measured included, the list puts the line it holds back at its offset, or as near as the end lets it, and holds it where it then stands;
       a wheel up pauses at once, and the person's scroll down to the end follows again: a wheel's at once, a key's where the browser stops it at the end as it stood, though lines came before it got there;
       a window asked around a line says where that line stands, so an earlier window is not taken for the answer, and a paused list keeps its place across a new view and a remount, a line the view hides where its time puts it;
-      a reveal that comes while the list follows is no step's and moves nothing;
+      a step reveals its line once, a remount included, and a reveal that comes while the list follows is no step's and moves nothing;
     - a line shows its text as the container wrote it, ANSI colours as tokens at 4.5:1 or more on the editor, warnings and errors tinted with an edge as failing rows are; markers say that a container ended, with its code and next start, that a pod joined from its ReplicaSet or left, and what the buffer dropped;
     - F, W and T toggle follow, wrap and timestamps while the lines have the focus, ⌘F finds and `/` filters; below 1,100 px the toolbar drops the level counts and narrows its fields, so a split panel keeps every control.
 - **Exec and attach.**

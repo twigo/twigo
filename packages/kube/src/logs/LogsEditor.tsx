@@ -288,9 +288,10 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
             timestamps={tab.timestamps}
             tagWidth={tagWidth}
             reveal={
-              match && tab.steps > 0
-                ? { key: String(match.id), token: tab.steps }
-                : undefined
+              tab.reveal && {
+                key: String(tab.reveal.id),
+                token: tab.reveal.token,
+              }
             }
             fresh={tabs.fresh(uri)}
             place={tabs.place(uri)}
