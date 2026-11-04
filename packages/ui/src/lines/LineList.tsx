@@ -105,9 +105,10 @@ const JUMP: Mode = { kind: "jump" };
 type Move = "up" | "down" | "first" | "last";
 
 /**
- * The keys that scroll a focused list natively, in Chromium or in WebKit,
- * which the list moves itself, at once: WebKit animates a key's scroll and
- * stops it at the list's next write of `scrollTop`.
+ * The list's own keys, which it moves itself for, at once, on every
+ * platform, besides ↑, ↓, Home and End, which the list commands send it:
+ * the engines scroll on some of them natively, and WebKit animates a key's
+ * scroll and stops it at the list's next write of `scrollTop`.
  */
 const MOVES = new Map<string, Move>([
   ["PageUp", "up"],
@@ -118,12 +119,12 @@ const MOVES = new Map<string, Move>([
   ["Alt+ArrowDown", "down"],
   ["Control+ArrowUp", "up"],
   ["Control+ArrowDown", "down"],
-  ["Shift+Control+ArrowUp", "up"],
-  ["Shift+Control+ArrowDown", "down"],
   ["Control+Alt+ArrowUp", "up"],
   ["Control+Alt+ArrowDown", "down"],
   ["Meta+ArrowUp", "first"],
   ["Meta+ArrowDown", "last"],
+  ["Control+Home", "first"],
+  ["Control+End", "last"],
 ]);
 
 function moveOf({
@@ -213,10 +214,10 @@ const OVERLAP = 2 * ROW;
 /**
  * A page of a list `length` px long: its length less two rows, or in a
  * short list Chromium's share of it, more than WebKit's 4/5, so a page is
- * never less than a browser's.
+ * never less than a browser's, and at least a pixel, as the browsers' are.
  */
 function pageOf(length: number): number {
-  return Math.max(length - OVERLAP, Math.floor((length * 7) / 8));
+  return Math.max(1, length - OVERLAP, Math.floor((length * 7) / 8));
 }
 
 /** The px of one unit of a wheel's delta along a list `length` px long. */

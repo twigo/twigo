@@ -466,7 +466,7 @@ function press(log: HTMLElement, key: string, init: KeyboardEventInit = {}) {
 
 const PAGE = 600 - 2 * 19;
 
-test("the page keys, Space, and Alt or ⌘ with an arrow move the list itself at once, so neither the browser nor the workbench scrolls it", () => {
+test("the list's own keys, the same on every platform, move it itself at once, so neither the browser nor the workbench scrolls it: the page keys, Space, and ⌥ or ⌘ with an arrow", () => {
   const { log, onPlace } = mount({
     follow: false,
     total: 300,
@@ -511,7 +511,7 @@ test("the page keys, Space, and Alt or ⌘ with an arrow move the list itself at
   expect(log.scrollTop).toBe(0);
 });
 
-test("⌃↑ and ⌃↓, alone or with ⇧ or ⌥, move the list a page itself, as WebKit pages on them, and with both or with ⌘ do nothing", () => {
+test("among the list's own keys, ⌃↑ and ⌃↓, alone or with ⌥, move it a page, and with ⇧, on which no engine scrolls, or with ⌘ they are not the list's", () => {
   const { log } = mount({
     follow: false,
     total: 300,
@@ -521,12 +521,9 @@ test("⌃↑ and ⌃↓, alone or with ⇧ or ⌥, move the list a page itself, 
   const moves = [
     press(log, "ArrowDown", { ctrlKey: true }),
     log.scrollTop,
-    press(log, "ArrowDown", { ctrlKey: true, shiftKey: true }),
-    log.scrollTop,
     press(log, "ArrowDown", { ctrlKey: true, altKey: true }),
     log.scrollTop,
     press(log, "ArrowUp", { ctrlKey: true }),
-    press(log, "ArrowUp", { ctrlKey: true, shiftKey: true }),
     press(log, "ArrowUp", { ctrlKey: true, altKey: true }),
     log.scrollTop,
   ];
@@ -536,22 +533,34 @@ test("⌃↑ and ⌃↓, alone or with ⇧ or ⌥, move the list a page itself, 
     false,
     19 * 100 + 2 * PAGE,
     false,
-    19 * 100 + 3 * PAGE,
-    false,
-    false,
     false,
     19 * 100,
   ]);
   expect([
+    press(log, "ArrowDown", { ctrlKey: true, shiftKey: true }),
+    press(log, "ArrowUp", { ctrlKey: true, shiftKey: true }),
     press(log, "ArrowDown", { ctrlKey: true, shiftKey: true, altKey: true }),
     press(log, "ArrowDown", { ctrlKey: true, metaKey: true }),
     press(log, " ", { ctrlKey: true }),
-  ]).toEqual([true, true, true]);
+  ]).toEqual([true, true, true, true, true]);
   expect(log.scrollTop).toBe(19 * 100);
 });
 
-test("in a short list a page moves seven eighths of it, never the wrong way", () => {
-  const pages = [30, 50, 90, 400].map((height) => {
+test("among the list's own keys, ⌃Home goes to the top and ⌃End follows again, as ⌘↑ and ⌘↓ do", () => {
+  const { log, onFollowChange } = mount({
+    follow: false,
+    total: 300,
+    items: lines(0, 300),
+  });
+  scroll(log, 19 * 100);
+  expect(press(log, "End", { ctrlKey: true })).toBe(false);
+  expect(onFollowChange).toHaveBeenLastCalledWith(true);
+  expect(press(log, "Home", { ctrlKey: true })).toBe(false);
+  expect(log.scrollTop).toBe(0);
+});
+
+test("in a short list a page moves seven eighths of it, never the wrong way, and at least a pixel", () => {
+  const pages = [1, 30, 50, 90, 400].map((height) => {
     shown = height;
     const { log } = mount({
       follow: false,
@@ -567,6 +576,7 @@ test("in a short list a page moves seven eighths of it, never the wrong way", ()
     return [height, down, up];
   });
   expect(pages).toEqual([
+    [1, 1, -1],
     [30, 26, -26],
     [50, 43, -43],
     [90, 78, -78],
