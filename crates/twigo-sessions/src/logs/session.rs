@@ -5,15 +5,17 @@
 //! at most one batch unacknowledged. It sends nothing before the
 //! webview's first window.
 
+mod marks;
+mod streams;
+
 use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use serde_json::Value;
-use tokio::sync::{Notify, mpsc, oneshot, watch};
+use tokio::sync::{Notify, oneshot};
 use tokio::task::JoinHandle;
-use tokio::time::{Instant, MissedTickBehavior};
+use tokio::time::MissedTickBehavior;
 use twigo_cache::batcher::FLUSH;
 use twigo_cache::hub::Hub;
 use twigo_cache::object::Object;
@@ -23,23 +25,13 @@ use twigo_ipc::{
     LogView, LogWindow, ObjectRef, OpenLogs, StreamState, ViewState,
 };
 
-use crate::logs::buffer::{Buffer, Kind, LIMITS, Origin};
-use crate::logs::stream::{self, Event, Stream};
+use crate::logs::buffer::{Buffer, Kind, LIMITS};
 use crate::logs::target::{Subscriptions, Target};
 use crate::logs::view::{self, Spec};
 use crate::logs::{now, plan};
 
-/// The streams a tab follows at most, those stopped among them until their
-/// tasks have ended, so one workload cannot take the cluster's 32 followed
-/// logs.
-const STREAMS: usize = 10;
-
-/// How long a left pod's streams may take to finish their reads: the
-/// kubelet ends a follow up to `logForceCheckPeriod`, a second, after the
-/// container exits (cri-client v1.37.0, `waitLogs`), and its status
-/// manager deletes a finished pod right after it patches its status
-/// (kubernetes v1.37.0, `pkg/kubelet/status/status_manager.go`, `syncPod`).
-const FINISHING: Duration = Duration::from_secs(5);
+use marks::Marks;
+use streams::{Streams, Taken};
 
 /// A running session: dropping it ends its task, its streams and its
 /// subscriptions.
@@ -177,56 +169,6 @@ impl Pod {
     }
 }
 
-/// A stream under way.
-struct Running {
-    /// The id its events come under, its own in the session.
-    id: u64,
-    task: Task,
-    /// Tells it its pod; dropped, it lets the stream end once its read
-    /// does.
-    pod: watch::Sender<Arc<Value>>,
-    state: StreamState,
-    origin: Arc<Origin>,
-}
-
-/// A stream stopped, as when its pod left: kept until its task has ended
-/// and what it said is taken, which may come after.
-struct Stopped {
-    id: u64,
-    task: Task,
-    /// Its pod's uid.
-    uid: Arc<str>,
-    origin: Arc<Origin>,
-    /// Until when the stream of a pod that left may finish its read.
-    finishing: Option<Instant>,
-}
-
-/// A pod that left, whose `Left` entry waits until its streams have
-/// ended, so it comes after the last of their entries.
-struct Leaving {
-    uid: Arc<str>,
-    pod: Box<str>,
-    /// When the session saw it leave.
-    at: i64,
-}
-
-/// What a pod's streams wrote.
-struct Written {
-    /// When its first entry stands.
-    first: i64,
-    /// The time and id of its latest entry.
-    last: (i64, u64),
-}
-
-/// A stream's task, ended when dropped.
-struct Task(JoinHandle<()>);
-
-impl Drop for Task {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
-
 /// What changed since the last batch.
 #[derive(Default)]
 struct Dirty {
@@ -249,8 +191,6 @@ struct Sent {
 }
 
 struct Run {
-    hub: Hub,
-    context: String,
     subscriptions: Subscriptions,
     source: LogSource,
     spec: Spec,
@@ -260,27 +200,8 @@ struct Run {
     pods: Vec<Pod>,
     /// The target's pods were listed once, so those that come later join.
     listed: bool,
-    streams: HashMap<Key, Running>,
-    stopped: Vec<Stopped>,
-    /// The streams of an old source, aborted, which keep their places until
-    /// their tasks have ended; what they said goes.
-    ending: Vec<Task>,
-    /// Streams that read all there was, with their last state.
-    finished: HashMap<Key, StreamState>,
-    /// What each pod's streams wrote, by its uid: its `Joined` stands just
-    /// before the first entry and its `Left` just after the latest while
-    /// the buffer holds it, whatever the clocks of its node, the API server
-    /// and the session say.
-    written: HashMap<Arc<str>, Written>,
-    /// The id and time of each `Joined` entry, by its pod's uid, until the
-    /// pod left; the bound keeps it while the pod has written nothing.
-    joined: HashMap<Arc<str>, (u64, i64)>,
-    leaving: Vec<Leaving>,
-    /// Counts the streams started, which gives each its id, so the events
-    /// of a stream neither running nor stopped, as of an old source, go.
-    started: u64,
-    events: mpsc::UnboundedSender<(u64, Event)>,
-    incoming: mpsc::UnboundedReceiver<(u64, Event)>,
+    streams: Streams,
+    marks: Marks,
     dirty: Dirty,
     sent: Sent,
     /// The entries the view kept as they came since the source or the view
@@ -351,11 +272,9 @@ impl Run {
     async fn new(hub: Hub, context: String, request: OpenLogs) -> Result<Self, IpcError> {
         let target = Target::new(&request.target)?;
         let spec = Spec::new(&request.view)?;
+        let streams = Streams::new(hub.clone(), context.clone(), target.namespace.clone());
         let subscriptions = Subscriptions::new(&hub, &context, target).await?;
-        let (events, incoming) = mpsc::unbounded_channel();
         Ok(Self {
-            hub,
-            context,
             subscriptions,
             source: request.source,
             spec,
@@ -363,16 +282,8 @@ impl Run {
             buffer: Buffer::new(LIMITS),
             pods: Vec::new(),
             listed: false,
-            streams: HashMap::new(),
-            stopped: Vec::new(),
-            ending: Vec::new(),
-            finished: HashMap::new(),
-            written: HashMap::new(),
-            joined: HashMap::new(),
-            leaving: Vec::new(),
-            started: 0,
-            events,
-            incoming,
+            streams,
+            marks: Marks::default(),
             dirty: Dirty::default(),
             sent: Sent::default(),
             arrived: 0,
@@ -382,16 +293,8 @@ impl Run {
 
     fn set_source(&mut self, source: LogSource) {
         self.source = source;
-        let old = self.streams.drain().map(|(_, running)| running.task);
-        self.ending
-            .extend(old.chain(self.stopped.drain(..).map(|stopped| stopped.task)));
-        for task in &self.ending {
-            task.0.abort();
-        }
-        self.finished.clear();
-        self.written.clear();
-        self.joined.clear();
-        self.leaving.clear();
+        self.streams.reset();
+        self.marks.clear();
         self.buffer.clear();
         self.arrived = 0;
         self.dirty = Dirty {
@@ -480,99 +383,28 @@ impl Run {
             .map(|(uid, at, kind)| ((uid, at), (at, kind)))
             .unzip();
         let ids = self.add(marks);
-        self.joined.extend(
-            uids.into_iter()
-                .zip(ids)
-                .map(|((uid, at), id)| (uid, (id, at))),
-        );
+        for ((uid, at), id) in uids.into_iter().zip(ids) {
+            self.marks.joined(uid, id, at);
+        }
         self.bound();
         for gone in before.values() {
             if self.reads(&gone.name) {
-                self.leaving.push(Leaving {
-                    uid: Arc::clone(&gone.uid),
-                    pod: (*gone.name).into(),
-                    at: now(),
-                });
+                self.marks.left(&gone.uid, &gone.name, now());
             }
         }
         self.listed = true;
-        let left: Vec<Key> = self
-            .streams
-            .keys()
-            .filter(|(uid, _)| !pods.iter().any(|pod| pod.uid == *uid))
-            .cloned()
-            .collect();
-        for key in &left {
-            stop(&mut self.streams, &mut self.stopped, key, true);
-        }
-        self.finished
-            .retain(|(uid, _), _| pods.iter().any(|pod| pod.uid == *uid));
-        for ((uid, _), running) in &self.streams {
-            if let Some(pod) = pods.iter().find(|pod| pod.uid == *uid)
-                && !Arc::ptr_eq(&pod.json, &*running.pod.borrow())
-            {
-                running.pod.send_replace(Arc::clone(&pod.json));
-            }
-        }
+        self.streams.listed(&pods);
         self.pods = pods;
         self.dirty.pods = true;
         self.plan();
     }
 
     /// Adds the `Left` entry of each pod that left once its streams have
-    /// ended, so every entry of the pod came: just after the latest of them
-    /// while the buffer holds it, else at the leave, though not before its
-    /// `Joined`.
+    /// ended.
     fn leave(&mut self) {
-        let (gone, waiting): (Vec<Leaving>, Vec<Leaving>) = std::mem::take(&mut self.leaving)
-            .into_iter()
-            .partition(|leaving| {
-                !self
-                    .stopped
-                    .iter()
-                    .any(|stopped| stopped.uid == leaving.uid)
-            });
-        self.leaving = waiting;
-        let marks = gone
-            .into_iter()
-            .map(|leaving| {
-                let joined = self.joined.remove(&leaving.uid);
-                let at = match self.written.remove(&leaving.uid) {
-                    Some(Written { last: (at, id), .. }) if self.buffer.holds(id, at) => at,
-                    _ => joined.map_or(leaving.at, |(_, at)| at.max(leaving.at)),
-                };
-                (
-                    at,
-                    Kind::Left {
-                        pod: leaving.pod,
-                        time: view::rfc3339(leaving.at).into(),
-                    },
-                )
-            })
-            .collect();
+        let streams = &self.streams;
+        let marks = self.marks.leave(&self.buffer, |uid| streams.streaming(uid));
         self.insert(marks);
-    }
-
-    /// Moves each `Joined` entry just before its pod's first entry, which
-    /// may come long after the creation it stood at, or before it from a
-    /// node whose clock runs behind the API server's: under its id, lower
-    /// than those of its pod's entries, so it comes first at their time.
-    fn place_joined(&mut self) {
-        let (buffer, written) = (&mut self.buffer, &self.written);
-        let mut moved = false;
-        self.joined.retain(|uid, (id, at)| {
-            let Some(&Written { first, .. }) = written.get(uid) else {
-                return true;
-            };
-            if first == *at {
-                return true;
-            }
-            moved = true;
-            let kept = buffer.place(*id, *at, first);
-            *at = first;
-            kept
-        });
-        self.dirty.view |= moved;
     }
 
     /// Adds entries to the buffer, which holds them all until
@@ -590,16 +422,9 @@ impl Run {
     }
 
     /// Bounds the buffer, which keeps the `Joined` of each pod in view that
-    /// has written nothing, at its creation, so that it moves to the pod's
-    /// first entry once one comes.
+    /// has written nothing.
     fn bound(&mut self) {
-        let held: Vec<u64> = self
-            .joined
-            .iter()
-            .filter(|(uid, _)| !self.written.contains_key(*uid))
-            .map(|(_, &(id, _))| id)
-            .collect();
-        self.buffer.bound(&held);
+        self.buffer.bound(&self.marks.held());
     }
 
     fn insert(&mut self, entries: Vec<(i64, Kind)>) {
@@ -607,195 +432,35 @@ impl Run {
         self.bound();
     }
 
-    /// Starts a stream for each chosen container without one, those with
-    /// an instance to read first, then the newest pods, while the tab has
-    /// fewer than [`STREAMS`], the stopped streams whose tasks have not
-    /// ended among them; stops those the source no longer chooses. Streams
-    /// under way keep their places, but one with nothing to read gives its
-    /// place up to one that can be read, as many of them as the places the
-    /// stopped streams will free leave short.
+    /// Plans the streams of the pods the source reads.
     fn plan(&mut self) {
-        let mut order: Vec<&Pod> = self
+        let pods: Vec<&Pod> = self
             .pods
             .iter()
             .filter(|pod| self.reads(&pod.name))
             .collect();
-        order.sort_by(|a, b| b.created.cmp(&a.created).then_with(|| a.name.cmp(&b.name)));
-        let previous = self.source.previous;
-        let mut wanted: Vec<(Key, &Pod, bool)> = order
-            .into_iter()
-            .flat_map(|pod| {
-                plan::chosen(&pod.json, &self.source.containers)
-                    .into_iter()
-                    .map(move |container| {
-                        let readable = stream::readable(&pod.json, &container, previous);
-                        ((Arc::clone(&pod.uid), container.into()), pod, readable)
-                    })
-            })
-            .filter(|(key, ..)| !self.finished.contains_key(key))
-            .collect();
-        wanted.sort_by_key(|(.., readable)| !readable);
-        let unwanted: Vec<Key> = self
-            .streams
-            .keys()
-            .filter(|key| !wanted.iter().any(|(wanted, ..)| wanted == *key))
-            .cloned()
-            .collect();
-        for key in &unwanted {
-            stop(&mut self.streams, &mut self.stopped, key, false);
-        }
-        let lacking = wanted
-            .iter()
-            .filter(|(key, _, readable)| *readable && !self.streams.contains_key(key))
-            .count();
-        let mut yielding = lacking.saturating_sub(STREAMS.saturating_sub(self.streams.len()));
-        for (key, _, readable) in wanted.iter().rev() {
-            if yielding == 0 {
-                break;
-            }
-            if !readable && stop(&mut self.streams, &mut self.stopped, key, false) {
-                yielding -= 1;
-            }
-        }
-        let mut started = Vec::new();
-        let mut held = self.streams.len() + self.stopping();
-        for (key, pod, _) in wanted {
-            if held >= STREAMS {
-                break;
-            }
-            if self.streams.contains_key(&key) {
-                continue;
-            }
-            started.push((key, Arc::clone(&pod.name), Arc::clone(&pod.json)));
-            held += 1;
-        }
-        for (key, pod, json) in started {
-            self.start(key, &pod, json);
-        }
-    }
-
-    /// The stopped streams whose tasks have not ended: an abort only
-    /// schedules a task's end, so each keeps its place until then.
-    fn stopping(&self) -> usize {
-        let stopped = self.stopped.iter().map(|stopped| &stopped.task);
-        stopped
-            .chain(&self.ending)
-            .filter(|task| !task.0.is_finished())
-            .count()
-    }
-
-    fn start(&mut self, key: Key, pod: &str, json: Arc<Value>) {
-        let (sender, receiver) = watch::channel(json);
-        let origin = Arc::new(Origin {
-            pod: pod.into(),
-            container: (*key.1).into(),
-        });
-        let stream = Stream::new(
-            self.hub.clone(),
-            &self.context,
-            &self.subscriptions.target().namespace,
-            Arc::clone(&origin),
-            &self.source,
-        );
-        let events = self.events.clone();
-        self.started += 1;
-        let id = self.started;
-        let task = tokio::spawn(stream::run(stream, receiver, move |event| {
-            // The session may have ended, and its streams with it.
-            let _ = events.send((id, event));
-        }));
-        self.streams.insert(
-            key,
-            Running {
-                id,
-                task: Task(task),
-                pod: sender,
-                state: StreamState::Connecting,
-                origin,
-            },
-        );
-        self.dirty.pods = true;
+        self.dirty.pods |= self.streams.plan(pods, &self.source);
     }
 
     /// Takes what the streams said: their lines and ends into the buffer,
     /// their states, and the places of those that finished for the next.
     fn take_events(&mut self) {
-        let mut entries = Vec::new();
-        let mut whose = Vec::new();
-        let mut restarts = Vec::new();
-        let mut freed = false;
-        let now = Instant::now();
-        for stopped in &self.stopped {
-            if stopped.finishing.is_some_and(|until| until <= now) {
-                stopped.task.0.abort();
-            }
-        }
-        // A stream whose task has ended has said all it will, and frees its
-        // place; one that ended by itself read all there was.
-        let done: Vec<Key> = self
-            .streams
-            .iter()
-            .filter(|(_, running)| running.task.0.is_finished())
-            .map(|(key, _)| key.clone())
-            .collect();
-        let ended: Vec<u64> = self
-            .stopped
-            .iter()
-            .filter(|stopped| stopped.task.0.is_finished())
-            .map(|stopped| stopped.id)
-            .collect();
-        let ending = self.ending.len();
-        self.ending.retain(|task| !task.0.is_finished());
-        freed |= !ended.is_empty() || self.ending.len() < ending;
-        while let Ok((id, event)) = self.incoming.try_recv() {
-            let key = self
-                .streams
-                .iter()
-                .find_map(|(key, running)| (running.id == id).then(|| key.clone()));
-            let (uid, origin) = match &key {
-                Some(key) => (&key.0, &self.streams[key].origin),
-                None => match self.stopped.iter().find(|stopped| stopped.id == id) {
-                    Some(stopped) => (&stopped.uid, &stopped.origin),
-                    None => continue,
-                },
-            };
-            match event {
-                Event::Entry { at, kind } => {
-                    whose.push((Arc::clone(uid), at));
-                    entries.push((at, kind));
-                }
-                Event::Restarts { restarting } => restarts.push((Arc::clone(origin), restarting)),
-                Event::State(state) => {
-                    if let Some(running) = key.and_then(|key| self.streams.get_mut(&key))
-                        && running.state != state
-                    {
-                        running.state = state;
-                        self.dirty.pods = true;
-                    }
-                }
-            }
-        }
-        self.stopped.retain(|stopped| !ended.contains(&stopped.id));
-        for key in done {
-            let running = self.streams.remove(&key).expect("it was running");
-            self.finished.insert(key, running.state);
-            self.dirty.pods = true;
-            freed = true;
-        }
+        let Taken {
+            entries,
+            restarts,
+            changed,
+            freed,
+        } = self.streams.take();
+        self.dirty.pods |= changed;
+        let (whose, entries): (Vec<_>, Vec<_>) = entries
+            .into_iter()
+            .map(|(uid, at, kind)| ((uid, at), (at, kind)))
+            .unzip();
         let ids = self.add(entries);
         for (id, (uid, at)) in ids.zip(whose) {
-            self.written
-                .entry(uid)
-                .and_modify(|written| {
-                    written.first = written.first.min(at);
-                    written.last = written.last.max((at, id));
-                })
-                .or_insert(Written {
-                    first: at,
-                    last: (at, id),
-                });
+            self.marks.wrote(uid, at, id);
         }
-        self.place_joined();
+        self.dirty.view |= self.marks.place(&mut self.buffer);
         self.bound();
         for (origin, restarting) in restarts {
             self.dirty.view |= self.buffer.restarts(&origin, restarting.into());
@@ -818,14 +483,11 @@ impl Run {
                     .into_iter()
                     .map(|name| {
                         let key: Key = (Arc::clone(&pod.uid), name.as_str().into());
-                        let stream = if !chosen.contains(&name) {
-                            StreamState::Off
-                        } else if let Some(running) = self.streams.get(&key) {
-                            running.state.clone()
-                        } else if let Some(state) = self.finished.get(&key) {
-                            state.clone()
+                        let stream = if chosen.contains(&name) {
+                            let state = self.streams.state(&key).cloned();
+                            state.unwrap_or(StreamState::OverLimit)
                         } else {
-                            StreamState::OverLimit
+                            StreamState::Off
                         };
                         LogContainer { name, stream }
                     })
@@ -897,33 +559,6 @@ fn fresh<T: PartialEq + Clone>(sent: &mut Option<T>, new: Option<T>) -> Option<T
     Some(new)
 }
 
-/// Stops a stream, which may yet have said things not taken: at once, or,
-/// when its pod left, once its read ends, within [`FINISHING`].
-fn stop(
-    streams: &mut HashMap<Key, Running>,
-    stopped: &mut Vec<Stopped>,
-    key: &Key,
-    left: bool,
-) -> bool {
-    let Some(Running {
-        id, task, origin, ..
-    }) = streams.remove(key)
-    else {
-        return false;
-    };
-    if !left {
-        task.0.abort();
-    }
-    stopped.push(Stopped {
-        id,
-        task,
-        uid: Arc::clone(&key.0),
-        origin,
-        finishing: left.then(|| Instant::now() + FINISHING),
-    });
-    true
-}
-
 /// What controls the pod, by its controller owner reference.
 fn controller(pod: &Value) -> Option<ObjectRef> {
     let owner = pod["metadata"]["ownerReferences"]
@@ -946,13 +581,16 @@ fn nanos(time: jiff::Timestamp) -> i64 {
 
 #[cfg(test)]
 mod tests {
+    use tokio::sync::mpsc;
     use twigo_ipc::{Containers, Gvr, LevelFilter, LogTarget, Since};
 
     use twigo_ipc::LogEntry;
 
+    use super::streams::{FINISHING, STREAMS};
     use super::*;
     use crate::logs::buffer::{Limits, Origin};
     use crate::logs::fake::{Fake, NAMESPACE};
+    use crate::logs::stream::Event;
 
     const SECOND: i64 = 1_000_000_000;
     /// 2026-11-03T10:00:00Z.
@@ -1202,9 +840,12 @@ mod tests {
             .await
             .unwrap();
         until(&mut run, "its line", |run| texts(run) == ["up"]).await;
-        let id = run.streams.values().next().unwrap().id;
+        let (_, id) = run.streams.running().next().unwrap();
         fake.delete("web-1");
-        until(&mut run, "the pod gone", |run| run.streams.is_empty()).await;
+        until(&mut run, "the pod gone", |run| {
+            run.streams.running().next().is_none()
+        })
+        .await;
 
         let late = |text: &str| Event::Entry {
             at: T0 + 2 * SECOND,
@@ -1218,13 +859,13 @@ mod tests {
                 styles: Box::new([]),
             },
         };
-        run.events.send((id, late("late"))).unwrap();
+        run.streams.send(id, late("late"));
         run.tick();
         fake.stop("web-1", "web", "web-a");
         let read = tokio::time::Instant::now();
-        until(&mut run, "its task ended", |run| run.stopped.is_empty()).await;
+        until(&mut run, "its task ended", |run| run.streams.stopped() == 0).await;
         assert!(read.elapsed() < FINISHING, "{:?}", read.elapsed());
-        run.events.send((id, late("after its end"))).unwrap();
+        run.streams.send(id, late("after its end"));
         run.tick();
         assert_eq!(texts(&run), ["up", "late", "web-1 left"]);
     }
@@ -1253,7 +894,10 @@ mod tests {
         until(&mut run, "the pod gone", |run| run.pods.is_empty()).await;
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         fake.stop("web-1", "web", "web-a");
-        until(&mut run, "its stream ended", |run| run.stopped.is_empty()).await;
+        until(&mut run, "its stream ended", |run| {
+            run.streams.stopped() == 0
+        })
+        .await;
         assert_eq!(texts(&run), ["up", "web ended", "web-1 left"]);
     }
 
@@ -1272,7 +916,10 @@ mod tests {
         fake.delete("web-1");
         until(&mut run, "the pod gone", |run| run.pods.is_empty()).await;
         let left = tokio::time::Instant::now();
-        until(&mut run, "its stream ended", |run| run.stopped.is_empty()).await;
+        until(&mut run, "its stream ended", |run| {
+            run.streams.stopped() == 0
+        })
+        .await;
         let lasted = left.elapsed();
         assert!(
             (FINISHING..FINISHING + std::time::Duration::from_secs(1)).contains(&lasted),
@@ -1296,7 +943,10 @@ mod tests {
         until(&mut run, "the pod gone", |run| run.pods.is_empty()).await;
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         fake.write("web-1", "web", "web-a", now(), "after it left");
-        until(&mut run, "its stream ended", |run| run.stopped.is_empty()).await;
+        until(&mut run, "its stream ended", |run| {
+            run.streams.stopped() == 0
+        })
+        .await;
         assert_eq!(texts(&run), ["up", "after it left", "web-1 left"]);
     }
 
@@ -1315,7 +965,10 @@ mod tests {
         fake.stop("web-1", "web", "web-a");
         fake.delete("web-1");
         until(&mut run, "the pod gone", |run| run.pods.is_empty()).await;
-        until(&mut run, "its stream ended", |run| run.stopped.is_empty()).await;
+        until(&mut run, "its stream ended", |run| {
+            run.streams.stopped() == 0
+        })
+        .await;
         assert_eq!(texts(&run), ["ahead", "web-1 left"]);
     }
 
@@ -1368,7 +1021,7 @@ mod tests {
         fake.stop("web-1", "web", "web-a");
         fake.delete("web-1");
         until(&mut run, "the old pod left", |run| {
-            run.pods.is_empty() && run.leaving.is_empty()
+            run.pods.is_empty() && run.marks.leaving().next().is_none()
         })
         .await;
         made_again(&fake, created);
@@ -1392,7 +1045,10 @@ mod tests {
         .await;
         fake.write("web-1", "web", "web-a", now(), "old after");
         fake.stop("web-1", "web", "web-a");
-        until(&mut run, "the old pod left", |run| run.leaving.is_empty()).await;
+        until(&mut run, "the old pod left", |run| {
+            run.marks.leaving().next().is_none()
+        })
+        .await;
         new_up(&fake, &mut run).await;
         assert_eq!(
             texts(&run),
@@ -1417,7 +1073,8 @@ mod tests {
         made_again(&fake, created);
         fake.write("web-1", "web", "web-b", now(), "new early");
         until(&mut run, "the old pod left and the new one wrote", |run| {
-            run.leaving.is_empty() && texts(run).iter().any(|text| text == "new early")
+            run.marks.leaving().next().is_none()
+                && texts(run).iter().any(|text| text == "new early")
         })
         .await;
         assert_eq!(
@@ -1444,7 +1101,10 @@ mod tests {
         .await;
         fake.write("web-1", "web", "web-a", now(), "old after");
         fake.stop("web-1", "web", "web-a");
-        until(&mut run, "the old pod left", |run| run.leaving.is_empty()).await;
+        until(&mut run, "the old pod left", |run| {
+            run.marks.leaving().next().is_none()
+        })
+        .await;
         new_up(&fake, &mut run).await;
         assert_eq!(
             texts(&run),
@@ -1474,11 +1134,14 @@ mod tests {
         fake.stop("web-1", "web", "web-b");
         fake.delete("web-1");
         until(&mut run, "the new pod left", |run| {
-            run.pods.is_empty() && !run.leaving.iter().any(|leaving| &*leaving.uid == "uid-b")
+            run.pods.is_empty() && !run.marks.leaving().any(|uid| uid == "uid-b")
         })
         .await;
         fake.stop("web-1", "web", "web-a");
-        until(&mut run, "the old pod left", |run| run.leaving.is_empty()).await;
+        until(&mut run, "the old pod left", |run| {
+            run.marks.leaving().next().is_none()
+        })
+        .await;
         assert_eq!(
             texts(&run),
             [
@@ -1498,7 +1161,7 @@ mod tests {
         fake.stop("web-1", "web", "web-a");
         fake.delete("web-1");
         until(&mut run, "the old pod left", |run| {
-            run.pods.is_empty() && run.leaving.is_empty()
+            run.pods.is_empty() && run.marks.leaving().next().is_none()
         })
         .await;
         made_again(&fake, (now().div_euclid(SECOND) + 10) * SECOND);
@@ -1541,7 +1204,7 @@ mod tests {
         fake.stop("web-1", "web", "web-a");
         fake.delete("web-1");
         until(&mut run, "the pod left", |run| {
-            run.pods.is_empty() && run.leaving.is_empty()
+            run.pods.is_empty() && run.marks.leaving().next().is_none()
         })
         .await;
         assert_eq!(texts(&run), ["other 2", "other 3", "web-1 left"]);
@@ -1552,7 +1215,7 @@ mod tests {
         fake.stop("web-1", "web", "web-a");
         fake.delete("web-1");
         until(&mut run, "the old pod left", |run| {
-            run.pods.is_empty() && run.leaving.is_empty()
+            run.pods.is_empty() && run.marks.leaving().next().is_none()
         })
         .await;
         run.buffer = small();
@@ -1603,7 +1266,7 @@ mod tests {
         fake.stop("web-1", "web", "web-a");
         fake.delete("web-1");
         until(&mut run, "the old pod left", |run| {
-            run.pods.is_empty() && run.leaving.is_empty()
+            run.pods.is_empty() && run.marks.leaving().next().is_none()
         })
         .await;
         run.insert(vec![other("other 1"), other("other 2"), other("other 3")]);
@@ -1632,7 +1295,10 @@ mod tests {
             fake.write("web-1", "web", "web-a", now(), &format!("old after {n}"));
         }
         fake.stop("web-1", "web", "web-a");
-        until(&mut run, "the old pod left", |run| run.leaving.is_empty()).await;
+        until(&mut run, "the old pod left", |run| {
+            run.marks.leaving().next().is_none()
+        })
+        .await;
         new_up(&fake, &mut run).await;
         assert_eq!(texts(&run), ["web-1 left", "web-1 joined", "new up"]);
     }
@@ -1676,7 +1342,7 @@ mod tests {
     }
 
     fn alive(run: &Run) -> usize {
-        run.streams.len() + run.stopping()
+        run.streams.running().count() + run.streams.stopping()
     }
 
     /// The most follows open at once, and the most streams whose tasks had
@@ -1885,7 +1551,11 @@ mod tests {
     }
 
     fn running(run: &Run) -> Vec<String> {
-        let mut names: Vec<String> = run.streams.keys().map(|(uid, _)| uid.to_string()).collect();
+        let mut names: Vec<String> = run
+            .streams
+            .running()
+            .map(|((uid, _), _)| uid.to_string())
+            .collect();
         names.sort();
         names
     }
@@ -1898,7 +1568,7 @@ mod tests {
             .chain([pod("old", 0, true)])
             .collect();
         run.plan();
-        assert_eq!(run.streams.len(), STREAMS);
+        assert_eq!(run.streams.running().count(), STREAMS);
         assert!(
             running(&run).contains(&"old".to_owned()),
             "{:?}",
@@ -1911,12 +1581,12 @@ mod tests {
         assert_eq!(alive(&run), STREAMS);
         assert!(!running(&run).contains(&"older".to_owned()));
         run.plan();
-        assert_eq!(run.streams.len(), STREAMS - 1);
+        assert_eq!(run.streams.running().count(), STREAMS - 1);
         until(&mut run, "the older pod followed", |run| {
             running(run).contains(&"older".to_owned())
         })
         .await;
-        assert_eq!(run.streams.len(), STREAMS);
+        assert_eq!(run.streams.running().count(), STREAMS);
         let names = running(&run);
         assert!(
             names.contains(&"old".to_owned()) && names.contains(&"older".to_owned()),
