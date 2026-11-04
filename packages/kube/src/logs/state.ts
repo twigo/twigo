@@ -97,11 +97,6 @@ export class LogsTabs {
     return this.#tabs.get(uri) ?? INITIAL;
   }
 
-  /** What a tab opens with, set before it opens: Previous logs picks the container and its previous instance. */
-  prepare(uri: string, source: Partial<LogSource>): void {
-    this.setSource(uri, source);
-  }
-
   update(uri: string, change: Partial<LogsTab>): void {
     const before = this.get(uri);
     const after = { ...before, ...change };

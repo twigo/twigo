@@ -7,7 +7,6 @@ import {
   X,
 } from "lucide-react";
 import type { MenuId, Workbench } from "@twigo/workbench";
-import type { LogTarget } from "@twigo/protocol";
 import type { ListServices } from "./services";
 import { objectOf, type Selected } from "./selection";
 import { objectUri, parseListUri } from "./uri";
@@ -21,7 +20,6 @@ import { objectUri, parseListUri } from "./uri";
 export function registerResourceActions(
   workbench: Workbench,
   { selection, statuses, states }: ListServices,
-  openLogs: (object: LogTarget) => void,
 ): void {
   const { commands, menus, editors, keybindings } = workbench;
   /** The active list editor and its selected row. */
@@ -68,13 +66,18 @@ export function registerResourceActions(
         ["resource/inline", "navigation"],
         ["resource/details", "navigation"],
       ],
-      run: () => {
+      run: async () => {
         const found = target();
         const space = found && parseListUri(found.uri)?.space;
         if (!found || space === undefined) return;
         const { namespace, name } = objectOf(found.selected);
         if (namespace === undefined) return;
-        openLogs({ space, gvr: found.selected.gvr, namespace, name });
+        await commands.execute("k8s.logs.open", workbench.keys.lookup(null), {
+          space,
+          gvr: found.selected.gvr,
+          namespace,
+          name,
+        });
       },
     },
     {

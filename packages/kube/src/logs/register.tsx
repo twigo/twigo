@@ -4,19 +4,15 @@ import type { Workbench } from "@twigo/workbench";
 import { LOGS_SCHEME, logsUri, parseLogsUri } from "../uri";
 import { logsKind } from "./entries";
 import { LogsEditor } from "./LogsEditor";
-import { LogsTabs, type LogsTab } from "./state";
+import type { LogsTab, LogsTabs } from "./state";
 
 /**
- * Logs in the panel (ARCHITECTURE 4.6): the `logs://` editor, opened by
- * `l` on a row, in the details and in an object's editor, and the keys of
- * a logs tab.
+ * Logs in the panel (ARCHITECTURE 4.6): the `logs://` editor of `tabs`,
+ * opened by `l` on a row, in the details and in an object's editor through
+ * `k8s.logs.open`, and the keys of a logs tab.
  */
-export function registerLogs(workbench: Workbench): {
-  tabs: LogsTabs;
-  open: (object: LogTarget) => void;
-} {
+export function registerLogs(workbench: Workbench, tabs: LogsTabs): void {
   const { editors, commands, keybindings, menus } = workbench;
-  const tabs = new LogsTabs(workbench.backend);
   editors.onClose((uri) => {
     tabs.closed(uri);
   });
@@ -43,7 +39,7 @@ export function registerLogs(workbench: Workbench): {
     const uri = logsUri(object);
     // A finding's instance may have ended long before the tab's 15 minutes.
     if (choice) {
-      tabs.prepare(uri, {
+      tabs.setSource(uri, {
         containers: { type: "named", name: choice.container },
         previous: choice.previous,
         since: { type: "start" },
@@ -119,7 +115,6 @@ export function registerLogs(workbench: Workbench): {
     ...toggles.map(({ id, key }) => ({ key, command: id, when: "logLines" })),
     { key: "mod+f", command: "k8s.logs.find", when: "logsFocus" },
   ]);
-  return { tabs, open };
 }
 
 /** A `k8s.logs.open` request, as a finding's button sends it. */

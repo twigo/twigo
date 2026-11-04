@@ -374,11 +374,16 @@ function published(session: LogsSession) {
 
 async function logsTab() {
   const workbench = await testWorkbench();
-  const { tabs, open } = registerLogs(workbench);
+  const tabs = new LogsTabs(workbench.backend);
+  registerLogs(workbench, tabs);
   render(<WorkbenchView workbench={workbench} />);
-  act(() => {
-    open(DEPLOYMENT);
-  });
+  await act(() =>
+    workbench.commands.execute(
+      "k8s.logs.open",
+      workbench.keys.lookup(null),
+      DEPLOYMENT,
+    ),
+  );
   const uri = logsUri(DEPLOYMENT);
   const input = parseLogsUri(uri);
   if (!input) throw new Error("no logs URI");
