@@ -16,18 +16,21 @@ const ICON: Readonly<Record<keyof typeof TINT, string>> = {
 
 /**
  * A slim bar across a view that says what holds for all of it: logs of a
- * previous container, streams that wait for the cluster's budget. Its
- * icon says the tone, so it does not rest on hue alone.
+ * previous container, streams that wait for the cluster's budget; its
+ * title first, in a heavier weight. Its icon says the tone, so it does not
+ * rest on hue alone.
  */
 export function Banner({
   tone,
   icon: Icon,
+  title,
   children,
   action,
 }: {
   tone: keyof typeof TINT;
   icon: LucideIcon;
-  children: ReactNode;
+  title: ReactNode;
+  children?: ReactNode;
   /** A button at its end. */
   action?: ReactNode;
 }) {
@@ -39,7 +42,10 @@ export function Banner({
       )}
     >
       <Icon aria-hidden className={cn("size-3.5 shrink-0", ICON[tone])} />
-      <div className="min-w-0 flex-1 truncate">{children}</div>
+      <div className="min-w-0 flex-1 truncate">
+        <span className="font-medium">{title}</span>
+        {children !== undefined && <> {children}</>}
+      </div>
       {action}
     </div>
   );

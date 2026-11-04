@@ -214,7 +214,7 @@ test("a finding's Previous logs opens its pod's tab on that container's previous
       previous: true,
     },
   ]);
-  expect(screen.getByText("Previous container")).toBeTruthy();
+  expect(screen.getByText("Previous container:")).toBeTruthy();
   await open(false);
   await act(() =>
     vi.waitFor(() => {

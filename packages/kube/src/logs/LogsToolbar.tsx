@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   ArrowDownToLine,
   Box,
-  Check,
   ChevronDown,
   ChevronUp,
   Clock,
@@ -10,7 +9,6 @@ import {
   ListFilter,
   Search,
   WrapText,
-  X,
 } from "lucide-react";
 import {
   TAB_STREAMS,
@@ -37,6 +35,9 @@ import {
   SearchField,
   Segmented,
   StatusLabel,
+  Tick,
+  TriggerButton,
+  TriggerChip,
   type Action,
   type Tone,
 } from "@twigo/ui";
@@ -90,9 +91,6 @@ const RANGES: readonly {
     since: { type: "start" },
   },
 ];
-
-const TRIGGER =
-  "inline-flex h-6.5 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs shadow-[inset_0_0_0_1px_var(--border)] outline-none hover:bg-row-hover focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-active";
 
 /**
  * A logs tab's one toolbar (ARCHITECTURE 4.6): the pods and container, the
@@ -224,22 +222,17 @@ export function LogsToolbar({
       <div className="flex h-9 min-w-0 flex-none items-center gap-1 overflow-hidden border-b border-border-subtle px-2">
         <PodPicker uri={uri} input={input} tabs={tabs} pods={snapshot.pods} />
         {range ? (
-          <span className={TRIGGER}>
+          <TriggerChip
+            clearLabel="Show the whole range"
+            onClear={() => {
+              tabs.setView(uri, { range: null });
+            }}
+          >
             <Clock aria-hidden className="size-3.5 text-muted-foreground" />
             <span className="tabular-nums">
               {clock(range.from).slice(0, 8)} – {clock(range.to).slice(0, 8)}
             </span>
-            <button
-              type="button"
-              aria-label="Show the whole range"
-              onClick={() => {
-                tabs.setView(uri, { range: null });
-              }}
-              className="-mr-1 flex size-4 items-center justify-center rounded text-muted-foreground hover:bg-row-hover hover:text-foreground"
-            >
-              <X aria-hidden className="size-3" />
-            </button>
-          </span>
+          </TriggerChip>
         ) : (
           <ActionDropdown
             label="Where the lines start"
@@ -255,14 +248,14 @@ export function LogsToolbar({
               })),
             ]}
           >
-            <button type="button" className={TRIGGER}>
+            <TriggerButton>
               <Clock aria-hidden className="size-3.5 text-muted-foreground" />
               {rangeLabel(source.since, narrow)}
               <ChevronDown
                 aria-hidden
                 className="size-3 text-muted-foreground"
               />
-            </button>
+            </TriggerButton>
           </ActionDropdown>
         )}
         <span aria-hidden className="mx-1 h-4 w-px bg-border" />
@@ -426,11 +419,11 @@ function PodPicker({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button type="button" className={TRIGGER}>
+        <TriggerButton>
           <Box aria-hidden className="size-3.5 text-muted-foreground" />
           {label}
           <ChevronDown aria-hidden className="size-3 text-muted-foreground" />
-        </button>
+        </TriggerButton>
       </PopoverTrigger>
       <PopoverContent className="w-[420px] p-0">
         <Command loop>
@@ -519,21 +512,6 @@ function PodPicker({
         </Command>
       </PopoverContent>
     </Popover>
-  );
-}
-
-function Tick({ on }: { on: boolean }) {
-  return (
-    <span
-      aria-hidden
-      className={
-        on
-          ? "flex size-3.5 items-center justify-center rounded bg-brand text-brand-foreground"
-          : "size-3.5 rounded shadow-[inset_0_0_0_1px_var(--input)]"
-      }
-    >
-      {on && <Check className="size-3" />}
-    </span>
   );
 }
 

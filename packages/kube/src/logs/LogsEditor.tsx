@@ -186,6 +186,7 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
         <Banner
           tone="info"
           icon={History}
+          title="Previous container:"
           action={
             <Button
               variant="outline"
@@ -198,46 +199,49 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
             </Button>
           }
         >
-          <span className="font-medium">Previous container</span>, the instance
-          that ended before the one running now
+          the instance that ended before the one running now
         </Banner>
       )}
       {queued > 0 && (
-        <Banner tone="warn" icon={Hourglass}>
-          <span className="font-medium">
-            {queued} {queued === 1 ? "pod waits" : "pods wait"} for a log
-            stream.
-          </span>{" "}
+        <Banner
+          tone="warn"
+          icon={Hourglass}
+          title={`${String(queued)} ${queued === 1 ? "pod waits" : "pods wait"} for a log stream.`}
+        >
           The cluster has {CLUSTER_STREAMS} followed logs open, the most Twigo
           opens on one cluster; close a logs tab to free some.
         </Banner>
       )}
       {snapshot.refused && (
-        <Banner tone="error" icon={CircleAlert}>
-          <span className="font-medium">Not applied:</span>{" "}
+        <Banner tone="error" icon={CircleAlert} title="Not applied:">
           {snapshot.refused.message}. The lines show the last filter and search
           that worked.
         </Banner>
       )}
       {failed[0] && (
-        <Banner tone="error" icon={CircleAlert}>
-          <span className="font-medium">
-            {failed.length === 1
+        <Banner
+          tone="error"
+          icon={CircleAlert}
+          title={
+            failed.length === 1
               ? `Cannot read the logs of ${failed[0].name}:`
-              : `Cannot read the logs of ${String(failed.length)} containers, ${failed[0].name} first:`}
-          </span>{" "}
+              : `Cannot read the logs of ${String(failed.length)} containers, ${failed[0].name} first:`
+          }
+        >
           {failed[0].error.message}
         </Banner>
       )}
       {problem && total > 0 && (
-        <Banner tone="error" icon={problem.icon}>
-          <span className="font-medium">{problem.title}.</span> {problem.body}{" "}
-          The lines read so far stay.
+        <Banner tone="error" icon={problem.icon} title={`${problem.title}.`}>
+          {problem.body} The lines read so far stay.
         </Banner>
       )}
       {status.state === "queued" && (
-        <Banner tone="warn" icon={Hourglass}>
-          <span className="font-medium">Waiting for a watch of the pods.</span>{" "}
+        <Banner
+          tone="warn"
+          icon={Hourglass}
+          title="Waiting for a watch of the pods."
+        >
           The cluster's watches are taken; one frees as a list closes.
         </Banner>
       )}
