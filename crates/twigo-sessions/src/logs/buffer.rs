@@ -203,23 +203,13 @@ impl Buffer {
         let mut kept = Vec::new();
         let mut joined: Option<(i64, Vec<Box<str>>)> = None;
         let mut count = 0;
-        loop {
-            let over = self.entries.len() + kept.len() > self.limits.entries
-                || self.bytes > self.limits.bytes;
-            let along = self
-                .entries
-                .front()
-                .is_some_and(|oldest| joined.as_ref().is_some_and(|(at, _)| *at == oldest.at));
-            if !over && !along {
-                break;
-            }
+        while self.entries.len() + kept.len() > self.limits.entries
+            || self.bytes > self.limits.bytes
+        {
             let Some(oldest) = self.entries.pop_front() else {
                 break;
             };
-            let theirs = joined.as_ref().is_some_and(|(at, pods)| {
-                *at == oldest.at && pods.iter().any(|pod| **pod == *oldest.kind.pod())
-            });
-            if held.contains(&oldest.id) || (!over && !theirs) {
+            if held.contains(&oldest.id) {
                 kept.push(oldest);
                 continue;
             }
@@ -231,6 +221,17 @@ impl Buffer {
             }
             self.bytes -= oldest.kind.bytes();
             count += 1;
+        }
+        if let Some((at, pods)) = joined {
+            while let Some(oldest) = self.entries.pop_front_if(|oldest| oldest.at == at) {
+                let theirs = pods.iter().any(|pod| **pod == *oldest.kind.pod());
+                if held.contains(&oldest.id) || !theirs {
+                    kept.push(oldest);
+                } else {
+                    self.bytes -= oldest.kind.bytes();
+                    count += 1;
+                }
+            }
         }
         for entry in kept.into_iter().rev() {
             self.entries.push_front(entry);
