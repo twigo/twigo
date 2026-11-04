@@ -15,6 +15,18 @@ import type {
   ViewState,
 } from "./generated";
 
+/**
+ * What Rust holds a logs tab to (ARCHITECTURE 4.6), as the webview tells
+ * it and the mock keeps it: the containers a tab follows at once
+ * (twigo-sessions' `STREAMS`), the followed logs Twigo opens on one
+ * cluster (twigo-kube's `Budgets::logs`, 3.2), and what a tab's buffer
+ * holds at most, entries and bytes of their text in UTF-8 (twigo-sessions'
+ * `LIMITS`).
+ */
+export const TAB_STREAMS = 10;
+export const CLUSTER_STREAMS = 32;
+export const LOG_LIMITS = { entries: 50_000, bytes: 16 * 2 ** 20 } as const;
+
 export interface LogsSnapshot {
   readonly seq: number;
   readonly status: ViewState;

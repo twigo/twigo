@@ -1,12 +1,11 @@
 import type { Level, ObjectRef, TextStyle } from "../../generated";
+import { LOG_LIMITS } from "../../logs";
 
-/** What the buffer holds at most (ARCHITECTURE 4.6): entries, and bytes of their text in UTF-8. */
+/** What the buffer holds at most: entries, and bytes of their text in UTF-8. */
 export interface Limits {
   readonly entries: number;
   readonly bytes: number;
 }
-
-export const LIMITS: Limits = { entries: 50_000, bytes: 16 * 2 ** 20 };
 
 export type Kind =
   | {
@@ -90,7 +89,7 @@ export class LogBuffer {
   #dropped: Dropped | null = null;
   #droppedEver = 0;
 
-  constructor(limits: Limits = LIMITS) {
+  constructor(limits: Limits = LOG_LIMITS) {
     this.#limits = limits;
   }
 

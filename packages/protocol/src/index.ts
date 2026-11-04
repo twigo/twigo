@@ -89,6 +89,13 @@ export type {
   ViewState,
 } from "./generated";
 export { INITIAL_SNAPSHOT, ListView, type ListSnapshot } from "./list";
-export { INITIAL_LOGS, LogsSession, type LogsSnapshot } from "./logs";
+export {
+  CLUSTER_STREAMS,
+  INITIAL_LOGS,
+  LOG_LIMITS,
+  LogsSession,
+  TAB_STREAMS,
+  type LogsSnapshot,
+} from "./logs";
 export { INITIAL_OBJECT, ObjectView, type ObjectSnapshot } from "./object";
 export { tauriBackend } from "./tauri";

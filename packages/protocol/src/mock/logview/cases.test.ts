@@ -10,7 +10,8 @@ import type {
   TextRange,
 } from "../../generated";
 import CASES from "../../log-cases.json";
-import { LIMITS, LogBuffer, type Limits, type Timed } from "./buffer";
+import { LOG_LIMITS } from "../../logs";
+import { LogBuffer, type Limits, type Timed } from "./buffer";
 import { level } from "./level";
 import { parse, time } from "./line";
 import {
@@ -111,7 +112,7 @@ for (const {
       return;
     }
     const checked = spec(view);
-    const buffer = new LogBuffer(limits ?? LIMITS);
+    const buffer = new LogBuffer(limits ?? LOG_LIMITS);
     buffer.insert(given.map(timed), (_, kind) => judge(checked, kind));
     buffer.bound(new Set(held));
 

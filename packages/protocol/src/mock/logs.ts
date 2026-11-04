@@ -1,4 +1,5 @@
 import { IpcError } from "../error";
+import { LOG_LIMITS, TAB_STREAMS } from "../logs";
 import { sameData } from "@twigo/utils";
 import type {
   Histogram,
@@ -22,7 +23,6 @@ import {
   type Pod,
 } from "./cluster";
 import {
-  LIMITS,
   LogBuffer,
   type Kind,
   type Limits,
@@ -42,9 +42,6 @@ import {
   type Spec,
 } from "./logview/view";
 
-/** A tab's streams (ARCHITECTURE 4.6) and the cluster's followed logs (3.2). */
-export const TAB_STREAMS = 10;
-export const CLUSTER_STREAMS = 32;
 const TICK_MS = 100;
 /** How often a workload's tab sees one of its pods replaced, as in a rollout. */
 const ROLLOUT_MS = 25_000;
@@ -100,7 +97,7 @@ export class MockLogs {
     cluster: Cluster | undefined,
     budget: (logs: MockLogs, wanted: number) => number,
     onMessage: (batch: LogBatch) => void,
-    limits: Limits = LIMITS,
+    limits: Limits = LOG_LIMITS,
   ) {
     this.#buffer = new LogBuffer(limits);
     this.#target = target;

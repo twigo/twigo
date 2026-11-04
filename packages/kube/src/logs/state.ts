@@ -46,9 +46,6 @@ export interface MatchAnchor {
   readonly fromEnd: number;
 }
 
-/** The containers a tab follows at once (ARCHITECTURE 4.6); Rust holds the rest back. */
-export const TAB_STREAMS = 10;
-
 /** The last 15 minutes of each pod's default container (ARCHITECTURE 4.6). */
 export const DEFAULT_SOURCE: LogSource = {
   containers: { type: "default" },

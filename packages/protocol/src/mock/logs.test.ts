@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { LogBatch, LogEntry, LogSource, LogView } from "../generated";
 import { Cluster, deploymentOf, type Pod } from "./cluster";
-import { MockLogs, TAB_STREAMS } from "./logs";
+import { TAB_STREAMS } from "../logs";
+import { MockLogs } from "./logs";
 import type { Limits } from "./logview/buffer";
 
 const SOURCE: LogSource = {

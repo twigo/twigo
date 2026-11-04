@@ -12,14 +12,15 @@ import {
   WrapText,
   X,
 } from "lucide-react";
-import type {
-  Containers,
-  LogPod,
-  LogsSession,
-  LogTarget,
-  LogsSnapshot,
-  Since,
-  StreamState,
+import {
+  TAB_STREAMS,
+  type Containers,
+  type LogPod,
+  type LogsSession,
+  type LogTarget,
+  type LogsSnapshot,
+  type Since,
+  type StreamState,
 } from "@twigo/protocol";
 import {
   ActionDropdown,
@@ -42,7 +43,7 @@ import {
 import { sameData } from "@twigo/utils";
 import { useChanges, useWorkbench } from "@twigo/workbench";
 import { clock, followed, logsKind, podTag, standingMatch } from "./entries";
-import { TAB_STREAMS, type LogsTabs } from "./state";
+import type { LogsTabs } from "./state";
 
 /** Where a session starts, as the range offers it (ARCHITECTURE 4.6). */
 const RANGES: readonly {

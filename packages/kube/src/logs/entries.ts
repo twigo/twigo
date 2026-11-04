@@ -5,12 +5,13 @@ import {
   LogIn,
   LogOut,
 } from "lucide-react";
-import type {
-  Gvr,
-  LogEntry,
-  LogMatches,
-  LogPod,
-  TextStyle,
+import {
+  LOG_LIMITS,
+  type Gvr,
+  type LogEntry,
+  type LogMatches,
+  type LogPod,
+  type TextStyle,
 } from "@twigo/protocol";
 import type { LineItem, TextMark, TextRun } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
@@ -196,7 +197,7 @@ export function lineItem(
         kind: "marker",
         key,
         icon: Ellipsis,
-        text: `${entry.count.toLocaleString("en")} older lines dropped · a tab keeps the last 50,000 lines or 16 MB`,
+        text: `${entry.count.toLocaleString("en")} older lines dropped · a tab keeps the last ${LOG_LIMITS.entries.toLocaleString("en")} lines or ${String(LOG_LIMITS.bytes / 2 ** 20)} MB`,
       };
   }
 }

@@ -23,7 +23,8 @@ import {
 } from "./auth";
 import { Cluster } from "./cluster";
 import { KINDS, wireRow, type MockKind, type MockRow } from "./kinds";
-import { CLUSTER_STREAMS, MockLogs } from "./logs";
+import { CLUSTER_STREAMS } from "../logs";
+import { MockLogs } from "./logs";
 import { MockObject } from "./objects";
 import {
   CONTEXTS,

@@ -6,7 +6,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { CircleAlert, History, Hourglass, ScrollText } from "lucide-react";
-import type { LogView } from "@twigo/protocol";
+import { CLUSTER_STREAMS, type LogView } from "@twigo/protocol";
 import {
   Banner,
   Button,
@@ -208,8 +208,8 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
             {queued} {queued === 1 ? "pod waits" : "pods wait"} for a log
             stream.
           </span>{" "}
-          The cluster has 32 followed logs open, the most Twigo opens on one
-          cluster; close a logs tab to free some.
+          The cluster has {CLUSTER_STREAMS} followed logs open, the most Twigo
+          opens on one cluster; close a logs tab to free some.
         </Banner>
       )}
       {snapshot.refused && (
