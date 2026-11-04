@@ -171,8 +171,10 @@ impl Resume {
             .map(|(latest, left)| Skip { left, latest, same });
     }
 
-    /// What a line read at `at` is, counting it if new.
-    pub fn admit(&mut self, at: i64) -> Admit {
+    /// What a line read at `at` is, counting it if new and it `counts`:
+    /// a line held back, which does not come, must not, or a later read
+    /// would skip one that it never sent for it.
+    pub fn admit(&mut self, at: i64, counts: bool) -> Admit {
         if let Some(skip) = &mut self.skip {
             if at <= skip.latest {
                 skip.left -= 1;
@@ -186,6 +188,9 @@ impl Resume {
             if same {
                 return Admit::Moved;
             }
+        }
+        if !counts {
+            return Admit::New;
         }
         self.latest = match self.latest {
             Some((latest, count)) if second(at) == second(latest) => {
@@ -604,8 +609,10 @@ impl Reader {
     /// the resume holds no line, up to `before`, the time of the later
     /// one's first line, and tries again while the cluster cannot be
     /// reached and the status names `old`, but not once the pod's channel
-    /// closed. What its log held, the resume left as it was when it held
-    /// none of the lines read, for the instance they came from.
+    /// closed. The lines it holds back, before the latest one read, it
+    /// neither sends nor counts, so a rest that holds none of the lines
+    /// read, or that it gives up, leaves the resume to the instance they
+    /// came from.
     async fn tail(
         &mut self,
         old: &str,
@@ -614,7 +621,6 @@ impl Reader {
         pod: &mut watch::Receiver<Arc<Value>>,
         send: &impl Fn(Event),
     ) -> Tail {
-        let kept = self.resume;
         loop {
             if gone(pod) {
                 return Tail::GaveUp;
@@ -623,10 +629,7 @@ impl Reader {
             let start = self.resume.from().map_or(from, ReadFrom::Time);
             match self.read(Read::Rest, start, before, send).await {
                 Outcome::Ended { held: true, .. } => return Tail::Found,
-                Outcome::Ended { held: false, .. } => {
-                    self.resume = kept;
-                    return Tail::Lacked;
-                }
+                Outcome::Ended { held: false, .. } => return Tail::Lacked,
                 Outcome::Cut => {}
                 Outcome::Broken => {
                     self.pause(pod).await;
@@ -878,7 +881,7 @@ impl Reader {
             if holding.is_some_and(|latest| at >= latest) {
                 holding = None;
             }
-            match self.resume.admit(at) {
+            match self.resume.admit(at, holding.is_none()) {
                 Admit::New => fresh = true,
                 Admit::Again => continue,
                 Admit::Moved => return Outcome::Moved { at: Some(at) },
@@ -1351,6 +1354,34 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn a_rest_cut_while_it_held_lines_back_then_given_up_skips_none_of_the_later_instance() {
+        let fake = Fake::default();
+        let write = |instance, ms, text| fake.write("web-1", "web", instance, T0 + ms * MS, text);
+        fake.serve("web-1", "web", Some("web-b"), Some("web-a"));
+        write("web-a", 5_100, "web-a x");
+        write("web-a", 5_200, "web-a y");
+        fake.stop("web-1", "web", "web-a");
+        write("web-b", 5_800, "web-b 1");
+        let followed = Followed::new(&fake, web(running(), json!({})), false);
+        followed.until("web-b's line", has("web-b 1")).await;
+        fake.strand("web-1", "web");
+        write("web-b", 5_700, "web-b late");
+        fake.hold("web-1", "web");
+        followed.tell(restarted("web-b", "web-a"));
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        fake.remove("web-1", "web", "web-a");
+        followed.cut();
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        write("web-b", 7_000, "web-b 2");
+        followed.until("web-b's next line", has("web-b 2")).await;
+        assert_eq!(
+            followed.entries(),
+            ["web-b 1", "ended", "web-b late", "web-b 2"]
+        );
+        assert_eq!(followed.ends(), [T0 + 5_800 * MS]);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn an_old_instances_end_follows_its_last_line_when_the_next_ones_came_first() {
         let fake = Fake::default();
         let followed = cut_across_a_restart(&fake).await;
@@ -1800,14 +1831,14 @@ mod tests {
 
     fn reread(resume: &mut Resume, times: &[i64]) -> Vec<Admit> {
         resume.reopen(true);
-        times.iter().map(|at| resume.admit(*at)).collect()
+        times.iter().map(|at| resume.admit(*at, true)).collect()
     }
 
     #[test]
     fn a_reopened_read_skips_what_came_already() {
         let mut resume = Resume::default();
         for at in [1_500, 2_000, 2_000] {
-            assert_eq!(resume.admit(at), New);
+            assert_eq!(resume.admit(at, true), New);
         }
         assert_eq!(resume.from(), Some(0));
         let again = reread(&mut resume, &[1_500, 2_000, 2_000, 2_000, 2_500]);
@@ -1819,7 +1850,7 @@ mod tests {
         let ms = |ms: i64| ms * 1_000_000;
         let mut resume = Resume::default();
         for at in [ms(1_900), ms(2_200), ms(2_300), ms(2_100)] {
-            assert_eq!(resume.admit(at), New);
+            assert_eq!(resume.admit(at, true), New);
         }
         assert_eq!(resume.from(), Some(2 * SECOND));
         let again = reread(
@@ -1845,18 +1876,18 @@ mod tests {
     fn a_later_line_first_says_the_log_holds_none_of_what_came() {
         let mut resume = Resume::default();
         for at in [1_000, 2_000] {
-            assert_eq!(resume.admit(at), New);
+            assert_eq!(resume.admit(at, true), New);
         }
         assert_eq!(reread(&mut resume, &[5_000, 6_000]), [Moved, New]);
         resume.reopen(false);
-        assert_eq!(resume.admit(9_000), New);
-        assert_eq!(resume.admit(9_500), New);
+        assert_eq!(resume.admit(9_000, true), New);
+        assert_eq!(resume.admit(9_500, true), New);
     }
 
     #[test]
     fn a_reopened_read_resumes_from_the_latest_lines_second() {
         let mut resume = Resume::default();
-        assert_eq!(resume.admit(5 * SECOND + 700), New);
+        assert_eq!(resume.admit(5 * SECOND + 700, true), New);
         assert_eq!(resume.from(), Some(5 * SECOND));
         assert_eq!(Resume::default().from(), None);
     }
