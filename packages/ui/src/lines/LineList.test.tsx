@@ -341,6 +341,51 @@ test("paused near the end, a list made taller holds where the end cut it short, 
   expect(log.scrollTop).toBe(19 * 300 - 900);
 });
 
+test("paused, the end cutting the list short as lines leave on either side of its top is no scroll of the person's", () => {
+  const { log, onPlace, update } = mount({
+    follow: false,
+    total: 300,
+    items: lines(0, 300),
+  });
+  scroll(log, 19 * 260);
+  update({ total: 280, items: lines(10, 290) });
+  expect(log.scrollTop).toBe(19 * 280 - 600);
+  expect(onPlace).toHaveBeenLastCalledWith({
+    key: "260",
+    offset: 19 * 280 - 600 - 19 * 250,
+  });
+});
+
+test("paused, the person's scroll whose event has not come when lines leave before the top moves the place with it", () => {
+  const { log, onPlace, update } = mount({
+    follow: false,
+    total: 300,
+    items: lines(0, 300),
+  });
+  scroll(log, 19 * 120);
+  log.scrollTop = 19 * 130;
+  update({ items: lines(10, 310) });
+  expect(log.scrollTop).toBe(19 * 120);
+  expect(onPlace).toHaveBeenLastCalledWith({ key: "130", offset: 0 });
+});
+
+test("a line revealed near the end stands where the end lets it, says so as it lands, and the lines that come next move nothing", () => {
+  const { log, onPlace, update } = mount({
+    follow: false,
+    total: 300,
+    items: lines(0, 300),
+  });
+  update({ reveal: { key: "295", token: 1 } });
+  expect(log.scrollTop).toBe(19 * 300 - 600);
+  expect(onPlace).toHaveBeenLastCalledWith({
+    key: "295",
+    offset: 19 * 300 - 600 - 19 * 295,
+  });
+  expect(onPlace).not.toHaveBeenCalledWith({ key: "295", offset: CENTRE });
+  update({ total: 320, items: lines(0, 320) });
+  expect(log.scrollTop).toBe(19 * 300 - 600);
+});
+
 test("paused, the lines that came meanwhile show on a button that follows again", () => {
   const { onFollowChange } = mount({ follow: false, fresh: 2 });
   act(() => {
@@ -380,6 +425,23 @@ test("paused, turning wrap on keeps the top line where it stood as its rows are 
   });
   expect(log.scrollTop - startOf(log, "120")).toBe(8);
   expect(onPlace).toHaveBeenLastCalledWith({ key: "120", offset: 8 });
+});
+
+test("paused at the end, turning wrap on keeps the top line where it stood, though the rows it measured grow the list only a render later", async () => {
+  const { log, update } = mount({
+    follow: false,
+    total: 300,
+    items: lines(0, 300),
+    place: { key: "268", offset: 8 },
+  });
+  scroll(log, log.scrollTop);
+  await act(() => new Promise((done) => setTimeout(done, 200)));
+  wrapped();
+  update({ wrap: true });
+  act(() => {
+    resize();
+  });
+  expect(log.scrollTop - startOf(log, "268")).toBe(8);
 });
 
 test("with wrap, a revealed line stays centred as the rows before it are measured", () => {
