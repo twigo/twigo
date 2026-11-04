@@ -132,9 +132,32 @@ function scroll(log: HTMLElement, top: number) {
 
 function wheel(log: HTMLElement, top: number) {
   act(() => {
-    fireEvent.wheel(log, { deltaY: top < log.scrollTop ? -40 : 40 });
-    log.scrollTop = top;
+    fireEvent.wheel(log, { deltaY: top - log.scrollTop });
     fireEvent.scroll(log);
+  });
+}
+
+function spin(log: HTMLElement, init: WheelEventInit) {
+  let left = true;
+  act(() => {
+    left = fireEvent.wheel(log, init);
+  });
+  return left;
+}
+
+function wide(log: HTMLElement) {
+  let at = 0;
+  Object.defineProperty(log, "clientWidth", { configurable: true, value: 700 });
+  Object.defineProperty(log, "scrollWidth", {
+    configurable: true,
+    value: 2000,
+  });
+  Object.defineProperty(log, "scrollLeft", {
+    configurable: true,
+    get: () => at,
+    set: (left: number) => {
+      at = Math.min(Math.max(0, left), 2000 - 700);
+    },
   });
 }
 
@@ -223,24 +246,142 @@ test("paused, a scroll too small to show other rows still moves the place it kee
   expect(onPlace).toHaveBeenLastCalledWith({ key: "120", offset: 3 });
 });
 
-test("a wheel up pauses following", () => {
-  const { log, onFollowChange } = mount();
-  fireEvent.wheel(log, { deltaY: -40 });
+test("a wheel up pauses following at once, and the list scrolls up by it itself", () => {
+  const { log, onFollowChange } = mount({ total: 300, items: lines(0, 300) });
+  expect(spin(log, { deltaY: -40 })).toBe(false);
   expect(onFollowChange).toHaveBeenCalledWith(false);
+  expect(log.scrollTop).toBe(19 * 300 - 600 - 40);
 });
 
-test("paused, a wheel down that reaches the end follows again at once, and one short of it does not, though the browser scrolled by it first", () => {
+test("paused, the list scrolls down by a wheel itself, and one whose delta reaches the end follows again at once, one short of it not", () => {
   const { log, onFollowChange } = mount({
     follow: false,
     total: 300,
     items: lines(0, 300),
   });
-  log.scrollTop = 19 * 300 - 600 - 40;
-  fireEvent.wheel(log, { deltaY: 19 * 300 - 600 - 40 });
+  expect(spin(log, { deltaY: 19 * 300 - 600 - 40 })).toBe(false);
+  expect(log.scrollTop).toBe(19 * 300 - 600 - 40);
   expect(onFollowChange).not.toHaveBeenCalled();
-  log.scrollTop = 0;
-  fireEvent.wheel(log, { deltaY: 19 * 300 - 600 });
+  expect(spin(log, { deltaY: 40 })).toBe(false);
+  expect(log.scrollTop).toBe(19 * 300 - 600);
   expect(onFollowChange).toHaveBeenLastCalledWith(true);
+});
+
+test("a wheel scrolls the list by its pixels, by a row a line and by a page a page", () => {
+  const { log } = mount({
+    follow: false,
+    total: 300,
+    items: lines(0, 300),
+  });
+  scroll(log, 19 * 100);
+  const tops = [
+    { deltaY: 40 },
+    { deltaY: 3, deltaMode: WheelEvent.DOM_DELTA_LINE },
+    { deltaY: 1, deltaMode: WheelEvent.DOM_DELTA_PAGE },
+    { deltaY: -2, deltaMode: WheelEvent.DOM_DELTA_PAGE },
+  ].map((init) => [spin(log, init), log.scrollTop - 19 * 100]);
+  expect(tops).toEqual([
+    [false, 40],
+    [false, 40 + 3 * 19],
+    [false, 40 + 3 * 19 + PAGE],
+    [false, 40 + 3 * 19 - PAGE],
+  ]);
+});
+
+test("a wheel's deltas below a pixel add up, though the browser keeps whole pixels", () => {
+  const { log } = mount({
+    follow: false,
+    total: 300,
+    items: lines(0, 300),
+  });
+  scroll(log, 19 * 100);
+  let at = log.scrollTop;
+  Object.defineProperty(log, "scrollTop", {
+    configurable: true,
+    get: () => at,
+    set: (top: number) => {
+      at = Math.trunc(top);
+    },
+  });
+  for (let round = 0; round < 4; round++) spin(log, { deltaY: 0.5 });
+  expect(log.scrollTop).toBe(19 * 100 + 2);
+});
+
+test("a wheel the list cannot scroll by, at its top or its end, is the browser's", () => {
+  const top = mount({ follow: false, total: 300, items: lines(0, 300) });
+  const left = [spin(top.log, { deltaY: -40 }), spin(top.log, { deltaY: 40 })];
+  cleanup();
+  const end = mount({ total: 300, items: lines(0, 300) });
+  left.push(spin(end.log, { deltaY: 40 }), spin(end.log, { deltaY: -40 }));
+  expect(left).toEqual([true, false, true, false]);
+  expect(end.log.scrollTop).toBe(19 * 300 - 600 - 40);
+});
+
+test("without wrap, the list scrolls sideways by a wheel's deltaX itself, ⇧ with a mouse's included, and at its left edge the wheel is the browser's", () => {
+  const { log } = mount({
+    follow: false,
+    total: 300,
+    items: lines(0, 300),
+  });
+  wide(log);
+  const lefts = [
+    { deltaX: 100 },
+    { deltaX: 120, shiftKey: true },
+    { deltaX: -300 },
+    { deltaX: -10 },
+    { deltaX: 50, deltaY: 40 },
+  ].map((init) => [spin(log, init), log.scrollLeft]);
+  expect(lefts).toEqual([
+    [false, 100],
+    [false, 220],
+    [false, 0],
+    [true, 0],
+    [false, 50],
+  ]);
+  expect(log.scrollTop).toBe(40);
+});
+
+test("a wheel with ⌃, which zooms, or with ⇧ and no deltaX, which Chromium turns sideways, is the browser's, and the list neither scrolls nor pauses for it", () => {
+  const { log, onFollowChange } = mount({ total: 300, items: lines(0, 300) });
+  wide(log);
+  expect([
+    spin(log, { deltaY: -40, ctrlKey: true }),
+    spin(log, { deltaY: -40, shiftKey: true }),
+  ]).toEqual([true, true]);
+  expect([log.scrollTop, log.scrollLeft]).toEqual([19 * 300 - 600, 0]);
+  expect(onFollowChange).not.toHaveBeenCalled();
+});
+
+test("a wheel the browser does not let the list cancel moves the list no further, and still pauses or follows at once", () => {
+  const { log, onFollowChange, update } = mount({
+    total: 300,
+    items: lines(0, 300),
+  });
+  spin(log, { deltaY: -40, cancelable: false });
+  expect(onFollowChange).toHaveBeenLastCalledWith(false);
+  expect(log.scrollTop).toBe(19 * 300 - 600);
+  update({ follow: false });
+  scroll(log, 19 * 300 - 600 - 600);
+  log.scrollTop = 19 * 300 - 600 - 300;
+  spin(log, { deltaY: 300, cancelable: false });
+  expect(log.scrollTop).toBe(19 * 300 - 600 - 300);
+  expect(onFollowChange).not.toHaveBeenCalledWith(true);
+  spin(log, { deltaY: 600, cancelable: false });
+  expect(onFollowChange).toHaveBeenLastCalledWith(true);
+});
+
+test("paused, the wheel's scroll is the person's: lines that leave before its scroll event move the place with it, in the one write that holds the line", () => {
+  const { log, onPlace, update } = mount({
+    follow: false,
+    total: 300,
+    items: lines(0, 300),
+  });
+  scroll(log, 19 * 120);
+  spin(log, { deltaY: 40 });
+  const writes = vi.spyOn(log, "scrollTop", "set");
+  update({ items: lines(10, 310) });
+  expect(writes.mock.calls).toEqual([[19 * 110 + 40]]);
+  expect(onPlace).toHaveBeenLastCalledWith({ key: "122", offset: 2 });
 });
 
 test("following, a scroll the list did not write is the person's, and away from the end it pauses", () => {

@@ -210,6 +210,22 @@ function sameLines(
 /** What a page keeps in view of the one before, about what the browsers keep. */
 const OVERLAP = 2 * ROW;
 
+/**
+ * A page of a list `length` px long: its length less two rows, or in a
+ * short list Chromium's share of it, more than WebKit's 4/5, so a page is
+ * never less than a browser's.
+ */
+function pageOf(length: number): number {
+  return Math.max(length - OVERLAP, Math.floor((length * 7) / 8));
+}
+
+/** The px of one unit of a wheel's delta along a list `length` px long. */
+function unitOf(mode: number, length: number): number {
+  if (mode === WheelEvent.DOM_DELTA_LINE) return ROW;
+  if (mode === WheelEvent.DOM_DELTA_PAGE) return pageOf(length);
+  return 1;
+}
+
 function askedBy(mode: Mode): string | undefined {
   switch (mode.kind) {
     case "seek":
@@ -225,6 +241,15 @@ const NEVER = () => false;
 
 function maxOf(element: HTMLElement): number {
   return Math.max(0, element.scrollHeight - element.clientHeight);
+}
+
+function maxLeftOf(element: HTMLElement): number {
+  return Math.max(0, element.scrollWidth - element.clientWidth);
+}
+
+/** Whether a scroll by `delta` from `at` moves within `[0, max]`. */
+function within(delta: number, at: number, max: number): boolean {
+  return delta < 0 ? at > 0 : delta > 0 && at < max;
 }
 
 /**
@@ -424,11 +449,54 @@ export function LineList({
     if (to === "last") followAgain();
     else if (to === "first") go(scroller, 0);
     else {
-      // A short list moves Chromium's share of itself, more than WebKit's
-      // 4/5, so its page is never less than a browser's.
-      const height = scroller.clientHeight;
-      const page = Math.max(height - OVERLAP, Math.floor((height * 7) / 8));
+      const page = pageOf(scroller.clientHeight);
       go(scroller, scroller.scrollTop + (to === "down" ? page : -page));
+    }
+  };
+  /** What the engine's whole-pixel `scrollTop` and `scrollLeft` dropped of the wheel's deltas, carried to the next one. */
+  const rest = useRef({ x: 0, y: 0 });
+  // The person's wheel pauses at once, or follows again once its delta
+  // reaches the end: lines that come before its scroll event move the end.
+  // While the list can scroll that way it scrolls by the wheel itself, as
+  // xterm.js does, since WebKit drops a wheel's own scroll at the list's
+  // next write; that scroll is the person's, so a layout change before its
+  // scroll event carries it in the write that holds the line. A wheel the
+  // browser does not let it cancel the browser scrolls by, maybe before it
+  // dispatches it, so its delta counts from where the list last stood. The
+  // browser keeps a ⌃ wheel, which zooms, a pinch's included, and a ⇧
+  // wheel without `deltaX`, which Chromium turns sideways on Windows and
+  // Linux.
+  const wheel = (scroller: HTMLElement, event: WheelEvent) => {
+    if (event.ctrlKey || (event.shiftKey && event.deltaX === 0)) return;
+    const dx = event.deltaX * unitOf(event.deltaMode, scroller.clientWidth);
+    const dy = event.deltaY * unitOf(event.deltaMode, scroller.clientHeight);
+    const left = scroller.scrollLeft;
+    const top = scroller.scrollTop;
+    const from = event.cancelable ? top : known.current;
+    if (follow) {
+      if (dy < 0) onFollowChange(false);
+    } else if (dy > 0 && maxOf(scroller) - from - dy < ROW)
+      onFollowChange(true);
+    if (!event.cancelable) return;
+    const sideways = within(dx, left, maxLeftOf(scroller));
+    const vertical = within(dy, top, maxOf(scroller));
+    if (!sideways && !vertical) return;
+    event.preventDefault();
+    if (sideways) {
+      const to = Math.min(
+        Math.max(0, left + rest.current.x + dx),
+        maxLeftOf(scroller),
+      );
+      scroller.scrollLeft = to;
+      rest.current.x = to - scroller.scrollLeft;
+    }
+    if (vertical) {
+      const to = Math.min(
+        Math.max(0, top + rest.current.y + dy),
+        maxOf(scroller),
+      );
+      scroller.scrollTop = to;
+      rest.current.y = to - scroller.scrollTop;
     }
   };
 
@@ -568,6 +636,20 @@ export function LineList({
     }
   }, [items, loaded.left, virtualizer]);
 
+  const wheeled = useEffectEvent((event: WheelEvent) => {
+    if (element) wheel(element, event);
+  });
+  useEffect(() => {
+    if (!element) return;
+    const listener = (event: WheelEvent) => {
+      wheeled(event);
+    };
+    element.addEventListener("wheel", listener, { passive: false });
+    return () => {
+      element.removeEventListener("wheel", listener);
+    };
+  }, [element]);
+
   const keyed = useEffectEvent((to: Move | number) => {
     if (!element) return;
     if (typeof to === "number") go(element, element.scrollTop + to * ROW);
@@ -597,20 +679,6 @@ export function LineList({
           if (!element || hidden.current || element.clientHeight === 0) return;
           const from = known.current;
           if (unseen(element) !== 0) personal(element, from);
-        }}
-        // The person's wheel pauses at once, or follows again once it
-        // reaches the end: the browser scrolls it against the end it last
-        // drew, which lines that came since have moved. It counts from
-        // where the list last stood, since Chromium may have scrolled by
-        // the wheel before it dispatches it.
-        onWheel={(event) => {
-          if (follow) {
-            if (event.deltaY < 0) onFollowChange(false);
-          } else if (
-            event.deltaY > 0 &&
-            maxOf(event.currentTarget) - known.current - event.deltaY < ROW
-          )
-            onFollowChange(true);
         }}
         onKeyDown={(event) => {
           const to = moveOf(event);
