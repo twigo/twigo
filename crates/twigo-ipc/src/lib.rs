@@ -8,6 +8,7 @@ mod environment;
 mod error;
 mod keyboard;
 mod list;
+mod logs;
 mod object;
 mod space;
 mod state;
@@ -22,11 +23,17 @@ pub use list::{
     Ack, Cell, Column, ColumnKind, ColumnValues, Grouping, Gvr, ListBatch, ListQuery, Row,
     RowGroup, RowId, SetWindow, Sort, SubscriptionId, ValueCount, ViewState, Window,
 };
+pub use logs::{
+    AnsiColor, Bucket, Containers, DownloadLogs, Histogram, Level, LevelFilter, LogAround,
+    LogBatch, LogContainer, LogEntries, LogEntry, LogMatches, LogPod, LogSource, LogTarget,
+    LogView, LogWindow, OpenLogs, SetLogSource, SetLogView, SetLogWindow, Since, StreamState,
+    TextRange, TextStyle, TimeRange,
+};
 pub use object::{
     Block, Condition, Container, ContainerRole, ContainerState, DataEntry, EmbeddedList, EventList,
-    Field, Finding, GetValues, Label, ObjectBatch, ObjectEvent, ObjectParts, ObjectQuery,
-    ObjectRef, OpenObject, Overview, Related, RelatedObject, Section, SetParts, Span, Tone,
-    TreeNode, TreeValue, Value,
+    Field, Finding, FindingLogs, GetValues, Label, ObjectBatch, ObjectEvent, ObjectParts,
+    ObjectQuery, ObjectRef, OpenObject, Overview, Related, RelatedObject, Section, SetParts, Span,
+    Tone, TreeNode, TreeValue, Value,
 };
 pub use space::{Context, ContextColor, Space};
 pub use state::{StateEntry, StateSnapshot};

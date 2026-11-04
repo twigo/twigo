@@ -43,7 +43,7 @@ test("the next window comes back to the space, its parts, namespaces and views",
   const first = await window(backend);
   first.spaces.select("staging");
   first.spaces.setPart("staging", "sidebar", { visible: false });
-  first.spaces.setPart("staging", "panel", { visible: true, container: "out" });
+  first.spaces.setPart("staging", "panel", { visible: true, maximized: true });
   first.spaces.update("staging", (state) => ({
     ...state,
     namespaces: ["payments"],
@@ -56,7 +56,7 @@ test("the next window comes back to the space, its parts, namespaces and views",
   expect(spaces.state("staging").parts.sidebar.visible).toBe(false);
   expect(spaces.state("staging").parts.panel).toEqual({
     visible: true,
-    container: "out",
+    maximized: true,
   });
   expect(spaces.state("staging").namespaces).toEqual(["payments"]);
   expect(spaces.view("staging", "tree")).toEqual({ open: ["Config"] });
@@ -75,7 +75,7 @@ test("a change goes to the backend at once, one key per part of the state", asyn
       key: "parts",
       value: JSON.stringify({
         ...DEFAULT_STATE.parts,
-        panel: { visible: true },
+        panel: { visible: true, maximized: false },
       }),
     },
     { space: "prod-eu", key: "namespaces", value: '["a"]' },
@@ -100,7 +100,7 @@ test("what a key holds reads back as far as it fits", async () => {
       {
         space: "prod-eu",
         key: "parts",
-        value: '{"panel":{"visible":"yes","container":"out"},"secondary":3}',
+        value: '{"panel":{"visible":"yes","maximized":true},"secondary":3}',
       },
       { space: "prod-eu", key: "namespaces", value: '["a",1]' },
       { space: "prod-eu", key: "placement", value: '{"view":"there"}' },
@@ -112,7 +112,7 @@ test("what a key holds reads back as far as it fits", async () => {
     ...DEFAULT_STATE,
     parts: {
       ...DEFAULT_STATE.parts,
-      panel: { visible: false, container: "out" },
+      panel: { visible: false, maximized: true },
     },
     placement: { view: "there" },
   });

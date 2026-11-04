@@ -5,8 +5,9 @@
 use ts_rs::TS;
 
 use crate::{
-    Ack, ClusterVersion, Context, ContextAuth, Discovered, ExecReview, GetValues, KeyboardLayout,
-    ListBatch, ListQuery, ObjectBatch, OpenObject, SetParts, SetWindow, ShellEnvironment, Space,
+    Ack, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ExecReview, GetValues,
+    KeyboardLayout, ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject,
+    SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellEnvironment, Space,
     StateEntry, StateSnapshot, SubscriptionId,
 };
 
@@ -164,6 +165,73 @@ pub struct ObjectClose;
 
 impl Command for ObjectClose {
     const NAME: &'static str = "object_close";
+    type Request = SubscriptionId;
+    type Response = ();
+    type Message = ();
+}
+
+/// Opens a logs tab's session (ARCHITECTURE 4.6), whose batches come over
+/// the channel until it closes.
+pub struct LogsOpen;
+
+impl Command for LogsOpen {
+    const NAME: &'static str = "logs_open";
+    type Request = OpenLogs;
+    type Response = SubscriptionId;
+    type Message = LogBatch;
+}
+
+pub struct LogsSetSource;
+
+impl Command for LogsSetSource {
+    const NAME: &'static str = "logs_set_source";
+    type Request = SetLogSource;
+    type Response = ();
+    type Message = ();
+}
+
+pub struct LogsSetView;
+
+impl Command for LogsSetView {
+    const NAME: &'static str = "logs_set_view";
+    type Request = SetLogView;
+    type Response = ();
+    type Message = ();
+}
+
+pub struct LogsSetWindow;
+
+impl Command for LogsSetWindow {
+    const NAME: &'static str = "logs_set_window";
+    type Request = SetLogWindow;
+    type Response = ();
+    type Message = ();
+}
+
+pub struct LogsAck;
+
+impl Command for LogsAck {
+    const NAME: &'static str = "logs_ack";
+    type Request = Ack;
+    type Response = ();
+    type Message = ();
+}
+
+/// Saves a session's lines to a file the person picks in a save dialog;
+/// answers with its path, or null when they cancel.
+pub struct LogsDownload;
+
+impl Command for LogsDownload {
+    const NAME: &'static str = "logs_download";
+    type Request = DownloadLogs;
+    type Response = Option<String>;
+    type Message = ();
+}
+
+pub struct LogsClose;
+
+impl Command for LogsClose {
+    const NAME: &'static str = "logs_close";
     type Request = SubscriptionId;
     type Response = ();
     type Message = ();

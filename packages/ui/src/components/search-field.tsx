@@ -1,4 +1,4 @@
-import type { Ref } from "react";
+import type { ReactNode, Ref } from "react";
 import { ListFilter, X, type LucideIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 import { Kbd } from "./kbd";
@@ -16,6 +16,8 @@ export function SearchField({
   icon: Icon = ListFilter,
   keys,
   inputRef,
+  trailing,
+  onEnter,
   className,
 }: {
   label: string;
@@ -26,6 +28,10 @@ export function SearchField({
   /** The key that focuses the field, shown while it is empty. */
   keys?: string;
   inputRef?: Ref<HTMLInputElement>;
+  /** What follows the text while there is some, such as a search's `3 of 5`. */
+  trailing?: ReactNode;
+  /** Enter, or Shift+Enter, such as a search's step to its next match or back. */
+  onEnter?: (back: boolean) => void;
   className?: string;
 }) {
   return (
@@ -46,6 +52,11 @@ export function SearchField({
           onChange(event.target.value);
         }}
         onKeyDown={(event) => {
+          if (event.key === "Enter" && onEnter) {
+            event.preventDefault();
+            onEnter(event.shiftKey);
+            return;
+          }
           if (event.key !== "Escape") return;
           event.preventDefault();
           if (value) onChange("");
@@ -53,6 +64,7 @@ export function SearchField({
         }}
         className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground-2"
       />
+      {value && trailing}
       {value ? (
         <button
           type="button"

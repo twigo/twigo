@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use k8s_openapi::api::authentication::v1::TokenRequest;
-use k8s_openapi::api::core::v1::{ConfigMap, Namespace, Pod, ServiceAccount};
+use k8s_openapi::api::core::v1::{ConfigMap, Namespace, Node, Pod, ServiceAccount};
 use k8s_openapi::api::rbac::v1::{Role, RoleBinding};
 use kube::api::{ApiResource, DeleteParams, DynamicObject, Patch, PatchParams, PostParams};
 use kube::config::Kubeconfig;
@@ -700,5 +700,84 @@ async fn a_need_that_may_not_be_read_says_why() {
     let refused = cell(&batch, "core.ports", 0, "Endpoints").unwrap();
     assert!(refused.contains("endpointslices"), "{refused}");
     core.object_close("main", opened.id).unwrap();
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_crashing_containers_finding_has_its_previous_instances_last_line() {
+    let cluster = Cluster::connect().await;
+    let node = cluster
+        .context
+        .strip_prefix("kind-")
+        .map(|name| format!("{name}-control-plane"));
+    let node = node.expect("a kubelet runs the container, so kind's node");
+    let held = Api::<Node>::all(cluster.admin.clone())
+        .get(&node)
+        .await
+        .unwrap();
+    let image = held
+        .status
+        .and_then(|status| status.images)
+        .into_iter()
+        .flatten()
+        .flat_map(|image| image.names.unwrap_or_default())
+        .find(|name| name.starts_with("docker.io/kindest/local-path-helper:"))
+        .expect("kind's local-path helper");
+    let namespace = cluster.namespace("crash").await;
+    let accounts = Api::<ServiceAccount>::namespaced(cluster.admin.clone(), &namespace);
+    tokio::time::timeout(WAIT, async {
+        while !matches!(accounts.get_opt("default").await, Ok(Some(_))) {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("the default ServiceAccount");
+    let pod: Pod = serde_json::from_value(json!({
+        "metadata": { "name": "p1" },
+        "spec": {
+            "nodeName": node,
+            "terminationGracePeriodSeconds": 0,
+            "containers": [{
+                "name": "app",
+                "image": image,
+                "imagePullPolicy": "Never",
+                "command": ["sh", "-c", "echo starting; echo $'\\e[31mpanic: boom\\e[0m'; exit 1"],
+            }],
+        },
+    }))
+    .unwrap();
+    Api::<Pod>::namespaced(cluster.admin.clone(), &namespace)
+        .create(&PostParams::default(), &pod)
+        .await
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (core, space) = core(dir.path(), &cluster.path, &cluster.context);
+    let mut opened = Opened::pod(&core, space, &namespace, OVERVIEW).await;
+    let last_line = |batch: &ObjectBatch| {
+        batch
+            .overview
+            .as_ref()?
+            .sections
+            .iter()
+            .find_map(|section| {
+                section.blocks.iter().find_map(|block| match block {
+                    Block::Diagnostics { findings } => findings
+                        .iter()
+                        .find_map(|finding| finding.logs.as_ref()?.last_line.clone()),
+                    _ => None,
+                })
+            })
+    };
+    let read = tokio::time::timeout(Duration::from_secs(120), async {
+        loop {
+            if let Some(line) = last_line(&opened.next().await) {
+                return line;
+            }
+        }
+    })
+    .await
+    .expect("the last line within two minutes");
+    assert_eq!(read, "panic: boom");
     cluster.delete(&namespace).await;
 }

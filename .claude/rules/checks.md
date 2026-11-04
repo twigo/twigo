@@ -16,7 +16,7 @@
 - twigo-keyboard on Windows: after `rustup target add x86_64-pc-windows-msvc`, `cargo clippy -p twigo-keyboard --target x86_64-pc-windows-msvc --all-targets -- -D warnings` checks the code; nothing runs it yet (D2).
 - Live tests against kind, one release: `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/test-matrix.sh 1.37`.
   Without an argument it runs every supported release.
-- A cluster to keep: `export TWIGO_BENCH_DIR=$(mktemp -d)`, `kubeconfig=$(bench/cluster.sh up <name> 1.37 | tail -1)`, then `TWIGO_TEST_KUBECONFIG=$kubeconfig cargo test -p twigo-cache -p twigo-kube -p twigo-core -p twigo-bench -- --ignored`, and `bench/cluster.sh down <name>` with the same `TWIGO_BENCH_DIR` when done.
+- A cluster to keep: `export TWIGO_BENCH_DIR=$(mktemp -d)`, `kubeconfig=$(bench/cluster.sh up <name> 1.37 | tail -1)`, then `TWIGO_TEST_KUBECONFIG=$kubeconfig cargo test -p twigo-cache -p twigo-kube -p twigo-core -p twigo-bench -p twigo-sessions -- --ignored`, and `bench/cluster.sh down <name>` with the same `TWIGO_BENCH_DIR` when done.
 - `bench/harness/tests/view_live.rs` creates `bench/bench` at 5,000 pods, runs `twigo-bench churn` for 20 s and deletes the namespace `bench`, so it refuses a cluster that has it already, such as one the bench harness scaled.
 - The IPC bench: `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/ipc/run.sh frames` or `bench/ipc/run.sh cost 3` on macOS, and `bench/ipc/linux.sh frames` for WebKitGTK in Docker.
   Each run opens a window and exits by itself.
@@ -26,12 +26,17 @@
 - State across ⌘Q and a restart, on macOS with the screen unlocked: `bench/restart.sh <kind kubeconfig>` after the debug build; it runs the app with a temporary `HOME` and presses keys through System Events, which needs the terminal's Accessibility permission.
 - The churn generator alone: `cargo run --release -p twigo-bench -- churn --kubeconfig <path> --rate 100 --seconds 60 --log churn.jsonl`.
 - The hub's live tests sit in the library (`crates/twigo-cache/src/hub/live.rs`) and run with the others under `--ignored`; `crates/twigo-cache/tests/restart_live.rs` restarts the API server of a kind cluster through `docker exec … crictl stop`, so it refuses kwok contexts and waits for the controller manager before it ends.
+- The logs' live tests (`crates/twigo-sessions/tests/logs_live.rs`) and `objects_live`'s crash loop need a kubelet, so they refuse contexts other than `kind-*`.
+  Their pods run on kind's node from its `docker.io/kindest/local-path-helper` image with `imagePullPolicy: Never`, so nothing is pulled; it has bash and no other command, so their scripts sleep by reading a coprocess that never writes, and a forced restart is `crictl stop` through `docker exec`.
 - The hub's heap at 5,000 pods: `bench/pods.sh <kubeconfig> 5000`, then `TWIGO_TEST_KUBECONFIG=<kubeconfig> cargo run --release -p twigo-cache --example hub_memory`, next to `--example table_memory`.
 - Before a push, run only the checks the change affects.
-  CI runs the rest, the live tests on every release when `twigo-cache`, `twigo-kube`, `twigo-core`, `bench/harness`, `bench/cluster.sh`, `bench/pods.sh` or the Cargo files change, and the frame probe on WebKitGTK when `bench/ipc` or the Cargo files change.
+  CI runs the rest, the live tests on every release when `twigo-cache`, `twigo-kube`, `twigo-core`, `twigo-sessions`, `bench/harness`, `bench/cluster.sh`, `bench/pods.sh` or the Cargo files change, and the frame probe on WebKitGTK when `bench/ipc` or the Cargo files change.
 
 ## Gotchas
 
+- On macOS a debug build's debug info stays in `.rcgu.o` files beside it (`split-debuginfo = "unpacked"`), and every incremental build leaves its own in `target/debug/deps` without removing the old ones.
+  At 492,498 of them (3 days of work, 2026-11-03) starting an FSEvents stream in a test binary there took 1–3 s, the same binary copied to `target/debug` 0.5 ms, so twigo-kube's kubeconfig watcher tests, which start one per watch and unwatch, timed out in parallel.
+  When they time out locally, count the files (`find target/debug/deps -maxdepth 1 | wc -l`) and `cargo clean`.
 - pnpm 12 comes from `packageManager`, and pnpm installs the Node of `devEngines.runtime`.
   An install fails on a package younger than a day (`minimumReleaseAge`): pin the previous version instead of excluding the new one.
 - `tsc` is TypeScript 7 (`@typescript/native`), while `typescript` is `@typescript/typescript6`, the API typescript-eslint needs.
@@ -59,7 +64,7 @@
   `UCKeyTranslate` takes the keyboard type (`LMGetKbdType`), so a Mac with another keyboard may record other characters; the committed ones come from an ANSI keyboard, type 91 (2026-10-31).
 - The live X11 test changes the X server's keymap and group, so it runs only where `TWIGO_TEST_X11_DISPLAY` equals `DISPLAY`, as under `xvfb-run`.
 - The live Wayland test changes sway's keyboard, so it runs only where `TWIGO_TEST_WAYLAND_DISPLAY` equals `WAYLAND_DISPLAY`, as under `crates/twigo-keyboard/linux/wayland.sh`.
-  Headless sway has no input devices, so the script holds a virtual keyboard open with `wtype`; `swaymsg` reads a comma as a command separator, so a layout list is quoted.
+  Headless sway has no input devices, so the test gives its seat a virtual keyboard of its own and sets the keymap and the group through it: sway 1.11, unlike 1.9, applies no input config to a virtual keyboard, `swaymsg input … xkb_layout` included (`sway/input/keyboard.c`, `sway_keyboard_configure`), and Ubuntu 26.04, which `ubuntu-latest` became on 2026-11-04, ships 1.11.
 - `crates/twigo-env/tests/live.rs` runs bash and zsh from `PATH` as login shells and fails if either is missing, so CI installs zsh.
   It runs without the test harness, because the shells re-run it with `--dump-env`.
 - TIS must run on the main thread, so `crates/twigo-keyboard/tests/layouts.rs` runs without the test harness.

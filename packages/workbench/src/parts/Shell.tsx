@@ -3,10 +3,11 @@ import { Allotment, LayoutPriority } from "allotment";
 import { Toaster } from "@twigo/ui";
 import { QuickAccessWidget } from "../quickaccess/QuickAccessWidget";
 import { useChanges, useWorkbench } from "../react";
-import type { Location } from "../views/registry";
+import type { Location, SideBar } from "../views/registry";
 import { ReviewDialog, TrustDialog } from "./credentials/TrustDialog";
 import { EditorArea } from "./EditorArea";
 import { PanelBoundary, PartCrash } from "./PanelBoundary";
+import { PanelArea } from "./PanelArea";
 import { PartView } from "./PartView";
 import { SpaceRail } from "./SpaceRail";
 import { StatusBar } from "./StatusBar";
@@ -14,7 +15,7 @@ import { TitleBar } from "./TitleBar";
 
 const DEFAULT_SIZE: Readonly<Record<Location, number>> = {
   sidebar: 260,
-  panel: 240,
+  panel: 340,
   secondary: 300,
 };
 
@@ -40,9 +41,11 @@ export function Shell() {
 
   const space = spaces.active;
   const parts = space ? spaces.state(space.id).parts : undefined;
-  const shown = (location: Location) =>
+  const shown = (location: SideBar) =>
     (parts?.[location].visible ?? false) &&
     views.containers(location).length > 0;
+  const panel = parts?.panel.visible ?? false;
+  const maximized = panel && (parts?.panel.maximized ?? false);
   const size = (location: Location) =>
     sizes.get(location) ?? DEFAULT_SIZE[location];
   const remember =
@@ -102,15 +105,21 @@ export function Shell() {
               proportionalLayout={false}
               onDragEnd={remember([undefined, "panel"])}
             >
-              <Allotment.Pane minSize={120} priority={LayoutPriority.High}>
+              <Allotment.Pane
+                minSize={120}
+                priority={LayoutPriority.High}
+                visible={!maximized}
+              >
                 <EditorArea />
               </Allotment.Pane>
               <Allotment.Pane
                 minSize={80}
                 preferredSize={size("panel")}
-                visible={shown("panel")}
+                visible={panel}
               >
-                <PartView location="panel" />
+                <PanelBoundary label="Panel">
+                  <PanelArea />
+                </PanelBoundary>
               </Allotment.Pane>
             </Allotment>
           </Allotment.Pane>

@@ -1,3 +1,5 @@
+import { ChevronDown, ChevronUp, X, type LucideIcon } from "lucide-react";
+import type { Area } from "./editors/registry";
 import type { Workbench } from "./services";
 import type { MenuId } from "./commands/menus";
 import type { KeybindingRule } from "./keybindings/resolver";
@@ -7,7 +9,7 @@ import {
   spacesProvider,
   symbolsProvider,
 } from "./quickaccess/providers";
-import { LOCATION_TITLES, LOCATIONS, type Location } from "./views/registry";
+import { LOCATION_TITLES, SIDE_BARS, type Location } from "./views/registry";
 import { useChordEntries, useSpaceEntries } from "./parts/StatusItems";
 import { useShellEnvironmentEntries } from "./parts/shellEnvironment";
 import {
@@ -120,7 +122,7 @@ export function registerCore(workbench: Workbench): void {
       if (!view || !space) return;
       const target = await quickAccess.pick(
         `Move ${view.label} to`,
-        LOCATIONS.flatMap((location) =>
+        SIDE_BARS.flatMap((location) =>
           views.containers(location).map((container) => ({
             id: container.id,
             label: container.title,
@@ -150,6 +152,59 @@ export function registerCore(workbench: Workbench): void {
     });
     rules.push({ key, command: id });
   }
+  const panel: readonly {
+    id: string;
+    title: string;
+    icon: LucideIcon;
+    /** Where the panel's title offers it. */
+    when: string;
+    enablement?: string;
+    part: { visible?: boolean; maximized?: boolean };
+  }[] = [
+    {
+      id: "workbench.action.maximizePanel",
+      title: "Maximize Panel Size",
+      icon: ChevronUp,
+      when: "!panelMaximized",
+      // Maximizing a maximized panel changes nothing, so it waits for no state.
+      part: { visible: true, maximized: true },
+    },
+    {
+      id: "workbench.action.restorePanel",
+      title: "Restore Panel Size",
+      icon: ChevronDown,
+      when: "panelMaximized",
+      enablement: "panelMaximized",
+      part: { maximized: false },
+    },
+    {
+      id: "workbench.action.closePanel",
+      title: "Hide Panel",
+      icon: X,
+      when: "panelVisible",
+      enablement: "panelVisible",
+      part: { visible: false },
+    },
+  ];
+  panel.forEach(({ id, title, icon, when, enablement, part }, order) => {
+    commands.register({
+      id,
+      title,
+      category: "View",
+      icon,
+      ...(enablement !== undefined && { enablement }),
+      run: () => {
+        const space = spaces.active;
+        if (space) spaces.setPart(space.id, "panel", part);
+      },
+    });
+    menus.append("panel/title", {
+      command: id,
+      group: "navigation",
+      order,
+      when,
+    });
+  });
 
   for (let index = 1; index <= 9; index++) {
     const id = `workbench.action.selectSpace${String(index)}`;
@@ -170,7 +225,7 @@ export function registerCore(workbench: Workbench): void {
     id: string;
     title: string;
     key?: string;
-    run: (uri: string) => void;
+    run: (uri: string, area: Area) => void;
   }[] = [
     {
       id: "workbench.action.closeActiveEditor",
@@ -192,15 +247,15 @@ export function registerCore(workbench: Workbench): void {
       id: "workbench.action.moveEditorToRightGroup",
       title: "Move Editor into New Group to the Right",
       key: "mod+\\",
-      run: () => {
-        editors.moveActive("right");
+      run: (_uri, area) => {
+        editors.moveActive("right", area);
       },
     },
     {
       id: "workbench.action.moveEditorToBelowGroup",
       title: "Move Editor into New Group Below",
-      run: () => {
-        editors.moveActive("bottom");
+      run: (_uri, area) => {
+        editors.moveActive("bottom", area);
       },
     },
   ];
@@ -209,10 +264,13 @@ export function registerCore(workbench: Workbench): void {
       id,
       title,
       category: "Editor",
-      enablement: "editor.open",
-      run: () => {
-        const uri = editors.active;
-        if (uri) run(uri);
+      enablement: "editor.open || panelFocus",
+      run: (_args, lookup) => {
+        // The panel's editors take the commands while it has the focus.
+        const area: Area = lookup("panelFocus") === true ? "panel" : "editor";
+        const uri =
+          area === "panel" ? editors.activeIn("panel") : editors.active;
+        if (uri) run(uri, area);
       },
     });
     if (key) rules.push({ key, command: id });

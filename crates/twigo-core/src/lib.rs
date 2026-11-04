@@ -22,14 +22,16 @@ use twigo_cache::hub::{Connect, Hub, Query, Resource, RowFormat};
 use twigo_cache::view::Spec;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    Ack, ClusterVersion, ErrorKind, GetValues, IpcError, ListBatch, ListQuery, ObjectBatch,
-    OpenObject, SetParts, SetWindow, SubscriptionId, ViewState,
+    Ack, ClusterVersion, DownloadLogs, ErrorKind, GetValues, IpcError, ListBatch, ListQuery,
+    LogBatch, ObjectBatch, OpenLogs, OpenObject, SetLogSource, SetLogView, SetLogWindow, SetParts,
+    SetWindow, SubscriptionId, ViewState,
 };
 use twigo_kube::client::{Clients, ProxyEnv};
 use twigo_kube::credentials::{ExecError, OidcError, Provider, Registry, Source, Timeouts};
 use twigo_kube::discovery::Cache;
 use twigo_kube::kubeconfig;
 use twigo_netmon::Event;
+use twigo_sessions::logs::Session;
 
 pub use auth::AuthFollower;
 use catalog::Catalog;
@@ -47,6 +49,7 @@ pub struct Core {
     pub hub: Hub,
     lists: Subscriptions<Batcher>,
     objects: Subscriptions<Opened>,
+    logs: Subscriptions<Session>,
     discovery: Arc<Cache>,
     credentials: Registry,
     /// Whether a Twigo window has the focus, which a plugin that may ask
@@ -84,6 +87,7 @@ impl Core {
             hub: Hub::new(connect(core.clone())),
             lists: Subscriptions::new("list"),
             objects: Subscriptions::new("object"),
+            logs: Subscriptions::new("logs"),
             discovery: Arc::new(Cache::new(cache.join("discovery"))),
             state: State::open(data.join("state.json")),
             catalog: Catalog::default(),
@@ -378,10 +382,84 @@ impl Core {
         self.objects.remove(window, id)
     }
 
-    /// Ends the lists and open objects of a window that reloads or closes.
+    /// A logs tab's session for a window (ARCHITECTURE 4.6): a pod, or a
+    /// workload's pods, followed through the hub, whose batches go through
+    /// `send` until it says the window is gone.
+    pub async fn logs_open(
+        &self,
+        window: &str,
+        request: OpenLogs,
+        send: impl FnMut(LogBatch) -> bool + Send + 'static,
+    ) -> Result<SubscriptionId, IpcError> {
+        let ticket = self.logs.ticket(window);
+        let context = self.context(&request.target.space)?;
+        let session = Session::open(self.hub.clone(), context, request, send).await?;
+        self.logs.keep(ticket, session)
+    }
+
+    pub fn logs_set_source(&self, window: &str, request: SetLogSource) -> Result<(), IpcError> {
+        self.logs.with(window, request.id, |session| {
+            session.set_source(request.source)
+        })
+    }
+
+    /// Refuses a view whose filter, search or range does not parse.
+    pub fn logs_set_view(&self, window: &str, request: SetLogView) -> Result<(), IpcError> {
+        self.logs.with(window, request.id, |session| {
+            session.set_view(&request.view)
+        })?
+    }
+
+    pub fn logs_set_window(&self, window: &str, request: SetLogWindow) -> Result<(), IpcError> {
+        self.logs.with(window, request.id, |session| {
+            session.set_window(request.window)
+        })
+    }
+
+    pub fn logs_ack(&self, window: &str, request: Ack) -> Result<(), IpcError> {
+        self.logs
+            .with(window, request.id, |session| session.ack(request.seq))
+    }
+
+    pub fn logs_close(&self, window: &str, id: SubscriptionId) -> Result<(), IpcError> {
+        self.logs.remove(window, id)
+    }
+
+    /// The file name a session's lines are offered under: its target's.
+    pub fn logs_file_name(&self, window: &str, id: SubscriptionId) -> Result<String, IpcError> {
+        self.logs
+            .with(window, id, |session| format!("{}.log", session.name()))
+    }
+
+    /// Writes a session's lines to `path`, as `<pod> <container> <time>
+    /// <text>` each: those its view keeps, or every one it holds.
+    pub async fn logs_write(
+        &self,
+        window: &str,
+        request: DownloadLogs,
+        path: &Path,
+    ) -> Result<(), IpcError> {
+        let lines = self.logs.with(window, request.id, |session| {
+            session.lines(request.filtered)
+        })?;
+        let lines = lines.await.map_err(|_| IpcError {
+            kind: ErrorKind::Unavailable,
+            message: "the logs tab closed".to_owned(),
+        })?;
+        tokio::fs::write(path, lines)
+            .await
+            .map_err(|error| IpcError {
+                kind: ErrorKind::Internal,
+                message: format!("could not write {}: {error}", path.display()),
+            })
+    }
+
+    /// Ends the lists, open objects and logs sessions of a window that
+    /// reloads or closes.
     pub fn drop_window(&self, window: &str) {
         self.lists.drop_window(window);
         self.objects.drop_window(window);
+        self.logs.drop_window(window);
     }
 
     /// Retires every connection on wake, and those whose route moved on a

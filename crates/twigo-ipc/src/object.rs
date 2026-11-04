@@ -138,6 +138,21 @@ pub struct Finding {
     /// What the component that saw it said, shown as it said it: a
     /// termination message, a waiting reason's message, an event's note.
     pub message: Option<String>,
+    /// A container's finding's logs, for its Previous logs and the last
+    /// line its previous instance wrote.
+    pub logs: Option<FindingLogs>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct FindingLogs {
+    pub container: String,
+    /// It has a previous instance, which a logs tab reads with `previous`.
+    pub previous: bool,
+    /// The last line of its instance that ended last, without its escapes,
+    /// once it has a previous one: null until Twigo has read it, or when it
+    /// wrote none.
+    pub last_line: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

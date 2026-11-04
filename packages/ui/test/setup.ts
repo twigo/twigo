@@ -1,14 +1,6 @@
 import "@testing-library/jest-dom/vitest";
+import { ResizeObserver } from "./resize";
 
-// jsdom has no layout; Radix ScrollArea (and friends) observe element size.
-globalThis.ResizeObserver = class {
-  observe() {
-    return undefined;
-  }
-  unobserve() {
-    return undefined;
-  }
-  disconnect() {
-    return undefined;
-  }
-};
+// jsdom has none; Radix ScrollArea and the virtualizer observe sizes, which
+// a test reports with `resize()`.
+globalThis.ResizeObserver = ResizeObserver;

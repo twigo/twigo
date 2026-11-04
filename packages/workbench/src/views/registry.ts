@@ -10,10 +10,13 @@ import {
   type When,
 } from "../contextkey/when";
 
-/** Where a view container sits (ARCHITECTURE 4.1). */
+/** A part that shows and hides, and keeps its size (ARCHITECTURE 4.1). */
 export type Location = "sidebar" | "panel" | "secondary";
 
-export const LOCATIONS: readonly Location[] = ["sidebar", "panel", "secondary"];
+/** Where a view container sits; the panel holds inputs by URI instead (ARCHITECTURE 4.1). */
+export type SideBar = Exclude<Location, "panel">;
+
+export const SIDE_BARS: readonly SideBar[] = ["sidebar", "secondary"];
 
 export const LOCATION_TITLES: Readonly<Record<Location, string>> = {
   sidebar: "Primary Side Bar",
@@ -25,7 +28,7 @@ export interface ViewContainer {
   readonly id: string;
   readonly title: string;
   readonly icon: LucideIcon;
-  readonly location: Location;
+  readonly location: SideBar;
   readonly order?: number;
 }
 
@@ -120,7 +123,7 @@ export class Views {
     return this.#add(this.#watermarks, watermark.id, conditional(watermark));
   }
 
-  containers(location: Location): ViewContainer[] {
+  containers(location: SideBar): ViewContainer[] {
     return [...this.#containers.values()]
       .filter((container) => container.location === location)
       .sort(byOrder);

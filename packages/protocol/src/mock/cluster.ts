@@ -72,6 +72,8 @@ export class Cluster {
   /** The kinds whose first subscription has synced; later ones start ready, as on a shared upstream. */
   readonly synced = new Set<string>();
   readonly #random: () => number;
+  /** Rollouts draw from a stream of their own, so the churn stays as it was. */
+  readonly #rollouts: () => number;
   #serial = 0;
 
   constructor(
@@ -81,6 +83,7 @@ export class Cluster {
   ) {
     this.now = now;
     this.#random = mulberry32(hash(context));
+    this.#rollouts = mulberry32(hash(`${context}/rollouts`));
     for (let i = 0; i < count; i++) this.pods.push(this.#pod(now));
     // A stream of their own, so the pods and their churn stay as they were.
     const random = mulberry32(hash(`${context}/nodes`));
@@ -119,6 +122,34 @@ export class Cluster {
       const gone = Math.floor(this.#random() * this.pods.length);
       this.pods.splice(gone, 1, this.#pod(now, now));
     }
+    this.now = now;
+    this.version++;
+  }
+
+  /** Replaces a pod with a new one of its Deployment, as a rollout's step does. */
+  rollOut(pod: Pod, now: number): void {
+    const random = this.#rollouts;
+    const templateHash = Math.floor(random() * 0xffffffff)
+      .toString(36)
+      .slice(0, 8);
+    const suffix = Math.floor(random() * 36 ** 5)
+      .toString(36)
+      .padStart(5, "0");
+    const generateName = `${deploymentOf(pod)}-${templateHash}-`;
+    const name = `${generateName}${suffix}`;
+    const next: Pod = {
+      ...pod,
+      id: `${this.context}/${pod.namespace}/${name}`,
+      name,
+      generateName,
+      templateHash,
+      status: "Running",
+      ready: pod.containers,
+      restarts: "0",
+      created: now,
+      version: 0,
+    };
+    this.pods.splice(this.pods.indexOf(pod), 1, next);
     this.now = now;
     this.version++;
   }
@@ -277,7 +308,7 @@ export function hash(text: string): number {
   return h >>> 0;
 }
 
-function mulberry32(seed: number): () => number {
+export function mulberry32(seed: number): () => number {
   let a = seed;
   return () => {
     a = (a + 0x6d2b79f5) | 0;

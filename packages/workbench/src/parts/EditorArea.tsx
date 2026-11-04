@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FunctionComponent } from "react";
 import {
   DockviewReact,
   themeLight,
@@ -8,10 +8,16 @@ import {
   type IDockviewHeaderActionsProps,
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
+  type IWatermarkPanelProps,
 } from "dockview-react";
 import { FileQuestion, X } from "lucide-react";
 import { cn, EmptyState, KeyHints } from "@twigo/ui";
-import { EDITOR_COMPONENT, EDITOR_TAB, readParams } from "../editors/registry";
+import {
+  EDITOR_COMPONENT,
+  EDITOR_TAB,
+  readParams,
+  type Area,
+} from "../editors/registry";
 import { useChanges, useWorkbench } from "../react";
 import { PanelBoundary } from "./PanelBoundary";
 
@@ -40,15 +46,41 @@ export function EditorArea() {
 
   return (
     <div ref={ref} className="h-full min-h-0">
-      {space && <SpaceEditors key={space.id} space={space.id} />}
+      {space && (
+        <SpaceDock
+          key={space.id}
+          space={space.id}
+          area="editor"
+          theme={THEME}
+          actions={GroupActions}
+          watermark={Watermark}
+        />
+      )}
     </div>
   );
 }
 
-function SpaceEditors({ space }: { space: string }) {
+/**
+ * An area's dockview in a space: its saved layout loaded, kept as it
+ * changes, and attached to the editor service while it is mounted.
+ */
+export function SpaceDock({
+  space,
+  area,
+  theme,
+  actions,
+  watermark,
+}: {
+  space: string;
+  area: Area;
+  theme: DockviewTheme;
+  actions: FunctionComponent<IDockviewHeaderActionsProps>;
+  watermark: FunctionComponent<IWatermarkPanelProps>;
+}) {
   const workbench = useWorkbench();
   const [api, setApi] = useState<DockviewApi>();
   const [host, setHost] = useState<HTMLDivElement | null>(null);
+  const key = area === "editor" ? "editors" : "panelEditors";
 
   // Dockview 8.8 lays out a frame after its ResizeObserver fires
   // (watchElementResize defers to requestAnimationFrame), so the editors
@@ -57,12 +89,14 @@ function SpaceEditors({ space }: { space: string }) {
     if (!api || !host) return;
     let last = "";
     const observer = new ResizeObserver(([entry]) => {
-      // A hidden element measures zero, which would collapse the grid.
+      // A hidden element measures zero, which would collapse the grid: a
+      // hidden part is 0 px high, not display:none (allotment 1.20.6).
       if (!entry || !host.offsetParent) return;
       // Rounded and deduplicated: a fractional devicePixelRatio would
       // otherwise lay out against itself.
       const width = Math.round(entry.contentRect.width);
       const height = Math.round(entry.contentRect.height);
+      if (width === 0 || height === 0) return;
       const size = `${String(width)}x${String(height)}`;
       if (size === last) return;
       last = size;
@@ -79,11 +113,11 @@ function SpaceEditors({ space }: { space: string }) {
     const save = () => {
       workbench.spaces.update(space, (state) => ({
         ...state,
-        editors: api.toJSON(),
+        [key]: api.toJSON(),
       }));
     };
     const changes = api.onDidLayoutChange(save);
-    const detach = workbench.editors.attach(api);
+    const detach = workbench.editors.attach(api, area);
     // Dockview reports layout changes a microtask late (its AsapEvent), so
     // the layout is saved once more as the space goes away, after the
     // listener stops, so nothing the teardown reports can overwrite it.
@@ -92,10 +126,10 @@ function SpaceEditors({ space }: { space: string }) {
       save();
       detach();
     };
-  }, [api, space, workbench]);
+  }, [api, area, key, space, workbench]);
 
   const onReady = ({ api: ready }: DockviewReadyEvent) => {
-    const saved = workbench.spaces.state(space).editors;
+    const saved = workbench.spaces.state(space)[key];
     if (saved) {
       try {
         ready.fromJSON(saved);
@@ -110,11 +144,11 @@ function SpaceEditors({ space }: { space: string }) {
   return (
     <div ref={setHost} className="h-full">
       <DockviewReact
-        theme={THEME}
+        theme={theme}
         components={COMPONENTS}
         tabComponents={TABS}
-        rightHeaderActionsComponent={GroupActions}
-        watermarkComponent={Watermark}
+        rightHeaderActionsComponent={actions}
+        watermarkComponent={watermark}
         disableAutoResizing
         onReady={onReady}
       />
@@ -146,7 +180,7 @@ function EditorPanel({ params: raw }: IDockviewPanelProps) {
   );
 }
 
-function GroupActions({ activePanel }: IDockviewHeaderActionsProps) {
+export function GroupActions({ activePanel }: IDockviewHeaderActionsProps) {
   const { editors } = useWorkbench();
   const params = readParams(activePanel?.params);
   const provider = params && editors.resolve(params.uri);

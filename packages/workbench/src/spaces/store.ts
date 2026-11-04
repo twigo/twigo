@@ -8,16 +8,30 @@ import type { StateStore } from "../state/store";
 import type { Location } from "../views/registry";
 import type { Catalog } from "./catalog";
 
-export interface PartState {
+export interface SideBarState {
   readonly visible: boolean;
   /** The container shown, once the user picked one. */
   readonly container?: string | undefined;
 }
 
+export interface PanelState {
+  readonly visible: boolean;
+  /** Over the editor area, which it hides, as VS Code's maximized panel. */
+  readonly maximized: boolean;
+}
+
+export interface PartStates {
+  readonly sidebar: SideBarState;
+  readonly panel: PanelState;
+  readonly secondary: SideBarState;
+}
+
 /** What a space remembers (ARCHITECTURE 4.1, 4.2); part sizes are the app's ({@link PartSizes}). */
 export interface SpaceState {
   readonly editors: SerializedDockview | undefined;
-  readonly parts: Readonly<Record<Location, PartState>>;
+  /** The panel's own editors, its logs tabs. */
+  readonly panelEditors: SerializedDockview | undefined;
+  readonly parts: PartStates;
   /** Views the user moved, by view ID: the container they now live in. */
   readonly placement: Readonly<Record<string, string>>;
   /** Empty for every namespace. */
@@ -28,9 +42,10 @@ export interface SpaceState {
 
 export const DEFAULT_STATE: SpaceState = {
   editors: undefined,
+  panelEditors: undefined,
   parts: {
     sidebar: { visible: true, container: undefined },
-    panel: { visible: false, container: undefined },
+    panel: { visible: false, maximized: false },
     secondary: { visible: false, container: undefined },
   },
   placement: {},
@@ -38,7 +53,7 @@ export const DEFAULT_STATE: SpaceState = {
   recent: [],
 };
 
-const part = (fallback: PartState) =>
+const sideBar = (fallback: SideBarState) =>
   v.fallback(
     v.object({
       visible: v.fallback(v.boolean(), fallback.visible),
@@ -49,18 +64,27 @@ const part = (fallback: PartState) =>
     fallback,
   );
 
+const layout = v.custom<SerializedDockview>(
+  (value) =>
+    typeof value === "object" && value !== null && !Array.isArray(value),
+);
+
 /** Each key of a space's state and how it reads back; what does not fit falls back to the default. */
 const SCHEMAS: {
   readonly [K in keyof SpaceState]: v.GenericSchema<unknown, SpaceState[K]>;
 } = {
-  editors: v.custom<SerializedDockview>(
-    (value) =>
-      typeof value === "object" && value !== null && !Array.isArray(value),
-  ),
+  editors: layout,
+  panelEditors: layout,
   parts: v.object({
-    sidebar: part(DEFAULT_STATE.parts.sidebar),
-    panel: part(DEFAULT_STATE.parts.panel),
-    secondary: part(DEFAULT_STATE.parts.secondary),
+    sidebar: sideBar(DEFAULT_STATE.parts.sidebar),
+    panel: v.fallback(
+      v.object({
+        visible: v.fallback(v.boolean(), DEFAULT_STATE.parts.panel.visible),
+        maximized: v.fallback(v.boolean(), DEFAULT_STATE.parts.panel.maximized),
+      }),
+      DEFAULT_STATE.parts.panel,
+    ),
+    secondary: sideBar(DEFAULT_STATE.parts.secondary),
   }),
   placement: v.record(v.string(), v.string()),
   namespaces: v.array(v.string()),
@@ -150,6 +174,7 @@ export class Spaces {
         this.store.get(id, key, SCHEMAS[key], DEFAULT_STATE[key]);
       state = {
         editors: read("editors"),
+        panelEditors: read("panelEditors"),
         parts: read("parts"),
         placement: read("placement"),
         namespaces: read("namespaces"),
@@ -171,15 +196,16 @@ export class Spaces {
     this.changes.emit();
   }
 
-  setPart(id: string, location: Location, part: Partial<PartState>): void {
+  setPart<L extends Location>(
+    id: string,
+    location: L,
+    part: Partial<PartStates[L]>,
+  ): void {
     this.update(id, (state) => {
       const current = state.parts[location];
       const next = { ...current, ...part };
-      if (
-        next.visible === current.visible &&
-        next.container === current.container
-      )
-        return state;
+      const keys = Object.keys(next) as (keyof PartStates[L])[];
+      if (keys.every((key) => next[key] === current[key])) return state;
       return { ...state, parts: { ...state.parts, [location]: next } };
     });
   }

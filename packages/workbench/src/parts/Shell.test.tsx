@@ -49,7 +49,7 @@ const drag = (split: "rows" | "columns", measured: number[]) => {
 test("dragged part sizes are the app's: they stay as spaces switch, and come back in the next window", async () => {
   const workbench = await testWorkbench();
   render(<WorkbenchView workbench={workbench} />);
-  expect(sizes()).toEqual([260, 240, 300]);
+  expect(sizes()).toEqual([260, 340, 300]);
 
   drag("columns", [300.4, 900, 0]);
   drag("rows", [500, 199.6]);

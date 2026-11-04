@@ -1,0 +1,266 @@
+import { sameData } from "@twigo/utils";
+import { FrameAcks } from "./acks";
+import type { Backend } from "./backend";
+import { toIpcError, type IpcError } from "./error";
+import type {
+  Histogram,
+  LogBatch,
+  LogEntries,
+  LogMatches,
+  LogPod,
+  LogSource,
+  LogView,
+  LogWindow,
+  OpenLogs,
+  SubscriptionId,
+  ViewState,
+} from "./generated";
+
+/**
+ * What Rust holds a logs tab to (ARCHITECTURE 4.6), as the webview tells
+ * it and the mock keeps it: the containers a tab follows at once
+ * (twigo-sessions' `STREAMS`), the followed logs Twigo opens on one
+ * cluster (twigo-kube's `Budgets::logs`, 3.2), and what a tab's buffer
+ * holds at most, entries and bytes of their text in UTF-8 (twigo-sessions'
+ * `LIMITS`).
+ */
+export const TAB_STREAMS = 10;
+export const CLUSTER_STREAMS = 32;
+export const LOG_LIMITS = { entries: 50_000, bytes: 16 * 2 ** 20 } as const;
+
+export interface LogsSnapshot {
+  readonly seq: number;
+  readonly status: ViewState;
+  readonly pods: readonly LogPod[] | undefined;
+  /** Entries the view keeps, in or out of the window. */
+  readonly total: number;
+  readonly window: LogEntries | undefined;
+  readonly matches: LogMatches | undefined;
+  readonly histogram: Histogram | undefined;
+  /** Entries the buffer's bound dropped. */
+  readonly dropped: number;
+  /**
+   * Entries the view kept as they came since the session opened or its
+   * source or view last changed, as of the batch's `changes`.
+   */
+  readonly arrived: number;
+  /** The source and view changes Rust had applied when it made the batch. */
+  readonly changes: number;
+  /**
+   * Whether the batch reflects every source and view change sent and not
+   * refused; until then its matches may be an earlier search's.
+   */
+  readonly settled: boolean;
+  /**
+   * Why Rust refused the source or view last sent, as a filter that is no
+   * regex; it keeps the one it had, so the lines show that one until a
+   * change is taken.
+   */
+  readonly refused: IpcError | undefined;
+}
+
+export const INITIAL_LOGS: LogsSnapshot = {
+  seq: 0,
+  status: { state: "connecting" },
+  pods: undefined,
+  total: 0,
+  window: undefined,
+  matches: undefined,
+  histogram: undefined,
+  dropped: 0,
+  arrived: 0,
+  changes: 0,
+  settled: true,
+  refused: undefined,
+};
+
+/**
+ * One logs tab's session as a store for `useSyncExternalStore`
+ * (ARCHITECTURE 4.6): the buffer lives in Rust, which merges the entries in
+ * time order and sends the window's; each batch is acknowledged on the next
+ * animation frame, as a list's is.
+ */
+export class LogsSession {
+  readonly #backend: Backend;
+  readonly #listeners = new Set<() => void>();
+  readonly #opened: Promise<SubscriptionId>;
+  #snapshot = INITIAL_LOGS;
+  #id: SubscriptionId | undefined;
+  #source: LogSource;
+  #view: LogView;
+  #window: LogWindow | undefined;
+  #sent: { source: LogSource; view: LogView; window: LogWindow | undefined };
+  readonly #acks = new FrameAcks(
+    (id, seq) => this.#backend.invoke("logs_ack", { id, seq }),
+    () => this.#closed,
+    (error) => {
+      this.#fail(error);
+    },
+  );
+  #closed = false;
+  /** Source and view changes sent and not refused, as Rust counts those it applied. */
+  #changes = 0;
+  readonly #refusals: {
+    source: IpcError | undefined;
+    view: IpcError | undefined;
+  } = { source: undefined, view: undefined };
+
+  constructor(backend: Backend, request: OpenLogs) {
+    this.#backend = backend;
+    this.#source = request.source;
+    this.#view = request.view;
+    this.#sent = {
+      source: request.source,
+      view: request.view,
+      window: undefined,
+    };
+    this.#opened = backend.subscribe("logs_open", request, (batch) => {
+      this.#apply(batch);
+    });
+    this.#opened.then(
+      (id) => {
+        this.#id = id;
+        if (this.#closed) {
+          void this.#backend.invoke("logs_close", id);
+          return;
+        }
+        this.#flush();
+        this.#acks.opened(id);
+      },
+      (error: unknown) => {
+        this.#fail(error);
+      },
+    );
+  }
+
+  readonly subscribe = (listener: () => void): (() => void) => {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  };
+
+  readonly getSnapshot = (): LogsSnapshot => this.#snapshot;
+
+  setSource(source: LogSource): void {
+    this.#source = source;
+    this.#flush();
+  }
+
+  setView(view: LogView): void {
+    this.#view = view;
+    this.#flush();
+  }
+
+  setWindow(window: LogWindow): void {
+    this.#window = window;
+    this.#flush();
+  }
+
+  /** Saves the lines through a save dialog: the path, or null when the person cancels. */
+  download(filtered: boolean): Promise<string | null> {
+    return this.#opened.then((id) =>
+      this.#backend.invoke("logs_download", { id, filtered }),
+    );
+  }
+
+  close(): void {
+    this.#closed = true;
+    this.#listeners.clear();
+    if (this.#id !== undefined)
+      void this.#backend.invoke("logs_close", this.#id);
+  }
+
+  /** Sends what changed since it last sent, once the session has its id. */
+  #flush(): void {
+    const id = this.#id;
+    if (id === undefined || this.#closed) return;
+    const sent = this.#sent;
+    const changes = this.#changes;
+    const failed = (error: unknown) => {
+      this.#fail(error);
+    };
+    const answer = (kind: "source" | "view") => {
+      this.#changes++;
+      return {
+        taken: () => {
+          this.#refuse(kind, undefined);
+        },
+        refused: (error: unknown) => {
+          this.#changes--;
+          this.#refuse(kind, toIpcError(error));
+        },
+      };
+    };
+    if (!sameData(sent.source, this.#source)) {
+      const { taken, refused } = answer("source");
+      this.#backend
+        .invoke("logs_set_source", { id, source: this.#source })
+        .then(taken, refused);
+    }
+    if (!sameData(sent.view, this.#view)) {
+      const { taken, refused } = answer("view");
+      this.#backend
+        .invoke("logs_set_view", { id, view: this.#view })
+        .then(taken, refused);
+    }
+    if (this.#changes !== changes) this.#refresh();
+    if (this.#window && !sameData(sent.window, this.#window)) {
+      this.#backend
+        .invoke("logs_set_window", { id, window: this.#window })
+        .catch(failed);
+    }
+    this.#sent = {
+      source: this.#source,
+      view: this.#view,
+      window: this.#window,
+    };
+  }
+
+  #apply(batch: LogBatch): void {
+    if (this.#closed) return;
+    const previous = this.#snapshot;
+    this.#publish({
+      seq: batch.seq,
+      status: batch.status,
+      pods: batch.pods ?? previous.pods,
+      total: batch.total,
+      window: batch.window ?? previous.window,
+      matches: batch.matches ?? previous.matches,
+      histogram: batch.histogram ?? previous.histogram,
+      dropped: batch.dropped,
+      arrived: batch.arrived,
+      changes: batch.changes,
+      settled: batch.changes === this.#changes,
+      refused: previous.refused,
+    });
+    this.#acks.took(batch.seq);
+  }
+
+  /** Each kind stays refused until a change of its own is taken. */
+  #refuse(kind: "source" | "view", error: IpcError | undefined): void {
+    if (this.#closed) return;
+    this.#refusals[kind] = error;
+    this.#refresh();
+  }
+
+  /** Publishes what the changes sent, taken and refused make of the last batch. */
+  #refresh(): void {
+    const refused = this.#refusals.view ?? this.#refusals.source;
+    const now = this.#snapshot;
+    const settled = now.changes === this.#changes;
+    if (now.refused !== refused || now.settled !== settled)
+      this.#publish({ ...now, refused, settled });
+  }
+
+  #fail(error: unknown): void {
+    if (this.#closed) return;
+    this.#publish({
+      ...this.#snapshot,
+      status: { state: "error", error: toIpcError(error) },
+    });
+  }
+
+  #publish(snapshot: LogsSnapshot): void {
+    this.#snapshot = snapshot;
+    for (const listener of this.#listeners) listener();
+  }
+}

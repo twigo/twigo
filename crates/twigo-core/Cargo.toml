@@ -16,7 +16,7 @@ kube.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["fs", "sync"] }
 twigo-cache.workspace = true
 twigo-describe.workspace = true
 twigo-env.workspace = true
@@ -24,6 +24,7 @@ twigo-ipc.workspace = true
 twigo-kube.workspace = true
 twigo-netmon.workspace = true
 twigo-policy.workspace = true
+twigo-sessions.workspace = true
 
 [dev-dependencies]
 twigo-cache = { workspace = true, features = ["test-util"] }

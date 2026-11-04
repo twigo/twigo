@@ -39,7 +39,6 @@ jobs:
             x11-xkb-utils \
             xvfb \
             sway \
-            wtype \
             zsh
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2

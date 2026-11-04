@@ -11,6 +11,7 @@ import type {
   Value,
 } from "../generated";
 import { replicaSetUid, type Cluster, type Pod } from "./cluster";
+import { CRASH_LINE as LAST_LINE } from "./logs";
 import OBJECTS from "./objects.json";
 
 /**
@@ -97,7 +98,9 @@ export class MockObject {
         `the mock backend has no recorded ${resource}`,
       );
     }
-    this.#overview = listing(renamed(recorded.overview, query), query, cluster);
+    this.#overview = withLastLines(
+      listing(renamed(recorded.overview, query), query, cluster),
+    );
     const manifest = JSON.parse(recorded.manifest) as {
       metadata: Record<string, unknown>;
     };
@@ -191,6 +194,30 @@ function renamed(overview: Overview, query: ObjectQuery): Overview {
  * by the mock's ReplicaSets of it, a node's pods by its name, and none of
  * the objects the mock does not serve.
  */
+/**
+ * The last line a crashed container wrote, which Rust reads once per
+ * restart and the recorded objects lack: the crash the mock's logs write.
+ */
+function withLastLines(overview: Overview): Overview {
+  const filled = (block: Block): Block =>
+    block.type === "diagnostics"
+      ? {
+          ...block,
+          findings: block.findings.map((finding) =>
+            finding.logs?.previous
+              ? { ...finding, logs: { ...finding.logs, lastLine: LAST_LINE } }
+              : finding,
+          ),
+        }
+      : block;
+  return {
+    sections: overview.sections.map((section) => ({
+      ...section,
+      blocks: section.blocks.map(filled),
+    })),
+  };
+}
+
 function listing(
   overview: Overview,
   query: ObjectQuery,

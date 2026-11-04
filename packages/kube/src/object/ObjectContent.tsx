@@ -24,6 +24,7 @@ export function ObjectContent({
   snapshot,
   values,
   onOpen,
+  onLogs,
 }: {
   tab: ObjectTab;
   /** The object's space, which its Overview's live lists query. */
@@ -34,6 +35,7 @@ export function ObjectContent({
   snapshot: ObjectSnapshot;
   values: OverviewProps["values"];
   onOpen: (target: ObjectRef) => void;
+  onLogs?: OverviewProps["onLogs"];
 }) {
   return (
     <div
@@ -55,6 +57,7 @@ export function ObjectContent({
               kind={kind}
               onOpen={onOpen}
               values={values}
+              onLogs={onLogs}
             />
           )}
         </Shown>

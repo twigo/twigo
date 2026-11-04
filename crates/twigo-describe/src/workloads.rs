@@ -309,6 +309,7 @@ fn deployment_findings(deployment: &Value) -> Vec<Finding> {
         && progressing["status"] == "False"
     {
         findings.push(Finding {
+            logs: None,
             tone: Tone::Danger,
             title: "The rollout is stuck".to_owned(),
             detail: since(progressing, "Not progressing since "),
@@ -319,6 +320,7 @@ fn deployment_findings(deployment: &Value) -> Vec<Finding> {
         && failure["status"] == "True"
     {
         findings.push(Finding {
+            logs: None,
             tone: Tone::Danger,
             title: "Its ReplicaSet cannot create pods".to_owned(),
             detail: since(failure, "Failing since "),
@@ -339,6 +341,7 @@ fn deployment_findings(deployment: &Value) -> Vec<Finding> {
         }
         detail.push(span("."));
         findings.push(Finding {
+            logs: None,
             tone: Tone::Warning,
             title: "Fewer pods are available than it needs".to_owned(),
             detail,
@@ -358,6 +361,7 @@ fn since(condition: &Value, words: &str) -> Vec<Span> {
 /// Ready pods short of the replicas a controller wants.
 fn short(ready: u64, desired: u64) -> Option<Finding> {
     (ready < desired).then(|| Finding {
+        logs: None,
         tone: Tone::Warning,
         title: "Not every pod is ready".to_owned(),
         detail: vec![span(&format!("{ready} of {desired} pods are ready."))],
@@ -519,6 +523,7 @@ pub(crate) fn daemon_set(input: &Input<'_>) -> Described {
     let mut findings: Vec<Finding> = short(ready, desired).into_iter().collect();
     if misscheduled > 0 {
         findings.push(Finding {
+            logs: None,
             tone: Tone::Warning,
             title: "Some of its pods run where they should not".to_owned(),
             detail: vec![span(&format!(

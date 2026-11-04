@@ -2,6 +2,7 @@ import {
   Copy,
   FileCode,
   PanelRight,
+  ScrollText,
   SquareArrowOutUpRight,
   X,
 } from "lucide-react";
@@ -13,8 +14,8 @@ import { objectUri, parseListUri } from "./uri";
 /**
  * Commands on the active list's selected row and on its marked rows, and
  * the menus that place them (ARCHITECTURE 4.4, 5.1): the row's context
- * menu, its hover buttons and the marked rows' bar. Logs, shell, YAML and
- * delete join them with their commands.
+ * menu, its hover buttons and the marked rows' bar, and an object editor's
+ * title. Shell and delete join them with their commands.
  */
 export function registerResourceActions(
   workbench: Workbench,
@@ -52,6 +53,31 @@ export function registerResourceActions(
         const found = target();
         if (found)
           selection.set(found.uri, { ...found.selected, reveal: true });
+      },
+    },
+    {
+      id: "k8s.resource.logs",
+      title: "Logs",
+      icon: ScrollText,
+      key: "l",
+      when: "resource.logs",
+      menus: [
+        ["resource/context", "navigation"],
+        ["resource/inline", "navigation"],
+        ["resource/details", "navigation"],
+      ],
+      run: async () => {
+        const found = target();
+        const space = found && parseListUri(found.uri)?.space;
+        if (!found || space === undefined) return;
+        const { namespace, name } = objectOf(found.selected);
+        if (namespace === undefined) return;
+        await commands.execute("k8s.logs.open", workbench.keys.lookup(null), {
+          space,
+          gvr: found.selected.gvr,
+          namespace,
+          name,
+        });
       },
     },
     {

@@ -106,3 +106,21 @@
 .twigo-dockview .dv-tab [data-preview="true"] {
   font-style: italic;
 }
+
+/* The panel's tabs sit on the shell and mark the active one with a line
+   under its title, as the panel's mockup draws them: the panel holds
+   sessions, not documents, so its tabs do not open into their content. */
+.twigo-dockview.twigo-panel.dockview-theme-light {
+  --dv-tabs-and-actions-container-height: 32px;
+  --dv-activegroup-visiblepanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
+  --dv-background-color: var(--editor);
+  --dv-group-view-background-color: var(--editor);
+}
+.twigo-dockview.twigo-panel .dv-tab.dv-active-tab,
+.twigo-dockview.twigo-panel .dv-tab.dv-active-tab:first-child {
+  box-shadow: inset 0 -2px 0 var(--foreground);
+}
+.twigo-dockview.twigo-panel .dv-inactive-group .dv-tab.dv-active-tab {
+  box-shadow: inset 0 -2px 0 var(--muted-foreground-2);
+}

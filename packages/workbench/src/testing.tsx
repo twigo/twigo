@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { act } from "@testing-library/react";
 import type { Backend } from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
+import type { Area } from "./editors/registry";
 import { WorkbenchContext } from "./react";
 import { registerCore } from "./core";
 import { Workbench } from "./services";
@@ -35,4 +36,14 @@ export function inWorkbench(workbench: Workbench) {
       {children}
     </WorkbenchContext.Provider>
   );
+}
+
+/** The URIs of the editors whose tabs an area shows, by the panel id dockview gives each tab. */
+export function tabsIn(area: Area): string[] {
+  const panel = document.querySelector('[aria-label="Panel"]');
+  return [
+    ...document.querySelectorAll<HTMLElement>("[role=tab][data-tab-panel-id]"),
+  ]
+    .filter((tab) => (panel?.contains(tab) ?? false) === (area === "panel"))
+    .map((tab) => tab.dataset.tabPanelId ?? "");
 }

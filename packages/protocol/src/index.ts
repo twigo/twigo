@@ -9,6 +9,27 @@ export type {
 } from "./backend";
 export { IpcError, toIpcError } from "./error";
 export type {
+  AnsiColor,
+  Bucket,
+  Containers,
+  Histogram,
+  Level,
+  LevelFilter,
+  LogBatch,
+  LogContainer,
+  LogEntries,
+  LogEntry,
+  LogMatches,
+  LogPod,
+  LogSource,
+  LogTarget,
+  LogView,
+  LogWindow,
+  Since,
+  StreamState,
+  TextRange,
+  TextStyle,
+  TimeRange,
   Cell,
   Column,
   ColumnKind,
@@ -68,5 +89,13 @@ export type {
   ViewState,
 } from "./generated";
 export { INITIAL_SNAPSHOT, ListView, type ListSnapshot } from "./list";
+export {
+  CLUSTER_STREAMS,
+  INITIAL_LOGS,
+  LOG_LIMITS,
+  LogsSession,
+  TAB_STREAMS,
+  type LogsSnapshot,
+} from "./logs";
 export { INITIAL_OBJECT, ObjectView, type ObjectSnapshot } from "./object";
 export { tauriBackend } from "./tauri";

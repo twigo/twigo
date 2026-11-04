@@ -14,6 +14,7 @@ export * from "./components/toast";
 export * from "./components/notify";
 export { fuzzyMatch, type TextMatch, type TextRange } from "./lib/match";
 export * from "./components/actions";
+export * from "./components/banner";
 export * from "./components/callout";
 export * from "./components/card";
 export * from "./components/chip";
@@ -33,7 +34,9 @@ export * from "./components/table";
 export * from "./components/toned-text";
 export * from "./components/status-label";
 export * from "./components/highlighted-label";
+export * from "./components/tick";
 export * from "./components/tile";
+export * from "./components/trigger";
 export {
   DataGrid,
   GridSkeleton,
@@ -42,5 +45,21 @@ export {
 } from "./grid/DataGrid";
 export type { GridColumn, GridItem, GridSort } from "./grid/types";
 export { Tree, type TreeRow } from "./tree/Tree";
+export * from "./components/histogram";
+export {
+  LineList,
+  type LineItem,
+  type LinePlace,
+  type LineWindow,
+  type MarkerLine,
+  type TextLine,
+} from "./lines/LineList";
+export {
+  StyledText,
+  type AnsiColor,
+  type TextMark,
+  type TextRun,
+  type TextSpan,
+} from "./lines/StyledText";
 export type { ListController } from "./lib/list";
 export type { Tone } from "./lib/tone";
