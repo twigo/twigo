@@ -21,6 +21,13 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+function carried<K extends "window" | "matches">(
+  batches: readonly LogBatch[],
+  part: K,
+): LogBatch[K] | undefined {
+  return [...batches].reverse().find((batch) => batch[part] !== null)?.[part];
+}
+
 function session(
   view: LogView = VIEW,
   budget = (_session: MockLogs, wanted: number) => wanted,
@@ -79,8 +86,8 @@ test("a filter keeps the matching lines and every marker, and a search marks its
     search: "STATUS=",
   });
   await vi.advanceTimersByTimeAsync(300);
-  const last = batches[batches.length - 1];
-  const entries = last?.window?.entries ?? [];
+  const entries = carried(batches, "window")?.entries ?? [];
+  const found = carried(batches, "matches");
   expect(entries.length).toBeGreaterThan(0);
   for (const entry of entries) {
     if (entry.type !== "line") continue;
@@ -92,15 +99,15 @@ test("a filter keeps the matching lines and every marker, and a search marks its
     (sum, entry) => sum + (entry.type === "line" ? entry.marks.length : 0),
     0,
   );
-  expect(last?.matches?.count).toBeGreaterThanOrEqual(marked);
-  expect(last?.matches?.entries).toHaveLength(last?.matches?.count ?? -1);
+  expect(found?.count).toBeGreaterThanOrEqual(marked);
+  expect(found?.entries).toHaveLength(found?.count ?? -1);
   logs.close();
 });
 
 test("the warn level keeps warnings and errors", async () => {
   const { logs, batches } = session({ ...VIEW, level: "warn" });
   await vi.advanceTimersByTimeAsync(300);
-  const lines = (batches[batches.length - 1]?.window?.entries ?? []).filter(
+  const lines = (carried(batches, "window")?.entries ?? []).filter(
     (entry) => entry.type === "line",
   );
   expect(lines.length).toBeGreaterThan(0);
@@ -168,7 +175,7 @@ function bounds(entries: readonly LogEntry[], mark: number): void {
 test("a rollout's left stands just after its pod's last entry, and its successor's joined just before its first", async () => {
   const { logs, batches } = session();
   await vi.advanceTimersByTimeAsync(27_000);
-  const entries = batches[batches.length - 1]?.window?.entries ?? [];
+  const entries = carried(batches, "window")?.entries ?? [];
   const left = entries.findIndex((entry) => entry.type === "left");
   const joined = entries.findIndex((entry) => entry.type === "joined");
   expect(left).toBeGreaterThan(0);
@@ -185,7 +192,7 @@ test("only pods the source reads come and go: a read pod's rollout leaves, and i
   const read = batches.find((batch) => batch.pods !== null)?.pods?.[0]?.name;
   logs.setSource({ ...SOURCE, pods: read === undefined ? [] : [read] });
   await vi.advanceTimersByTimeAsync(27_000);
-  const entries = batches[batches.length - 1]?.window?.entries ?? [];
+  const entries = carried(batches, "window")?.entries ?? [];
   expect(entries.filter((entry) => entry.type === "left").map(podOf)).toEqual([
     read,
   ]);
@@ -199,7 +206,7 @@ test("a pod that joins and writes nothing keeps its joined through the bound", a
     bytes: 1 << 20,
   });
   await vi.advanceTimersByTimeAsync(45_000);
-  const entries = batches[batches.length - 1]?.window?.entries ?? [];
+  const entries = carried(batches, "window")?.entries ?? [];
   const joined = entries.filter((entry) => entry.type === "joined");
   expect(entries[0]?.type).toBe("dropped");
   expect(joined).toHaveLength(1);
@@ -229,7 +236,7 @@ test("a pod whose last line is the oldest the bound keeps still shows its left w
     .pop()?.name;
   cut = true;
   const oldest = () => {
-    const entries = batches[batches.length - 1]?.window?.entries ?? [];
+    const entries = carried(batches, "window")?.entries ?? [];
     return (
       entries[0]?.type === "dropped" &&
       podOf(entries[1]) === quiet &&
@@ -243,7 +250,7 @@ test("a pod whose last line is the oldest the bound keeps still shows its left w
   if (!pod) throw new Error("no quiet pod");
   cluster.rollOut(pod, Date.now());
   await vi.advanceTimersByTimeAsync(100);
-  const entries = batches[batches.length - 1]?.window?.entries ?? [];
+  const entries = carried(batches, "window")?.entries ?? [];
   expect(entries.filter((entry) => entry.type === "left").map(podOf)).toEqual([
     quiet,
   ]);
@@ -301,7 +308,7 @@ test("a pod that leaves in its crash loop's back-off has its left just after its
   await vi.advanceTimersByTimeAsync(5_000);
   cluster.rollOut(crashing, Date.now());
   await vi.advanceTimersByTimeAsync(200);
-  const entries = batches[batches.length - 1]?.window?.entries ?? [];
+  const entries = carried(batches, "window")?.entries ?? [];
   const left = entries.findIndex(
     (entry) => entry.type === "left" && entry.pod === crashing.name,
   );
@@ -402,17 +409,38 @@ test("a batch counts every source and view change applied, a no-op among them", 
   logs.close();
 });
 
+test("a batch carries only the parts that changed since the last, and none comes when nothing did, as Rust's", async () => {
+  const { logs, batches } = session();
+  logs.setSource({ ...SOURCE, previous: true });
+  await vi.advanceTimersByTimeAsync(300);
+  const sent = batches.length;
+  logs.setWindow({ type: "tail", count: 200 });
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(batches).toHaveLength(sent);
+  logs.setWindow({ type: "tail", count: 3 });
+  await vi.advanceTimersByTimeAsync(200);
+  expect(
+    batches
+      .slice(sent)
+      .map((batch) => [
+        batch.pods,
+        batch.window?.entries.length,
+        batch.matches,
+        batch.histogram,
+      ]),
+  ).toEqual([[null, 3, null, null]]);
+  logs.close();
+});
+
 test("an around window reads the entries before one and from it on, by its id", async () => {
   const { logs, batches } = session();
   await vi.advanceTimersByTimeAsync(3_000);
-  const tail = batches[batches.length - 1]?.window?.entries ?? [];
+  const tail = carried(batches, "window")?.entries ?? [];
   const anchor = tail[tail.length - 5];
   expect(anchor).toBeDefined();
   logs.setWindow({ type: "around", id: anchor?.id ?? 0, before: 2, after: 3 });
   await vi.advanceTimersByTimeAsync(200);
-  const ids = batches[batches.length - 1]?.window?.entries.map(
-    (entry) => entry.id,
-  );
+  const ids = carried(batches, "window")?.entries.map((entry) => entry.id);
   expect(ids).toHaveLength(5);
   expect(ids?.[2]).toBe(anchor?.id);
   logs.close();

@@ -1,6 +1,10 @@
 import { IpcError } from "../error";
+import { sameData } from "@twigo/utils";
 import type {
+  Histogram,
   LogBatch,
+  LogEntries,
+  LogMatches,
   LogPod,
   LogSource,
   LogTarget,
@@ -83,6 +87,8 @@ export class MockLogs {
   #seq = 0;
   #unacked: number | undefined;
   #dirty = { pods: true, lines: true };
+  /** What the batches said last, undefined for a part none has sent yet. */
+  #sent: Sent = { total: 0, dropped: 0, arrived: 0, changes: 0 };
   #rolledAt = Date.now();
   #timer: ReturnType<typeof setInterval>;
 
@@ -235,8 +241,11 @@ export class MockLogs {
     if (!this.#source.previous) this.#follow(now);
     const window = this.#window;
     if (this.#unacked !== undefined || window === undefined) return;
-    if (!this.#dirty.lines && !this.#dirty.pods) return;
-    this.#send(window);
+    const batch = this.#batch(window);
+    if (!batch) return;
+    this.#seq = batch.seq;
+    this.#unacked = batch.seq;
+    this.#onMessage(batch);
   }
 
   /** Writes what each stream wrote since the last tick, and follows the target's pods as they come and go. */
@@ -423,25 +432,56 @@ export class MockLogs {
     ];
   }
 
-  #send(window: LogWindow): void {
+  /**
+   * The batch of what changed since the last, every part in the first;
+   * undefined when nothing did, as Rust's `Run::batch`.
+   */
+  #batch(window: LogWindow): LogBatch | undefined {
+    const sent = this.#sent;
+    const first = sent.window === undefined;
+    const pods = this.#dirty.pods || first ? this.#logPods() : undefined;
+    const view = this.#dirty.lines || first;
+    this.#dirty = { pods: false, lines: false };
     const buffer = this.#buffer;
     const checked = this.#spec;
-    this.#seq++;
-    this.#unacked = this.#seq;
     const status: ViewState = { state: "ready" };
-    this.#onMessage({
-      seq: this.#seq,
+    const batch: LogBatch = {
+      seq: this.#seq + 1,
       status,
-      pods: this.#dirty.pods ? this.#logPods() : null,
-      total: total(buffer, checked),
-      window: entries(buffer, checked, window),
-      matches: matches(buffer, checked),
-      histogram: histogram(buffer),
+      pods: fresh(sent, "pods", pods),
+      total: view ? total(buffer, checked) : sent.total,
+      window: fresh(
+        sent,
+        "window",
+        view ? entries(buffer, checked, window) : undefined,
+      ),
+      matches: fresh(
+        sent,
+        "matches",
+        view ? matches(buffer, checked) : undefined,
+      ),
+      histogram: fresh(sent, "histogram", view ? histogram(buffer) : undefined),
       dropped: buffer.droppedEver,
       arrived: this.#arrived,
       changes: this.#changes,
-    });
-    this.#dirty = { pods: false, lines: false };
+    };
+    const unchanged =
+      sameData(sent.status, batch.status) &&
+      batch.pods === null &&
+      batch.total === sent.total &&
+      batch.window === null &&
+      batch.matches === null &&
+      batch.histogram === null &&
+      batch.dropped === sent.dropped &&
+      batch.arrived === sent.arrived &&
+      batch.changes === sent.changes;
+    if (unchanged) return undefined;
+    sent.status = batch.status;
+    sent.total = batch.total;
+    sent.dropped = batch.dropped;
+    sent.arrived = batch.arrived;
+    sent.changes = batch.changes;
+    return batch;
   }
 
   #logPods(): LogPod[] {
@@ -487,6 +527,29 @@ export class MockLogs {
       return { state: "waiting", reason: "CrashLoopBackOff" };
     return { state: "following" };
   }
+}
+
+interface Sent {
+  status?: ViewState;
+  pods?: LogPod[];
+  total: number;
+  window?: LogEntries;
+  matches?: LogMatches;
+  histogram?: Histogram;
+  dropped: number;
+  arrived: number;
+  changes: number;
+}
+
+/** `now` unless the part sent last is the same, remembering what it gives. */
+function fresh<K extends "pods" | "window" | "matches" | "histogram">(
+  sent: Sent,
+  part: K,
+  now: Sent[K],
+): NonNullable<Sent[K]> | null {
+  if (now === undefined || sameData(sent[part], now)) return null;
+  sent[part] = now;
+  return now;
 }
 
 /** A container's previous instance: its lines from the last start a crash loop wrote, without the end that followed. */
