@@ -156,7 +156,9 @@ export function registerCore(workbench: Workbench): void {
     id: string;
     title: string;
     icon: LucideIcon;
+    /** Where the panel's title offers it. */
     when: string;
+    enablement?: string;
     part: { visible?: boolean; maximized?: boolean };
   }[] = [
     {
@@ -164,6 +166,7 @@ export function registerCore(workbench: Workbench): void {
       title: "Maximize Panel Size",
       icon: ChevronUp,
       when: "!panelMaximized",
+      // Maximizing a maximized panel changes nothing, so it waits for no state.
       part: { visible: true, maximized: true },
     },
     {
@@ -171,6 +174,7 @@ export function registerCore(workbench: Workbench): void {
       title: "Restore Panel Size",
       icon: ChevronDown,
       when: "panelMaximized",
+      enablement: "panelMaximized",
       part: { maximized: false },
     },
     {
@@ -178,17 +182,17 @@ export function registerCore(workbench: Workbench): void {
       title: "Hide Panel",
       icon: X,
       when: "panelVisible",
+      enablement: "panelVisible",
       part: { visible: false },
     },
   ];
-  panel.forEach(({ id, title, icon, when, part }, order) => {
+  panel.forEach(({ id, title, icon, when, enablement, part }, order) => {
     commands.register({
       id,
       title,
       category: "View",
       icon,
-      // Maximizing a maximized panel changes nothing, so only the others wait for their state.
-      ...(id !== "workbench.action.maximizePanel" && { enablement: when }),
+      ...(enablement !== undefined && { enablement }),
       run: () => {
         const space = spaces.active;
         if (space) spaces.setPart(space.id, "panel", part);
@@ -261,12 +265,9 @@ export function registerCore(workbench: Workbench): void {
       title,
       category: "Editor",
       enablement: "editor.open || panelFocus",
-      run: () => {
+      run: (_args, lookup) => {
         // The panel's editors take the commands while it has the focus.
-        const area: Area =
-          workbench.keys.lookup(document.activeElement)("panelFocus") === true
-            ? "panel"
-            : "editor";
+        const area: Area = lookup("panelFocus") === true ? "panel" : "editor";
         const uri =
           area === "panel" ? editors.activeIn("panel") : editors.active;
         if (uri) run(uri, area);

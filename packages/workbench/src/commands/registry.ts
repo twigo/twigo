@@ -20,7 +20,8 @@ export interface CommandDescriptor {
 }
 
 export interface Command extends CommandDescriptor {
-  run(args: unknown): void | Promise<void>;
+  /** Runs with the context the command was enabled in, as of the focus it ran from. */
+  run(args: unknown, lookup: Lookup): void | Promise<void>;
 }
 
 interface Entry {
@@ -84,7 +85,7 @@ export class Commands {
     const entry = this.#entries.get(id);
     if (!entry || !this.enabled(id, lookup)) return false;
     try {
-      await entry.command.run(args);
+      await entry.command.run(args, lookup);
     } catch (error) {
       this.onError(id, error);
     }
