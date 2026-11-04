@@ -341,15 +341,49 @@ test("without wrap, the list scrolls sideways by a wheel's deltaX itself, ⇧ wi
   expect(log.scrollTop).toBe(40);
 });
 
-test("a wheel with ⌃, which zooms, or with ⇧ and no deltaX, which Chromium turns sideways, is the browser's, and the list neither scrolls nor pauses for it", () => {
-  const { log, onFollowChange } = mount({ total: 300, items: lines(0, 300) });
+test("on macOS the list takes a wheel with ⌃, or with ⇧ and no deltaX, along its own axis, as WebKit there scrolls it", () => {
+  const { log, onFollowChange } = mount({
+    total: 300,
+    items: lines(0, 300),
+    mac: true,
+  });
   wide(log);
   expect([
     spin(log, { deltaY: -40, ctrlKey: true }),
     spin(log, { deltaY: -40, shiftKey: true }),
-  ]).toEqual([true, true]);
-  expect([log.scrollTop, log.scrollLeft]).toEqual([19 * 300 - 600, 0]);
+  ]).toEqual([false, false]);
+  expect([log.scrollTop, log.scrollLeft]).toEqual([19 * 300 - 600 - 80, 0]);
+  expect(onFollowChange).toHaveBeenCalledWith(false);
+});
+
+test("elsewhere a wheel with ⌃ is the engine's, and one with ⇧ and no deltaX scrolls sideways", () => {
+  const { log, onFollowChange } = mount({ total: 300, items: lines(0, 300) });
+  wide(log);
+  expect([
+    spin(log, { deltaY: -40, ctrlKey: true }),
+    spin(log, { deltaY: 40, shiftKey: true }),
+  ]).toEqual([true, false]);
+  expect([log.scrollTop, log.scrollLeft]).toEqual([19 * 300 - 600, 40]);
   expect(onFollowChange).not.toHaveBeenCalled();
+});
+
+test("a wheel's sideways deltas below a pixel add up too", () => {
+  const { log } = mount({
+    follow: false,
+    total: 300,
+    items: lines(0, 300),
+  });
+  wide(log);
+  let at = 0;
+  Object.defineProperty(log, "scrollLeft", {
+    configurable: true,
+    get: () => at,
+    set: (left: number) => {
+      at = Math.trunc(left);
+    },
+  });
+  for (let round = 0; round < 4; round++) spin(log, { deltaX: 0.5 });
+  expect(log.scrollLeft).toBe(2);
 });
 
 test("a wheel the browser does not let the list cancel moves the list no further, and still pauses or follows at once", () => {

@@ -45,7 +45,7 @@ import type { LogsTabs } from "./state";
  * filters and searches; the tab shows a window of them.
  */
 export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
-  const { keys, lists } = useWorkbench();
+  const { keys, lists, platform } = useWorkbench();
   useChanges(tabs.changes);
   const input = useMemo(() => parseLogsUri(uri), [uri]);
   const session = useMemo(
@@ -293,6 +293,7 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
             wrap={tab.wrap}
             timestamps={tab.timestamps}
             tagWidth={tagWidth}
+            mac={platform === "mac"}
             reveal={
               tab.reveal && {
                 key: String(tab.reveal.id),

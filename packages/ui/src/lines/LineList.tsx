@@ -276,6 +276,7 @@ export function LineList({
   onFollowChange,
   onPlace,
   register,
+  mac = false,
   className,
 }: {
   label: string;
@@ -306,6 +307,13 @@ export function LineList({
   onPlace?: (place: LinePlace) => void;
   /** Scopes the list's keys while it is mounted and routes the list commands to it, as a grid's. */
   register?: (element: HTMLElement, controller: ListController) => () => void;
+  /**
+   * On macOS, where WebKit scrolls a wheel with ⌃, or with ⇧ and no
+   * `deltaX`, along its own axis, the list takes it as any other wheel;
+   * elsewhere a ⇧ wheel goes sideways, as VS Code turns it off macOS, and a
+   * ⌃ wheel is the engine's.
+   */
+  mac?: boolean;
   className?: string;
 }) {
   const [element, setElement] = useState<HTMLDivElement | null>(null);
@@ -463,14 +471,15 @@ export function LineList({
   // next write; that scroll is the person's, so a layout change before its
   // scroll event carries it in the write that holds the line. A wheel the
   // browser does not let it cancel the browser scrolls by, maybe before it
-  // dispatches it, so its delta counts from where the list last stood. The
-  // browser keeps a ⌃ wheel, which zooms, a pinch's included, and a ⇧
-  // wheel without `deltaX`, which Chromium turns sideways on Windows and
-  // Linux.
+  // dispatches it, so its delta counts from where the list last stood.
   const wheel = (scroller: HTMLElement, event: WheelEvent) => {
-    if (event.ctrlKey || (event.shiftKey && event.deltaX === 0)) return;
-    const dx = event.deltaX * unitOf(event.deltaMode, scroller.clientWidth);
-    const dy = event.deltaY * unitOf(event.deltaMode, scroller.clientHeight);
+    if (event.ctrlKey && !mac) return;
+    const turned = !mac && event.shiftKey && event.deltaX === 0;
+    const across = unitOf(event.deltaMode, scroller.clientWidth);
+    const dx = turned ? event.deltaY * across : event.deltaX * across;
+    const dy = turned
+      ? 0
+      : event.deltaY * unitOf(event.deltaMode, scroller.clientHeight);
     const left = scroller.scrollLeft;
     const top = scroller.scrollTop;
     const from = event.cancelable ? top : known.current;
