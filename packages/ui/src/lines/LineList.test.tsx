@@ -1093,6 +1093,64 @@ test("a loaded line to reveal replaces a reveal still loading, whose answer then
   expect(log.scrollTop).toBe(19 * 4910 + CENTRE);
 });
 
+test("a reveal takes in the person's scroll whose event has not come, and lands on a loaded line", () => {
+  const { log, update } = mount({
+    follow: false,
+    total: 5000,
+    start: 4900,
+    items: lines(4900, 5000),
+  });
+  scroll(log, 19 * 4950);
+  log.scrollTop = 19 * 4960;
+  update({ reveal: { key: "4910", token: 1 } });
+  act(() => {
+    fireEvent.scroll(log);
+  });
+  expect(log.scrollTop).toBe(19 * 4910 + CENTRE);
+});
+
+test("a reveal takes in the person's scroll whose event has not come, and lands on a line once its answer comes", () => {
+  const { log, onWindow, update } = mount({
+    follow: false,
+    total: 5000,
+    start: 4900,
+    items: lines(4900, 5000),
+  });
+  scroll(log, 19 * 4950);
+  log.scrollTop = 19 * 4960;
+  update({ reveal: { key: "1200", token: 1 } });
+  expect(onWindow).toHaveBeenLastCalledWith(around("1200"));
+  act(() => {
+    fireEvent.scroll(log);
+  });
+  update({
+    start: 1160,
+    items: lines(1160, 1272),
+    around: { key: "1200", index: 1200 },
+  });
+  expect(log.scrollTop).toBe(19 * 1200 + CENTRE);
+});
+
+test("a list shown again while a reveal loads still lands on the line", () => {
+  const { log, update } = mount({
+    follow: false,
+    total: 5000,
+    start: 4900,
+    items: lines(4900, 5000),
+  });
+  scroll(log, 19 * 4950);
+  update({ reveal: { key: "1200", token: 1 } });
+  hide(log);
+  show(log);
+  update({ fresh: 1 });
+  update({
+    start: 1160,
+    items: lines(1160, 1272),
+    around: { key: "1200", index: 1200 },
+  });
+  expect(log.scrollTop).toBe(19 * 1200 + CENTRE);
+});
+
 test("a revealed line stays where it was revealed as lines leave before it ahead of the reveal's scroll event", () => {
   const { log, update } = mount({
     follow: false,

@@ -564,7 +564,8 @@ export function LineList({
       if (follow) enter(FOLLOW);
     }
     const from = known.current;
-    const moved = shown || revealing ? 0 : unseen(scroller);
+    if (shown || revealing) known.current = scroller.scrollTop;
+    const moved = unseen(scroller);
     const now = mode.current;
     if (now.kind === "hold") {
       const index = placed(now.key);
