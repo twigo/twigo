@@ -508,12 +508,17 @@ test("a step's match beyond the last 10,000 gives way to the newest once the win
     (entry) => entry.type === "line" && entry.marks.length > 0,
   );
   if (line?.type !== "line") throw new Error("no matching line in the window");
-  const around = (kept: typeof entries) => ({
+  const around = (kept: typeof entries, id: number | null = line.id) => ({
     ...now,
     settled: true,
     matches: { count: 12, entries: [line.id + 1, line.id + 2, line.id + 3] },
-    window: { start: 0, entries: kept, around: { id: line.id, index: 0 } },
+    window: {
+      start: 0,
+      entries: kept,
+      around: id === null ? null : { id, index: 0 },
+    },
   });
+  const lacking = entries.filter((entry) => entry.id !== line.id);
   const snapshot = vi
     .spyOn(session, "getSnapshot")
     .mockReturnValue(around(entries));
@@ -526,9 +531,18 @@ test("a step's match beyond the last 10,000 gives way to the newest once the win
     });
   });
   expect(tabs.get(uri).anchor).toEqual({ id: line.id, fromEnd: 0 });
-  snapshot.mockReturnValue(
-    around(entries.filter((entry) => entry.id !== line.id)),
-  );
+  const kept = [line.id + 1, null].map((id) => {
+    snapshot.mockReturnValue(around(lacking, id));
+    act(() => {
+      tabs.update(uri, {});
+    });
+    return tabs.get(uri).anchor;
+  });
+  expect(kept).toEqual([
+    { id: line.id, fromEnd: 0 },
+    { id: line.id, fromEnd: 0 },
+  ]);
+  snapshot.mockReturnValue(around(lacking));
   act(() => {
     tabs.update(uri, {});
   });
