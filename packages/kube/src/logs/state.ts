@@ -17,12 +17,11 @@ export interface LogsTab {
   readonly follow: boolean;
   readonly wrap: boolean;
   readonly timestamps: boolean;
-  /** The match the search stands on, counted back from the newest: 0 is the last. */
-  readonly current: number;
   /**
    * The entry and the mark the current match is, by the entry's id and its
    * place counted from the line's last mark, once the person stepped to it:
-   * matches that come or go around it move `current`, not the match.
+   * matches that come or go around it move its number, not the match; the
+   * newest match until then.
    */
   readonly anchor: MatchAnchor | undefined;
   /**
@@ -70,7 +69,6 @@ const INITIAL: LogsTab = {
   follow: true,
   wrap: false,
   timestamps: true,
-  current: 0,
   anchor: undefined,
   reveal: undefined,
   waiting: undefined,
@@ -128,10 +126,7 @@ export class LogsTabs {
     if (same(view, tab.view)) return;
     this.update(uri, {
       view,
-      ...(view.search !== tab.view.search && {
-        current: 0,
-        anchor: undefined,
-      }),
+      ...(view.search !== tab.view.search && { anchor: undefined }),
     });
   }
 
@@ -143,7 +138,6 @@ export class LogsTabs {
     this.#places.delete(uri);
     this.update(uri, {
       source,
-      current: 0,
       anchor: undefined,
       follow: true,
     });
@@ -208,13 +202,15 @@ export class LogsTabs {
       if (tab.waiting) this.update(uri, { waiting: undefined });
       return;
     }
-    // `current` counts back from the newest, so an older match is a larger one.
-    let current = (tab.current + (older ? 1 : shown - 1)) % shown;
-    if (standingMatch(snapshot.matches, tab.current, tab.anchor)?.atMost)
-      current = older ? 0 : shown - 1;
-    const next = currentMatch(snapshot.matches, current);
+    // Counted back from the newest, an older match is a larger one.
+    const standing = standingMatch(snapshot.matches, tab.anchor);
+    const back = standing?.atMost
+      ? older
+        ? 0
+        : shown - 1
+      : ((standing?.back ?? 0) + (older ? 1 : shown - 1)) % shown;
+    const next = currentMatch(snapshot.matches, back);
     this.update(uri, {
-      current,
       anchor: next && { id: next.id, fromEnd: next.fromEnd },
       reveal: next && { id: next.id, token: (tab.reveal?.token ?? 0) + 1 },
       waiting: undefined,

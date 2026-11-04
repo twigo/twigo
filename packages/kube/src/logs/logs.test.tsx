@@ -81,24 +81,27 @@ test("an anchored match keeps its entry and mark as matches come after it and dr
 
 test("a stepped match stands while the matches list it, and beyond the last they list while they list only those", () => {
   const capped = { count: 12, entries: [30, 70, 90] };
-  expect(standingMatch(capped, 1, { id: 70, fromEnd: 0 })).toEqual({
+  expect(standingMatch(capped, { id: 70, fromEnd: 0 })).toEqual({
     id: 70,
     fromEnd: 0,
     number: 11,
+    back: 1,
   });
-  expect(standingMatch(capped, 2, { id: 20, fromEnd: 0 })).toEqual({
+  expect(standingMatch(capped, { id: 20, fromEnd: 0 })).toEqual({
     id: 20,
     fromEnd: 0,
     number: 9,
+    back: 3,
     atMost: true,
   });
   const every = { count: 3, entries: [30, 70, 90] };
-  expect(standingMatch(every, 2, { id: 20, fromEnd: 0 })).toEqual({
-    id: 30,
+  expect(standingMatch(every, { id: 20, fromEnd: 0 })).toEqual({
+    id: 90,
     fromEnd: 0,
-    number: 1,
+    number: 3,
+    back: 0,
   });
-  expect(standingMatch(every, 0, undefined)?.id).toBe(90);
+  expect(standingMatch(every, undefined)?.id).toBe(90);
 });
 
 test("entries become lines and markers: a level's tone, the current mark, a crash and a rollout", () => {
@@ -407,7 +410,7 @@ test("a view that changes nothing keeps the match, the place and the session's v
   if (!input) throw new Error("no logs URI");
   const session = tabs.session(uri, input);
   const setView = vi.spyOn(session, "setView");
-  tabs.update(uri, { current: 3, anchor: { id: 9, fromEnd: 0 } });
+  tabs.update(uri, { anchor: { id: 9, fromEnd: 0 } });
   tabs.keepPlace(uri, { key: "7", offset: 0 });
   const before = tabs.get(uri);
   tabs.setView(uri, { level: "all", filter: null });
@@ -460,7 +463,6 @@ test("a step's match the last 10,000 no longer list stays current, the line the 
   act(() => {
     tabs.update(uri, {
       anchor: { id: line.id, fromEnd: 0 },
-      current: 2,
       reveal: { id: line.id, token: 1 },
       follow: false,
     });
@@ -472,18 +474,16 @@ test("a step's match the last 10,000 no longer list stays current, the line the 
     tabs.step(uri, false);
   });
   expect(tabs.get(uri)).toMatchObject({
-    current: 2,
     anchor: { id: line.id + 1, fromEnd: 0 },
   });
   expect(screen.getByText("10 of 12")).toBeTruthy();
   act(() => {
-    tabs.update(uri, { anchor: { id: line.id, fromEnd: 0 }, current: 2 });
+    tabs.update(uri, { anchor: { id: line.id, fromEnd: 0 } });
   });
   act(() => {
     tabs.step(uri, true);
   });
   expect(tabs.get(uri)).toMatchObject({
-    current: 0,
     anchor: { id: line.id + 3, fromEnd: 0 },
   });
   height.mockRestore();
@@ -525,7 +525,6 @@ test("a step's match beyond the last 10,000 gives way to the newest once the win
   act(() => {
     tabs.update(uri, {
       anchor: { id: line.id, fromEnd: 0 },
-      current: 2,
       reveal: { id: line.id, token: 1 },
       follow: false,
     });
@@ -546,7 +545,7 @@ test("a step's match beyond the last 10,000 gives way to the newest once the win
   act(() => {
     tabs.update(uri, {});
   });
-  expect(tabs.get(uri)).toMatchObject({ current: 0, anchor: undefined });
+  expect(tabs.get(uri)).toMatchObject({ anchor: undefined });
   session.close();
 });
 
@@ -673,16 +672,17 @@ test("a step binds the current match to its entry, so matches that come after it
   act(() => {
     tabs.step(uri, true);
   });
-  const { anchor, current } = tabs.get(uri);
+  const { anchor } = tabs.get(uri);
+  const standing = () =>
+    standingMatch(session.getSnapshot().matches, tabs.get(uri).anchor);
+  const back = standing()?.back ?? 0;
   await vi.waitFor(
     () => {
-      expect(tabs.get(uri).current).toBeGreaterThan(current);
+      expect(standing()?.back).toBeGreaterThan(back);
     },
     { timeout: 10_000 },
   );
-  expect(
-    currentMatch(session.getSnapshot().matches, tabs.get(uri).current)?.id,
-  ).toBe(anchor?.id);
+  expect(standing()?.id).toBe(anchor?.id);
 }, 15_000);
 
 test("a filter keeps the match stepped to while the view keeps it, a refused one too, and one that hides it goes back to the newest", async () => {
@@ -698,7 +698,7 @@ test("a filter keeps the match stepped to while the view keeps it, a refused one
   const { anchor } = tabs.get(uri);
   expect(anchor).toBeDefined();
   const stepped = () =>
-    currentMatch(session.getSnapshot().matches, tabs.get(uri).current)?.id;
+    standingMatch(session.getSnapshot().matches, tabs.get(uri).anchor)?.id;
   act(() => {
     tabs.setView(uri, { filter: "/(/" });
   });
@@ -722,7 +722,7 @@ test("a filter keeps the match stepped to while the view keeps it, a refused one
     tabs.setView(uri, { filter: "no line says this" });
   });
   await vi.waitFor(() => {
-    expect(tabs.get(uri)).toMatchObject({ current: 0, anchor: undefined });
+    expect(tabs.get(uri)).toMatchObject({ anchor: undefined });
   });
   act(() => {
     tabs.setView(uri, { filter: null });
@@ -738,6 +738,6 @@ test("a filter keeps the match stepped to while the view keeps it, a refused one
   act(() => {
     tabs.setView(uri, { search: "token" });
   });
-  expect(tabs.get(uri)).toMatchObject({ current: 0, anchor: undefined });
+  expect(tabs.get(uri)).toMatchObject({ anchor: undefined });
   session.close();
 }, 20_000);

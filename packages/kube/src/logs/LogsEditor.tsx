@@ -91,19 +91,18 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
   // window asked around it does not, which the view keeps exactly.
   const matchesNow = snapshot?.matches;
   const windowNow = snapshot?.window;
-  const { anchor, current } = tabs.get(uri);
+  const { anchor } = tabs.get(uri);
   useEffect(() => {
     if (!anchor || !matchesNow) return;
-    const back = anchoredMatch(matchesNow, anchor.id, anchor.fromEnd);
-    if (back !== undefined) {
-      if (back !== current) tabs.update(uri, { current: back });
-    } else if (
+    if (anchoredMatch(matchesNow, anchor.id, anchor.fromEnd) !== undefined)
+      return;
+    if (
       matchesNow.count <= matchesNow.entries.length ||
       (windowNow?.around?.id === anchor.id &&
         !windowNow.entries.some((entry) => entry.id === anchor.id))
     )
-      tabs.update(uri, { current: 0, anchor: undefined });
-  }, [anchor, current, matchesNow, windowNow, tabs, uri]);
+      tabs.update(uri, { anchor: undefined });
+  }, [anchor, matchesNow, windowNow, tabs, uri]);
 
   const onWindow = useCallback(
     (window: LineWindow) => {
@@ -142,7 +141,7 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
   const several = (pods ?? []).some((pod) => followed(pod).length > 1);
   const tag = (pod: string, container: string) =>
     several ? `${podTag(pod)}/${container}` : podTag(pod);
-  const match = standingMatch(matches, tab.current, tab.anchor);
+  const match = standingMatch(matches, tab.anchor);
   const start = window?.start ?? 0;
   const items = (window?.entries ?? []).map((entry) =>
     lineItem(entry, {

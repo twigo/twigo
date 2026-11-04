@@ -142,7 +142,7 @@ export function LogsToolbar({
     { warnings: 0, errors: 0 },
   );
   const matches = snapshot.matches?.count ?? 0;
-  const match = standingMatch(snapshot.matches, tab.current, tab.anchor);
+  const match = standingMatch(snapshot.matches, tab.anchor);
   const step = (older: boolean) => {
     tabs.step(uri, older);
   };
