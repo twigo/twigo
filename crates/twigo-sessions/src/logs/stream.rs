@@ -152,6 +152,13 @@ pub struct Resume {
     first: Option<(i64, u64)>,
     /// What a reopened read has still to skip.
     skip: Option<Skip>,
+    /// The latest time admitted when a rest started, until the rest gives
+    /// a line at or after it: a log holding the lines read gives the latest
+    /// again before any later one, as the kubelet sends those at or after
+    /// its second first, in the log's order, so the lines before it are
+    /// none the stream had, but another instance's, or of that second
+    /// before where a tail of lines started.
+    hold: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -175,15 +182,18 @@ pub enum Admit {
     Again,
     /// A reread of the same instance found a log without what it had.
     Moved,
+    /// A rest's line the hold keeps back, which neither comes nor counts.
+    Held,
 }
 
 const SECOND: i64 = 1_000_000_000;
 
 impl Resume {
-    /// Starts a read that skips what came already, of the instance read
-    /// before when `same`; where it starts: the second of the latest line,
-    /// or `from` while there is none.
-    fn start(&mut self, same: bool, from: ReadFrom) -> ReadFrom {
+    /// Starts a read that skips what came already, and for a rest holds
+    /// back what came before the latest line; where it starts: the second
+    /// of the latest line, or `from` while there is none.
+    fn start(&mut self, read: Read, from: ReadFrom) -> ReadFrom {
+        let same = matches!(read, Read::Follow { same: true } | Read::Previous);
         let first = self.first;
         self.skip = self.latest.map(|(latest, left)| Skip {
             left,
@@ -191,15 +201,19 @@ impl Resume {
             same,
             first,
         });
+        self.hold = self.last_at().filter(|_| read == Read::Rest);
         self.tail = self.latest.is_none() && matches!(from, ReadFrom::Lines(_));
         self.latest
             .map_or(from, |(at, _)| ReadFrom::Time(second(at)))
     }
 
-    /// What a line read at `at` is, counting it if new and it `counts`:
-    /// a line held back, which does not come, must not, or a later read
-    /// would skip one that it never sent for it.
-    pub fn admit(&mut self, at: i64, line: &[u8], counts: bool) -> Admit {
+    /// What a line read at `at` is, counting it if new; a line held back
+    /// does not come, so it must not count, or a later read would skip one
+    /// that it never sent for it.
+    pub fn admit(&mut self, at: i64, line: &[u8]) -> Admit {
+        if self.hold.is_some_and(|hold| at >= hold) {
+            self.hold = None;
+        }
         if let Some(skip) = &mut self.skip {
             if at <= skip.latest {
                 if let Some((first, hash)) = skip.first {
@@ -220,8 +234,8 @@ impl Resume {
                 return Admit::Moved;
             }
         }
-        if !counts {
-            return Admit::New;
+        if self.hold.is_some() {
+            return Admit::Held;
         }
         let tail = self.tail && self.latest.is_none();
         let (latest, count) = match self.latest {
@@ -244,16 +258,17 @@ impl Resume {
     }
 
     /// Whether a reread of the instance read before has yet to get lines
-    /// it had: a log that ends first holds none of them, as a later
-    /// instance's does not.
+    /// it had, or a rest the latest of them: a log that ends first holds
+    /// none of them.
     fn lacks(&self) -> bool {
-        self.skip.is_some_and(|skip| skip.same)
+        self.hold.is_some() || self.skip.is_some_and(|skip| skip.same)
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Read {
-    Follow,
+    /// `same` when it rereads the instance read before.
+    Follow { same: bool },
     /// The kubelet's previous instance, to its end.
     Previous,
     /// The rest of the instance the resume's lines may have come from, as
@@ -263,21 +278,18 @@ enum Read {
 
 /// How a read ended.
 enum Outcome {
-    /// The server ended the log; `fresh` if it sent lines this read had
-    /// not had, and `held` unless it was a rest's that ended before it gave
-    /// the latest line read, which a log holding the lines read never does,
-    /// as the kubelet sends again first those at or after their second, in
-    /// the log's order: they were another instance's.
+    /// The server ended the log, or a rest reached the later instance's
+    /// first line; `fresh` if it sent lines this read had not had.
     Ended {
         fresh: bool,
-        held: bool,
     },
     /// The connection was retired or its clients abandoned under it.
     Cut,
     /// A reread of the instance read before got a later instance's log,
-    /// whose first line came at `at`, or that ended before the lines it
-    /// had: the kubelet's status had moved on before the one the stream
-    /// was told of.
+    /// whose first line came at `at`, or a log that ended before the lines
+    /// it had: the kubelet's status had moved on before the one the stream
+    /// was told of; or a rest ended before it gave the latest line read,
+    /// so the lines read were a later instance's.
     Moved {
         at: Option<i64>,
     },
@@ -569,12 +581,11 @@ impl Reader {
             // says it runs, as after its log was rotated, or the kubelet
             // gave its rest as the previous instance already.
             let moved_on = moved.take().as_deref() == Some(id.as_str()) || over.is_some();
-            let same = reading.as_deref() == Some(id.as_str());
-            let start = self.resume.start(same && !moved_on, from);
+            let same = reading.as_deref() == Some(id.as_str()) && !moved_on;
             reading = Some(id.clone());
             let container = self.stream.container.clone();
             let outcome = tokio::select! {
-                outcome = self.read(Read::Follow, start, None, send) => outcome,
+                outcome = self.read(Read::Follow { same }, from, None, send) => outcome,
                 () = moved_off(pod, &container, &id) => Outcome::Cut,
             };
             if let Outcome::Ended { .. } | Outcome::Unreadable(_) = &outcome {
@@ -617,7 +628,7 @@ impl Reader {
                     }
                     self.pause(pod).await;
                 }
-                Outcome::Ended { fresh, .. } => {
+                Outcome::Ended { fresh } => {
                     // The status may not say yet that it ended; or the
                     // server ended the log of one that runs.
                     got = Got::Read;
@@ -659,10 +670,9 @@ impl Reader {
             if gone(pod) {
                 return Tail::GaveUp;
             }
-            let start = self.resume.start(false, from);
-            match self.read(Read::Rest, start, before, send).await {
-                Outcome::Ended { held: true, .. } => return Tail::Found,
-                Outcome::Ended { held: false, .. } => return Tail::Lacked,
+            match self.read(Read::Rest, from, before, send).await {
+                Outcome::Ended { .. } => return Tail::Found,
+                Outcome::Moved { .. } => return Tail::Lacked,
                 Outcome::Cut => {}
                 Outcome::Broken => {
                     self.pause(pod).await;
@@ -715,8 +725,7 @@ impl Reader {
                 return;
             }
             let id = id.to_owned();
-            let start = self.resume.start(true, from);
-            match self.read(Read::Previous, start, None, send).await {
+            match self.read(Read::Previous, from, None, send).await {
                 Outcome::Cut => {
                     unfinished.get_or_insert(id);
                 }
@@ -769,8 +778,9 @@ impl Reader {
         }
     }
 
-    /// Reads the log from `from` to its end, or up to a line at or after
-    /// `before`.
+    /// Reads the log from `from` while the resume holds no line, else
+    /// from the latest line's second, to its end or up to a line at or
+    /// after `before`.
     async fn read(
         &mut self,
         kind: Read,
@@ -778,6 +788,7 @@ impl Reader {
         before: Option<i64>,
         send: &impl Fn(Event),
     ) -> Outcome {
+        let from = self.resume.start(kind, from);
         send(Event::State(StreamState::Connecting));
         let clients = match self.stream.hub.clients(&self.stream.context).await {
             Ok(clients) => clients,
@@ -799,8 +810,8 @@ impl Reader {
     ) -> Outcome {
         let mut params = LogParams {
             container: Some(self.stream.container.clone()),
-            follow: kind == Read::Follow,
-            previous: kind != Read::Follow,
+            follow: matches!(kind, Read::Follow { .. }),
+            previous: !matches!(kind, Read::Follow { .. }),
             timestamps: true,
             ..LogParams::default()
         };
@@ -872,8 +883,6 @@ impl Reader {
         let mut lines = std::pin::pin!(lines);
         let mut fresh = false;
         let mut buffer = Vec::new();
-        // Until a rest gives the latest line read, it may not hold them.
-        let mut holding = self.resume.last_at().filter(|_| kind == Read::Rest);
         loop {
             buffer.clear();
             let read = tokio::select! {
@@ -882,13 +891,7 @@ impl Reader {
                 () = &mut abandoned => return Outcome::Cut,
             };
             match read {
-                Ok(0) if self.resume.lacks() => return Outcome::Moved { at: None },
-                Ok(0) => {
-                    return Outcome::Ended {
-                        fresh,
-                        held: holding.is_none(),
-                    };
-                }
+                Ok(0) => break,
                 Ok(_) => {}
                 Err(_) => return Outcome::Broken,
             }
@@ -901,23 +904,12 @@ impl Reader {
                 });
             };
             if before.is_some_and(|before| at >= before) {
-                return Outcome::Ended {
-                    fresh,
-                    held: holding.is_none(),
-                };
+                break;
             }
-            if holding.is_some_and(|latest| at >= latest) {
-                holding = None;
-            }
-            match self.resume.admit(at, &buffer, holding.is_none()) {
+            match self.resume.admit(at, &buffer) {
                 Admit::New => fresh = true,
-                Admit::Again => continue,
+                Admit::Again | Admit::Held => continue,
                 Admit::Moved => return Outcome::Moved { at: Some(at) },
-            }
-            // Before it, a rest's line is none it had: another instance's,
-            // or one of that second before where a tail of lines started.
-            if holding.is_some() {
-                continue;
             }
             send(Event::Line {
                 at,
@@ -925,6 +917,11 @@ impl Reader {
                 text: parsed.text,
                 styles: parsed.styles,
             });
+        }
+        if self.resume.lacks() {
+            Outcome::Moved { at: None }
+        } else {
+            Outcome::Ended { fresh }
         }
     }
 }
@@ -1881,11 +1878,11 @@ mod tests {
     use Admit::{Again, Moved, New};
 
     fn admit(resume: &mut Resume, at: i64) -> Admit {
-        resume.admit(at, format!("{at} line").as_bytes(), true)
+        resume.admit(at, format!("{at} line").as_bytes())
     }
 
     fn reread(resume: &mut Resume, times: &[i64]) -> Vec<Admit> {
-        resume.start(true, ReadFrom::Start);
+        resume.start(Read::Follow { same: true }, ReadFrom::Start);
         times.iter().map(|at| admit(resume, *at)).collect()
     }
 
@@ -1895,7 +1892,10 @@ mod tests {
         for at in [1_500, 2_000, 2_000] {
             assert_eq!(admit(&mut resume, at), New);
         }
-        assert_eq!(resume.start(true, ReadFrom::Start), ReadFrom::Time(0));
+        assert_eq!(
+            resume.start(Read::Follow { same: true }, ReadFrom::Start),
+            ReadFrom::Time(0)
+        );
         let again = reread(&mut resume, &[1_500, 2_000, 2_000, 2_000, 2_500]);
         assert_eq!(again, [Again, Again, Again, New, New]);
     }
@@ -1908,7 +1908,7 @@ mod tests {
             assert_eq!(admit(&mut resume, at), New);
         }
         assert_eq!(
-            resume.start(true, ReadFrom::Start),
+            resume.start(Read::Follow { same: true }, ReadFrom::Start),
             ReadFrom::Time(2 * SECOND)
         );
         let again = reread(
@@ -1937,7 +1937,7 @@ mod tests {
             assert_eq!(admit(&mut resume, at), New);
         }
         assert_eq!(reread(&mut resume, &[5_000, 6_000]), [Moved, New]);
-        resume.start(false, ReadFrom::Start);
+        resume.start(Read::Follow { same: false }, ReadFrom::Start);
         assert_eq!(admit(&mut resume, 9_000), New);
         assert_eq!(admit(&mut resume, 9_500), New);
     }
@@ -1947,11 +1947,11 @@ mod tests {
         let mut resume = Resume::default();
         assert_eq!(admit(&mut resume, 5 * SECOND + 700), New);
         assert_eq!(
-            resume.start(true, ReadFrom::Lines(10)),
+            resume.start(Read::Follow { same: true }, ReadFrom::Lines(10)),
             ReadFrom::Time(5 * SECOND)
         );
         assert_eq!(
-            Resume::default().start(true, ReadFrom::Lines(10)),
+            Resume::default().start(Read::Follow { same: true }, ReadFrom::Lines(10)),
             ReadFrom::Lines(10)
         );
     }
@@ -1959,7 +1959,7 @@ mod tests {
     #[test]
     fn a_reread_from_the_second_last_lines_started_in_passes_the_lines_before_them() {
         let mut resume = Resume::default();
-        resume.start(true, ReadFrom::Lines(2));
+        resume.start(Read::Follow { same: true }, ReadFrom::Lines(2));
         for at in [1_200, 1_300] {
             assert_eq!(admit(&mut resume, at), New);
         }
