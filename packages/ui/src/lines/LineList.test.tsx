@@ -645,6 +645,41 @@ test("with wrap, a new window keeps the sizes of the rows that just left it, so 
   expect(log.scrollTop).toBe(before);
 });
 
+test("with wrap, a new window that moves the lines, as the bound drops some before them and a lagging stream merges some in, keeps the sizes of the rows that left it where their lines now stand", () => {
+  wrapped();
+  const { log, onPlace, update } = mount({
+    follow: false,
+    wrap: true,
+    total: 300,
+    start: 60,
+    items: lines(60, 300),
+  });
+  for (const top of [19 * 100, 3000, 2300]) {
+    scroll(log, top);
+    act(() => {
+      resize();
+    });
+  }
+  scroll(log, log.scrollTop);
+  expect(onPlace).toHaveBeenLastCalledWith({ key: "113", offset: 1 });
+  update({ start: 103, items: lines(103, 153) });
+  const top = log.scrollTop;
+  const length = log.scrollHeight;
+  update({
+    total: 295,
+    start: 93,
+    items: [
+      ...lines(103, 143),
+      ...[1000, 1001, 1003, 1004, 1006].map((key) => line(key)),
+      ...lines(143, 153),
+    ],
+  });
+  expect([log.scrollTop - top, log.scrollHeight - length]).toEqual([
+    -10 * 19,
+    -10 * 19 + 5 * 19,
+  ]);
+});
+
 test("with wrap, a revealed line stays centred as the rows before it are measured", () => {
   wrapped();
   const { log, update } = mount({
