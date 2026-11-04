@@ -134,25 +134,28 @@ export class LogBuffer {
 
   /**
    * Drops the oldest entries while it holds more than its limits, but keeps
-   * those `held` names, first, among the entries it counts, and drops a
-   * `joined` only along with its pod's entries at its time, where the
-   * session places the pod's first.
+   * those `held` names, first, among the entries it counts, noting the
+   * pods whose `joined` it dropped last; then, at that `joined`'s time,
+   * where the session places a pod's first entry, it drops those pods'
+   * entries too and keeps the others, as Rust's `Buffer::bound` does.
    */
   bound(held: ReadonlySet<number>): void {
     const kept: Entry[] = [];
     let joined: { readonly at: bigint; readonly pods: Set<string> } | undefined;
     let count = 0;
     let next = 0;
-    for (;;) {
+    const drop = (entry: Entry) => {
+      this.#bytes -= bytes(entry.kind);
+      count++;
+    };
+    while (
+      this.#entries.length - next + kept.length > this.#limits.entries ||
+      this.#bytes > this.#limits.bytes
+    ) {
       const oldest = this.#entries[next];
-      const over =
-        this.#entries.length - next + kept.length > this.#limits.entries ||
-        this.#bytes > this.#limits.bytes;
-      if (!oldest || (!over && oldest.at !== joined?.at)) break;
+      if (!oldest) break;
       next++;
-      const theirs =
-        oldest.at === joined?.at && joined.pods.has(oldest.kind.pod);
-      if (held.has(oldest.id) || (!over && !theirs)) {
+      if (held.has(oldest.id)) {
         kept.push(oldest);
         continue;
       }
@@ -160,8 +163,17 @@ export class LogBuffer {
         if (joined?.at === oldest.at) joined.pods.add(oldest.kind.pod);
         else joined = { at: oldest.at, pods: new Set([oldest.kind.pod]) };
       }
-      this.#bytes -= bytes(oldest.kind);
-      count++;
+      drop(oldest);
+    }
+    for (
+      let oldest = this.#entries[next];
+      joined && oldest?.at === joined.at;
+      oldest = this.#entries[next]
+    ) {
+      next++;
+      if (held.has(oldest.id) || !joined.pods.has(oldest.kind.pod))
+        kept.push(oldest);
+      else drop(oldest);
     }
     this.#entries.splice(0, next, ...kept);
     if (count === 0) return;
