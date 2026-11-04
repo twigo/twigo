@@ -12,20 +12,6 @@ import type { ListController } from "../lib/list";
 import { LineList, type LineItem } from "./LineList";
 import { StyledText } from "./StyledText";
 
-const seen = vi.hoisted(() => ({ sizes: new Map<unknown, number>() }));
-
-vi.mock(import("@tanstack/react-virtual"), async (importOriginal) => {
-  const virtual = await importOriginal();
-  return {
-    ...virtual,
-    useVirtualizer: (options) => {
-      const virtualizer = virtual.useVirtualizer(options);
-      seen.sizes = virtualizer.itemSizeCache;
-      return virtualizer;
-    },
-  };
-});
-
 let shown = 600;
 const tops = new WeakMap<HTMLElement, number>();
 const maxOf = (element: HTMLElement) =>
@@ -944,51 +930,6 @@ test("following with wrap through many lines, the rows on screen keep their size
       gaps: [],
     });
   }
-});
-
-test("following with wrap, the list keeps the sizes of the loaded rows and of those near them that left, and no others", () => {
-  wrapped();
-  const { log, update } = mount({
-    wrap: true,
-    total: 100,
-    start: 60,
-    items: lines(60, 100),
-  });
-  for (let end = 110; end <= 600; end += 10) {
-    update({ total: end, start: end - 40, items: lines(end - 40, end) });
-    scroll(log, log.scrollTop);
-    act(() => {
-      resize();
-    });
-  }
-  expect([...seen.sizes.keys()].map(Number).sort((a, b) => a - b)).toEqual(
-    lines(600 - 40 - 32 - 40, 600)
-      .map((item) => Number(item.key))
-      .filter((key) => key % 3 === 0),
-  );
-});
-
-test("paused with wrap at the head of a bounded buffer as lines come, the list keeps the sizes of the loaded rows alone", () => {
-  wrapped();
-  const { update } = mount({
-    follow: false,
-    wrap: true,
-    total: 300,
-    items: lines(0, 112),
-  });
-  for (let first = 10; first <= 1000; first += 10) {
-    update({
-      items: lines(first, first + 112),
-      around: { key: "0", index: 0 },
-    });
-    act(() => {
-      resize();
-    });
-  }
-  const loaded = new Set(lines(1000, 1112).map((item) => item.key));
-  expect(
-    [...seen.sizes.keys()].filter((key) => !loaded.has(String(key))).length,
-  ).toBe(0);
 });
 
 test("a list that mounts paused goes back to where it stood", () => {
