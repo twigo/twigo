@@ -140,7 +140,7 @@ export class LogBuffer {
    */
   bound(held: ReadonlySet<number>): void {
     const kept: Entry[] = [];
-    let joined: { readonly at: bigint; readonly pod: string } | undefined;
+    let joined: { readonly at: bigint; readonly pods: Set<string> } | undefined;
     let count = 0;
     let next = 0;
     for (;;) {
@@ -150,13 +150,16 @@ export class LogBuffer {
         this.#bytes > this.#limits.bytes;
       if (!oldest || (!over && oldest.at !== joined?.at)) break;
       next++;
-      const theirs = oldest.at === joined?.at && oldest.kind.pod === joined.pod;
+      const theirs =
+        oldest.at === joined?.at && joined.pods.has(oldest.kind.pod);
       if (held.has(oldest.id) || (!over && !theirs)) {
         kept.push(oldest);
         continue;
       }
-      if (oldest.kind.type === "joined")
-        joined = { at: oldest.at, pod: oldest.kind.pod };
+      if (oldest.kind.type === "joined") {
+        if (joined?.at === oldest.at) joined.pods.add(oldest.kind.pod);
+        else joined = { at: oldest.at, pods: new Set([oldest.kind.pod]) };
+      }
       this.#bytes -= bytes(oldest.kind);
       count++;
     }

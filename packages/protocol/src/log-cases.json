@@ -2392,6 +2392,86 @@
       }
     },
     {
+      "name": "the bound drops along the entries of every joined it dropped at a time",
+      "limits": {
+        "entries": 3,
+        "bytes": 1048576
+      },
+      "entries": [
+        {
+          "type": "joined",
+          "pod": "web-a",
+          "time": "2026-11-03T10:00:05Z",
+          "owner": {
+            "group": "apps",
+            "version": "v1",
+            "kind": "ReplicaSet",
+            "namespace": "shop",
+            "name": "web-7f9c8d6b5"
+          }
+        },
+        {
+          "type": "joined",
+          "pod": "web-b",
+          "time": "2026-11-03T10:00:05Z",
+          "owner": {
+            "group": "apps",
+            "version": "v1",
+            "kind": "ReplicaSet",
+            "namespace": "shop",
+            "name": "web-7f9c8d6b5"
+          }
+        },
+        {
+          "type": "ended",
+          "pod": "web-a",
+          "container": "web",
+          "time": "2026-11-03T10:00:05Z",
+          "exitCode": 1,
+          "reason": "Error",
+          "restarting": null
+        },
+        {
+          "type": "ended",
+          "pod": "web-b",
+          "container": "web",
+          "time": "2026-11-03T10:00:05Z",
+          "exitCode": 1,
+          "reason": "Error",
+          "restarting": null
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:06Z",
+          "level": null,
+          "text": "later"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": null,
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "total": 2,
+        "window": {
+          "start": 0,
+          "ids": [6, 5]
+        },
+        "dropped": {
+          "id": 6,
+          "count": 4
+        }
+      }
+    },
+    {
       "name": "the histogram's spans grow until they reach the first line",
       "entries": [
         {

@@ -201,7 +201,7 @@ impl Buffer {
     /// where the session places the pod's first.
     pub fn bound(&mut self, held: &[u64]) {
         let mut kept = Vec::new();
-        let mut joined: Option<(i64, Box<str>)> = None;
+        let mut joined: Option<(i64, Vec<Box<str>>)> = None;
         let mut count = 0;
         loop {
             let over = self.entries.len() + kept.len() > self.limits.entries
@@ -216,15 +216,18 @@ impl Buffer {
             let Some(oldest) = self.entries.pop_front() else {
                 break;
             };
-            let theirs = joined
-                .as_ref()
-                .is_some_and(|(at, pod)| *at == oldest.at && **pod == *oldest.kind.pod());
+            let theirs = joined.as_ref().is_some_and(|(at, pods)| {
+                *at == oldest.at && pods.iter().any(|pod| **pod == *oldest.kind.pod())
+            });
             if held.contains(&oldest.id) || (!over && !theirs) {
                 kept.push(oldest);
                 continue;
             }
             if let Kind::Joined { pod, .. } = &oldest.kind {
-                joined = Some((oldest.at, pod.clone()));
+                match &mut joined {
+                    Some((at, pods)) if *at == oldest.at => pods.push(pod.clone()),
+                    _ => joined = Some((oldest.at, vec![pod.clone()])),
+                }
             }
             self.bytes -= oldest.kind.bytes();
             count += 1;
@@ -468,6 +471,47 @@ mod tests {
             .collect();
         assert_eq!(kept, [(3, "web-1"), (4, "web-1")]);
         assert_eq!(buffer.dropped(), Some(Dropped { id: 5, count: 2 }));
+    }
+
+    #[test]
+    fn the_bound_drops_along_the_entries_of_every_joined_it_dropped_at_a_time() {
+        let ended = |pod: &str| Kind::Ended {
+            origin: Arc::new(Origin {
+                pod: pod.into(),
+                container: "web".into(),
+            }),
+            time: "2026-11-03T10:00:05Z".into(),
+            exit_code: Some(1),
+            reason: Some("Error".into()),
+            restarting: None,
+        };
+        let joined = |pod: &str| Kind::Joined {
+            pod: pod.into(),
+            time: "2026-11-03T10:00:00Z".into(),
+            owner: None,
+        };
+        let mut buffer = Buffer::new(Limits {
+            entries: 3,
+            bytes: 1 << 20,
+        });
+        buffer.insert(
+            vec![
+                (5, joined("web-a")),
+                (5, joined("web-b")),
+                (5, ended("web-a")),
+                (5, ended("web-b")),
+                (6, line("later")),
+            ],
+            judged,
+        );
+        buffer.bound(&[]);
+        let kept: Vec<(u64, &str)> = buffer
+            .entries()
+            .iter()
+            .map(|entry| (entry.id, entry.kind.pod()))
+            .collect();
+        assert_eq!(kept, [(5, "web-1")]);
+        assert_eq!(buffer.dropped(), Some(Dropped { id: 6, count: 4 }));
     }
 
     #[test]
