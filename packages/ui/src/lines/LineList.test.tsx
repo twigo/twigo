@@ -253,6 +253,17 @@ test("paused, a wheel down to the end follows on, though lines came before its s
   expect(onFollowChange).not.toHaveBeenCalledWith(false);
 });
 
+test("following, the person's scroll down into the room a shorter list makes, its event not come yet, keeps it following, and the list writes the end at once", () => {
+  const { log, onFollowChange } = mount({ total: 300, items: lines(0, 300) });
+  shown = 500;
+  log.scrollTop = 19 * 300 - 600 + 50;
+  act(() => {
+    resize();
+  });
+  expect(log.scrollTop).toBe(19 * 300 - 500);
+  expect(onFollowChange).not.toHaveBeenCalled();
+});
+
 test("a touch that scrolls the list up pauses it", () => {
   const { log, onFollowChange } = mount({ total: 300, items: lines(0, 300) });
   act(() => {
