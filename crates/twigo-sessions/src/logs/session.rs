@@ -80,7 +80,7 @@ impl Session {
     ) -> Result<Self, IpcError> {
         let session = Run::new(hub, context, request).await?;
         let control = Arc::new(Control::default());
-        let name = session.target.name.clone();
+        let name = session.followed.target().name.clone();
         let task = tokio::spawn(run(session, Arc::clone(&control), send));
         Ok(Self {
             control,
@@ -251,7 +251,6 @@ struct Sent {
 struct Run {
     hub: Hub,
     context: String,
-    target: Target,
     followed: Followed,
     source: LogSource,
     spec: Spec,
@@ -352,12 +351,11 @@ impl Run {
     async fn new(hub: Hub, context: String, request: OpenLogs) -> Result<Self, IpcError> {
         let target = Target::new(&request.target)?;
         let spec = Spec::new(&request.view)?;
-        let followed = Followed::new(&hub, &context, &target).await?;
+        let followed = Followed::new(&hub, &context, target).await?;
         let (events, incoming) = mpsc::unbounded_channel();
         Ok(Self {
             hub,
             context,
-            target,
             followed,
             source: request.source,
             spec,
@@ -431,7 +429,7 @@ impl Run {
         if !self.followed.drain() && self.listed {
             return;
         }
-        let Some(objects) = self.followed.pods(&self.target) else {
+        let Some(objects) = self.followed.pods() else {
             return;
         };
         let columns = self.followed.columns();
@@ -695,7 +693,7 @@ impl Run {
         let stream = Stream::new(
             self.hub.clone(),
             &self.context,
-            &self.target.namespace,
+            &self.followed.target().namespace,
             Arc::clone(&origin),
             &self.source,
         );
@@ -854,7 +852,7 @@ impl Run {
         let (buffer, spec, sent) = (&self.buffer, &self.spec, &mut self.sent);
         let batch = LogBatch {
             seq,
-            status: self.followed.state(&self.target),
+            status: self.followed.state(),
             pods: fresh(&mut sent.pods, pods),
             total: if view {
                 view::total(buffer, spec)
@@ -1182,11 +1180,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         fake.delete("web-1");
         let gone = async {
-            while !run
-                .followed
-                .pods(&run.target)
-                .is_some_and(|pods| pods.is_empty())
-            {
+            while !run.followed.pods().is_some_and(|pods| pods.is_empty()) {
                 tokio::time::sleep(FLUSH).await;
             }
         };

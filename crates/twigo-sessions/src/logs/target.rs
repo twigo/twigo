@@ -7,6 +7,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use twigo_cache::hub::{self, Delta, Hub, Query, Resource, RowFormat, Subscription};
+use twigo_cache::meta::Meta;
 use twigo_cache::object::Object;
 use twigo_cache::store::Item;
 use twigo_cache::table::{Column, Row};
@@ -95,7 +96,9 @@ fn v1(group: &str, resource: &str) -> Resource {
 
 /// The target's subscriptions in the hub.
 pub struct Followed {
-    target: Subscription<Object>,
+    target: Target,
+    /// The target itself.
+    object: Subscription<Object>,
     /// The ReplicaSets or Jobs of the namespace, for a target that controls
     /// its pods through them.
     controlled: Option<Subscription<Row>>,
@@ -104,7 +107,7 @@ pub struct Followed {
 }
 
 impl Followed {
-    pub async fn new(hub: &Hub, context: &str, target: &Target) -> Result<Self, IpcError> {
+    pub async fn new(hub: &Hub, context: &str, target: Target) -> Result<Self, IpcError> {
         let namespace = Some(target.namespace.clone());
         let object = hub.object(
             context,
@@ -132,15 +135,20 @@ impl Followed {
             }
         };
         Ok(Self {
-            target: object,
+            target,
+            object,
             controlled,
             pods,
         })
     }
 
+    pub fn target(&self) -> &Target {
+        &self.target
+    }
+
     /// Whether anything changed since the last look.
     pub fn drain(&self) -> bool {
-        let mut changed = drained(&self.target);
+        let mut changed = drained(&self.object);
         if let Some(controlled) = &self.controlled {
             changed |= drained(controlled);
         }
@@ -152,19 +160,19 @@ impl Followed {
 
     /// The least ready of its subscriptions' states, or an error once the
     /// target is gone.
-    pub fn state(&self, target: &Target) -> ViewState {
-        let mut states = vec![self.target.state()];
+    pub fn state(&self) -> ViewState {
+        let mut states = vec![self.object.state()];
         states.extend(self.controlled.as_ref().map(Subscription::state));
         states.extend(self.pods.as_ref().map(Subscription::state));
         let state = hub::combine(states.into_iter());
-        if state == ViewState::Ready && self.target.listed() && self.target.items().is_empty() {
+        if state == ViewState::Ready && self.object.listed() && self.object.items().is_empty() {
             return ViewState::Error {
                 error: IpcError {
                     kind: ErrorKind::NotFound,
                     message: format!(
                         "{} {} is gone",
-                        resource_name(&target.resource.group, &target.resource.resource),
-                        target.name
+                        resource_name(&self.target.resource.group, &self.target.resource.resource),
+                        self.target.name
                     ),
                 },
             };
@@ -173,12 +181,12 @@ impl Followed {
     }
 
     /// The target's pods, once its subscriptions have listed them.
-    pub fn pods(&self, target: &Target) -> Option<Vec<Arc<Object>>> {
-        if !self.target.listed() {
+    pub fn pods(&self) -> Option<Vec<Arc<Object>>> {
+        if !self.object.listed() {
             return None;
         }
-        let object = self.target.items().into_iter().next();
-        if target.reach == Reach::Pod {
+        let object = self.object.items().into_iter().next();
+        if self.target.reach == Reach::Pod {
             return Some(object.into_iter().collect());
         }
         let pods = self.pods.as_ref().expect("a workload follows its pods");
@@ -193,7 +201,7 @@ impl Followed {
             Some(controlled) => controlled
                 .items()
                 .iter()
-                .filter(|row| controls(row.meta(), &uid))
+                .filter(|row| controlled_by(row.meta(), |owner| owner == &*uid))
                 .filter_map(|row| row.meta.uid.clone())
                 .collect(),
             None => HashSet::from([uid]),
@@ -201,26 +209,22 @@ impl Followed {
         Some(
             pods.items()
                 .into_iter()
-                .filter(|pod| {
-                    pod.meta
-                        .owners
-                        .iter()
-                        .any(|owner| owner.controller && owners.contains(&owner.uid))
-                })
+                .filter(|pod| controlled_by(&pod.meta, |owner| owners.contains(owner)))
                 .collect(),
         )
     }
 
     /// The columns the server prints for pods, Status among them.
     pub fn columns(&self) -> Option<Arc<[Column]>> {
-        self.pods.as_ref().unwrap_or(&self.target).columns()
+        self.pods.as_ref().unwrap_or(&self.object).columns()
     }
 }
 
-fn controls(meta: &twigo_cache::meta::Meta, uid: &str) -> bool {
+/// Whether a controller owner reference names an owner `owners` takes.
+fn controlled_by(meta: &Meta, owners: impl Fn(&str) -> bool) -> bool {
     meta.owners
         .iter()
-        .any(|owner| owner.controller && &*owner.uid == uid)
+        .any(|owner| owner.controller && owners(&owner.uid))
 }
 
 fn drained<T: Item>(subscription: &Subscription<T>) -> bool {
