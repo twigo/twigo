@@ -63,6 +63,13 @@ impl Kind {
             _ => 0,
         }
     }
+
+    fn pod(&self) -> &str {
+        match self {
+            Kind::Line { origin, .. } | Kind::Ended { origin, .. } => &origin.pod,
+            Kind::Joined { pod, .. } | Kind::Left { pod, .. } => pod,
+        }
+    }
 }
 
 /// What the view made of an entry, kept so that a new line costs only its
@@ -190,11 +197,11 @@ impl Buffer {
 
     /// Drops the oldest entries while it holds more than its limits, but
     /// keeps those `held` names, first, among the entries it counts, and
-    /// drops a `Joined` only along with the entries at its time, where the
-    /// session places its pod's first.
+    /// drops a `Joined` only along with its pod's entries at its time,
+    /// where the session places the pod's first.
     pub fn bound(&mut self, held: &[u64]) {
         let mut kept = Vec::new();
-        let mut joined = None;
+        let mut joined: Option<(i64, Box<str>)> = None;
         let mut count = 0;
         loop {
             let over = self.entries.len() + kept.len() > self.limits.entries
@@ -202,19 +209,22 @@ impl Buffer {
             let along = self
                 .entries
                 .front()
-                .is_some_and(|oldest| joined == Some(oldest.at));
+                .is_some_and(|oldest| joined.as_ref().is_some_and(|(at, _)| *at == oldest.at));
             if !over && !along {
                 break;
             }
             let Some(oldest) = self.entries.pop_front() else {
                 break;
             };
-            if held.contains(&oldest.id) {
+            let theirs = joined
+                .as_ref()
+                .is_some_and(|(at, pod)| *at == oldest.at && **pod == *oldest.kind.pod());
+            if held.contains(&oldest.id) || (!over && !theirs) {
                 kept.push(oldest);
                 continue;
             }
-            if let Kind::Joined { .. } = oldest.kind {
-                joined = Some(oldest.at);
+            if let Kind::Joined { pod, .. } = &oldest.kind {
+                joined = Some((oldest.at, pod.clone()));
             }
             self.bytes -= oldest.kind.bytes();
             count += 1;
@@ -421,6 +431,42 @@ mod tests {
         buffer.insert(vec![(3, line("other"))], judged);
         buffer.bound(&[]);
         assert_eq!(texts(&buffer), [(3, "second"), (4, "other")]);
+        assert_eq!(buffer.dropped(), Some(Dropped { id: 5, count: 2 }));
+    }
+
+    #[test]
+    fn the_bound_keeps_another_pods_entries_at_a_dropped_joineds_time() {
+        let ended = |pod: &str| Kind::Ended {
+            origin: Arc::new(Origin {
+                pod: pod.into(),
+                container: "web".into(),
+            }),
+            time: "2026-11-03T10:00:05Z".into(),
+            exit_code: Some(1),
+            reason: Some("Error".into()),
+            restarting: None,
+        };
+        let mut buffer = Buffer::new(Limits {
+            entries: 3,
+            bytes: 1 << 20,
+        });
+        let joined = Kind::Joined {
+            pod: "web-2".into(),
+            time: "2026-11-03T10:00:00Z".into(),
+            owner: None,
+        };
+        buffer.insert(
+            vec![(5, joined), (5, ended("web-2")), (5, ended("web-1"))],
+            judged,
+        );
+        buffer.insert(vec![(6, line("later"))], judged);
+        buffer.bound(&[]);
+        let kept: Vec<(u64, &str)> = buffer
+            .entries()
+            .iter()
+            .map(|entry| (entry.id, entry.kind.pod()))
+            .collect();
+        assert_eq!(kept, [(3, "web-1"), (4, "web-1")]);
         assert_eq!(buffer.dropped(), Some(Dropped { id: 5, count: 2 }));
     }
 

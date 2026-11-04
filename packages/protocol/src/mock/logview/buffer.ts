@@ -135,12 +135,12 @@ export class LogBuffer {
   /**
    * Drops the oldest entries while it holds more than its limits, but keeps
    * those `held` names, first, among the entries it counts, and drops a
-   * `joined` only along with the entries at its time, where the session
-   * places its pod's first.
+   * `joined` only along with its pod's entries at its time, where the
+   * session places the pod's first.
    */
   bound(held: ReadonlySet<number>): void {
     const kept: Entry[] = [];
-    let joined: bigint | undefined;
+    let joined: { readonly at: bigint; readonly pod: string } | undefined;
     let count = 0;
     let next = 0;
     for (;;) {
@@ -148,13 +148,15 @@ export class LogBuffer {
       const over =
         this.#entries.length - next + kept.length > this.#limits.entries ||
         this.#bytes > this.#limits.bytes;
-      if (!oldest || (!over && oldest.at !== joined)) break;
+      if (!oldest || (!over && oldest.at !== joined?.at)) break;
       next++;
-      if (held.has(oldest.id)) {
+      const theirs = oldest.at === joined?.at && oldest.kind.pod === joined.pod;
+      if (held.has(oldest.id) || (!over && !theirs)) {
         kept.push(oldest);
         continue;
       }
-      if (oldest.kind.type === "joined") joined = oldest.at;
+      if (oldest.kind.type === "joined")
+        joined = { at: oldest.at, pod: oldest.kind.pod };
       this.#bytes -= bytes(oldest.kind);
       count++;
     }
