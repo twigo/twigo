@@ -175,7 +175,9 @@ impl Reading {
     }
 }
 
-/// The last instance a follow read to its end.
+/// The last instance a follow was done with: read to its end, or ended
+/// by [`Reader::finish`] once the status named another instance, or none,
+/// with or without an `Ended`.
 struct Done {
     id: String,
     /// Its `Ended` said its next start.
