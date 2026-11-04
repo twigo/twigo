@@ -62,9 +62,9 @@ export const INITIAL_LOGS: LogsSnapshot = {
 
 /**
  * One logs tab's session as a store for `useSyncExternalStore`
- * (ARCHITECTURE 4.6): the ring buffer lives in Rust, which sends the
- * window's entries; each batch is acknowledged on the next animation
- * frame, as a list's is.
+ * (ARCHITECTURE 4.6): the buffer lives in Rust, which merges the entries in
+ * time order and sends the window's; each batch is acknowledged on the next
+ * animation frame, as a list's is.
  */
 export class LogsSession {
   readonly #backend: Backend;
