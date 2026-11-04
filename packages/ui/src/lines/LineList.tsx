@@ -374,15 +374,15 @@ export function LineList({
     onFollowChange(true);
     if (follow) enter(FOLLOW);
   };
-  // Following, the person's scroll away from the end pauses; paused, one
-  // down to the end follows again. Otherwise the list holds the line now on
-  // top.
+  // Following, the person's scroll up away from the end pauses, and one
+  // down does not, though lines came before it got there; paused, one down
+  // to the end follows again. Otherwise the list holds the line now on top.
   const personal = (scroller: HTMLElement, from: number) => {
     const top = scroller.scrollTop;
     known.current = top;
     const now = mode.current;
     if (now.kind === "follow") {
-      if (maxOf(scroller) - top < ROW) return;
+      if (top > from || maxOf(scroller) - top < ROW) return;
       onFollowChange(false);
     } else if (top > from && maxOf(scroller) - top < ROW) {
       followAgain();
@@ -494,7 +494,7 @@ export function LineList({
     }
     if (moved !== 0) {
       personal(scroller, from);
-      return;
+      if (now.kind !== "follow" || mode.current.kind !== "follow") return;
     }
     if (now.kind === "follow") {
       if (follow || shown) write(scroller, max);

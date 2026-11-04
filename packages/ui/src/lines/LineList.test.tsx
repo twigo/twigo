@@ -237,6 +237,22 @@ test("following, a scroll the list did not write is the person's, and away from 
   expect(onFollowChange).toHaveBeenLastCalledWith(false);
 });
 
+test("paused, a wheel down to the end follows on, though lines came before its scroll and the list followed before its event", () => {
+  const { log, onFollowChange, update } = mount({
+    follow: false,
+    total: 300,
+    items: lines(0, 300),
+  });
+  scroll(log, 19 * 100);
+  fireEvent.wheel(log, { deltaY: 100_000 });
+  expect(onFollowChange).toHaveBeenLastCalledWith(true);
+  log.scrollTop = 19 * 300 - 600;
+  update({ follow: true, total: 310, items: lines(0, 310) });
+  expect(log.scrollTop).toBe(19 * 310 - 600);
+  scroll(log, log.scrollTop);
+  expect(onFollowChange).not.toHaveBeenCalledWith(false);
+});
+
 test("a touch that scrolls the list up pauses it", () => {
   const { log, onFollowChange } = mount({ total: 300, items: lines(0, 300) });
   act(() => {
