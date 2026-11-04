@@ -25,7 +25,7 @@ use twigo_ipc::{
 
 use crate::logs::buffer::{Buffer, Kind, LIMITS, Origin};
 use crate::logs::stream::{self, Event, Stream};
-use crate::logs::target::{Followed, Target};
+use crate::logs::target::{Subscriptions, Target};
 use crate::logs::view::{self, Spec};
 use crate::logs::{now, plan};
 
@@ -80,7 +80,7 @@ impl Session {
     ) -> Result<Self, IpcError> {
         let session = Run::new(hub, context, request).await?;
         let control = Arc::new(Control::default());
-        let name = session.followed.target().name.clone();
+        let name = session.subscriptions.target().name.clone();
         let task = tokio::spawn(run(session, Arc::clone(&control), send));
         Ok(Self {
             control,
@@ -251,7 +251,7 @@ struct Sent {
 struct Run {
     hub: Hub,
     context: String,
-    followed: Followed,
+    subscriptions: Subscriptions,
     source: LogSource,
     spec: Spec,
     window: Option<LogWindow>,
@@ -351,12 +351,12 @@ impl Run {
     async fn new(hub: Hub, context: String, request: OpenLogs) -> Result<Self, IpcError> {
         let target = Target::new(&request.target)?;
         let spec = Spec::new(&request.view)?;
-        let followed = Followed::new(&hub, &context, target).await?;
+        let subscriptions = Subscriptions::new(&hub, &context, target).await?;
         let (events, incoming) = mpsc::unbounded_channel();
         Ok(Self {
             hub,
             context,
-            followed,
+            subscriptions,
             source: request.source,
             spec,
             window: None,
@@ -426,13 +426,13 @@ impl Run {
     /// Reads the target's pods again when they changed: who joined and
     /// left, and what their streams are told of them.
     fn follow_pods(&mut self) {
-        if !self.followed.drain() && self.listed {
+        if !self.subscriptions.drain() && self.listed {
             return;
         }
-        let Some(objects) = self.followed.pods() else {
+        let Some(objects) = self.subscriptions.pods() else {
             return;
         };
-        let columns = self.followed.columns();
+        let columns = self.subscriptions.columns();
         let mut before: HashMap<Arc<str>, Pod> = std::mem::take(&mut self.pods)
             .into_iter()
             .map(|pod| (Arc::clone(&pod.uid), pod))
@@ -685,7 +685,7 @@ impl Run {
     }
 
     fn start(&mut self, key: Key, pod: &str, json: Arc<Value>) {
-        let (told, followed) = watch::channel(json);
+        let (sender, receiver) = watch::channel(json);
         let origin = Arc::new(Origin {
             pod: pod.into(),
             container: (*key.1).into(),
@@ -693,14 +693,14 @@ impl Run {
         let stream = Stream::new(
             self.hub.clone(),
             &self.context,
-            &self.followed.target().namespace,
+            &self.subscriptions.target().namespace,
             Arc::clone(&origin),
             &self.source,
         );
         let events = self.events.clone();
         self.started += 1;
         let id = self.started;
-        let task = tokio::spawn(stream::run(stream, followed, move |event| {
+        let task = tokio::spawn(stream::run(stream, receiver, move |event| {
             // The session may have ended, and its streams with it.
             let _ = events.send((id, event));
         }));
@@ -709,7 +709,7 @@ impl Run {
             Running {
                 id,
                 task: Task(task),
-                pod: told,
+                pod: sender,
                 state: StreamState::Connecting,
                 origin,
             },
@@ -852,7 +852,7 @@ impl Run {
         let (buffer, spec, sent) = (&self.buffer, &self.spec, &mut self.sent);
         let batch = LogBatch {
             seq,
-            status: self.followed.state(),
+            status: self.subscriptions.state(),
             pods: fresh(&mut sent.pods, pods),
             total: if view {
                 view::total(buffer, spec)
@@ -1180,7 +1180,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         fake.delete("web-1");
         let gone = async {
-            while !run.followed.pods().is_some_and(|pods| pods.is_empty()) {
+            while !run.subscriptions.pods().is_some_and(|pods| pods.is_empty()) {
                 tokio::time::sleep(FLUSH).await;
             }
         };
@@ -1884,7 +1884,7 @@ mod tests {
         }
     }
 
-    fn followed(run: &Run) -> Vec<String> {
+    fn running(run: &Run) -> Vec<String> {
         let mut names: Vec<String> = run.streams.keys().map(|(uid, _)| uid.to_string()).collect();
         names.sort();
         names
@@ -1900,24 +1900,24 @@ mod tests {
         run.plan();
         assert_eq!(run.streams.len(), STREAMS);
         assert!(
-            followed(&run).contains(&"old".to_owned()),
+            running(&run).contains(&"old".to_owned()),
             "{:?}",
-            followed(&run)
+            running(&run)
         );
-        assert!(!followed(&run).contains(&"new-0".to_owned()));
+        assert!(!running(&run).contains(&"new-0".to_owned()));
 
         run.pods.push(pod("older", 0, true));
         run.plan();
         assert_eq!(alive(&run), STREAMS);
-        assert!(!followed(&run).contains(&"older".to_owned()));
+        assert!(!running(&run).contains(&"older".to_owned()));
         run.plan();
         assert_eq!(run.streams.len(), STREAMS - 1);
         until(&mut run, "the older pod followed", |run| {
-            followed(run).contains(&"older".to_owned())
+            running(run).contains(&"older".to_owned())
         })
         .await;
         assert_eq!(run.streams.len(), STREAMS);
-        let names = followed(&run);
+        let names = running(&run);
         assert!(
             names.contains(&"old".to_owned()) && names.contains(&"older".to_owned()),
             "{names:?}"

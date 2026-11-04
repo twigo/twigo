@@ -62,7 +62,7 @@ struct Container {
     /// The next read's body stays open after what the log holds.
     holds: bool,
     /// The next read of the previous instance, or the next follow, fails.
-    fails: bool,
+    previous_fails: bool,
     follow_fails: bool,
 }
 
@@ -196,7 +196,7 @@ impl Fake {
     }
 
     pub fn fail_previous(&self, pod: &str, container: &str) {
-        self.state().container(pod, container).fails = true;
+        self.state().container(pod, container).previous_fails = true;
     }
 
     pub fn fail_follow(&self, pod: &str, container: &str) {
@@ -333,7 +333,7 @@ impl State {
         });
         let served = self.container(pod, container);
         let fails = if param("previous") == Some("true") {
-            &mut served.fails
+            &mut served.previous_fails
         } else {
             &mut served.follow_fails
         };

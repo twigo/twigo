@@ -297,7 +297,7 @@ enum Outcome {
 }
 
 /// What the rest of an old instance's log held of the lines read.
-enum Tail {
+enum Rest {
     /// The latest of them, or lines after it, so they were its.
     Found,
     /// None of them, as it ended before their latest: they were a later
@@ -627,12 +627,12 @@ impl Reader {
                     self.pause(pod).await;
                 }
                 Outcome::Moved { at } => {
-                    let tail = self.tail(id, from, at, pod, send).await;
+                    let rest = self.rest(id, from, at, pod, send).await;
                     read.got = Got::Read;
                     // The kubelet's previous instance held what came, so it
                     // reads a later one; else the log was rotated, and the
                     // previous instance is an older one, or none.
-                    if let Tail::Found = tail {
+                    if let Rest::Found = rest {
                         read.own_last = self.resume.last_at();
                     } else {
                         read.rotated = true;
@@ -680,7 +680,7 @@ impl Reader {
                 && old.own_last.is_none()
                 && status.previous() == Some(old.id.as_str())
             {
-                Some(self.tail(&old.id, from, None, pod, send).await)
+                Some(self.rest(&old.id, from, None, pod, send).await)
             } else {
                 None
             };
@@ -688,7 +688,7 @@ impl Reader {
             // later instance's, read on a stale status, so its Ended stands
             // at its finish alone; one not read says nothing of them.
             let last = match rest {
-                Some(Tail::Lacked) => None,
+                Some(Rest::Lacked) => None,
                 _ => old.last(&self.resume),
             };
             if let Some(terminated) = status.termination(&old.id) {
@@ -711,21 +711,21 @@ impl Reader {
     /// neither sends nor counts, so a rest that holds none of the lines
     /// read, or that it gives up, leaves the resume to the instance they
     /// came from.
-    async fn tail(
+    async fn rest(
         &mut self,
         old: &str,
         from: ReadFrom,
         before: Option<i64>,
         pod: &mut watch::Receiver<Arc<Value>>,
         send: &impl Fn(Event),
-    ) -> Tail {
+    ) -> Rest {
         loop {
             if gone(pod) {
-                return Tail::GaveUp;
+                return Rest::GaveUp;
             }
             match self.read(Read::Rest, from, before, send).await {
-                Outcome::Ended { .. } => return Tail::Found,
-                Outcome::Moved { .. } => return Tail::Lacked,
+                Outcome::Ended { .. } => return Rest::Found,
+                Outcome::Moved { .. } => return Rest::Lacked,
                 Outcome::Cut => {}
                 Outcome::Broken => {
                     self.pause(pod).await;
@@ -740,10 +740,10 @@ impl Reader {
                     let current = Arc::clone(&pod.borrow_and_update());
                     let status = Status::of(&current, &self.stream.origin.container);
                     if !status.is_some_and(|status| status.names(old)) {
-                        return Tail::GaveUp;
+                        return Rest::GaveUp;
                     }
                 }
-                _ => return Tail::GaveUp,
+                _ => return Rest::GaveUp,
             }
         }
     }
@@ -895,7 +895,7 @@ impl Reader {
         })));
         // Tells the queue's state until the request is sent, when the
         // client drops the extension.
-        let told = async {
+        let queue = async {
             while waiting.changed().await.is_ok() {
                 let state = if *waiting.borrow_and_update() {
                     StreamState::Queued
@@ -906,7 +906,7 @@ impl Reader {
             }
             std::future::pending::<()>().await;
         };
-        let mut told = std::pin::pin!(told);
+        let mut queue = std::pin::pin!(queue);
         let mut retired = clients.connections().retired();
         retired.borrow_and_update();
         let mut abandoned = clients.connections().abandoned();
@@ -919,7 +919,7 @@ impl Reader {
         let mut opening = std::pin::pin!(opening);
         let opened = tokio::select! {
             opened = &mut opening => opened,
-            () = &mut told => unreachable!("it never ends"),
+            () = &mut queue => unreachable!("it never ends"),
             _ = retired.changed() => return Outcome::Cut,
             () = &mut abandoned => return Outcome::Cut,
         };
@@ -1061,7 +1061,7 @@ mod tests {
     /// A stream of `web-1`'s container `web` over the fake, and what it said.
     struct Followed {
         events: Arc<Mutex<Vec<Event>>>,
-        told: watch::Sender<Arc<Value>>,
+        pod: watch::Sender<Arc<Value>>,
         clients: Arc<Clients>,
         task: JoinHandle<()>,
     }
@@ -1084,22 +1084,22 @@ mod tests {
                 since,
                 previous,
             };
-            let (told, followed) = watch::channel(Arc::new(pod));
+            let (sender, receiver) = watch::channel(Arc::new(pod));
             let events = Arc::new(Mutex::new(Vec::new()));
             let sink = Arc::clone(&events);
-            let task = tokio::spawn(run(stream, followed, move |event| {
+            let task = tokio::spawn(run(stream, receiver, move |event| {
                 sink.lock().unwrap().push(event);
             }));
             Self {
                 events,
-                told,
+                pod: sender,
                 clients,
                 task,
             }
         }
 
         fn tell(&self, pod: Value) {
-            self.told.send_replace(Arc::new(pod));
+            self.pod.send_replace(Arc::new(pod));
         }
 
         fn cut(&self) {
@@ -1107,7 +1107,7 @@ mod tests {
         }
 
         fn leave(&mut self) {
-            self.told = watch::channel(Arc::new(Value::Null)).0;
+            self.pod = watch::channel(Arc::new(Value::Null)).0;
         }
 
         /// The lines and ends it sent, as `text` and `ended`.
@@ -1247,7 +1247,7 @@ mod tests {
         let fake = Fake::default();
         let followed = cut_across_a_restart(&fake).await;
         followed
-            .until("the old instance's tail", has("web-a 5"))
+            .until("the old instance's rest", has("web-a 5"))
             .await;
         followed.tell(restarted("web-b", "web-a"));
         followed.until("the new instance", has("web-b 12")).await;
@@ -1266,7 +1266,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_tail_the_kubelet_cannot_give_at_once_is_read_once_it_can() {
+    async fn a_rest_the_kubelet_cannot_give_at_once_is_read_once_it_can() {
         let fake = Fake::default();
         let followed = cut_across_a_restart(&fake).await;
         fake.fail_previous("web-1", "web");
@@ -1280,12 +1280,12 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_tail_on_a_stale_status_is_read_once_the_kubelet_can_give_it() {
+    async fn a_rest_on_a_stale_status_is_read_once_the_kubelet_can_give_it() {
         let fake = Fake::default();
         let followed = cut_across_a_restart(&fake).await;
         fake.fail_previous("web-1", "web");
         followed
-            .until("the old instance's tail", has("web-a 5"))
+            .until("the old instance's rest", has("web-a 5"))
             .await;
         followed.tell(restarted("web-b", "web-a"));
         followed.until("the new instance", has("web-b 12")).await;
@@ -1293,7 +1293,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_tail_the_kubelet_cannot_give_is_given_up_once_the_status_names_others() {
+    async fn a_rest_the_kubelet_cannot_give_is_given_up_once_the_status_names_others() {
         let fake = Fake::default();
         let followed = cut_across_a_restart(&fake).await;
         fake.fail_previous("web-1", "web");
@@ -1331,7 +1331,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn an_old_instances_end_follows_its_last_line_when_its_tail_is_given_up() {
+    async fn an_old_instances_end_follows_its_last_line_when_its_rest_is_given_up() {
         let fake = Fake::default();
         let followed = cut_after_a_late_last_line(&fake).await;
         fake.fail_previous("web-1", "web");
@@ -1353,7 +1353,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn an_old_instances_end_follows_its_last_line_when_its_tail_is_unreadable() {
+    async fn an_old_instances_end_follows_its_last_line_when_its_rest_is_unreadable() {
         let fake = Fake::default();
         let followed = cut_after_a_late_last_line(&fake).await;
         fake.remove("web-1", "web", "web-a");
@@ -1395,7 +1395,7 @@ mod tests {
         let followed = cut_before_a_restart(&fake).await;
         fake.stop("web-1", "web", "web-b");
         followed
-            .until("the old instance's tail", has("web-a 5"))
+            .until("the old instance's rest", has("web-a 5"))
             .await;
         followed.tell(crashed_again("web-b", "web-a"));
         followed.until("both ends", both_ended).await;
@@ -1611,7 +1611,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_left_pods_stream_reads_no_tail_once_the_status_moved_on() {
+    async fn a_left_pods_stream_reads_no_rest_once_the_status_moved_on() {
         let fake = Fake::default();
         let mut followed = cut_across_a_restart(&fake).await;
         followed.tell(restarted("web-b", "web-a"));

@@ -95,7 +95,7 @@ fn v1(group: &str, resource: &str) -> Resource {
 }
 
 /// The target's subscriptions in the hub.
-pub struct Followed {
+pub struct Subscriptions {
     target: Target,
     /// The target itself.
     object: Subscription<Object>,
@@ -106,7 +106,7 @@ pub struct Followed {
     pods: Option<Subscription<Object>>,
 }
 
-impl Followed {
+impl Subscriptions {
     pub async fn new(hub: &Hub, context: &str, target: Target) -> Result<Self, IpcError> {
         let namespace = Some(target.namespace.clone());
         let object = hub.object(
