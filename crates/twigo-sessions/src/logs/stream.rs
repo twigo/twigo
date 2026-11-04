@@ -327,6 +327,82 @@ enum Got {
     Read,
 }
 
+/// The instance a follow's reads started on, as the status named it.
+struct Reading {
+    id: String,
+    got: Got,
+    /// Its last reread got a log without what came, as after a rotation,
+    /// so the next reads it on as it is.
+    rotated: bool,
+    /// Its own last line, once the kubelet gave its rest as the previous
+    /// instance while the status still named it: the lines read since are
+    /// a later instance's.
+    own_last: Option<i64>,
+}
+
+impl Reading {
+    fn new(id: &str) -> Self {
+        Self {
+            id: id.to_owned(),
+            got: Got::Nothing,
+            rotated: false,
+            own_last: None,
+        }
+    }
+
+    /// Where its `Ended` stands: after its own last line, else after the
+    /// latest one read.
+    fn last(&self, resume: &Resume) -> Option<i64> {
+        self.own_last.or_else(|| resume.last_at())
+    }
+}
+
+/// The last instance a follow read to its end.
+struct Done {
+    id: String,
+    /// Its `Ended` said its next start.
+    told: bool,
+    /// The kubelet's error, that it could not read it.
+    unreadable: Option<IpcError>,
+}
+
+impl Done {
+    /// Tells the stream's state while the status names this instance: the
+    /// kubelet's error if it could not read it, else Ended once the
+    /// container runs no more, else Waiting, with its next start once its
+    /// back-off says it; whether the container runs again.
+    fn tell(
+        &mut self,
+        status: &Status<'_>,
+        pod: &Value,
+        container: &str,
+        send: &impl Fn(Event),
+    ) -> bool {
+        let terminated = status.termination(&self.id);
+        let exit_code = terminated.and_then(|ended| ended["exitCode"].as_i64());
+        let error = self
+            .unreadable
+            .clone()
+            .map(|error| StreamState::Error { error });
+        if !restarts(pod, container, exit_code) {
+            send(Event::State(error.unwrap_or(StreamState::Ended)));
+            return false;
+        }
+        if !self.told
+            && let Some(terminated) = terminated
+            && let Some(restarting) =
+                status.restarting(terminated["finishedAt"].as_str().unwrap_or_default())
+        {
+            send(Event::Restarts { restarting });
+            self.told = true;
+        }
+        send(Event::State(error.unwrap_or(StreamState::Waiting {
+            reason: status.waiting(),
+        })));
+        true
+    }
+}
+
 /// A container's status in the pod's: its instance now, the one before.
 struct Status<'a>(&'a Value);
 
@@ -472,54 +548,18 @@ impl Reader {
     async fn follow(&mut self, pod: &mut watch::Receiver<Arc<Value>>, send: &impl Fn(Event)) {
         // Where a read starts while the resume holds no line.
         let mut from = ReadFrom::source(self.stream.since);
-        // The instance a read started on, and what its reads got of its
-        // log; the last one read to its end; and one whose reread got a log
-        // without what came, as after it was rotated.
-        let mut reading: Option<String> = None;
-        let mut got = Got::Nothing;
-        let mut read: Option<String> = None;
-        let mut moved: Option<String> = None;
-        // The last line of the instance a read started on, once the
-        // kubelet gave its rest as the previous instance while the status
-        // still named it: the lines read since are a later instance's.
-        let mut over: Option<i64> = None;
-        // Whether the last Ended said its next start.
-        let mut told = false;
-        // The kubelet's error for an instance it could not read.
-        let mut unreadable: Option<(String, IpcError)> = None;
+        let mut reading: Option<Reading> = None;
+        let mut done: Option<Done> = None;
         loop {
             let current = Arc::clone(&pod.borrow_and_update());
             let status = Status::of(&current, &self.stream.container);
-            let instance = status.as_ref().and_then(Status::current);
-            if let Some(old) = reading.take_if(|old| instance.map(|(id, _)| id) != Some(old)) {
-                let mut last = over.take();
-                if let Some(status) = &status {
-                    // It ended and the next began while its read was cut:
-                    // the kubelet reads its rest as the previous instance.
-                    if got == Got::Cut && last.is_none() && status.previous() == Some(old.as_str())
-                    {
-                        let tail = self.tail(&old, from, None, pod, send).await;
-                        // A log that holds none of the lines read says they
-                        // were a later instance's, read on a stale status, so
-                        // its Ended stands at its finish alone; one not read
-                        // says nothing of them.
-                        last = match tail {
-                            Tail::Lacked => None,
-                            Tail::Found | Tail::GaveUp => self.resume.last_at(),
-                        };
-                    } else {
-                        last = last.or_else(|| self.resume.last_at());
-                    }
-                    if let Some(terminated) = status.termination(&old) {
-                        told = end(terminated, status, last, send);
-                    }
-                }
-                read = Some(old);
-                got = Got::Nothing;
+            let instance = status.as_ref().and_then(Status::current).map(|(id, _)| id);
+            if let Some(old) = reading.take_if(|reading| instance != Some(reading.id.as_str())) {
+                done = Some(self.finish(old, status.as_ref(), from, pod, send).await);
                 from = ReadFrom::Start;
                 continue;
             }
-            let Some((id, _)) = instance else {
+            let Some(id) = instance else {
                 send(Event::State(StreamState::Waiting {
                     reason: status.as_ref().and_then(Status::waiting),
                 }));
@@ -528,33 +568,11 @@ impl Reader {
                 }
                 continue;
             };
-            if read.as_deref() == Some(id) {
+            if let Some(done) = done.as_mut().filter(|done| done.id == id) {
                 let status = status.expect("its instance came from it");
-                let exit_code = status
-                    .termination(id)
-                    .and_then(|ended| ended["exitCode"].as_i64());
-                let error = unreadable
-                    .as_ref()
-                    .filter(|(of, _)| of == id)
-                    .map(|(_, error)| StreamState::Error {
-                        error: error.clone(),
-                    });
-                if !restarts(&current, &self.stream.container, exit_code) {
-                    send(Event::State(error.unwrap_or(StreamState::Ended)));
-                    return;
-                }
-                if !told
-                    && let Some(terminated) = status.termination(id)
-                    && let Some(restarting) =
-                        status.restarting(terminated["finishedAt"].as_str().unwrap_or_default())
+                if !done.tell(&status, &current, &self.stream.container, send)
+                    || pod.changed().await.is_err()
                 {
-                    send(Event::Restarts { restarting });
-                    told = true;
-                }
-                send(Event::State(error.unwrap_or(StreamState::Waiting {
-                    reason: status.waiting(),
-                })));
-                if pod.changed().await.is_err() {
                     return;
                 }
                 continue;
@@ -562,76 +580,78 @@ impl Reader {
             if gone(pod) {
                 // Its reads got its log, whole or in part, and no new read
                 // comes, so its end, once the status says it, follows them.
-                if got != Got::Nothing
+                if let Some(reading) = &reading
+                    && reading.got != Got::Nothing
                     && let Some(status) = &status
                     && let Some(terminated) = status.termination(id)
                 {
-                    end(
-                        terminated,
-                        status,
-                        over.or_else(|| self.resume.last_at()),
-                        send,
-                    );
+                    end(terminated, status, reading.last(&self.resume), send);
                 }
                 return;
             }
-            let id = id.to_owned();
             // A reread of the instance checks that the kubelet still reads
             // it, unless the last found it did not and the status still
             // says it runs, as after its log was rotated, or the kubelet
             // gave its rest as the previous instance already.
-            let moved_on = moved.take().as_deref() == Some(id.as_str()) || over.is_some();
-            let same = reading.as_deref() == Some(id.as_str()) && !moved_on;
-            reading = Some(id.clone());
+            let same = reading.as_mut().is_some_and(|reading| {
+                !std::mem::take(&mut reading.rotated) && reading.own_last.is_none()
+            });
+            reading.get_or_insert_with(|| Reading::new(id));
             let container = self.stream.container.clone();
             let outcome = tokio::select! {
                 outcome = self.read(Read::Follow { same }, from, None, send) => outcome,
-                () = moved_off(pod, &container, &id) => Outcome::Cut,
+                () = moved_off(pod, &container, id) => Outcome::Cut,
             };
             if let Outcome::Ended { .. } | Outcome::Unreadable(_) = &outcome {
                 let current = Arc::clone(&pod.borrow_and_update());
                 let status = Status::of(&current, &self.stream.container);
                 if let Some(status) = &status
-                    && let Some(terminated) = status.termination(&id)
+                    && let Some(terminated) = status.termination(id)
                 {
-                    if let Outcome::Unreadable(error) = outcome {
-                        send(Event::State(StreamState::Error {
-                            error: error.clone(),
-                        }));
-                        unreadable = Some((id.clone(), error));
-                    }
-                    let last = over.take().or_else(|| self.resume.last_at());
-                    told = end(terminated, status, last, send);
-                    reading = None;
-                    read = Some(id);
-                    got = Got::Nothing;
+                    let unreadable = match outcome {
+                        Outcome::Unreadable(error) => {
+                            send(Event::State(StreamState::Error {
+                                error: error.clone(),
+                            }));
+                            Some(error)
+                        }
+                        _ => None,
+                    };
+                    let read = reading.take().expect("a read started on it");
+                    let told = end(terminated, status, read.last(&self.resume), send);
+                    done = Some(Done {
+                        id: read.id,
+                        told,
+                        unreadable,
+                    });
                     from = ReadFrom::Start;
                     continue;
                 }
             }
+            let read = reading.as_mut().expect("a read started on it");
             match outcome {
-                Outcome::Cut => got = Got::Cut,
+                Outcome::Cut => read.got = Got::Cut,
                 Outcome::Broken => {
-                    got = Got::Cut;
+                    read.got = Got::Cut;
                     self.pause(pod).await;
                 }
                 Outcome::Moved { at } => {
-                    let tail = self.tail(&id, from, at, pod, send).await;
-                    got = Got::Read;
+                    let tail = self.tail(id, from, at, pod, send).await;
+                    read.got = Got::Read;
                     // The kubelet's previous instance held what came, so it
                     // reads a later one; else the log was rotated, and the
                     // previous instance is an older one, or none.
                     if let Tail::Found = tail {
-                        over = self.resume.last_at();
+                        read.own_last = self.resume.last_at();
                     } else {
-                        moved = Some(id);
+                        read.rotated = true;
                     }
                     self.pause(pod).await;
                 }
                 Outcome::Ended { fresh } => {
                     // The status may not say yet that it ended; or the
                     // server ended the log of one that runs.
-                    got = Got::Read;
+                    read.got = Got::Read;
                     if fresh {
                         self.backoff = backoff();
                     }
@@ -646,6 +666,48 @@ impl Reader {
                     return;
                 }
             }
+        }
+    }
+
+    /// Ends the instance a follow read once the status names another, or
+    /// none: after its rest, when a cut left it unread and the kubelet now
+    /// reads it as the previous instance, with its `Ended` once the status
+    /// says it ended.
+    async fn finish(
+        &mut self,
+        old: Reading,
+        status: Option<&Status<'_>>,
+        from: ReadFrom,
+        pod: &mut watch::Receiver<Arc<Value>>,
+        send: &impl Fn(Event),
+    ) -> Done {
+        let mut told = false;
+        if let Some(status) = status {
+            // It ended and the next began while its read was cut: the
+            // kubelet reads its rest as the previous instance.
+            let rest = if old.got == Got::Cut
+                && old.own_last.is_none()
+                && status.previous() == Some(old.id.as_str())
+            {
+                Some(self.tail(&old.id, from, None, pod, send).await)
+            } else {
+                None
+            };
+            // A log that holds none of the lines read says they were a
+            // later instance's, read on a stale status, so its Ended stands
+            // at its finish alone; one not read says nothing of them.
+            let last = match rest {
+                Some(Tail::Lacked) => None,
+                _ => old.last(&self.resume),
+            };
+            if let Some(terminated) = status.termination(&old.id) {
+                told = end(terminated, status, last, send);
+            }
+        }
+        Done {
+            id: old.id,
+            told,
+            unreadable: None,
         }
     }
 
