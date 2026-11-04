@@ -267,4 +267,21 @@ mod tests {
         );
         assert!(target("apps", "pods").is_err());
     }
+
+    #[test]
+    fn a_target_without_a_namespace_is_refused() {
+        let refused = Target::new(&LogTarget {
+            space: "kind-test".to_owned(),
+            gvr: Gvr {
+                group: String::new(),
+                version: "v1".to_owned(),
+                resource: "pods".to_owned(),
+            },
+            namespace: String::new(),
+            name: "api".to_owned(),
+        })
+        .unwrap_err();
+        assert_eq!(refused.kind, ErrorKind::InvalidInput);
+        assert_eq!(refused.message, "api names no namespace");
+    }
 }

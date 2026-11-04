@@ -439,3 +439,57 @@ pub fn lines(buffer: &Buffer, spec: Option<&Spec>) -> Vec<u8> {
     }
     file
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::logs::buffer::{LIMITS, Origin};
+
+    #[test]
+    fn a_download_holds_the_lines_the_view_keeps_or_every_line() {
+        const T0: i64 = 1_793_700_000 * NANOS;
+        let line = |pod: &str, text: &str| Kind::Line {
+            origin: Arc::new(Origin {
+                pod: pod.into(),
+                container: "web".into(),
+            }),
+            level: None,
+            text: text.into(),
+            styles: Box::new([]),
+        };
+        let spec = Spec::new(&LogView {
+            level: LevelFilter::All,
+            filter: Some("GET".to_owned()),
+            search: None,
+            range: None,
+        })
+        .unwrap();
+        let mut buffer = Buffer::new(LIMITS);
+        buffer.insert(
+            vec![
+                (T0, line("web-1", "GET / 200")),
+                (
+                    T0 + NANOS,
+                    Kind::Left {
+                        pod: "web-2".into(),
+                        time: "2026-11-03T10:00:01Z".into(),
+                    },
+                ),
+                (T0 + 2 * NANOS, line("web-2", "boom")),
+            ],
+            |_, kind| spec.judge(kind),
+        );
+        let file = |spec| String::from_utf8(lines(&buffer, spec)).unwrap();
+        assert_eq!(
+            file(Some(&spec)),
+            "web-1 web 2026-11-03T10:00:00.000000000Z GET / 200\n"
+        );
+        assert_eq!(
+            file(None),
+            "web-1 web 2026-11-03T10:00:00.000000000Z GET / 200\n\
+             web-2 web 2026-11-03T10:00:02.000000000Z boom\n"
+        );
+    }
+}

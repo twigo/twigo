@@ -64,6 +64,8 @@ struct Container {
     /// The next read of the previous instance, or the next follow, fails.
     previous_fails: bool,
     follow_fails: bool,
+    /// The next read is refused, as for rejected credentials.
+    rejects: bool,
 }
 
 #[derive(Default)]
@@ -203,6 +205,10 @@ impl Fake {
         self.state().container(pod, container).follow_fails = true;
     }
 
+    pub fn reject(&self, pod: &str, container: &str) {
+        self.state().container(pod, container).rejects = true;
+    }
+
     /// The next read of a container breaks after `lines` lines.
     pub fn break_after(&self, pod: &str, container: &str, lines: usize) {
         self.state().container(pod, container).breaks = Some(lines);
@@ -332,6 +338,12 @@ impl State {
             i64::try_from(since.as_nanosecond()).unwrap()
         });
         let served = self.container(pod, container);
+        if std::mem::take(&mut served.rejects) {
+            return full(
+                StatusCode::UNAUTHORIZED,
+                json!({ "kind": "Status", "apiVersion": "v1", "status": "Failure", "reason": "Unauthorized", "code": 401, "message": "Unauthorized" }),
+            );
+        }
         let fails = if param("previous") == Some("true") {
             &mut served.previous_fails
         } else {

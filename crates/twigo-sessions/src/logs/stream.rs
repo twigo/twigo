@@ -1616,6 +1616,28 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn rejected_credentials_end_a_stream_with_their_error_and_no_other_read() {
+        for previous in [false, true] {
+            let fake = Fake::default();
+            fake.serve("web-1", "web", Some("web-b"), Some("web-a"));
+            numbered(&fake, "web-a", 1..=1);
+            numbered(&fake, "web-b", 11..=11);
+            fake.reject("web-1", "web");
+            let followed = Followed::new(&fake, restarted("web-b", "web-a"), previous);
+            followed.until("finished", Followed::finished).await;
+            assert!(
+                matches!(
+                    followed.state(),
+                    Some(StreamState::Error { error }) if error.kind == ErrorKind::Unauthorized
+                ),
+                "{:?}",
+                followed.state()
+            );
+            assert!(followed.entries().is_empty(), "{:?}", followed.entries());
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn a_broken_body_reads_on_to_the_end_of_a_crashed_instance() {
         let fake = Fake::default();
         fake.serve("web-1", "web", Some("web-a"), None);

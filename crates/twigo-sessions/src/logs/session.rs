@@ -582,7 +582,7 @@ fn nanos(time: jiff::Timestamp) -> i64 {
 #[cfg(test)]
 mod tests {
     use tokio::sync::mpsc;
-    use twigo_ipc::{Containers, Gvr, LevelFilter, LogTarget, Since};
+    use twigo_ipc::{Containers, ErrorKind, Gvr, LevelFilter, LogTarget, Since};
 
     use twigo_ipc::LogEntry;
 
@@ -809,12 +809,7 @@ mod tests {
 
         fake.stop("web-1", "web", "web-a");
         fake.pod(web(true));
-        until(&mut run, "the pod deleted", |run| {
-            run.pods
-                .first()
-                .is_some_and(|pod| pod.json["metadata"]["deletionTimestamp"].is_string())
-        })
-        .await;
+        until(&mut run, "the pod deleted", deleted).await;
         tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         fake.delete("web-1");
         let gone = async {
@@ -868,6 +863,25 @@ mod tests {
         run.streams.send(id, late("after its end"));
         run.tick();
         assert_eq!(texts(&run), ["up", "late", "web-1 left"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_target_that_is_gone_makes_the_view_an_error() {
+        let fake = Fake::default();
+        fake.pod(web(false));
+        let (hub, _) = fake.hub();
+        let mut run = Run::new(hub, "kind-test".to_owned(), request("web-1"))
+            .await
+            .unwrap();
+        until(&mut run, "the pod listed", |run| run.pods.len() == 1).await;
+        assert_eq!(run.subscriptions.state(), ViewState::Ready);
+        fake.delete("web-1");
+        until(&mut run, "the pod gone", |run| run.pods.is_empty()).await;
+        let gone = IpcError {
+            kind: ErrorKind::NotFound,
+            message: "pods web-1 is gone".to_owned(),
+        };
+        assert_eq!(run.subscriptions.state(), ViewState::Error { error: gone });
     }
 
     fn deleted(run: &Run) -> bool {
