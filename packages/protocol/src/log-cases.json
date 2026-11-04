@@ -214,6 +214,16 @@
       }
     },
     {
+      "name": "pino's 30 is info",
+      "raw": "2026-11-03T10:00:06Z {\"level\":30,\"msg\":\"pino\"}",
+      "expect": {
+        "time": "2026-11-03T10:00:06.000000000Z",
+        "text": "{\"level\":30,\"msg\":\"pino\"}",
+        "level": "info",
+        "styles": []
+      }
+    },
+    {
       "name": "pino's fatal is an error",
       "raw": "2026-11-03T10:00:06Z {\"level\":60}",
       "expect": {
@@ -279,6 +289,16 @@
       "expect": {
         "time": "2026-11-03T10:00:06.000000000Z",
         "text": "{\"msg\":\"error: nothing says it\"}",
+        "level": null,
+        "styles": []
+      }
+    },
+    {
+      "name": "a line that only looks like JSON is read as text",
+      "raw": "2026-11-03T10:00:06Z {not json and no level}",
+      "expect": {
+        "time": "2026-11-03T10:00:06.000000000Z",
+        "text": "{not json and no level}",
         "level": null,
         "styles": []
       }
@@ -400,6 +420,16 @@
         "time": "2026-11-03T10:00:08.000000000Z",
         "text": "E1103 10:00:08.000000       1 reflector.go:200] failed",
         "level": "error",
+        "styles": []
+      }
+    },
+    {
+      "name": "klog's warning header",
+      "raw": "2026-11-03T10:00:08Z W1103 10:00:08.000000       1 x.go:1] slow",
+      "expect": {
+        "time": "2026-11-03T10:00:08.000000000Z",
+        "text": "W1103 10:00:08.000000       1 x.go:1] slow",
+        "level": "warn",
         "styles": []
       }
     },

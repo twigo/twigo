@@ -3,7 +3,6 @@ import type { LogBatch, LogEntry, LogSource, LogView } from "../generated";
 import { Cluster, deploymentOf, type Pod } from "./cluster";
 import { MockLogs, TAB_STREAMS } from "./logs";
 import type { Limits } from "./logview/buffer";
-import { level } from "./logview/level";
 
 const SOURCE: LogSource = {
   containers: { type: "default" },
@@ -20,24 +19,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
-});
-
-test.each([
-  ['{"level":"warn","msg":"retrying"}', "warn"],
-  ['{"severity":"ERROR","msg":"x"}', "error"],
-  ['{"level":50,"msg":"pino"}', "error"],
-  ['{"level":30,"msg":"pino"}', "info"],
-  ['level=debug msg="cache hit"', "debug"],
-  ['ts=1 lvl="warning" msg=slow', "warn"],
-  ["E1103 10:41:02.402135       1 reflector.go:561] failed", "error"],
-  ["W1103 10:41:02.402135       1 x.go:1] slow", "warn"],
-  ["[WARN] queue depth 120", "warn"],
-  ["INFO: started", "info"],
-  ["panic: dial tcp: connection refused", "error"],
-  ["GET /healthz 200 3ms", null],
-  ["{not json and no level}", null],
-])("the level of %s is %s", (line, wanted) => {
-  expect(level(line)).toBe(wanted);
 });
 
 function session(
