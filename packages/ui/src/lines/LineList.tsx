@@ -4,6 +4,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type KeyboardEvent,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, type LucideIcon } from "lucide-react";
@@ -100,6 +101,42 @@ type Mode =
 const FOLLOW: Mode = { kind: "follow" };
 const JUMP: Mode = { kind: "jump" };
 
+/** Where a key sends the list: a page up or down, or an edge. */
+type Move = "up" | "down" | "first" | "last";
+
+/**
+ * The keys that scroll a focused list natively, which the list moves
+ * itself, at once: WebKit animates a key's scroll and stops it at the
+ * list's next write of `scrollTop`.
+ */
+function moveOf({
+  key,
+  altKey,
+  ctrlKey,
+  metaKey,
+  shiftKey,
+}: KeyboardEvent): Move | undefined {
+  if (ctrlKey || (altKey && metaKey)) return undefined;
+  if (key === " ")
+    return altKey || metaKey ? undefined : shiftKey ? "up" : "down";
+  if (shiftKey) return undefined;
+  switch (key) {
+    case "PageUp":
+      return altKey || metaKey ? undefined : "up";
+    case "PageDown":
+      return altKey || metaKey ? undefined : "down";
+    case "ArrowUp":
+      return metaKey ? "first" : altKey ? "up" : undefined;
+    case "ArrowDown":
+      return metaKey ? "last" : altKey ? "down" : undefined;
+    default:
+      return undefined;
+  }
+}
+
+/** What a page keeps in view of the one before, about what the browsers keep. */
+const OVERLAP = 2 * ROW;
+
 function askedBy(mode: Mode): string | undefined {
   switch (mode.kind) {
     case "seek":
@@ -190,8 +227,6 @@ export function LineList({
   const followed = useRef(follow);
   /** Where the list's own writes left `scrollTop`, as read back, or where the person's scroll it took in did: a scroll elsewhere is the person's. */
   const known = useRef(0);
-  /** Where the end stood when the person's key began the scroll they make now, moved with the lines under the top since: the browser animates it to there. */
-  const began = useRef<number | undefined>(undefined);
   /** Hidden, the list has no layout to place its lines in; shown again, it places them anew. */
   const hidden = useRef(false);
   const virtualizer = useVirtualizer({
@@ -261,9 +296,8 @@ export function LineList({
     if (follow) enter(FOLLOW);
   };
   // Following, the person's scroll away from the end pauses; paused, one
-  // down to the end follows again, and so does one a key sent to the end as
-  // it stood then, though lines came or rows were measured before it got
-  // there. Otherwise the list holds the line now on top.
+  // down to the end follows again. Otherwise the list holds the line now on
+  // top.
   const personal = (scroller: HTMLElement, from: number) => {
     const top = scroller.scrollTop;
     known.current = top;
@@ -271,11 +305,7 @@ export function LineList({
     if (now.kind === "follow") {
       if (maxOf(scroller) - top < ROW) return;
       onFollowChange(false);
-    } else if (
-      top > from &&
-      (maxOf(scroller) - top < ROW ||
-        (began.current !== undefined && Math.abs(began.current - top) < 1))
-    ) {
+    } else if (top > from && maxOf(scroller) - top < ROW) {
       followAgain();
       return;
     }
@@ -291,6 +321,25 @@ export function LineList({
         ask = now.asked;
     }
     hold(line.key, line.offset, ask);
+  };
+  // The person's key moves the list at once, as their scroll; one down at
+  // the end follows again.
+  const go = (scroller: HTMLElement, top: number) => {
+    const from = known.current;
+    scroller.scrollTop = top;
+    if (unseen(scroller) !== 0) personal(scroller, from);
+    else if (top > from && maxOf(scroller) - scroller.scrollTop < ROW)
+      followAgain();
+  };
+  const move = (scroller: HTMLElement, to: Move) => {
+    if (to === "last") followAgain();
+    else if (to === "first") go(scroller, 0);
+    else
+      go(
+        scroller,
+        scroller.scrollTop +
+          (to === "down" ? 1 : -1) * (scroller.clientHeight - OVERLAP),
+      );
   };
 
   useEffect(() => {
@@ -344,10 +393,7 @@ export function LineList({
     }
     if (follow !== followed.current) {
       followed.current = follow;
-      if (follow) {
-        enter(FOLLOW);
-        began.current = undefined;
-      }
+      if (follow) enter(FOLLOW);
     }
     const from = known.current;
     const moved = shown || revealing ? 0 : unseen(scroller);
@@ -357,11 +403,6 @@ export function LineList({
       if (index !== undefined) {
         const begin = startOf(index);
         const at = begin + now.offset;
-        // The lines under the top moved, and the end the person's scroll
-        // began against with them: the browser adds its scroll to where the
-        // list writes it.
-        if (at !== from && began.current !== undefined)
-          began.current += at - from;
         // What the end cuts short is where the list now stands.
         const top = Math.min(Math.max(0, at + moved), max);
         write(scroller, top);
@@ -435,26 +476,23 @@ export function LineList({
     }
   }, [follow, wrap, items, rows, virtualizer]);
 
-  // The list's keys scroll it as the person does: not through `write`, so
-  // their scrolls are the person's.
+  const keyed = useEffectEvent((to: Move | number) => {
+    if (!element) return;
+    if (typeof to === "number") go(element, element.scrollTop + to * ROW);
+    else move(element, to);
+  });
   useEffect(() => {
     if (!element || !register) return;
     return register(element, {
       move: (delta) => {
-        if (delta < 0) onFollowChange(false);
-        element.scrollTop += delta * ROW;
+        keyed(delta);
       },
       moveToEdge: (edge) => {
-        if (edge === "last") {
-          onFollowChange(true);
-          return;
-        }
-        onFollowChange(false);
-        element.scrollTop = 0;
+        keyed(edge);
       },
       activate: () => undefined,
     });
-  }, [element, register, onFollowChange]);
+  }, [element, register]);
 
   return (
     <div className={cn("relative min-h-0", className)}>
@@ -474,7 +512,6 @@ export function LineList({
         // where the list last stood, since Chromium may have scrolled by
         // the wheel before it dispatches it.
         onWheel={(event) => {
-          began.current = undefined;
           if (follow) {
             if (event.deltaY < 0) onFollowChange(false);
           } else if (
@@ -484,7 +521,10 @@ export function LineList({
             onFollowChange(true);
         }}
         onKeyDown={(event) => {
-          began.current = maxOf(event.currentTarget);
+          const to = moveOf(event);
+          if (!to) return;
+          event.preventDefault();
+          move(event.currentTarget, to);
         }}
         className="h-full overflow-auto py-1 font-mono text-xs leading-[19px] outline-none [overflow-anchor:none] focus-visible:shadow-[inset_var(--focus-ring)]"
       >

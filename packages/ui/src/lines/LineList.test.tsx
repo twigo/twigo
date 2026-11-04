@@ -274,50 +274,106 @@ test("paused at the end, the person's scroll up within a row of it keeps it paus
   expect(onFollowChange).not.toHaveBeenCalled();
 });
 
-test("paused, a key's scroll the browser took to the end as it stood follows again, though lines came before it got there", () => {
+function press(log: HTMLElement, key: string, init: KeyboardEventInit = {}) {
+  let left = true;
+  act(() => {
+    left = fireEvent.keyDown(log, { key, ...init });
+  });
+  return left;
+}
+
+const PAGE = 600 - 2 * 19;
+
+test("the page keys, Space, and Alt or ⌘ with an arrow move the list itself at once, so neither the browser nor the workbench scrolls it", () => {
+  const { log, onPlace } = mount({
+    follow: false,
+    total: 300,
+    items: lines(0, 300),
+  });
+  scroll(log, 19 * 100);
+  const moves = [
+    press(log, "PageDown"),
+    log.scrollTop,
+    press(log, " "),
+    log.scrollTop,
+    press(log, " ", { shiftKey: true }),
+    press(log, "PageUp"),
+    log.scrollTop,
+    press(log, "ArrowDown", { altKey: true }),
+    log.scrollTop,
+    press(log, "ArrowUp", { altKey: true }),
+    press(log, "ArrowUp", { metaKey: true }),
+    log.scrollTop,
+  ];
+  expect(moves).toEqual([
+    false,
+    19 * 100 + PAGE,
+    false,
+    19 * 100 + 2 * PAGE,
+    false,
+    false,
+    19 * 100,
+    false,
+    19 * 100 + PAGE,
+    false,
+    false,
+    0,
+  ]);
+  expect(onPlace).toHaveBeenLastCalledWith({ key: "0", offset: 0 });
+  expect([
+    press(log, "ArrowDown"),
+    press(log, "End"),
+    press(log, "c", { metaKey: true }),
+    press(log, "PageDown", { shiftKey: true }),
+  ]).toEqual([true, true, true, true]);
+  expect(log.scrollTop).toBe(0);
+});
+
+test("paused, a page down that reaches the end follows again, one at the end too, and ⌘↓ at once", () => {
   const { log, onFollowChange, update } = mount({
     follow: false,
     total: 300,
     items: lines(0, 300),
   });
-  fireEvent.keyDown(log, { key: "End" });
+  scroll(log, 19 * 300 - 600 - 100);
+  press(log, "PageDown");
+  expect(log.scrollTop).toBe(19 * 300 - 600);
+  expect(onFollowChange).toHaveBeenLastCalledWith(true);
+  onFollowChange.mockClear();
   update({ total: 310, items: lines(0, 310) });
-  scroll(log, 19 * 300 - 600);
+  scroll(log, 19 * 310 - 600 - 5);
+  update({ total: 320, items: lines(0, 320) });
+  press(log, " ");
+  expect(onFollowChange).toHaveBeenLastCalledWith(true);
+  onFollowChange.mockClear();
+  scroll(log, 19 * 100);
+  press(log, "ArrowDown", { metaKey: true });
   expect(onFollowChange).toHaveBeenLastCalledWith(true);
 });
 
-test("paused at the buffer's bound, a key's scroll to the end follows again, though the lines it began over moved before it got there", () => {
+test("paused at the end, a page down follows again though it cannot scroll", () => {
+  const { log, onFollowChange } = mount({
+    follow: false,
+    total: 300,
+    items: lines(0, 300),
+    place: { key: "268", offset: 8 },
+  });
+  expect(log.scrollTop).toBe(19 * 300 - 600);
+  press(log, "PageDown");
+  expect(onFollowChange).toHaveBeenLastCalledWith(true);
+});
+
+test("a key that does not scroll leaves nothing behind that a later scroll follows at", () => {
   const { log, onFollowChange, update } = mount({
     follow: false,
     total: 300,
     items: lines(0, 300),
   });
-  scroll(log, 19 * 120);
-  fireEvent.keyDown(log, { key: "End" });
-  update({ items: lines(10, 310) });
-  expect(log.scrollTop).toBe(19 * 110);
-  scroll(log, 19 * 300 - 600 - 19 * 10);
-  expect(onFollowChange).toHaveBeenLastCalledWith(true);
-});
-
-test("a key's end is the end only for the scroll it began, not after a wheel or following again", () => {
-  const { log, onFollowChange, update } = mount({
-    follow: false,
-    total: 300,
-    items: lines(0, 300),
-  });
-  fireEvent.keyDown(log, { key: "End" });
+  scroll(log, 19 * 100);
+  fireEvent.keyDown(log, { key: "c", metaKey: true });
   update({ total: 400, items: lines(0, 400) });
-  fireEvent.wheel(log, { deltaY: -40 });
   scroll(log, 19 * 200);
   scroll(log, 19 * 300 - 600);
-  expect(onFollowChange).not.toHaveBeenCalledWith(true);
-  fireEvent.keyDown(log, { key: "End" });
-  update({ follow: true });
-  update({ total: 500, items: lines(0, 500) });
-  update({ follow: false });
-  scroll(log, 19 * 200);
-  scroll(log, 19 * 400 - 600);
   expect(onFollowChange).not.toHaveBeenCalledWith(true);
 });
 
