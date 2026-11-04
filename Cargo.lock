@@ -5569,6 +5569,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-window-state",
+ "tokio",
  "twigo-core",
  "twigo-env",
  "twigo-ipc",

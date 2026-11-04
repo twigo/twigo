@@ -408,19 +408,21 @@ async fn logs_download(
     request: DownloadLogs,
 ) -> Result<Option<String>, IpcError> {
     let name = app.core.logs_file_name(webview.label(), request.id)?;
-    let dialog = webview
+    let (answer, picked) = tokio::sync::oneshot::channel();
+    webview
         .dialog()
         .file()
         .set_parent(&webview.window())
         .set_file_name(name)
-        .add_filter("Logs", &["log", "txt"]);
-    // The dialog runs on the main thread, which this call must not block.
-    let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_save_file())
-        .await
-        .map_err(|error| IpcError {
-            kind: ErrorKind::Internal,
-            message: format!("the save dialog failed: {error}"),
-        })?;
+        .add_filter("Logs", &["log", "txt"])
+        .save_file(move |picked| {
+            // Once the command is dropped, nothing waits for the answer.
+            let _ = answer.send(picked);
+        });
+    let picked = picked.await.map_err(|error| IpcError {
+        kind: ErrorKind::Internal,
+        message: format!("the save dialog failed: {error}"),
+    })?;
     let Some(picked) = picked else {
         return Ok(None);
     };
