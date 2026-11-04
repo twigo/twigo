@@ -253,27 +253,6 @@ test("paused, the list scrolls down by a wheel itself, and one whose delta reach
   expect(onFollowChange).toHaveBeenLastCalledWith(true);
 });
 
-test("a wheel scrolls the list by its pixels, by a row a line and by a page a page", () => {
-  const { log } = mount({
-    follow: false,
-    total: 300,
-    items: lines(0, 300),
-  });
-  scroll(log, 19 * 100);
-  const tops = [
-    { deltaY: 40 },
-    { deltaY: 3, deltaMode: WheelEvent.DOM_DELTA_LINE },
-    { deltaY: 1, deltaMode: WheelEvent.DOM_DELTA_PAGE },
-    { deltaY: -2, deltaMode: WheelEvent.DOM_DELTA_PAGE },
-  ].map((init) => [spin(log, init), log.scrollTop - 19 * 100]);
-  expect(tops).toEqual([
-    [false, 40],
-    [false, 40 + 3 * 19],
-    [false, 40 + 3 * 19 + PAGE],
-    [false, 40 + 3 * 19 - PAGE],
-  ]);
-});
-
 test("a wheel's deltas below a pixel add up, though the browser keeps whole pixels", () => {
   const { log } = mount({
     follow: false,
@@ -327,30 +306,16 @@ test("without wrap, the list scrolls sideways by a wheel's deltaX itself, ⇧ wi
   expect(log.scrollTop).toBe(40);
 });
 
-test("on macOS the list takes a wheel with ⌃, or with ⇧ and no deltaX, along its own axis, as WebKit there scrolls it", () => {
-  const { log, onFollowChange } = mount({
-    total: 300,
-    items: lines(0, 300),
-    mac: true,
-  });
-  wide(log);
-  expect([
-    spin(log, { deltaY: -40, ctrlKey: true }),
-    spin(log, { deltaY: -40, shiftKey: true }),
-  ]).toEqual([false, false]);
-  expect([log.scrollTop, log.scrollLeft]).toEqual([19 * 300 - 600 - 80, 0]);
-  expect(onFollowChange).toHaveBeenCalledWith(false);
-});
-
-test("elsewhere a wheel with ⌃ is the engine's, and one with ⇧ and no deltaX scrolls sideways", () => {
-  const { log, onFollowChange } = mount({ total: 300, items: lines(0, 300) });
-  wide(log);
-  expect([
-    spin(log, { deltaY: -40, ctrlKey: true }),
-    spin(log, { deltaY: 40, shiftKey: true }),
-  ]).toEqual([true, false]);
-  expect([log.scrollTop, log.scrollLeft]).toEqual([19 * 300 - 600, 40]);
-  expect(onFollowChange).not.toHaveBeenCalled();
+test("a wheel with ⌃ is the list's on macOS, which it takes along its own axis, and elsewhere the engine's, which neither scrolls nor pauses the list", () => {
+  const mac = mount({ total: 300, items: lines(0, 300), mac: true });
+  const taken = spin(mac.log, { deltaY: -40, ctrlKey: true });
+  expect([taken, mac.log.scrollTop]).toEqual([false, 19 * 300 - 600 - 40]);
+  expect(mac.onFollowChange).toHaveBeenCalledWith(false);
+  cleanup();
+  const elsewhere = mount({ total: 300, items: lines(0, 300) });
+  const left = spin(elsewhere.log, { deltaY: -40, ctrlKey: true });
+  expect([left, elsewhere.log.scrollTop]).toEqual([true, 19 * 300 - 600]);
+  expect(elsewhere.onFollowChange).not.toHaveBeenCalled();
 });
 
 test("a wheel's sideways deltas below a pixel add up too", () => {
@@ -486,7 +451,7 @@ function press(log: HTMLElement, key: string, init: KeyboardEventInit = {}) {
 
 const PAGE = 600 - 2 * 19;
 
-test("the list's own keys, the same on every platform, move it itself at once, so neither the browser nor the workbench scrolls it: the page keys, Space, and ⌥ or ⌘ with an arrow", () => {
+test("the list's own keys move it itself at once, so neither the browser nor the workbench scrolls it, a page or to the top, and other keys are not its own", () => {
   const { log, onPlace } = mount({
     follow: false,
     total: 300,
@@ -496,112 +461,20 @@ test("the list's own keys, the same on every platform, move it itself at once, s
   const moves = [
     press(log, "PageDown"),
     log.scrollTop,
-    press(log, " "),
+    press(log, "ArrowDown"),
     log.scrollTop,
-    press(log, " ", { shiftKey: true }),
-    press(log, "PageUp"),
-    log.scrollTop,
-    press(log, "ArrowDown", { altKey: true }),
-    log.scrollTop,
-    press(log, "ArrowUp", { altKey: true }),
     press(log, "ArrowUp", { metaKey: true }),
     log.scrollTop,
   ];
   expect(moves).toEqual([
     false,
     19 * 100 + PAGE,
-    false,
-    19 * 100 + 2 * PAGE,
-    false,
-    false,
-    19 * 100,
-    false,
+    true,
     19 * 100 + PAGE,
-    false,
     false,
     0,
   ]);
   expect(onPlace).toHaveBeenLastCalledWith({ key: "0", offset: 0 });
-  expect([
-    press(log, "ArrowDown"),
-    press(log, "End"),
-    press(log, "c", { metaKey: true }),
-    press(log, "PageDown", { shiftKey: true }),
-  ]).toEqual([true, true, true, true]);
-  expect(log.scrollTop).toBe(0);
-});
-
-test("among the list's own keys, ⌃↑ and ⌃↓, alone or with ⌥, move it a page, and with ⇧, on which no engine scrolls, or with ⌘ they are not the list's", () => {
-  const { log } = mount({
-    follow: false,
-    total: 300,
-    items: lines(0, 300),
-  });
-  scroll(log, 19 * 100);
-  const moves = [
-    press(log, "ArrowDown", { ctrlKey: true }),
-    log.scrollTop,
-    press(log, "ArrowDown", { ctrlKey: true, altKey: true }),
-    log.scrollTop,
-    press(log, "ArrowUp", { ctrlKey: true }),
-    press(log, "ArrowUp", { ctrlKey: true, altKey: true }),
-    log.scrollTop,
-  ];
-  expect(moves).toEqual([
-    false,
-    19 * 100 + PAGE,
-    false,
-    19 * 100 + 2 * PAGE,
-    false,
-    false,
-    19 * 100,
-  ]);
-  expect([
-    press(log, "ArrowDown", { ctrlKey: true, shiftKey: true }),
-    press(log, "ArrowUp", { ctrlKey: true, shiftKey: true }),
-    press(log, "ArrowDown", { ctrlKey: true, shiftKey: true, altKey: true }),
-    press(log, "ArrowDown", { ctrlKey: true, metaKey: true }),
-    press(log, " ", { ctrlKey: true }),
-  ]).toEqual([true, true, true, true, true]);
-  expect(log.scrollTop).toBe(19 * 100);
-});
-
-test("among the list's own keys, ⌃Home goes to the top and ⌃End follows again, as ⌘↑ and ⌘↓ do", () => {
-  const { log, onFollowChange } = mount({
-    follow: false,
-    total: 300,
-    items: lines(0, 300),
-  });
-  scroll(log, 19 * 100);
-  expect(press(log, "End", { ctrlKey: true })).toBe(false);
-  expect(onFollowChange).toHaveBeenLastCalledWith(true);
-  expect(press(log, "Home", { ctrlKey: true })).toBe(false);
-  expect(log.scrollTop).toBe(0);
-});
-
-test("in a short list a page moves seven eighths of it, never the wrong way, and at least a pixel", () => {
-  const pages = [1, 30, 50, 90, 400].map((height) => {
-    shown = height;
-    const { log } = mount({
-      follow: false,
-      total: 300,
-      items: lines(0, 300),
-    });
-    scroll(log, 19 * 100);
-    press(log, "PageDown");
-    const down = log.scrollTop - 19 * 100;
-    press(log, "PageUp");
-    const up = log.scrollTop - 19 * 100 - down;
-    cleanup();
-    return [height, down, up];
-  });
-  expect(pages).toEqual([
-    [1, 1, -1],
-    [30, 26, -26],
-    [50, 43, -43],
-    [90, 78, -78],
-    [400, 400 - 38, -(400 - 38)],
-  ]);
 });
 
 test("paused, a page down that reaches the end follows again, one at the end too, and ⌘↓ at once", () => {

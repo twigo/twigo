@@ -4,13 +4,13 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type KeyboardEvent,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, type LucideIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 import type { ListController } from "../lib/list";
 import type { Tone } from "../lib/tone";
+import { moveOf, pageOf, ROW, wheelDeltas, type Move } from "./input";
 import { useKeptSizes, useRowKeys } from "./rows";
 import { StyledText, type TextMark, type TextRun } from "./StyledText";
 
@@ -69,7 +69,6 @@ export interface LineAround {
   readonly index: number;
 }
 
-const ROW = 19;
 /** Lines asked for beyond the visible ones. */
 const OVERSCAN = 40;
 /** How far the top may move from the line a window was asked around before it asks again, so a scroll asks now and then. */
@@ -101,69 +100,6 @@ type Mode =
 
 const FOLLOW: Mode = { kind: "follow" };
 const JUMP: Mode = { kind: "jump" };
-
-/** Where a key sends the list: a page up or down, or an edge. */
-type Move = "up" | "down" | "first" | "last";
-
-/**
- * The list's own keys, which it moves itself for, at once, on every
- * platform, besides ↑, ↓, Home and End, which the list commands send it:
- * the engines scroll on some of them natively, and WebKit animates a key's
- * scroll and stops it at the list's next write of `scrollTop`.
- */
-const MOVES = new Map<string, Move>([
-  ["PageUp", "up"],
-  ["PageDown", "down"],
-  ["Space", "down"],
-  ["Shift+Space", "up"],
-  ["Alt+ArrowUp", "up"],
-  ["Alt+ArrowDown", "down"],
-  ["Control+ArrowUp", "up"],
-  ["Control+ArrowDown", "down"],
-  ["Control+Alt+ArrowUp", "up"],
-  ["Control+Alt+ArrowDown", "down"],
-  ["Meta+ArrowUp", "first"],
-  ["Meta+ArrowDown", "last"],
-  ["Control+Home", "first"],
-  ["Control+End", "last"],
-]);
-
-function moveOf({
-  key,
-  altKey,
-  ctrlKey,
-  metaKey,
-  shiftKey,
-}: KeyboardEvent): Move | undefined {
-  return MOVES.get(
-    [
-      shiftKey ? "Shift+" : "",
-      ctrlKey ? "Control+" : "",
-      altKey ? "Alt+" : "",
-      metaKey ? "Meta+" : "",
-      key === " " ? "Space" : key,
-    ].join(""),
-  );
-}
-
-/** What a page keeps in view of the one before, about what the browsers keep. */
-const OVERLAP = 2 * ROW;
-
-/**
- * A page of a list `length` px long: its length less two rows, or in a
- * short list Chromium's share of it, more than WebKit's 4/5, so a page is
- * never less than a browser's, and at least a pixel, as the browsers' are.
- */
-function pageOf(length: number): number {
-  return Math.max(1, length - OVERLAP, Math.floor((length * 7) / 8));
-}
-
-/** The px of one unit of a wheel's delta along a list `length` px long. */
-function unitOf(mode: number, length: number): number {
-  if (mode === WheelEvent.DOM_DELTA_LINE) return ROW;
-  if (mode === WheelEvent.DOM_DELTA_PAGE) return pageOf(length);
-  return 1;
-}
 
 function askedBy(mode: Mode): string | undefined {
   switch (mode.kind) {
@@ -401,13 +337,14 @@ export function LineList({
   // browser does not let it cancel the browser scrolls by, maybe before it
   // dispatches it, so its delta counts from where the list last stood.
   const wheel = (scroller: HTMLElement, event: WheelEvent) => {
-    if (event.ctrlKey && !mac) return;
-    const turned = !mac && event.shiftKey && event.deltaX === 0;
-    const across = unitOf(event.deltaMode, scroller.clientWidth);
-    const dx = turned ? event.deltaY * across : event.deltaX * across;
-    const dy = turned
-      ? 0
-      : event.deltaY * unitOf(event.deltaMode, scroller.clientHeight);
+    const deltas = wheelDeltas(
+      event,
+      mac,
+      scroller.clientWidth,
+      scroller.clientHeight,
+    );
+    if (!deltas) return;
+    const { dx, dy } = deltas;
     const left = scroller.scrollLeft;
     const top = scroller.scrollTop;
     const from = event.cancelable ? top : known.current;
