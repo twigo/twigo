@@ -17,7 +17,13 @@ import {
   type Cluster,
   type Pod,
 } from "./cluster";
-import { LogBuffer, type Kind, type Timed } from "./logview/buffer";
+import {
+  LIMITS,
+  LogBuffer,
+  type Kind,
+  type Limits,
+  type Timed,
+} from "./logview/buffer";
 import { level } from "./logview/level";
 import { parse } from "./logview/line";
 import {
@@ -66,9 +72,11 @@ export class MockLogs {
   #source: LogSource;
   #spec: Spec;
   #window: LogWindow | undefined;
-  readonly #buffer = new LogBuffer();
+  readonly #buffer: LogBuffer;
   #streams = new Map<string, Stream>();
   #members = new Set<string>();
+  /** The `joined` of each pod in view that has written nothing, which the bound keeps, as Rust's does. */
+  #waiting = new Map<string, number>();
   /** The entries the view kept as they came since the source or the view last changed. */
   #arrived = 0;
   #changes = 0;
@@ -86,7 +94,9 @@ export class MockLogs {
     cluster: Cluster | undefined,
     budget: (logs: MockLogs, wanted: number) => number,
     onMessage: (batch: LogBatch) => void,
+    limits: Limits = LIMITS,
   ) {
+    this.#buffer = new LogBuffer(limits);
     this.#target = target;
     this.#cluster = cluster;
     this.#source = source;
@@ -111,6 +121,7 @@ export class MockLogs {
     this.#arrived = 0;
     this.#streams.clear();
     this.#members.clear();
+    this.#waiting.clear();
     this.#start(Date.now());
   }
 
@@ -243,6 +254,8 @@ export class MockLogs {
     for (const name of this.#members) {
       if (current.has(name)) continue;
       this.#members.delete(name);
+      this.#waiting.delete(name);
+      if (!this.#reads(name)) continue;
       // The kubelet deletes a rolled-out pod once its containers ended, so
       // their ends come before its `left` (ARCHITECTURE 4.6); a queued
       // stream's read finds no pod by then, so it gets none.
@@ -268,6 +281,7 @@ export class MockLogs {
     for (const pod of this.#pods()) {
       if (this.#members.has(pod.name)) continue;
       this.#members.add(pod.name);
+      if (!this.#reads(pod.name)) continue;
       incoming.push([
         at,
         {
@@ -325,6 +339,12 @@ export class MockLogs {
     if (pod) this.#cluster.rollOut(pod, now);
   }
 
+  /** Whether the source reads the pod at all; Rust marks only those that come and go. */
+  #reads(pod: string): boolean {
+    const { pods } = this.#source;
+    return pods === null || pods.includes(pod);
+  }
+
   /** When the pod's last line or end stands in the buffer. */
   #lastOf(pod: string): bigint | undefined {
     const entries = this.#buffer.entries;
@@ -341,11 +361,19 @@ export class MockLogs {
   #insert(incoming: readonly Timed[]): void {
     if (incoming.length === 0) return;
     const checked = this.#spec;
-    this.#buffer.insert(incoming, (at, kind) => {
+    const ids = this.#buffer.insert(incoming, (at, kind) => {
       const judged = judge(checked, kind);
       if (keeps(checked, at, judged)) this.#arrived++;
       return judged;
     });
+    incoming.forEach(([, kind], index) => {
+      const id = ids[index];
+      if (kind.type === "joined" && id !== undefined)
+        this.#waiting.set(kind.pod, id);
+      else if (kind.type === "line" || kind.type === "ended")
+        this.#waiting.delete(kind.pod);
+    });
+    this.#buffer.bound(new Set(this.#waiting.values()));
     this.#dirty.lines = true;
   }
 

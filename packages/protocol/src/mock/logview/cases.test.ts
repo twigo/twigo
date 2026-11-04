@@ -48,6 +48,8 @@ type CaseEntry =
 interface ViewCase {
   name: string;
   limits?: Limits;
+  /** The ids the session holds through the bound, as a pod's `joined` before its first entry. */
+  held?: number[];
   entries: CaseEntry[];
   view: LogView;
   window: LogWindow;
@@ -95,6 +97,7 @@ for (const { name, raw, expect: wanted } of CASES.lines) {
 for (const {
   name,
   limits,
+  held,
   entries: given,
   view,
   window,
@@ -110,6 +113,7 @@ for (const {
     const checked = spec(view);
     const buffer = new LogBuffer(limits ?? LIMITS);
     buffer.insert(given.map(timed), (_, kind) => judge(checked, kind));
+    buffer.bound(new Set(held));
 
     expect(total(buffer, checked)).toBe(wanted.total);
     const shown = entries(buffer, checked, window);

@@ -2183,6 +2183,147 @@
       }
     },
     {
+      "name": "the bound keeps the entries the session holds, first among those it counts",
+      "limits": {
+        "entries": 3,
+        "bytes": 1048576
+      },
+      "held": [1],
+      "entries": [
+        {
+          "type": "joined",
+          "pod": "web-2",
+          "time": "2026-11-03T10:00:00Z",
+          "owner": {
+            "group": "apps",
+            "version": "v1",
+            "kind": "ReplicaSet",
+            "namespace": "shop",
+            "name": "web-7f9c8d6b5"
+          }
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": null,
+          "text": "line 1"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "line 2"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": null,
+          "text": "line 3"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:04Z",
+          "level": null,
+          "text": "line 4"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": null,
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "total": 4,
+        "window": {
+          "start": 0,
+          "ids": [6, 1, 4, 5]
+        },
+        "dropped": {
+          "id": 6,
+          "count": 2
+        }
+      }
+    },
+    {
+      "name": "the bound drops a joined only along with the entries at its time",
+      "limits": {
+        "entries": 3,
+        "bytes": 1048576
+      },
+      "entries": [
+        {
+          "type": "joined",
+          "pod": "web-2",
+          "time": "2026-11-03T10:00:01Z",
+          "owner": {
+            "group": "apps",
+            "version": "v1",
+            "kind": "ReplicaSet",
+            "namespace": "shop",
+            "name": "web-7f9c8d6b5"
+          }
+        },
+        {
+          "type": "line",
+          "pod": "web-2",
+          "container": "web",
+          "time": "2026-11-03T10:00:01Z",
+          "level": null,
+          "text": "first"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:02Z",
+          "level": null,
+          "text": "second"
+        },
+        {
+          "type": "line",
+          "pod": "web-1",
+          "container": "web",
+          "time": "2026-11-03T10:00:03Z",
+          "level": null,
+          "text": "other"
+        }
+      ],
+      "view": {
+        "level": "all",
+        "filter": null,
+        "search": null,
+        "range": null
+      },
+      "window": {
+        "type": "tail",
+        "count": 100
+      },
+      "expect": {
+        "total": 3,
+        "window": {
+          "start": 0,
+          "ids": [5, 3, 4]
+        },
+        "dropped": {
+          "id": 5,
+          "count": 2
+        }
+      }
+    },
+    {
       "name": "the histogram's spans grow until they reach the first line",
       "entries": [
         {

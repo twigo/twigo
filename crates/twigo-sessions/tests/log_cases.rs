@@ -30,6 +30,8 @@ struct LineCase {
 struct ViewCase {
     name: String,
     limits: Option<CaseLimits>,
+    #[serde(default)]
+    held: Vec<u64>,
     entries: Vec<CaseEntry>,
     view: LogView,
     window: LogWindow,
@@ -220,7 +222,7 @@ fn views_show_what_the_mock_shows() {
         let mut buffer = Buffer::new(limits);
         let entries = case.entries.into_iter().map(kind).collect();
         buffer.insert(entries, |_, kind| spec.judge(kind));
-        buffer.bound(&[]);
+        buffer.bound(&case.held);
 
         assert_eq!(
             Some(view::total(&buffer, &spec)),

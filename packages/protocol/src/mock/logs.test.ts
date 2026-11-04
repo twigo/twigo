@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { LogBatch, LogEntry, LogSource, LogView } from "../generated";
 import { Cluster, deploymentOf, type Pod } from "./cluster";
 import { MockLogs, TAB_STREAMS } from "./logs";
+import type { Limits } from "./logview/buffer";
 import { level } from "./logview/level";
 
 const SOURCE: LogSource = {
@@ -42,6 +43,7 @@ test.each([
 function session(
   view: LogView = VIEW,
   budget = (_session: MockLogs, wanted: number) => wanted,
+  limits?: Limits,
 ) {
   const cluster = new Cluster("prod-eu", 5000, Date.now());
   const counts = new Map<string, number>();
@@ -67,6 +69,7 @@ function session(
       batches.push(batch);
       logs.ack(batch.seq);
     },
+    limits,
   );
   logs.setWindow({ type: "tail", count: 200 });
   return { logs, batches, pods: busiest?.[1] ?? 0 };
@@ -192,6 +195,37 @@ test("a rollout's left stands just after its pod's last entry, and its successor
   bounds(entries, left);
   bounds(entries, joined);
   expect(entries[joined + 1]?.type).toBe("line");
+  logs.close();
+});
+
+test("only pods the source reads come and go: a read pod's rollout leaves, and its successor, which it does not read, does not join", async () => {
+  const { logs, batches } = session();
+  await vi.advanceTimersByTimeAsync(300);
+  const read = batches.find((batch) => batch.pods !== null)?.pods?.[0]?.name;
+  logs.setSource({ ...SOURCE, pods: read === undefined ? [] : [read] });
+  await vi.advanceTimersByTimeAsync(27_000);
+  const entries = batches[batches.length - 1]?.window?.entries ?? [];
+  expect(entries.filter((entry) => entry.type === "left").map(podOf)).toEqual([
+    read,
+  ]);
+  expect(entries.filter((entry) => entry.type === "joined")).toEqual([]);
+  logs.close();
+});
+
+test("a pod that joins and writes nothing keeps its joined through the bound", async () => {
+  const { logs, batches } = session(VIEW, (_session, wanted) => wanted - 1, {
+    entries: 40,
+    bytes: 1 << 20,
+  });
+  await vi.advanceTimersByTimeAsync(45_000);
+  const entries = batches[batches.length - 1]?.window?.entries ?? [];
+  const joined = entries.filter((entry) => entry.type === "joined");
+  expect(entries[0]?.type).toBe("dropped");
+  expect(joined).toHaveLength(1);
+  const pod = podOf(joined[0]);
+  expect(
+    entries.some((entry) => entry.type === "line" && entry.pod === pod),
+  ).toBe(false);
   logs.close();
 });
 

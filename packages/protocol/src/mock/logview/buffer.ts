@@ -75,8 +75,9 @@ function bytes(kind: Kind): number {
 /**
  * A session's buffer as Rust's `logs::buffer` keeps it: the entries of
  * every stream in time order, ties by id, each with an id it keeps while
- * buffered, bounded by entries and bytes of text, oldest out first, with
- * one `Dropped` entry before them once any went.
+ * buffered, bounded by entries and bytes of text, oldest out first but
+ * those the session holds, with one `Dropped` entry before them once any
+ * went.
  */
 export class LogBuffer {
   readonly #limits: Limits;
@@ -90,20 +91,21 @@ export class LogBuffer {
     this.#limits = limits;
   }
 
-  /** Adds entries in the order they came, each with the next id and what `judge` makes of it and its time, at its place in time. */
+  /** Adds entries in the order they came, each with the next id and what `judge` makes of it and its time, at its place in time, all of them until `bound`; the ids they got, in that order. */
   insert(
     incoming: readonly Timed[],
     judge: (at: bigint, kind: Kind) => Judged,
-  ): void {
+  ): number[] {
     const fresh = incoming.map(([at, kind]): Entry => ({
       id: ++this.#next,
       at,
       kind,
       judged: judge(at, kind),
     }));
+    const ids = fresh.map((entry) => entry.id);
     fresh.sort(order);
     const first = fresh[0];
-    if (!first) return;
+    if (!first) return ids;
     for (const entry of fresh) this.#bytes += bytes(entry.kind);
     let split = this.#entries.length;
     while (split > 0) {
@@ -127,22 +129,37 @@ export class LogBuffer {
         break;
       }
     }
-    this.#bound();
+    return ids;
   }
 
-  #bound(): void {
+  /**
+   * Drops the oldest entries while it holds more than its limits, but keeps
+   * those `held` names, first, among the entries it counts, and drops a
+   * `joined` only along with the entries at its time, where the session
+   * places its pod's first.
+   */
+  bound(held: ReadonlySet<number>): void {
+    const kept: Entry[] = [];
+    let joined: bigint | undefined;
     let count = 0;
-    while (
-      this.#entries.length - count > this.#limits.entries ||
-      this.#bytes > this.#limits.bytes
-    ) {
-      const oldest = this.#entries[count];
-      if (!oldest) break;
+    let next = 0;
+    for (;;) {
+      const oldest = this.#entries[next];
+      const over =
+        this.#entries.length - next + kept.length > this.#limits.entries ||
+        this.#bytes > this.#limits.bytes;
+      if (!oldest || (!over && oldest.at !== joined)) break;
+      next++;
+      if (held.has(oldest.id)) {
+        kept.push(oldest);
+        continue;
+      }
+      if (oldest.kind.type === "joined") joined = oldest.at;
       this.#bytes -= bytes(oldest.kind);
       count++;
     }
+    this.#entries.splice(0, next, ...kept);
     if (count === 0) return;
-    this.#entries.splice(0, count);
     this.#droppedEver += count;
     this.#dropped = {
       id: this.#dropped?.id ?? ++this.#next,
