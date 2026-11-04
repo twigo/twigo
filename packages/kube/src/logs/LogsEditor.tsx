@@ -87,17 +87,23 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
   // Matches come and go around the one the person stepped to, which stays
   // the current one by its entry's id while the matches hold it, or may
   // hold it beyond the last 10,000 they list, and gives way to the newest
-  // once a list of every match does not hold it.
+  // once its line is gone: a list of every match does not hold it, or the
+  // window asked around it does not, which the view keeps exactly.
   const matchesNow = snapshot?.matches;
+  const windowNow = snapshot?.window;
   const { anchor, current } = tabs.get(uri);
   useEffect(() => {
     if (!anchor || !matchesNow) return;
     const back = anchoredMatch(matchesNow, anchor.id, anchor.fromEnd);
     if (back !== undefined) {
       if (back !== current) tabs.update(uri, { current: back });
-    } else if (matchesNow.count <= matchesNow.entries.length)
+    } else if (
+      matchesNow.count <= matchesNow.entries.length ||
+      (windowNow?.around?.id === anchor.id &&
+        !windowNow.entries.some((entry) => entry.id === anchor.id))
+    )
       tabs.update(uri, { current: 0, anchor: undefined });
-  }, [anchor, current, matchesNow, tabs, uri]);
+  }, [anchor, current, matchesNow, windowNow, tabs, uri]);
 
   const onWindow = useCallback(
     (window: LineWindow) => {

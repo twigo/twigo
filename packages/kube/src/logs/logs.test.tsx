@@ -490,6 +490,52 @@ test("a step's match the last 10,000 no longer list stays current, the line the 
   session.close();
 });
 
+test("a step's match beyond the last 10,000 gives way to the newest once the window asked around it lacks its line, and only then", async () => {
+  const { tabs, uri, session } = await logsTab();
+  await vi.waitFor(() => {
+    expect(session.getSnapshot().window?.entries.length).toBeGreaterThan(3);
+  });
+  act(() => {
+    tabs.setView(uri, { search: "request" });
+  });
+  await vi.waitFor(() => {
+    expect(session.getSnapshot().settled).toBe(true);
+    expect(session.getSnapshot().matches?.count).toBeGreaterThan(0);
+  });
+  const now = session.getSnapshot();
+  const entries = now.window?.entries ?? [];
+  const line = entries.find(
+    (entry) => entry.type === "line" && entry.marks.length > 0,
+  );
+  if (line?.type !== "line") throw new Error("no matching line in the window");
+  const around = (kept: typeof entries) => ({
+    ...now,
+    settled: true,
+    matches: { count: 12, entries: [line.id + 1, line.id + 2, line.id + 3] },
+    window: { start: 0, entries: kept, around: { id: line.id, index: 0 } },
+  });
+  const snapshot = vi
+    .spyOn(session, "getSnapshot")
+    .mockReturnValue(around(entries));
+  act(() => {
+    tabs.update(uri, {
+      anchor: { id: line.id, fromEnd: 0 },
+      current: 2,
+      reveal: { id: line.id, token: 1 },
+      follow: false,
+    });
+  });
+  expect(tabs.get(uri).anchor).toEqual({ id: line.id, fromEnd: 0 });
+  snapshot.mockReturnValue(
+    around(entries.filter((entry) => entry.id !== line.id)),
+  );
+  act(() => {
+    tabs.update(uri, {});
+  });
+  expect(tabs.get(uri)).toMatchObject({ current: 0, anchor: undefined });
+  session.close();
+});
+
 async function remountAfterSteps(follow: boolean) {
   const { workbench, tabs, uri, session } = await logsTab();
   act(() => {
