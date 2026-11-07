@@ -113,6 +113,10 @@ function header(table: HTMLElement, column: string): HTMLButtonElement {
   return found;
 }
 
+export function shownSort(button: HTMLButtonElement): string | null {
+  return button.parentElement?.getAttribute("aria-sort") ?? null;
+}
+
 function rowAt(table: HTMLElement, index: number): HTMLElement | null {
   return table.querySelector(`[role="row"][aria-rowindex="${index + 2}"]`);
 }
@@ -297,7 +301,7 @@ async function sorts(probe: Probe): Promise<Results["sort"]> {
       () => shows(table, expected),
       `rows sorted by ${sorted}`,
     );
-    const shown = button.getAttribute("aria-sort");
+    const shown = shownSort(button);
     if (shown !== (descending ? "descending" : "ascending")) {
       throw new Error(`clicking ${column} sorted it ${String(shown)}`);
     }

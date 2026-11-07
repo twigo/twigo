@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { shows, topRows } from "./driver";
+import { shownSort, shows, topRows } from "./driver";
 import { ListProbe } from "./probe";
 
 function table(rows: (readonly [string, string] | null)[]): HTMLElement {
@@ -26,6 +26,12 @@ function table(rows: (readonly [string, string] | null)[]): HTMLElement {
   });
   return grid;
 }
+
+test("a header's sort is read from the column header around its button", () => {
+  const button = table([]).querySelector("button");
+  button?.parentElement?.setAttribute("aria-sort", "descending");
+  expect(button && shownSort(button)).toBe("descending");
+});
 
 test("the screen shows the rows only once every one of them is in place", () => {
   const expected = ["payments/api-2", "payments/api-1", "web/api-3"];
