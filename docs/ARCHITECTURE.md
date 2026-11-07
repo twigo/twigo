@@ -730,7 +730,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 - A pinned list keeps its namespaces, text and health in its URI and shows at the top of the explorer; a kind whose list is open shows its rows and its worst health there.
 - Single-key verbs work only when a table is focused (context key `listFocus`): `l` logs, `s` shell, `e` edit YAML, `d` describe/overview, `y` copy YAML, `f` port-forward, `⇧J` jump to owner, `⌘⌫` delete (with confirmation), off a bare key since k9s users deleted the wrong object from one ([research](research/workbench-design.md)).
   These are ordinary commands with keybindings, so users can remap them.
-- Changed cells flash briefly: the cell's background starts at the `--flash` tint and fades out over 1 s.
+- Changed cells flash briefly: the cell's background starts at the `--flash` tint and fades out over 1 s, as the opacity of a layer behind the text, which runs on the compositor and leaves the page asleep ([bench](bench.md#what-the-budgets-do-not-measure)).
   A batch that changes more than 8 rows flashes nothing, so a rollout does not strobe the table.
   The flash is a setting, on by default.
 

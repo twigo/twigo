@@ -324,12 +324,13 @@
 @theme {
   --animate-flash: flash 1s var(--ease-out);
 
+  /* Opacity runs on the compositor: a background-color keyframe repaints the page on every frame. */
   @keyframes flash {
     from {
-      background-color: var(--flash);
+      opacity: 1;
     }
     to {
-      background-color: transparent;
+      opacity: 0;
     }
   }
 }

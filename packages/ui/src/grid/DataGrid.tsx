@@ -540,7 +540,8 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
                 data-fit={column.id}
                 className={cn(
                   "-mx-1 rounded-sm px-1",
-                  since !== undefined && "animate-flash",
+                  since !== undefined &&
+                    "relative isolate before:absolute before:inset-0 before:-z-10 before:rounded-[inherit] before:bg-(--flash) before:opacity-0 before:animate-flash",
                 )}
               >
                 {cell(target.data, column)}
