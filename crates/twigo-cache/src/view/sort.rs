@@ -174,38 +174,42 @@ fn duration(text: &str) -> Option<f64> {
 /// other characters one by one with ASCII letters folded to lower case,
 /// and a tie by the characters themselves.
 pub fn natural(a: &str, b: &str) -> Ordering {
-    let (mut x, mut y) = (a.chars().peekable(), b.chars().peekable());
+    // UTF-8 bytes order as their characters do, and only ASCII bytes are
+    // digits or fold.
+    let (mut x, mut y) = (a.as_bytes(), b.as_bytes());
     loop {
-        let (c, d) = match (x.peek(), y.peek()) {
+        let (c, d) = match (x.first(), y.first()) {
             (None, None) => return a.cmp(b),
             (None, Some(_)) => return Ordering::Less,
             (Some(_), None) => return Ordering::Greater,
             (Some(&c), Some(&d)) => (c, d),
         };
         if c.is_ascii_digit() && d.is_ascii_digit() {
-            let run = |chars: &mut std::iter::Peekable<std::str::Chars<'_>>| {
-                let mut digits = String::new();
-                while let Some(&c) = chars.peek().filter(|c| c.is_ascii_digit()) {
-                    digits.push(c);
-                    chars.next();
-                }
-                digits
-            };
-            let (left, right) = (run(&mut x), run(&mut y));
-            let (left, right) = (left.trim_start_matches('0'), right.trim_start_matches('0'));
+            let (left, rest_x) = digit_run(x);
+            let (right, rest_y) = digit_run(y);
             let order = left.len().cmp(&right.len()).then_with(|| left.cmp(right));
             if order != Ordering::Equal {
                 return order;
             }
+            (x, y) = (rest_x, rest_y);
             continue;
         }
         let order = c.to_ascii_lowercase().cmp(&d.to_ascii_lowercase());
         if order != Ordering::Equal {
             return order;
         }
-        x.next();
-        y.next();
+        (x, y) = (&x[1..], &y[1..]);
     }
+}
+
+/// The digits `text` starts with, without leading zeros, and what follows.
+fn digit_run(text: &[u8]) -> (&[u8], &[u8]) {
+    let end = text
+        .iter()
+        .position(|b| !b.is_ascii_digit())
+        .unwrap_or(text.len());
+    let zeros = text[..end].iter().take_while(|&&b| b == b'0').count();
+    (&text[zeros..end], &text[end..])
 }
 
 #[cfg(test)]
@@ -287,5 +291,11 @@ mod tests {
             Ordering::Less,
             "digit runs of any length"
         );
+        assert_eq!(natural("a10", "a010"), Ordering::Greater, "a tie in value");
+        assert_eq!(natural("Z", "é"), Ordering::Less, "ASCII before the rest");
+        assert_eq!(natural("é", "è"), Ordering::Greater, "by code point");
+        assert_eq!(natural("é1", "é01"), Ordering::Greater, "digits after é");
+        assert_eq!(natural("Éa", "éa"), Ordering::Less, "only ASCII folds");
+        assert_eq!(natural("𝟙", "2"), Ordering::Greater, "only ASCII digits");
     }
 }
