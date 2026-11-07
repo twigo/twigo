@@ -6,7 +6,8 @@
 //! list with none of them. While it waits, the
 //! changes coalesce in the row stores' feeds, so a hidden window, which
 //! acknowledges nothing since the webview acks on an animation frame, costs
-//! no more memory than its rows, and the next batch carries everything.
+//! no more memory than its rows and no wake-ups, and the next batch carries
+//! everything.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -86,7 +87,7 @@ async fn run(
     let mut moved = false;
     loop {
         let ticked = tokio::select! {
-            _ = interval.tick() => true,
+            _ = interval.tick(), if unacked.is_none() => true,
             () = control.wake.notified() => false,
         };
         let Pending { window, acked } =
@@ -112,12 +113,15 @@ async fn run(
             if !send(batch) {
                 return;
             }
+            interval.reset();
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use tokio::sync::mpsc;
     use tokio::time::{Instant, sleep};
     use twigo_ipc::{Gvr, ListQuery, ViewState};
@@ -141,7 +145,7 @@ mod tests {
         rig
     }
 
-    async fn unwindowed() -> Rig {
+    async fn subscribed() -> (Fake, (Hub, Arc<Clients>), Subscription<Row>, Spec) {
         let fake = Fake::default();
         fake.add("pods", Some("a"), "p1");
         let (hub, clients) = fake.hub(Budgets::default());
@@ -179,14 +183,19 @@ mod tests {
             group_by: None,
             values: None,
         };
-        let (sender, batches) = mpsc::unbounded_channel();
         let spec = Spec::new("kind-test", &query).unwrap();
+        (fake, (hub, clients), subscription, spec)
+    }
+
+    async fn unwindowed() -> Rig {
+        let (fake, hub, subscription, spec) = subscribed().await;
+        let (sender, batches) = mpsc::unbounded_channel();
         let batcher = Batcher::spawn(subscription, spec, move |batch| {
             sender.send((Instant::now(), batch)).is_ok()
         });
         Rig {
             fake,
-            _hub: (hub, clients),
+            _hub: hub,
             batcher,
             batches,
         }
@@ -257,6 +266,67 @@ mod tests {
         assert_eq!(coalesced.seq, unacked.seq + 1);
         assert_eq!(coalesced.total, 10, "every change since, in one batch");
         assert_eq!(coalesced.upserts.len(), 8);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_late_ack_flushes_at_once_and_the_next_tick_waits_its_interval() {
+        let mut rig = rig().await;
+        rig.until_total(1).await;
+        rig.fake.add("pods", Some("a"), "p2");
+        let (_, unacked) = rig.next().await;
+        rig.fake.add("pods", Some("a"), "p3");
+        sleep(FLUSH * 3 + Duration::from_millis(20)).await;
+        let acked = Instant::now();
+        rig.batcher.ack(unacked.seq);
+        let (at, late) = rig.next().await;
+        assert_eq!(at, acked);
+        rig.fake.add("pods", Some("a"), "p4");
+        rig.batcher.ack(late.seq);
+        let (next, _) = rig.next().await;
+        assert!(next - at >= FLUSH, "{:?} after the late one", next - at);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_window_change_on_a_late_ack_leaves_no_tick_owed() {
+        let mut rig = rig().await;
+        rig.until_total(1).await;
+        rig.fake.add("pods", Some("a"), "p2");
+        let (_, unacked) = rig.next().await;
+        rig.batcher.set_window(0, 50);
+        sleep(FLUSH * 3 + Duration::from_millis(20)).await;
+        rig.batcher.ack(unacked.seq);
+        let (at, moved) = rig.next().await;
+        rig.fake.add("pods", Some("a"), "p3");
+        rig.batcher.ack(moved.seq);
+        let (next, _) = rig.next().await;
+        assert!(next - at >= FLUSH, "{:?} after the moved one", next - at);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_unacknowledged_list_is_not_woken_before_the_ack() {
+        let (_fake, _hub, subscription, spec) = subscribed().await;
+        let control = Arc::new(Control::default());
+        let (sender, mut batches) = mpsc::unbounded_channel();
+        let mut task = Box::pin(run(
+            subscription,
+            spec,
+            Arc::clone(&control),
+            move |batch| sender.send(batch).is_ok(),
+        ));
+        let polls = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&polls);
+        let _running = tokio::spawn(std::future::poll_fn(move |cx| {
+            counted.fetch_add(1, Ordering::Relaxed);
+            task.as_mut().poll(cx)
+        }));
+        control.pending.lock().unwrap().window = Some((0, 100));
+        control.wake.notify_one();
+        batches.recv().await.expect("the first batch");
+        sleep(Duration::from_millis(1)).await;
+
+        let before = polls.load(Ordering::Relaxed);
+        sleep(FLUSH * 10).await;
+        assert_eq!(polls.load(Ordering::Relaxed), before);
     }
 
     #[tokio::test(start_paused = true)]
