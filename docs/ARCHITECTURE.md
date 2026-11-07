@@ -180,8 +180,8 @@ Detached editor windows (VS Code's auxiliary windows) come after the MVP.
 twigo/
 ├─ apps/desktop/              Tauri app: thin glue; src-tauri only wires crates into commands/channels
 ├─ crates/
-│  ├─ twigo-core/             app services: spaces, settings layers, catalog, command bus, approvals
-│  ├─ twigo-kube/             contexts, client factory, credential runner, discovery/OpenAPI cache, operations
+│  ├─ twigo-core/             app services: spaces, settings layers, catalog, command bus and its actions, approvals
+│  ├─ twigo-kube/             contexts, client factory, credential runner, discovery/OpenAPI cache
 │  ├─ twigo-cache/            watch hub (upstreams, row stores, query views, batching), the discovery it follows
 │  ├─ twigo-describe/         describers by GroupKind: an object and its related facts → the Overview document (4.3)
 │  ├─ twigo-sessions/         logs, exec/attach, port-forward manager, pty terminal
@@ -489,6 +489,7 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
   - managedFields stay on the Rust side: they serve conflict display and are hidden in the editor.
   - Secrets keep their values in Rust.
     Only keys and sizes are sent, until the user explicitly reveals a value.
+    A Reveal is a command of the bus (5.1): it sends one key's value, read from the open object as it runs, which the view keeps until Hide or until it closes, and nothing stores.
   - The `kubectl.kubernetes.io/last-applied-configuration` annotation on a Secret holds its values in clear text.
     The decoder strips it from Secret rows and objects everywhere: tables, editors, agents.
   - **Secret-grade data** is anything that can carry Secret values: Secret data, Helm values, and Secret objects inside a Helm release manifest.
@@ -876,7 +877,8 @@ A notification centre with severity, actions and do-not-disturb, built on the to
 `notify` raises a toast from anywhere, and sonner, under the `<Toaster>` the workbench shell mounts, positions, stacks and times them.
 The toasts exist; the centre does not yet.
 Every long operation reports progress from Rust: drain, apply, Helm, provider "Create cluster".
-Progress shows in the status bar, or in a notification when the operation needs attention.
+A command's run tells how it goes over the channel of `command_execute` (5.1).
+The status bar shows a run that waits, as for a deleted namespace to go, until it ends, and a click stops the wait; a toast says how it ended, and an error waits to be read.
 
 ### 4.8 Settings and state
 
@@ -1000,10 +1002,13 @@ interface CommandDescriptor {
 - **One namespace for commands**, as VS Code's CommandsRegistry.
   Every UI action is a command, including the single-key table verbs.
 - **Backend commands.**
-  - All Kubernetes operations: apply, delete, scale, restart, drain, cordon, trigger, suspend, Helm.
-  - They run in Rust through one `command.execute` IPC.
-  - Rust checks policy before it runs, so a read-only context blocks the command before anything is sent.
-  - Args are resource references (`ResourceRef[]` = the selection), never full objects.
+  - All Kubernetes operations: apply, delete, scale, restart, drain, cordon, trigger, suspend, Helm, and a Reveal of secret-grade data (3.6).
+  - Each is an action of the command bus in `twigo-core`, planned first through `command_plan`.
+    Rust finds what it acts on, refuses what the policy blocks before anything is asked, and answers with what it will do, in words and as the equivalent kubectl command, and the friction its blast radius asks for in the context's mode (6.4).
+  - The webview draws the friction and runs the plan by its id through `command_execute`, with what proves the friction was met: the name typed, the countdown passed.
+    Rust checks the proof, runs a plan once, only from the window it was made for and on the cluster it was planned for, refuses it when the mode now asks for more, and decides on the policy again; the gate checks each request as it goes out.
+  - `command_cancel` drops a plan, or stops a run where stopping leaves what it sent standing, as the wait for a deleted object to go.
+  - Args are resource references (`ResourceRef`), never full objects.
 - **Menus are data that point at commands**, with `group`, `order` and `when`, as VS Code's MenuRegistry.
   The menu IDs:
   - `commandPalette`
@@ -1407,7 +1412,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   A write to `secrets` also needs what reading one needs, since its answer is the stored Secret and an empty patch changes nothing.
 
   The mode allows or blocks every other class.
-  In `guarded` the UI's writes and exec pass, since its commands confirm above the layer; anyone else's need the broker, and until there is one the answer is deny.
+  In `guarded` the UI's writes and exec pass, since its commands confirm above the layer and the command bus checks that they did (5.1); anyone else's need the broker, and until there is one the answer is deny.
   Confirmations, typed context names and diffs belong to the commands above the layer, because at the HTTP level a scale is one PATCH and a drain is many requests.
 
 - **Actors.**
@@ -1449,7 +1454,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
 | Port-forward                                                                  | ✓                                       | ✓                                     | ✓ unless `readOnly.allowPortForward: false`            |
 | exec, attach, ephemeral debug container                                       | ✓                                       | confirm                               | ✗                                                      |
 | create, apply, patch, update (dry-run diff always shown)                      | ✓                                       | confirm with the diff                 | ✗ (dry-run still allowed, so a change can be prepared) |
-| delete, scale, rollout restart, cordon, drain, evict, Helm rollback/uninstall | ✓ with confirmation listing the objects | typed confirmation (the context name) | ✗                                                      |
+| delete, scale, rollout restart, cordon, drain, evict, Helm rollback/uninstall | ✓ with friction by blast radius (below) | typed confirmation (the context name) | ✗                                                      |
 
 - **Where the mode comes from**, highest first:
   1. a policy file entry, which the UI cannot change or unlock; of several that match, the strictest;
@@ -1470,6 +1475,10 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
 - **Clients keep to what they were built for.**
   Clients of a context that now names another cluster still reach the old one until their owner re-opens, so their gate reads them as `read-only` from the moment the fingerprint changes, whatever the new one's mode is.
 - **Every blocked request** returns a typed `permissions` error with the mode and its source, and the UI shows which rule blocked it.
+- **The audit log** is `audit.jsonl` in the app-data directory, mode 0600.
+  The gate notes each write it sends, just above the socket, or stops, with the actor, the context and its mode; the command bus notes what a person confirmed, through which friction, and how it ended.
+  It names targets, never a value, so the actors of M3 only add their name.
+  A file that cannot be opened is said on stderr and keeps nothing: the log records, it guards nothing.
 - **How the UI shows a mode and asks before damage**, designed with the owner on 2026-11-03 ([research](research/workbench-design.md)), for M2:
   - Environment types, Production, Staging, Development and Local, set a context's colour and its default mode.
     A person marks a context, or its kubeconfig metadata says so (`twigo.environment`, 5.5), and the person's mark wins, their None included.
@@ -1477,11 +1486,12 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   - A production context is a mode with two cues (NN/g): a chip in the title bar after its name that says the type and the lock (`Production · read-only`), and the status bar tinted in it.
     The mockup's third, a 2 px line of its colour along the title bar's top, was dropped on 2026-11-07: the chip, the tint and the bar's left end in the context's colour already say it.
     The chip opens what set the mode, in words, with the choices the person has.
-  - Friction grows with the blast radius (Primer):
+  - Friction grows with the blast radius (Primer), and the mode raises it; Rust names it in a command's plan and checks it before the plan runs (5.1):
     - scale, cordon and suspend run at once with an undo (⌘Z);
-    - deleting a pod that a controller replaces, outside production, sends after a 5 s toast with Cancel, as Headlamp holds it;
+    - deleting a pod that a controller replaces, outside production, sends after a 5 s toast with Cancel, as Headlamp holds it, and ⌘Z cancels it too; in production it asks in a dialog;
     - deleting one object asks in a dialog that names the cluster in its question and lists what follows, with the equivalent kubectl command;
-    - a namespace, a node or a bulk delete asks for the object's name typed, as the guarded mode asks for the context's;
+    - a namespace, a node, a CustomResourceDefinition or a bulk delete asks for the object's name typed;
+    - in `guarded` every write asks for the context's name typed, whatever it risks, and a Reveal asks in a dialog, as in `read-only`; in `read-write` a Reveal shows at once;
     - the confirming button names its action, `Delete namespace`, never Yes or OK.
   - Delete is ⌘⌫, never a bare key (4.4).
 
