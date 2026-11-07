@@ -50,6 +50,8 @@
   `api` counts its streams, 24 watches at most by default, so a test or tool that opens more raises `Options::budgets`, or its watches wait.
   Never `Config::infer()`, `~/.kube/config` or the current context: tests and examples read `TWIGO_TEST_KUBECONFIG` and refuse contexts other than `kind-*` and `kwok-*`.
 - `Clients::new` takes the gate of the context it is for, so no client goes around the policy: the app's comes from `Policy::gate`, and tests and tools that own their clusters pass `Gate::unrestricted()`.
+- Tauri runs a plain `#[tauri::command] fn` on the main thread, outside its tokio runtime, where `tokio::spawn` panics; tests that call the core inside `#[tokio::test]` never see it.
+  A core method that spawns is `async`, so its handler has to be too, as `command_execute` is.
 - Exec plugins run only through `twigo_kube::credentials`, never kube's exec auth, which `Clients::new` strips.
   An unknown command may ask the person to sign in, so it runs only while a window has the focus: tests build their `Registry` with focus on, and the app runs a plugin only once its `HOME`'s `trust.json` lists it, else it starts with the review of untrusted plugins.
 - k8s-openapi moves only together with kube: kube 5.0 requires `^0.29`.
