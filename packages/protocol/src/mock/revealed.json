@@ -1,0 +1,12 @@
+{
+  "secret": {
+    "key.der": {
+      "value": "MIIBCgKCAQEA/w==",
+      "binary": true
+    },
+    "password": {
+      "value": "test-password",
+      "binary": false
+    }
+  }
+}

@@ -1,7 +1,9 @@
 //! App services: the catalog, spaces, the state store and each context's
 //! clients, which the Tauri app turns into commands.
 
+mod actions;
 mod auth;
+mod bus;
 pub mod catalog;
 pub mod connections;
 mod errors;
@@ -13,6 +15,7 @@ pub mod trust;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak};
+use std::time::Duration;
 
 use jiff::Timestamp;
 use tokio::sync::watch;
@@ -22,19 +25,22 @@ use twigo_cache::hub::{Connect, Hub, Query, Resource, RowFormat};
 use twigo_cache::view::Spec;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    Ack, ClusterVersion, Context, DownloadLogs, ErrorKind, GetValues, IpcError, ListBatch,
-    ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject, SetContextEnvironment, SetContextMode,
-    SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, SubscriptionId, ViewState,
+    Ack, ClusterVersion, Context, DownloadLogs, ErrorKind, Execute, Friction, GetValues, IpcError,
+    ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject, OperationEvent, Plan,
+    PlanId, PlanRequest, SetContextEnvironment, SetContextMode, SetLogSource, SetLogView,
+    SetLogWindow, SetParts, SetWindow, SubscriptionId, ViewState,
 };
 use twigo_kube::client::{Actor, Clients, ProxyEnv};
 use twigo_kube::credentials::{ExecError, OidcError, Provider, Registry, Source, Timeouts};
 use twigo_kube::discovery::Cache;
 use twigo_kube::kubeconfig;
 use twigo_netmon::Event;
-use twigo_policy::Policy;
+use twigo_policy::friction::{covers, friction};
+use twigo_policy::{Audit, Entry, Policy};
 use twigo_sessions::logs::Session;
 
 pub use auth::AuthFollower;
+use bus::{Bus, Progress, Waiting};
 use catalog::Catalog;
 use connections::Connections;
 use objects::{Opened, Target};
@@ -44,6 +50,8 @@ use trust::Trust;
 pub use twigo_policy::PolicyFile;
 
 pub struct Core {
+    /// For the runs the bus spawns, which outlive a call.
+    this: Weak<Core>,
     pub state: State,
     pub catalog: Catalog,
     pub connections: Connections,
@@ -56,6 +64,7 @@ pub struct Core {
     lists: Subscriptions<Batcher>,
     objects: Subscriptions<Opened>,
     logs: Subscriptions<Session>,
+    bus: Arc<Bus>,
     discovery: Arc<Cache>,
     credentials: Registry,
     /// Whether a Twigo window has the focus, which a plugin that may ask
@@ -83,9 +92,10 @@ pub enum ClientsError {
 }
 
 impl Core {
-    /// The core whose state and trusted plugins live in `data`, the app's
-    /// data directory, its clusters' discovery in `cache`, its cache
-    /// directory, and whose admin's policy is the file at `policy_file`.
+    /// The core whose state, trusted plugins and audit log live in `data`,
+    /// the app's data directory, its clusters' discovery in `cache`, its
+    /// cache directory, and whose admin's policy is the file at
+    /// `policy_file`.
     pub fn new(data: &Path, cache: &Path, policy_file: &Path) -> Arc<Self> {
         let shell_env = watch::Sender::new(None);
         let focused = watch::Sender::new(false);
@@ -95,14 +105,17 @@ impl Core {
             PolicyFile::read(policy_file),
             catalog.metadata(),
             state.choices(),
+            Audit::open(&data.join("audit.jsonl")),
         );
         Arc::new_cyclic(|core| Self {
+            this: core.clone(),
             hub: Hub::new(connect(core.clone())),
             policy,
             choosing: Mutex::default(),
             lists: Subscriptions::new("list"),
             objects: Subscriptions::new("object"),
             logs: Subscriptions::new("logs"),
+            bus: Arc::default(),
             discovery: Arc::new(Cache::new(cache.join("discovery"))),
             state,
             catalog,
@@ -266,6 +279,131 @@ impl Core {
             Some(_) => Ok(()),
             None => Err(IpcError::from(&ClientsError::NoContext(context.to_owned()))),
         }
+    }
+
+    /// What a command will do and the friction it asks for (ARCHITECTURE
+    /// 5.1, 6.4), refused by the policy before anything is asked.
+    pub async fn command_plan(&self, window: &str, request: PlanRequest) -> Result<Plan, IpcError> {
+        let ticket = self.bus.ticket(window);
+        let planned = match request {
+            PlanRequest::Delete { space, target } => actions::delete(self, &space, target).await?,
+            PlanRequest::Reveal { object, key } => actions::reveal(self, window, object, key)?,
+        };
+        self.authorize(&planned.context, &planned.writes)?;
+        let access = self.policy.access(&planned.context);
+        let connection = self.policy.connection(&planned.context);
+        self.bus.keep(ticket, planned, connection, &access)
+    }
+
+    /// Runs a plan once its friction is met, whose events go through `send`.
+    pub fn command_execute(
+        &self,
+        window: &str,
+        request: Execute,
+        send: impl FnMut(OperationEvent) -> bool + Send + 'static,
+    ) -> Result<(), IpcError> {
+        let (waiting, ticket) = self.bus.take(window, request.plan)?;
+        let Waiting {
+            planned,
+            connection,
+            friction: planned_friction,
+            since,
+        } = *waiting;
+        let context = planned.context.clone();
+        if self.policy.connection(&context) != connection {
+            return Err(IpcError::new(
+                ErrorKind::Conflict,
+                format!(
+                    "{context} names another cluster now than when Twigo asked, so it sent nothing"
+                ),
+            ));
+        }
+        let access = self.policy.access(&context);
+        if !covers(
+            &planned_friction,
+            &friction(&planned.risk, &context, &access),
+        ) {
+            return Err(IpcError::new(
+                ErrorKind::Conflict,
+                format!(
+                    "{context} is {} now, which asks for more than you confirmed, so Twigo sent nothing",
+                    access.mode.name()
+                ),
+            ));
+        }
+        match &planned_friction {
+            Friction::Countdown { seconds }
+                if since.elapsed() < Duration::from_secs((*seconds).into()) =>
+            {
+                return Err(IpcError::new(
+                    ErrorKind::InvalidInput,
+                    "the countdown has not ended",
+                ));
+            }
+            Friction::Typed { text } if request.typed.as_deref() != Some(text.as_str()) => {
+                return Err(IpcError::new(
+                    ErrorKind::InvalidInput,
+                    format!("type {text} to confirm"),
+                ));
+            }
+            _ => {}
+        }
+        self.authorize(&context, &planned.writes)?;
+
+        let (progress, stop) = Progress::new(send);
+        self.bus.run(ticket, request.plan, stop)?;
+        let audit = |entry: &Entry<'_>| self.policy.audit().record(entry);
+        audit(&Entry::Confirmed {
+            context: &context,
+            command: planned.command,
+            target: &planned.target,
+            mode: access.mode,
+            friction: &planned_friction,
+        });
+        let (bus, policy, window) = (
+            Arc::clone(&self.bus),
+            Arc::clone(&self.policy),
+            window.to_owned(),
+        );
+        let (command, target, run) = (planned.command, planned.target, planned.run);
+        tokio::spawn(async move {
+            let (event, outcome, message) = match run(progress.clone()).await {
+                Ok(finished) => finished.told(),
+                Err(error) => {
+                    let message = error.message.clone();
+                    (OperationEvent::Failed { error }, "failed", message)
+                }
+            };
+            policy.audit().record(&Entry::Ended {
+                context: &context,
+                command,
+                target: &target,
+                outcome,
+                message: &message,
+            });
+            progress.tell(event);
+            bus.ended(&window, request.plan);
+        });
+        Ok(())
+    }
+
+    /// Drops a plan that has not run, or stops one that runs.
+    pub fn command_cancel(&self, window: &str, id: PlanId) {
+        self.bus.cancel(window, id);
+    }
+
+    /// Whether the UI may send `writes` on `context` now.
+    pub(crate) fn authorize(
+        &self,
+        context: &str,
+        writes: &[twigo_policy::Attributes],
+    ) -> Result<(), IpcError> {
+        for write in writes {
+            self.policy
+                .authorize(context, write, twigo_kube::client::Actor::Ui)
+                .map_err(|blocked| IpcError::from(*blocked))?;
+        }
+        Ok(())
     }
 
     pub async fn cluster_version(&self, context: &str) -> Result<ClusterVersion, IpcError> {
@@ -522,12 +660,13 @@ impl Core {
         })
     }
 
-    /// Ends the lists, open objects and logs sessions of a window that
-    /// reloads or closes.
+    /// Ends the lists, open objects, logs sessions and plans of a window
+    /// that reloads or closes.
     pub fn drop_window(&self, window: &str) {
         self.lists.drop_window(window);
         self.objects.drop_window(window);
         self.logs.drop_window(window);
+        self.bus.drop_window(window);
     }
 
     /// Retires every connection on wake, and those whose route moved on a

@@ -250,6 +250,15 @@ export type ExecReview = {
  */
 reviewed: boolean, plugins: Array<ReviewedPlugin>, };
 
+/**
+ * Runs a plan, with what its friction asks for.
+ */
+export type Execute = { plan: PlanId, 
+/**
+ * What the person typed, for a `typed` friction.
+ */
+typed: string | null, };
+
 export type Field = { label: string, value: Value, };
 
 export type Finding = { 
@@ -288,6 +297,12 @@ previous: boolean,
  * wrote none.
  */
 lastLine: string | null, };
+
+/**
+ * What a person goes through before a plan runs, by what it risks and the
+ * context's mode (ARCHITECTURE 6.4).
+ */
+export type Friction = { "kind": "atOnce" } | { "kind": "countdown", seconds: number, } | { "kind": "confirm" } | { "kind": "typed", text: string, };
 
 /**
  * Asks for the values of a ConfigMap's keys, which its Overview lists with
@@ -787,10 +802,51 @@ export type OpenLogs = { target: LogTarget, source: LogSource, view: LogView, };
 export type OpenObject = { object: ObjectQuery, parts: ObjectParts, };
 
 /**
+ * How a running plan goes, over its channel; every kind but `running` is
+ * the last.
+ */
+export type OperationEvent = { "state": "running", text: string, } | { "state": "done", text: string, } | { "state": "stopped", text: string, } | { "state": "revealed", value: string, binary: boolean, } | { "state": "failed", error: IpcError, };
+
+/**
  * An object described for people: sections in their order, each a list of
  * blocks from a closed set (ARCHITECTURE 4.3).
  */
 export type Overview = { sections: Array<Section>, };
+
+/**
+ * What a command will do, for the person to confirm. It runs only by its
+ * id, once, on the cluster it was planned for.
+ */
+export type Plan = { id: PlanId, context: string, environment: Environment | null, mode: Mode, friction: Friction, 
+/**
+ * The question a dialog asks, naming the cluster: `Delete pod web-1
+ * from kind-a?`
+ */
+question: string, 
+/**
+ * What the confirming button says: `Delete pod`.
+ */
+confirm: string, 
+/**
+ * What follows, a sentence each.
+ */
+consequences: Array<string>, 
+/**
+ * The kubectl command that does the same.
+ */
+kubectl: string, 
+/**
+ * What a toast or the status bar says while it counts down or runs:
+ * `Deleting pod web-1`.
+ */
+doing: string, };
+
+export type PlanId = number;
+
+/**
+ * What a person asks a command to do.
+ */
+export type PlanRequest = { "action": "delete", space: string, target: ResourceRef, } | { "action": "reveal", object: SubscriptionId, key: string, };
 
 export type PluginStatus = { "state": "idle" } | { "state": "waiting" } | { "state": "running", 
 /**
@@ -829,6 +885,15 @@ export type RequestClass = "read" | "dryRun" | "write" | "secretRead" | "forward
  * lists and what `:` in quick access resolves names against (ARCHITECTURE 4.5).
  */
 export type Resource = { gvr: Gvr, kind: string, singular: string, shortNames: Array<string>, namespaced: boolean, };
+
+/**
+ * An object of a space, by its resource as discovery names it.
+ */
+export type ResourceRef = { gvr: Gvr, namespaced: boolean, 
+/**
+ * None for a cluster-scoped object.
+ */
+namespace: string | null, name: string, };
 
 export type ReviewedPlugin = { plugin: ExecPlugin, 
 /**
@@ -1028,6 +1093,9 @@ export type Commands = {
   context_environment_set: { request: SetContextEnvironment; response: null; message: null };
   context_unlock: { request: string; response: null; message: null };
   context_relock: { request: string; response: null; message: null };
+  command_plan: { request: PlanRequest; response: Plan; message: null };
+  command_execute: { request: Execute; response: null; message: OperationEvent };
+  command_cancel: { request: PlanId; response: null; message: null };
   space_open: { request: string; response: Space; message: null };
   resources_watch: { request: string; response: null; message: Discovered };
   namespaces_list: { request: string; response: Array<string>; message: null };

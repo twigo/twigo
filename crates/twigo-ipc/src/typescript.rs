@@ -5,13 +5,13 @@ use std::fmt::Write;
 use ts_rs::{Config, TS, TypeVisitor};
 
 use crate::command::{
-    ClusterVersionGet, Command, ContextAuthWatch, ContextEnvironmentSet, ContextModeSet,
-    ContextRelock, ContextSignIn, ContextSignInCancel, ContextUnlock, ContextsWatch, ExecReviewGet,
-    ExecTrust, KeyboardLayoutWatch, ListAck, ListSetWindow, ListSubscribe, ListUnsubscribe,
-    LogsAck, LogsClose, LogsDownload, LogsOpen, LogsSetSource, LogsSetView, LogsSetWindow,
-    NamespacesList, ObjectAck, ObjectClose, ObjectOpen, ObjectSetParts, ObjectValues,
-    ResourcesWatch, ShellEnvironmentRetry, ShellEnvironmentWatch, SpaceOpen, SpacesList, StateLoad,
-    StateSet, UrlOpen,
+    ClusterVersionGet, Command, CommandCancel, CommandExecute, CommandPlan, ContextAuthWatch,
+    ContextEnvironmentSet, ContextModeSet, ContextRelock, ContextSignIn, ContextSignInCancel,
+    ContextUnlock, ContextsWatch, ExecReviewGet, ExecTrust, KeyboardLayoutWatch, ListAck,
+    ListSetWindow, ListSubscribe, ListUnsubscribe, LogsAck, LogsClose, LogsDownload, LogsOpen,
+    LogsSetSource, LogsSetView, LogsSetWindow, NamespacesList, ObjectAck, ObjectClose, ObjectOpen,
+    ObjectSetParts, ObjectValues, ResourcesWatch, ShellEnvironmentRetry, ShellEnvironmentWatch,
+    SpaceOpen, SpacesList, StateLoad, StateSet, UrlOpen,
 };
 
 /// The TypeScript module of `packages/protocol`: every type the commands
@@ -29,6 +29,9 @@ pub fn typescript() -> String {
     module.command::<ContextEnvironmentSet>();
     module.command::<ContextUnlock>();
     module.command::<ContextRelock>();
+    module.command::<CommandPlan>();
+    module.command::<CommandExecute>();
+    module.command::<CommandCancel>();
     module.command::<SpaceOpen>();
     module.command::<ResourcesWatch>();
     module.command::<NamespacesList>();

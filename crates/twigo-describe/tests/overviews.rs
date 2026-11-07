@@ -1,7 +1,7 @@
 //! Describes the objects recorded from kind (`cargo run -p twigo-core
 //! --example record_objects`) and compares the documents, with the objects
-//! as views show them, with the mock backend's, which
-//! `TWIGO_UPDATE_OBJECTS=1` rewrites.
+//! as views show them and what a Reveal of each Secret's keys answers, with
+//! the mock backend's, which `TWIGO_UPDATE_OBJECTS=1` rewrites.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -72,6 +72,51 @@ struct Mocked {
     manifest: String,
 }
 
+/// What a Reveal answers for a key, apart from the objects, which hold no
+/// value.
+#[derive(Serialize)]
+struct Revealed {
+    value: String,
+    binary: bool,
+}
+
+/// Compares `json` with the file at `path` from the repository's root, which
+/// `TWIGO_UPDATE_OBJECTS=1` rewrites.
+fn recorded_as(path: &str, json: &str) {
+    let file = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(path);
+    if std::env::var_os("TWIGO_UPDATE_OBJECTS").is_some() {
+        std::fs::write(&file, json).unwrap();
+    }
+    assert!(
+        std::fs::read_to_string(&file).is_ok_and(|current| current == json),
+        "run TWIGO_UPDATE_OBJECTS=1 cargo test -p twigo-describe --test overviews"
+    );
+}
+
+#[test]
+fn the_mock_reveals_the_recorded_secrets_values_as_rust_does() {
+    let revealed: BTreeMap<String, BTreeMap<String, Revealed>> = recorded()
+        .into_iter()
+        .filter(|(_, recorded)| recorded.object["kind"] == "Secret")
+        .map(|(name, recorded)| {
+            let keys = recorded.object["data"].as_object().unwrap().keys();
+            let values = keys
+                .map(|key| {
+                    let (value, binary) =
+                        twigo_policy::redact::secret_value(&recorded.object, key).unwrap();
+                    (key.clone(), Revealed { value, binary })
+                })
+                .collect();
+            (name, values)
+        })
+        .collect();
+    assert!(!revealed.is_empty());
+    let json = serde_json::to_string_pretty(&revealed).unwrap() + "\n";
+    recorded_as("packages/protocol/src/mock/revealed.json", &json);
+}
+
 #[test]
 fn the_mock_answers_with_the_recorded_objects() {
     let mut described = described();
@@ -83,16 +128,8 @@ fn the_mock_answers_with_the_recorded_objects() {
             (name, Mocked { overview, manifest })
         })
         .collect();
-    let file =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/protocol/src/mock/objects.json");
     let json = serde_json::to_string_pretty(&mocked).unwrap() + "\n";
-    if std::env::var_os("TWIGO_UPDATE_OBJECTS").is_some() {
-        std::fs::write(&file, &json).unwrap();
-    }
-    assert!(
-        std::fs::read_to_string(&file).is_ok_and(|current| current == json),
-        "run TWIGO_UPDATE_OBJECTS=1 cargo test -p twigo-describe --test overviews"
-    );
+    recorded_as("packages/protocol/src/mock/objects.json", &json);
     for value in ["test-password", "dGVzdC1wYXNzd29yZA", "MIIBCgKCAQEA"] {
         assert!(!json.contains(value), "{value} in the mock's objects");
     }

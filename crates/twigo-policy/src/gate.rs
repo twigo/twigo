@@ -64,10 +64,31 @@ impl Gate {
         RecheckLayer(self.clone())
     }
 
-    fn check(&self, attributes: &Attributes) -> Result<(), BoxError> {
-        self.policy
-            .authorize_built(&self.context, self.connection, attributes, self.actor)
-            .map_err(|blocked| BoxError::from(*blocked))
+    /// Whether the request may go on; `sending` where it goes out next,
+    /// which the audit log notes of a write it lets through.
+    fn check(&self, attributes: &Attributes, sending: bool) -> Result<(), BoxError> {
+        let decided =
+            self.policy
+                .authorize_built(&self.context, self.connection, attributes, self.actor);
+        let audit = self.policy.audit();
+        match decided {
+            Ok(mode) => {
+                if sending {
+                    audit.request(&self.context, self.actor, attributes, mode, None);
+                }
+                Ok(())
+            }
+            Err(blocked) => {
+                audit.request(
+                    &self.context,
+                    self.actor,
+                    attributes,
+                    blocked.mode,
+                    Some(blocked.reason),
+                );
+                Err(BoxError::from(*blocked))
+            }
+        }
     }
 }
 
@@ -117,7 +138,7 @@ where
 
     fn call(&mut self, mut request: Request<B>) -> Self::Future {
         let attributes = Attributes::of(&request);
-        if let Err(blocked) = self.gate.check(&attributes) {
+        if let Err(blocked) = self.gate.check(&attributes, false) {
             return Box::pin(ready(Err(blocked)));
         }
         request.extensions_mut().insert(Read(Arc::new(attributes)));
@@ -167,7 +188,7 @@ where
             .extensions()
             .get::<Read>()
             .expect("the gate at the top of the stack read the request");
-        if let Err(blocked) = self.gate.check(&read.0) {
+        if let Err(blocked) = self.gate.check(&read.0, true) {
             return Box::pin(ready(Err(blocked)));
         }
         let answer = self.inner.call(request);

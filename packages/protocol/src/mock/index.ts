@@ -16,6 +16,7 @@ import type {
   ViewState,
 } from "../generated";
 import { MockAccess } from "./access";
+import { MockBus } from "./bus";
 import {
   AUTH_SCENARIOS,
   isAuthScenario,
@@ -182,6 +183,24 @@ export function createMockBackend(
     return found;
   };
 
+  const objectContexts = new Map<number, string>();
+  const bus = new MockBus({
+    access: (context) => access.of(context),
+    context: (id) => space(id).contexts[0],
+    cluster,
+    reveal: (id, key) => object(id).reveal(key),
+    secret: (id) => {
+      const context = objectContexts.get(id);
+      if (context === undefined) {
+        throw new IpcError("notFound", `no object subscription ${id}`);
+      }
+      return { context, ...object(id).names };
+    },
+    changed: () => {
+      for (const sub of subscriptions.values()) sub.touch();
+    },
+  });
+
   const logs = new Map<number, MockLogs>();
   const log = (id: number) => {
     const found = logs.get(id);
@@ -218,6 +237,8 @@ export function createMockBackend(
       access.relock(context);
       return null;
     },
+    command_plan: (request) => bus.plan(request),
+    command_cancel: (id) => bus.cancel(id),
     space_open: (name) => {
       if (!CONTEXTS.some((context) => context.name === name)) {
         throw new IpcError("notFound", `no source lists the context ${name}`);
@@ -340,6 +361,7 @@ export function createMockBackend(
     object_close: (id) => {
       object(id);
       objects.delete(id);
+      objectContexts.delete(id);
       return null;
     },
     list_unsubscribe: (id) => {
@@ -438,6 +460,7 @@ export function createMockBackend(
       space(query.space);
       const id = nextId++;
       const [context] = space(query.space).contexts;
+      if (context !== undefined) objectContexts.set(id, context);
       objects.set(
         id,
         new MockObject(
@@ -465,6 +488,7 @@ export function createMockBackend(
       );
       return id;
     },
+    command_execute: (request, onMessage) => bus.execute(request, onMessage),
     contexts_watch: (_request, onMessage) => access.watch(onMessage),
     resources_watch: (id, onMessage) => {
       space(id);

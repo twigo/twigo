@@ -24,6 +24,7 @@ use twigo_ipc::{
 
 /// An open object: dropping it ends its task and its upstreams.
 pub struct Opened {
+    context: Arc<str>,
     control: Arc<Control>,
     task: JoinHandle<()>,
 }
@@ -58,8 +59,23 @@ impl Opened {
         send: impl FnMut(ObjectBatch) -> bool + Send + 'static,
     ) -> Self {
         let control = Arc::new(Control::default());
+        let context = target.context.as_str().into();
         let task = tokio::spawn(run(hub, target, object, parts, Arc::clone(&control), send));
-        Self { control, task }
+        Self {
+            context,
+            control,
+            task,
+        }
+    }
+
+    /// The context it lives in.
+    pub(crate) fn context(&self) -> &str {
+        &self.context
+    }
+
+    /// The object as last listed, read when asked, after it closes too.
+    pub(crate) fn reading(&self) -> Reading {
+        Reading(Arc::clone(&self.control))
     }
 
     pub fn set_parts(&self, parts: ObjectParts) {
@@ -75,16 +91,25 @@ impl Opened {
     /// The values of a ConfigMap's keys: None for a key it lacks or holds
     /// as binary data. A Secret's values stay in Rust (ARCHITECTURE 3.6).
     pub fn values(&self, keys: &[String]) -> Result<Vec<Option<String>>, IpcError> {
-        let latest = self.control.latest.lock().expect("object lock").clone();
+        values_of(&self.reading().json()?, keys)
+    }
+}
+
+/// An open object's latest listing.
+#[derive(Clone)]
+pub(crate) struct Reading(Arc<Control>);
+
+impl Reading {
+    pub(crate) fn json(&self) -> Result<Value, IpcError> {
+        let latest = self.0.latest.lock().expect("object lock").clone();
         let object =
             latest.ok_or_else(|| IpcError::new(ErrorKind::NotFound, "the object is not listed"))?;
-        let json: Value = serde_json::from_str(object.json.get()).map_err(|error| {
+        serde_json::from_str(object.json.get()).map_err(|error| {
             IpcError::new(
                 ErrorKind::Internal,
                 format!("the object does not parse: {error}"),
             )
-        })?;
-        values_of(&json, keys)
+        })
     }
 }
 

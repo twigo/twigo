@@ -5,10 +5,11 @@
 use ts_rs::TS;
 
 use crate::{
-    Ack, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ExecReview, GetValues,
-    KeyboardLayout, ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject,
-    SetContextEnvironment, SetContextMode, SetLogSource, SetLogView, SetLogWindow, SetParts,
-    SetWindow, ShellEnvironment, Space, StateEntry, StateSnapshot, SubscriptionId,
+    Ack, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ExecReview, Execute,
+    GetValues, KeyboardLayout, ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject,
+    OperationEvent, Plan, PlanId, PlanRequest, SetContextEnvironment, SetContextMode, SetLogSource,
+    SetLogView, SetLogWindow, SetParts, SetWindow, ShellEnvironment, Space, StateEntry,
+    StateSnapshot, SubscriptionId,
 };
 
 pub trait Command {
@@ -78,6 +79,43 @@ pub struct ContextRelock;
 impl Command for ContextRelock {
     const NAME: &'static str = "context_relock";
     type Request = String;
+    type Response = ();
+    type Message = ();
+}
+
+/// Plans a command that changes a cluster or shows secret-grade data
+/// (ARCHITECTURE 5.1, 6.4): what it will do and the friction it asks for,
+/// or the gate's refusal before anything is asked.
+pub struct CommandPlan;
+
+impl Command for CommandPlan {
+    const NAME: &'static str = "command_plan";
+    type Request = PlanRequest;
+    type Response = Plan;
+    type Message = ();
+}
+
+/// Runs a plan once its friction is met, refused when it is not, when the
+/// plan ran or was dropped, when its context names another cluster now, or
+/// when the mode asks for more than the plan did. Answers once it starts,
+/// and its channel tells how it goes.
+pub struct CommandExecute;
+
+impl Command for CommandExecute {
+    const NAME: &'static str = "command_execute";
+    type Request = Execute;
+    type Response = ();
+    type Message = OperationEvent;
+}
+
+/// Drops a plan that has not run, or stops one that runs at its next point
+/// where stopping leaves what it sent standing, as a wait; nothing for a
+/// plan already ended.
+pub struct CommandCancel;
+
+impl Command for CommandCancel {
+    const NAME: &'static str = "command_cancel";
+    type Request = PlanId;
     type Response = ();
     type Message = ();
 }

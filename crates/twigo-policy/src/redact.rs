@@ -1,9 +1,10 @@
 //! What the webview may see of an object (ARCHITECTURE 3.6): managedFields
-//! stay in Rust, and so do a Secret's values.
+//! stay in Rust, and so do a Secret's values until a Reveal.
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use serde_json::Value;
+use twigo_ipc::{ErrorKind, IpcError};
 
 /// Holds the whole object as last applied, a Secret's values in clear.
 const LAST_APPLIED: &str = "kubectl.kubernetes.io/last-applied-configuration";
@@ -38,6 +39,30 @@ pub fn for_view(mut object: Value) -> Value {
         }
     }
     object
+}
+
+/// A Secret's value of `key` (ARCHITECTURE 3.6): its text, or its base64 when
+/// it is not UTF-8, and whether it is; refused for any other kind.
+pub fn secret_value(object: &Value, key: &str) -> Result<(String, bool), IpcError> {
+    if object["apiVersion"] != "v1" || object["kind"] != "Secret" {
+        return Err(IpcError::new(
+            ErrorKind::InvalidInput,
+            "only a Secret's values are revealed".to_owned(),
+        ));
+    }
+    let encoded = object["data"][key].as_str().ok_or_else(|| {
+        IpcError::new(ErrorKind::NotFound, format!("the Secret has no key {key}"))
+    })?;
+    let bytes = STANDARD.decode(encoded).map_err(|error| {
+        IpcError::new(
+            ErrorKind::Internal,
+            format!("the value of {key} is no base64: {error}"),
+        )
+    })?;
+    Ok(match String::from_utf8(bytes) {
+        Ok(text) => (text, false),
+        Err(_) => (encoded.to_owned(), true),
+    })
 }
 
 #[cfg(test)]
@@ -114,5 +139,27 @@ mod tests {
             config["metadata"]["annotations"]
         );
         assert!(shown["metadata"].get("managedFields").is_none());
+    }
+
+    #[test]
+    fn a_secret_reveals_its_text_or_the_base64_of_its_bytes() {
+        let secret = serde_json::json!({
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "data": { "password": "aHVudGVyMg==", "key.der": "MIIBCgKCAQEA/w==" },
+        });
+        let value = secret_value(&secret, "password").unwrap();
+        assert_eq!(value, ("hunter2".to_owned(), false));
+        let value = secret_value(&secret, "key.der").unwrap();
+        assert_eq!(value, ("MIIBCgKCAQEA/w==".to_owned(), true));
+        let missing = secret_value(&secret, "token").unwrap_err();
+        assert_eq!(missing.kind, ErrorKind::NotFound);
+        let config = serde_json::json!({
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "data": { "password": "aHVudGVyMg==" },
+        });
+        let refused = secret_value(&config, "password").unwrap_err();
+        assert_eq!(refused.kind, ErrorKind::InvalidInput);
     }
 }

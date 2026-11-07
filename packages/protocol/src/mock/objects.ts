@@ -13,6 +13,7 @@ import type {
 import { replicaSetUid, type Cluster, type Pod } from "./cluster";
 import { CRASH_LINE as LAST_LINE } from "./logs";
 import OBJECTS from "./objects.json";
+import REVEALED from "./revealed.json";
 
 /**
  * Objects described in Rust from kind by `twigo-describe`'s tests, keyed by
@@ -21,6 +22,11 @@ import OBJECTS from "./objects.json";
 const RECORDED: Readonly<
   Record<string, { overview: Overview; manifest: string }>
 > = OBJECTS as never;
+
+/** What a Reveal of each recorded Secret's keys answers, written by the same test from what Rust reveals. */
+const VALUES: Readonly<
+  Record<string, Readonly<Record<string, { value: string; binary: boolean }>>>
+> = REVEALED;
 
 /** The recorded object that stands for any object of a resource. */
 const BY_RESOURCE: Readonly<Record<string, string>> = {
@@ -68,6 +74,8 @@ function podFixture(pod: Pod | undefined): string {
  * mock has of it: a Deployment's pods, a node's pods.
  */
 export class MockObject {
+  /** The recorded object it stands for. */
+  readonly #fixture: string;
   readonly #overview: Overview;
   readonly #manifest: string;
   readonly #related: Related;
@@ -92,12 +100,13 @@ export class MockObject {
         ? podFixture(pod)
         : BY_RESOURCE[`${group}/${version}/${resource}`];
     const recorded = name === undefined ? undefined : RECORDED[name];
-    if (recorded === undefined) {
+    if (name === undefined || recorded === undefined) {
       throw new IpcError(
         "notFound",
         `the mock backend has no recorded ${resource}`,
       );
     }
+    this.#fixture = name;
     this.#overview = withLastLines(
       listing(renamed(recorded.overview, query), query, cluster),
     );
@@ -139,6 +148,27 @@ export class MockObject {
       throw new IpcError("forbidden", "only a ConfigMap's values are sent");
     }
     return keys.map((key) => object.data?.[key] ?? null);
+  }
+
+  /** A Secret's value of `key`, as a Reveal answers it. */
+  reveal(key: string): { value: string; binary: boolean } {
+    const values = VALUES[this.#fixture];
+    if (values === undefined) {
+      throw new IpcError("invalidInput", "only a Secret's values are revealed");
+    }
+    const value = values[key];
+    if (value === undefined) {
+      throw new IpcError("notFound", `the Secret has no key ${key}`);
+    }
+    return value;
+  }
+
+  /** Its namespace and name. */
+  get names(): { namespace: string; name: string } {
+    const { metadata } = JSON.parse(this.#manifest) as {
+      metadata: { namespace?: string; name: string };
+    };
+    return { namespace: metadata.namespace ?? "", name: metadata.name };
   }
 
   #send(parts: ObjectParts): void {

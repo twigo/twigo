@@ -70,6 +70,11 @@ export class MockAccess {
     if (this.#unlocks.delete(name)) this.#emit();
   }
 
+  /** What a context lets through now. */
+  of(name: string): ContextAccess {
+    return this.#access(fixture(name));
+  }
+
   #list(): Context[] {
     return CONTEXTS.map((context) => ({
       ...context,

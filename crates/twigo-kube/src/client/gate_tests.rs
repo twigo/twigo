@@ -11,7 +11,7 @@ use http_body_util::Full;
 use jiff::SignedDuration;
 use tokio::sync::Notify;
 use twigo_ipc::{BlockReason, ErrorKind, Mode, ModeSource, RequestClass};
-use twigo_policy::Policy;
+use twigo_policy::{Audit, Choices, Metadata, Policy, PolicyFile};
 
 use super::*;
 use crate::errors;
@@ -56,7 +56,16 @@ impl Server {
 }
 
 fn in_mode(mode: Mode) -> Arc<Policy> {
-    let policy = Policy::open();
+    audited(mode, Audit::off())
+}
+
+fn audited(mode: Mode, audit: Audit) -> Arc<Policy> {
+    let policy = Policy::new(
+        PolicyFile::default(),
+        |_| Some(Metadata::default()),
+        Choices::default(),
+        audit,
+    );
     policy.set_mode("c", Some(mode)).unwrap();
     policy
 }
@@ -115,9 +124,12 @@ async fn reads_and_dry_runs_pass_in_every_mode() {
 
 /// The write waits for the only request stream while the first holds it,
 /// and what happens to the mode meanwhile decides its fate.
-async fn wait_for_a_stream(change: impl FnOnce(&Policy)) -> (Server, Result<String, kube::Error>) {
+async fn wait_for_a_stream(
+    audit: Audit,
+    change: impl FnOnce(&Policy),
+) -> (Server, Result<String, kube::Error>) {
     let server = Server::default();
-    let policy = in_mode(Mode::ReadOnly);
+    let policy = audited(Mode::ReadOnly, audit);
     policy.unlock("c").unwrap();
     let budgets = Budgets {
         requests: 1,
@@ -152,16 +164,25 @@ async fn wait_for_a_stream(change: impl FnOnce(&Policy)) -> (Server, Result<Stri
 
 #[tokio::test]
 async fn a_relock_reaches_a_request_already_waiting() {
-    let (server, answer) = wait_for_a_stream(|policy| policy.relock("c")).await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("audit.jsonl");
+    let (server, answer) = wait_for_a_stream(Audit::open(&path), |policy| policy.relock("c")).await;
     let error = errors::request(&answer.unwrap_err());
     assert_eq!(error.kind, ErrorKind::Permissions);
     assert_eq!(error.blocked.unwrap().mode, Mode::ReadOnly);
     assert_eq!(server.seen(), ["GET /hold"]);
+    let logged = std::fs::read_to_string(&path).unwrap();
+    let lines: Vec<serde_json::Value> = logged
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 1, "logged once, where it stopped: {logged}");
+    assert_eq!(lines[0]["blocked"], "mode");
 }
 
 #[tokio::test]
 async fn an_unlock_that_lasts_lets_the_waiting_request_through() {
-    let (server, answer) = wait_for_a_stream(|_| {}).await;
+    let (server, answer) = wait_for_a_stream(Audit::off(), |_| {}).await;
     answer.unwrap();
     assert_eq!(
         server.seen(),
@@ -177,7 +198,7 @@ async fn an_unlock_that_ends_by_itself_reaches_a_request_already_waiting() {
             .unwrap();
         std::thread::sleep(Duration::from_millis(5));
     };
-    let (server, answer) = wait_for_a_stream(wait_it_out).await;
+    let (server, answer) = wait_for_a_stream(Audit::off(), wait_it_out).await;
     assert_eq!(
         errors::request(&answer.unwrap_err()).kind,
         ErrorKind::Permissions
@@ -269,4 +290,55 @@ async fn the_sessions_budget_is_shared_by_every_actor() {
     assert_eq!(clients.usage().borrow().sessions.held, 1);
     drop(held);
     assert!(clients.try_admit(Class::Session, Actor::Terminal).is_some());
+}
+
+#[tokio::test]
+async fn the_audit_log_has_each_write_sent_or_stopped_and_no_read_or_body() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("audit.jsonl");
+    let policy = audited(Mode::ReadWrite, Audit::open(&path));
+    let server = Server::default();
+    let clients = server.clients(Budgets::default(), policy.gate("c", Actor::Ui));
+
+    send(&clients.api, "GET", CONFIGMAPS).await.unwrap();
+    let body = Request::post(CONFIGMAPS)
+        .body(br#"{"data":{"password":"hunter2"}}"#.to_vec())
+        .unwrap();
+    clients.api.request_text(body).await.unwrap();
+    policy.set_mode("c", Some(Mode::ReadOnly)).unwrap();
+    send(&clients.api, "DELETE", "/api/v1/namespaces/a/configmaps/m")
+        .await
+        .unwrap_err();
+
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(!text.contains("hunter2"), "{text}");
+    let lines: Vec<serde_json::Value> = text
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let without_time = |line: &serde_json::Value| {
+        assert!(line["at"].is_string(), "{line}");
+        let mut line = line.clone();
+        line.as_object_mut().unwrap().remove("at");
+        line
+    };
+    assert_eq!(
+        lines.iter().map(without_time).collect::<Vec<_>>(),
+        [
+            serde_json::json!({
+                "event": "request", "context": "c", "actor": "ui", "verb": "create",
+                "target": "configmaps in a", "mode": "read-write", "blocked": null,
+            }),
+            serde_json::json!({
+                "event": "request", "context": "c", "actor": "ui", "verb": "delete",
+                "target": "configmaps/m in a", "mode": "read-only", "blocked": "mode",
+            }),
+        ]
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
 }
