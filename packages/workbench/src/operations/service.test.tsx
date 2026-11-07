@@ -4,12 +4,13 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   IpcError,
   type Backend,
+  type Blocked,
   type OperationEvent,
   type Plan,
   type PlanRequest,
 } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
-import { Toaster } from "@twigo/ui";
+import { notify, Toaster } from "@twigo/ui";
 import { testWorkbench } from "../testing";
 import { COUNTING_DOWN, type Outcome } from "./service";
 
@@ -19,6 +20,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
@@ -160,15 +162,50 @@ test("a wait shows until the run ends, and a stop asks Rust to stop it", async (
   });
 });
 
-test("a refused plan is reported and nothing runs", async () => {
-  const refused = new IpcError(
+function blocked(source: Blocked["source"]): IpcError {
+  return new IpcError(
     "permissions",
-    "dev is read-only by your choice, so Twigo did not send delete pods/web-1 in default",
+    "dev is read-only as Production by default, so Twigo did not send delete pods/web-1 in default",
+    {
+      context: "dev",
+      mode: "read-only",
+      source,
+      class: "write",
+      reason: "mode",
+      verb: "delete",
+      target: "pods/web-1 in default",
+    },
   );
-  const { sent, report, outcome } = await started(refused, []);
+}
+
+test("a refused plan runs nothing, and a lock the person may lift offers the unlock", async () => {
+  const error = vi.spyOn(notify, "error");
+  const refused = blocked({ kind: "environment", environment: "production" });
+  const { workbench, sent, report, outcome } = await started(refused, []);
   await expect(outcome).resolves.toEqual({ state: "failed" } satisfies Outcome);
-  expect(report).toHaveBeenCalledWith(refused);
   expect(commands(sent)).toEqual(["command_plan"]);
+  expect(report).not.toHaveBeenCalled();
+  const [message, options] = error.mock.calls[0] ?? [];
+  expect(message).toBe(refused.message);
+  expect(options?.action?.label).toBe("Unlock for 15 minutes");
+  const unlock = vi.spyOn(workbench.backend, "invoke");
+  options?.action?.run();
+  expect(unlock).toHaveBeenCalledWith("context_unlock", "dev");
+});
+
+test("a policy file's lock is only reported, as nothing in Twigo lifts it", async () => {
+  const error = vi.spyOn(notify, "error");
+  const refused = blocked({
+    kind: "policyFile",
+    file: "/etc/twigo/policy.json",
+    pattern: "dev",
+  });
+  const { report, outcome } = await started(refused, []);
+  await expect(outcome).resolves.toEqual({ state: "failed" });
+  expect(report).toHaveBeenCalledWith(refused);
+  expect(error.mock.calls.map(([, options]) => options?.action)).toEqual(
+    error.mock.calls.map(() => undefined),
+  );
 });
 
 test("a run that fails is reported", async () => {

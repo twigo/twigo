@@ -53,21 +53,21 @@ export function Toast({ id, tone, message, action }: ToastProps) {
       <span className="flex h-5 shrink-0 items-center">
         <Icon aria-hidden className={cn("size-3.5", text)} />
       </span>
-      <span className="min-w-0 flex-1 leading-5 break-words text-foreground">
-        {message}
+      <span className="grid min-w-0 flex-1 justify-items-start gap-1 leading-5">
+        <span className="break-words text-foreground">{message}</span>
+        {action && (
+          <button
+            type="button"
+            onClick={() => {
+              action.run();
+              toast.dismiss(id);
+            }}
+            className="-ml-1.5 rounded px-1.5 py-0.5 font-medium text-brand transition-colors hover:bg-brand/10 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none"
+          >
+            {action.label}
+          </button>
+        )}
       </span>
-      {action && (
-        <button
-          type="button"
-          onClick={() => {
-            action.run();
-            toast.dismiss(id);
-          }}
-          className="shrink-0 rounded px-1.5 py-0.5 font-medium text-brand transition-colors hover:bg-brand/10 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none"
-        >
-          {action.label}
-        </button>
-      )}
       <button
         type="button"
         aria-label="Dismiss"

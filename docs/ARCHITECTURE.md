@@ -1468,7 +1468,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   The mode is read for every request, so a change reaches clients already built.
 
 - **Unlock for 15 minutes.**
-  A command switches a `read-only` context to `guarded` for a limited time.
+  A command switches a `read-only` context to `guarded` for a limited time, and a command that such a lock refused offers it in the toast that says so; a policy file's lock offers nothing.
   A banner shows the countdown, and the context relocks by itself.
   The gate reads the wall clock, as timers stop while the machine sleeps, and nothing stores an unlock, so a restart relocks.
   An unlock holds only while the context's fingerprint stays, so one given on a cluster never reaches another its name moves to, and a new choice or type ends it.

@@ -5,6 +5,7 @@ import type {
   Plan,
   PlanRequest,
 } from "@twigo/protocol";
+import { toIpcError } from "@twigo/protocol";
 import { notify } from "@twigo/ui";
 import { Changes } from "../changes";
 import type { ContextKeys } from "../contextkey/service";
@@ -86,7 +87,7 @@ export class Operations {
     try {
       plan = await this.backend.invoke("command_plan", request);
     } catch (error) {
-      this.report(error);
+      this.#refused(error);
       return { state: "failed" };
     }
     const agreed = await this.#ask(plan, look, JSON.stringify(request));
@@ -103,6 +104,35 @@ export class Operations {
   }
 
   /** `request` names what the plan acts on, so a second countdown of it replaces the first. */
+  /**
+   * Says why a plan was refused; a context that is read-only by what the
+   * person may lift offers the unlock right there, which a policy file's
+   * lock or a context no source lists does not.
+   */
+  #refused(error: unknown): void {
+    const { message, blocked } = toIpcError(error);
+    const unlockable =
+      blocked?.reason === "mode" &&
+      blocked.mode === "read-only" &&
+      blocked.source.kind !== "policyFile" &&
+      blocked.source.kind !== "unlisted";
+    if (!unlockable) {
+      this.report(error);
+      return;
+    }
+    notify.error(message, {
+      key: message,
+      action: {
+        label: "Unlock for 15 minutes",
+        run: () => {
+          this.backend
+            .invoke("context_unlock", blocked.context)
+            .catch(this.report);
+        },
+      },
+    });
+  }
+
   #ask(
     plan: Plan,
     look: Look,
