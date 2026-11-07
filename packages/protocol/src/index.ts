@@ -9,6 +9,15 @@ export type {
 } from "./backend";
 export { IpcError, toIpcError } from "./error";
 export type {
+  BlockReason,
+  Blocked,
+  ContextAccess,
+  Environment,
+  Mode,
+  ModeSource,
+  RequestClass,
+  SetContextEnvironment,
+  SetContextMode,
   AnsiColor,
   Bucket,
   Containers,

@@ -385,10 +385,10 @@ where
                     Next::List
                 }
                 Outcome::Undecodable(error) => {
-                    let error = IpcError {
-                        kind: ErrorKind::Internal,
-                        message: format!("could not decode the server's answer: {error}"),
-                    };
+                    let error = IpcError::new(
+                        ErrorKind::Internal,
+                        format!("could not decode the server's answer: {error}"),
+                    );
                     self.refused(ViewState::Error { error }).await;
                     Next::List
                 }

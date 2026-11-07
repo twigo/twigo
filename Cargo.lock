@@ -5811,6 +5811,7 @@ dependencies = [
  "twigo-cache",
  "twigo-env",
  "twigo-ipc",
+ "twigo-policy",
  "yaml-edit",
 ]
 
@@ -5838,7 +5839,18 @@ name = "twigo-policy"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
+ "form_urlencoded",
+ "glob",
+ "http",
+ "jiff",
+ "percent-encoding",
+ "serde",
  "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tower",
+ "twigo-ipc",
 ]
 
 [[package]]

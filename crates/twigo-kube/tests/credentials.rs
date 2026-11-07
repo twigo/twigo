@@ -22,7 +22,7 @@ use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tokio_rustls::TlsAcceptor;
 use twigo_env::ShellEnv;
-use twigo_kube::client::{Clients, Options};
+use twigo_kube::client::{Clients, Gate, Options};
 use twigo_kube::credentials::{Exec, Provider, Registry, Timeouts};
 
 /// What the server saw of one request.
@@ -286,6 +286,10 @@ users:
 }
 
 fn clients(server: &Server, exec: Exec) -> Clients {
+    gated_clients(server, exec, Gate::unrestricted())
+}
+
+fn gated_clients(server: &Server, exec: Exec, gate: Gate) -> Clients {
     let env: ShellEnv = std::env::vars_os()
         .collect::<Vec<(OsString, OsString)>>()
         .into_iter()
@@ -303,6 +307,7 @@ fn clients(server: &Server, exec: Exec) -> Clients {
     config.root_cert = Some(vec![server.ca.to_vec()]);
     Clients::new(
         &config,
+        gate,
         Options {
             provider: Some(Provider::Exec(registry.source(exec))),
             ..Options::default()
@@ -314,6 +319,34 @@ fn clients(server: &Server, exec: Exec) -> Clients {
 async fn get(clients: &Clients) -> Result<String, kube::Error> {
     let request = Request::get("/version").body(Vec::new()).unwrap();
     clients.api.request_text(request).await
+}
+
+#[tokio::test]
+async fn a_request_the_gate_stops_runs_no_plugin() {
+    let server = Server::start().await;
+    let plugin = Plugin::new();
+    plugin.prints(serde_json::json!({"token": "t"}));
+    server.accept_token("t");
+    let policy = twigo_policy::Policy::open();
+    policy
+        .set_mode("c", Some(twigo_ipc::Mode::ReadOnly))
+        .unwrap();
+    let clients = gated_clients(
+        &server,
+        plugin.exec(),
+        policy.gate("c", twigo_policy::Actor::Ui),
+    );
+    let write = Request::post("/api/v1/namespaces/a/configmaps")
+        .body(Vec::new())
+        .unwrap();
+    let refused = clients.api.request_text(write).await.unwrap_err();
+    assert_eq!(
+        twigo_kube::errors::request(&refused).kind,
+        twigo_ipc::ErrorKind::Permissions
+    );
+    assert_eq!(plugin.runs(), 0);
+    assert_eq!(get(&clients).await.unwrap(), "ok");
+    assert_eq!(plugin.runs(), 1);
 }
 
 #[tokio::test]
@@ -430,7 +463,7 @@ async fn a_token_in_the_entry_goes_out_rather_than_its_oidc_provider_s() {
             .collect(),
         other: Default::default(),
     });
-    let clients = Clients::new(&config, Options::default()).unwrap();
+    let clients = Clients::new(&config, Gate::unrestricted(), Options::default()).unwrap();
     assert_eq!(get(&clients).await.unwrap(), "ok");
     assert_eq!(server.seen()[0].token.as_deref(), Some("static"));
 }
@@ -450,7 +483,7 @@ async fn an_empty_token_leaves_the_token_file_to_be_read() {
     config.root_cert = Some(vec![server.ca.to_vec()]);
     config.auth_info.token = Some(String::new().into());
     config.auth_info.token_file = Some(file.display().to_string());
-    let clients = Clients::new(&config, Options::default()).unwrap();
+    let clients = Clients::new(&config, Gate::unrestricted(), Options::default()).unwrap();
     assert_eq!(get(&clients).await.unwrap(), "ok");
 }
 
@@ -467,7 +500,7 @@ async fn an_empty_username_leaves_the_token_to_be_sent() {
     config.auth_info.username = Some(String::new());
     config.auth_info.password = Some(String::new().into());
     config.auth_info.token = Some("t".to_owned().into());
-    let clients = Clients::new(&config, Options::default()).unwrap();
+    let clients = Clients::new(&config, Gate::unrestricted(), Options::default()).unwrap();
     assert_eq!(get(&clients).await.unwrap(), "ok");
 }
 
@@ -490,7 +523,7 @@ async fn the_removed_gcp_and_azure_providers_are_refused_before_their_command_co
             .collect(),
             other: Default::default(),
         });
-        let error = Clients::new(&config, Options::default())
+        let error = Clients::new(&config, Gate::unrestricted(), Options::default())
             .err()
             .expect("refused");
         assert!(error.to_string().starts_with(refused), "{error}");

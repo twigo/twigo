@@ -1,6 +1,6 @@
 //! How a request's failure reaches the webview (`IpcError`).
 
-use twigo_ipc::{ErrorKind, IpcError};
+use twigo_ipc::{Blocked, ErrorKind, IpcError};
 
 use crate::credentials::{CredentialError, OidcError, RunError};
 
@@ -8,6 +8,11 @@ use crate::credentials::{CredentialError, OidcError, RunError};
 /// than kube's `ApiError: … (Status { … })`, else why the request got no
 /// answer.
 pub fn request(error: &kube::Error) -> IpcError {
+    if let kube::Error::Service(service) = error
+        && let Some(blocked) = blocked(&**service)
+    {
+        return blocked.clone().into();
+    }
     let kind = match error {
         kube::Error::Api(status) => match status.code {
             400 | 422 => ErrorKind::InvalidInput,
@@ -33,7 +38,19 @@ pub fn request(error: &kube::Error) -> IpcError {
         kube::Error::Api(status) if !status.message.is_empty() => status.message.clone(),
         _ => error.to_string(),
     };
-    IpcError { kind, message }
+    IpcError::new(kind, message)
+}
+
+/// What the gate said, when it stopped the request.
+fn blocked<'a>(error: &'a (dyn std::error::Error + 'static)) -> Option<&'a Blocked> {
+    let mut source = Some(error);
+    while let Some(error) = source {
+        if let Some(blocked) = error.downcast_ref::<Blocked>() {
+            return Some(blocked);
+        }
+        source = error.source();
+    }
+    None
 }
 
 /// Whether the context's plugin or oidc provider gave the request no

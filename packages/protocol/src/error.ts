@@ -1,12 +1,15 @@
-import type { ErrorKind } from "./generated";
+import type { Blocked, ErrorKind } from "./generated";
 
 export class IpcError extends Error {
   readonly kind: ErrorKind;
+  /** With `permissions`: the mode and its source, when the gate stopped a request. */
+  readonly blocked: Blocked | undefined;
 
-  constructor(kind: ErrorKind, message: string) {
+  constructor(kind: ErrorKind, message: string, blocked?: Blocked) {
     super(message);
     this.name = "IpcError";
     this.kind = kind;
+    this.blocked = blocked;
   }
 }
 
@@ -21,7 +24,11 @@ export function toIpcError(error: unknown): IpcError {
     typeof error.kind === "string" &&
     typeof error.message === "string"
   ) {
-    return new IpcError(error.kind as ErrorKind, error.message);
+    return new IpcError(
+      error.kind as ErrorKind,
+      error.message,
+      "blocked" in error ? (error.blocked as Blocked) : undefined,
+    );
   }
   return new IpcError(
     "internal",

@@ -136,3 +136,30 @@ fn a_space_missing_for_ninety_days_of_readings_is_dropped_as_the_store_opens() {
     drop(reopened);
     assert_eq!(ids(&reopen()), ["kind-kept"]);
 }
+
+#[test]
+fn the_webview_cannot_write_the_contexts_modes() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = State::open(dir.path().join("state.json"));
+    let refused = state
+        .set(vec![StateEntry {
+            space: None,
+            key: CHOICES.to_owned(),
+            value: r#"{"modes": {"prod": "read-write"}}"#.to_owned(),
+        }])
+        .unwrap_err();
+    assert!(matches!(refused, Error::Reserved(_)));
+    assert_eq!(state.choices().modes.len(), 0);
+
+    let mut choices = Choices::default();
+    choices
+        .modes
+        .insert("prod".to_owned(), twigo_ipc::Mode::ReadOnly);
+    state.set_choices(&choices);
+    state.flush().unwrap();
+    let reopened = State::open(dir.path().join("state.json"));
+    assert_eq!(
+        reopened.choices().modes.get("prod"),
+        Some(&twigo_ipc::Mode::ReadOnly)
+    );
+}

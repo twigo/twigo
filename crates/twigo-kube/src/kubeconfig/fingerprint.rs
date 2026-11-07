@@ -13,6 +13,10 @@ use serde::Serialize;
 pub struct Fingerprint(u64);
 
 impl Fingerprint {
+    pub fn value(self) -> u64 {
+        self.0
+    }
+
     pub(super) fn of(
         context: &NamedContext,
         cluster: Option<&NamedCluster>,

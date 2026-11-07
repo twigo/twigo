@@ -40,9 +40,11 @@ impl TextFilter {
                 RegexBuilder::new(pattern)
                     .case_insensitive(true)
                     .build()
-                    .map_err(|error| IpcError {
-                        kind: ErrorKind::InvalidInput,
-                        message: format!("the filter /{pattern}/ is no regex: {error}"),
+                    .map_err(|error| {
+                        IpcError::new(
+                            ErrorKind::InvalidInput,
+                            format!("the filter /{pattern}/ is no regex: {error}"),
+                        )
                     })?,
             ),
             None if rest.is_empty() => return Ok(None),

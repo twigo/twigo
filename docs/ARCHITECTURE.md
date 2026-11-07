@@ -215,6 +215,7 @@ Why these crates:
 - `twigo-describe` is pure: describers name the related queries they need and turn the object and the answers into sections, while `twigo-core` runs the queries.
   Its tests run on objects recorded from kind, and the UI and `twigo mcp` describe an object alike.
 - `twigo-policy` sits under everything that can reach a cluster.
+  `twigo-kube` builds its gate into every client, so the crate holds no Kubernetes client of its own.
 - `twigo-keyboard` keeps the OS's keyboard APIs out of `apps/desktop`.
   It needs no Tauri, and its tests read named layouts without a window.
 - `twigo-netmon` keeps the OS's power and network notifications out of the transport, which only learns that the machine woke or the network changed.
@@ -614,15 +615,15 @@ The bench also replays the cases that broke other clients, and one that loopback
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-| Part               | Holds                                                                                                                                                                                                                                                                                                                                                                                             |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Title bar          | Breadcrumb of the space and its namespace scope; in the middle a search field with its key that opens quick access, as VS Code's Command Center; drag region; native traffic lights on macOS. Parts show and hide by keys (⌘B, ⌘J, ⌥⌘B), the View menu and the palette, not buttons                                                                                                               |
-| Space rail         | Tiles of the open spaces (D6, Lens's hotbar), each with a dot of its connection, ⌘1..9 by position, a button that opens any context                                                                                                                                                                                                                                                               |
-| Primary side bar   | View containers as tabs in its header (Explorer, Port forwards, Helm, Extensions and contributed ones); the active one's views: resource tree, saved filters                                                                                                                                                                                                                                      |
-| Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups; with no editor open, the space's home                                                                                                                                                                                                                                                                            |
-| Panel              | A dockview of its own for sessions opened by URI, its layout kept per space beside the editor area's: logs tabs now (4.6); a pod's shell, the terminal (pty), the cluster's Events, Output (Twigo logs per channel) and Agent activity (audit, 6.6) later. Its tabs split and move; it maximizes over the editor area and hides with ⌘J                                                           |
-| Secondary side bar | The ACP agent panel later; hidden while nothing lives there                                                                                                                                                                                                                                                                                                                                       |
-| Status bar         | In the shell's colour, entries as data: on the left the active space in its context's colour, a warning while the login shell's environment is missing (6.1), credentials that need the person, the cluster's version, or its connection in words when it is not connected (later policy mode, port-forwards, sync); on the right the active list's rows and how many fail or wait, each a filter |
+| Part               | Holds                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Title bar          | Breadcrumb of the space and its namespace scope; in the middle a search field with its key that opens quick access, as VS Code's Command Center; drag region; native traffic lights on macOS. Parts show and hide by keys (⌘B, ⌘J, ⌥⌘B), the View menu and the palette, not buttons                                                                                                                                                      |
+| Space rail         | Tiles of the open spaces (D6, Lens's hotbar), each with a dot of its connection, ⌘1..9 by position, a button that opens any context                                                                                                                                                                                                                                                                                                      |
+| Primary side bar   | View containers as tabs in its header (Explorer, Port forwards, Helm, Extensions and contributed ones); the active one's views: resource tree, saved filters                                                                                                                                                                                                                                                                             |
+| Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups; with no editor open, the space's home                                                                                                                                                                                                                                                                                                                   |
+| Panel              | A dockview of its own for sessions opened by URI, its layout kept per space beside the editor area's: logs tabs now (4.6); a pod's shell, the terminal (pty), the cluster's Events, Output (Twigo logs per channel) and Agent activity (audit, 6.6) later. Its tabs split and move; it maximizes over the editor area and hides with ⌘J                                                                                                  |
+| Secondary side bar | The ACP agent panel later; hidden while nothing lives there                                                                                                                                                                                                                                                                                                                                                                              |
+| Status bar         | In the shell's colour, entries as data: on the left the active space in its context's colour, with a lock while its mode holds writes back (6.4), a warning while the login shell's environment is missing (6.1), credentials that need the person, the cluster's version, or its connection in words when it is not connected (later port-forwards, sync); on the right the active list's rows and how many fail or wait, each a filter |
 
 The parts sit flush, split by hairlines, with no cards or gaps: the owner tried islands, as JetBrains Islands and VS Code's 2026 layout ([research](research/workbench-chrome.md)), and preferred flat parts.
 Views are descriptors (ID, title, container, `when`, provider), so the user can move a view to another container, VS Code style.
@@ -640,10 +641,10 @@ The layout per space is persisted (dockview `toJSON` and which parts show); part
   A space whose context goes away keeps its state and comes back with it.
   When the catalog lists contexts but no space has them, as on the first start, the first context's space opens.
 - Switching spaces moves the whole workbench: explorer, editors, status bar, policy badge.
-  The rail shows a tile per open space: two letters on the tint of its context's colour, the active one ringed and marked, a dot of its connection (connected, connecting, failed, or idle while another space is active), a lock badge on a locked context.
+  The rail shows a tile per open space: two letters on the tint of its context's colour, the active one ringed and marked, a dot of its connection (connected, connecting, failed, or idle while another space is active).
   The title bar's breadcrumb names the active space and its namespace scope and opens their pickers.
   Every context has a colour, the only extra colour, from six tokens: red, orange, yellow, green, blue and purple.
-  It comes from the context's kubeconfig metadata (5.5), else from the user's pick in Twigo (Set Space Colour… in the palette and the tile's menu, kept in the app's state), else from its name, the same each time, among blue, purple, green and orange: red and yellow stay for the user and the environment types (6.4), so neither says danger by chance.
+  It comes from the context's kubeconfig metadata (5.5), else from the user's pick in Twigo (Set Space Colour… in the palette and the tile's menu, kept in the app's state), else from its environment type (6.4), Production red, Staging orange, Development green and Local blue, else from its name, the same each time, among blue, purple, green and orange: red and yellow stay for the user and the environment types (6.4), so neither says danger by chance.
   Decided with the owner on 2026-11-03, after contexts without metadata left the workbench grey.
   It tints the tile and the title bar's left end behind the breadcrumb, as JetBrains does with a project's colour, and fills the status bar's space entry.
   A space with several contexts shows none.
@@ -886,6 +887,8 @@ Progress shows in the status bar, or in a notification when the operation needs 
   4. policy.
 - **Policy** is an admin-managed file, `/Library/Application Support/Twigo/policy.json` or `/etc/twigo/policy.json`, and later MDM.
   It locks values: for example "contexts matching `prod-*` are read-only", "extensions only from these registries", "MCP off".
+  So far it sets modes by context glob and what `read-only` does with a port-forward, `{"contexts": {"prod-*": "read-only"}, "readOnly": {"allowPortForward": false}}`, and it is read once, as the app starts.
+  A key nothing reads would be a lock that does not hold, so an unknown key, like any file that cannot be read, locks every context `read-only` and says so (6.4).
 - Settings are files the user can edit in the app (with a schema) or through the generated settings UI.
   Changes are picked up live.
   `keybindings.json` works the same way.
@@ -908,6 +911,7 @@ Progress shows in the status bar, or in a notification when the operation needs 
   - A file that cannot be read, or has another version, moves aside as `state.json.unreadable`, and the app starts with nothing remembered.
     Before users exist there are no migrations.
   - Secrets never go into the state: they stay in Rust and the keychain (6.2).
+  - Until the settings files come in M3, the mode a person chooses for a context and the type they mark it as live here too, under a key `state_set` refuses, since only a command changes a mode.
 - **What is skipped from VS Code, and why:**
   - Workspace and folder layers: spaces take their place.
   - Profiles and settings sync: later, if users ask.
@@ -930,7 +934,7 @@ It lives in `packages/ui`: the tokens, and primitives that draw every recurring 
   - Hover and selection are alpha overlays, so they work on any surface.
   - A two-layer focus ring: a solid brand line, 3:1 or more on any surface (WCAG 1.4.11), and a translucent halo.
   - Hairline borders in alpha tiers.
-  - The status bar takes the shell's colour; colour there comes only from its entries' tones and the active space's context colour, as VS Code's 2026 themes do.
+  - The status bar takes the shell's colour; colour there comes only from its entries' tones and the active space's context colour, as VS Code's 2026 themes do, and from the whole bar's tint in a production context (6.4).
 - **Type.**
   - The platform's UI font, SF on macOS, as VS Code; tabular numbers for every metric column.
   - Two weights, 400 and 600, as VS Code and JetBrains; 13 px base, 12 px secondary, 11 px labels; sentence case, no capitals.
@@ -1020,7 +1024,7 @@ interface CommandDescriptor {
   A `when` expression evaluates them, using a subset of the VS Code grammar: `==`, `!=`, `&&`, `||`, `!`, `=~`, `in`, `<`, `>`.
   Core keys:
   - `space.contexts`, `space.multiContext`
-  - `context.name`, `context.readOnly`, `context.mode`, `context.provider`
+  - `context.name`, `context.readOnly`, `context.mode`, `context.unlocked`, `context.provider`
   - `listFocus`, `treeFocus` (a tree, which is also a list: left and right close and open), `editorFocus`, `inputFocus`
   - `inQuickOpen`, `quickOpenToSide` (the open provider opens rows to the side)
   - `resource.group`, `resource.kind`, `resource.namespaced`, `resource.namespace`
@@ -1212,11 +1216,11 @@ A section takes over a core one only by naming its id in `replaces`, and its hea
     The token or certificate stays in Rust, is cached until 60 s before it expires, and is refreshed on 401.
   - Unlike Lens and Headlamp, **providers never write kubeconfig files**.
     "Export to kubeconfig" is an explicit command; for Segla it writes an exec entry for `sgl cluster credentials <label>`.
-- **Metadata from kubeconfig** `extensions` (name `twigo`): `color`, `tags`, `readOnly`, `order`.
+- **Metadata from kubeconfig** `extensions` (name `twigo`): `color`, `tags`, `readOnly`, `environment`, `order`.
   Twigo reads it and never writes it.
-  Each field is read on its own, so a value Twigo does not know drops only that field.
+  Each field is read on its own, so a value Twigo does not know drops only that field; `readOnly` alone reads anything but `false` as a lock (6.4).
   Contexts with an `order` come first, lowest first, then the rest, each group by name.
-  M1 reads `color` and `order`; `readOnly` comes with its consumer in M2, `tags` with the catalog's views.
+  `tags` comes with the catalog's views.
 - **The generic "Add cluster…" command.**
   Its picker lists "Import kubeconfig…" plus every provider's `create` command.
   The form is a declarative JSON-Schema form.
@@ -1368,19 +1372,25 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
 
 **One gate, in Rust, below every caller.**
 
-- The policy check is a tower layer in every actor's kube clients (3.2).
+- The policy check is a tower layer at the top of every actor's kube clients (3.2), above their credential and the stream counter, so a request it stops runs no plugin and takes no stream.
+  A second check sits just above the socket, below all a request waits for: a mode can change meanwhile, and a relock has to reach a request already waiting.
   The UI, extensions (via `host-kube`) and the MCP server have no other way to reach a cluster, so they cannot get around it.
   `host-http` refuses any host and port that belongs to a catalog API server.
-- `authorize(context, verb, resource, subresource, namespace, name, actor)` runs before the request leaves the process.
+- `authorize(context, attributes, actor)` runs before the request leaves the process.
+  The attributes are a verb, resource, subresource, namespace, name and class, read from a request as the API server reads it ([`NewRequestInfo`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/request/requestinfo.go#L127-L274)), `%2F` decoded, or from what a command says it will do.
 - The frontend only displays the lock.
   Legacy kept the lock in a frontend store synced to Rust, and that model is reversed.
 - **What the layer sees, and what commands add.**
   The layer classifies each request before it is sent, by HTTP method, resource, subresource, the `dryRun` and `includeObject` parameters, and the `Accept` header:
   - read: GET, LIST, WATCH, plus the POSTs that only ask questions (`authorization.k8s.io` self-subject access and rules reviews, `authentication.k8s.io` self-subject reviews);
-  - dry-run: any write with `dryRun=All`;
+  - dry-run: a POST, PUT or PATCH of a resource itself, outside the groups of `authorization.k8s.io` and `authentication.k8s.io`, whose reviews answer whatever it says, with `dryRun=All` and no other value.
+    A DELETE is no dry run, as kube-apiserver reads a body's options and never the query when there is a body ([`DeleteResource`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/delete.go#L95-L127)), and the layer reads no body.
+    A subresource is none either: `serviceaccounts/token` mints a token whatever the query says ([`TokenREST`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/pkg/registry/core/serviceaccount/storage/token.go#L295)).
+    Whether every aggregated API server honours it is not verified.
   - write: every other POST, PUT, PATCH, DELETE;
-  - secret-read: GET, LIST or WATCH of `secrets` whose `Accept` header allows a full-object response.
-    Only `PartialObjectMetadata`, or a Table with `includeObject` `None` or `Metadata` and no plain JSON fallback, escapes it.
+  - secret-read: GET, LIST or WATCH of `secrets`, and a dry run of a write to them, which is answered with what it would store.
+    Only a Table with `includeObject=None` and no plain JSON fallback escapes it, and only every range of `Accept` read as `goautoneg` reads it.
+    Metadata does not, as `kubectl apply`'s last-applied annotation holds the values in clear (3.6).
     `includeObject=Object` (kubectl `--sort-by` sends it) counts.
     This is deliberately conservative: a plain `kubectl get secrets` through the proxy counts too.
     The class is decided by actor, not by mode:
@@ -1392,12 +1402,17 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     - agents through the proxy, only with an approval scoped to the session and namespace, and a fresh one per call after untrusted content (6.6).
   - forward: `pods/portforward`, and GET without `Upgrade` on `pods/*/proxy` and `services/*/proxy`;
   - exec: `pods/exec`, `pods/attach`, every `nodes/*/proxy` request (it reaches the kubelet, including its exec), and any other request that carries an `Upgrade` header or uses a proxy subresource.
+    A `CONNECT` counts too, and so does a path with an empty, `.` or `..` segment, which a server or a proxy in front of it may clean into another.
+
+  A write to `secrets` also needs what reading one needs, since its answer is the stored Secret and an empty patch changes nothing.
 
   The mode allows or blocks every other class.
+  In `guarded` the UI's writes and exec pass, since its commands confirm above the layer; anyone else's need the broker, and until there is one the answer is deny.
   Confirmations, typed context names and diffs belong to the commands above the layer, because at the HTTP level a scale is one PATCH and a drain is many requests.
 
 - **Actors.**
   Each actor (the UI, an extension, an MCP client, an agent session) gets its own two kube clients, which carry its policy layer over the context's two shared hyper-util clients and the context's stream counter (3.2).
+  The hub, commands and discovery use the UI's.
   A hyper-util client clone shares its pool, so every actor uses the same HTTP/2 connection, and the layer knows who is asking without per-call plumbing.
 - **Child processes go through a policy proxy.**
   `helm` for release actions, kubectl in actions, the `kubectl port-forward` fallback, agent sessions and terminals of every context that is not `read-write` get a generated kubeconfig.
@@ -1437,18 +1452,31 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
 | delete, scale, rollout restart, cordon, drain, evict, Helm rollback/uninstall | ✓ with confirmation listing the objects | typed confirmation (the context name) | ✗                                                      |
 
 - **Where the mode comes from**, highest first:
-  1. a policy file entry, which the UI cannot unlock;
-  2. the user setting for the context (or a context glob);
-  3. kubeconfig metadata (`twigo.readOnly`);
-  4. the provider (Segla can mark production clusters);
-  5. the default `read-write`.
+  1. a policy file entry, which the UI cannot change or unlock; of several that match, the strictest;
+  2. no source lists the context now: `read-only`, since clients built before it went may still run and nothing says what it lets through;
+  3. the person's choice for the context;
+  4. kubeconfig metadata (`twigo.readOnly`), where a value other than true or false counts as true;
+  5. the provider (Segla can mark production clusters);
+  6. the default of its environment type: `read-only` for Production, `guarded` for Staging and `read-write` for the rest;
+  7. the default `read-write`.
+
+  The mode is read for every request, so a change reaches clients already built.
+
 - **Unlock for 15 minutes.**
   A command switches a `read-only` context to `guarded` for a limited time.
   A banner shows the countdown, and the context relocks by itself.
+  The gate reads the wall clock, as timers stop while the machine sleeps, and nothing stores an unlock, so a restart relocks.
+  An unlock holds only while the context's fingerprint stays, so one given on a cluster never reaches another its name moves to, and a new choice or type ends it.
+- **Clients keep to what they were built for.**
+  Clients of a context that now names another cluster still reach the old one until their owner re-opens, so their gate reads them as `read-only` from the moment the fingerprint changes, whatever the new one's mode is.
 - **Every blocked request** returns a typed `permissions` error with the mode and its source, and the UI shows which rule blocked it.
 - **How the UI shows a mode and asks before damage**, designed with the owner on 2026-11-03 ([research](research/workbench-design.md)), for M2:
-  - Environment types, Production, Staging, Development and Local, set a context's colour and its default mode; the type is data, like the colour, from kubeconfig metadata or rules over context names.
-  - A production context is a mode with two cues (NN/g): a chip in the title bar after its name that says the type and the lock (`Production · read-only`), a 2 px line of its colour along the title bar's top, and the status bar tinted in it.
+  - Environment types, Production, Staging, Development and Local, set a context's colour and its default mode.
+    A person marks a context, or its kubeconfig metadata says so (`twigo.environment`, 5.5), and the person's mark wins, their None included.
+    Nothing guesses a type from a context's name: a context nobody marked is `read-write` with no chip, and only an admin's policy file sets modes by glob (4.8).
+  - A production context is a mode with two cues (NN/g): a chip in the title bar after its name that says the type and the lock (`Production · read-only`), and the status bar tinted in it.
+    The mockup's third, a 2 px line of its colour along the title bar's top, was dropped on 2026-11-07: the chip, the tint and the bar's left end in the context's colour already say it.
+    The chip opens what set the mode, in words, with the choices the person has.
   - Friction grows with the blast radius (Primer):
     - scale, cordon and suspend run at once with an undo (⌘Z);
     - deleting a pod that a controller replaces, outside production, sends after a 5 s toast with Cancel, as Headlamp holds it;

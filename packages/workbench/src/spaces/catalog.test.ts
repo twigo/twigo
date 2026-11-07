@@ -1,12 +1,25 @@
+import { UNMARKED } from "@twigo/protocol/mock";
 import { expect, test, vi } from "vitest";
 import type { Backend, Context } from "@twigo/protocol";
 import { Catalog } from "./catalog";
 
 const ONE: Context[] = [
-  { name: "kind-one", color: null, source: "~/.kube/config", server: null },
+  {
+    name: "kind-one",
+    color: null,
+    source: "~/.kube/config",
+    server: null,
+    access: UNMARKED,
+  },
 ];
 const TWO: Context[] = [
-  { name: "kind-two", color: "green", source: "~/.kube/config", server: null },
+  {
+    name: "kind-two",
+    color: "green",
+    source: "~/.kube/config",
+    server: null,
+    access: UNMARKED,
+  },
 ];
 
 function backend(early: Context[] | undefined) {

@@ -50,18 +50,20 @@ impl Target {
             .iter()
             .find(|(group, resource, _)| *group == gvr.group && *resource == gvr.resource)
             .map(|(_, _, reach)| *reach)
-            .ok_or_else(|| IpcError {
-                kind: ErrorKind::InvalidInput,
-                message: format!(
-                    "{} has no logs: a logs tab follows a pod, or the pods of a workload",
-                    resource_name(&gvr.group, &gvr.resource)
-                ),
+            .ok_or_else(|| {
+                IpcError::new(
+                    ErrorKind::InvalidInput,
+                    format!(
+                        "{} has no logs: a logs tab follows a pod, or the pods of a workload",
+                        resource_name(&gvr.group, &gvr.resource)
+                    ),
+                )
             })?;
         if target.namespace.is_empty() {
-            return Err(IpcError {
-                kind: ErrorKind::InvalidInput,
-                message: format!("{} names no namespace", target.name),
-            });
+            return Err(IpcError::new(
+                ErrorKind::InvalidInput,
+                format!("{} names no namespace", target.name),
+            ));
         }
         Ok(Self {
             reach,
@@ -167,14 +169,14 @@ impl Subscriptions {
         let state = hub::combine(states.into_iter());
         if state == ViewState::Ready && self.object.listed() && self.object.items().is_empty() {
             return ViewState::Error {
-                error: IpcError {
-                    kind: ErrorKind::NotFound,
-                    message: format!(
+                error: IpcError::new(
+                    ErrorKind::NotFound,
+                    format!(
                         "{} {} is gone",
                         resource_name(&self.target.resource.group, &self.target.resource.resource),
                         self.target.name
                     ),
-                },
+                ),
             };
         }
         state

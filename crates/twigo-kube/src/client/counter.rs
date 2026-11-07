@@ -17,9 +17,23 @@ pub enum Class {
     Watch,
     Log,
     Request,
+    /// An exec, attach or port-forward connection, for its whole life.
+    Session,
+    /// A stream of the policy proxy.
+    Proxied,
+}
+
+/// Who a stream is for: requests of anyone but the UI share a smaller
+/// budget, so an agent's lists cannot starve the UI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Party {
+    Ui,
+    Other,
 }
 
 impl Class {
+    /// The class of a request a client sends, which sessions and the
+    /// proxy's streams do not take from their URI.
     pub fn of(uri: &Uri) -> Self {
         let query = uri.query().unwrap_or_default();
         let flag = |name: &str| {
@@ -49,6 +63,10 @@ pub struct Budgets {
     pub watches: usize,
     pub logs: usize,
     pub requests: usize,
+    /// Of `requests`, what actors other than the UI may hold.
+    pub others: usize,
+    pub sessions: usize,
+    pub proxied: usize,
 }
 
 impl Default for Budgets {
@@ -57,6 +75,9 @@ impl Default for Budgets {
             watches: 24,
             logs: 32,
             requests: 28,
+            others: 20,
+            sessions: 64,
+            proxied: 16,
         }
     }
 }
@@ -73,6 +94,8 @@ pub struct Usage {
     pub watches: Slots,
     pub logs: Slots,
     pub requests: Slots,
+    pub sessions: Slots,
+    pub proxied: Slots,
 }
 
 impl Usage {
@@ -81,6 +104,8 @@ impl Usage {
             Class::Watch => &mut self.watches,
             Class::Log => &mut self.logs,
             Class::Request => &mut self.requests,
+            Class::Session => &mut self.sessions,
+            Class::Proxied => &mut self.proxied,
         }
     }
 }
@@ -98,6 +123,9 @@ struct Inner {
     watches: Arc<Semaphore>,
     logs: Arc<Semaphore>,
     requests: Arc<Semaphore>,
+    others: Arc<Semaphore>,
+    sessions: Arc<Semaphore>,
+    proxied: Arc<Semaphore>,
     usage: watch::Sender<Usage>,
 }
 
@@ -107,6 +135,9 @@ impl Counter {
             watches: Arc::new(Semaphore::new(budgets.watches)),
             logs: Arc::new(Semaphore::new(budgets.logs)),
             requests: Arc::new(Semaphore::new(budgets.requests)),
+            others: Arc::new(Semaphore::new(budgets.others)),
+            sessions: Arc::new(Semaphore::new(budgets.sessions)),
+            proxied: Arc::new(Semaphore::new(budgets.proxied)),
             usage: watch::Sender::new(Usage::default()),
         }))
     }
@@ -117,26 +148,61 @@ impl Counter {
 
     /// Waits until the class has a free stream; a stream that has to wait
     /// counts as queued meanwhile, and tells `waiting`.
-    pub async fn admit(&self, class: Class, waiting: Option<&Waiting>) -> Permit {
-        let semaphore = match class {
+    pub async fn admit(&self, class: Class, party: Party, waiting: Option<&Waiting>) -> Permit {
+        if let Some(permit) = self.try_admit(class, party) {
+            return permit;
+        }
+        let _queued = Queued::new(self, class, waiting);
+        let share = match self.share(class, party) {
+            Some(share) => Some(Self::acquire(share).await),
+            None => None,
+        };
+        let permit = Self::acquire(Arc::clone(self.semaphore(class))).await;
+        self.held(class, share, permit)
+    }
+
+    /// A free stream of the class now, for what refuses rather than waits.
+    pub fn try_admit(&self, class: Class, party: Party) -> Option<Permit> {
+        let share = match self.share(class, party) {
+            Some(share) => Some(share.try_acquire_owned().ok()?),
+            None => None,
+        };
+        let permit = Arc::clone(self.semaphore(class)).try_acquire_owned().ok()?;
+        Some(self.held(class, share, permit))
+    }
+
+    fn share(&self, class: Class, party: Party) -> Option<Arc<Semaphore>> {
+        (class == Class::Request && party == Party::Other).then(|| Arc::clone(&self.0.others))
+    }
+
+    fn semaphore(&self, class: Class) -> &Arc<Semaphore> {
+        match class {
             Class::Watch => &self.0.watches,
             Class::Log => &self.0.logs,
             Class::Request => &self.0.requests,
-        };
-        let permit = match Arc::clone(semaphore).try_acquire_owned() {
-            Ok(permit) => permit,
-            Err(_) => {
-                let _queued = Queued::new(self, class, waiting);
-                Arc::clone(semaphore)
-                    .acquire_owned()
-                    .await
-                    .expect("the counter never closes its semaphores")
-            }
-        };
+            Class::Session => &self.0.sessions,
+            Class::Proxied => &self.0.proxied,
+        }
+    }
+
+    async fn acquire(semaphore: Arc<Semaphore>) -> OwnedSemaphorePermit {
+        semaphore
+            .acquire_owned()
+            .await
+            .expect("the counter never closes its semaphores")
+    }
+
+    fn held(
+        &self,
+        class: Class,
+        share: Option<OwnedSemaphorePermit>,
+        permit: OwnedSemaphorePermit,
+    ) -> Permit {
         self.change(class, |slots| slots.held += 1);
         Permit {
             counter: self.clone(),
             class,
+            _share: share,
             _permit: permit,
         }
     }
@@ -180,6 +246,7 @@ impl Drop for Queued<'_> {
 pub struct Permit {
     counter: Counter,
     class: Class,
+    _share: Option<OwnedSemaphorePermit>,
     _permit: OwnedSemaphorePermit,
 }
 
@@ -190,7 +257,7 @@ impl Drop for Permit {
 }
 
 #[derive(Clone)]
-pub struct CounterLayer(pub Counter);
+pub struct CounterLayer(pub Counter, pub Party);
 
 impl<S> Layer<S> for CounterLayer {
     type Service = Counted<S>;
@@ -198,6 +265,7 @@ impl<S> Layer<S> for CounterLayer {
     fn layer(&self, inner: S) -> Self::Service {
         Counted {
             counter: self.0.clone(),
+            party: self.1,
             inner,
         }
     }
@@ -206,6 +274,7 @@ impl<S> Layer<S> for CounterLayer {
 #[derive(Clone)]
 pub struct Counted<S> {
     counter: Counter,
+    party: Party,
     inner: S,
 }
 
@@ -227,11 +296,12 @@ where
 
     fn call(&mut self, request: Request<B>) -> Self::Future {
         let counter = self.counter.clone();
+        let party = self.party;
         let inner = self.inner.clone();
         Box::pin(async move {
             let waiting = request.extensions().get::<Waiting>().cloned();
             let permit = counter
-                .admit(Class::of(request.uri()), waiting.as_ref())
+                .admit(Class::of(request.uri()), party, waiting.as_ref())
                 .await;
             let response = inner.oneshot(request).await.map_err(Into::into)?;
             Ok(response.map(|body| Permitted {
@@ -323,7 +393,7 @@ mod tests {
     + Send
     + 'static {
         let ok = |_| async { Ok::<_, Infallible>(Response::new(Empty::new())) };
-        CounterLayer(counter.clone()).layer(tower::service_fn(ok))
+        CounterLayer(counter.clone(), Party::Ui).layer(tower::service_fn(ok))
     }
 
     fn request(uri: &str) -> Request<()> {
@@ -336,6 +406,7 @@ mod tests {
             watches: 2,
             logs: 1,
             requests: 1,
+            ..Budgets::default()
         });
         let service = counted(&counter);
         let first = service
@@ -387,6 +458,7 @@ mod tests {
             watches: 1,
             logs: 1,
             requests: 1,
+            ..Budgets::default()
         });
         let service = counted(&counter);
         let told = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -423,6 +495,7 @@ mod tests {
             watches: 1,
             logs: 1,
             requests: 1,
+            ..Budgets::default()
         });
         let service = counted(&counter);
         let _held = service.clone().oneshot(request("/version")).await.unwrap();
@@ -439,5 +512,111 @@ mod tests {
             .expect("the aborted stream leaves the queue")
             .unwrap();
         assert_eq!(usage.borrow().requests.held, 1);
+    }
+    #[tokio::test]
+    async fn actors_other_than_the_ui_hold_only_their_share_of_the_requests() {
+        let counter = Counter::new(Budgets {
+            requests: 3,
+            others: 2,
+            ..Budgets::default()
+        });
+        let other = |counter: &Counter| {
+            let counter = counter.clone();
+            tokio::spawn(async move { counter.admit(Class::Request, Party::Other, None).await })
+        };
+        let first = other(&counter).await.unwrap();
+        let second = other(&counter).await.unwrap();
+        let third = other(&counter);
+        let mut usage = counter.usage();
+        usage
+            .wait_for(|usage| usage.requests.queued == 1)
+            .await
+            .unwrap();
+        assert_eq!(usage.borrow().requests, Slots { held: 2, queued: 1 });
+
+        let ui = counter.admit(Class::Request, Party::Ui, None).await;
+        assert_eq!(usage.borrow().requests, Slots { held: 3, queued: 1 });
+        assert!(
+            counter.try_admit(Class::Request, Party::Other).is_none(),
+            "their share is full"
+        );
+        drop(ui);
+        assert!(
+            !third.is_finished(),
+            "the UI's stream was no part of their share"
+        );
+
+        drop(first);
+        let third = tokio::time::timeout(Duration::from_secs(1), third)
+            .await
+            .expect("it takes the share's freed stream")
+            .unwrap();
+        assert_eq!(usage.borrow().requests, Slots { held: 2, queued: 0 });
+        drop((second, third));
+        assert_eq!(usage.borrow().requests, Slots::default());
+    }
+
+    #[tokio::test]
+    async fn the_ui_waits_for_the_budget_and_not_for_the_share() {
+        let counter = Counter::new(Budgets {
+            requests: 1,
+            others: 1,
+            ..Budgets::default()
+        });
+        let held = counter.admit(Class::Request, Party::Other, None).await;
+        let ui = counter.clone();
+        let ui = tokio::spawn(async move { ui.admit(Class::Request, Party::Ui, None).await });
+        let mut usage = counter.usage();
+        usage
+            .wait_for(|usage| usage.requests.queued == 1)
+            .await
+            .unwrap();
+        drop(held);
+        tokio::time::timeout(Duration::from_secs(1), ui)
+            .await
+            .expect("the UI gets the freed stream")
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn sessions_wait_and_the_proxy_refuses_over_their_budgets() {
+        let counter = Counter::new(Budgets {
+            sessions: 1,
+            proxied: 1,
+            ..Budgets::default()
+        });
+        let session = counter.admit(Class::Session, Party::Ui, None).await;
+        let proxied = counter.try_admit(Class::Proxied, Party::Other).unwrap();
+        assert!(counter.try_admit(Class::Proxied, Party::Other).is_none());
+        assert!(counter.try_admit(Class::Session, Party::Other).is_none());
+        let mut usage = counter.usage();
+        assert_eq!(usage.borrow().proxied, Slots { held: 1, queued: 0 });
+        assert_eq!(usage.borrow().requests, Slots::default());
+
+        let waits = counter.clone();
+        let waits = tokio::spawn(async move { waits.admit(Class::Session, Party::Ui, None).await });
+        usage
+            .wait_for(|usage| usage.sessions.queued == 1)
+            .await
+            .unwrap();
+        drop(session);
+        let next = tokio::time::timeout(Duration::from_secs(1), waits)
+            .await
+            .expect("closing a session starts the next")
+            .unwrap();
+        assert_eq!(usage.borrow().sessions, Slots { held: 1, queued: 0 });
+        drop((next, proxied));
+        assert!(counter.try_admit(Class::Proxied, Party::Other).is_some());
+    }
+
+    #[test]
+    fn the_budgets_are_those_of_the_architecture() {
+        let budgets = Budgets::default();
+        assert_eq!(
+            budgets.watches + budgets.logs + budgets.proxied + budgets.requests,
+            100,
+            "what the API server allows a connection"
+        );
+        assert_eq!((budgets.others, budgets.sessions), (20, 64));
     }
 }

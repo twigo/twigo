@@ -20,7 +20,7 @@ use serde_json::json;
 use tempfile::TempDir;
 use tokio::sync::watch;
 use twigo_env::ShellEnv;
-use twigo_kube::client::{Clients, Options};
+use twigo_kube::client::{Clients, Gate, Options};
 use twigo_kube::credentials::{Exec, Provider, Registry, Source, Timeouts};
 
 struct Live {
@@ -44,7 +44,9 @@ impl Live {
             Config::from_custom_kubeconfig(kubeconfig.clone(), &KubeConfigOptions::default())
                 .await
                 .unwrap();
-        let admin = Clients::new(&config, Options::default()).unwrap().api;
+        let admin = Clients::new(&config, Gate::unrestricted(), Options::default())
+            .unwrap()
+            .api;
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -166,6 +168,7 @@ impl Live {
         let source = registry.source(exec);
         let clients = Clients::new(
             &config,
+            Gate::unrestricted(),
             Options {
                 provider: Some(Provider::Exec(Arc::clone(&source))),
                 ..Options::default()
@@ -225,7 +228,9 @@ async fn a_revoked_token_gets_one_401_one_new_run_and_success() {
     let mut direct = Config::new(clients_url(&live));
     direct.root_cert = live_root(&live).await;
     direct.auth_info.token = Some(revoked.clone().into());
-    let direct = Clients::new(&direct, Options::default()).unwrap().api;
+    let direct = Clients::new(&direct, Gate::unrestricted(), Options::default())
+        .unwrap()
+        .api;
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         match whoami(&direct).await {

@@ -12,7 +12,7 @@ use kube::{Api, Client, Config};
 use serde_json::json;
 use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
-use twigo_kube::client::{Clients, Options, Slots};
+use twigo_kube::client::{Clients, Gate, Options, Slots};
 
 struct Cluster {
     clients: Clients,
@@ -33,7 +33,7 @@ async fn cluster() -> Cluster {
         .await
         .unwrap();
     Cluster {
-        clients: Clients::new(&config, Options::default()).unwrap(),
+        clients: Clients::new(&config, Gate::unrestricted(), Options::default()).unwrap(),
         kind,
     }
 }

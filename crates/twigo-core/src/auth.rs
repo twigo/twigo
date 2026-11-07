@@ -55,9 +55,11 @@ impl Core {
     }
 
     pub fn trust_plugins(&self, digests: Vec<String>) -> Result<(), IpcError> {
-        self.trust.trust(digests).map_err(|error| IpcError {
-            kind: twigo_ipc::ErrorKind::Internal,
-            message: format!("could not save the trusted plugins: {error}"),
+        self.trust.trust(digests).map_err(|error| {
+            IpcError::new(
+                twigo_ipc::ErrorKind::Internal,
+                format!("could not save the trusted plugins: {error}"),
+            )
         })
     }
 }

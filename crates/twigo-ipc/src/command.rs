@@ -7,8 +7,8 @@ use ts_rs::TS;
 use crate::{
     Ack, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ExecReview, GetValues,
     KeyboardLayout, ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject,
-    SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellEnvironment, Space,
-    StateEntry, StateSnapshot, SubscriptionId,
+    SetContextEnvironment, SetContextMode, SetLogSource, SetLogView, SetLogWindow, SetParts,
+    SetWindow, ShellEnvironment, Space, StateEntry, StateSnapshot, SubscriptionId,
 };
 
 pub trait Command {
@@ -38,6 +38,48 @@ impl Command for ContextsWatch {
     type Request = ();
     type Response = Vec<Context>;
     type Message = Vec<Context>;
+}
+
+/// The person's mode for a context (ARCHITECTURE 6.4), refused when the
+/// policy file sets it. The contexts' watch says what follows.
+pub struct ContextModeSet;
+
+impl Command for ContextModeSet {
+    const NAME: &'static str = "context_mode_set";
+    type Request = SetContextMode;
+    type Response = ();
+    type Message = ();
+}
+
+/// What the person marks a context as.
+pub struct ContextEnvironmentSet;
+
+impl Command for ContextEnvironmentSet {
+    const NAME: &'static str = "context_environment_set";
+    type Request = SetContextEnvironment;
+    type Response = ();
+    type Message = ();
+}
+
+/// Lets a `read-only` context through as `guarded` for 15 minutes, by its
+/// name, refused when the policy file sets it.
+pub struct ContextUnlock;
+
+impl Command for ContextUnlock {
+    const NAME: &'static str = "context_unlock";
+    type Request = String;
+    type Response = ();
+    type Message = ();
+}
+
+/// Ends a context's unlock now, by its name.
+pub struct ContextRelock;
+
+impl Command for ContextRelock {
+    const NAME: &'static str = "context_relock";
+    type Request = String;
+    type Response = ();
+    type Message = ();
 }
 
 /// The one-context space of a context, created if it has none (ARCHITECTURE 4.2).

@@ -3,7 +3,6 @@
 Findings that belong to no step yet.
 
 - A kubeconfig file that cannot be read or parsed is skipped with a line on stderr only (`twigo_core::catalog`): the catalog should say so in the UI, next to the contexts it hides.
-- The request budget's cap for actors other than the UI (20 of the 28, ARCHITECTURE 3.2) waits for the first such actor: M1 has only the UI, so the stream counter (`crates/twigo-kube/src/client/counter.rs`) has three classes and no actors.
 - Proxies (`twigo_kube::client::proxy`):
   - Go converts non-ASCII hosts and `NO_PROXY` entries to punycode before matching; Twigo compares them as written.
   - An http API server goes through an HTTP proxy's CONNECT tunnel, where Go sends the proxy the request in absolute form.
@@ -31,8 +30,15 @@ Findings that belong to no step yet.
   - A node's Overview asks for `resource.k8s.io/v1` ResourceSlices, which Kubernetes 1.33 does not serve: there the need fails and retries while the Overview is shown, and the section stays out, as kubectl leaves it out.
 - The visible window ([bench](docs/bench.md#the-visible-window)):
   - A row memo in `DataGrid`, since each batch renders every row of the window; JavaScript is about half of WebContent's main thread under churn, which is 2.1 % of a core by Name.
+- Modes (`twigo_policy`, ARCHITECTURE 6.4):
+  - The mode a person chooses and the type they mark live in the app's state (`policy/choices`, `crates/twigo-core/src/state.rs`): `@todo` to move them to `settings.json` once the settings files come in M3, with nothing of this left behind.
+  - The policy file is read once, as the app starts, so an admin's change takes a restart.
+  - A type a person marks stays over the kubeconfig's, with no way back to it but marking the same type, which hides a later change of the kubeconfig's: the settings files of M3 can say which is which.
+  - The accepted mockup also shows the type in the context picker and on the cluster's home; so far only the title bar shows it.
 - The bench:
-  - Core RSS read 153 MB, over its 150 MB, in one run of fifteen on fresh clusters on 2026-11-07, and 140 to 147 MB in the others, on kube 5; 141 to 144 MB in three on kube 4.2. Whether kube 5 moved it was not measured.
+  - Core RSS, against its budget of 150 MB: kube 5 did not move the typical value, but spikes over the budget came only on kube 5, and their cause is not known.
+    `bench/harness.sh` five times each, in turn, on `b6043b6` and on it with only kube, k8s-openapi and serde-saphyr set back to 4.2, 0.28 and 0.0.29, on fresh clusters on 2026-11-07, read 145, 144, 144, 144 and 143 MB on kube 4.2, and 152, 144, 141, 143 and 142 MB on kube 5.
+    Over that day 2 runs of 20 passed 150 MB on kube 5 and none of 8 on 4.2, too few to blame it; not investigated, to measure again at M2's close.
   - `no rows sorted by Restarts descending` stopped one driver run in about forty on 2026-11-07, in a build with the clock of ages off; not investigated.
   - One run read a footprint of 404 MB with 235 MiB resident; what it held is not known.
 - The grid's row actions (`packages/ui/src/grid/DataGrid.tsx`):

@@ -24,12 +24,13 @@ use rustls::pki_types::InvalidDnsNameError;
 use rustls::pki_types::ServerName;
 use secrecy::ExposeSecret;
 use tokio::sync::watch;
+use tower::ServiceBuilder;
 use tower::timeout::TimeoutLayer;
-use tower::{BoxError, ServiceBuilder};
 
 pub use connections::Connections;
-pub use counter::{Budgets, Class, Slots, Usage, Waiting};
+pub use counter::{Budgets, Class, Party, Permit, Slots, Usage, Waiting};
 pub use proxy::{Proxy, ProxyEnv, ProxyError, proxy_for};
+pub use twigo_policy::{Actor, Gate};
 
 use auth::AuthLayer;
 use connections::{ConnectionsLayer, Tracked};
@@ -51,14 +52,26 @@ const PING_TIMEOUT: Duration = Duration::from_secs(15);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(70);
 
 pub struct Clients {
-    /// Requests, watches and followed logs, on one HTTP/2 connection when the
-    /// server negotiates it.
+    /// The UI's requests, watches and followed logs, on one HTTP/2 connection
+    /// when the server negotiates it.
     pub api: Client,
-    /// Exec, attach and port-forward: their WebSocket upgrade needs HTTP/1.1.
+    /// The UI's exec, attach and port-forward: their WebSocket upgrade needs
+    /// HTTP/1.1.
     pub sessions: Client,
     cluster: String,
     counter: Counter,
     connections: Connections,
+    gate: Gate,
+    actors: BuildActor,
+}
+
+type BuildActor = Arc<dyn Fn(&Gate) -> Result<ActorClients, Error> + Send + Sync>;
+
+/// An actor's two clients (ARCHITECTURE 6.4), which carry its gate over the
+/// context's shared connections and stream counter.
+pub struct ActorClients {
+    pub api: Client,
+    pub sessions: Client,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -91,20 +104,73 @@ pub struct Options {
     pub provider: Option<Provider>,
 }
 
+/// What every actor's clients of a context share.
+struct Shared<A, S> {
+    config: Config,
+    provider: Option<Provider>,
+    identity: Arc<Identity>,
+    api: hyper_util::client::legacy::Client<A, Body>,
+    sessions: hyper_util::client::legacy::Client<S, Body>,
+    counter: Counter,
+    connections: Connections,
+}
+
+impl<A, S> Shared<A, S>
+where
+    A: Connect + Clone + Send + Sync + 'static,
+    S: Connect + Clone + Send + Sync + 'static,
+{
+    fn actor(&self, gate: &Gate) -> Result<ActorClients, Error> {
+        let config = &self.config;
+        let auth = || {
+            self.provider
+                .as_ref()
+                .map(|provider| AuthLayer::new(provider.clone(), Arc::clone(&self.identity)))
+        };
+        let api = ServiceBuilder::new()
+            .layer(gate.layer())
+            .layer(config.base_uri_layer())
+            .option_layer(config.auth_layer()?)
+            .option_layer(auth())
+            .layer(config.extra_headers_layer()?)
+            .layer(CounterLayer(self.counter.clone(), party(gate.actor())))
+            .layer(TimeoutLayer::new(REQUEST_TIMEOUT))
+            .layer(RetryLayer)
+            .layer(ConnectionsLayer(self.connections.clone()))
+            .layer(gate.recheck())
+            .service(self.api.clone());
+        let sessions = ServiceBuilder::new()
+            .layer(gate.layer())
+            .layer(config.base_uri_layer())
+            .option_layer(config.auth_layer()?)
+            .option_layer(auth())
+            .layer(config.extra_headers_layer()?)
+            .layer(gate.recheck())
+            .service(self.sessions.clone());
+        Ok(ActorClients {
+            api: Client::new(api, config.default_namespace.clone()),
+            sessions: Client::new(sessions, config.default_namespace.clone()),
+        })
+    }
+}
+
+fn party(actor: Actor) -> Party {
+    match actor {
+        Actor::Ui => Party::Ui,
+        _ => Party::Other,
+    }
+}
+
 impl Clients {
-    pub fn new(config: &Config, options: Options) -> Result<Self, Error> {
+    /// The clients of the context `gate` is for, the UI's first. `gate` is
+    /// the UI's: no client of the context goes around it.
+    pub fn new(config: &Config, gate: Gate, options: Options) -> Result<Self, Error> {
         let config = &without_plugins(config, options.provider.is_some())?;
         let proxy = options.proxy.as_ref();
         let counter = Counter::new(options.budgets);
         let connections = Connections::default();
         let identity = Arc::new(Identity::new(connections.clone()));
         let offered = matches!(options.provider, Some(Provider::Exec(_))).then_some(&identity);
-        let auth = || {
-            options
-                .provider
-                .as_ref()
-                .map(|provider| AuthLayer::new(provider.clone(), Arc::clone(&identity)))
-        };
 
         let mut builder = hyper_util::client::legacy::Client::builder(TokioExecutor::new());
         builder
@@ -120,16 +186,6 @@ impl Clients {
             connector(config, Alpn::Both, proxy, offered)?,
             connections.clone(),
         ));
-        let api = ServiceBuilder::new()
-            .layer(config.base_uri_layer())
-            .option_layer(config.auth_layer()?)
-            .option_layer(auth())
-            .layer(config.extra_headers_layer()?)
-            .layer(CounterLayer(counter.clone()))
-            .layer(TimeoutLayer::new(REQUEST_TIMEOUT))
-            .layer(RetryLayer)
-            .layer(ConnectionsLayer(connections.clone()))
-            .service(api);
 
         // Each session upgrades its connection, which leaves the pool, so an
         // idle one would only carry a certificate the plugin has replaced.
@@ -137,42 +193,113 @@ impl Clients {
             .pool_max_idle_per_host(0)
             .build::<_, Body>(connector(config, Alpn::Http1, proxy, offered)?);
 
+        let shared = Shared {
+            config: config.clone(),
+            provider: options.provider,
+            identity: Arc::clone(&identity),
+            api,
+            sessions,
+            counter: counter.clone(),
+            connections: connections.clone(),
+        };
+        let ui = shared.actor(&gate)?;
         Ok(Clients {
-            api: Client::new(api, config.default_namespace.clone()),
-            sessions: kube_client(config, sessions, auth())?,
+            api: ui.api,
+            sessions: ui.sessions,
             cluster: cluster(config),
             counter,
             connections,
+            gate,
+            actors: Arc::new(move |gate| shared.actor(gate)),
         })
     }
 
     /// Clients over `service` in place of a server, the cluster
     /// `https://fake.invalid`, with the stream counter of `budgets` and
     /// connections that nothing dials: for the tests of what runs over
-    /// them.
-    #[cfg(feature = "test-util")]
+    /// them. Their gate lets everything through.
+    #[cfg(any(test, feature = "test-util"))]
     pub fn over<S, B>(service: S, budgets: Budgets) -> Self
     where
         S: tower::Service<http::Request<Body>, Response = http::Response<B>>
             + Clone
             + Send
+            + Sync
             + 'static,
         S::Future: Send + 'static,
-        S::Error: Into<BoxError>,
+        S::Error: Into<tower::BoxError>,
+        S::Response: Send + 'static,
         B: http_body::Body<Data = bytes::Bytes> + Send + Unpin + 'static,
-        B::Error: Into<BoxError>,
+        B::Error: Into<tower::BoxError>,
+    {
+        Self::over_gated(service, budgets, Gate::unrestricted())
+    }
+
+    /// [`Clients::over`], through `gate`.
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn over_gated<S, B>(service: S, budgets: Budgets, gate: Gate) -> Self
+    where
+        S: tower::Service<http::Request<Body>, Response = http::Response<B>>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+        S::Future: Send + 'static,
+        S::Error: Into<tower::BoxError>,
+        S::Response: Send + 'static,
+        B: http_body::Body<Data = bytes::Bytes> + Send + Unpin + 'static,
+        B::Error: Into<tower::BoxError>,
     {
         let counter = Counter::new(budgets);
-        let api = ServiceBuilder::new()
-            .layer(CounterLayer(counter.clone()))
-            .service(service.clone());
+        let actors = {
+            let counter = counter.clone();
+            move |gate: &Gate| {
+                let api = ServiceBuilder::new()
+                    .layer(gate.layer())
+                    .layer(CounterLayer(counter.clone(), party(gate.actor())))
+                    .layer(gate.recheck())
+                    .service(service.clone());
+                let sessions = ServiceBuilder::new()
+                    .layer(gate.layer())
+                    .layer(gate.recheck())
+                    .service(service.clone());
+                Ok(ActorClients {
+                    api: Client::new(api, "default"),
+                    sessions: Client::new(sessions, "default"),
+                })
+            }
+        };
+        let ui = actors(&gate).expect("building over a service cannot fail");
         Clients {
-            api: Client::new(api, "default"),
-            sessions: Client::new(service, "default"),
+            api: ui.api,
+            sessions: ui.sessions,
             cluster: "https://fake.invalid".to_owned(),
             counter,
             connections: Connections::default(),
+            gate,
+            actors: Arc::new(actors),
         }
+    }
+
+    /// Another actor's clients of this context, over its shared connections
+    /// and stream counter.
+    pub fn actor(&self, actor: Actor) -> Result<ActorClients, Error> {
+        (self.actors)(&self.gate.of(actor))
+    }
+
+    /// A session's permit, which it holds for its life, since the upgraded
+    /// stream outlives the response that would hold it: waits as queued over
+    /// the budget, and tells `waiting`.
+    pub async fn admit_session(&self, actor: Actor, waiting: Option<&Waiting>) -> Permit {
+        self.counter
+            .admit(Class::Session, party(actor), waiting)
+            .await
+    }
+
+    /// A permit of the class for what refuses over its budget: the proxy's
+    /// streams and its upgrades.
+    pub fn try_admit(&self, class: Class, actor: Actor) -> Option<Permit> {
+        self.counter.try_admit(class, party(actor))
     }
 
     /// The cluster they reach: its URL, the name they check its certificate
@@ -263,24 +390,6 @@ fn without_plugins(config: &Config, provided: bool) -> Result<Config, Error> {
     Ok(config)
 }
 
-fn kube_client<C>(
-    config: &Config,
-    client: hyper_util::client::legacy::Client<C, Body>,
-    auth: Option<AuthLayer>,
-) -> Result<Client, Error>
-where
-    C: Connect + Clone + Send + Sync + 'static,
-{
-    let service = ServiceBuilder::new()
-        .layer(config.base_uri_layer())
-        .option_layer(config.auth_layer()?)
-        .option_layer(auth)
-        .layer(config.extra_headers_layer()?)
-        .map_err(BoxError::from)
-        .service(client);
-    Ok(Client::new(service, config.default_namespace.clone()))
-}
-
 #[derive(Clone, Copy)]
 enum Alpn {
     Both,
@@ -326,6 +435,9 @@ fn connector(
     // quiet cluster would cut every watch.
     Ok(connector)
 }
+
+#[cfg(test)]
+mod gate_tests;
 
 #[cfg(test)]
 mod tests {

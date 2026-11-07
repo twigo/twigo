@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::mpsc;
 use tokio::time::{Instant, MissedTickBehavior};
-use twigo_kube::client::{self, Budgets, Clients};
+use twigo_kube::client::{self, Budgets, Clients, Gate};
 
 use crate::stats::Spread;
 
@@ -128,6 +128,7 @@ pub async fn run(options: Options) -> Result<Summary, String> {
     };
     let client = Clients::new(
         &config,
+        Gate::unrestricted(),
         client::Options {
             budgets,
             ..client::Options::default()

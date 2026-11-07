@@ -19,6 +19,7 @@ import {
 import { useCredentialEntries } from "./parts/credentials/credentialEntries";
 import { registerListCommands } from "./lists/commands";
 import { registerSpaceColor } from "./spaces/colorCommand";
+import { registerContextModes } from "./spaces/modeCommands";
 import { registerQuickInputCommands } from "./quickaccess/commands";
 
 const TOGGLES: readonly {
@@ -278,6 +279,7 @@ export function registerCore(workbench: Workbench): void {
 
   registerListCommands(workbench, rules);
   registerSpaceColor(workbench);
+  registerContextModes(workbench);
   registerQuickInputCommands(workbench, rules);
   keybindings.register("core", rules);
 

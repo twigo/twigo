@@ -15,6 +15,7 @@ import type {
   ShellEnvironment,
   ViewState,
 } from "../generated";
+import { MockAccess } from "./access";
 import {
   AUTH_SCENARIOS,
   isAuthScenario,
@@ -48,6 +49,8 @@ import {
   type QueryResult,
 } from "./query";
 
+export { UNMARKED } from "./fixtures";
+
 /**
  * `live` connects, syncs and then changes pods every second, and refuses
  * the lists `FORBIDDEN` names; any other value pins that state.
@@ -56,13 +59,16 @@ type ListScenario = "live" | ViewState["state"];
 
 /**
  * A list scenario, `shellTimeout`: live lists while the login shell's
- * environment timed out, or a pinned state of prod-eu's credentials.
+ * environment timed out, `policyFile`: live lists with an admin's policy
+ * file over `prod-*`, or a pinned state of prod-eu's credentials.
  */
-export type MockScenario = ListScenario | "shellTimeout" | AuthScenario;
+export type MockScenario =
+  ListScenario | "shellTimeout" | "policyFile" | AuthScenario;
 
 export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "live",
   "shellTimeout",
+  "policyFile",
   ...AUTH_SCENARIOS,
   "queued",
   "connecting",
@@ -125,8 +131,13 @@ export function createMockBackend(
   const now = Date.now();
   const pinsAuth = isAuthScenario(scenario);
   const lists: ListScenario =
-    scenario === "shellTimeout" || isAuthScenario(scenario) ? "live" : scenario;
+    scenario === "shellTimeout" ||
+    scenario === "policyFile" ||
+    isAuthScenario(scenario)
+      ? "live"
+      : scenario;
   const auth = new MockAuth(pinsAuth ? scenario : undefined);
+  const access = new MockAccess(scenario === "policyFile");
   const resolved: ShellEnvironment =
     scenario === "shellTimeout" ? SHELL_TIMEOUT : { state: "resolved" };
   let environment = resolved;
@@ -191,6 +202,22 @@ export function createMockBackend(
     [C in PlainCommand]: (request: RequestOf<C>) => ResponseOf<C>;
   } = {
     spaces_list: () => [...spaces],
+    context_mode_set: ({ context, mode }) => {
+      access.setMode(context, mode);
+      return null;
+    },
+    context_environment_set: ({ context, environment }) => {
+      access.setEnvironment(context, environment);
+      return null;
+    },
+    context_unlock: (context) => {
+      access.unlock(context);
+      return null;
+    },
+    context_relock: (context) => {
+      access.relock(context);
+      return null;
+    },
     space_open: (name) => {
       if (!CONTEXTS.some((context) => context.name === name)) {
         throw new IpcError("notFound", `no source lists the context ${name}`);
@@ -438,7 +465,7 @@ export function createMockBackend(
       );
       return id;
     },
-    contexts_watch: () => CONTEXTS,
+    contexts_watch: (_request, onMessage) => access.watch(onMessage),
     resources_watch: (id, onMessage) => {
       space(id);
       onMessage({

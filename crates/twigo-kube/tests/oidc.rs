@@ -594,6 +594,7 @@ async fn a_request_whose_refreshed_token_is_rejected_goes_unretried() {
     ]);
     let clients = twigo_kube::client::Clients::new(
         &config,
+        twigo_kube::client::Gate::unrestricted(),
         twigo_kube::client::Options {
             provider: Some(twigo_kube::credentials::Provider::Oidc(Arc::clone(
                 &setup.oidc,

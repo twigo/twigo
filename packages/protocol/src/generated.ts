@@ -11,6 +11,24 @@ export type Block = { "type": "fields", fields: Array<Field>, } | { "type": "con
  */
 readable: boolean, } | { "type": "tree", nodes: Array<TreeNode>, } | { "type": "events" } & EventList | { "type": "diagnostics", findings: Array<Finding>, } | { "type": "containers", containers: Array<Container>, } | { "type": "table", columns: Array<string>, rows: Array<Array<Value>>, } | { "type": "list" } & EmbeddedList;
 
+/**
+ * Why the gate stopped it.
+ */
+export type BlockReason = "mode" | "noGrant" | "noApproval";
+
+/**
+ * A request the gate stopped before it left the process.
+ */
+export type Blocked = { context: string, mode: Mode, source: ModeSource, class: RequestClass, reason: BlockReason, 
+/**
+ * What it asked for, as RBAC names it: `create`, `get`, `proxy`.
+ */
+verb: string, 
+/**
+ * What it asked that of: `pods/web-1/exec in default`, or a path.
+ */
+target: string, };
+
 export type Bucket = { 
 /**
  * Every line in the span, warnings and errors included.
@@ -118,7 +136,29 @@ source: string,
  * `https://10.0.0.1:6443`. None when the kubeconfig names no server
  * that parses.
  */
-server: string | null, };
+server: string | null, 
+/**
+ * Its mode, where the mode comes from and what it is marked as.
+ */
+access: ContextAccess, };
+
+/**
+ * What a context lets through now, and why.
+ */
+export type ContextAccess = { 
+/**
+ * In force now: `guarded` while a `read-only` context is unlocked.
+ */
+mode: Mode, 
+/**
+ * Where the mode comes from, an unlock aside.
+ */
+source: ModeSource, environment: Environment | null, 
+/**
+ * When an unlock ends and the context relocks, in milliseconds since
+ * the epoch.
+ */
+unlockedUntil: number | null, };
 
 /**
  * How a context gets its credentials.
@@ -166,7 +206,13 @@ owners: Array<string> | null, };
 
 export type EnvVar = { name: string, value: string, };
 
-export type ErrorKind = "invalidInput" | "notFound" | "conflict" | "forbidden" | "unauthorized" | "timeout" | "unavailable" | "internal";
+/**
+ * What a context is marked as, by a person or its kubeconfig; a context
+ * nobody marked has none. It sets the default mode and colour.
+ */
+export type Environment = "production" | "staging" | "development" | "local";
+
+export type ErrorKind = "invalidInput" | "notFound" | "conflict" | "forbidden" | "unauthorized" | "permissions" | "timeout" | "unavailable" | "internal";
 
 /**
  * An object's events, newest first.
@@ -291,7 +337,12 @@ to: string, buckets: Array<Bucket>, };
  * The error every command returns. The webview branches on `kind`; `message`
  * is for people.
  */
-export type IpcError = { kind: ErrorKind, message: string, };
+export type IpcError = { kind: ErrorKind, message: string, 
+/**
+ * With `permissions`: the mode and its source, when the gate stopped a
+ * request.
+ */
+blocked?: Blocked, };
 
 /**
  * The characters one key types; empty where it types none.
@@ -615,6 +666,17 @@ range: TimeRange | null, };
 export type LogWindow = { "type": "tail", count: number, } | { "type": "range", start: number, end: number, } | { "type": "around", id: number, before: number, after: number, };
 
 /**
+ * How much a context lets through (ARCHITECTURE 6.4). Rust owns it, and the
+ * webview only shows it.
+ */
+export type Mode = "read-write" | "guarded" | "read-only";
+
+/**
+ * Where a context's mode comes from, highest first.
+ */
+export type ModeSource = { "kind": "policyFile", file: string, pattern: string | null, } | { "kind": "unlisted" } | { "kind": "moved" } | { "kind": "user" } | { "kind": "kubeconfig" } | { "kind": "provider" } | { "kind": "environment", environment: Environment, } | { "kind": "default" };
+
+/**
  * One flush of an open object. Rust sends the next only after the webview
  * acknowledged this one's `seq`, and coalesces changes meanwhile.
  */
@@ -758,6 +820,11 @@ export type RelatedObject = { target: ObjectRef,
 controller: boolean, };
 
 /**
+ * What the gate takes a request for (ARCHITECTURE 6.4).
+ */
+export type RequestClass = "read" | "dryRun" | "write" | "secretRead" | "forward" | "exec";
+
+/**
  * A resource the space's clusters serve, from discovery: what the explorer
  * lists and what `:` in quick access resolves names against (ARCHITECTURE 4.5).
  */
@@ -813,6 +880,18 @@ export type Section = {
  * Stable, such as `core.metadata`; folding is kept by it.
  */
 id: string, title: string, blocks: Array<Block>, };
+
+/**
+ * Marks a context as an environment type; none says it has no type, whatever
+ * its kubeconfig says.
+ */
+export type SetContextEnvironment = { context: string, environment: Environment | null, };
+
+/**
+ * Sets the person's mode for a context; none goes back to what the rest
+ * says.
+ */
+export type SetContextMode = { context: string, mode: Mode | null, };
 
 export type SetLogSource = { id: SubscriptionId, source: LogSource, };
 
@@ -945,6 +1024,10 @@ start: number, ids: Array<RowId>, };
 export type Commands = {
   spaces_list: { request: null; response: Array<Space>; message: null };
   contexts_watch: { request: null; response: Array<Context>; message: Array<Context> };
+  context_mode_set: { request: SetContextMode; response: null; message: null };
+  context_environment_set: { request: SetContextEnvironment; response: null; message: null };
+  context_unlock: { request: string; response: null; message: null };
+  context_relock: { request: string; response: null; message: null };
   space_open: { request: string; response: Space; message: null };
   resources_watch: { request: string; response: null; message: Discovered };
   namespaces_list: { request: string; response: Array<string>; message: null };

@@ -25,6 +25,20 @@
     transparent 360px
   );
 }
+/* A context whose mode wants to be seen (ARCHITECTURE 6.4): the status bar
+   tinted in its colour. */
+.twigo-statusbar[data-strong] {
+  background: color-mix(in oklab, var(--twigo-context) 16%, var(--shell));
+  color: var(--foreground);
+  box-shadow: inset 0 1px 0
+    color-mix(in oklab, var(--twigo-context) 40%, transparent);
+}
+.twigo-mode-chip {
+  color: var(--twigo-context-ink);
+  background: color-mix(in oklab, var(--twigo-context) 14%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklab, var(--twigo-context) 38%, transparent);
+}
 /* Dockview on the design tokens. Tabs connect to their editor (VS Code
    1.144 dropped detached pill tabs for this): the strip takes the shell's
    surface, the active tab the editor's, open into it. */

@@ -1,11 +1,12 @@
 import { act } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import type { Context } from "@twigo/protocol";
-import { createMockBackend } from "@twigo/protocol/mock";
+import { createMockBackend, UNMARKED } from "@twigo/protocol/mock";
 import { StateStore } from "../state/store";
 import { testWorkbench } from "../testing";
 import { ContextColors } from "./colors";
 import { SET_SPACE_COLOR } from "./colorCommand";
+import { SET_CONTEXT_ENVIRONMENT } from "./modeCommands";
 
 test("a kubeconfig's colour comes first, then the one chosen in Twigo, then one from the name", async () => {
   const workbench = await testWorkbench();
@@ -24,6 +25,48 @@ test("a kubeconfig's colour comes first, then the one chosen in Twigo, then one 
   expect(colors.of("prod-eu")).toBe("red");
 
   colors.choose("qa", undefined);
+  expect(colors.of("qa")).toBe(automatic);
+});
+
+test("an environment type colours a context nothing else colours, and Automatic goes back to it", async () => {
+  const workbench = await testWorkbench();
+  const { colors, commands, keys, quickAccess } = workbench;
+  const automatic = colors.of("qa");
+  await act(() =>
+    commands.execute(SET_CONTEXT_ENVIRONMENT, keys.lookup(null), {
+      context: "qa",
+      value: "production",
+    }),
+  );
+  expect(colors.of("qa")).toBe("red");
+  expect(colors.source("qa")).toBe("environment");
+
+  colors.choose("qa", "blue");
+  expect(colors.source("qa")).toBe("chosen");
+  colors.choose("qa", undefined);
+  expect(colors.of("qa")).toBe("red");
+
+  await act(() => workbench.spaces.open("qa"));
+  const run = commands.execute(SET_SPACE_COLOR, keys.lookup(null));
+  await act(() => Promise.resolve());
+  const pick = quickAccess.session?.pick;
+  expect(pick?.items.find((item) => item.id === "red")?.description).toBe(
+    "Current, from its environment type",
+  );
+  expect(pick?.items.find((item) => item.id === "automatic")?.description).toBe(
+    "From its environment type, else its name",
+  );
+  act(() => {
+    pick?.resolve(undefined);
+  });
+  await run;
+
+  await act(() =>
+    commands.execute(SET_CONTEXT_ENVIRONMENT, keys.lookup(null), {
+      context: "qa",
+      value: null,
+    }),
+  );
   expect(colors.of("qa")).toBe(automatic);
 });
 
@@ -83,6 +126,7 @@ test("the colour command does nothing for a space the rail no longer shows", asy
     color: null,
     source: "~/.kube/config",
     server: null,
+    access: UNMARKED,
   }));
   const backend = createMockBackend("ready");
   let send: ((next: Context[]) => void) | undefined;

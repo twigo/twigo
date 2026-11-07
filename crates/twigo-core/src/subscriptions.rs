@@ -58,10 +58,10 @@ impl<T> Subscriptions<T> {
     }
 
     fn missing(&self, id: SubscriptionId) -> IpcError {
-        IpcError {
-            kind: ErrorKind::NotFound,
-            message: format!("no {} subscription {}", self.what, id.0),
-        }
+        IpcError::new(
+            ErrorKind::NotFound,
+            format!("no {} subscription {}", self.what, id.0),
+        )
     }
 
     /// Taken before a subscription is built, which may wait on the network,
@@ -87,10 +87,10 @@ impl<T> Subscriptions<T> {
         let id = SubscriptionId(inner.next);
         let window = inner.windows.entry(ticket.window).or_default();
         if window.generation != ticket.generation {
-            return Err(IpcError {
-                kind: ErrorKind::Unavailable,
-                message: format!("the page that asked for the {} is gone", self.what),
-            });
+            return Err(IpcError::new(
+                ErrorKind::Unavailable,
+                format!("the page that asked for the {} is gone", self.what),
+            ));
         }
         window.held.insert(id, held);
         Ok(id)

@@ -52,9 +52,6 @@ impl From<&Error> for IpcError {
             Error::Unavailable(_) => ErrorKind::Unavailable,
             Error::NotFound(_) => ErrorKind::NotFound,
         };
-        IpcError {
-            kind,
-            message: error.to_string(),
-        }
+        IpcError::new(kind, error.to_string())
     }
 }

@@ -15,13 +15,13 @@ use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Manager, RunEvent, State, Webview, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
-use twigo_core::Core;
+use twigo_core::{Core, PolicyFile};
 use twigo_env::Environment;
 use twigo_ipc::{
     Ack, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ErrorKind, ExecReview,
     GetValues, IpcError, KeyboardLayout, ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs,
-    OpenObject, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellEnvironment,
-    Space, StateEntry, StateSnapshot, SubscriptionId,
+    OpenObject, SetContextEnvironment, SetContextMode, SetLogSource, SetLogView, SetLogWindow,
+    SetParts, SetWindow, ShellEnvironment, Space, StateEntry, StateSnapshot, SubscriptionId,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
 
@@ -139,19 +139,23 @@ async fn contexts_watch(
     channel: Channel<Vec<Context>>,
 ) -> Result<Vec<Context>, IpcError> {
     let mut contexts = app.core.catalog.subscribe();
+    let mut access = app.core.policy.changes();
     // Marks what it answers with as seen, so the follower sends only what
     // comes after.
-    let current = contexts
+    contexts
         .wait_for(Option::is_some)
         .await
-        .expect("the catalog lives as long as the app")
-        .as_ref()
-        .expect("waited for")
-        .ipc();
+        .expect("the catalog lives as long as the app");
+    access.borrow_and_update();
+    let current = app.core.contexts().expect("waited for");
+    let core = Arc::clone(&app.core);
     let follower = tauri::async_runtime::spawn(async move {
-        while contexts.changed().await.is_ok() {
-            let next = contexts.borrow_and_update().as_ref().map(|c| c.ipc());
-            if let Some(next) = next
+        loop {
+            tokio::select! {
+                changed = contexts.changed() => if changed.is_err() { return },
+                changed = access.changed() => if changed.is_err() { return },
+            }
+            if let Some(next) = core.contexts()
                 && let Err(error) = channel.send(next)
             {
                 eprintln!("could not send the contexts: {error}");
@@ -163,6 +167,29 @@ async fn contexts_watch(
 }
 
 #[tauri::command]
+async fn context_mode_set(app: State<'_, App>, request: SetContextMode) -> Result<(), IpcError> {
+    app.core.set_context_mode(request).await
+}
+
+#[tauri::command]
+async fn context_environment_set(
+    app: State<'_, App>,
+    request: SetContextEnvironment,
+) -> Result<(), IpcError> {
+    app.core.set_context_environment(request).await
+}
+
+#[tauri::command]
+async fn context_unlock(app: State<'_, App>, request: String) -> Result<(), IpcError> {
+    app.core.unlock_context(&request).await
+}
+
+#[tauri::command]
+fn context_relock(app: State<'_, App>, request: String) {
+    app.core.policy.relock(&request);
+}
+
+#[tauri::command]
 fn spaces_list(app: State<'_, App>) -> Vec<Space> {
     app.core.state.spaces()
 }
@@ -170,10 +197,10 @@ fn spaces_list(app: State<'_, App>) -> Vec<Space> {
 #[tauri::command]
 async fn space_open(app: State<'_, App>, request: String) -> Result<Space, IpcError> {
     if app.core.catalog.contexts().await.find(&request).is_none() {
-        return Err(IpcError {
-            kind: ErrorKind::NotFound,
-            message: format!("no source lists the context {request:?}"),
-        });
+        return Err(IpcError::new(
+            ErrorKind::NotFound,
+            format!("no source lists the context {request:?}"),
+        ));
     }
     Ok(app.core.state.open_space(&request))
 }
@@ -419,16 +446,20 @@ async fn logs_download(
             // Once the command is dropped, nothing waits for the answer.
             let _ = answer.send(picked);
         });
-    let picked = picked.await.map_err(|error| IpcError {
-        kind: ErrorKind::Internal,
-        message: format!("the save dialog failed: {error}"),
+    let picked = picked.await.map_err(|error| {
+        IpcError::new(
+            ErrorKind::Internal,
+            format!("the save dialog failed: {error}"),
+        )
     })?;
     let Some(picked) = picked else {
         return Ok(None);
     };
-    let path = picked.into_path().map_err(|error| IpcError {
-        kind: ErrorKind::InvalidInput,
-        message: format!("Twigo saves logs only to a file on this computer: {error}"),
+    let path = picked.into_path().map_err(|error| {
+        IpcError::new(
+            ErrorKind::InvalidInput,
+            format!("Twigo saves logs only to a file on this computer: {error}"),
+        )
     })?;
     app.core.logs_write(webview.label(), request, &path).await?;
     Ok(Some(path.display().to_string()))
@@ -469,9 +500,11 @@ fn url_open(handle: AppHandle, request: String) -> Result<(), IpcError> {
     handle
         .opener()
         .open_url(url, None::<&str>)
-        .map_err(|error| IpcError {
-            kind: ErrorKind::Internal,
-            message: format!("could not open {request}: {error}"),
+        .map_err(|error| {
+            IpcError::new(
+                ErrorKind::Internal,
+                format!("could not open {request}: {error}"),
+            )
         })
 }
 
@@ -530,7 +563,11 @@ fn main() {
                 let environment = Arc::clone(&environment);
                 async move { environment.resolve().await }
             });
-            let core = Core::new(&app.path().app_data_dir()?, &app.path().app_cache_dir()?);
+            let core = Core::new(
+                &app.path().app_data_dir()?,
+                &app.path().app_cache_dir()?,
+                &PolicyFile::default_path(),
+            );
             tauri::async_runtime::spawn({
                 let core = Arc::clone(&core);
                 let environment = Arc::clone(&environment);
@@ -563,6 +600,10 @@ fn main() {
             shell_environment_watch,
             shell_environment_retry,
             contexts_watch,
+            context_mode_set,
+            context_environment_set,
+            context_unlock,
+            context_relock,
             spaces_list,
             space_open,
             state_load,

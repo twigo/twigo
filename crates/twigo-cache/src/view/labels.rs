@@ -71,10 +71,10 @@ fn keyword(text: &str) -> Option<Token> {
 }
 
 fn invalid(message: String) -> IpcError {
-    IpcError {
-        kind: ErrorKind::InvalidInput,
-        message: format!("the label selector: {message}"),
-    }
+    IpcError::new(
+        ErrorKind::InvalidInput,
+        format!("the label selector: {message}"),
+    )
 }
 
 fn lex(source: &str) -> Result<Vec<Token>, IpcError> {

@@ -12,6 +12,7 @@ import { PartView } from "./PartView";
 import { SpaceRail } from "./SpaceRail";
 import { StatusBar } from "./StatusBar";
 import { TitleBar } from "./TitleBar";
+import { UnlockBanner } from "./UnlockBanner";
 
 const DEFAULT_SIZE: Readonly<Record<Location, number>> = {
   sidebar: 260,
@@ -73,6 +74,7 @@ export function Shell() {
       >
         <TitleBar />
       </PanelBoundary>
+      <UnlockBanner />
       <div className="flex min-h-0 flex-1">
         <PanelBoundary
           label="Space rail"

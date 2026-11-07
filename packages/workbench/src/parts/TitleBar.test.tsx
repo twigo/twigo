@@ -5,11 +5,21 @@ import {
   render,
   screen,
 } from "@testing-library/react";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
+import { createMockBackend } from "@twigo/protocol/mock";
 import { inWorkbench, testWorkbench } from "../testing";
 import { TitleBar } from "./TitleBar";
 
 afterEach(cleanup);
+
+/** The mock answers after a timer. */
+const settled = () =>
+  act(
+    () =>
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      }),
+  );
 
 async function mounted() {
   const workbench = await testWorkbench();
@@ -88,4 +98,136 @@ test("the search opens quick access, and the bar has no part toggles", async () 
   fireEvent.click(screen.getByRole("button", { name: /Search prod-eu/ }));
   expect(workbench.quickAccess.session?.value).toBe("");
   expect(screen.queryByRole("button", { name: /Toggle/ })).toBeNull();
+});
+
+test("the chip follows the context's name and opens what set its mode", async () => {
+  const { workbench } = await mounted();
+  await settled();
+  const chip = screen.getByRole("button", {
+    name: "Mode of prod-eu: Production · read-only",
+  });
+  expect(chip.textContent).toBe("Production · read-only");
+
+  fireEvent.click(chip);
+  expect(screen.getByText("The default for Production.")).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: /Unlock for 15 minutes/ }),
+  );
+  await settled();
+  expect(workbench.catalog.find("prod-eu")?.access.mode).toBe("guarded");
+  expect(
+    screen.getByRole("button", {
+      name: "Mode of prod-eu: Production · unlocked",
+    }),
+  ).toBeTruthy();
+});
+
+test("pressing what is already pressed changes nothing, so an unlock keeps its relock", async () => {
+  const { workbench } = await mounted();
+  const invoke = vi.spyOn(workbench.backend, "invoke");
+  await settled();
+  fireEvent.click(screen.getByRole("button", { name: /^Mode of prod-eu/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Read-only" }));
+  fireEvent.click(screen.getByRole("button", { name: "Production" }));
+  await settled();
+  expect(invoke).not.toHaveBeenCalledWith(
+    "context_mode_set",
+    expect.anything(),
+  );
+  expect(invoke).not.toHaveBeenCalledWith(
+    "context_environment_set",
+    expect.anything(),
+  );
+
+  fireEvent.click(
+    screen.getByRole("button", { name: /Unlock for 15 minutes/ }),
+  );
+  await settled();
+  const until = workbench.catalog.find("prod-eu")?.access.unlockedUntil;
+  fireEvent.click(screen.getByRole("button", { name: "Guarded" }));
+  await settled();
+  expect(workbench.catalog.find("prod-eu")?.access.unlockedUntil).toBe(until);
+  expect(screen.getByText(/You unlocked it for now/)).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Lock now" }));
+  await settled();
+  expect(workbench.catalog.find("prod-eu")?.access.mode).toBe("read-only");
+});
+
+test("the popover takes the focus itself, so a second Enter cannot open up production", async () => {
+  await mounted();
+  await settled();
+  const chip = screen.getByRole("button", { name: /^Mode of prod-eu/ });
+  chip.focus();
+  fireEvent.click(chip);
+  await settled();
+  expect(document.activeElement).toBe(
+    screen.getByRole("dialog", { name: "Mode of prod-eu" }),
+  );
+
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  await settled();
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(document.activeElement).toBe(chip);
+});
+
+test("a popover left open on one context does not stay open on the next", async () => {
+  const { workbench } = await mounted();
+  await settled();
+  fireEvent.click(screen.getByRole("button", { name: /^Mode of prod-eu/ }));
+  expect(screen.getByRole("dialog", { name: "Mode of prod-eu" })).toBeTruthy();
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  await settled();
+  expect(screen.queryByRole("dialog")).toBeNull();
+  act(() => {
+    workbench.spaces.select("prod-eu");
+  });
+  await settled();
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+test("a choice of the person can go back to the default", async () => {
+  const { workbench } = await mounted();
+  await settled();
+  fireEvent.click(screen.getByRole("button", { name: /^Mode of prod-eu/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Guarded" }));
+  await settled();
+  expect(workbench.catalog.find("prod-eu")?.access.source).toEqual({
+    kind: "user",
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Use the default" }));
+  await settled();
+  expect(workbench.catalog.find("prod-eu")?.access.mode).toBe("read-only");
+});
+
+test("under a policy file the popover names the rule and offers no way around it", async () => {
+  const workbench = await testWorkbench(
+    undefined,
+    createMockBackend("policyFile"),
+  );
+  render(<TitleBar />, { wrapper: inWorkbench(workbench) });
+  await settled();
+  fireEvent.click(screen.getByRole("button", { name: /^Mode of prod-eu/ }));
+  expect(screen.getByText(/prod-\* in .*policy\.json sets this/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Read-write" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /Unlock/ })).toBeNull();
+});
+
+test("a context nobody marked has no chip", async () => {
+  const { workbench } = await mounted();
+  await act(() => workbench.spaces.open("qa"));
+  expect(screen.queryByRole("button", { name: /^Mode of/ })).toBeNull();
+});
+
+test("a type other than Production has its chip", async () => {
+  const { workbench } = await mounted();
+  act(() => {
+    workbench.spaces.select("dev");
+  });
+  await settled();
+  expect(
+    screen.getByRole("button", { name: "Mode of dev: Development" }),
+  ).toBeTruthy();
 });

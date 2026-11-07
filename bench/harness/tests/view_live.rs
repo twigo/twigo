@@ -27,7 +27,7 @@ use twigo_cache::batcher::Batcher;
 use twigo_cache::hub::{Connect, Delta, Hub, Query, Resource, RowFormat};
 use twigo_cache::view::{QueryView, Spec};
 use twigo_ipc::{Cell, Gvr, ListBatch, ListQuery, Row, RowId, Sort, ViewState};
-use twigo_kube::client::{Clients, Options};
+use twigo_kube::client::{Clients, Gate, Options};
 
 const PODS: u32 = 5_000;
 const NAMESPACE: &str = "bench";
@@ -207,7 +207,8 @@ async fn windows_under_churn_end_as_a_fresh_list_sorts_them() {
     let config = Config::from_custom_kubeconfig(kubeconfig, &KubeConfigOptions::default())
         .await
         .unwrap();
-    let clients = Arc::new(Clients::new(&config, Options::default()).unwrap());
+    let clients =
+        Arc::new(Clients::new(&config, Gate::unrestricted(), Options::default()).unwrap());
     let namespaces = Api::<Namespace>::all(clients.api.clone());
     assert!(
         namespaces.get_opt(NAMESPACE).await.unwrap().is_none(),

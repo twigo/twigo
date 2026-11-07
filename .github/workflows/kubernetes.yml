@@ -9,6 +9,7 @@ on:
       - crates/twigo-cache/**
       - crates/twigo-core/**
       - crates/twigo-kube/**
+      - crates/twigo-policy/**
       - crates/twigo-sessions/**
       - bench/harness/**
       - bench/cluster.sh

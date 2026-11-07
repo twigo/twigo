@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import {
   cn,
   Popover,
@@ -6,17 +7,31 @@ import {
   StatusDot,
 } from "@twigo/ui";
 import { useChanges, useWorkbench } from "../react";
+import { useModeCues } from "./modeCues";
 import type { Alignment, StatusBarItem, StatusEntry } from "../views/registry";
 import { PanelBoundary, PartCrash } from "./PanelBoundary";
 
 /**
  * Items that features contribute, ordered by priority on each side
  * (ARCHITECTURE 4.1), in the shell's colour: colour comes only from an
- * entry's tone and the context's accent.
+ * entry's tone and the context's accent, and from the whole bar's tint in
+ * a context whose mode wants to be seen (6.4).
  */
 export function StatusBar() {
+  const { spaces, colors } = useWorkbench();
+  useChanges(spaces.changes);
+  useChanges(colors.changes);
+  const { strong } = useModeCues();
+  const color = spaces.active && colors.ofSpace(spaces.active);
   return (
-    <footer className="flex h-6 shrink-0 items-center justify-between gap-2 bg-shell px-0.5 text-xs text-muted-foreground shadow-[inset_0_1px_0_var(--border)]">
+    <footer
+      data-strong={strong ? "" : undefined}
+      style={
+        color &&
+        ({ "--twigo-context": `var(--context-${color})` } as CSSProperties)
+      }
+      className="twigo-statusbar flex h-6 shrink-0 items-center justify-between gap-2 bg-shell px-0.5 text-xs text-muted-foreground shadow-[inset_0_1px_0_var(--border)]"
+    >
       <Side alignment="left" />
       <Side alignment="right" />
     </footer>

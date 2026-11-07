@@ -1,5 +1,5 @@
 import * as v from "valibot";
-import type { ContextColor, Space } from "@twigo/protocol";
+import type { ContextColor, Environment, Space } from "@twigo/protocol";
 import { Changes } from "../changes";
 import type { StateStore } from "../state/store";
 import type { Catalog } from "./catalog";
@@ -29,13 +29,22 @@ const AUTOMATIC: readonly ContextColor[] = [
 
 const CHOSEN = v.record(v.string(), v.picklist(CONTEXT_COLORS));
 
+/** The colour an environment type gives a context (ARCHITECTURE 6.4). */
+const OF_ENVIRONMENT: Readonly<Record<Environment, ContextColor>> = {
+  production: "red",
+  staging: "orange",
+  development: "green",
+  local: "blue",
+};
+
 /** Where a context's colour comes from, strongest first. */
-export type ColorSource = "kubeconfig" | "chosen" | "automatic";
+export type ColorSource = "kubeconfig" | "chosen" | "environment" | "automatic";
 
 /**
  * Every context's colour (ARCHITECTURE 4.2): the one its kubeconfig's
  * `twigo` extension gives, else the one the user chose in Twigo, kept in
- * the app's state, else one picked from its name, the same each time.
+ * the app's state, else its environment type's, else one picked from its
+ * name, the same each time.
  */
 export class ContextColors {
   readonly changes = new Changes();
@@ -55,16 +64,23 @@ export class ContextColors {
     return (
       this.catalog.find(context)?.color ??
       this.#chosen[context] ??
+      this.#ofEnvironment(context) ??
       automatic(context)
     );
   }
 
-  source(context: string): ColorSource {
-    if (this.catalog.find(context)?.color) return "kubeconfig";
-    return this.#chosen[context] ? "chosen" : "automatic";
+  #ofEnvironment(context: string): ContextColor | undefined {
+    const environment = this.catalog.find(context)?.access.environment;
+    return environment ? OF_ENVIRONMENT[environment] : undefined;
   }
 
-  /** Undefined goes back to the colour from the context's name. */
+  source(context: string): ColorSource {
+    if (this.catalog.find(context)?.color) return "kubeconfig";
+    if (this.#chosen[context]) return "chosen";
+    return this.#ofEnvironment(context) ? "environment" : "automatic";
+  }
+
+  /** Undefined goes back to its environment type's colour, else its name's. */
   choose(context: string, color: ContextColor | undefined): void {
     const { [context]: _, ...rest } = this.#chosen;
     this.#chosen = color === undefined ? rest : { ...rest, [context]: color };

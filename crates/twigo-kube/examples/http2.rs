@@ -21,7 +21,7 @@ use tokio::task::JoinHandle;
 use twigo_cache::decode::Decode;
 use twigo_cache::request::{self, Collection, WatchFrom};
 use twigo_cache::table::TableDecoder;
-use twigo_kube::client::{Budgets, Clients, Options};
+use twigo_kube::client::{Budgets, Clients, Gate, Options};
 
 const WATCHES: usize = 50;
 const REPLICAS: i32 = 5000;
@@ -207,7 +207,7 @@ async fn phase(name: &str, config: &Config, namespace: &str, port: u16) {
         budgets,
         ..Options::default()
     };
-    let clients = Clients::new(config, options).unwrap();
+    let clients = Clients::new(config, Gate::unrestricted(), options).unwrap();
     let client = if name == "HTTP/2" {
         clients.api
     } else {
@@ -278,7 +278,9 @@ async fn main() {
         WINDOW.as_secs()
     );
     println!();
-    let api = Clients::new(&config, Options::default()).unwrap().api;
+    let api = Clients::new(&config, Gate::unrestricted(), Options::default())
+        .unwrap()
+        .api;
     let version = resource_version(&api, &collection).await;
     let watches = Watches::open(&api, &collection, &version, 10).await;
     tokio::time::sleep(IDLE).await;

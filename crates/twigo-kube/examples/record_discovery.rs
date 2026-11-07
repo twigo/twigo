@@ -7,7 +7,7 @@ use std::path::Path;
 
 use kube::Config;
 use kube::config::{KubeConfigOptions, Kubeconfig};
-use twigo_kube::client::{Clients, Options};
+use twigo_kube::client::{Clients, Gate, Options};
 use twigo_kube::discovery::Discovery;
 
 #[tokio::main(flavor = "current_thread")]
@@ -23,7 +23,7 @@ async fn main() {
     let config = Config::from_custom_kubeconfig(kubeconfig, &KubeConfigOptions::default())
         .await
         .unwrap();
-    let clients = Clients::new(&config, Options::default()).unwrap();
+    let clients = Clients::new(&config, Gate::unrestricted(), Options::default()).unwrap();
     let discovery = Discovery::refresh(&clients.api, None)
         .await
         .unwrap()
