@@ -197,7 +197,7 @@ export class Operations {
       const toast = notify.countdown({
         icon: look.icon,
         message: plan.doing,
-        detail: (left) => `${plan.context} · sends in ${String(left)} s`,
+        detail: (left) => `${plan.context} · sends in ${String(left)}\u00a0s`,
         until,
         seconds,
         cancel: {
