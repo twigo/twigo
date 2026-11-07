@@ -1,4 +1,4 @@
-//! The report of ARCHITECTURE 3.8's six metrics at 5k pods, from what the app's bench mode, the
+//! The report of ARCHITECTURE 3.8's seven metrics at 5k pods, from what the app's bench mode, the
 //! process sampler and the churn generator wrote into one directory.
 
 use std::collections::HashMap;
@@ -21,6 +21,7 @@ const SORT_P95_MS: f64 = 50.0;
 const CORE_RSS_MB: f64 = 150.0;
 const WEBVIEW_MB: f64 = 300.0;
 const IDLE_CPU_PERCENT: f64 = 2.0;
+const VISIBLE_CPU_PERCENT: f64 = 20.0;
 const MB: f64 = 1_000_000.0;
 const GPU_PROCESS: &str = "com.apple.WebKit.GPU";
 
@@ -101,6 +102,7 @@ pub struct Inputs {
     pub run: Run,
     pub webview: Webview,
     pub memory: Vec<Sample>,
+    pub visible: (Sample, Sample),
     pub idle: (Sample, Sample),
     pub hidden: Option<Hidden>,
     pub churn: Option<Churn>,
@@ -148,6 +150,10 @@ impl Inputs {
             run: read(dir, "run.json")?,
             webview: read(dir, "webview.json")?,
             memory: read_memory(dir)?,
+            visible: (
+                read(dir, "visible-start.json")?,
+                read(dir, "visible-end.json")?,
+            ),
             idle: (read(dir, "idle-start.json")?, read(dir, "idle-end.json")?),
             hidden: read_optional(dir, "hidden.json")?,
             churn: read_optional(dir, "churn.json")?,
@@ -270,6 +276,7 @@ pub fn build(inputs: Inputs) -> Report {
         run,
         webview,
         memory,
+        visible,
         idle,
         hidden,
         churn,
@@ -420,6 +427,20 @@ pub fn build(inputs: Inputs) -> Report {
         measured: format!(
             "physical footprint of the app's WebKit GPU process, the median of {} samples; any page that repaints holds about 260 MB there, WebKit's pool of IOSurfaces, so it stays out of the budget (docs/bench.md)",
             memory.len()
+        ),
+    });
+
+    let (start, end) = &visible;
+    let cpu = cpu_percent(start, end);
+    rows.push(Row {
+        metric: "Visible CPU, 100 changes/s, window on screen".into(),
+        value: Some(format!("{cpu:.2} %")),
+        target: format!("< {VISIBLE_CPU_PERCENT:.0} %"),
+        status: Status::judged(cpu < VISIBLE_CPU_PERCENT),
+        measured: format!(
+            "CPU time of the app and its {} WebKit processes over {:.0} s, as a share of one core; sorted by Restarts descending, the rows the churn changes on screen, while the driver sleeps",
+            end.webkit.len(),
+            (end.at_ms - start.at_ms) / 1000.0,
         ),
     });
 
@@ -576,6 +597,7 @@ mod tests {
                 },
             },
             memory: vec![sample(0.0, 0, webkit(0))],
+            visible: (sample(0.0, 0, webkit(0)), sample(10_000.0, 0, webkit(0))),
             idle: (
                 sample(0.0, 1_000, webkit(1_000)),
                 sample(10_000.0, 1_000 + idle_ns, webkit(1_000)),
@@ -618,6 +640,10 @@ mod tests {
                 ("Webview memory with the pod list open", &Status::Pass),
                 ("  Physical footprint", &Status::Shown),
                 ("  GPU process", &Status::Shown),
+                (
+                    "Visible CPU, 100 changes/s, window on screen",
+                    &Status::Pass
+                ),
                 ("Idle CPU, 100 changes/s, window hidden", &Status::Pass),
             ]
         );
@@ -625,7 +651,7 @@ mod tests {
         assert_eq!(report.rows[5].value.as_deref(), Some("220 MB"));
         assert_eq!(report.rows[6].value.as_deref(), Some("160 MB"));
         assert_eq!(report.rows[7].value.as_deref(), Some("500 MB"));
-        assert_eq!(report.rows[8].value.as_deref(), Some("0.01 %"));
+        assert_eq!(report.rows[9].value.as_deref(), Some("0.01 %"));
     }
 
     #[test]
@@ -748,6 +774,20 @@ mod tests {
     }
 
     #[test]
+    fn visible_cpu_is_judged_at_twenty_percent() {
+        let busy = |ns: u64| {
+            let mut all = inputs(20.0, 16.7, 0);
+            all.visible = (sample(0.0, 0, vec![]), sample(10_000.0, ns, vec![]));
+            all
+        };
+        assert!(build(busy(1_900_000_000)).failed().is_empty());
+        assert_eq!(
+            build(busy(2_100_000_000)).failed(),
+            ["Visible CPU, 100 changes/s, window on screen"]
+        );
+    }
+
+    #[test]
     fn cpu_counts_a_process_that_started_in_between_whole() {
         let start = sample(0.0, 0, vec![]);
         let end = sample(
@@ -762,7 +802,7 @@ mod tests {
     fn the_table_lists_every_row() {
         let report = build(inputs(30.0, 16.7, 0));
         let table = table(&report);
-        assert_eq!(table.lines().filter(|l| l.starts_with("| ")).count(), 11);
+        assert_eq!(table.lines().filter(|l| l.starts_with("| ")).count(), 12);
         assert!(table.contains("| First paint after the space connects | 400 ms | < 1 s | pass |"));
     }
 }

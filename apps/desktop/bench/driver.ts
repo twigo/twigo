@@ -29,6 +29,8 @@ const WAIT_MS = 5000;
 /** The list waits for the space's discovery, then lists every pod. */
 const FIRST_PAINT_WAIT_MS = 30_000;
 const PAINT_TIMEOUT_MS = 1000;
+/** Longer than the harness's settling and sampling, as `bench/harness.sh` checks. */
+const VISIBLE_MS = 30_000;
 
 /** A restart count the churn set, painted at `at`, in Unix milliseconds. */
 export interface Paint {
@@ -381,12 +383,21 @@ async function changes(
 /**
  * Opens the space's pod list, then scrolls it, sorts it and watches it
  * change, timing each in the webview (ARCHITECTURE 3.8). `steady` runs once
- * the list is open under churn, for the harness to sample memory.
+ * the list is open under churn, for the harness to sample memory, and `visible`
+ * once the driver only sleeps, for it to sample the page's own CPU.
  */
 export async function drive(
   workbench: Workbench,
   probe: Probe,
-  { space, steady }: { space: string; steady: () => Promise<void> },
+  {
+    space,
+    steady,
+    visible,
+  }: {
+    space: string;
+    steady: () => Promise<void>;
+    visible: () => Promise<void>;
+  },
 ): Promise<Results> {
   const first = await open(workbench, probe, space);
   await sleep(1000);
@@ -396,6 +407,8 @@ export async function drive(
   const list = probe.lists[probe.lists.length - 1] ?? first.list;
   await top();
   const changed = await changes(list, steady);
+  await visible();
+  await sleep(VISIBLE_MS);
   return {
     rows: list.total,
     refreshMs,

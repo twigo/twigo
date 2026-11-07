@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Usage: bench/harness.sh [kubeconfig]
 #
-# ARCHITECTURE 3.8's six metrics at 5k pods, on macOS. Builds the app's bench mode in release,
+# ARCHITECTURE 3.8's seven metrics at 5k pods, on macOS. Builds the app's bench mode in release,
 # runs the churn generator at 100 changes/s against a kwok cluster, launches the app with
 # TWIGO_BENCH and the cluster's kubeconfig as TWIGO_KUBECONFIG, samples its memory with the pod
-# list open and its CPU with the window hidden, and prints the report. Without a kubeconfig it creates the cluster (bench/cluster.sh up bench,
+# list open and its CPU with the window on screen and hidden, and prints the report. Without a kubeconfig it creates the cluster (bench/cluster.sh up bench,
 # bench/pods.sh 5000) and deletes it at the end; a given one must hold the 5,000 pods already.
 # report.json and the files it is built from land in $TWIGO_BENCH_DIR/harness.
 set -euo pipefail
@@ -14,6 +14,8 @@ RATE=100
 SETTLE=10
 MEMORY_SAMPLES=5
 MEMORY_EVERY=2
+VISIBLE_SETTLE=5
+VISIBLE_SAMPLE=20
 IDLE_SETTLE=5
 IDLE_SAMPLE=30
 
@@ -155,6 +157,15 @@ for n in $(seq 1 "$MEMORY_SAMPLES"); do
   no_failure
   "$tool" sample "$app" >"$out/memory-$n.json"
 done
+wait_for visible.json 120
+sleep "$VISIBLE_SETTLE"
+"$tool" sample "$app" >"$out/visible-start.json"
+sleep "$VISIBLE_SAMPLE"
+"$tool" sample "$app" >"$out/visible-end.json"
+if [ -e "$out/idle.json" ]; then
+  echo "the window hid before the visible sample ended" >&2
+  exit 1
+fi
 wait_for idle.json 180
 sleep "$IDLE_SETTLE"
 "$tool" sample "$app" >"$out/idle-start.json"

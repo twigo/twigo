@@ -86,7 +86,11 @@ async function run(container: HTMLElement) {
   );
   const space = await benchSpace(workbench);
   const results = await whileVisible(() =>
-    drive(workbench, probe, { space, steady: () => write("steady", {}) }),
+    drive(workbench, probe, {
+      space,
+      steady: () => write("steady", {}),
+      visible: () => write("visible", {}),
+    }),
   );
   await write("webview", results);
 }
