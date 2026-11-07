@@ -178,6 +178,7 @@ test("a row's actions button and a right click run the resource commands on that
   const namespace = cellOf(second, "Namespace");
   expect(name).not.toBe("");
   expect(namespace).not.toBe("");
+  fireEvent.pointerEnter(second);
   const trigger = within(second).getByRole("button", { name: "Row actions" });
   openMenu(trigger);
   fireEvent.click(
@@ -202,6 +203,7 @@ test("a row's hover buttons show before any row is selected, and act on their ro
   expect(
     rows().filter((row) => row.getAttribute("aria-selected") === "true"),
   ).toEqual([]);
+  fireEvent.pointerEnter(second);
   fireEvent.click(within(second).getByRole("button", { name: "Copy Name" }));
   await settle(1);
   expect(writeText).toHaveBeenCalledWith(nameOf(second));

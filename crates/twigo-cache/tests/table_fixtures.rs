@@ -364,6 +364,52 @@ fn a_raw_object_falls_back_to_name_and_age() {
 }
 
 #[test]
+fn a_table_may_spell_its_kind_with_an_escape() {
+    let escape = |text: &str| {
+        let escaped = text
+            .replace(r#""kind":"Table""#, r#""kind":"\u0054able""#)
+            .replace(r#""kind": "Table""#, r#""kind": "\u0054able""#);
+        assert_ne!(escaped, text);
+        escaped
+    };
+    let mut decoder = TableDecoder::new();
+    let page = decoder
+        .decode_list(escape(include_str!("fixtures/pods-list.json")).as_bytes())
+        .unwrap();
+    assert!(!page.items.is_empty());
+    let line = include_str!("fixtures/pods-watch.jsonl")
+        .lines()
+        .next()
+        .unwrap();
+    assert!(decoder.decode_event(escape(line).as_bytes()).is_ok());
+}
+
+#[test]
+fn a_raw_object_may_have_a_field_named_as_a_tables() {
+    let mut decoder = TableDecoder::new();
+    let line = br#"{"type":"ADDED","object":{"kind":"Grid","rows":5,"columnDefinitions":"none","metadata":{"name":"g","uid":"u","resourceVersion":"7"}}}"#;
+    let row = upsert(decoder.decode_event(line).unwrap());
+    assert_eq!(&*row.meta.name, "g");
+}
+
+#[test]
+fn a_status_in_a_watch_is_an_error_event() {
+    let mut decoder = TableDecoder::new();
+    let line = br#"{"type":"ERROR","object":{"kind":"Status","status":"Failure","reason":"Expired","code":410,"message":"too old"}}"#;
+    assert!(matches!(
+        decoder.decode_event(line).unwrap(),
+        Event::Error(_)
+    ));
+}
+
+#[test]
+fn a_table_with_a_row_it_cannot_read_is_an_error() {
+    let mut decoder = TableDecoder::new();
+    let line = br#"{"type":"MODIFIED","object":{"kind":"Table","rows":[{"cells":5}]}}"#;
+    assert!(decoder.decode_event(line).is_err());
+}
+
+#[test]
 fn a_server_without_table_gets_metadata_columns() {
     let mut decoder = TableDecoder::new();
     let page = decoder
