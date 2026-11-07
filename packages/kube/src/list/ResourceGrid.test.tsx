@@ -16,6 +16,19 @@ import {
   withScreenSize,
 } from "../../test/workbench";
 
+const gridRenders = vi.hoisted(() => ({ count: 0 }));
+
+vi.mock("@twigo/ui", async (original) => {
+  const ui = await original<typeof import("@twigo/ui")>();
+  return {
+    ...ui,
+    DataGrid: (props: Parameters<typeof ui.DataGrid>[0]) => {
+      gridRenders.count++;
+      return <ui.DataGrid {...props} />;
+    },
+  };
+});
+
 withScreenSize();
 
 beforeEach(() => {
@@ -234,6 +247,43 @@ test("a changed cell flashes through the next batch, and a storm flashes nothing
       restarts(id)?.className.includes("animate-flash"),
     ),
   ).toEqual([]);
+});
+
+test("seconds passing render the ages and not the grid", async () => {
+  const script = scriptedBackend();
+  await openList(script.backend);
+  act(() => {
+    script.send({
+      ...batch(1, {}, true),
+      total: 1,
+      columns: [
+        { name: "Name", kind: "string", priority: 0 },
+        { name: "Age", kind: "age", priority: 0 },
+      ],
+      window: { start: 0, ids: ["a"] },
+      upserts: [
+        {
+          id: "a",
+          created: new Date(Date.now() - 5000).toISOString(),
+          generated: null,
+          cells: ["a", null],
+        },
+      ],
+    });
+  });
+  await settle(1);
+  const age = () =>
+    textOf(
+      screen.getByText("a").closest<HTMLElement>("[role=row]") ?? undefined,
+      "Age",
+    );
+  const before = age();
+  const renders = gridRenders.count;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(age()).not.toBe(before);
+  expect(gridRenders.count).toBe(renders);
 });
 
 test("the name takes the free width until an edge's drag sizes it, and the kind keeps the width", async () => {

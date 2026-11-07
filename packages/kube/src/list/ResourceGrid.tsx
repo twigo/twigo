@@ -28,7 +28,6 @@ import { kindIcon } from "../kinds";
 import type { ListServices } from "../services";
 import type { ListInput } from "../uri";
 import { ViewStatus } from "../ViewStatus";
-import { useNow } from "../useNow";
 import { CellView, type ShownColumn } from "./cells";
 import { SHOWS_ROWS } from "./listStatus";
 import { sequence } from "./sequence";
@@ -133,7 +132,6 @@ function Grid({
     query: shown,
     setWindow,
   } = useListView(backend, query);
-  const now = useNow(1000);
   // The rows on screen as one string: churn refreshes a picked health's
   // values without reordering anything, so they stand as their healths.
   const showing = JSON.stringify(
@@ -339,9 +337,7 @@ function Grid({
       onRange={onRange}
       cell={(row, column) => {
         const shownColumn = byName.get(column.id);
-        return (
-          shownColumn && <CellView row={row} column={shownColumn} now={now} />
-        );
+        return shownColumn && <CellView row={row} column={shownColumn} />;
       }}
       group={(group) => (
         <GroupHeader
