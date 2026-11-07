@@ -13,6 +13,7 @@ import { Credentials } from "./credentials";
 import type { Lookup } from "./contextkey/when";
 import { Keybindings } from "./keybindings/service";
 import { Lists } from "./lists/service";
+import { CANCEL_COUNTDOWN, Operations } from "./operations/service";
 import { PartSizes } from "./parts/sizes";
 import { QuickAccess } from "./quickaccess/registry";
 import { Catalog } from "./spaces/catalog";
@@ -56,6 +57,7 @@ export class Workbench {
   readonly sizes: PartSizes;
   readonly shellEnvironment: ShellEnvironmentStatus;
   readonly credentials: Credentials;
+  readonly operations: Operations;
 
   constructor(
     readonly backend: Backend,
@@ -87,6 +89,17 @@ export class Workbench {
     this.credentials = new Credentials(backend, this.spaces, (error) => {
       this.report(error);
     });
+    this.operations = new Operations(
+      backend,
+      this.keys,
+      () => {
+        const binding = this.keybindings.primary(CANCEL_COUNTDOWN);
+        return binding && this.keybindings.label(binding.presses);
+      },
+      (error) => {
+        this.report(error);
+      },
+    );
   }
 
   /** A menu's commands as actions to draw, run against `lookup` with `args`, such as the space a tile's menu is about. */

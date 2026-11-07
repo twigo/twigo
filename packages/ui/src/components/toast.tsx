@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import {
   CircleAlert,
   CircleCheck,
@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { Toaster as SonnerToaster, toast } from "sonner";
 import { cn } from "../lib/cn";
+import { Kbd } from "./kbd";
 
 export type Tone = "success" | "error" | "warning" | "info";
 
@@ -77,6 +78,81 @@ export function Toast({ id, tone, message, action }: ToastProps) {
       </button>
     </div>
   );
+}
+
+export interface CountdownToastProps {
+  icon: LucideIcon;
+  message: ReactNode;
+  /** Says what happens when, from the seconds left: `dev · sends in 4 s`. */
+  detail: (seconds: number) => ReactNode;
+  /** When it ends, in milliseconds since the epoch. */
+  until: number;
+  /** How long it counts in all, which its bar shows. */
+  seconds: number;
+  cancel: { label: string; keys?: string; run: () => void };
+}
+
+/**
+ * Something that happens once its seconds run out unless cancelled, as
+ * Headlamp holds a delete (ARCHITECTURE 6.4): a bar runs down under it,
+ * and its owner, not the toast, keeps the time.
+ */
+export function CountdownToast({
+  icon: Icon,
+  message,
+  detail,
+  until,
+  seconds,
+  cancel,
+}: CountdownToastProps) {
+  const [shown, setShown] = useState(() => secondsLeft(until));
+  useEffect(() => {
+    const tick = setInterval(() => {
+      setShown(secondsLeft(until));
+    }, 250);
+    return () => {
+      clearInterval(tick);
+    };
+  }, [until]);
+  // Set once: a new duration mid-way would make the bar jump.
+  const [bar] = useState(() => {
+    const remaining = Math.max(0, until - Date.now());
+    return {
+      "--countdown-from": remaining / (seconds * 1000),
+      animationDuration: `${remaining}ms`,
+    } as CSSProperties;
+  });
+  return (
+    <div
+      role="status"
+      className="relative flex w-[var(--width)] items-center gap-2 overflow-hidden rounded-md border border-border bg-popover/90 py-2 pr-2 pl-3 font-sans text-xs shadow-lg backdrop-blur-xl"
+    >
+      <Icon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+      <span className="grid min-w-0 flex-1 gap-0.5 leading-5">
+        <span className="break-words text-foreground">{message}</span>
+        <span className="text-[11px] leading-4 text-muted-foreground">
+          {detail(shown)}
+        </span>
+      </span>
+      <button
+        type="button"
+        onClick={cancel.run}
+        className="flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 font-medium text-foreground shadow-[inset_0_0_0_1px_var(--border)] transition-colors hover:bg-accent focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none"
+      >
+        {cancel.label}
+        {cancel.keys && <Kbd>{cancel.keys}</Kbd>}
+      </button>
+      <span
+        aria-hidden
+        className="absolute inset-x-0 bottom-0 h-0.5 origin-left animate-countdown bg-brand"
+        style={bar}
+      />
+    </div>
+  );
+}
+
+function secondsLeft(until: number): number {
+  return Math.max(0, Math.ceil((until - Date.now()) / 1000));
 }
 
 const WIDTH = { "--width": "288px" } as CSSProperties;

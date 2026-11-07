@@ -344,6 +344,8 @@
 
 @theme {
   --animate-flash: flash 1s var(--ease-out);
+  /* Its duration and starting scale come inline from what is left. */
+  --animate-countdown: countdown linear forwards;
 
   /* Opacity runs on the compositor: a background-color keyframe repaints the page on every frame. */
   @keyframes flash {
@@ -352,6 +354,15 @@
     }
     to {
       opacity: 0;
+    }
+  }
+
+  @keyframes countdown {
+    from {
+      transform: scaleX(var(--countdown-from));
+    }
+    to {
+      transform: scaleX(0);
     }
   }
 }

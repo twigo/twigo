@@ -5,6 +5,7 @@ export * from "./components/popover";
 export * from "./components/tooltip";
 export * from "./components/command";
 export * from "./components/dialog";
+export * from "./components/confirm-dialog";
 export * from "./components/empty-state";
 export * from "./components/frame";
 export * from "./components/kbd";

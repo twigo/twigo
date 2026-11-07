@@ -3,6 +3,8 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Eye,
+  EyeOff,
   Minus,
   TriangleAlert,
   X,
@@ -19,7 +21,7 @@ import type {
   Section,
 } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
-import { cn, PropertyList, Section as Folding, Table } from "@twigo/ui";
+import { Button, cn, PropertyList, Section as Folding, Table } from "@twigo/ui";
 import { useChanges } from "@twigo/workbench";
 import { formatBytes } from "@twigo/utils";
 import { Containers } from "./Containers";
@@ -27,6 +29,7 @@ import { Diagnostics, type FindingLogsChoice } from "./Diagnostics";
 import { EmbeddedList } from "./EmbeddedList";
 import { Properties } from "./Properties";
 import type { OverviewStates } from "./overviewStates";
+import type { Reveal } from "./reveal";
 import { Age, ValueView } from "./values";
 
 export interface OverviewProps {
@@ -41,6 +44,8 @@ export interface OverviewProps {
   readonly onOpen: (target: ObjectRef) => void;
   /** The values of a ConfigMap's keys, null for a binary one. */
   readonly values?: (keys: readonly string[]) => Promise<(string | null)[]>;
+  /** Reveals a Secret's value, as its data's keys offer it. */
+  readonly reveal?: Reveal | undefined;
   /** Opens a container's logs from a finding about it. */
   readonly onLogs?: ((choice: FindingLogsChoice) => void) | undefined;
 }
@@ -58,6 +63,7 @@ export function Overview({
   kind,
   onOpen,
   values,
+  reveal,
   onLogs,
 }: OverviewProps) {
   useChanges(states.changes);
@@ -93,6 +99,7 @@ export function Overview({
                   kind={kind}
                   onOpen={onOpen}
                   values={values}
+                  reveal={reveal}
                   onLogs={onLogs}
                 />
               ))}
@@ -140,6 +147,7 @@ function BlockView({
   kind,
   onOpen,
   values,
+  reveal,
   onLogs,
 }: {
   /** Whose title names a table and whose id keys a list's state. */
@@ -150,6 +158,7 @@ function BlockView({
   kind: string;
   onOpen: (target: ObjectRef) => void;
   values: OverviewProps["values"];
+  reveal: OverviewProps["reveal"];
   onLogs: OverviewProps["onLogs"];
 }) {
   switch (block.type) {
@@ -162,6 +171,7 @@ function BlockView({
         <Data
           entries={block.entries}
           values={block.readable ? values : undefined}
+          reveal={block.readable ? undefined : reveal}
         />
       );
     case "tree":
@@ -291,22 +301,94 @@ function Conditions({ conditions }: { conditions: readonly Condition[] }) {
   );
 }
 
-/** Keys with their sizes; a ConfigMap's value comes when its key opens. */
+/**
+ * Keys with their sizes; a ConfigMap's value comes when its key opens, and
+ * a Secret's on a Reveal.
+ */
 function Data({
   entries,
   values,
+  reveal,
 }: {
   entries: readonly DataEntry[];
   values: OverviewProps["values"];
+  reveal: OverviewProps["reveal"];
 }) {
   if (entries.length === 0)
     return <p className="text-muted-foreground">No data</p>;
   return (
     <ul className="flex flex-col">
-      {entries.map((entry) => (
-        <DataRow key={entry.key} entry={entry} values={values} />
-      ))}
+      {entries.map((entry) =>
+        reveal ? (
+          <SecretRow key={entry.key} entry={entry} reveal={reveal} />
+        ) : (
+          <DataRow key={entry.key} entry={entry} values={values} />
+        ),
+      )}
     </ul>
+  );
+}
+
+/** What a Reveal gave, which leaves the webview as the row hides it or goes. */
+type Shown =
+  | { readonly state: "hidden" }
+  | { readonly state: "revealing" }
+  | {
+      readonly state: "shown";
+      readonly value: string;
+      readonly binary: boolean;
+    };
+
+/**
+ * A Secret's key, whose value stays in Rust until a Reveal (ARCHITECTURE
+ * 3.6), and stays shown only until Hide or the row goes.
+ */
+function SecretRow({ entry, reveal }: { entry: DataEntry; reveal: Reveal }) {
+  const [shown, setShown] = useState<Shown>({ state: "hidden" });
+  const showing = shown.state === "shown";
+  return (
+    <li className="flex flex-col">
+      <div className="flex h-6 items-center gap-2">
+        <span className="truncate font-mono text-xs">{entry.key}</span>
+        <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
+          {entry.binary && "binary, "}
+          {formatBytes(entry.bytes)}
+        </span>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label={showing ? `Hide ${entry.key}` : `Reveal ${entry.key}`}
+          tooltip={showing ? "Hide" : "Reveal"}
+          isLoading={shown.state === "revealing"}
+          onClick={() => {
+            if (showing) {
+              setShown({ state: "hidden" });
+              return;
+            }
+            setShown({ state: "revealing" });
+            void reveal(entry.key).then((revealed) => {
+              setShown(
+                revealed
+                  ? { state: "shown", ...revealed }
+                  : { state: "hidden" },
+              );
+            });
+          }}
+        >
+          {showing ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
+        </Button>
+      </div>
+      {showing && (
+        <pre className="mb-1 ml-0 max-h-80 overflow-auto rounded bg-muted p-2 font-mono text-xs break-all whitespace-pre-wrap">
+          {shown.value}
+          {shown.binary && (
+            <span className="mt-1 block font-sans text-muted-foreground">
+              base64
+            </span>
+          )}
+        </pre>
+      )}
+    </li>
   );
 }
 

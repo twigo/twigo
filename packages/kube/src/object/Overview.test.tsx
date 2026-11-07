@@ -386,3 +386,50 @@ test("conditions read as chips with a mark in their tone, and the wrong ones say
     "DisruptionTarget · EvictionByEvictionAPI",
   ]);
 });
+
+test("a Secret's value reaches the DOM only through a Reveal, and leaves it on Hide", async () => {
+  const reveal = vi.fn((key: string) =>
+    Promise.resolve(
+      key === "mode" ? { value: "hunter2", binary: false } : undefined,
+    ),
+  );
+  render(
+    <Overview
+      states={new OverviewStates()}
+      kind="/secrets"
+      space="kind-test"
+      overview={data(false)}
+      onOpen={() => undefined}
+      reveal={reveal}
+    />,
+  );
+  expect(document.body.textContent).not.toContain("hunter2");
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Reveal mode" }));
+    await Promise.resolve();
+  });
+  expect(reveal).toHaveBeenCalledWith("mode");
+  expect(document.body.textContent).toContain("hunter2");
+  fireEvent.click(screen.getByRole("button", { name: "Hide mode" }));
+  expect(document.body.textContent).not.toContain("hunter2");
+});
+
+test("a Reveal the person does not confirm shows nothing", async () => {
+  const reveal = vi.fn(() => Promise.resolve(undefined));
+  render(
+    <Overview
+      states={new OverviewStates()}
+      kind="/secrets"
+      space="kind-test"
+      overview={data(false)}
+      onOpen={() => undefined}
+      reveal={reveal}
+    />,
+  );
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Reveal mode" }));
+    await Promise.resolve();
+  });
+  expect(screen.getByRole("button", { name: "Reveal mode" })).toBeTruthy();
+  expect(document.querySelector("pre")).toBeNull();
+});

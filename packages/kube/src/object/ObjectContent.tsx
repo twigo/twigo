@@ -23,6 +23,7 @@ export function ObjectContent({
   kind,
   snapshot,
   values,
+  reveal,
   onOpen,
   onLogs,
 }: {
@@ -34,6 +35,7 @@ export function ObjectContent({
   kind: string;
   snapshot: ObjectSnapshot;
   values: OverviewProps["values"];
+  reveal?: OverviewProps["reveal"];
   onOpen: (target: ObjectRef) => void;
   onLogs?: OverviewProps["onLogs"];
 }) {
@@ -57,6 +59,7 @@ export function ObjectContent({
               kind={kind}
               onOpen={onOpen}
               values={values}
+              reveal={reveal}
               onLogs={onLogs}
             />
           )}

@@ -4,6 +4,7 @@ import {
   PanelRight,
   ScrollText,
   SquareArrowOutUpRight,
+  Trash2,
   X,
 } from "lucide-react";
 import type { MenuId, Workbench } from "@twigo/workbench";
@@ -15,7 +16,9 @@ import { objectUri, parseListUri } from "./uri";
  * Commands on the active list's selected row and on its marked rows, and
  * the menus that place them (ARCHITECTURE 4.4, 5.1): the row's context
  * menu, its hover buttons and the marked rows' bar, and an object editor's
- * title. Shell and delete join them with their commands.
+ * title. Delete goes through the command bus, whose plan says how much to
+ * ask (6.4); it is ⌘⌫, never a bare key (4.4). Shell joins them with its
+ * command.
  */
 export function registerResourceActions(
   workbench: Workbench,
@@ -158,6 +161,31 @@ export function registerResourceActions(
           (id) => id.split("/").pop() ?? id,
         );
         await copy(names.sort().join("\n"));
+      },
+    },
+    {
+      id: "k8s.resource.delete",
+      title: "Delete",
+      icon: Trash2,
+      key: "mod+backspace",
+      menus: [
+        ["resource/context", "9_delete"],
+        ["resource/details", "9_delete"],
+      ],
+      run: async () => {
+        const found = target();
+        const space = found && parseListUri(found.uri)?.space;
+        if (!found || space === undefined) return;
+        const { gvr, namespaced } = found.selected;
+        const { namespace, name } = objectOf(found.selected);
+        await workbench.operations.run(
+          {
+            action: "delete",
+            space,
+            target: { gvr, namespaced, namespace: namespace ?? null, name },
+          },
+          { icon: Trash2, destructive: true },
+        );
       },
     },
     {

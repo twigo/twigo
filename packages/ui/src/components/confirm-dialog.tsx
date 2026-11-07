@@ -1,0 +1,176 @@
+import { useId, useRef, useState, type ReactNode } from "react";
+import { Check, Copy, type LucideIcon } from "lucide-react";
+import { Button } from "./button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "./dialog";
+import { Kbd } from "./kbd";
+
+export interface ConfirmDialogProps {
+  /** Says where it acts first: the context's type and name. */
+  readonly badge?: ReactNode;
+  /** A strip of this colour along the top, for a context whose mode wants to be seen. */
+  readonly accent?: string;
+  /** Names the cluster: `Delete pod web-1 from kind-a?` */
+  readonly question: string;
+  /** What follows, a sentence each. */
+  readonly consequences: readonly string[];
+  /** The command line that does the same, shown as code to copy. */
+  readonly command?: string;
+  /** What the person types before the button works. */
+  readonly typed?: string;
+  /** The button names its action, never Yes or OK. */
+  readonly confirm: string;
+  readonly icon?: LucideIcon;
+  /** Whether it destroys, which the button's colour says. */
+  readonly destructive: boolean;
+  readonly onConfirm: (typed: string | undefined) => void;
+  readonly onCancel: () => void;
+}
+
+/**
+ * Asks before a change that cannot be undone at once (ARCHITECTURE 6.4): the
+ * question names the cluster, the dialog lists what follows and the
+ * equivalent command, and a typed name holds the button back where the blast
+ * radius or the mode asks for one. Focus starts on Cancel, or on the field,
+ * so a stray Enter confirms nothing.
+ */
+export function ConfirmDialog({
+  badge,
+  accent,
+  question,
+  consequences,
+  command,
+  typed,
+  confirm,
+  icon: Icon,
+  destructive,
+  onConfirm,
+  onCancel,
+}: ConfirmDialogProps) {
+  const [text, setText] = useState("");
+  const cancel = useRef<HTMLButtonElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const field = useId();
+  const ready = typed === undefined || text === typed;
+  const submit = () => {
+    if (ready) onConfirm(typed === undefined ? undefined : text);
+  };
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onCancel();
+      }}
+    >
+      <DialogContent
+        className="max-w-[480px] overflow-hidden"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          (input.current ?? cancel.current)?.focus();
+        }}
+      >
+        {accent && (
+          <div aria-hidden className="h-1" style={{ background: accent }} />
+        )}
+        <form
+          className="grid gap-3 px-[18px] py-4 text-xs"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submit();
+          }}
+        >
+          {badge && <div className="flex items-center gap-2">{badge}</div>}
+          <DialogTitle className="text-[15px] leading-snug font-semibold">
+            {question}
+          </DialogTitle>
+          {consequences.length > 0 ? (
+            <DialogDescription asChild>
+              <ul className="grid gap-1 text-muted-foreground">
+                {consequences.map((consequence) => (
+                  <li key={consequence}>{consequence}</li>
+                ))}
+              </ul>
+            </DialogDescription>
+          ) : (
+            <DialogDescription className="sr-only">
+              {question}
+            </DialogDescription>
+          )}
+          {command && <CommandLine command={command} />}
+          {typed !== undefined && (
+            <div className="grid gap-1.5">
+              <label htmlFor={field}>
+                Type <span className="font-mono font-semibold">{typed}</span> to
+                confirm
+              </label>
+              <input
+                ref={input}
+                id={field}
+                value={text}
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                onChange={(event) => {
+                  setText(event.target.value);
+                }}
+                className="h-7 rounded-md bg-editor px-2 font-mono text-xs shadow-[inset_0_0_0_1px_var(--input)] outline-none focus:shadow-[inset_0_0_0_1px_var(--ring)]"
+              />
+            </div>
+          )}
+          <div className="mt-1 flex items-center justify-end gap-2">
+            <Button
+              ref={cancel}
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onCancel}
+            >
+              Cancel
+              <Kbd>esc</Kbd>
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              variant={destructive ? "destructive" : "default"}
+              disabled={!ready}
+            >
+              {Icon && <Icon aria-hidden />}
+              {confirm}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** A command line in code, with a button that copies it. */
+function CommandLine({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="flex items-start gap-1 rounded-md bg-row-active py-1.5 pr-1 pl-2 font-mono text-[11px] leading-relaxed text-muted-foreground">
+      <code className="min-w-0 flex-1 break-words whitespace-pre-wrap select-text">
+        {command}
+      </code>
+      <Button
+        type="button"
+        size="icon-sm"
+        variant="ghost"
+        aria-label={copied ? "Copied" : "Copy command"}
+        tooltip={copied ? "Copied" : "Copy command"}
+        onClick={() => {
+          void navigator.clipboard.writeText(command).then(() => {
+            setCopied(true);
+          });
+        }}
+      >
+        {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
+      </Button>
+    </div>
+  );
+}

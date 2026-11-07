@@ -21,6 +21,8 @@ import { registerListCommands } from "./lists/commands";
 import { registerSpaceColor } from "./spaces/colorCommand";
 import { registerContextModes } from "./spaces/modeCommands";
 import { registerQuickInputCommands } from "./quickaccess/commands";
+import { CANCEL_COUNTDOWN, COUNTING_DOWN } from "./operations/service";
+import { useOperationEntries } from "./operations/entries";
 
 const TOGGLES: readonly {
   location: Location;
@@ -328,6 +330,28 @@ export function registerCore(workbench: Workbench): void {
     priority: 1000,
     useEntries: useSpaceEntries,
   });
+  views.registerStatusBarItem({
+    id: "workbench.operations",
+    alignment: "left",
+    priority: 180,
+    useEntries: useOperationEntries,
+  });
+  commands.register({
+    id: CANCEL_COUNTDOWN,
+    title: "Cancel the Countdown",
+    category: "View",
+    enablement: COUNTING_DOWN,
+    run: () => {
+      workbench.operations.cancelCountdown();
+    },
+  });
+  keybindings.register("core", [
+    {
+      key: "mod+z",
+      command: CANCEL_COUNTDOWN,
+      when: `${COUNTING_DOWN} && !inputFocus`,
+    },
+  ]);
   views.registerStatusBarItem({
     id: "workbench.chord",
     alignment: "right",
