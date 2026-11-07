@@ -48,7 +48,7 @@ impl Watch {
         let mut watched = Watched {
             debouncer: new_debouncer_opt(
                 DEBOUNCE,
-                None,
+                Some(DEBOUNCE),
                 events,
                 NoCache,
                 notify::Config::default(),
