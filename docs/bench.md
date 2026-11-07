@@ -165,17 +165,40 @@ macOS 27.2 and the state of the machine were not told apart.
 
 ### What the budgets do not measure
 
-The visible window, on 2026-11-07, e795d43, one run each, with a driver that sleeps instead of watching frames, in 15 s windows, the churn stopped with SIGSTOP for the second:
+The visible window, on 2026-11-07, on a kind 1.37 cluster with kwok and 5,000 pods, at 100 changes/s or with the churn stopped by SIGSTOP, in 20 s windows of `twigo-bench sample`, as a share of one core, the app and its WebKit processes together.
+A driver patch, not committed, opened the pod list and slept, so only the page's own work ran.
+A window patch, not committed either, kept the bench off a desktop in use: 40 pt of the window at the screen's left edge, behind other windows, without the focus, with WebKit's occlusion detection off (`_setWindowOcclusionDetectionEnabled:`).
+The page stayed `visible` at a frame of 17 ms.
+Moved fully off the screen, one run read 16.7 % by Restarts, below the 20.4 to 26.4 % of the same build, so these runs keep that edge on screen.
 
-| Build                            | 100 changes/s | No changes |
-| -------------------------------- | ------------- | ---------- |
-| As it is                         | 21.7 %        | 3.9 %      |
-| Without the changed cell's flash | 15.8 %        | 8.0 %      |
-| Also without the clock of ages   | 15.6 %        | 9.9 %      |
+| Build                                  | By Name, 100 changes/s | By Restarts, 100 changes/s | No changes | Runs |
+| -------------------------------------- | ---------------------- | -------------------------- | ---------- | ---- |
+| 673d868                                | 12.5–14.5 %            | 20.4–26.4 %                | 1.4–2.5 %  | 3    |
+| 673d868 without the flash              | 5.6–6.2 %              | 6.9–7.7 %                  | 1.5–2.2 %  | 2    |
+| 067d5f4, the flash on the compositor   | 5.4–7.0 %              | 7.2–8.4 %                  | 1.7–2.4 %  | 4    |
+| 067d5f4 without the clock of ages      | 5.4–7.6 %              | 7.6–8.3 %                  | 0.5–0.7 %  | 2    |
+| 3237f23, also only an age on the clock | 6.6–7.3 %              | 6.9–8.3 %                  | 0.7–1.4 %  | 4    |
 
-The flash's `background-color` keyframes are about 6 points under churn.
-The second column contradicts itself, as turning things off made it worse: something else wakes the page, or the desktop in use around the bench window disturbed it; not known.
+- **The flash.**
+  A `background-color` keyframe repaints the page on every frame of the second after a change, so one change a second kept the whole pipeline at the display's rate.
+  By Name, in one run, by thread through `proc_pidinfo`: WebContent's main thread 6.6 %, the GPU process's 1.6 % and the app's 1.5 %.
+  With `opacity` on a layer behind the text, which runs on the compositor, in one run of 3237f23: 2.1, 0.3 and 0.5 %.
+  It looks the same: the tint within 1 of 255 per channel at six times of the animation, in Chromium and Playwright's WebKit, in both themes, with the pill's bottom edge one device pixel apart in WebKit; a capture of the bench window shows it in a real WKWebView.
+- **The clock.**
+  With no changes, the clock of ages was what woke the page: every list rendered its whole window each second for its Age column.
+  Only an age holds the clock now, on one timer for the page.
+- **What is left.**
+  By Name, in that run of 3237f23: the app's tokio workers 1.6 %, as hidden, WebContent's main thread 2.1 % and its JIT 0.7 %.
+  `sample` counted JavaScript in 36 of that thread's 66 active samples by Name and 50 of 116 by Restarts, so a row memo in `DataGrid` could take at most about half of it; not tried.
+- **`sample` undercounts.**
+  It found WebContent's main thread active in 2.1 % of its samples where `proc_pidinfo` read 6.6 %, so its counts only split a thread's work.
+- **The first measurement.**
+  On e795d43, one run each, the window on top of a desktop in use, it read 21.7 and 3.9 %, and 8.0 and 9.9 % with no changes as the flash and the clock were switched off.
+  These windows do not repeat that rise; the desktop in use is the likely cause, not proven.
+
 Nothing judges these numbers yet.
+
+The budgets hold: `bench/harness.sh <kubeconfig>` three times on 3237f23 with the window patch, at 16:33, 16:35 and 16:38 UTC, each exited 0, with first paint 190 to 244 ms, change → painted cell p95 61.4 to 67.9 ms, scroll 60.0 fps, sort p95 33 to 36 ms, core RSS 132 to 133 MB, webview memory 239 to 246 MB, footprint 166 to 180 MB, GPU process 262 to 264 MB and idle CPU 1.04 to 1.28 %.
 
 ### The first runs on the Rust path
 
