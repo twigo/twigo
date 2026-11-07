@@ -208,11 +208,25 @@ function nextBatch(
   return within(matched, WAIT_MS, what).finally(stop);
 }
 
+/** The editor area mounts after its space opens, and until then no editor can open. */
+async function openEditor(workbench: Workbench, uri: string): Promise<number> {
+  const deadline = performance.now() + WAIT_MS;
+  for (;;) {
+    const clicked = performance.now();
+    try {
+      workbench.editors.open(uri);
+      return clicked;
+    } catch (error) {
+      if (clicked > deadline) throw error;
+      await sleep(50);
+    }
+  }
+}
+
 /** Opens the space's pod list: from the click to its first rows painted. */
 async function open(workbench: Workbench, probe: Probe, space: string) {
   const opened = probe.next();
-  const clicked = performance.now();
-  workbench.editors.open(`k8s-list://${space}/v1/pods`);
+  const clicked = await openEditor(workbench, `k8s-list://${space}/v1/pods`);
   const list = await within(
     opened,
     FIRST_PAINT_WAIT_MS,

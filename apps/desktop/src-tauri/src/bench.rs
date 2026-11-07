@@ -12,6 +12,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tauri::ipc::CapabilityBuilder;
 use tauri::plugin::{Builder, TauriPlugin};
+#[cfg(target_os = "macos")]
+use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Manager, Runtime, State, WebviewWindow};
 
 const IDLE: Duration = Duration::from_secs(45);
@@ -38,9 +40,11 @@ pub fn plugin<R: Runtime>() -> TauriPlugin<R> {
             )?;
             Ok(())
         })
-        .on_page_load(|webview, _| {
+        .on_page_load(|webview, payload| {
             #[cfg(target_os = "macos")]
-            if let Err(error) = webview.with_webview(paint_when_covered) {
+            if matches!(payload.event(), PageLoadEvent::Started)
+                && let Err(error) = webview.with_webview(paint_when_covered)
+            {
                 eprintln!("could not keep the bench page visible: {error}");
             }
         })
