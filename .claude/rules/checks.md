@@ -75,4 +75,5 @@
   A window that others cover turns `hidden` too, so the bench window stays above other windows.
 - A process started from a terminal has the terminal as its responsible process, and so do its `com.apple.WebKit.*` processes; `twigo-bench launch` starts the app responsible for itself, and `twigo-bench sample` refuses an app that is not.
 - The bench build has the identifier `io.twigo.ide.bench`, so it shares neither the single-instance lock nor the window state with Twigo.
+- WebContent's physical footprint misleads: pages WebKit reused stay off it and unmapped graphics count on it, so read resident size and the `WebKit Malloc` zone's allocated bytes in `vmmap -summary`; blocks of 16 KB in `heap` are JavaScriptCore's heap ([bench](../../docs/bench.md#on-the-rust-path)).
 - `bench/` scripts run on macOS's bash 3.2: no associative arrays, and no `$(…)` inside a command's arguments where its failure must stop the script.
