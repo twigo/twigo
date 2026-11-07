@@ -12,7 +12,7 @@ use kube::api::{DeleteParams, Patch, PatchParams, PostParams};
 use kube::config::{AuthInfo, KubeConfigOptions, Kubeconfig};
 use kube::{Api, Config};
 use serde_json::json;
-use twigo_kube::client::{Clients, Options};
+use twigo_kube::client::{Clients, Gate, Options};
 
 use super::*;
 use crate::decode::{Decode, Event};
@@ -49,7 +49,9 @@ pub(crate) async fn live() -> Live {
     let config = Config::from_custom_kubeconfig(kubeconfig, &KubeConfigOptions::default())
         .await
         .unwrap();
-    let admin = Clients::new(&config, Options::default()).unwrap().api;
+    let admin = Clients::new(&config, Gate::unrestricted(), Options::default())
+        .unwrap()
+        .api;
     Live {
         config,
         context,
@@ -92,8 +94,14 @@ impl Live {
 
     /// The hub over clients of `config`, the admin's unless given.
     pub(crate) fn hub(&self, config: Option<&Config>) -> (Hub, Arc<Clients>) {
-        let clients =
-            Arc::new(Clients::new(config.unwrap_or(&self.config), Options::default()).unwrap());
+        let clients = Arc::new(
+            Clients::new(
+                config.unwrap_or(&self.config),
+                Gate::unrestricted(),
+                Options::default(),
+            )
+            .unwrap(),
+        );
         let connect: Connect = {
             let clients = Arc::clone(&clients);
             Arc::new(move |_context| {

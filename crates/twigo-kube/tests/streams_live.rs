@@ -7,7 +7,7 @@ use kube::config::{KubeConfigOptions, Kubeconfig};
 use kube::{Api, Client, Config};
 use serde_json::json;
 use twigo_cache::request::{self, Collection, WatchFrom};
-use twigo_kube::client::{Budgets, Clients, Options};
+use twigo_kube::client::{Budgets, Clients, Gate, Options};
 
 async fn api() -> (Client, u16) {
     let path = std::env::var_os("TWIGO_TEST_KUBECONFIG")
@@ -30,6 +30,7 @@ async fn api() -> (Client, u16) {
     (
         Clients::new(
             &config,
+            Gate::unrestricted(),
             Options {
                 budgets,
                 ..Options::default()

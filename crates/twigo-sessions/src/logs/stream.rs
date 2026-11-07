@@ -482,13 +482,10 @@ impl Reader {
             let status = Status::of(&current, &self.stream.origin.container);
             let Some(id) = status.as_ref().and_then(Status::previous) else {
                 send(Event::State(StreamState::Error {
-                    error: IpcError {
-                        kind: ErrorKind::NotFound,
-                        message: format!(
-                            "{} has no previous instance",
-                            self.stream.origin.container
-                        ),
-                    },
+                    error: IpcError::new(
+                        ErrorKind::NotFound,
+                        format!("{} has no previous instance", self.stream.origin.container),
+                    ),
                 }));
                 return;
             };
@@ -604,10 +601,10 @@ impl Reader {
             match kube::core::Request::new(path).logs(&self.stream.origin.pod, &params) {
                 Ok(request) => request,
                 Err(error) => {
-                    return Outcome::Failed(IpcError {
-                        kind: ErrorKind::Internal,
-                        message: format!("could not build the log request: {error}"),
-                    });
+                    return Outcome::Failed(IpcError::new(
+                        ErrorKind::Internal,
+                        format!("could not build the log request: {error}"),
+                    ));
                 }
             };
         let (queued, mut waiting) = watch::channel(false);
@@ -676,10 +673,7 @@ impl Reader {
             let parsed = line::parse(&buffer);
             // With timestamps every line the container wrote has its time.
             let Some(at) = parsed.at else {
-                return Outcome::Unreadable(IpcError {
-                    kind: ErrorKind::Unavailable,
-                    message: parsed.text,
-                });
+                return Outcome::Unreadable(IpcError::new(ErrorKind::Unavailable, parsed.text));
             };
             if before.is_some_and(|before| at >= before) {
                 break;

@@ -1,6 +1,7 @@
 //! How the core's errors reach the webview (`IpcError`).
 
 use twigo_ipc::{ErrorKind, IpcError};
+use twigo_policy::Refused;
 
 use crate::ClientsError;
 
@@ -12,9 +13,14 @@ impl From<&ClientsError> for IpcError {
             ClientsError::Untrusted(..) => ErrorKind::Unauthorized,
             ClientsError::Connect(..) => ErrorKind::Unavailable,
         };
-        IpcError {
-            kind,
-            message: error.to_string(),
-        }
+        IpcError::new(kind, error.to_string())
     }
+}
+
+pub(crate) fn refused(error: &Refused) -> IpcError {
+    let kind = match error {
+        Refused::PolicyFile(..) | Refused::PolicyFileUnreadable(_) => ErrorKind::Permissions,
+        Refused::NotLocked(..) => ErrorKind::InvalidInput,
+    };
+    IpcError::new(kind, error.to_string())
 }

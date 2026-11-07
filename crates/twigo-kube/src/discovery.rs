@@ -75,10 +75,9 @@ impl From<&Error> for IpcError {
     fn from(error: &Error) -> Self {
         match error {
             Error::Request(error) => crate::errors::request(error),
-            Error::NotAggregated { .. } | Error::Decode { .. } => IpcError {
-                kind: ErrorKind::Unavailable,
-                message: error.to_string(),
-            },
+            Error::NotAggregated { .. } | Error::Decode { .. } => {
+                IpcError::new(ErrorKind::Unavailable, error.to_string())
+            }
         }
     }
 }

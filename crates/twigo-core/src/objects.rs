@@ -76,13 +76,13 @@ impl Opened {
     /// as binary data. A Secret's values stay in Rust (ARCHITECTURE 3.6).
     pub fn values(&self, keys: &[String]) -> Result<Vec<Option<String>>, IpcError> {
         let latest = self.control.latest.lock().expect("object lock").clone();
-        let object = latest.ok_or_else(|| IpcError {
-            kind: ErrorKind::NotFound,
-            message: "the object is not listed".to_owned(),
-        })?;
-        let json: Value = serde_json::from_str(object.json.get()).map_err(|error| IpcError {
-            kind: ErrorKind::Internal,
-            message: format!("the object does not parse: {error}"),
+        let object =
+            latest.ok_or_else(|| IpcError::new(ErrorKind::NotFound, "the object is not listed"))?;
+        let json: Value = serde_json::from_str(object.json.get()).map_err(|error| {
+            IpcError::new(
+                ErrorKind::Internal,
+                format!("the object does not parse: {error}"),
+            )
         })?;
         values_of(&json, keys)
     }
@@ -91,10 +91,10 @@ impl Opened {
 /// A ConfigMap's text values; any other kind's refused, a Secret's above all.
 fn values_of(object: &Value, keys: &[String]) -> Result<Vec<Option<String>>, IpcError> {
     if object["apiVersion"] != "v1" || object["kind"] != "ConfigMap" {
-        return Err(IpcError {
-            kind: ErrorKind::Forbidden,
-            message: "only a ConfigMap's values are sent".to_owned(),
-        });
+        return Err(IpcError::new(
+            ErrorKind::Forbidden,
+            "only a ConfigMap's values are sent".to_owned(),
+        ));
     }
     Ok(keys
         .iter()
@@ -877,10 +877,10 @@ mod tests {
     async fn a_need_the_hub_refuses_reaches_the_describer_when_held() {
         let connect: twigo_cache::hub::Connect = Arc::new(|_context| {
             Box::pin(async {
-                Err(IpcError {
-                    kind: ErrorKind::Unavailable,
-                    message: "no cluster".to_owned(),
-                })
+                Err(IpcError::new(
+                    ErrorKind::Unavailable,
+                    "no cluster".to_owned(),
+                ))
             })
         });
         let hub = Hub::new(connect);
@@ -923,10 +923,10 @@ mod tests {
     async fn a_crashed_containers_last_line_is_read_once_per_restart() {
         let connect: twigo_cache::hub::Connect = Arc::new(|_context| {
             Box::pin(async {
-                Err(IpcError {
-                    kind: ErrorKind::Unavailable,
-                    message: "no cluster".to_owned(),
-                })
+                Err(IpcError::new(
+                    ErrorKind::Unavailable,
+                    "no cluster".to_owned(),
+                ))
             })
         });
         let hub = Hub::new(connect);

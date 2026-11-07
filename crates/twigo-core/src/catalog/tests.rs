@@ -30,7 +30,7 @@ async fn contexts_come_by_order_then_by_name() {
     let names: Vec<String> = catalog
         .contexts()
         .await
-        .ipc()
+        .ipc(&Policy::open())
         .into_iter()
         .map(|c| c.name)
         .collect();
@@ -54,7 +54,7 @@ contexts: [{ name: kind-a, context: { cluster: c } }]
     .unwrap();
     let catalog = Catalog::default();
     catalog.follow(Sources::explicit(file.clone()));
-    let contexts = catalog.contexts().await.ipc();
+    let contexts = catalog.contexts().await.ipc(&Policy::open());
     assert_eq!(
         contexts,
         [twigo_ipc::Context {
@@ -62,6 +62,7 @@ contexts: [{ name: kind-a, context: { cluster: c } }]
             color: None,
             source: file.display().to_string(),
             server: Some("https://kind:6443".to_owned()),
+            access: Policy::open().access("kind-a"),
         }]
     );
 }

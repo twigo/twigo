@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 use twigo_ipc::{
-    Cell, ColumnValues, ErrorKind, Grouping, Gvr, IpcError, ListQuery, RowId, Sort, SubscriptionId,
-    ViewState,
+    BlockReason, Blocked, Cell, ColumnValues, ContextAccess, Environment, ErrorKind, Grouping, Gvr,
+    IpcError, ListQuery, Mode, ModeSource, RequestClass, RowId, Sort, SubscriptionId, ViewState,
 };
 
 fn wire<T: serde::Serialize>(value: &T) -> Value {
@@ -18,10 +18,7 @@ fn view_states_are_tagged_by_state() {
     );
     assert_eq!(
         wire(&ViewState::Error {
-            error: IpcError {
-                kind: ErrorKind::Unavailable,
-                message: "refused".into(),
-            },
+            error: IpcError::new(ErrorKind::Unavailable, "refused"),
         }),
         json!({"state": "error", "error": {"kind": "unavailable", "message": "refused"}})
     );
@@ -100,4 +97,83 @@ fn queries_use_camel_case_and_newtypes_are_bare() {
         wire(&RowId("prod/default/api".into())),
         json!("prod/default/api")
     );
+}
+
+#[test]
+fn modes_read_as_people_name_them() {
+    assert_eq!(wire(&Mode::ReadWrite), json!("read-write"));
+    assert_eq!(wire(&Mode::Guarded), json!("guarded"));
+    assert_eq!(wire(&Mode::ReadOnly), json!("read-only"));
+    assert!(Mode::ReadWrite < Mode::Guarded && Mode::Guarded < Mode::ReadOnly);
+}
+
+#[test]
+fn a_context_s_access_says_where_its_mode_comes_from() {
+    assert_eq!(
+        wire(&ContextAccess {
+            mode: Mode::Guarded,
+            source: ModeSource::PolicyFile {
+                file: "/etc/twigo/policy.json".to_owned(),
+                pattern: Some("prod-*".to_owned()),
+            },
+            environment: Some(Environment::Production),
+            unlocked_until: Some(1000),
+        }),
+        json!({
+            "mode": "guarded",
+            "source": {
+                "kind": "policyFile",
+                "file": "/etc/twigo/policy.json",
+                "pattern": "prod-*",
+            },
+            "environment": "production",
+            "unlockedUntil": 1000,
+        })
+    );
+    assert_eq!(
+        wire(&ModeSource::Environment {
+            environment: Environment::Staging
+        }),
+        json!({"kind": "environment", "environment": "staging"})
+    );
+    assert_eq!(wire(&ModeSource::Default), json!({"kind": "default"}));
+}
+
+#[test]
+fn only_a_blocked_request_s_error_carries_its_rule() {
+    assert_eq!(
+        wire(&IpcError::new(ErrorKind::Forbidden, "no")),
+        json!({"kind": "forbidden", "message": "no"})
+    );
+    let blocked = Blocked {
+        context: "prod-eu".to_owned(),
+        mode: Mode::ReadOnly,
+        source: ModeSource::User,
+        class: RequestClass::DryRun,
+        reason: BlockReason::Mode,
+        verb: "create".to_owned(),
+        target: "configmaps in a".to_owned(),
+    };
+    let error = IpcError::from(blocked);
+    assert_eq!(
+        wire(&error),
+        json!({
+            "kind": "permissions",
+            "message": "prod-eu is read-only by your choice, so Twigo did not send create configmaps in a",
+            "blocked": {
+                "context": "prod-eu",
+                "mode": "read-only",
+                "source": {"kind": "user"},
+                "class": "dryRun",
+                "reason": "mode",
+                "verb": "create",
+                "target": "configmaps in a",
+            },
+        })
+    );
+    let read: IpcError = serde_json::from_value(wire(&error)).unwrap();
+    assert_eq!(read, error);
+    let plain: IpcError =
+        serde_json::from_value(json!({"kind": "timeout", "message": "late"})).unwrap();
+    assert_eq!(plain.blocked, None);
 }

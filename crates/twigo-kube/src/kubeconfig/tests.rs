@@ -241,6 +241,51 @@ contexts:
 }
 
 #[test]
+fn the_twigo_extension_says_what_a_context_lets_through_and_what_it_is() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = write(
+        dir.path(),
+        "config",
+        "
+contexts:
+- name: kind-locked
+  context:
+    cluster: c
+    extensions:
+    - name: twigo
+      extension: { readOnly: true, environment: Production }
+- name: kind-open
+  context:
+    cluster: c
+    extensions:
+    - name: twigo
+      extension: { readOnly: false, environment: local }
+- name: kind-unknown
+  context:
+    cluster: c
+    extensions:
+    - name: twigo
+      extension: { readOnly: maybe, environment: moon, order: 3 }
+- name: kind-plain
+  context: { cluster: c }
+",
+    );
+    let catalog = kubectl(&[&file]).load();
+    let read = |name: &str| {
+        let found = context(&catalog, name);
+        (found.read_only, found.environment)
+    };
+    assert_eq!(
+        read("kind-locked"),
+        (Some(true), Some(Environment::Production))
+    );
+    assert_eq!(read("kind-open"), (Some(false), Some(Environment::Local)));
+    assert_eq!(read("kind-unknown"), (Some(true), None));
+    assert_eq!(context(&catalog, "kind-unknown").order, Some(3));
+    assert_eq!(read("kind-plain"), (None, None));
+}
+
+#[test]
 fn a_fingerprint_changes_only_with_its_own_entries_and_files() {
     let dir = tempfile::tempdir().unwrap();
     write(dir.path(), "a.crt", "a");

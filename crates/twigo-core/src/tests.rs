@@ -7,6 +7,7 @@ use tokio::sync::watch;
 use twigo_env::{Failure, Reason, ShellEnv, Status};
 
 use super::*;
+use twigo_ipc::{Environment, Mode, ModeSource};
 
 fn env(kubeconfig: &Path) -> Arc<ShellEnv> {
     Arc::new(ShellEnv::from_iter([(
@@ -48,7 +49,11 @@ async fn the_catalog_follows_the_login_shell_and_tells_the_store() {
     )
     .unwrap();
     let state_file = dir.path().join("state.json");
-    let core = Core::new(dir.path(), &dir.path().join("cache"));
+    let core = Core::new(
+        dir.path(),
+        &dir.path().join("cache"),
+        &dir.path().join("policy.json"),
+    );
     core.state.open_space("kind-process");
     let (status, followed) = watch::channel(Status::Resolving);
     tokio::spawn({
@@ -146,7 +151,11 @@ impl Plugins {
 
     async fn core(&self) -> (Arc<Core>, tempfile::TempDir) {
         let data = tempfile::tempdir().unwrap();
-        let core = Core::new(data.path(), &data.path().join("cache"));
+        let core = Core::new(
+            data.path(),
+            &data.path().join("cache"),
+            &data.path().join("policy.json"),
+        );
         let env = Arc::new(ShellEnv::from_iter(Vec::<(OsString, OsString)>::new()));
         let (status, followed) = watch::channel(Status::Resolved(env));
         tokio::spawn({
@@ -372,7 +381,11 @@ fn pods(space: &str) -> ListQuery {
 #[tokio::test]
 async fn a_window_reaches_only_its_own_lists_and_a_reload_drops_them() {
     let dir = tempfile::tempdir().unwrap();
-    let core = Core::new(dir.path(), &dir.path().join("cache"));
+    let core = Core::new(
+        dir.path(),
+        &dir.path().join("cache"),
+        &dir.path().join("policy.json"),
+    );
     let space = core.state.open_space("kind-test").id;
     let (sender, mut batches) = tokio::sync::mpsc::unbounded_channel();
     let id = core
@@ -441,7 +454,11 @@ async fn a_window_reaches_only_its_own_lists_and_a_reload_drops_them() {
 #[tokio::test]
 async fn a_list_of_an_unknown_space_or_a_bad_selector_is_refused() {
     let dir = tempfile::tempdir().unwrap();
-    let core = Core::new(dir.path(), &dir.path().join("cache"));
+    let core = Core::new(
+        dir.path(),
+        &dir.path().join("cache"),
+        &dir.path().join("policy.json"),
+    );
     let refused = core.list_subscribe("main", pods("nowhere"), |_| true).await;
     assert_eq!(refused.unwrap_err().kind, ErrorKind::NotFound);
     let space = core.state.open_space("kind-test").id;
@@ -474,7 +491,11 @@ fn pod(space: &str) -> twigo_ipc::OpenObject {
 #[tokio::test]
 async fn a_window_reaches_only_its_own_objects_and_a_reload_closes_them() {
     let dir = tempfile::tempdir().unwrap();
-    let core = Core::new(dir.path(), &dir.path().join("cache"));
+    let core = Core::new(
+        dir.path(),
+        &dir.path().join("cache"),
+        &dir.path().join("policy.json"),
+    );
     let space = core.state.open_space("kind-test").id;
     let (sender, mut batches) = tokio::sync::mpsc::unbounded_channel();
     let id = core
@@ -526,7 +547,11 @@ async fn a_window_reaches_only_its_own_objects_and_a_reload_closes_them() {
 #[tokio::test]
 async fn a_namespaced_object_without_a_namespace_is_refused() {
     let dir = tempfile::tempdir().unwrap();
-    let core = Core::new(dir.path(), &dir.path().join("cache"));
+    let core = Core::new(
+        dir.path(),
+        &dir.path().join("cache"),
+        &dir.path().join("policy.json"),
+    );
     let space = core.state.open_space("kind-test").id;
     let mut nowhere = pod(&space);
     nowhere.object.namespace = None;
@@ -564,7 +589,11 @@ fn logs(space: &str, group: &str, resource: &str) -> twigo_ipc::OpenLogs {
 #[tokio::test]
 async fn a_window_reaches_only_its_own_logs_and_a_reload_closes_them() {
     let dir = tempfile::tempdir().unwrap();
-    let core = Core::new(dir.path(), &dir.path().join("cache"));
+    let core = Core::new(
+        dir.path(),
+        &dir.path().join("cache"),
+        &dir.path().join("policy.json"),
+    );
     let space = core.state.open_space("kind-test").id;
     let (sender, mut batches) = tokio::sync::mpsc::unbounded_channel();
     let id = core
@@ -626,7 +655,11 @@ async fn a_window_reaches_only_its_own_logs_and_a_reload_closes_them() {
 #[tokio::test]
 async fn logs_of_a_kind_without_pods_or_an_unknown_space_are_refused() {
     let dir = tempfile::tempdir().unwrap();
-    let core = Core::new(dir.path(), &dir.path().join("cache"));
+    let core = Core::new(
+        dir.path(),
+        &dir.path().join("cache"),
+        &dir.path().join("policy.json"),
+    );
     let refused = core
         .logs_open("main", logs("nowhere", "", "pods"), |_| true)
         .await;
@@ -640,4 +673,278 @@ async fn logs_of_a_kind_without_pods_or_an_unknown_space_are_refused() {
         .logs_open("main", logs(&space, "apps", "deployments"), |_| true)
         .await;
     assert!(deployment.is_ok(), "{deployment:?}");
+}
+
+/// A running core over the kubeconfig `text`, whose cluster nothing listens
+/// on, so a request that reaches the network fails as unavailable.
+fn running(dir: &Path, text: &str) -> Arc<Core> {
+    let kubeconfig = dir.join("config");
+    std::fs::write(&kubeconfig, text).unwrap();
+    let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
+    let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter([]))));
+    tokio::spawn({
+        let core = Arc::clone(&core);
+        async move { core.run(followed, Some(kubeconfig)).await }
+    });
+    core
+}
+
+const UNREACHABLE: &str = "
+clusters: [{ name: c, cluster: { server: 'http://127.0.0.1:1' } }]
+users: [{ name: u, user: {} }]
+contexts:
+- name: kind-plain
+  context: { cluster: c, user: u }
+- name: kind-locked
+  context:
+    cluster: c
+    user: u
+    extensions: [{ name: twigo, extension: { readOnly: true } }]
+- name: kind-prod
+  context:
+    cluster: c
+    user: u
+    extensions: [{ name: twigo, extension: { environment: production } }]
+";
+
+async fn create_a_configmap(core: &Core, context: &str) -> IpcError {
+    let clients = core.clients(context).await.unwrap();
+    let request = http::Request::post("/api/v1/namespaces/a/configmaps")
+        .body(Vec::new())
+        .unwrap();
+    let error = clients.api.request_text(request).await.unwrap_err();
+    twigo_kube::errors::request(&error)
+}
+
+fn access(core: &Core, context: &str) -> twigo_ipc::ContextAccess {
+    let contexts = core.contexts().unwrap();
+    let found = contexts.into_iter().find(|c| c.name == context);
+    found.unwrap().access
+}
+
+#[tokio::test]
+async fn a_context_s_mode_comes_from_its_kubeconfig_and_reaches_its_clients() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path(), UNREACHABLE);
+    core.catalog.contexts().await;
+
+    assert_eq!(access(&core, "kind-plain").mode, Mode::ReadWrite);
+    assert_eq!(access(&core, "kind-locked").mode, Mode::ReadOnly);
+    assert_eq!(access(&core, "kind-locked").source, ModeSource::Kubeconfig);
+    let prod = access(&core, "kind-prod");
+    assert_eq!(prod.mode, Mode::ReadOnly);
+    assert_eq!(prod.environment, Some(Environment::Production));
+
+    let open = create_a_configmap(&core, "kind-plain").await;
+    assert_eq!(open.kind, ErrorKind::Unavailable, "it reached the network");
+    for context in ["kind-locked", "kind-prod"] {
+        let blocked = create_a_configmap(&core, context).await;
+        assert_eq!(blocked.kind, ErrorKind::Permissions, "{context}");
+    }
+}
+
+#[tokio::test]
+async fn a_person_s_choice_changes_clients_already_built_and_survives_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path(), UNREACHABLE);
+    core.catalog.contexts().await;
+    let mut changes = core.policy.changes();
+
+    let open = create_a_configmap(&core, "kind-plain").await;
+    assert_eq!(open.kind, ErrorKind::Unavailable);
+
+    core.set_context_mode(SetContextMode {
+        context: "kind-plain".to_owned(),
+        mode: Some(Mode::ReadOnly),
+    })
+    .await
+    .unwrap();
+    assert!(changes.has_changed().unwrap());
+    changes.borrow_and_update();
+    let blocked = create_a_configmap(&core, "kind-plain").await;
+    assert_eq!(blocked.kind, ErrorKind::Permissions);
+    assert_eq!(blocked.blocked.unwrap().source, ModeSource::User);
+
+    core.set_context_environment(SetContextEnvironment {
+        context: "kind-locked".to_owned(),
+        environment: Some(Environment::Staging),
+    })
+    .await
+    .unwrap();
+    assert!(changes.has_changed().unwrap());
+
+    core.state.flush().unwrap();
+    let reopened = running(dir.path(), UNREACHABLE);
+    reopened.catalog.contexts().await;
+    assert_eq!(access(&reopened, "kind-plain").mode, Mode::ReadOnly);
+    assert_eq!(access(&reopened, "kind-plain").source, ModeSource::User);
+    assert_eq!(
+        access(&reopened, "kind-locked").environment,
+        Some(Environment::Staging)
+    );
+}
+
+#[tokio::test]
+async fn an_unlock_does_not_survive_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path(), UNREACHABLE);
+    core.catalog.contexts().await;
+    core.unlock_context("kind-locked").await.unwrap();
+    assert_eq!(access(&core, "kind-locked").mode, Mode::Guarded);
+    let through = create_a_configmap(&core, "kind-locked").await;
+    assert_eq!(through.kind, ErrorKind::Unavailable);
+
+    core.state.flush().unwrap();
+    let reopened = running(dir.path(), UNREACHABLE);
+    reopened.catalog.contexts().await;
+    assert_eq!(access(&reopened, "kind-locked").mode, Mode::ReadOnly);
+}
+
+#[tokio::test]
+async fn a_policy_file_entry_cannot_be_changed_from_the_ui() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("policy.json"),
+        r#"{"contexts": {"kind-plain": "read-only"}}"#,
+    )
+    .unwrap();
+    let core = running(dir.path(), UNREACHABLE);
+    core.catalog.contexts().await;
+
+    let refused = core
+        .set_context_mode(SetContextMode {
+            context: "kind-plain".to_owned(),
+            mode: Some(Mode::ReadWrite),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::Permissions);
+    let refused = core.unlock_context("kind-plain").await.unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::Permissions);
+
+    assert!(matches!(
+        access(&core, "kind-plain").source,
+        ModeSource::PolicyFile {
+            pattern: Some(_),
+            ..
+        }
+    ));
+    let blocked = create_a_configmap(&core, "kind-plain").await;
+    assert_eq!(blocked.kind, ErrorKind::Permissions);
+}
+
+#[tokio::test]
+async fn commands_refuse_a_context_no_source_lists() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path(), UNREACHABLE);
+    let absent = core
+        .set_context_mode(SetContextMode {
+            context: "kind-absent".to_owned(),
+            mode: Some(Mode::ReadOnly),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(absent.kind, ErrorKind::NotFound);
+    let absent = core.unlock_context("kind-absent").await.unwrap_err();
+    assert_eq!(absent.kind, ErrorKind::NotFound);
+}
+
+#[tokio::test]
+async fn clients_already_built_stop_writing_once_no_source_lists_their_context() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path(), UNREACHABLE);
+    core.catalog.contexts().await;
+    let clients = core.clients("kind-plain").await.unwrap();
+    let write = || {
+        http::Request::post("/api/v1/namespaces/a/configmaps")
+            .body(Vec::new())
+            .unwrap()
+    };
+    let open = clients.api.request_text(write()).await.unwrap_err();
+    assert_eq!(
+        twigo_kube::errors::request(&open).kind,
+        ErrorKind::Unavailable
+    );
+
+    std::fs::write(
+        dir.path().join("config"),
+        "
+clusters: [{ name: c, cluster: { server: 'http://127.0.0.1:1' } }]
+users: [{ name: u, user: {} }]
+contexts: [{ name: kind-other, context: { cluster: c, user: u } }]
+",
+    )
+    .unwrap();
+    names(&core, &["kind-other"]).await;
+
+    let error = clients.api.request_text(write()).await.unwrap_err();
+    let error = twigo_kube::errors::request(&error);
+    assert_eq!(error.kind, ErrorKind::Permissions);
+    assert_eq!(error.blocked.unwrap().source, ModeSource::Unlisted);
+}
+
+#[tokio::test]
+async fn an_unlock_holds_only_for_the_cluster_it_was_given_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path(), UNREACHABLE);
+    core.catalog.contexts().await;
+    core.unlock_context("kind-locked").await.unwrap();
+    assert_eq!(access(&core, "kind-locked").mode, Mode::Guarded);
+
+    let mut contexts = core.catalog.subscribe();
+    contexts.borrow_and_update();
+    std::fs::write(
+        dir.path().join("config"),
+        UNREACHABLE.replace("127.0.0.1:1", "127.0.0.1:2"),
+    )
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), contexts.changed())
+        .await
+        .expect("the catalog reads the new server")
+        .unwrap();
+    let moved = access(&core, "kind-locked");
+    assert_eq!(moved.mode, Mode::ReadOnly);
+    assert_eq!(moved.unlocked_until, None);
+}
+
+#[tokio::test]
+async fn clients_built_for_one_cluster_write_nothing_once_their_name_means_another() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path(), UNREACHABLE);
+    core.catalog.contexts().await;
+    let clients = core.clients("kind-plain").await.unwrap();
+    let write = || {
+        http::Request::post("/api/v1/namespaces/a/configmaps")
+            .body(Vec::new())
+            .unwrap()
+    };
+    let open = clients.api.request_text(write()).await.unwrap_err();
+    assert_eq!(
+        twigo_kube::errors::request(&open).kind,
+        ErrorKind::Unavailable
+    );
+
+    let mut contexts = core.catalog.subscribe();
+    contexts.borrow_and_update();
+    std::fs::write(
+        dir.path().join("config"),
+        UNREACHABLE.replace("127.0.0.1:1", "127.0.0.1:2"),
+    )
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), contexts.changed())
+        .await
+        .expect("the catalog reads the new server")
+        .unwrap();
+
+    let held = clients.api.request_text(write()).await.unwrap_err();
+    let held = twigo_kube::errors::request(&held);
+    assert_eq!(held.kind, ErrorKind::Permissions);
+    assert_eq!(held.blocked.unwrap().source, ModeSource::Moved);
+
+    let rebuilt = create_a_configmap(&core, "kind-plain").await;
+    assert_eq!(
+        rebuilt.kind,
+        ErrorKind::Unavailable,
+        "the new one's own mode"
+    );
 }

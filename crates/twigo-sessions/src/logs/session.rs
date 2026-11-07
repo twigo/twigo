@@ -877,10 +877,7 @@ mod tests {
         assert_eq!(run.subscriptions.state(), ViewState::Ready);
         fake.delete("web-1");
         until(&mut run, "the pod gone", |run| run.pods.is_empty()).await;
-        let gone = IpcError {
-            kind: ErrorKind::NotFound,
-            message: "pods web-1 is gone".to_owned(),
-        };
+        let gone = IpcError::new(ErrorKind::NotFound, "pods web-1 is gone");
         assert_eq!(run.subscriptions.state(), ViewState::Error { error: gone });
     }
 

@@ -72,10 +72,10 @@ const SEGMENT: &AsciiSet = &NON_ALPHANUMERIC
 /// before it routes, so escaping would not keep it in its segment.
 fn segment(name: &str) -> Result<(), IpcError> {
     if name.is_empty() || name == "." || name == ".." || name.contains(['/', '%']) {
-        return Err(IpcError {
-            kind: ErrorKind::InvalidInput,
-            message: format!("{name:?} can be no name in a request's path"),
-        });
+        return Err(IpcError::new(
+            ErrorKind::InvalidInput,
+            format!("{name:?} can be no name in a request's path"),
+        ));
     }
     Ok(())
 }

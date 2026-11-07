@@ -10,7 +10,7 @@ use kube::Config;
 use kube::config::{KubeConfigOptions, Kubeconfig};
 use twigo_cache::hub::{Connect, Hub, Query, Resource, RowFormat};
 use twigo_ipc::ViewState;
-use twigo_kube::client::{Clients, Options};
+use twigo_kube::client::{Clients, Gate, Options};
 
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
@@ -34,7 +34,8 @@ async fn main() {
     let config = Config::from_custom_kubeconfig(kubeconfig, &KubeConfigOptions::default())
         .await
         .unwrap();
-    let clients = Arc::new(Clients::new(&config, Options::default()).unwrap());
+    let clients =
+        Arc::new(Clients::new(&config, Gate::unrestricted(), Options::default()).unwrap());
     // The connection and its buffers come before the measurement.
     clients.api.apiserver_version().await.unwrap();
     let connect: Connect = {

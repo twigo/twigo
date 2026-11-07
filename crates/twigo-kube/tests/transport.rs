@@ -162,7 +162,12 @@ async fn requests_that_waited_for_a_failed_first_connection_go_at_once() {
     });
     let mut config = kube::Config::new(format!("https://localhost:{port}").parse().unwrap());
     config.connect_timeout = Some(Duration::from_secs(1));
-    let clients = twigo_kube::client::Clients::new(&config, Default::default()).unwrap();
+    let clients = twigo_kube::client::Clients::new(
+        &config,
+        twigo_kube::client::Gate::unrestricted(),
+        Default::default(),
+    )
+    .unwrap();
 
     let started = std::time::Instant::now();
     let answers = join_all((0..5).map(|_| get(&clients, "/version"))).await;

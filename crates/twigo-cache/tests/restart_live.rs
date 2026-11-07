@@ -14,7 +14,7 @@ use kube::{Api, Config};
 use serde_json::json;
 use twigo_cache::hub::{Connect, Hub, Query, Resource, RowFormat};
 use twigo_ipc::ViewState;
-use twigo_kube::client::{Clients, Options};
+use twigo_kube::client::{Clients, Gate, Options};
 
 fn docker(node: &str, args: &[&str]) -> String {
     let output = Command::new("docker")
@@ -74,7 +74,8 @@ async fn an_api_server_restart_leaves_the_rows_after_a_stale_spell() {
     let config = Config::from_custom_kubeconfig(kubeconfig, &KubeConfigOptions::default())
         .await
         .unwrap();
-    let clients = Arc::new(Clients::new(&config, Options::default()).unwrap());
+    let clients =
+        Arc::new(Clients::new(&config, Gate::unrestricted(), Options::default()).unwrap());
     let admin = clients.api.clone();
 
     let ns = namespace(&admin, "restart").await;

@@ -12,7 +12,7 @@ pub mod trust;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Mutex, Weak};
 
 use jiff::Timestamp;
 use tokio::sync::watch;
@@ -22,15 +22,16 @@ use twigo_cache::hub::{Connect, Hub, Query, Resource, RowFormat};
 use twigo_cache::view::Spec;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    Ack, ClusterVersion, DownloadLogs, ErrorKind, GetValues, IpcError, ListBatch, ListQuery,
-    LogBatch, ObjectBatch, OpenLogs, OpenObject, SetLogSource, SetLogView, SetLogWindow, SetParts,
-    SetWindow, SubscriptionId, ViewState,
+    Ack, ClusterVersion, Context, DownloadLogs, ErrorKind, GetValues, IpcError, ListBatch,
+    ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject, SetContextEnvironment, SetContextMode,
+    SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, SubscriptionId, ViewState,
 };
-use twigo_kube::client::{Clients, ProxyEnv};
+use twigo_kube::client::{Actor, Clients, ProxyEnv};
 use twigo_kube::credentials::{ExecError, OidcError, Provider, Registry, Source, Timeouts};
 use twigo_kube::discovery::Cache;
 use twigo_kube::kubeconfig;
 use twigo_netmon::Event;
+use twigo_policy::Policy;
 use twigo_sessions::logs::Session;
 
 pub use auth::AuthFollower;
@@ -40,6 +41,7 @@ use objects::{Opened, Target};
 use state::State;
 use subscriptions::Subscriptions;
 use trust::Trust;
+pub use twigo_policy::PolicyFile;
 
 pub struct Core {
     pub state: State,
@@ -47,6 +49,10 @@ pub struct Core {
     pub connections: Connections,
     pub trust: Trust,
     pub hub: Hub,
+    pub policy: Arc<Policy>,
+    /// Held while a change of the person's choices is stored, so an earlier
+    /// copy of them never lands after a later one.
+    choosing: Mutex<()>,
     lists: Subscriptions<Batcher>,
     objects: Subscriptions<Opened>,
     logs: Subscriptions<Session>,
@@ -78,19 +84,28 @@ pub enum ClientsError {
 
 impl Core {
     /// The core whose state and trusted plugins live in `data`, the app's
-    /// data directory, and its clusters' discovery in `cache`, its cache
-    /// directory.
-    pub fn new(data: &Path, cache: &Path) -> Arc<Self> {
+    /// data directory, its clusters' discovery in `cache`, its cache
+    /// directory, and whose admin's policy is the file at `policy_file`.
+    pub fn new(data: &Path, cache: &Path, policy_file: &Path) -> Arc<Self> {
         let shell_env = watch::Sender::new(None);
         let focused = watch::Sender::new(false);
+        let state = State::open(data.join("state.json"));
+        let catalog = Catalog::default();
+        let policy = Policy::new(
+            PolicyFile::read(policy_file),
+            catalog.metadata(),
+            state.choices(),
+        );
         Arc::new_cyclic(|core| Self {
             hub: Hub::new(connect(core.clone())),
+            policy,
+            choosing: Mutex::default(),
             lists: Subscriptions::new("list"),
             objects: Subscriptions::new("object"),
             logs: Subscriptions::new("logs"),
             discovery: Arc::new(Cache::new(cache.join("discovery"))),
-            state: State::open(data.join("state.json")),
-            catalog: Catalog::default(),
+            state,
+            catalog,
             connections: Connections::default(),
             trust: Trust::open(data.join("trust.json")),
             credentials: Registry::new(
@@ -130,7 +145,15 @@ impl Core {
             .clone()
             .expect("waited for");
         self.connections
-            .clients(found, &env, provider)
+            .clients(
+                found,
+                &env,
+                provider,
+                // Of what the clients are built from, not of the catalog as
+                // it may be by now.
+                self.policy
+                    .gate_for(context, Actor::Ui, found.fingerprint.value()),
+            )
             .await
             .map_err(|error| ClientsError::Connect(context.to_owned(), Box::new(error)))
     }
@@ -196,6 +219,55 @@ impl Core {
         Ok(())
     }
 
+    /// The contexts the catalog lists, with what each lets through now.
+    pub fn contexts(&self) -> Option<Vec<Context>> {
+        // Out of the borrow: the policy reads the same channel for each
+        // context, and a second borrow behind a waiting writer may deadlock
+        // (tokio's `watch::Ref`).
+        let listed = self.catalog.subscribe().borrow().clone();
+        listed.map(|listed| listed.ipc(&self.policy))
+    }
+
+    /// The person's mode for a context, kept in the state.
+    pub async fn set_context_mode(&self, request: SetContextMode) -> Result<(), IpcError> {
+        self.listed(&request.context).await?;
+        let _choosing = self.choosing.lock().expect("choosing lock");
+        let choices = self
+            .policy
+            .set_mode(&request.context, request.mode)
+            .map_err(|error| errors::refused(&error))?;
+        self.state.set_choices(&choices);
+        Ok(())
+    }
+
+    /// What the person marks a context as, kept in the state.
+    pub async fn set_context_environment(
+        &self,
+        request: SetContextEnvironment,
+    ) -> Result<(), IpcError> {
+        self.listed(&request.context).await?;
+        let _choosing = self.choosing.lock().expect("choosing lock");
+        let choices = self
+            .policy
+            .set_environment(&request.context, request.environment);
+        self.state.set_choices(&choices);
+        Ok(())
+    }
+
+    pub async fn unlock_context(&self, context: &str) -> Result<(), IpcError> {
+        self.listed(context).await?;
+        self.policy
+            .unlock(context)
+            .map_err(|error| errors::refused(&error))
+    }
+
+    async fn listed(&self, context: &str) -> Result<(), IpcError> {
+        match self.catalog.contexts().await.find(context) {
+            Some(_) => Ok(()),
+            None => Err(IpcError::from(&ClientsError::NoContext(context.to_owned()))),
+        }
+    }
+
     pub async fn cluster_version(&self, context: &str) -> Result<ClusterVersion, IpcError> {
         let clients = self
             .clients(context)
@@ -218,10 +290,7 @@ impl Core {
             .into_iter()
             .find(|candidate| candidate.id == space)
             .and_then(|space| space.contexts.into_iter().next())
-            .ok_or_else(|| IpcError {
-                kind: ErrorKind::NotFound,
-                message: format!("no space {space:?}"),
-            })
+            .ok_or_else(|| IpcError::new(ErrorKind::NotFound, format!("no space {space:?}")))
     }
 
     /// The resources a space's context serves, followed as they change.
@@ -263,19 +332,19 @@ impl Core {
                 names.sort();
                 Ok(names)
             }
-            Err(ViewState::Forbidden { verb, resource }) => Err(IpcError {
-                kind: ErrorKind::Forbidden,
-                message: format!("you may not {verb} {resource}"),
-            }),
-            Err(ViewState::Unauthorized) => Err(IpcError {
-                kind: ErrorKind::Unauthorized,
-                message: "no credentials for this context that the cluster accepts".to_owned(),
-            }),
+            Err(ViewState::Forbidden { verb, resource }) => Err(IpcError::new(
+                ErrorKind::Forbidden,
+                format!("you may not {verb} {resource}"),
+            )),
+            Err(ViewState::Unauthorized) => Err(IpcError::new(
+                ErrorKind::Unauthorized,
+                "no credentials for this context that the cluster accepts".to_owned(),
+            )),
             Err(ViewState::Error { error }) => Err(error),
-            Err(_) => Err(IpcError {
-                kind: ErrorKind::Unavailable,
-                message: "the cluster is unavailable".to_owned(),
-            }),
+            Err(_) => Err(IpcError::new(
+                ErrorKind::Unavailable,
+                "the cluster is unavailable".to_owned(),
+            )),
         }
     }
 
@@ -343,10 +412,10 @@ impl Core {
             namespaced: query.namespaced,
         };
         if query.namespaced && query.namespace.is_none() {
-            return Err(IpcError {
-                kind: ErrorKind::InvalidInput,
-                message: format!("{} names no namespace", query.name),
-            });
+            return Err(IpcError::new(
+                ErrorKind::InvalidInput,
+                format!("{} names no namespace", query.name),
+            ));
         }
         let namespace = query.namespace.filter(|_| query.namespaced);
         let object = self
@@ -442,16 +511,15 @@ impl Core {
         let lines = self.logs.with(window, request.id, |session| {
             session.lines(request.filtered)
         })?;
-        let lines = lines.await.map_err(|_| IpcError {
-            kind: ErrorKind::Unavailable,
-            message: "the logs tab closed".to_owned(),
-        })?;
-        tokio::fs::write(path, lines)
+        let lines = lines
             .await
-            .map_err(|error| IpcError {
-                kind: ErrorKind::Internal,
-                message: format!("could not write {}: {error}", path.display()),
-            })
+            .map_err(|_| IpcError::new(ErrorKind::Unavailable, "the logs tab closed"))?;
+        tokio::fs::write(path, lines).await.map_err(|error| {
+            IpcError::new(
+                ErrorKind::Internal,
+                format!("could not write {}: {error}", path.display()),
+            )
+        })
     }
 
     /// Ends the lists, open objects and logs sessions of a window that
@@ -523,7 +591,7 @@ impl Core {
                 }
             }
         };
-        tokio::join!(sources, seen);
+        tokio::join!(sources, seen, self.policy.follow_unlocks());
     }
 }
 
@@ -533,10 +601,10 @@ fn connect(core: Weak<Core>) -> Connect {
         let core = core.clone();
         Box::pin(async move {
             let Some(core) = core.upgrade() else {
-                return Err(IpcError {
-                    kind: ErrorKind::Unavailable,
-                    message: "Twigo is quitting".to_owned(),
-                });
+                return Err(IpcError::new(
+                    ErrorKind::Unavailable,
+                    "Twigo is quitting".to_owned(),
+                ));
             };
             core.clients(&context)
                 .await
@@ -549,9 +617,11 @@ fn connect(core: Weak<Core>) -> Connect {
 /// localhost or 127.0.0.1, without a user part, which would name another
 /// host.
 pub fn sign_in_url(url: &str) -> Result<String, IpcError> {
-    let refused = || IpcError {
-        kind: twigo_ipc::ErrorKind::InvalidInput,
-        message: format!("Twigo opens only sign-in links: {url}"),
+    let refused = || {
+        IpcError::new(
+            twigo_ipc::ErrorKind::InvalidInput,
+            format!("Twigo opens only sign-in links: {url}"),
+        )
     };
     let parsed: http::Uri = url.parse().map_err(|_| refused())?;
     let authority = parsed.authority().ok_or_else(refused)?;

@@ -14,7 +14,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
-use twigo_kube::client::{Clients, Options};
+use twigo_kube::client::{Clients, Gate, Options};
 
 const HEADERS: u8 = 0x1;
 const RST_STREAM: u8 = 0x3;
@@ -212,7 +212,7 @@ pub fn clients(server: &Server) -> Clients {
     let url = format!("https://localhost:{}", server.addr.port());
     let mut config = Config::new(url.parse().unwrap());
     config.root_cert = Some(vec![server.ca.to_vec()]);
-    Clients::new(&config, Options::default()).unwrap()
+    Clients::new(&config, Gate::unrestricted(), Options::default()).unwrap()
 }
 
 pub async fn watch(clients: &Clients) -> impl futures::AsyncBufRead + use<> {

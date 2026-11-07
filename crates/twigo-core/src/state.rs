@@ -20,6 +20,7 @@ use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use twigo_ipc::{Space, StateEntry, StateSnapshot};
+use twigo_policy::Choices;
 
 /// A write waits this long after the change that starts it, so the changes
 /// that follow within it share the write.
@@ -36,10 +37,17 @@ const MISSING: SignedDuration = SignedDuration::from_hours(90 * 24);
 /// aside, and the store starts empty.
 const VERSION: u32 = 1;
 
+/// What the person chose for each context's mode (ARCHITECTURE 6.4), the one
+/// key no webview writes, as the webview only shows a mode.
+/// @todo: move the mode to settings.json once the settings files come in M3
+const CHOICES: &str = "policy/choices";
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("no space {0:?}")]
     NoSpace(String),
+    #[error("{0:?} is set only through its command")]
+    Reserved(String),
     #[error("the value of {key:?} is not JSON: {source}")]
     NotJson {
         key: String,
@@ -152,10 +160,34 @@ impl State {
         }
     }
 
+    /// What the person chose for each context's mode; nothing, when the
+    /// value does not read back.
+    pub fn choices(&self) -> Choices {
+        let data = self.inner.lock();
+        let Some(value) = data.file.app.get(CHOICES) else {
+            return Choices::default();
+        };
+        serde_json::from_str(value.get()).unwrap_or_else(|error| {
+            eprintln!("could not read the contexts' modes from the state: {error}");
+            Choices::default()
+        })
+    }
+
+    pub fn set_choices(&self, choices: &Choices) {
+        let value = serde_json::value::to_raw_value(choices)
+            .expect("maps of strings and plain enums serialize to JSON");
+        let mut data = self.inner.lock();
+        data.file.app.insert(CHOICES.to_owned(), value);
+        self.changed(&mut data);
+    }
+
     /// Stores the entries, all or none.
     pub fn set(&self, entries: Vec<StateEntry>) -> Result<(), Error> {
         let mut parsed = Vec::with_capacity(entries.len());
         for StateEntry { space, key, value } in entries {
+            if key == CHOICES {
+                return Err(Error::Reserved(key));
+            }
             let value = RawValue::from_string(value).map_err(|source| Error::NotJson {
                 key: key.clone(),
                 source,
@@ -338,11 +370,9 @@ impl From<&Error> for twigo_ipc::IpcError {
     fn from(error: &Error) -> Self {
         let kind = match error {
             Error::NoSpace(_) => twigo_ipc::ErrorKind::NotFound,
+            Error::Reserved(_) => twigo_ipc::ErrorKind::Permissions,
             Error::NotJson { .. } => twigo_ipc::ErrorKind::InvalidInput,
         };
-        Self {
-            kind,
-            message: error.to_string(),
-        }
+        Self::new(kind, error.to_string())
     }
 }

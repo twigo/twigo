@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use kube::config::{Kubeconfig, KubeconfigError, NamedAuthInfo, NamedCluster, NamedContext};
 use serde::Deserialize;
-use twigo_ipc::ContextColor;
+use twigo_ipc::{ContextColor, Environment};
 
 use crate::credentials::{Exec, ExecError, OidcEntry, OidcError, token_or_basic};
 
@@ -173,6 +173,9 @@ pub struct Context {
     pub server: Option<String>,
     /// Where the context goes among the others, lowest first.
     pub order: Option<i64>,
+    /// `twigo.readOnly`, one of the sources of its mode.
+    pub read_only: Option<bool>,
+    pub environment: Option<Environment>,
     pub fingerprint: Fingerprint,
     /// Why no connection can be made, when the kubeconfig already says.
     pub problem: Option<Problem>,
@@ -204,6 +207,8 @@ impl Context {
             source,
             server: cluster.and_then(server),
             order: extension.order,
+            read_only: extension.read_only,
+            environment: extension.environment,
             fingerprint: Fingerprint::of(named, cluster, user),
             problem,
             entries: Entries::new(
@@ -349,11 +354,14 @@ impl FileFailure {
 }
 
 /// The `twigo` extension of a context. Each field is read on its own, so a
-/// value Twigo does not know drops only that field.
+/// value Twigo does not know drops only that field; but a `readOnly` that says
+/// something else than true or false stays a lock, as somebody meant one.
 #[derive(Default)]
 struct Extension {
     color: Option<ContextColor>,
     order: Option<i64>,
+    read_only: Option<bool>,
+    environment: Option<Environment>,
 }
 
 impl Extension {
@@ -370,8 +378,18 @@ impl Extension {
         Self {
             color: field(value, "color"),
             order: field(value, "order"),
+            read_only: value
+                .get("readOnly")
+                .map(|read_only| read_only.as_bool().unwrap_or(true)),
+            environment: environment(value),
         }
     }
+}
+
+/// The type in any case, as `Production` is how people write it.
+fn environment(value: &serde_json::Value) -> Option<Environment> {
+    let named = value.get("environment")?.as_str()?.to_ascii_lowercase();
+    serde_json::from_value(named.into()).ok()
 }
 
 fn field<T: for<'de> Deserialize<'de>>(value: &serde_json::Value, name: &str) -> Option<T> {

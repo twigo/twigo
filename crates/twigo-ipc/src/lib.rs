@@ -1,6 +1,7 @@
 //! The protocol between the Rust core and the webview. `packages/protocol`
 //! gets its TypeScript types from these, through [`typescript`].
 
+mod access;
 pub mod command;
 mod credentials;
 mod discovery;
@@ -14,6 +15,10 @@ mod space;
 mod state;
 mod typescript;
 
+pub use access::{
+    BlockReason, Blocked, ContextAccess, Environment, Mode, ModeSource, RequestClass,
+    SetContextEnvironment, SetContextMode,
+};
 pub use credentials::{ContextAuth, EnvVar, ExecPlugin, ExecReview, PluginStatus, ReviewedPlugin};
 pub use discovery::{ClusterVersion, Discovered, Resource};
 pub use environment::ShellEnvironment;

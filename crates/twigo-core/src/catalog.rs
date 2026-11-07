@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::watch;
 use twigo_kube::kubeconfig::{self, Fingerprint, Sources, Watch};
+use twigo_policy::{Metadata, Policy};
 
 /// The contexts, ordered by their `order`, those without one last, then by
 /// name.
@@ -36,7 +37,7 @@ impl Contexts {
         self.0.iter().find(|context| context.name == name)
     }
 
-    pub fn ipc(&self) -> Vec<twigo_ipc::Context> {
+    pub fn ipc(&self, policy: &Policy) -> Vec<twigo_ipc::Context> {
         self.0
             .iter()
             .map(|context| twigo_ipc::Context {
@@ -44,6 +45,7 @@ impl Contexts {
                 color: context.color,
                 source: context.source.clone(),
                 server: context.server.clone(),
+                access: policy.access(&context.name),
             })
             .collect()
     }
@@ -166,6 +168,24 @@ impl Catalog {
             }
         });
         receiver
+    }
+
+    /// What the catalog says of a context for its mode, read anew each time,
+    /// so the gate sees a kubeconfig's change with the clients' first request.
+    pub fn metadata(&self) -> impl Fn(&str) -> Option<Metadata> + Send + Sync + 'static {
+        let contexts = self.subscribe();
+        move |context| {
+            contexts
+                .borrow()
+                .as_ref()
+                .and_then(|contexts| contexts.find(context))
+                .map(|found| Metadata {
+                    read_only: found.read_only,
+                    provider: None,
+                    environment: found.environment,
+                    connection: found.fingerprint.value(),
+                })
+        }
     }
 
     /// The contexts, once the sources have been read.

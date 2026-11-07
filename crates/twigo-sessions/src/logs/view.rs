@@ -85,9 +85,11 @@ impl Spec {
 }
 
 fn time(text: &str) -> Result<i64, IpcError> {
-    let invalid = || IpcError {
-        kind: ErrorKind::InvalidInput,
-        message: format!("{text:?} is no RFC 3339 time"),
+    let invalid = || {
+        IpcError::new(
+            ErrorKind::InvalidInput,
+            format!("{text:?} is no RFC 3339 time"),
+        )
     };
     let parsed: jiff::Timestamp = text.parse().map_err(|_| invalid())?;
     i64::try_from(parsed.as_nanosecond()).map_err(|_| invalid())
@@ -113,9 +115,11 @@ impl Search {
                 RegexBuilder::new(pattern)
                     .case_insensitive(true)
                     .build()
-                    .map_err(|error| IpcError {
-                        kind: ErrorKind::InvalidInput,
-                        message: format!("the search /{pattern}/ is no regex: {error}"),
+                    .map_err(|error| {
+                        IpcError::new(
+                            ErrorKind::InvalidInput,
+                            format!("the search /{pattern}/ is no regex: {error}"),
+                        )
                     })?,
             ),
             None if text.is_empty() => return Ok(None),
@@ -123,9 +127,11 @@ impl Search {
                 AhoCorasick::builder()
                     .ascii_case_insensitive(true)
                     .build([text])
-                    .map_err(|error| IpcError {
-                        kind: ErrorKind::InvalidInput,
-                        message: format!("the search {text:?} cannot be built: {error}"),
+                    .map_err(|error| {
+                        IpcError::new(
+                            ErrorKind::InvalidInput,
+                            format!("the search {text:?} cannot be built: {error}"),
+                        )
                     })?,
             ),
         };

@@ -22,7 +22,7 @@ use twigo_ipc::{
     Containers, Gvr, LevelFilter, LogBatch, LogEntry, LogPod, LogSource, LogTarget, LogView,
     LogWindow, OpenLogs, Since, StreamState, ViewState,
 };
-use twigo_kube::client::{Clients, Options};
+use twigo_kube::client::{Clients, Gate, Options};
 use twigo_sessions::logs::Session;
 
 const WITHIN: Duration = Duration::from_secs(120);
@@ -54,7 +54,8 @@ async fn live(prefix: &str) -> Live {
     let config = Config::from_custom_kubeconfig(kubeconfig, &KubeConfigOptions::default())
         .await
         .unwrap();
-    let clients = Arc::new(Clients::new(&config, Options::default()).unwrap());
+    let clients =
+        Arc::new(Clients::new(&config, Gate::unrestricted(), Options::default()).unwrap());
     let connect: Connect = {
         let clients = Arc::clone(&clients);
         Arc::new(move |_context| {

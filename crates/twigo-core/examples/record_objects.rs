@@ -21,7 +21,7 @@ use kube::{Api, Config};
 use serde_json::{Value, json};
 use twigo_cache::hub::{Connect, Hub, Resource, Subscription};
 use twigo_cache::object::Object;
-use twigo_kube::client::{Clients, Options};
+use twigo_kube::client::{Clients, Gate, Options};
 
 const NAMESPACE: &str = "overview";
 /// A shell without coreutils, from kind's local path provisioner.
@@ -44,7 +44,8 @@ async fn main() {
     let admin = kube::Client::try_from(config.clone()).unwrap();
     let node = create(&admin).await;
 
-    let clients = Arc::new(Clients::new(&config, Options::default()).unwrap());
+    let clients =
+        Arc::new(Clients::new(&config, Gate::unrestricted(), Options::default()).unwrap());
     let connect: Connect = Arc::new(move |_context| {
         let clients = Arc::clone(&clients);
         Box::pin(async move { Ok(clients) })

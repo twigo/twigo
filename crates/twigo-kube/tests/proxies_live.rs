@@ -13,7 +13,7 @@ use kube::Config;
 use kube::config::{KubeConfigOptions, Kubeconfig};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
-use twigo_kube::client::{Clients, Options, ProxyEnv, proxy_for};
+use twigo_kube::client::{Clients, Gate, Options, ProxyEnv, proxy_for};
 
 async fn config() -> Config {
     let path = std::env::var_os("TWIGO_TEST_KUBECONFIG")
@@ -123,6 +123,7 @@ async fn through(proxy_url: &str) -> Clients {
     assert!(proxy.is_some());
     Clients::new(
         &config,
+        Gate::unrestricted(),
         Options {
             proxy,
             ..Options::default()

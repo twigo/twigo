@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::ContextAccess;
+
 /// A workbench space: one context or a group of them (ARCHITECTURE 4.2).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct Space {
@@ -24,6 +26,8 @@ pub struct Context {
     /// `https://10.0.0.1:6443`. None when the kubeconfig names no server
     /// that parses.
     pub server: Option<String>,
+    /// Its mode, where the mode comes from and what it is marked as.
+    pub access: ContextAccess,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
