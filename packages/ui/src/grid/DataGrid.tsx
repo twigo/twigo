@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type ReactNode,
   type SyntheticEvent,
 } from "react";
@@ -433,13 +434,61 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       onSelect(target.id, target.data);
     };
     return (
-      <div
+      <DataRow
         key={target.id}
         id={rowId(at.index)}
         role="row"
         aria-rowindex={at.index + 2}
         aria-selected={anyMarked ? isMarked : isCursor}
         data-cursor={isCursor || undefined}
+        keepActions={isCursor}
+        actions={
+          <>
+            {menu.length > 0 && (
+              <ActionDropdown
+                actions={menu}
+                label="Row actions"
+                onOpen={select}
+              >
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                  }}
+                  className={cn(
+                    "flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none group-hover/row:opacity-100 hover:bg-row-hover hover:text-foreground focus-visible:opacity-100 focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-hover data-[state=open]:opacity-100",
+                    isCursor && "opacity-100",
+                  )}
+                >
+                  <Ellipsis aria-hidden className="size-4" />
+                </button>
+              </ActionDropdown>
+            )}
+            {inline.length > 0 && (
+              <div
+                className="absolute inset-y-0 hidden items-center bg-editor group-hover/row:flex"
+                style={{ right: ACTIONS_WIDTH }}
+              >
+                <div
+                  className={cn(
+                    "flex h-full items-center bg-row-hover pl-2",
+                    tint,
+                  )}
+                >
+                  <InlineActions
+                    actions={inline.map((action) => ({
+                      ...action,
+                      run: () => {
+                        select();
+                        action.run();
+                      },
+                    }))}
+                  />
+                </div>
+              </div>
+            )}
+          </>
+        }
         onClick={(event) => {
           // A click in a menu the row opened reaches it through the portal.
           if (!event.currentTarget.contains(event.target as Node)) return;
@@ -500,48 +549,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
           );
         })}
         {filler && <div role="gridcell" />}
-        <div role="gridcell" className="flex items-center justify-center">
-          {menu.length > 0 && (
-            <ActionDropdown actions={menu} label="Row actions" onOpen={select}>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                }}
-                className={cn(
-                  "flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none group-hover/row:opacity-100 hover:bg-row-hover hover:text-foreground focus-visible:opacity-100 focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-hover data-[state=open]:opacity-100",
-                  isCursor && "opacity-100",
-                )}
-              >
-                <Ellipsis aria-hidden className="size-4" />
-              </button>
-            </ActionDropdown>
-          )}
-          {inline.length > 0 && (
-            <div
-              className="absolute inset-y-0 hidden items-center bg-editor group-hover/row:flex"
-              style={{ right: ACTIONS_WIDTH }}
-            >
-              <div
-                className={cn(
-                  "flex h-full items-center bg-row-hover pl-2",
-                  tint,
-                )}
-              >
-                <InlineActions
-                  actions={inline.map((action) => ({
-                    ...action,
-                    run: () => {
-                      select();
-                      action.run();
-                    },
-                  }))}
-                />
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+      </DataRow>
     );
   });
 
@@ -621,6 +629,44 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
           </div>
         </ActionContextMenu>
       )}
+    </div>
+  );
+}
+
+/**
+ * A row whose last cell holds its actions, mounted only while they can be
+ * reached: one Tooltip per action and a menu on each of a window's rows cost
+ * more to render, on every frame of a scroll, than all of the rows' cells.
+ */
+function DataRow({
+  keepActions,
+  actions,
+  children,
+  ...row
+}: ComponentProps<"div"> & { keepActions: boolean; actions: ReactNode }) {
+  const [pointed, setPointed] = useState(false);
+  const [focused, setFocused] = useState(false);
+  return (
+    <div
+      {...row}
+      onPointerEnter={() => {
+        setPointed(true);
+      }}
+      onPointerLeave={() => {
+        setPointed(false);
+      }}
+      onFocus={() => {
+        setFocused(true);
+      }}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget))
+          setFocused(false);
+      }}
+    >
+      {children}
+      <div role="gridcell" className="flex items-center justify-center">
+        {(keepActions || pointed || focused) && actions}
+      </div>
     </div>
   );
 }

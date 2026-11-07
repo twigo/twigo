@@ -36,6 +36,12 @@ function nth(elements: readonly HTMLElement[], index: number): HTMLElement {
   return element;
 }
 
+function rowNamed(name: string): HTMLElement {
+  const row = screen.getByText(name).closest<HTMLElement>('[role="row"]');
+  if (!row) throw new Error(`no row ${name}`);
+  return row;
+}
+
 interface Pod {
   readonly name: string;
 }
@@ -493,9 +499,57 @@ test("a hovered row's actions run on that row, which they select first, without 
       },
     ],
   });
-  fireEvent.click(nth(screen.getAllByRole("button", { name: "Copy Name" }), 2));
+  fireEvent.pointerEnter(rowNamed("gateway-1"));
+  fireEvent.click(
+    within(rowNamed("gateway-1")).getByRole("button", { name: "Copy Name" }),
+  );
   expect(ranOn).toEqual(["e1"]);
   expect(handlers.onActivate).not.toHaveBeenCalled();
+});
+
+test("a row's actions mount only while the pointer, the focus or the cursor is on it", () => {
+  grid({
+    selected: "a1",
+    menu: [[{ id: "copy", label: "Copy Name", run: vi.fn() }]],
+    inline: [{ id: "copy", label: "Copy Name", icon: Copy, run: vi.fn() }],
+  });
+  const hasActions = (name: string) =>
+    within(rowNamed(name)).queryByRole("button", { name: "Row actions" }) !==
+    null;
+  expect(hasActions("api-1")).toBe(true);
+  expect(hasActions("gateway-1")).toBe(false);
+
+  fireEvent.pointerEnter(rowNamed("gateway-1"));
+  expect(hasActions("gateway-1")).toBe(true);
+  fireEvent.pointerLeave(rowNamed("gateway-1"));
+  expect(hasActions("gateway-1")).toBe(false);
+
+  fireEvent.focus(rowNamed("gateway-1"));
+  expect(hasActions("gateway-1")).toBe(true);
+  fireEvent.blur(rowNamed("gateway-1"));
+  expect(hasActions("gateway-1")).toBe(false);
+});
+
+test("the focus moving within a row keeps its actions", () => {
+  grid({ menu: [[{ id: "copy", label: "Copy Name", run: vi.fn() }]] });
+  const row = rowNamed("gateway-1");
+  fireEvent.focus(row);
+  const actions = within(row).getByRole("button", { name: "Row actions" });
+  fireEvent.blur(within(row).getByRole("checkbox"), {
+    relatedTarget: actions,
+  });
+  expect(actions.isConnected).toBe(true);
+});
+
+test("a row's menu stays open after the pointer leaves the row", () => {
+  grid({ menu: [[{ id: "copy", label: "Copy Name", run: vi.fn() }]] });
+  fireEvent.pointerEnter(rowNamed("gateway-1"));
+  fireEvent.pointerDown(screen.getByRole("button", { name: "Row actions" }), {
+    button: 0,
+    ctrlKey: false,
+  });
+  fireEvent.pointerLeave(rowNamed("gateway-1"));
+  expect(screen.getByRole("menuitem", { name: "Copy Name" })).toBeTruthy();
 });
 
 test("a choice in a row's menu runs without opening the row", async () => {
@@ -503,10 +557,11 @@ test("a choice in a row's menu runs without opening the row", async () => {
   const { handlers } = grid({
     menu: [[{ id: "copy", label: "Copy Name", run }]],
   });
-  fireEvent.pointerDown(
-    nth(screen.getAllByRole("button", { name: "Row actions" }), 2),
-    { button: 0, ctrlKey: false },
-  );
+  fireEvent.pointerEnter(rowNamed("gateway-1"));
+  fireEvent.pointerDown(screen.getByRole("button", { name: "Row actions" }), {
+    button: 0,
+    ctrlKey: false,
+  });
   fireEvent.click(screen.getByRole("menuitem", { name: "Copy Name" }));
   await act(() => new Promise((resolve) => setTimeout(resolve)));
   expect(run).toHaveBeenCalledOnce();
@@ -515,10 +570,11 @@ test("a choice in a row's menu runs without opening the row", async () => {
 
 test("a right click in a row's menu opens no other menu", async () => {
   grid({ menu: [[{ id: "copy", label: "Copy Name", run: vi.fn() }]] });
-  fireEvent.pointerDown(
-    nth(screen.getAllByRole("button", { name: "Row actions" }), 2),
-    { button: 0, ctrlKey: false },
-  );
+  fireEvent.pointerEnter(rowNamed("gateway-1"));
+  fireEvent.pointerDown(screen.getByRole("button", { name: "Row actions" }), {
+    button: 0,
+    ctrlKey: false,
+  });
   fireEvent.contextMenu(screen.getByRole("menuitem", { name: "Copy Name" }));
   await act(() => new Promise((resolve) => setTimeout(resolve)));
   expect(
