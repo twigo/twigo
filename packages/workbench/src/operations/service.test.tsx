@@ -1,4 +1,4 @@
-import { act } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 import { Trash2 } from "lucide-react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
@@ -9,6 +9,7 @@ import {
   type PlanRequest,
 } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
+import { Toaster } from "@twigo/ui";
 import { testWorkbench } from "../testing";
 import { COUNTING_DOWN, type Outcome } from "./service";
 
@@ -17,6 +18,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   vi.useRealTimers();
 });
 
@@ -238,4 +240,16 @@ test("a second dialog cancels the first's plan", async () => {
     first.workbench.operations.asking?.cancel();
   });
   await expect(second).resolves.toEqual({ state: "cancelled" });
+});
+
+test("a countdown that runs out runs its plan, though its toast's dismissal cancels", async () => {
+  render(<Toaster />);
+  const { sent, outcome } = await started(
+    plan({ kind: "countdown", seconds: 5 }),
+    [{ state: "done", text: "Deleted pod web-1" }],
+  );
+  await act(() => vi.advanceTimersByTimeAsync(5000));
+  await act(() => vi.advanceTimersByTimeAsync(1000));
+  await expect(outcome).resolves.toEqual({ state: "done" });
+  expect(commands(sent)).toEqual(["command_plan", "command_execute"]);
 });

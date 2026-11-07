@@ -8,7 +8,8 @@ import {
 import { toast } from "sonner";
 import { afterEach, expect, test, vi } from "vitest";
 import { Trash2 } from "lucide-react";
-import { CountdownToast, Toast } from "./toast";
+import { notify } from "./notify";
+import { CountdownToast, Toast, Toaster } from "./toast";
 
 afterEach(() => {
   cleanup();
@@ -68,6 +69,32 @@ test("a countdown says the seconds left and its Cancel runs", () => {
   });
   expect(screen.getByRole("status").textContent).toContain("sends in 3 s");
   fireEvent.click(screen.getByRole("button", { name: /Cancel/ }));
+  expect(run).toHaveBeenCalledOnce();
+  vi.useRealTimers();
+});
+
+test("a countdown's toast cannot be swiped away, and dismissing it cancels it", async () => {
+  vi.useFakeTimers();
+  render(<Toaster />);
+  const run = vi.fn();
+  act(() => {
+    notify.countdown({
+      icon: Trash2,
+      message: "Deleting pod web-1",
+      detail: () => "dev · sends in 5 s",
+      until: Date.now() + 5000,
+      seconds: 5,
+      cancel: { label: "Cancel", run },
+    });
+  });
+  await act(() => vi.advanceTimersByTimeAsync(100));
+  const shown = document.querySelector("[data-sonner-toast]");
+  expect(shown?.getAttribute("data-dismissible")).toBe("false");
+  expect(run).not.toHaveBeenCalled();
+  act(() => {
+    toast.dismiss();
+  });
+  await act(() => vi.advanceTimersByTimeAsync(1000));
   expect(run).toHaveBeenCalledOnce();
   vi.useRealTimers();
 });

@@ -21,8 +21,9 @@ use twigo_policy::friction::Risk;
 /// What a command will do, as its action planned it.
 pub(crate) struct Planned {
     pub context: String,
-    /// The context's connection what it read came from: the clients it
-    /// planned with, so it runs on that cluster only.
+    /// The context's connection it planned for, so it runs there only: a
+    /// delete's, that of the clients it read the object with; a Reveal's,
+    /// the context's as it planned.
     pub connection: Option<u64>,
     pub risk: Risk,
     /// The requests it sends that change the cluster, as they go out, for

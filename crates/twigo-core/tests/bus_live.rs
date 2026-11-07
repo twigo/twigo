@@ -563,6 +563,23 @@ async fn a_reveal_asks_in_guarded_and_kubectl_reads_the_same_value() {
         assert_eq!(kubectl(&plan, &kubeconfig), expected, "{}", plan.kubectl);
     }
 
+    let closed = core
+        .command_plan(
+            "main",
+            PlanRequest::Reveal {
+                object: id,
+                key: "password".to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+    core.object_close("main", id).unwrap();
+    let told = run(&core, &closed, None).await.unwrap();
+    let [OperationEvent::Failed { error }] = told.as_slice() else {
+        panic!("{told:?}");
+    };
+    assert_eq!(error.kind, ErrorKind::NotFound, "{}", error.message);
+
     core.state.flush().unwrap();
     for file in ["state.json", "audit.jsonl"] {
         let text = std::fs::read_to_string(dir.path().join(file)).unwrap();
@@ -579,6 +596,7 @@ async fn a_reveal_asks_in_guarded_and_kubectl_reads_the_same_value() {
         [
             format!("secrets/db in {namespace}, key password"),
             format!("secrets/db in {namespace}, key key.der"),
+            format!("secrets/db in {namespace}, key password"),
         ]
     );
     cluster.delete(&namespace).await;

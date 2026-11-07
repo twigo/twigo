@@ -376,3 +376,131 @@ async fn a_plan_taken_before_its_page_reloaded_does_not_run() {
     let refused = core.bus.run(ticket, plan.id, stop).unwrap_err();
     assert_eq!(refused.kind, ErrorKind::Unavailable);
 }
+
+/// An API server on loopback that holds each GET until released and notes
+/// every request line it gets.
+struct Held {
+    port: u16,
+    release: Arc<tokio::sync::Notify>,
+    seen: Arc<Mutex<Vec<String>>>,
+}
+
+impl Held {
+    async fn start() -> Self {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let release = Arc::new(tokio::sync::Notify::new());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        tokio::spawn({
+            let (release, seen) = (Arc::clone(&release), Arc::clone(&seen));
+            async move {
+                loop {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    let (release, seen) = (Arc::clone(&release), Arc::clone(&seen));
+                    tokio::spawn(async move {
+                        let mut read = Vec::new();
+                        let mut buffer = [0; 4096];
+                        while !read.windows(4).any(|window| window == b"\r\n\r\n") {
+                            let n = socket.read(&mut buffer).await.unwrap();
+                            if n == 0 {
+                                return;
+                            }
+                            read.extend_from_slice(&buffer[..n]);
+                        }
+                        let line = String::from_utf8_lossy(&read)
+                            .lines()
+                            .next()
+                            .unwrap_or_default()
+                            .to_owned();
+                        let get = line.starts_with("GET ");
+                        seen.lock().unwrap().push(line);
+                        if get {
+                            release.notified().await;
+                        }
+                        let body = r#"{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"m","namespace":"a","uid":"u-1"}}"#;
+                        let answer = format!(
+                            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                            body.len()
+                        );
+                        socket.write_all(answer.as_bytes()).await.unwrap();
+                    });
+                }
+            }
+        });
+        Held {
+            port,
+            release,
+            seen,
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_plan_whose_read_waited_across_an_edit_of_its_context_never_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = Held::start().await;
+    let kubeconfig = KUBECONFIG.replace("127.0.0.1:1", &format!("127.0.0.1:{}", server.port));
+    let core = running(dir.path());
+    std::fs::write(dir.path().join("config"), &kubeconfig).unwrap();
+    let mut contexts = core.catalog.subscribe();
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        contexts.wait_for(|listed| {
+            listed
+                .as_ref()
+                .is_some_and(|listed| listed.iter().any(|c| c.name == "kind-a"))
+        }),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let space = core.state.open_space("kind-a").id;
+    let planning = tokio::spawn({
+        let core = Arc::clone(&core);
+        async move {
+            let target = twigo_ipc::ResourceRef {
+                gvr: twigo_ipc::Gvr {
+                    group: String::new(),
+                    version: "v1".to_owned(),
+                    resource: "configmaps".to_owned(),
+                },
+                namespaced: true,
+                namespace: Some("a".to_owned()),
+                name: "m".to_owned(),
+            };
+            let request = twigo_ipc::PlanRequest::Delete { space, target };
+            core.command_plan("main", request).await
+        }
+    });
+    until("the plan's read reaches the server", || {
+        !server.seen.lock().unwrap().is_empty()
+    })
+    .await;
+
+    // The same server, but what the kubeconfig says of the context changed,
+    // as when it is pointed elsewhere: its clients are rebuilt.
+    contexts.borrow_and_update();
+    std::fs::write(
+        dir.path().join("config"),
+        kubeconfig.replace(
+            "context: { cluster: c, user: u }",
+            "context: { cluster: c, user: u, extensions: [{ name: twigo, extension: { readOnly: false } }] }",
+        ),
+    )
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), contexts.changed())
+        .await
+        .expect("the catalog reads the edit")
+        .unwrap();
+    server.release.notify_one();
+    let plan = planning.await.unwrap().unwrap();
+
+    assert_eq!(
+        execute(&core, "main", plan.id, None).await,
+        Err(ErrorKind::Conflict)
+    );
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let seen = server.seen.lock().unwrap().clone();
+    assert_eq!(seen, ["GET /api/v1/namespaces/a/configmaps/m HTTP/1.1"]);
+}

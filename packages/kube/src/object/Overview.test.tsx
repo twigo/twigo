@@ -458,4 +458,38 @@ test("a value revealed for one Secret is not shown for the next one's key of tha
   rerender(shown(next));
   expect(document.body.textContent).not.toContain("hunter2");
   expect(screen.getByRole("button", { name: "Reveal mode" })).toBeTruthy();
+  rerender(shown(first));
+  expect(document.body.textContent).not.toContain("hunter2");
+});
+
+test("an answer that comes after the row moved to another Secret is dropped", async () => {
+  let answer: (value: { value: string; binary: boolean }) => void = () =>
+    undefined;
+  const slow = vi.fn(
+    () =>
+      new Promise<{ value: string; binary: boolean }>((resolve) => {
+        answer = resolve;
+      }),
+  );
+  const next = vi.fn(() => Promise.resolve(undefined));
+  const shown = (reveal: typeof slow | typeof next) => (
+    <Overview
+      states={new OverviewStates()}
+      kind="/secrets"
+      space="kind-test"
+      overview={data(false)}
+      onOpen={() => undefined}
+      reveal={reveal}
+    />
+  );
+  const { rerender } = render(shown(slow));
+  fireEvent.click(screen.getByRole("button", { name: "Reveal mode" }));
+  rerender(shown(next));
+  await act(async () => {
+    answer({ value: "hunter2", binary: false });
+    await Promise.resolve();
+  });
+  expect(document.body.textContent).not.toContain("hunter2");
+  rerender(shown(slow));
+  expect(document.body.textContent).not.toContain("hunter2");
 });

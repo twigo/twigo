@@ -348,11 +348,13 @@ type Shown =
  * 3.6), and stays shown only until Hide or the row goes.
  */
 function SecretRow({ entry, reveal }: { entry: DataEntry; reveal: Reveal }) {
-  const [kept, setShown] = useState<Shown>({ state: "hidden" });
-  // A row that now shows another object's key shows none of the last one's.
-  const shown: Shown =
-    kept.state === "hidden" || kept.by === reveal ? kept : { state: "hidden" };
-  const showing = shown.state === "shown";
+  const [shown, setShown] = useState<Shown>({ state: "hidden" });
+  // A row that now shows another object's key drops the last one's value,
+  // rather than only hiding it.
+  if (shown.state !== "hidden" && shown.by !== reveal) {
+    setShown({ state: "hidden" });
+  }
+  const showing = shown.state === "shown" && shown.by === reveal;
   return (
     <li className="flex flex-col">
       <div className="flex h-6 items-center gap-2">
@@ -366,7 +368,7 @@ function SecretRow({ entry, reveal }: { entry: DataEntry; reveal: Reveal }) {
           variant="ghost"
           aria-label={showing ? `Hide ${entry.key}` : `Reveal ${entry.key}`}
           tooltip={showing ? "Hide" : "Reveal"}
-          isLoading={shown.state === "revealing"}
+          isLoading={shown.state === "revealing" && shown.by === reveal}
           onClick={() => {
             if (showing) {
               setShown({ state: "hidden" });
@@ -374,10 +376,13 @@ function SecretRow({ entry, reveal }: { entry: DataEntry; reveal: Reveal }) {
             }
             setShown({ state: "revealing", by: reveal });
             void reveal(entry.key).then((revealed) => {
-              setShown(
-                revealed
-                  ? { state: "shown", by: reveal, ...revealed }
-                  : { state: "hidden" },
+              // An answer for an object the row no longer shows is dropped.
+              setShown((current) =>
+                current.state !== "revealing" || current.by !== reveal
+                  ? current
+                  : revealed
+                    ? { state: "shown", by: reveal, ...revealed }
+                    : { state: "hidden" },
               );
             });
           }}
