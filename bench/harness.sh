@@ -147,7 +147,7 @@ wait_for() {
   done
 }
 
-echo "app running; the window must stay on screen until it hides itself" >&2
+echo "app running, its window at the screen's left edge; keep the screen unlocked" >&2
 wait_for steady.json 180
 sleep "$SETTLE"
 for n in $(seq 1 "$MEMORY_SAMPLES"); do
