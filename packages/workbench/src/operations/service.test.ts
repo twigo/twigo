@@ -55,6 +55,7 @@ function plan(friction: Plan["friction"]): Plan {
 function bus(planned: Plan | IpcError, events: OperationEvent[]) {
   const mock = createMockBackend("ready");
   const sent: { command: string; request: unknown }[] = [];
+  let next = planned instanceof IpcError ? 0 : planned.id;
   const backend: Backend = {
     invoke(command, request) {
       if (command === "command_plan" || command === "command_cancel") {
@@ -62,7 +63,7 @@ function bus(planned: Plan | IpcError, events: OperationEvent[]) {
         if (command === "command_cancel") return Promise.resolve(null as never);
         return planned instanceof IpcError
           ? Promise.reject(planned)
-          : Promise.resolve(planned as never);
+          : Promise.resolve({ ...planned, id: next++ } as never);
       }
       return mock.invoke(command, request);
     },
@@ -179,4 +180,62 @@ test("a run that fails is reported", async () => {
   await act(() => vi.advanceTimersByTimeAsync(20));
   await expect(outcome).resolves.toEqual({ state: "failed" });
   expect(report).toHaveBeenCalledWith(error);
+});
+
+test("a second countdown of the same object replaces the first, and ⌘Z cancels only outside a text field", async () => {
+  const first = await started(plan({ kind: "countdown", seconds: 5 }), []);
+  const { workbench, sent } = first;
+  const second = workbench.operations.run(REQUEST, LOOK);
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  await expect(first.outcome).resolves.toEqual({ state: "cancelled" });
+  expect(sent.map(({ command, request }) => [command, request])).toEqual([
+    ["command_plan", REQUEST],
+    ["command_plan", REQUEST],
+    ["command_cancel", 7],
+  ]);
+
+  /** ⌘Z pressed in `target`, through the window's dispatch as the shell wires it. */
+  const undo = (target: Element) => {
+    const event = new KeyboardEvent("keydown", {
+      code: "KeyZ",
+      key: "z",
+      metaKey: true,
+      cancelable: true,
+      bubbles: true,
+    });
+    let handled = false;
+    target.addEventListener(
+      "keydown",
+      (seen) => {
+        handled = workbench.keybindings.dispatch(seen as KeyboardEvent);
+      },
+      { once: true },
+    );
+    target.dispatchEvent(event);
+    return handled;
+  };
+  const input = document.createElement("input");
+  document.body.append(input);
+  expect(undo(input)).toBe(false);
+  input.remove();
+  expect(undo(document.body)).toBe(true);
+  await expect(second).resolves.toEqual({ state: "cancelled" });
+  await act(() => vi.advanceTimersByTimeAsync(5000));
+  expect(commands(sent)).not.toContain("command_execute");
+});
+
+test("a second dialog cancels the first's plan", async () => {
+  const first = await started(plan({ kind: "confirm" }), []);
+  const second = first.workbench.operations.run(REQUEST, LOOK);
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  await expect(first.outcome).resolves.toEqual({ state: "cancelled" });
+  expect(first.workbench.operations.asking?.plan.id).toBe(8);
+  expect(first.sent[first.sent.length - 1]).toEqual({
+    command: "command_cancel",
+    request: 7,
+  });
+  act(() => {
+    first.workbench.operations.asking?.cancel();
+  });
+  await expect(second).resolves.toEqual({ state: "cancelled" });
 });

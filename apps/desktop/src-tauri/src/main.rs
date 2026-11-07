@@ -200,7 +200,7 @@ async fn command_plan(
 }
 
 #[tauri::command]
-fn command_execute(
+async fn command_execute(
     webview: Webview,
     app: State<'_, App>,
     request: Execute,
@@ -216,6 +216,7 @@ fn command_execute(
                 }
             }
         })
+        .await
 }
 
 #[tauri::command]

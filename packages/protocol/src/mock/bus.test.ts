@@ -169,3 +169,65 @@ test("a node asks for its name typed and a deployment in a dialog", async () => 
     `kubectl --context qa delete deployments.apps ${deploymentOf(first)} -n ${first.namespace}`,
   );
 });
+
+test("read-only refuses before the object is looked up, as Rust does", async () => {
+  const backend = createMockBackend("live");
+  const missing = await refused(
+    backend.invoke("command_plan", {
+      action: "delete",
+      space: "prod-eu",
+      target: {
+        gvr: { group: "", version: "v1", resource: "configmaps" },
+        namespaced: true,
+        namespace: "payments",
+        name: "no-such-map",
+      },
+    }),
+  );
+  expect(missing.kind).toBe("permissions");
+});
+
+test("a Reveal whose Secret closed before it ran fails, and says so", async () => {
+  const backend = createMockBackend("live");
+  await answered(backend.invoke("space_open", "qa"));
+  const object = await answered(
+    backend.subscribe(
+      "object_open",
+      {
+        object: {
+          space: "qa",
+          gvr: { group: "", version: "v1", resource: "secrets" },
+          namespaced: true,
+          namespace: "overview",
+          name: "credentials",
+        },
+        parts: {
+          overview: true,
+          manifest: false,
+          events: false,
+          related: false,
+        },
+      },
+      () => undefined,
+    ),
+  );
+  const plan = await answered(
+    backend.invoke("command_plan", {
+      action: "reveal",
+      object,
+      key: "password",
+    }),
+  );
+  expect(plan.friction).toEqual({ kind: "atOnce" });
+  await answered(backend.invoke("object_close", object));
+  const events = await run(backend, plan.id);
+  expect(events).toEqual([
+    {
+      state: "failed",
+      error: {
+        kind: "notFound",
+        message: `no object subscription ${String(object)}`,
+      },
+    },
+  ]);
+});

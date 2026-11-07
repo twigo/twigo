@@ -329,12 +329,16 @@ function Data({
   );
 }
 
-/** What a Reveal gave, which leaves the webview as the row hides it or goes. */
+/**
+ * What a Reveal gave, which leaves the webview as the row hides it or goes,
+ * and holds only for the object whose `reveal` gave it.
+ */
 type Shown =
   | { readonly state: "hidden" }
-  | { readonly state: "revealing" }
+  | { readonly state: "revealing"; readonly by: Reveal }
   | {
       readonly state: "shown";
+      readonly by: Reveal;
       readonly value: string;
       readonly binary: boolean;
     };
@@ -344,7 +348,10 @@ type Shown =
  * 3.6), and stays shown only until Hide or the row goes.
  */
 function SecretRow({ entry, reveal }: { entry: DataEntry; reveal: Reveal }) {
-  const [shown, setShown] = useState<Shown>({ state: "hidden" });
+  const [kept, setShown] = useState<Shown>({ state: "hidden" });
+  // A row that now shows another object's key shows none of the last one's.
+  const shown: Shown =
+    kept.state === "hidden" || kept.by === reveal ? kept : { state: "hidden" };
   const showing = shown.state === "shown";
   return (
     <li className="flex flex-col">
@@ -365,11 +372,11 @@ function SecretRow({ entry, reveal }: { entry: DataEntry; reveal: Reveal }) {
               setShown({ state: "hidden" });
               return;
             }
-            setShown({ state: "revealing" });
+            setShown({ state: "revealing", by: reveal });
             void reveal(entry.key).then((revealed) => {
               setShown(
                 revealed
-                  ? { state: "shown", ...revealed }
+                  ? { state: "shown", by: reveal, ...revealed }
                   : { state: "hidden" },
               );
             });

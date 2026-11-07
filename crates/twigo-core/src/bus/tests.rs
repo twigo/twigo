@@ -34,10 +34,11 @@ fn running(dir: &Path) -> Arc<Core> {
 /// How many times the plan's run ran.
 type Runs = Arc<Mutex<u32>>;
 
-fn planned(risk: Risk, runs: &Runs) -> Planned {
+fn planned(core: &Core, risk: Risk, runs: &Runs) -> Planned {
     let runs = Arc::clone(runs);
     Planned {
         context: "kind-a".to_owned(),
+        connection: core.policy.connection("kind-a"),
         risk,
         writes: vec![Attributes::action(
             "delete",
@@ -68,9 +69,8 @@ async fn new_plan(core: &Core, window: &str, risk: Risk, runs: &Runs) -> twigo_i
     core.catalog.contexts().await;
     let ticket = core.bus.ticket(window);
     let access = core.policy.access("kind-a");
-    let connection = core.policy.connection("kind-a");
     core.bus
-        .keep(ticket, planned(risk, runs), connection, &access)
+        .keep(ticket, planned(core, risk, runs), &access)
         .unwrap()
 }
 
@@ -87,13 +87,19 @@ fn events() -> (
     })
 }
 
-fn execute(core: &Core, window: &str, plan: PlanId, typed: Option<&str>) -> Result<(), ErrorKind> {
+async fn execute(
+    core: &Core,
+    window: &str,
+    plan: PlanId,
+    typed: Option<&str>,
+) -> Result<(), ErrorKind> {
     let (_, send) = events();
     let request = Execute {
         plan,
         typed: typed.map(str::to_owned),
     };
     core.command_execute(window, request, send)
+        .await
         .map_err(|error| error.kind)
 }
 
@@ -115,12 +121,12 @@ async fn a_plan_runs_once_and_only_from_its_own_window() {
     assert_eq!(plan.friction, Friction::Confirm);
 
     assert_eq!(
-        execute(&core, "other", plan.id, None),
+        execute(&core, "other", plan.id, None).await,
         Err(ErrorKind::NotFound)
     );
-    execute(&core, "main", plan.id, None).unwrap();
+    execute(&core, "main", plan.id, None).await.unwrap();
     assert_eq!(
-        execute(&core, "main", plan.id, None),
+        execute(&core, "main", plan.id, None).await,
         Err(ErrorKind::NotFound)
     );
     until("the run starts", || *runs.lock().unwrap() == 1).await;
@@ -143,21 +149,23 @@ async fn a_typed_friction_runs_only_with_its_name_typed() {
         }
     );
     assert_eq!(
-        execute(&core, "main", plan.id, None),
+        execute(&core, "main", plan.id, None).await,
         Err(ErrorKind::InvalidInput)
     );
     assert_eq!(
-        execute(&core, "main", plan.id, Some("payments")),
+        execute(&core, "main", plan.id, Some("payments")).await,
         Err(ErrorKind::NotFound),
         "a refused plan is spent"
     );
     let plan = new_plan(&core, "main", wide(), &runs).await;
     assert_eq!(
-        execute(&core, "main", plan.id, Some("Payments")),
+        execute(&core, "main", plan.id, Some("Payments")).await,
         Err(ErrorKind::InvalidInput)
     );
     let plan = new_plan(&core, "main", wide(), &runs).await;
-    execute(&core, "main", plan.id, Some("payments")).unwrap();
+    execute(&core, "main", plan.id, Some("payments"))
+        .await
+        .unwrap();
     until("the run starts", || *runs.lock().unwrap() == 1).await;
     core.command_cancel("main", plan.id);
 }
@@ -173,7 +181,7 @@ async fn a_countdown_runs_only_once_it_has_ended_and_a_cancel_drops_it() {
     assert_eq!(plan.friction, Friction::Countdown { seconds: 5 });
     tokio::time::advance(Duration::from_millis(4_900)).await;
     assert_eq!(
-        execute(&core, "main", plan.id, None),
+        execute(&core, "main", plan.id, None).await,
         Err(ErrorKind::InvalidInput)
     );
 
@@ -181,13 +189,13 @@ async fn a_countdown_runs_only_once_it_has_ended_and_a_cancel_drops_it() {
     tokio::time::advance(Duration::from_secs(5)).await;
     core.command_cancel("main", cancelled.id);
     assert_eq!(
-        execute(&core, "main", cancelled.id, None),
+        execute(&core, "main", cancelled.id, None).await,
         Err(ErrorKind::NotFound)
     );
 
     let ended = new_plan(&core, "main", Risk::Replaced, &runs).await;
     tokio::time::advance(Duration::from_secs(5)).await;
-    execute(&core, "main", ended.id, None).unwrap();
+    execute(&core, "main", ended.id, None).await.unwrap();
     tokio::time::resume();
     until("the run starts", || *runs.lock().unwrap() == 1).await;
     core.command_cancel("main", ended.id);
@@ -206,7 +214,7 @@ async fn a_mode_that_asks_for_more_than_the_plan_did_refuses_it() {
     .await
     .unwrap();
     assert_eq!(
-        execute(&core, "main", plan.id, None),
+        execute(&core, "main", plan.id, None).await,
         Err(ErrorKind::Conflict)
     );
 
@@ -232,6 +240,7 @@ async fn a_mode_that_asks_for_more_than_the_plan_did_refuses_it() {
             },
             events().1,
         )
+        .await
         .unwrap_err();
     assert_eq!(blocked.kind, ErrorKind::Permissions);
     assert_eq!(blocked.blocked.unwrap().mode, Mode::ReadOnly);
@@ -256,7 +265,7 @@ async fn a_plan_never_runs_on_another_cluster_its_context_names_now() {
         .expect("the catalog reads the new server")
         .unwrap();
     assert_eq!(
-        execute(&core, "main", plan.id, None),
+        execute(&core, "main", plan.id, None).await,
         Err(ErrorKind::Conflict)
     );
     assert_eq!(*runs.lock().unwrap(), 0);
@@ -278,6 +287,7 @@ async fn a_reload_drops_the_window_s_plans_and_stops_its_runs() {
         },
         send,
     )
+    .await
     .unwrap();
     until("the run starts", || *runs.lock().unwrap() == 1).await;
 
@@ -302,7 +312,7 @@ async fn a_reload_drops_the_window_s_plans_and_stops_its_runs() {
         ]
     );
     assert_eq!(
-        execute(&core, "main", waiting.id, None),
+        execute(&core, "main", waiting.id, None).await,
         Err(ErrorKind::NotFound)
     );
 }
@@ -313,7 +323,7 @@ async fn the_audit_log_has_what_a_person_confirmed_and_how_it_ended() {
     let core = running(dir.path());
     let runs = Runs::default();
     let plan = new_plan(&core, "main", Risk::One, &runs).await;
-    execute(&core, "main", plan.id, None).unwrap();
+    execute(&core, "main", plan.id, None).await.unwrap();
     until("the run starts", || *runs.lock().unwrap() == 1).await;
     core.command_cancel("main", plan.id);
 
@@ -336,4 +346,33 @@ async fn the_audit_log_has_what_a_person_confirmed_and_how_it_ended() {
     );
     assert_eq!(lines[1]["event"], "ended");
     assert_eq!(lines[1]["outcome"], "stopped");
+}
+
+#[tokio::test]
+async fn a_plan_asked_for_by_a_page_that_reloaded_is_not_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path());
+    let runs = Runs::default();
+    core.catalog.contexts().await;
+    let ticket = core.bus.ticket("main");
+    core.drop_window("main");
+    let access = core.policy.access("kind-a");
+    let refused = core
+        .bus
+        .keep(ticket, planned(&core, Risk::One, &runs), &access)
+        .unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::Unavailable);
+}
+
+#[tokio::test]
+async fn a_plan_taken_before_its_page_reloaded_does_not_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path());
+    let runs = Runs::default();
+    let plan = new_plan(&core, "main", Risk::One, &runs).await;
+    let (_, ticket) = core.bus.take("main", plan.id).unwrap();
+    core.drop_window("main");
+    let (_, stop) = Progress::new(|_| true);
+    let refused = core.bus.run(ticket, plan.id, stop).unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::Unavailable);
 }

@@ -1488,7 +1488,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     The chip opens what set the mode, in words, with the choices the person has.
   - Friction grows with the blast radius (Primer), and the mode raises it; Rust names it in a command's plan and checks it before the plan runs (5.1):
     - scale, cordon and suspend run at once with an undo (⌘Z);
-    - deleting a pod that a controller replaces, outside production, sends after a 5 s toast with Cancel, as Headlamp holds it, and ⌘Z cancels it too; in production it asks in a dialog;
+    - deleting a pod that its ReplicaSet, StatefulSet or DaemonSet replaces, outside production, sends after a 5 s toast with Cancel, as Headlamp holds it, and ⌘Z cancels it too; in production it asks in a dialog, and a Job's or a workflow's pod, which may not come back, asks in one everywhere;
     - deleting one object asks in a dialog that names the cluster in its question and lists what follows, with the equivalent kubectl command;
     - a namespace, a node, a CustomResourceDefinition or a bulk delete asks for the object's name typed;
     - in `guarded` every write asks for the context's name typed, whatever it risks, and a Reveal asks in a dialog, as in `read-only`; in `read-write` a Reveal shows at once;

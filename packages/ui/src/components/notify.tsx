@@ -31,10 +31,16 @@ const show =
       { duration: DURATION[tone], ...(key !== undefined && { id: key }) },
     );
 
-/** A countdown's toast, which stays until its owner dismisses it. */
+/**
+ * A countdown's toast, which stays until its owner dismisses it: it cannot
+ * be swiped away, and anything else that dismisses it cancels it, so it
+ * never runs out unseen.
+ */
 function countdown(props: CountdownToastProps): { dismiss: () => void } {
   const id = toast.custom(() => <CountdownToast {...props} />, {
     duration: Infinity,
+    dismissible: false,
+    onDismiss: props.cancel.run,
   });
   return {
     dismiss: () => {

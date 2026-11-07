@@ -56,8 +56,11 @@ export class Operations {
   readonly changes = new Changes();
   #asking: Asking | undefined;
   readonly #running = new Map<number, Running>();
-  /** Cancels of the countdowns under way, the newest last. */
-  readonly #countdowns: (() => void)[] = [];
+  /** The countdowns under way, the newest last, by what they plan. */
+  readonly #countdowns: {
+    readonly request: string;
+    readonly cancel: () => void;
+  }[] = [];
   #all: readonly Running[] = [];
 
   /** `cancelKeys` labels the key that cancels a countdown, if one does. */
@@ -86,7 +89,7 @@ export class Operations {
       this.report(error);
       return { state: "failed" };
     }
-    const agreed = await this.#ask(plan, look);
+    const agreed = await this.#ask(plan, look, JSON.stringify(request));
     if (!agreed) {
       this.backend.invoke("command_cancel", plan.id).catch(this.report);
       return { state: "cancelled" };
@@ -96,19 +99,21 @@ export class Operations {
 
   /** Cancels the newest countdown, as ⌘Z does. */
   cancelCountdown(): void {
-    this.#countdowns[this.#countdowns.length - 1]?.();
+    this.#countdowns[this.#countdowns.length - 1]?.cancel();
   }
 
+  /** `request` names what the plan acts on, so a second countdown of it replaces the first. */
   #ask(
     plan: Plan,
     look: Look,
+    request: string,
   ): Promise<{ typed: string | undefined } | undefined> {
     const { friction } = plan;
     if (friction.kind === "atOnce") {
       return Promise.resolve({ typed: undefined });
     }
     if (friction.kind === "countdown") {
-      return this.#countdown(plan, friction.seconds, look);
+      return this.#countdown(plan, friction.seconds, look, request);
     }
     return new Promise((resolve) => {
       this.#asking?.cancel();
@@ -137,18 +142,24 @@ export class Operations {
     plan: Plan,
     seconds: number,
     look: Look,
+    request: string,
   ): Promise<{ typed: undefined } | undefined> {
+    this.#countdowns.find((other) => other.request === request)?.cancel();
     return new Promise((resolve) => {
       const until = Date.now() + seconds * 1000;
       const keys = this.cancelKeys();
-      // Both set below, before anything can end the countdown.
+      let ended = false;
+      // Both set below, before anything can end the countdown; dismissing
+      // the toast cancels it, so the first end stands.
       const end = (agreed: boolean) => {
+        if (ended) return;
+        ended = true;
         clearTimeout(timer);
-        toast.dismiss();
-        const index = this.#countdowns.indexOf(cancel);
+        const index = this.#countdowns.indexOf(entry);
         if (index >= 0) this.#countdowns.splice(index, 1);
         this.keys.set(COUNTING_DOWN, this.#countdowns.length > 0);
         resolve(agreed ? { typed: undefined } : undefined);
+        toast.dismiss();
       };
       const cancel = () => {
         end(false);
@@ -170,7 +181,8 @@ export class Operations {
       const timer = setTimeout(() => {
         end(true);
       }, seconds * 1000);
-      this.#countdowns.push(cancel);
+      const entry = { request, cancel };
+      this.#countdowns.push(entry);
       this.keys.set(COUNTING_DOWN, true);
     });
   }

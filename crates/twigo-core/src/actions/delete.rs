@@ -18,6 +18,10 @@ use super::{kind_words, kubectl, sentence};
 use crate::Core;
 use crate::bus::{Finished, Planned, Progress};
 
+/// The controllers that make a new pod for one that goes; a Job's or a
+/// workflow's may not.
+const REPLACING: [&str; 3] = ["ReplicaSet", "StatefulSet", "DaemonSet"];
+
 /// Kinds whose object takes all it holds with it.
 const WIDE: [(&str, &str); 3] = [
     ("", "namespaces"),
@@ -116,8 +120,10 @@ pub(crate) async fn delete(
         .as_deref()
         .map(|namespace| format!(" in {namespace}"))
         .unwrap_or_default();
+    let connection = clients.connection();
     let run = Run {
         core: core.this.clone(),
+        connection,
         context: context.clone(),
         resource,
         namespace,
@@ -136,23 +142,20 @@ pub(crate) async fn delete(
         target: attributes.target(),
         writes: vec![attributes],
         context,
+        connection,
         risk,
         run: Box::new(move |progress| Box::pin(run.run(progress))),
     })
 }
 
-/// The kind and name of the pod's controller, which replaces it.
+/// The kind and name of the pod's controller, when it is one that replaces
+/// the pod.
 fn controller(object: &Value) -> Option<(String, String)> {
     let owners = object["metadata"]["ownerReferences"].as_array()?;
-    owners
-        .iter()
-        .find(|owner| owner["controller"] == true)
-        .and_then(|owner| {
-            Some((
-                owner["kind"].as_str()?.to_owned(),
-                owner["name"].as_str()?.to_owned(),
-            ))
-        })
+    let owner = owners.iter().find(|owner| owner["controller"] == true)?;
+    let kind = owner["kind"].as_str()?;
+    let replaces = owner["apiVersion"] == "apps/v1" && REPLACING.contains(&kind);
+    replaces.then(|| Some((kind.to_owned(), owner["name"].as_str()?.to_owned())))?
 }
 
 fn wide_consequences(resource: &Resource, object: &Value) -> Vec<String> {
@@ -169,6 +172,8 @@ fn wide_consequences(resource: &Resource, object: &Value) -> Vec<String> {
 /// What the run holds of its plan.
 struct Run {
     core: Weak<Core>,
+    /// The connection of the clients it planned with.
+    connection: Option<u64>,
     context: String,
     resource: Resource,
     namespace: Option<String>,
@@ -190,6 +195,15 @@ impl Run {
             .await
             .map_err(|error| IpcError::from(&error))?;
         let what = &self.what;
+        if clients.connection() != self.connection {
+            return Err(IpcError::new(
+                ErrorKind::Conflict,
+                format!(
+                    "{} names another cluster now than when Twigo asked, so it deleted nothing",
+                    self.context
+                ),
+            ));
+        }
         match clients.api.request_text(self.request).await {
             Ok(_) => {}
             Err(kube::Error::Api(status)) if status.code == 404 => {
@@ -239,5 +253,38 @@ impl Run {
                 () = progress.stopped() => return Ok(stopped()),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::controller;
+
+    fn pod(owner: serde_json::Value) -> serde_json::Value {
+        json!({ "metadata": { "name": "p", "ownerReferences": [owner] } })
+    }
+
+    #[test]
+    fn only_a_controller_that_makes_a_new_pod_replaces_one() {
+        for kind in ["ReplicaSet", "StatefulSet", "DaemonSet"] {
+            let owned = pod(
+                json!({ "apiVersion": "apps/v1", "kind": kind, "name": "web", "controller": true }),
+            );
+            assert_eq!(
+                controller(&owned),
+                Some((kind.to_owned(), "web".to_owned())),
+                "{kind}"
+            );
+        }
+        for owner in [
+            json!({ "apiVersion": "batch/v1", "kind": "Job", "name": "migrate", "controller": true }),
+            json!({ "apiVersion": "tekton.dev/v1", "kind": "TaskRun", "name": "build", "controller": true }),
+            json!({ "apiVersion": "apps/v1", "kind": "ReplicaSet", "name": "web", "controller": false }),
+        ] {
+            assert_eq!(controller(&pod(owner.clone())), None, "{owner}");
+        }
+        assert_eq!(controller(&json!({ "metadata": { "name": "p" } })), None);
     }
 }

@@ -56,6 +56,12 @@ impl Gate {
         self.actor
     }
 
+    /// What its clients reach: the context's connection as it was when the
+    /// gate was made.
+    pub fn connection(&self) -> Option<u64> {
+        self.connection
+    }
+
     pub fn layer(&self) -> GateLayer {
         GateLayer(self.clone())
     }

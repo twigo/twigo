@@ -17,12 +17,19 @@ export type Reveal = (
 export function useReveal(
   id: (() => Promise<SubscriptionId>) | undefined,
 ): Reveal | undefined {
-  const { operations } = useWorkbench();
+  const workbench = useWorkbench();
+  const { operations } = workbench;
   return useMemo(
     () =>
       id &&
       (async (key: string) => {
-        const object = await id();
+        let object: SubscriptionId;
+        try {
+          object = await id();
+        } catch (error) {
+          workbench.report(error);
+          return undefined;
+        }
         const outcome = await operations.run(
           { action: "reveal", object, key },
           { icon: Eye, destructive: false },
@@ -31,6 +38,6 @@ export function useReveal(
           ? { value: outcome.value, binary: outcome.binary }
           : undefined;
       }),
-    [id, operations],
+    [id, operations, workbench],
   );
 }

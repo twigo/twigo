@@ -170,7 +170,8 @@ async fn run(
             typed: typed.map(str::to_owned),
         },
         move |event| sender.send(event).is_ok(),
-    )?;
+    )
+    .await?;
     let mut told = Vec::new();
     tokio::time::timeout(WAIT, async {
         while let Some(event) = events.recv().await {

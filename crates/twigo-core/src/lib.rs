@@ -291,12 +291,13 @@ impl Core {
         };
         self.authorize(&planned.context, &planned.writes)?;
         let access = self.policy.access(&planned.context);
-        let connection = self.policy.connection(&planned.context);
-        self.bus.keep(ticket, planned, connection, &access)
+        self.bus.keep(ticket, planned, &access)
     }
 
     /// Runs a plan once its friction is met, whose events go through `send`.
-    pub fn command_execute(
+    /// Async, as the run it spawns needs the runtime: Tauri runs a plain
+    /// command on the main thread, outside it.
+    pub async fn command_execute(
         &self,
         window: &str,
         request: Execute,
@@ -305,12 +306,11 @@ impl Core {
         let (waiting, ticket) = self.bus.take(window, request.plan)?;
         let Waiting {
             planned,
-            connection,
             friction: planned_friction,
             since,
         } = *waiting;
         let context = planned.context.clone();
-        if self.policy.connection(&context) != connection {
+        if self.policy.connection(&context) != planned.connection {
             return Err(IpcError::new(
                 ErrorKind::Conflict,
                 format!(

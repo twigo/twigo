@@ -191,15 +191,24 @@ export class MockBus {
       ended = true;
       onMessage({ state: "stopped", text: planned.stopped ?? "Stopped" });
     });
+    const tell = (event: OperationEvent) => {
+      if (ended) return;
+      if (event.state !== "running") {
+        ended = true;
+        this.#stopping.delete(id);
+      }
+      onMessage(event);
+    };
     setTimeout(() => {
-      planned.run((event) => {
-        if (ended) return;
-        if (event.state !== "running") {
-          ended = true;
-          this.#stopping.delete(id);
-        }
-        onMessage(event);
-      });
+      try {
+        planned.run(tell);
+      } catch (error) {
+        if (!(error instanceof IpcError)) throw error;
+        tell({
+          state: "failed",
+          error: { kind: error.kind, message: error.message },
+        });
+      }
     }, 0);
     return null;
   }
@@ -211,8 +220,11 @@ export class MockBus {
     return null;
   }
 
-  #authorize(context: string, access: ContextAccess, planned: Planned): void {
-    const { write } = planned;
+  #authorize(
+    context: string,
+    access: ContextAccess,
+    { write }: Pick<Planned, "write">,
+  ): void {
     if (!write || access.mode !== "read-only") return;
     const blocked: Blocked = {
       context,
@@ -248,6 +260,10 @@ export class MockBus {
       ...(namespace === null ? [] : ["-n", namespace]),
     ].join(" ");
     const auditTarget = `${resource}/${name}${place}`;
+    // As Rust: a read-only context says so before the object is looked up.
+    this.#authorize(context, this.host.access(context), {
+      write: { verb: "delete", target: auditTarget },
+    });
     const described = (kind: string, risk: Risk, consequences: string[]) => ({
       stopped: `Stopped waiting for ${kind} ${name}, which is still being deleted`,
       plan: {

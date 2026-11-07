@@ -21,6 +21,9 @@ use twigo_policy::friction::Risk;
 /// What a command will do, as its action planned it.
 pub(crate) struct Planned {
     pub context: String,
+    /// The context's connection what it read came from: the clients it
+    /// planned with, so it runs on that cluster only.
+    pub connection: Option<u64>,
     pub risk: Risk,
     /// The requests it sends that change the cluster, as they go out, for
     /// the policy to decide on before anything is asked.
@@ -115,8 +118,6 @@ impl Stop {
 /// A plan as it waits to run.
 pub(crate) struct Waiting {
     pub planned: Planned,
-    /// The context's connection as it was planned on (`Metadata::connection`).
-    pub connection: Option<u64>,
     pub friction: Friction,
     pub since: Instant,
 }
@@ -175,7 +176,6 @@ impl Bus {
         &self,
         ticket: Ticket,
         planned: Planned,
-        connection: Option<u64>,
         access: &ContextAccess,
     ) -> Result<Plan, IpcError> {
         let friction = twigo_policy::friction::friction(&planned.risk, &planned.context, access);
@@ -205,7 +205,6 @@ impl Bus {
             id,
             Entry::Waiting(Box::new(Waiting {
                 planned,
-                connection,
                 friction,
                 since: Instant::now(),
             })),

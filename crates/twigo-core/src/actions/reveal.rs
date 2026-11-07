@@ -2,7 +2,7 @@
 //! only as the Reveal runs, read from the Secret as last listed then, and
 //! nothing is sent to the cluster.
 
-use twigo_ipc::{IpcError, SubscriptionId};
+use twigo_ipc::{ErrorKind, IpcError, SubscriptionId};
 use twigo_policy::friction::Risk;
 use twigo_policy::redact::secret_value;
 
@@ -19,7 +19,9 @@ pub(crate) fn reveal(
     let (context, reading) = core.objects.with(window, object, |opened| {
         (opened.context().to_owned(), opened.reading())
     })?;
+    let connection = core.policy.connection(&context);
     let secret = reading.json()?;
+    let (this, window) = (core.this.clone(), window.to_owned());
     let (_, binary) = secret_value(&secret, &key)?;
     let name = secret["metadata"]["name"].as_str().unwrap_or_default();
     let namespace = secret["metadata"]["namespace"].as_str().unwrap_or_default();
@@ -55,9 +57,17 @@ pub(crate) fn reveal(
         target: format!("secrets/{name} in {namespace}, key {key}"),
         writes: Vec::new(),
         context,
+        connection,
         risk: Risk::Reveal,
         run: Box::new(move |_| {
             Box::pin(async move {
+                // Read as it runs, and only while the view it is for is open.
+                let core = this
+                    .upgrade()
+                    .ok_or_else(|| IpcError::new(ErrorKind::Unavailable, "Twigo is quitting"))?;
+                let reading = core
+                    .objects
+                    .with(&window, object, |opened| opened.reading())?;
                 let (value, binary) = secret_value(&reading.json()?, &key)?;
                 Ok(Finished::Revealed { value, binary })
             })

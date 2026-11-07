@@ -34,7 +34,8 @@ pub enum Entry<'a> {
         verb: &'a str,
         target: &'a str,
         mode: Mode,
-        /// None when it left the process.
+        /// None when the gate let it on to the connection, just above the
+        /// socket; a retry below the gate is noted again, as sent again.
         blocked: Option<BlockReason>,
     },
     /// A person confirmed a command, through `friction`.

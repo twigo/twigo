@@ -1,7 +1,14 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, expect, test, vi } from "vitest";
-import { Toast } from "./toast";
+import { Trash2 } from "lucide-react";
+import { CountdownToast, Toast } from "./toast";
 
 afterEach(() => {
   cleanup();
@@ -40,4 +47,27 @@ test("the action runs and dismisses only its toast", () => {
   expect(dismiss).toHaveBeenCalledWith("t7");
   fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
   expect(dismiss).toHaveBeenCalledTimes(2);
+});
+
+test("a countdown says the seconds left and its Cancel runs", () => {
+  vi.useFakeTimers();
+  const run = vi.fn();
+  render(
+    <CountdownToast
+      icon={Trash2}
+      message="Deleting pod web-1"
+      detail={(left) => `dev · sends in ${String(left)} s`}
+      until={Date.now() + 5000}
+      seconds={5}
+      cancel={{ label: "Cancel", keys: "⌘Z", run }}
+    />,
+  );
+  expect(screen.getByRole("status").textContent).toContain("sends in 5 s");
+  act(() => {
+    vi.advanceTimersByTime(2100);
+  });
+  expect(screen.getByRole("status").textContent).toContain("sends in 3 s");
+  fireEvent.click(screen.getByRole("button", { name: /Cancel/ }));
+  expect(run).toHaveBeenCalledOnce();
+  vi.useRealTimers();
 });

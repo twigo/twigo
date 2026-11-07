@@ -433,3 +433,29 @@ test("a Reveal the person does not confirm shows nothing", async () => {
   expect(screen.getByRole("button", { name: "Reveal mode" })).toBeTruthy();
   expect(document.querySelector("pre")).toBeNull();
 });
+
+test("a value revealed for one Secret is not shown for the next one's key of that name", async () => {
+  const first = vi.fn(() =>
+    Promise.resolve({ value: "hunter2", binary: false }),
+  );
+  const next = vi.fn(() => Promise.resolve(undefined));
+  const shown = (reveal: typeof first | typeof next) => (
+    <Overview
+      states={new OverviewStates()}
+      kind="/secrets"
+      space="kind-test"
+      overview={data(false)}
+      onOpen={() => undefined}
+      reveal={reveal}
+    />
+  );
+  const { rerender } = render(shown(first));
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Reveal mode" }));
+    await Promise.resolve();
+  });
+  expect(document.body.textContent).toContain("hunter2");
+  rerender(shown(next));
+  expect(document.body.textContent).not.toContain("hunter2");
+  expect(screen.getByRole("button", { name: "Reveal mode" })).toBeTruthy();
+});
