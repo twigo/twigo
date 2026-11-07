@@ -101,13 +101,12 @@ test("the search opens quick access, and the bar has no part toggles", async () 
 });
 
 test("the chip follows the context's name and opens what set its mode", async () => {
-  const { workbench, container } = await mounted();
+  const { workbench } = await mounted();
   await settled();
   const chip = screen.getByRole("button", {
     name: "Mode of prod-eu: Production · read-only",
   });
   expect(chip.textContent).toBe("Production · read-only");
-  expect(container.querySelector("header")?.dataset.strong).toBe("");
 
   fireEvent.click(chip);
   expect(screen.getByText("The default for Production.")).toBeTruthy();
@@ -216,15 +215,14 @@ test("under a policy file the popover names the rule and offers no way around it
   expect(screen.queryByRole("button", { name: /Unlock/ })).toBeNull();
 });
 
-test("a context nobody marked has no chip and no strong cue", async () => {
-  const { workbench, container } = await mounted();
+test("a context nobody marked has no chip", async () => {
+  const { workbench } = await mounted();
   await act(() => workbench.spaces.open("qa"));
   expect(screen.queryByRole("button", { name: /^Mode of/ })).toBeNull();
-  expect(container.querySelector("header")?.dataset.strong).toBeUndefined();
 });
 
-test("a type other than Production has its chip and no strong cue", async () => {
-  const { workbench, container } = await mounted();
+test("a type other than Production has its chip", async () => {
+  const { workbench } = await mounted();
   act(() => {
     workbench.spaces.select("dev");
   });
@@ -232,5 +230,4 @@ test("a type other than Production has its chip and no strong cue", async () => 
   expect(
     screen.getByRole("button", { name: "Mode of dev: Development" }),
   ).toBeTruthy();
-  expect(container.querySelector("header")?.dataset.strong).toBeUndefined();
 });

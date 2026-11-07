@@ -4,7 +4,6 @@ import { Kbd } from "@twigo/ui";
 import type { Space } from "@twigo/protocol";
 import { useChanges, useWorkbench } from "../react";
 import { ModeChip } from "./ModeChip";
-import { useModeCues } from "./modeCues";
 
 /**
  * Where you are (ARCHITECTURE 4.2): the space and its namespace scope as a
@@ -19,13 +18,11 @@ export function TitleBar() {
   useChanges(colors.changes);
   const space = spaces.active;
   const color = space && colors.ofSpace(space);
-  const { strong } = useModeCues();
   return (
     // 36 px pairs with trafficLightPosition in tauri.conf.json: change both or neither.
     <header
       data-tauri-drag-region="deep"
       data-color={color}
-      data-strong={strong ? "" : undefined}
       style={
         color &&
         ({

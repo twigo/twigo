@@ -25,11 +25,8 @@
     transparent 360px
   );
 }
-/* A context whose mode wants to be seen (ARCHITECTURE 6.4): a line of its
-   colour along the title bar's top and the status bar tinted in it. */
-.twigo-titlebar[data-strong] {
-  box-shadow: inset 0 2px 0 var(--twigo-context);
-}
+/* A context whose mode wants to be seen (ARCHITECTURE 6.4): the status bar
+   tinted in its colour. */
 .twigo-statusbar[data-strong] {
   background: color-mix(in oklab, var(--twigo-context) 16%, var(--shell));
   color: var(--foreground);

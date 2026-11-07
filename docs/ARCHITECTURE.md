@@ -1474,7 +1474,8 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   - Environment types, Production, Staging, Development and Local, set a context's colour and its default mode.
     A person marks a context, or its kubeconfig metadata says so (`twigo.environment`, 5.5), and the person's mark wins, their None included.
     Nothing guesses a type from a context's name: a context nobody marked is `read-write` with no chip, and only an admin's policy file sets modes by glob (4.8).
-  - A production context is a mode with two cues (NN/g): a chip in the title bar after its name that says the type and the lock (`Production · read-only`), a 2 px line of its colour along the title bar's top, and the status bar tinted in it.
+  - A production context is a mode with two cues (NN/g): a chip in the title bar after its name that says the type and the lock (`Production · read-only`), and the status bar tinted in it.
+    The mockup's third, a 2 px line of its colour along the title bar's top, was dropped on 2026-11-07: the chip, the tint and the bar's left end in the context's colour already say it.
     The chip opens what set the mode, in words, with the choices the person has.
   - Friction grows with the blast radius (Primer):
     - scale, cordon and suspend run at once with an undo (⌘Z);
