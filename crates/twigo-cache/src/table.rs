@@ -141,6 +141,36 @@ impl TableDecoder {
         let cells = self.raw_cells(&meta);
         Row { meta, cells }
     }
+
+    fn table_event(
+        &mut self,
+        kind: EventKind,
+        mut table: TableObject,
+    ) -> Result<Event, DecodeError> {
+        self.update_columns(table.column_definitions);
+        if table.rows.len() != 1 {
+            return Err(DecodeError::RowCount(table.rows.len()));
+        }
+        let Some(row) = table.rows.pop() else {
+            return Err(DecodeError::RowCount(0));
+        };
+        match kind {
+            EventKind::Bookmark => {
+                let metadata = row.object.unwrap_or_default().metadata;
+                Ok(Event::Bookmark {
+                    resource_version: decode::non_empty(
+                        metadata
+                            .resource_version
+                            .or(table.metadata.resource_version),
+                    )?,
+                    initial_events_end: metadata.initial_events_end,
+                })
+            }
+            EventKind::Added | EventKind::Modified => self.table_row(row).map(Event::Upsert),
+            EventKind::Deleted => self.table_row(row).map(Event::Delete),
+            EventKind::Error => Err(DecodeError::UnexpectedKind("Table".into())),
+        }
+    }
 }
 
 impl Decode for TableDecoder {
@@ -173,37 +203,20 @@ impl Decode for TableDecoder {
     }
 
     fn decode_event(&mut self, line: &[u8]) -> Result<Event, DecodeError> {
+        // Most of a line is managedFields, so a table's event reads it once.
+        // Anything else, or a table this cannot read, takes the path below.
+        if let Ok(event) = serde_json::from_slice::<TableEvent>(line)
+            && event.object.is_table
+        {
+            return self.table_event(event.kind, event.object);
+        }
         let event: RawEvent<'_> = serde_json::from_slice(line)?;
         let body = event.object.get().as_bytes();
         match peek_kind(body)? {
             Kind::Status => Ok(Event::Error(decode::status(body)?)),
             Kind::Table => {
-                let mut table: TableObject = serde_json::from_slice(body)?;
-                self.update_columns(table.column_definitions);
-                if table.rows.len() != 1 {
-                    return Err(DecodeError::RowCount(table.rows.len()));
-                }
-                let Some(row) = table.rows.pop() else {
-                    return Err(DecodeError::RowCount(0));
-                };
-                match event.kind {
-                    EventKind::Bookmark => {
-                        let metadata = row.object.unwrap_or_default().metadata;
-                        Ok(Event::Bookmark {
-                            resource_version: decode::non_empty(
-                                metadata
-                                    .resource_version
-                                    .or(table.metadata.resource_version),
-                            )?,
-                            initial_events_end: metadata.initial_events_end,
-                        })
-                    }
-                    EventKind::Added | EventKind::Modified => {
-                        self.table_row(row).map(Event::Upsert)
-                    }
-                    EventKind::Deleted => self.table_row(row).map(Event::Delete),
-                    EventKind::Error => Err(DecodeError::UnexpectedKind("Table".into())),
-                }
+                let table: TableObject = serde_json::from_slice(body)?;
+                self.table_event(event.kind, table)
             }
             Kind::Other(kind) => {
                 let object: RawObject = serde_json::from_slice(body)?;
@@ -248,9 +261,34 @@ fn metadata_columns() -> Arc<[Column]> {
     ])
 }
 
+fn is_table<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    struct IsTable;
+    impl Visitor<'_> for IsTable {
+        type Value = bool;
+
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("a kind")
+        }
+
+        fn visit_str<E: de::Error>(self, kind: &str) -> Result<bool, E> {
+            Ok(kind == "Table")
+        }
+    }
+    deserializer.deserialize_str(IsTable)
+}
+
+#[derive(Deserialize)]
+struct TableEvent {
+    #[serde(rename = "type")]
+    kind: EventKind,
+    object: TableObject,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TableObject {
+    #[serde(default, rename = "kind", deserialize_with = "is_table")]
+    is_table: bool,
     #[serde(default)]
     metadata: ListMeta,
     #[serde(default)]
