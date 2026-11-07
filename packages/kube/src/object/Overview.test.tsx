@@ -52,10 +52,12 @@ test("a ConfigMap of 2,000 keys puts in the DOM the values of the keys opened on
       values={values}
     />,
   );
-  expect(screen.getAllByRole("button", { expanded: false })).toHaveLength(KEYS);
+  expect(
+    document.querySelectorAll('button[aria-expanded="false"]'),
+  ).toHaveLength(KEYS);
   expect(document.body.textContent).not.toContain("value of");
   await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: /key-1500/ }));
+    fireEvent.click(screen.getByText("key-1500"));
     await Promise.resolve();
   });
   expect(values).toHaveBeenCalledWith(["key-1500"]);
