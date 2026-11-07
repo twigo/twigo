@@ -103,6 +103,15 @@
   --context-blue-solid: oklch(0.52 0.15 245);
   --context-purple-solid: oklch(0.52 0.17 300);
   --context-solid-foreground: oklch(0.99 0 0);
+  /* A context's colour as text: the mode's chip in the title bar, at 4.5:1
+     or more on the chip's tint over the bar's gradient where it is
+     strongest under a chip. */
+  --context-red-ink: oklch(0.46 0.19 25);
+  --context-orange-ink: oklch(0.48 0.13 55);
+  --context-yellow-ink: oklch(0.46 0.1 90);
+  --context-green-ink: oklch(0.45 0.13 150);
+  --context-blue-ink: oklch(0.43 0.15 245);
+  --context-purple-ink: oklch(0.46 0.17 300);
 
   /* A changed table cell starts at this tint and fades out. */
   --flash: color-mix(in oklab, var(--brand) 18%, transparent);
@@ -197,6 +206,12 @@
   --context-green: oklch(0.72 0.14 150);
   --context-blue: oklch(0.7 0.13 245);
   --context-purple: oklch(0.7 0.14 300);
+  --context-red-ink: oklch(0.8 0.12 25);
+  --context-orange-ink: oklch(0.82 0.11 55);
+  --context-yellow-ink: oklch(0.86 0.11 90);
+  --context-green-ink: oklch(0.82 0.12 150);
+  --context-blue-ink: oklch(0.8 0.1 245);
+  --context-purple-ink: oklch(0.8 0.11 300);
 
   --flash: color-mix(in oklab, var(--brand) 24%, transparent);
 

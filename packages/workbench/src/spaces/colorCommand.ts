@@ -48,7 +48,7 @@ export function registerSpaceColor({
         {
           id: AUTOMATIC,
           label: "Automatic",
-          description: "From the context's name",
+          description: "From its environment type, else its name",
         },
       ];
       const picked = await quickAccess.pick(
@@ -74,5 +74,6 @@ function title(color: ContextColor): string {
 function describe(source: string): string {
   if (source === "kubeconfig") return "Current, from the kubeconfig";
   if (source === "chosen") return "Current";
+  if (source === "environment") return "Current, from its environment type";
   return "Current, from the context's name";
 }

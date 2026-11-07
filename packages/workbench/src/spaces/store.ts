@@ -263,9 +263,12 @@ export class Spaces {
     const contexts = space?.contexts ?? [];
     this.keys.set("space.contexts", contexts);
     this.keys.set("space.multiContext", contexts.length > 1);
-    this.keys.set(
-      "context.name",
-      contexts.length === 1 ? contexts[0] : undefined,
-    );
+    const only = contexts.length === 1 ? contexts[0] : undefined;
+    this.keys.set("context.name", only);
+    const access =
+      only === undefined ? undefined : this.catalog.find(only)?.access;
+    this.keys.set("context.mode", access?.mode);
+    this.keys.set("context.readOnly", access?.mode === "read-only");
+    this.keys.set("context.unlocked", Boolean(access?.unlockedUntil));
   }
 }

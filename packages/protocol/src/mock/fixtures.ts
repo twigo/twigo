@@ -1,10 +1,18 @@
-import type { Column, Context, Space } from "../generated";
+import type { Column, Context, ContextAccess, Space } from "../generated";
 
 export const SPACES: Space[] = [
   { id: "prod-eu", name: "prod-eu", contexts: ["prod-eu"] },
   { id: "staging", name: "staging", contexts: ["staging"] },
   { id: "dev", name: "dev", contexts: ["dev"] },
 ];
+
+/** A context nobody marked: read-write, with no chip. */
+export const UNMARKED: ContextAccess = {
+  mode: "read-write",
+  source: { kind: "default" },
+  environment: null,
+  unlockedUntil: null,
+};
 
 /** The catalog: the contexts of the spaces, plus two that have none yet, from two files. */
 export const CONTEXTS: Context[] = [
@@ -13,30 +21,55 @@ export const CONTEXTS: Context[] = [
     color: "red",
     source: "~/.kube/config",
     server: "https://4f2a9c1e7b.gr7.eu-west-1.eks.amazonaws.com",
+    access: {
+      mode: "read-only",
+      source: { kind: "environment", environment: "production" },
+      environment: "production",
+      unlockedUntil: null,
+    },
   },
   {
     name: "staging",
     color: "orange",
     source: "~/.kube/config",
     server: "https://9d3e1b7c0a.yl4.eu-west-1.eks.amazonaws.com",
+    access: {
+      mode: "guarded",
+      source: { kind: "environment", environment: "staging" },
+      environment: "staging",
+      unlockedUntil: null,
+    },
   },
   {
     name: "dev",
     color: "green",
     source: "~/.kube/config",
     server: "https://34.141.62.18",
+    access: {
+      mode: "read-write",
+      source: { kind: "environment", environment: "development" },
+      environment: "development",
+      unlockedUntil: null,
+    },
   },
   {
     name: "qa",
     color: null,
     source: "~/.kube/config",
     server: "https://qa.internal:6443",
+    access: UNMARKED,
   },
   {
     name: "kind-local",
     color: null,
     source: "~/.kube/kind.yaml",
     server: "https://127.0.0.1:52144",
+    access: {
+      mode: "read-write",
+      source: { kind: "environment", environment: "local" },
+      environment: "local",
+      unlockedUntil: null,
+    },
   },
 ];
 

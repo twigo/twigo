@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Backend, Context } from "@twigo/protocol";
-import { createMockBackend } from "@twigo/protocol/mock";
+import { createMockBackend, UNMARKED } from "@twigo/protocol/mock";
 import { ContextKeys } from "../contextkey/service";
 import { StateStore } from "../state/store";
 import { Catalog } from "./catalog";
@@ -161,9 +161,27 @@ function withCatalog(contexts: readonly Context[]) {
 
 test("the rail hides a space whose context no source lists, and shows it again when it comes back", async () => {
   const all = [
-    { name: "prod-eu", color: null, source: "~/.kube/config", server: null },
-    { name: "staging", color: null, source: "~/.kube/config", server: null },
-    { name: "dev", color: null, source: "~/.kube/config", server: null },
+    {
+      name: "prod-eu",
+      color: null,
+      source: "~/.kube/config",
+      server: null,
+      access: UNMARKED,
+    },
+    {
+      name: "staging",
+      color: null,
+      source: "~/.kube/config",
+      server: null,
+      access: UNMARKED,
+    },
+    {
+      name: "dev",
+      color: null,
+      source: "~/.kube/config",
+      server: null,
+      access: UNMARKED,
+    },
   ];
   const { backend, change } = withCatalog(all);
   const { spaces, keys } = await window(backend);
@@ -184,7 +202,13 @@ test("the rail hides a space whose context no source lists, and shows it again w
 
 test("with no space for any listed context, the first context's space opens", async () => {
   const { backend } = withCatalog([
-    { name: "kind-local", color: null, source: "~/.kube/config", server: null },
+    {
+      name: "kind-local",
+      color: null,
+      source: "~/.kube/config",
+      server: null,
+      access: UNMARKED,
+    },
   ]);
   const { spaces } = await window(backend);
   await vi.runAllTimersAsync();

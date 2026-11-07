@@ -3,13 +3,15 @@ import { ChevronDown, ChevronRight, Search } from "lucide-react";
 import { Kbd } from "@twigo/ui";
 import type { Space } from "@twigo/protocol";
 import { useChanges, useWorkbench } from "../react";
+import { ModeChip } from "./ModeChip";
+import { useModeCues } from "./modeCues";
 
 /**
  * Where you are (ARCHITECTURE 4.2): the space and its namespace scope as a
  * breadcrumb that opens their pickers, and in the middle the search that
  * opens quick access, as VS Code's Command Center. A space with one
  * coloured context tints the bar's left end, as JetBrains tints it with a
- * project's colour.
+ * project's colour, and its mode's chip follows its name (6.4).
  */
 export function TitleBar() {
   const { spaces, colors } = useWorkbench();
@@ -17,16 +19,21 @@ export function TitleBar() {
   useChanges(colors.changes);
   const space = spaces.active;
   const color = space && colors.ofSpace(space);
+  const { strong } = useModeCues();
   return (
     // 36 px pairs with trafficLightPosition in tauri.conf.json: change both or neither.
     <header
       data-tauri-drag-region="deep"
       data-color={color}
+      data-strong={strong ? "" : undefined}
       style={
         color &&
-        ({ "--twigo-context": `var(--context-${color})` } as CSSProperties)
+        ({
+          "--twigo-context": `var(--context-${color})`,
+          "--twigo-context-ink": `var(--context-${color}-ink)`,
+        } as CSSProperties)
       }
-      className="twigo-titlebar grid h-9 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 border-b border-border bg-shell px-2"
+      className="twigo-titlebar grid h-9 shrink-0 grid-cols-[minmax(0,1.3fr)_auto_minmax(0,1fr)] items-center gap-3 border-b border-border bg-shell px-2"
     >
       <div className="flex min-w-0 items-center gap-0.5 pl-[84px]">
         {space && <Breadcrumb space={space} />}
@@ -46,6 +53,7 @@ function Breadcrumb({ space }: { space: Space }) {
           {space.contexts.join(" + ")}
         </span>
       </Crumb>
+      <ModeChip />
       <ChevronRight
         aria-hidden
         className="size-3.5 shrink-0 text-muted-foreground-2"

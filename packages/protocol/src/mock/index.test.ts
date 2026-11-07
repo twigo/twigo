@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type {
+  Context,
   KeyboardLayout,
   ListBatch,
   ListQuery,
@@ -83,6 +84,115 @@ test("lists the spaces, and the catalog colours their contexts", async () => {
     ["staging", "orange"],
     ["dev", "green"],
   ]);
+});
+
+test("a context's mode follows its type, a choice over it, and an unlock that ends by itself", async () => {
+  const backend = createMockBackend();
+  const seen: Context[][] = [];
+  const first = backend.subscribe("contexts_watch", null, (next) =>
+    seen.push(next),
+  );
+  await vi.advanceTimersByTimeAsync(0);
+  const access = (contexts: Context[] | undefined, name: string) =>
+    contexts?.find((context) => context.name === name)?.access;
+  const latest = () => seen[seen.length - 1];
+  const send = async <T>(answer: Promise<T>) => {
+    await vi.advanceTimersByTimeAsync(0);
+    return answer;
+  };
+
+  expect(access(await first, "prod-eu")?.mode).toBe("read-only");
+  expect(access(await first, "staging")?.mode).toBe("guarded");
+  expect(access(await first, "dev")?.mode).toBe("read-write");
+  expect(access(await first, "qa")?.source).toEqual({ kind: "default" });
+
+  await send(backend.invoke("context_unlock", "prod-eu"));
+  const unlocked = access(latest(), "prod-eu");
+  expect(unlocked?.mode).toBe("guarded");
+  expect(unlocked?.source).toEqual({
+    kind: "environment",
+    environment: "production",
+  });
+  expect(unlocked?.unlockedUntil).toBe(Date.now() + 15 * 60 * 1000);
+
+  await vi.advanceTimersByTimeAsync(15 * 60 * 1000 + 1);
+  expect(access(latest(), "prod-eu")?.mode).toBe("read-only");
+  expect(access(latest(), "prod-eu")?.unlockedUntil).toBeNull();
+
+  await send(
+    backend.invoke("context_mode_set", { context: "qa", mode: "read-only" }),
+  );
+  expect(access(latest(), "qa")?.source).toEqual({ kind: "user" });
+  await send(
+    backend.invoke("context_environment_set", {
+      context: "dev",
+      environment: "production",
+    }),
+  );
+  expect(access(latest(), "dev")?.mode).toBe("read-only");
+  await send(
+    backend.invoke("context_environment_set", {
+      context: "dev",
+      environment: null,
+    }),
+  );
+  expect(access(latest(), "dev")?.environment).toBeNull();
+
+  await send(backend.invoke("context_unlock", "prod-eu"));
+  await send(
+    backend.invoke("context_environment_set", {
+      context: "prod-eu",
+      environment: "local",
+    }),
+  );
+  await send(
+    backend.invoke("context_environment_set", {
+      context: "prod-eu",
+      environment: "production",
+    }),
+  );
+  expect(access(latest(), "prod-eu")?.mode).toBe("read-only");
+  expect(access(latest(), "prod-eu")?.unlockedUntil).toBeNull();
+
+  const refused = expect(
+    backend.invoke("context_unlock", "staging"),
+  ).rejects.toMatchObject({ kind: "invalidInput" });
+  const unlisted = expect(
+    backend.invoke("context_mode_set", { context: "ghost", mode: "guarded" }),
+  ).rejects.toMatchObject({ kind: "notFound" });
+  await vi.advanceTimersByTimeAsync(0);
+  await refused;
+  await unlisted;
+});
+
+test("an admin's policy file holds its contexts and leaves the others", async () => {
+  const backend = createMockBackend("policyFile");
+  const first = backend.subscribe("contexts_watch", null, () => undefined);
+  await vi.advanceTimersByTimeAsync(0);
+  const prod = (await first).find((context) => context.name === "prod-eu");
+  expect(prod?.access.source.kind).toBe("policyFile");
+
+  const refused = [
+    backend.invoke("context_mode_set", {
+      context: "prod-eu",
+      mode: "read-write",
+    }),
+    backend.invoke("context_unlock", "prod-eu"),
+  ];
+  const settled = Promise.allSettled(refused);
+  await vi.advanceTimersByTimeAsync(0);
+  for (const answer of await settled) {
+    expect(answer).toMatchObject({
+      status: "rejected",
+      reason: { kind: "permissions" },
+    });
+  }
+  const dev = backend.invoke("context_mode_set", {
+    context: "dev",
+    mode: "guarded",
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  await dev;
 });
 
 test("answers with the chosen keyboard layout, US by default, and never changes it", async () => {
