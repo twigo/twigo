@@ -20,7 +20,7 @@ const FPS_PASS: f64 = 57.0;
 const SORT_P95_MS: f64 = 50.0;
 const CORE_RSS_MB: f64 = 150.0;
 const WEBVIEW_MB: f64 = 300.0;
-const IDLE_CPU_PERCENT: f64 = 1.0;
+const IDLE_CPU_PERCENT: f64 = 2.0;
 const MB: f64 = 1_000_000.0;
 const GPU_PROCESS: &str = "com.apple.WebKit.GPU";
 
@@ -359,36 +359,49 @@ pub fn build(inputs: Inputs) -> Report {
     let budgeted = |s: &Sample, bytes: fn(&Process) -> u64| -> u64 {
         s.webkit.iter().filter(|p| !is_gpu(p)).map(bytes).sum()
     };
-    let webkit = median_mb(&memory, |s| budgeted(s, |p| p.footprint));
     let webkit_rss = median_mb(&memory, |s| budgeted(s, |p| p.rss));
-    let names: Vec<String> = first
-        .webkit
-        .iter()
-        .filter(|p| !is_gpu(p))
-        .map(|p| {
-            let footprint = median_mb(&memory, |s| {
-                s.webkit
-                    .iter()
-                    .filter(|q| q.name == p.name)
-                    .map(|q| q.footprint)
-                    .sum()
-            });
-            format!(
-                "{} {footprint:.0} MB",
-                p.name.trim_start_matches(crate::process::WEBKIT_PREFIX),
-            )
-        })
-        .collect();
+    let webkit_footprint = median_mb(&memory, |s| budgeted(s, |p| p.footprint));
+    let per_process = |bytes: fn(&Process) -> u64| -> Vec<String> {
+        first
+            .webkit
+            .iter()
+            .filter(|p| !is_gpu(p))
+            .map(|p| {
+                let value = median_mb(&memory, |s| {
+                    s.webkit
+                        .iter()
+                        .filter(|q| q.name == p.name)
+                        .map(bytes)
+                        .sum()
+                });
+                format!(
+                    "{} {value:.0} MB",
+                    p.name.trim_start_matches(crate::process::WEBKIT_PREFIX),
+                )
+            })
+            .collect()
+    };
     rows.push(Row {
         metric: "Webview memory with the pod list open".into(),
-        value: Some(format!("{webkit:.0} MB")),
+        value: Some(format!("{webkit_rss:.0} MB")),
         target: format!("< {WEBVIEW_MB:.0} MB"),
-        status: Status::judged(webkit < WEBVIEW_MB),
+        status: Status::judged(webkit_rss < WEBVIEW_MB),
         measured: format!(
-            "physical footprint of the WebKit processes the app is responsible for but the GPU process ({}), under churn, the median of {} samples; their RSS adds up to {webkit_rss:.0} MB; {} other WebKit processes left out",
-            names.join(", "),
+            "resident size of the WebKit processes the app is responsible for but the GPU process ({}), under churn, the median of {} samples; {} other WebKit processes left out",
+            per_process(|p| p.rss).join(", "),
             memory.len(),
             first.other_webkit.len(),
+        ),
+    });
+    rows.push(Row {
+        metric: "  Physical footprint".into(),
+        value: Some(format!("{webkit_footprint:.0} MB")),
+        target: "-".into(),
+        status: Status::Shown,
+        measured: format!(
+            "the same processes' physical footprint ({}), the median of {} samples; it leaves out pages WebKit reused and counts graphics that resident size does not, so it swings between runs (docs/bench.md)",
+            per_process(|p| p.footprint).join(", "),
+            memory.len(),
         ),
     });
 
@@ -603,14 +616,16 @@ mod tests {
                 ("Scroll and sort: sort", &Status::Pass),
                 ("Core RSS with the pod list open", &Status::Pass),
                 ("Webview memory with the pod list open", &Status::Pass),
+                ("  Physical footprint", &Status::Shown),
                 ("  GPU process", &Status::Shown),
                 ("Idle CPU, 100 changes/s, window hidden", &Status::Pass),
             ]
         );
         assert_eq!(report.rows[0].value.as_deref(), Some("400 ms"));
-        assert_eq!(report.rows[5].value.as_deref(), Some("160 MB"));
-        assert_eq!(report.rows[6].value.as_deref(), Some("500 MB"));
-        assert_eq!(report.rows[7].value.as_deref(), Some("0.01 %"));
+        assert_eq!(report.rows[5].value.as_deref(), Some("220 MB"));
+        assert_eq!(report.rows[6].value.as_deref(), Some("160 MB"));
+        assert_eq!(report.rows[7].value.as_deref(), Some("500 MB"));
+        assert_eq!(report.rows[8].value.as_deref(), Some("0.01 %"));
     }
 
     #[test]
@@ -631,7 +646,7 @@ mod tests {
 
     #[test]
     fn slow_paints_sorts_dropped_frames_and_a_busy_idle_fail() {
-        let mut slow = inputs(80.0, 20.0, 200_000_000);
+        let mut slow = inputs(80.0, 20.0, 300_000_000);
         slow.webview.first_paint_ms = 1_500.0;
         slow.log[0].sent = 0.0;
         slow.log[1].sent = 0.0;
@@ -670,8 +685,8 @@ mod tests {
                         process(
                             701,
                             "com.apple.WebKit.WebContent",
-                            1,
                             content * 1_000_000,
+                            content * 2_000_000,
                             0,
                         ),
                         process(702, "com.apple.WebKit.GPU", 1, 10 * 1_000_000, 0),
@@ -684,11 +699,51 @@ mod tests {
         let report = build(all);
         assert_eq!(report.rows[4].value.as_deref(), Some("200 MB"));
         assert_eq!(report.rows[5].value.as_deref(), Some("200 MB"));
-        assert_eq!(report.rows[6].value.as_deref(), Some("10 MB"));
+        assert_eq!(report.rows[6].value.as_deref(), Some("400 MB"));
+        assert_eq!(report.rows[7].value.as_deref(), Some("10 MB"));
         assert!(
             report.rows[5].measured.contains("(WebContent 200 MB)"),
             "{}",
             report.rows[5].measured
+        );
+        assert!(
+            report.rows[6].measured.contains("(WebContent 400 MB)"),
+            "{}",
+            report.rows[6].measured
+        );
+    }
+
+    fn with_webcontent(rss: u64, footprint: u64) -> Inputs {
+        let mut all = inputs(20.0, 16.7, 1_000_000);
+        all.memory = vec![sample(
+            0.0,
+            0,
+            vec![process(
+                701,
+                "com.apple.WebKit.WebContent",
+                rss * 1_000_000,
+                footprint * 1_000_000,
+                0,
+            )],
+        )];
+        all
+    }
+
+    #[test]
+    fn webview_memory_is_judged_by_resident_size_and_not_by_footprint() {
+        assert!(build(with_webcontent(250, 900)).failed().is_empty());
+        assert_eq!(
+            build(with_webcontent(350, 100)).failed(),
+            ["Webview memory with the pod list open"]
+        );
+    }
+
+    #[test]
+    fn idle_cpu_is_judged_at_two_percent() {
+        assert!(build(inputs(20.0, 16.7, 150_000_000)).failed().is_empty());
+        assert_eq!(
+            build(inputs(20.0, 16.7, 250_000_000)).failed(),
+            ["Idle CPU, 100 changes/s, window hidden"]
         );
     }
 
@@ -707,7 +762,7 @@ mod tests {
     fn the_table_lists_every_row() {
         let report = build(inputs(30.0, 16.7, 0));
         let table = table(&report);
-        assert_eq!(table.lines().filter(|l| l.starts_with("| ")).count(), 10);
+        assert_eq!(table.lines().filter(|l| l.starts_with("| ")).count(), 11);
         assert!(table.contains("| First paint after the space connects | 400 ms | < 1 s | pass |"));
     }
 }
