@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Usage: bench/harness.sh [kubeconfig]
 #
-# ARCHITECTURE 3.8's seven metrics at 5k pods, on macOS. Builds the app's bench mode in release,
+# ARCHITECTURE 3.8's six metrics at 5k pods, on macOS. Builds the app's bench mode in release,
 # runs the churn generator at 100 changes/s against a kwok cluster, launches the app with
 # TWIGO_BENCH and the cluster's kubeconfig as TWIGO_KUBECONFIG, samples its memory with the pod
 # list open and its CPU with the window on screen and hidden, and prints the report. Without a kubeconfig it creates the cluster (bench/cluster.sh up bench,

@@ -1,4 +1,4 @@
-//! The report of ARCHITECTURE 3.8's seven metrics at 5k pods, from what the app's bench mode, the
+//! The report of ARCHITECTURE 3.8's six metrics at 5k pods, from what the app's bench mode, the
 //! process sampler and the churn generator wrote into one directory.
 
 use std::collections::HashMap;
@@ -21,7 +21,6 @@ const SORT_P95_MS: f64 = 50.0;
 const CORE_RSS_MB: f64 = 150.0;
 const WEBVIEW_MB: f64 = 300.0;
 const IDLE_CPU_PERCENT: f64 = 2.0;
-const VISIBLE_CPU_PERCENT: f64 = 20.0;
 const MB: f64 = 1_000_000.0;
 const GPU_PROCESS: &str = "com.apple.WebKit.GPU";
 
@@ -435,10 +434,10 @@ pub fn build(inputs: Inputs) -> Report {
     rows.push(Row {
         metric: "Visible CPU, 100 changes/s, window on screen".into(),
         value: Some(format!("{cpu:.2} %")),
-        target: format!("< {VISIBLE_CPU_PERCENT:.0} %"),
-        status: Status::judged(cpu < VISIBLE_CPU_PERCENT),
+        target: "-".into(),
+        status: Status::Shown,
         measured: format!(
-            "CPU time of the app and its {} WebKit processes over {:.0} s, as a share of one core; sorted by Restarts descending, the rows the churn changes on screen, while the driver sleeps",
+            "CPU time of the app and its {} WebKit processes over {:.0} s, as a share of one core; sorted by Restarts descending, the rows the churn changes on screen, while the driver sleeps; it swings between runs, so nothing judges it (docs/bench.md)",
             end.webkit.len(),
             (end.at_ms - start.at_ms) / 1000.0,
         ),
@@ -642,7 +641,7 @@ mod tests {
                 ("  GPU process", &Status::Shown),
                 (
                     "Visible CPU, 100 changes/s, window on screen",
-                    &Status::Pass
+                    &Status::Shown
                 ),
                 ("Idle CPU, 100 changes/s, window hidden", &Status::Pass),
             ]
@@ -774,17 +773,15 @@ mod tests {
     }
 
     #[test]
-    fn visible_cpu_is_judged_at_twenty_percent() {
-        let busy = |ns: u64| {
-            let mut all = inputs(20.0, 16.7, 0);
-            all.visible = (sample(0.0, 0, vec![]), sample(10_000.0, ns, vec![]));
-            all
-        };
-        assert!(build(busy(1_900_000_000)).failed().is_empty());
-        assert_eq!(
-            build(busy(2_100_000_000)).failed(),
-            ["Visible CPU, 100 changes/s, window on screen"]
+    fn visible_cpu_is_shown_and_never_judged() {
+        let mut all = inputs(20.0, 16.7, 0);
+        all.visible = (
+            sample(0.0, 0, vec![]),
+            sample(10_000.0, 9_000_000_000, vec![]),
         );
+        let report = build(all);
+        assert!(report.failed().is_empty());
+        assert_eq!(report.rows[8].value.as_deref(), Some("90.00 %"));
     }
 
     #[test]

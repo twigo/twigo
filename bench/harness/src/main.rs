@@ -7,7 +7,7 @@
 //!   that its WebKit processes are told apart from those of the terminal it was started from.
 //! - `twigo-bench sample <pid>` prints the memory and CPU time of the app and of the WebKit
 //!   processes it is responsible for (macOS).
-//! - `twigo-bench report <dir>` prints the table of the seven metrics, writes `report.json`, and
+//! - `twigo-bench report <dir>` prints the table of the six metrics, writes `report.json`, and
 //!   fails when a judged metric misses its target; none measured on the mock is judged.
 
 mod churn;
