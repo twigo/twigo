@@ -50,7 +50,7 @@
   Never `Config::infer()`, `~/.kube/config` or the current context: tests and examples read `TWIGO_TEST_KUBECONFIG` and refuse contexts other than `kind-*` and `kwok-*`.
 - Exec plugins run only through `twigo_kube::credentials`, never kube's exec auth, which `Clients::new` strips.
   An unknown command may ask the person to sign in, so it runs only while a window has the focus: tests build their `Registry` with focus on, and the app runs a plugin only once its `HOME`'s `trust.json` lists it, else it starts with the review of untrusted plugins.
-- k8s-openapi moves only together with kube: kube 4.2 requires `^0.28`.
+- k8s-openapi moves only together with kube: kube 5.0 requires `^0.29`.
   Dependabot bumps both in its `kube` group; a group PR that carries only k8s-openapi cannot build until a kube release requires that version.
 - A test that counts connections with `lsof` gets a test binary of its own, because `lsof` counts the whole process.
 - tauri-build fails unless the `isolation` features in `Cargo.toml` match the config's pattern, so each pattern of the IPC bench is a crate of its own: `bench/ipc/brownfield` and `bench/ipc/isolation`.

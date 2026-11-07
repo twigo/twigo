@@ -167,10 +167,9 @@ async fn exec_needs_the_sessions_client() {
         panic!("exec over HTTP/2 must fail: the WebSocket upgrade needs HTTP/1.1");
     };
     assert!(
-        matches!(error, kube::Error::UpgradeConnection(_)),
+        matches!(&error, kube::Error::Api(status) if status.code == 400),
         "{error}"
     );
-    assert!(error.to_string().contains("400"), "{error}");
 
     delete_namespace(&clients.api, &ns).await;
 }
