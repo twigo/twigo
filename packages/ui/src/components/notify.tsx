@@ -1,6 +1,12 @@
 import type { ReactNode } from "react";
 import { toast } from "sonner";
-import { Toast, type ToastAction, type Tone } from "./toast";
+import {
+  CountdownToast,
+  Toast,
+  type CountdownToastProps,
+  type ToastAction,
+  type Tone,
+} from "./toast";
 
 /** Info and success fade; warnings and errors wait to be read. */
 const DURATION: Readonly<Record<Tone, number>> = {
@@ -26,6 +32,24 @@ const show =
     );
 
 /**
+ * A countdown's toast, which stays until its owner dismisses it: it cannot
+ * be swiped away, and anything else that dismisses it cancels it, so it
+ * never runs out unseen.
+ */
+function countdown(props: CountdownToastProps): { dismiss: () => void } {
+  const id = toast.custom(() => <CountdownToast {...props} />, {
+    duration: Infinity,
+    dismissible: false,
+    onDismiss: props.cancel.run,
+  });
+  return {
+    dismiss: () => {
+      toast.dismiss(id);
+    },
+  };
+}
+
+/**
  * A toast from anywhere: plain functions, no provider to be under. The app's
  * `<Toaster/>` shows them; sonner positions, stacks and times them, as in
  * Segla's front.
@@ -35,4 +59,5 @@ export const notify = {
   error: show("error"),
   warning: show("warning"),
   info: show("info"),
+  countdown,
 };

@@ -97,14 +97,23 @@ export class ObjectView {
     if (this.#id !== undefined) this.#sendParts();
   }
 
-  /** The values of a ConfigMap's keys; null for a key it lacks or holds as binary data. */
-  /** Waits for the subscription's id, since a batch may come before it. */
-  values(keys: readonly string[]): Promise<(string | null)[]> {
+  /**
+   * Its subscription's id, which commands name it by, once it is open:
+   * a batch may come before the id.
+   */
+  id(): Promise<SubscriptionId> {
     return this.#opened.then((id) => {
       if (this.#closed)
         throw new IpcError("unavailable", "the object is closed");
-      return this.#backend.invoke("object_values", { id, keys: [...keys] });
+      return id;
     });
+  }
+
+  /** The values of a ConfigMap's keys; null for a key it lacks or holds as binary data. */
+  values(keys: readonly string[]): Promise<(string | null)[]> {
+    return this.id().then((id) =>
+      this.#backend.invoke("object_values", { id, keys: [...keys] }),
+    );
   }
 
   close(): void {

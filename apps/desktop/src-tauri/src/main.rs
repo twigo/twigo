@@ -19,9 +19,10 @@ use twigo_core::{Core, PolicyFile};
 use twigo_env::Environment;
 use twigo_ipc::{
     Ack, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ErrorKind, ExecReview,
-    GetValues, IpcError, KeyboardLayout, ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs,
-    OpenObject, SetContextEnvironment, SetContextMode, SetLogSource, SetLogView, SetLogWindow,
-    SetParts, SetWindow, ShellEnvironment, Space, StateEntry, StateSnapshot, SubscriptionId,
+    Execute, GetValues, IpcError, KeyboardLayout, ListBatch, ListQuery, LogBatch, ObjectBatch,
+    OpenLogs, OpenObject, OperationEvent, Plan, PlanId, PlanRequest, SetContextEnvironment,
+    SetContextMode, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellEnvironment,
+    Space, StateEntry, StateSnapshot, SubscriptionId,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
 
@@ -187,6 +188,40 @@ async fn context_unlock(app: State<'_, App>, request: String) -> Result<(), IpcE
 #[tauri::command]
 fn context_relock(app: State<'_, App>, request: String) {
     app.core.policy.relock(&request);
+}
+
+#[tauri::command]
+async fn command_plan(
+    webview: Webview,
+    app: State<'_, App>,
+    request: PlanRequest,
+) -> Result<Plan, IpcError> {
+    app.core.command_plan(webview.label(), request).await
+}
+
+#[tauri::command]
+async fn command_execute(
+    webview: Webview,
+    app: State<'_, App>,
+    request: Execute,
+    channel: Channel<OperationEvent>,
+) -> Result<(), IpcError> {
+    app.core
+        .command_execute(webview.label(), request, move |event| {
+            match channel.send(event) {
+                Ok(()) => true,
+                Err(error) => {
+                    eprintln!("could not send an operation's event: {error}");
+                    false
+                }
+            }
+        })
+        .await
+}
+
+#[tauri::command]
+fn command_cancel(webview: Webview, app: State<'_, App>, request: PlanId) {
+    app.core.command_cancel(webview.label(), request);
 }
 
 #[tauri::command]
@@ -604,6 +639,9 @@ fn main() {
             context_environment_set,
             context_unlock,
             context_relock,
+            command_plan,
+            command_execute,
+            command_cancel,
             spaces_list,
             space_open,
             state_load,

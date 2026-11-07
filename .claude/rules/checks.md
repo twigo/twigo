@@ -10,7 +10,7 @@
 - The TypeScript of the IPC types: `TWIGO_UPDATE_TYPESCRIPT=1 cargo test -p twigo-ipc --test typescript`.
 - The mock's keyboard layouts: `cargo run -p twigo-keyboard --example record` on a Mac reads installed layouts without selecting them and rewrites `packages/protocol/src/mock/layouts`.
 - The mock's resources: `TWIGO_TEST_KUBECONFIG=<kind kubeconfig> cargo run -p twigo-kube --example record_discovery` rewrites `packages/protocol/src/mock/resources.json` from the cluster's discovery, as `resources_watch` answers it.
-- The mock's objects: `TWIGO_TEST_KUBECONFIG=<kind kubeconfig> cargo run -p twigo-core --example record_objects` applies an object of each core kind to the namespace `overview` of a kind cluster with kwok, waits for the states it records (a rollout, a crash loop in its back-off, an image that cannot be pulled, a finished Job, a CronJob that ran: a few minutes on a fresh cluster), and records each with its events and what its describer needs into `crates/twigo-describe/tests/fixtures`; then `TWIGO_UPDATE_OBJECTS=1 cargo test -p twigo-describe --test overviews` describes them into `packages/protocol/src/mock/objects.json`.
+- The mock's objects: `TWIGO_TEST_KUBECONFIG=<kind kubeconfig> cargo run -p twigo-core --example record_objects` applies an object of each core kind to the namespace `overview` of a kind cluster with kwok, waits for the states it records (a rollout, a crash loop in its back-off, an image that cannot be pulled, a finished Job, a CronJob that ran: a few minutes on a fresh cluster), and records each with its events and what its describer needs into `crates/twigo-describe/tests/fixtures`; then `TWIGO_UPDATE_OBJECTS=1 cargo test -p twigo-describe --test overviews` describes them into `packages/protocol/src/mock/objects.json`, and writes what a Reveal of each recorded Secret's keys answers into `revealed.json` beside it.
 - twigo-keyboard on Linux: `crates/twigo-keyboard/linux/run.sh` runs its tests in Docker, the live X11 test under Xvfb and the live Wayland test under a headless sway included; given a command, such as `cargo clippy -p twigo-keyboard --all-targets -- -D warnings`, it runs that instead.
 - twigo-netmon on Linux: `crates/twigo-netmon/linux.sh` runs its tests in Docker, the ignored ones included; CI runs the netlink one as root in a network namespace of its own.
 - twigo-keyboard on Windows: after `rustup target add x86_64-pc-windows-msvc`, `cargo clippy -p twigo-keyboard --target x86_64-pc-windows-msvc --all-targets -- -D warnings` checks the code; nothing runs it yet (D2).
@@ -26,6 +26,7 @@
 - State across ⌘Q and a restart, on macOS with the screen unlocked: `bench/restart.sh <kind kubeconfig>` after the debug build; it runs the app with a temporary `HOME` and presses keys through System Events, which needs the terminal's Accessibility permission.
 - The churn generator alone: `cargo run --release -p twigo-bench -- churn --kubeconfig <path> --rate 100 --seconds 60 --log churn.jsonl`.
 - The hub's live tests sit in the library (`crates/twigo-cache/src/hub/live.rs`) and run with the others under `--ignored`; `crates/twigo-cache/tests/restart_live.rs` restarts the API server of a kind cluster through `docker exec … crictl stop`, so it refuses kwok contexts and waits for the controller manager before it ends.
+- `crates/twigo-core/tests/bus_live.rs` runs the kubectl command of each plan through `sh`, with `KUBECONFIG` set to a copy of the test's kubeconfig, so it needs kubectl on `PATH`.
 - The logs' live tests (`crates/twigo-sessions/tests/logs_live.rs`) and `objects_live`'s crash loop need a kubelet, so they refuse contexts other than `kind-*`.
   Their pods run on kind's node from its `docker.io/kindest/local-path-helper` image with `imagePullPolicy: Never`, so nothing is pulled; it has bash and no other command, so their scripts sleep by reading a coprocess that never writes, and a forced restart is `crictl stop` through `docker exec`.
 - The hub's heap at 5,000 pods: `bench/pods.sh <kubeconfig> 5000`, then `TWIGO_TEST_KUBECONFIG=<kubeconfig> cargo run --release -p twigo-cache --example hub_memory`, next to `--example table_memory`.
@@ -49,6 +50,8 @@
   `api` counts its streams, 24 watches at most by default, so a test or tool that opens more raises `Options::budgets`, or its watches wait.
   Never `Config::infer()`, `~/.kube/config` or the current context: tests and examples read `TWIGO_TEST_KUBECONFIG` and refuse contexts other than `kind-*` and `kwok-*`.
 - `Clients::new` takes the gate of the context it is for, so no client goes around the policy: the app's comes from `Policy::gate`, and tests and tools that own their clusters pass `Gate::unrestricted()`.
+- Tauri runs a plain `#[tauri::command] fn` on the main thread, outside its tokio runtime, where `tokio::spawn` panics; tests that call the core inside `#[tokio::test]` never see it.
+  A core method that spawns is `async`, so its handler has to be too, as `command_execute` is.
 - Exec plugins run only through `twigo_kube::credentials`, never kube's exec auth, which `Clients::new` strips.
   An unknown command may ask the person to sign in, so it runs only while a window has the focus: tests build their `Registry` with focus on, and the app runs a plugin only once its `HOME`'s `trust.json` lists it, else it starts with the review of untrusted plugins.
 - k8s-openapi moves only together with kube: kube 5.0 requires `^0.29`.
@@ -65,6 +68,7 @@
 - Files under `crates/*/tests/fixtures` are recorded server responses: never reformat or edit them by hand.
 - `packages/protocol/src/mock/resources.json` is recorded by the `record_discovery` example from a cluster of `bench/cluster.sh up <name> 1.37`, which installs kwok's CRDs: never edit it by hand.
 - `packages/protocol/src/mock/objects.json` is written by `twigo-describe`'s `overviews` test from the recorded objects: never edit it by hand.
+  The same test writes `revealed.json`, the values a Reveal answers, and checks that `objects.json` holds none of them.
 - kube-apiserver keeps events an hour (`--event-ttl`), so `record_objects` records objects older than that without their events: delete the namespace `overview` first, or record only the fixtures that changed and keep the others.
 - `packages/protocol/src/mock/layouts/*.json` are recorded by `cargo run -p twigo-keyboard --example record`: never reformat or edit them by hand.
   `UCKeyTranslate` takes the keyboard type (`LMGetKbdType`), so a Mac with another keyboard may record other characters; the committed ones come from an ANSI keyboard, type 91 (2026-10-31).

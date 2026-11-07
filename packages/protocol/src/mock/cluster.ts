@@ -154,6 +154,43 @@ export class Cluster {
     this.version++;
   }
 
+  /** Deletes a pod, which its ReplicaSet replaces with a new one, as it does a pod that goes. */
+  deletePod(pod: Pod, now: number): void {
+    const suffix = Math.floor(this.#rollouts() * 36 ** 5)
+      .toString(36)
+      .padStart(5, "0");
+    const name = `${pod.generateName}${suffix}`;
+    const next: Pod = {
+      ...pod,
+      id: `${this.context}/${pod.namespace}/${name}`,
+      name,
+      status: "ContainerCreating",
+      ready: 0,
+      restarts: "0",
+      created: now,
+      version: 0,
+    };
+    this.pods.splice(this.pods.indexOf(pod), 1, next);
+    this.now = now;
+    this.version++;
+  }
+
+  /** Deletes a node; its pods stay, as the API server keeps them. */
+  deleteNode(name: string): void {
+    const index = this.nodes.findIndex((node) => node.name === name);
+    if (index >= 0) this.nodes.splice(index, 1);
+    this.version++;
+  }
+
+  /** Deletes a Deployment, and its pods with it, as the garbage collector does. */
+  deleteDeployment(namespace: string, name: string): void {
+    const kept = this.pods.filter(
+      (pod) => pod.namespace !== namespace || deploymentOf(pod) !== name,
+    );
+    this.pods.splice(0, this.pods.length, ...kept);
+    this.version++;
+  }
+
   /** Changes `count` distinct random pods. */
   change(count: number): void {
     const picked = new Set<Pod>();

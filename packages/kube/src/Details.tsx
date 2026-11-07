@@ -17,6 +17,7 @@ import { useResources } from "./discovery";
 import { KindIcon } from "./KindIcon";
 import { ObjectContent } from "./object/ObjectContent";
 import { OBJECT_TABS } from "./object/tabs";
+import { useReveal } from "./object/reveal";
 import { refResource, refUri, useObject } from "./object/useObject";
 import { objectOf, type Selected } from "./selection";
 import type { ListServices } from "./services";
@@ -89,7 +90,7 @@ export function Details({
     };
   }, [query]);
   const tab = states.detailsTab(uri);
-  const { snapshot, values } = useObject(
+  const { snapshot, values, id } = useObject(
     backend,
     rested === query ? query : undefined,
     {
@@ -99,6 +100,7 @@ export function Details({
       related: true,
     },
   );
+  const reveal = useReveal(id);
   const open = (target: ObjectRef) => {
     if (resources.state !== "ready") return;
     const next = refUri(space, resources.value, target);
@@ -271,6 +273,7 @@ export function Details({
             kind={`${group}/${resource}`}
             snapshot={snapshot}
             values={values}
+            reveal={reveal}
             onOpen={open}
             {...(namespace !== undefined && {
               onLogs: (choice) => {

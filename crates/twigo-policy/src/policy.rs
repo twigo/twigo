@@ -11,7 +11,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use tokio::sync::watch;
 use twigo_ipc::{Blocked, ContextAccess, Environment, Mode, ModeSource};
 
-use crate::{Actor, Attributes, Gate, PolicyFile};
+use crate::{Actor, Attributes, Audit, Gate, PolicyFile};
 
 /// How long an unlock lasts.
 pub const UNLOCK: SignedDuration = SignedDuration::from_mins(15);
@@ -78,6 +78,7 @@ pub struct Policy {
     metadata: ReadMetadata,
     held: Mutex<Held>,
     changes: watch::Sender<u64>,
+    audit: Audit,
 }
 
 struct Held {
@@ -98,6 +99,7 @@ impl Policy {
         file: PolicyFile,
         metadata: impl Fn(&str) -> Option<Metadata> + Send + Sync + 'static,
         choices: Choices,
+        audit: Audit,
     ) -> Arc<Self> {
         Arc::new(Self {
             file,
@@ -107,6 +109,7 @@ impl Policy {
                 unlocks: HashMap::new(),
             }),
             changes: watch::Sender::new(0),
+            audit,
         })
     }
 
@@ -117,7 +120,14 @@ impl Policy {
             PolicyFile::default(),
             |_| Some(Metadata::default()),
             Choices::default(),
+            Audit::off(),
         )
+    }
+
+    /// Where the gate logs the writes it sends or stops, and the command
+    /// bus what a person confirmed.
+    pub fn audit(&self) -> &Audit {
+        &self.audit
     }
 
     /// The gate of `actor` on `context`, for clients built from what the
@@ -239,18 +249,20 @@ impl Policy {
         actor: Actor,
     ) -> Result<(), Box<Blocked>> {
         self.decide(context, self.access(context), attributes, actor)
+            .map(|_| ())
     }
 
     /// [`Policy::authorize`], for clients built for `connection`: once the
     /// context's name means something else, they still reach the old cluster
     /// until their owner re-opens, and no mode of the new one holds for it.
+    /// Says the mode it let the request through in.
     pub(crate) fn authorize_built(
         &self,
         context: &str,
         connection: Option<u64>,
         attributes: &Attributes,
         actor: Actor,
-    ) -> Result<(), Box<Blocked>> {
+    ) -> Result<Mode, Box<Blocked>> {
         let mut access = self.access(context);
         let moved = self.file.mode(context).is_none()
             && (self.metadata)(context).is_some_and(|now| Some(now.connection) != connection);
@@ -261,7 +273,9 @@ impl Policy {
         self.decide(context, access, attributes, actor)
     }
 
-    fn connection(&self, context: &str) -> Option<u64> {
+    /// What the context connects to now, as [`Metadata::connection`] says;
+    /// none while no source lists it.
+    pub fn connection(&self, context: &str) -> Option<u64> {
         (self.metadata)(context).map(|metadata| metadata.connection)
     }
 
@@ -271,7 +285,7 @@ impl Policy {
         access: ContextAccess,
         attributes: &Attributes,
         actor: Actor,
-    ) -> Result<(), Box<Blocked>> {
+    ) -> Result<Mode, Box<Blocked>> {
         actor
             .decide(
                 attributes.class,
@@ -285,6 +299,7 @@ impl Policy {
                     Ok(())
                 }
             })
+            .map(|()| access.mode)
             .map_err(|reason| {
                 Box::new(Blocked {
                     context: context.to_owned(),

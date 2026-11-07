@@ -5,7 +5,7 @@
 use http::header::{ACCEPT, UPGRADE};
 use http::{Method, Request};
 use twigo_ipc::{BlockReason, Mode, RequestClass};
-use twigo_policy::{Actor, Attributes, Choices, Policy, PolicyFile};
+use twigo_policy::{Actor, Attributes, Audit, Choices, Policy, PolicyFile};
 
 const PODS: &str = "/api/v1/namespaces/a/pods";
 const POD: &str = "/api/v1/namespaces/a/pods/p";
@@ -748,6 +748,7 @@ fn a_read_only_context_lets_a_port_forward_through_unless_the_file_says_no() {
         PolicyFile::read(&file),
         |_| Some(twigo_policy::Metadata::default()),
         Choices::default(),
+        Audit::off(),
     );
     let forward = Attributes::action("create", "pods", Some("portforward"), Some("a"), Some("p"));
     assert_eq!(forward.class, RequestClass::Forward);

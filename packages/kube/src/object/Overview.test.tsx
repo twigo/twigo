@@ -386,3 +386,110 @@ test("conditions read as chips with a mark in their tone, and the wrong ones say
     "DisruptionTarget · EvictionByEvictionAPI",
   ]);
 });
+
+test("a Secret's value reaches the DOM only through a Reveal, and leaves it on Hide", async () => {
+  const reveal = vi.fn((key: string) =>
+    Promise.resolve(
+      key === "mode" ? { value: "hunter2", binary: false } : undefined,
+    ),
+  );
+  render(
+    <Overview
+      states={new OverviewStates()}
+      kind="/secrets"
+      space="kind-test"
+      overview={data(false)}
+      onOpen={() => undefined}
+      reveal={reveal}
+    />,
+  );
+  expect(document.body.textContent).not.toContain("hunter2");
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Reveal mode" }));
+    await Promise.resolve();
+  });
+  expect(reveal).toHaveBeenCalledWith("mode");
+  expect(document.body.textContent).toContain("hunter2");
+  fireEvent.click(screen.getByRole("button", { name: "Hide mode" }));
+  expect(document.body.textContent).not.toContain("hunter2");
+});
+
+test("a Reveal the person does not confirm shows nothing", async () => {
+  const reveal = vi.fn(() => Promise.resolve(undefined));
+  render(
+    <Overview
+      states={new OverviewStates()}
+      kind="/secrets"
+      space="kind-test"
+      overview={data(false)}
+      onOpen={() => undefined}
+      reveal={reveal}
+    />,
+  );
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Reveal mode" }));
+    await Promise.resolve();
+  });
+  expect(screen.getByRole("button", { name: "Reveal mode" })).toBeTruthy();
+  expect(document.querySelector("pre")).toBeNull();
+});
+
+test("a value revealed for one Secret is not shown for the next one's key of that name", async () => {
+  const first = vi.fn(() =>
+    Promise.resolve({ value: "hunter2", binary: false }),
+  );
+  const next = vi.fn(() => Promise.resolve(undefined));
+  const shown = (reveal: typeof first | typeof next) => (
+    <Overview
+      states={new OverviewStates()}
+      kind="/secrets"
+      space="kind-test"
+      overview={data(false)}
+      onOpen={() => undefined}
+      reveal={reveal}
+    />
+  );
+  const { rerender } = render(shown(first));
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Reveal mode" }));
+    await Promise.resolve();
+  });
+  expect(document.body.textContent).toContain("hunter2");
+  rerender(shown(next));
+  expect(document.body.textContent).not.toContain("hunter2");
+  expect(screen.getByRole("button", { name: "Reveal mode" })).toBeTruthy();
+  rerender(shown(first));
+  expect(document.body.textContent).not.toContain("hunter2");
+});
+
+test("an answer that comes after the row moved to another Secret is dropped", async () => {
+  let answer: (value: { value: string; binary: boolean }) => void = () =>
+    undefined;
+  const slow = vi.fn(
+    () =>
+      new Promise<{ value: string; binary: boolean }>((resolve) => {
+        answer = resolve;
+      }),
+  );
+  const next = vi.fn(() => Promise.resolve(undefined));
+  const shown = (reveal: typeof slow | typeof next) => (
+    <Overview
+      states={new OverviewStates()}
+      kind="/secrets"
+      space="kind-test"
+      overview={data(false)}
+      onOpen={() => undefined}
+      reveal={reveal}
+    />
+  );
+  const { rerender } = render(shown(slow));
+  fireEvent.click(screen.getByRole("button", { name: "Reveal mode" }));
+  rerender(shown(next));
+  await act(async () => {
+    answer({ value: "hunter2", binary: false });
+    await Promise.resolve();
+  });
+  expect(document.body.textContent).not.toContain("hunter2");
+  rerender(shown(slow));
+  expect(document.body.textContent).not.toContain("hunter2");
+});

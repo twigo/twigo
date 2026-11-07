@@ -23,6 +23,18 @@ pub enum Actor {
 }
 
 impl Actor {
+    /// As the audit log names it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Actor::Ui => "ui",
+            Actor::Terminal => "terminal",
+            Actor::Helm => "helm",
+            Actor::Mcp => "mcp",
+            Actor::Extension { .. } => "extension",
+            Actor::Agent => "agent",
+        }
+    }
+
     /// What the mode does with the class: reads and dry runs always pass,
     /// and the class of reading a Secret is the actor's, not the mode's.
     pub(crate) fn decide(

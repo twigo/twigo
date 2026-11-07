@@ -2,6 +2,7 @@
 //! gets its TypeScript types from these, through [`typescript`].
 
 mod access;
+mod action;
 pub mod command;
 mod credentials;
 mod discovery;
@@ -19,6 +20,7 @@ pub use access::{
     BlockReason, Blocked, ContextAccess, Environment, Mode, ModeSource, RequestClass,
     SetContextEnvironment, SetContextMode,
 };
+pub use action::{Execute, Friction, OperationEvent, Plan, PlanId, PlanRequest, ResourceRef};
 pub use credentials::{ContextAuth, EnvVar, ExecPlugin, ExecReview, PluginStatus, ReviewedPlugin};
 pub use discovery::{ClusterVersion, Discovered, Resource};
 pub use environment::ShellEnvironment;

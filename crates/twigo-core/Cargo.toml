@@ -15,6 +15,7 @@ jiff = { workspace = true, features = ["serde"] }
 kube.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+shlex.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "sync"] }
 twigo-cache.workspace = true
@@ -31,4 +32,4 @@ twigo-cache = { workspace = true, features = ["test-util"] }
 k8s-openapi.workspace = true
 rcgen.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "rt", "time"] }
+tokio = { workspace = true, features = ["macros", "rt", "test-util", "time"] }

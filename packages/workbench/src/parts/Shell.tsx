@@ -5,6 +5,7 @@ import { QuickAccessWidget } from "../quickaccess/QuickAccessWidget";
 import { useChanges, useWorkbench } from "../react";
 import type { Location, SideBar } from "../views/registry";
 import { ReviewDialog, TrustDialog } from "./credentials/TrustDialog";
+import { ConfirmHost } from "../operations/ConfirmHost";
 import { EditorArea } from "./EditorArea";
 import { PanelBoundary, PartCrash } from "./PanelBoundary";
 import { PanelArea } from "./PanelArea";
@@ -148,6 +149,7 @@ export function Shell() {
       <QuickAccessWidget />
       <ReviewDialog />
       <TrustDialog />
+      <ConfirmHost />
       <Toaster />
     </div>
   );

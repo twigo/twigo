@@ -8,6 +8,7 @@ import { parseObjectUri } from "../uri";
 import { ObjectContent } from "./ObjectContent";
 import type { OverviewStates } from "./overviewStates";
 import { OBJECT_TABS, type ObjectTab, type ObjectTabs } from "./tabs";
+import { useReveal } from "./reveal";
 import { refUri, useObject } from "./useObject";
 
 /**
@@ -41,12 +42,13 @@ export function ObjectEditor({
     namespace: input.namespace ?? null,
     name: input.name,
   };
-  const { snapshot, values } = useObject(backend, query, {
+  const { snapshot, values, id } = useObject(backend, query, {
     overview: tab === "overview",
     manifest: tab === "yaml",
     events: tab === "events",
     related: tab === "related",
   });
+  const reveal = useReveal(id);
   if (!input) return <EmptyState title="Not an object">{uri}</EmptyState>;
   const open = (target: ObjectRef) => {
     if (resources.state !== "ready") return;
@@ -63,6 +65,7 @@ export function ObjectEditor({
       kind={`${input.gvr.group}/${input.gvr.resource}`}
       snapshot={snapshot}
       values={values}
+      reveal={reveal}
       onOpen={open}
       {...(input.namespace !== undefined && {
         onLogs: (choice) => {

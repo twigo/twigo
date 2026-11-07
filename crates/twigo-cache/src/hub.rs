@@ -106,8 +106,31 @@ impl Resource {
         }
     }
 
+    /// The path of one of its objects, each name escaped; refused where a
+    /// name can be no path segment, or a namespaced resource has no
+    /// namespace.
+    pub fn object_path(&self, namespace: Option<&str>, name: &str) -> Result<String, IpcError> {
+        self.check()?;
+        segment(name)?;
+        let scope = match (self.namespaced, namespace) {
+            (true, Some(namespace)) => {
+                segment(namespace)?;
+                Scope::Namespace(namespace.to_owned())
+            }
+            (true, None) => {
+                return Err(IpcError::new(
+                    ErrorKind::InvalidInput,
+                    format!("{name} names no namespace"),
+                ));
+            }
+            (false, _) => Scope::Cluster,
+        };
+        let name = utf8_percent_encode(name, SEGMENT);
+        Ok(format!("{}/{name}", self.path(&scope)))
+    }
+
     /// As kubectl names it: `pods`, `deployments.apps`.
-    fn name(&self) -> String {
+    pub fn name(&self) -> String {
         if self.group.is_empty() {
             self.resource.clone()
         } else {

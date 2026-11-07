@@ -309,6 +309,11 @@ impl Clients {
         &self.cluster
     }
 
+    /// The context's connection they were built for (`Gate::connection`).
+    pub fn connection(&self) -> Option<u64> {
+        self.gate.connection()
+    }
+
     /// The same clients, said to reach `cluster`: for the tests of what
     /// tells clusters apart.
     #[cfg(feature = "test-util")]

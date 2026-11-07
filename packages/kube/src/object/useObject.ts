@@ -65,7 +65,8 @@ export function useObject(
     () => current && ((keys: readonly string[]) => current.values(keys)),
     [current],
   );
-  return { snapshot, values };
+  const id = useMemo(() => current && (() => current.id()), [current]);
+  return { snapshot, values, id };
 }
 
 /**

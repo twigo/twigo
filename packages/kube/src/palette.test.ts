@@ -25,6 +25,7 @@ async function withEveryEnablement() {
   workbench.keys.set("shellEnvironment", "failed");
   workbench.keys.set("inQuickOpen", true);
   workbench.keys.set("quickOpenToSide", true);
+  workbench.keys.set("operationCountingDown", true);
   return workbench;
 }
 

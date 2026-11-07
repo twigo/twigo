@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use jiff::SignedDuration;
 use twigo_ipc::{BlockReason, Environment, Mode, ModeSource};
-use twigo_policy::{Actor, Attributes, Choices, Metadata, Policy, PolicyFile, Refused};
+use twigo_policy::{Actor, Attributes, Audit, Choices, Metadata, Policy, PolicyFile, Refused};
 
 const NOTHING: Metadata = Metadata {
     read_only: None,
@@ -25,6 +25,7 @@ fn with_metadata(metadata: Metadata) -> Arc<Policy> {
         PolicyFile::default(),
         move |_| Some(metadata),
         Choices::default(),
+        Audit::off(),
     )
 }
 
@@ -108,7 +109,12 @@ fn the_sources_rank_as_the_architecture_lists_them() {
         environment: Some(Environment::Production),
         connection: 0,
     };
-    let policy = Policy::new(entries.clone(), move |_| Some(all), Choices::default());
+    let policy = Policy::new(
+        entries.clone(),
+        move |_| Some(all),
+        Choices::default(),
+        Audit::off(),
+    );
     let source = |context: &str| policy.access(context).source;
 
     // The kubeconfig's word comes before the provider's and the type's.
@@ -136,6 +142,7 @@ fn the_sources_rank_as_the_architecture_lists_them() {
             })
         },
         Choices::default(),
+        Audit::off(),
     );
     assert_eq!(provider.access("c").source, ModeSource::Provider);
     assert_eq!(provider.access("c").mode, Mode::Guarded);
@@ -156,6 +163,7 @@ fn the_catalog_is_read_anew_for_every_request() {
             PolicyFile::default(),
             move |_| Some(*metadata.lock().unwrap()),
             Choices::default(),
+            Audit::off(),
         )
     };
     let gate = write();
@@ -174,7 +182,7 @@ fn of_several_matching_entries_the_strictest_wins_and_globs_cross_slashes() {
             "arn:aws:eks:*:cluster/prod": "read-only"
         }}"#,
     );
-    let policy = Policy::new(entries, |_| Some(NOTHING), Choices::default());
+    let policy = Policy::new(entries, |_| Some(NOTHING), Choices::default(), Audit::off());
     assert_eq!(policy.access("dev").mode, Mode::ReadWrite);
     assert_eq!(policy.access("prod-us").mode, Mode::Guarded);
     assert_eq!(policy.access("prod-eu-1").mode, Mode::ReadOnly);
@@ -194,7 +202,12 @@ fn a_policy_file_that_cannot_be_read_locks_every_context_and_says_so() {
         r#"{"readOnly": {"allowPortforward": true}}"#,
     ] {
         let (_dir, unreadable) = file(text);
-        let policy = Policy::new(unreadable, |_| Some(NOTHING), Choices::default());
+        let policy = Policy::new(
+            unreadable,
+            |_| Some(NOTHING),
+            Choices::default(),
+            Audit::off(),
+        );
         let access = policy.access("anything");
         assert_eq!(access.mode, Mode::ReadOnly, "{text}");
         assert!(
@@ -219,6 +232,7 @@ fn a_missing_policy_file_sets_nothing() {
         PolicyFile::read(&dir.path().join("absent.json")),
         |_| Some(NOTHING),
         Choices::default(),
+        Audit::off(),
     );
     assert_eq!(policy.access("c").mode, Mode::ReadWrite);
 }
@@ -226,7 +240,7 @@ fn a_missing_policy_file_sets_nothing() {
 #[test]
 fn a_policy_file_entry_cannot_be_changed_or_unlocked() {
     let (_dir, entries) = file(r#"{"contexts": {"prod-*": "read-only"}}"#);
-    let policy = Policy::new(entries, |_| Some(NOTHING), Choices::default());
+    let policy = Policy::new(entries, |_| Some(NOTHING), Choices::default(), Audit::off());
     let refused = policy
         .set_mode("prod-eu", Some(Mode::ReadWrite))
         .unwrap_err();
@@ -318,6 +332,7 @@ fn an_unlock_holds_only_for_what_it_was_given_on() {
             PolicyFile::default(),
             move |_| Some(*metadata.lock().unwrap()),
             Choices::default(),
+            Audit::off(),
         )
     };
     policy.unlock("c").unwrap();
@@ -343,7 +358,12 @@ fn an_unlock_holds_only_for_what_it_was_given_on() {
 
 #[test]
 fn a_context_no_source_lists_lets_no_write_through_whatever_was_chosen() {
-    let policy = Policy::new(PolicyFile::default(), |_| None, Choices::default());
+    let policy = Policy::new(
+        PolicyFile::default(),
+        |_| None,
+        Choices::default(),
+        Audit::off(),
+    );
     let access = policy.access("gone");
     assert_eq!(access.mode, Mode::ReadOnly);
     assert_eq!(access.source, ModeSource::Unlisted);
@@ -448,7 +468,7 @@ fn the_blocked_error_names_the_rule() {
     );
 
     let (_dir, entries) = file(r#"{"contexts": {"prod-*": "read-only"}}"#);
-    let by_file = Policy::new(entries, |_| Some(NOTHING), Choices::default());
+    let by_file = Policy::new(entries, |_| Some(NOTHING), Choices::default(), Audit::off());
     let message = by_file
         .authorize("prod-eu", &exec, Actor::Ui)
         .unwrap_err()
@@ -464,7 +484,7 @@ fn choices_round_trip_as_a_person_left_them() {
     let text = serde_json::to_string(&choices).unwrap();
     assert_eq!(text, r#"{"modes":{"a":"guarded"},"environments":{}}"#);
     let back: Choices = serde_json::from_str(&text).unwrap();
-    let reopened = Policy::new(PolicyFile::default(), |_| Some(NOTHING), back);
+    let reopened = Policy::new(PolicyFile::default(), |_| Some(NOTHING), back, Audit::off());
     assert_eq!(reopened.access("a").mode, Mode::Guarded);
 }
 
@@ -483,6 +503,7 @@ fn a_gate_holds_its_clients_to_what_they_were_built_for() {
             PolicyFile::default(),
             move |_| Some(*metadata.lock().unwrap()),
             Choices::default(),
+            Audit::off(),
         )
     };
     let gate = policy.gate("c", Actor::Ui);
