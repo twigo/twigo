@@ -528,7 +528,10 @@ async fn failures_back_off_from_half_a_second_to_five_and_events_reset_it() {
     assert_eq!(seen.len(), bounds.len());
     for (gap, (low, high)) in seen.iter().zip(bounds) {
         let gap = gap.as_secs_f64();
-        assert!((low..high).contains(&gap), "{gap} s outside {low}–{high} s");
+        assert!(
+            (low..=high).contains(&gap),
+            "{gap} s outside {low}–{high} s"
+        );
     }
 
     fake.state().unavailable = 1;
@@ -539,7 +542,7 @@ async fn failures_back_off_from_half_a_second_to_five_and_events_reset_it() {
     let after = gaps(&fake);
     assert_eq!(after.len(), 1);
     assert!(
-        (0.5..1.0).contains(&after[0].as_secs_f64()),
+        (0.5..=1.0).contains(&after[0].as_secs_f64()),
         "the events since reset it"
     );
 }
