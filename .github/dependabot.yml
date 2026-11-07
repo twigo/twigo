@@ -5,6 +5,13 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # CI does not build for Windows, so it cannot judge these, and they work only as a pair.
+      - dependency-name: windows
+      - dependency-name: windows-core
+      # Tauri's plugins require zbus 5, so a new major here would build two of it.
+      - dependency-name: zbus
+        update-types: ["version-update:semver-major"]
     groups:
       kube:
         patterns: [kube, k8s-openapi]

@@ -52,6 +52,9 @@
   An unknown command may ask the person to sign in, so it runs only while a window has the focus: tests build their `Registry` with focus on, and the app runs a plugin only once its `HOME`'s `trust.json` lists it, else it starts with the review of untrusted plugins.
 - k8s-openapi moves only together with kube: kube 5.0 requires `^0.29`.
   Dependabot bumps both in its `kube` group; a group PR that carries only k8s-openapi cannot build until a kube release requires that version.
+- `windows` and `windows-core` move together and by hand: `#[implement]` expands to `::windows_core` paths, so twigo-keyboard names that crate directly, at the version `windows` uses.
+  CI does not build for Windows, so its green says nothing about them and Dependabot ignores both; check a bump with the Windows `cargo clippy` command above.
+- zbus stays on the major that `tauri-plugin-opener` and `tauri-plugin-single-instance` require, or Linux builds two D-Bus stacks; Dependabot ignores its majors until they move.
 - A test that counts connections with `lsof` gets a test binary of its own, because `lsof` counts the whole process.
 - tauri-build fails unless the `isolation` features in `Cargo.toml` match the config's pattern, so each pattern of the IPC bench is a crate of its own: `bench/ipc/brownfield` and `bench/ipc/isolation`.
 - Under the isolation pattern a `frame-src` must list the isolation frame's scheme, or every invoke waits forever.
