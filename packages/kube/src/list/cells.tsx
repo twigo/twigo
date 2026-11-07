@@ -2,6 +2,7 @@ import type { Cell, Row } from "@twigo/protocol";
 import { cn, StatusDot } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import { IN_FLIGHT, type ColumnRule } from "../columns";
+import { useNow } from "../useNow";
 
 /** A column as the grid draws it: where its cells are and how they read. */
 export interface ShownColumn {
@@ -11,31 +12,32 @@ export interface ShownColumn {
   readonly rule: ColumnRule;
 }
 
-/** A cell's text as the server gave it, an Age from the row's creation. */
-function cellText(
-  cell: Cell,
-  column: ShownColumn,
-  row: Row,
-  now: number,
-): string {
-  if (column.rule.cell === "age") {
-    return row.created ? humanDuration(now - Date.parse(row.created)) : "";
-  }
+/** A cell's text as the server gave it. */
+function cellText(cell: Cell): string {
   return cell === null ? "" : String(cell);
 }
 
+/** An Age from the row's creation: only it ticks, so its row does not render every second. */
+function Age({ created }: { created: string }) {
+  const now = useNow();
+  return (
+    <span className="text-muted-foreground">
+      {humanDuration(now - Date.parse(created))}
+    </span>
+  );
+}
+
 /** A cell by its column's rule (ARCHITECTURE 4.4): data stays near-monochrome. */
-export function CellView({
-  row,
-  column,
-  now,
-}: {
-  row: Row;
-  column: ShownColumn;
-  now: number;
-}) {
-  const text = cellText(row.cells[column.index] ?? null, column, row, now);
+export function CellView({ row, column }: { row: Row; column: ShownColumn }) {
   const { rule } = column;
+  if (rule.cell === "age") {
+    return row.created ? (
+      <Age created={row.created} />
+    ) : (
+      <span className="text-muted-foreground-2" />
+    );
+  }
+  const text = cellText(row.cells[column.index] ?? null);
   if (text === "<none>" || text === "")
     return <span className="text-muted-foreground-2">{text}</span>;
   switch (rule.cell) {
@@ -65,8 +67,6 @@ export function CellView({
       );
     case "restarts":
       return <Restarts text={text} />;
-    case "age":
-      return <span className="text-muted-foreground">{text}</span>;
     case "text":
       return rule.quiet ? (
         <span className="text-muted-foreground">{text}</span>

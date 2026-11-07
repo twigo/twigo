@@ -26,7 +26,6 @@ import { CellView, type ShownColumn } from "../list/cells";
 import { SHOWS_ROWS } from "../list/listStatus";
 import { useListView } from "../list/useListView";
 import { objectOf } from "../selection";
-import { useNow } from "../useNow";
 import { useWidth } from "../useWidth";
 import { ViewStatus } from "../ViewStatus";
 import type { OverviewStates } from "./overviewStates";
@@ -94,7 +93,6 @@ export function EmbeddedList({
     values: null,
   };
   const { snapshot, flash, setWindow } = useListView(backend, query);
-  const now = useNow(1000);
   const [element, setElement] = useState<HTMLElement | null>(null);
   const narrow = useWidth(element) < WIDE;
   const columns: readonly ShownColumn[] = snapshot.columns
@@ -217,7 +215,7 @@ export function EmbeddedList({
           onRange={onRange}
           cell={(row, column) => {
             const shown = byName.get(column.id);
-            return shown && <CellView row={row} column={shown} now={now} />;
+            return shown && <CellView row={row} column={shown} />;
           }}
           selected={selected}
           onSelect={(id) => {

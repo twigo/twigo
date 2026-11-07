@@ -29,7 +29,7 @@ function write(name: string, value: unknown): Promise<void> {
 }
 
 const NOT_VISIBLE =
-  "the window is not visible: WebKit renders nothing while the screen is locked or the window is covered";
+  "the window is not visible: WebKit renders nothing while the screen is locked";
 
 /** Runs `work` while the window stays visible, since nothing paints otherwise. */
 function whileVisible<T>(work: () => Promise<T>): Promise<T> {
@@ -86,7 +86,11 @@ async function run(container: HTMLElement) {
   );
   const space = await benchSpace(workbench);
   const results = await whileVisible(() =>
-    drive(workbench, probe, { space, steady: () => write("steady", {}) }),
+    drive(workbench, probe, {
+      space,
+      steady: () => write("steady", {}),
+      visible: () => write("visible", {}),
+    }),
   );
   await write("webview", results);
 }

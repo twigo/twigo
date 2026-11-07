@@ -101,6 +101,7 @@ pub struct Inputs {
     pub run: Run,
     pub webview: Webview,
     pub memory: Vec<Sample>,
+    pub visible: (Sample, Sample),
     pub idle: (Sample, Sample),
     pub hidden: Option<Hidden>,
     pub churn: Option<Churn>,
@@ -148,6 +149,10 @@ impl Inputs {
             run: read(dir, "run.json")?,
             webview: read(dir, "webview.json")?,
             memory: read_memory(dir)?,
+            visible: (
+                read(dir, "visible-start.json")?,
+                read(dir, "visible-end.json")?,
+            ),
             idle: (read(dir, "idle-start.json")?, read(dir, "idle-end.json")?),
             hidden: read_optional(dir, "hidden.json")?,
             churn: read_optional(dir, "churn.json")?,
@@ -270,6 +275,7 @@ pub fn build(inputs: Inputs) -> Report {
         run,
         webview,
         memory,
+        visible,
         idle,
         hidden,
         churn,
@@ -420,6 +426,20 @@ pub fn build(inputs: Inputs) -> Report {
         measured: format!(
             "physical footprint of the app's WebKit GPU process, the median of {} samples; any page that repaints holds about 260 MB there, WebKit's pool of IOSurfaces, so it stays out of the budget (docs/bench.md)",
             memory.len()
+        ),
+    });
+
+    let (start, end) = &visible;
+    let cpu = cpu_percent(start, end);
+    rows.push(Row {
+        metric: "Visible CPU, 100 changes/s, window on screen".into(),
+        value: Some(format!("{cpu:.2} %")),
+        target: "-".into(),
+        status: Status::Shown,
+        measured: format!(
+            "CPU time of the app and its {} WebKit processes over {:.0} s, as a share of one core; sorted by Restarts descending, the rows the churn changes on screen, while the driver sleeps; it swings between runs, so nothing judges it (docs/bench.md)",
+            end.webkit.len(),
+            (end.at_ms - start.at_ms) / 1000.0,
         ),
     });
 
@@ -576,6 +596,7 @@ mod tests {
                 },
             },
             memory: vec![sample(0.0, 0, webkit(0))],
+            visible: (sample(0.0, 0, webkit(0)), sample(10_000.0, 0, webkit(0))),
             idle: (
                 sample(0.0, 1_000, webkit(1_000)),
                 sample(10_000.0, 1_000 + idle_ns, webkit(1_000)),
@@ -618,6 +639,10 @@ mod tests {
                 ("Webview memory with the pod list open", &Status::Pass),
                 ("  Physical footprint", &Status::Shown),
                 ("  GPU process", &Status::Shown),
+                (
+                    "Visible CPU, 100 changes/s, window on screen",
+                    &Status::Shown
+                ),
                 ("Idle CPU, 100 changes/s, window hidden", &Status::Pass),
             ]
         );
@@ -625,7 +650,7 @@ mod tests {
         assert_eq!(report.rows[5].value.as_deref(), Some("220 MB"));
         assert_eq!(report.rows[6].value.as_deref(), Some("160 MB"));
         assert_eq!(report.rows[7].value.as_deref(), Some("500 MB"));
-        assert_eq!(report.rows[8].value.as_deref(), Some("0.01 %"));
+        assert_eq!(report.rows[9].value.as_deref(), Some("0.01 %"));
     }
 
     #[test]
@@ -748,6 +773,18 @@ mod tests {
     }
 
     #[test]
+    fn visible_cpu_is_shown_and_never_judged() {
+        let mut all = inputs(20.0, 16.7, 0);
+        all.visible = (
+            sample(0.0, 0, vec![]),
+            sample(10_000.0, 9_000_000_000, vec![]),
+        );
+        let report = build(all);
+        assert!(report.failed().is_empty());
+        assert_eq!(report.rows[8].value.as_deref(), Some("90.00 %"));
+    }
+
+    #[test]
     fn cpu_counts_a_process_that_started_in_between_whole() {
         let start = sample(0.0, 0, vec![]);
         let end = sample(
@@ -762,7 +799,7 @@ mod tests {
     fn the_table_lists_every_row() {
         let report = build(inputs(30.0, 16.7, 0));
         let table = table(&report);
-        assert_eq!(table.lines().filter(|l| l.starts_with("| ")).count(), 11);
+        assert_eq!(table.lines().filter(|l| l.starts_with("| ")).count(), 12);
         assert!(table.contains("| First paint after the space connects | 400 ms | < 1 s | pass |"));
     }
 }

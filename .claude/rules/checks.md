@@ -21,7 +21,7 @@
 - The IPC bench: `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/ipc/run.sh frames` or `bench/ipc/run.sh cost 3` on macOS, and `bench/ipc/linux.sh frames` for WebKitGTK in Docker.
   Each run opens a window and exits by itself.
 - The bench harness ([bench](../../docs/bench.md)): `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/harness.sh` on macOS with the screen unlocked; it creates and deletes its cluster, or takes the kubeconfig of one that `bench/pods.sh` scaled to 5000.
-  The app's window must stay on screen for about three minutes, until it hides itself; the report prints, and its JSON lands in `$TWIGO_BENCH_DIR/harness`.
+  The app takes no focus and its window stays at the screen's left edge, behind other windows, so the desktop stays in use; the report prints, and its JSON lands in `$TWIGO_BENCH_DIR/harness`.
 - The bench app alone: `pnpm tauri build --no-bundle --features bench --config src-tauri/tauri.bench.conf.json`, then `TWIGO_BENCH=<dir> target/release/twigo-bench launch target/release/twigo`.
 - State across ⌘Q and a restart, on macOS with the screen unlocked: `bench/restart.sh <kind kubeconfig>` after the debug build; it runs the app with a temporary `HOME` and presses keys through System Events, which needs the terminal's Accessibility permission.
 - The churn generator alone: `cargo run --release -p twigo-bench -- churn --kubeconfig <path> --rate 100 --seconds 60 --log churn.jsonl`.
@@ -56,6 +56,8 @@
   CI does not build for Windows, so its green says nothing about them and Dependabot ignores both; check a bump with the Windows `cargo clippy` command above.
 - zbus stays on the major that `tauri-plugin-opener` and `tauri-plugin-single-instance` require, or Linux builds two D-Bus stacks; Dependabot ignores its majors until they move.
 - A test that counts connections with `lsof` gets a test binary of its own, because `lsof` counts the whole process.
+- On Linux a script this process wrote is busy (`ETXTBSY`) while a child forked meanwhile holds its descriptor until `exec`, and a spawn with `pre_exec` always forks, so twigo-env's tests have `cp` write their scripts.
+  twigo-core's and twigo-kube's tests write theirs in-process; no such failure has been seen there.
 - tauri-build fails unless the `isolation` features in `Cargo.toml` match the config's pattern, so each pattern of the IPC bench is a crate of its own: `bench/ipc/brownfield` and `bench/ipc/isolation`.
 - Under the isolation pattern a `frame-src` must list the isolation frame's scheme, or every invoke waits forever.
   Tauri names it `isolation-<uuid>` anew on every build and adds it to `default-src` only, so `bench/ipc/isolation/src/main.rs` adds it to `frame-src` at startup from `Context::pattern()`.
@@ -75,7 +77,7 @@
   A glob such as `packages/*/src` there generated no utilities from the packages (Tailwind 4.3.3, 2026-10-31).
 - eslint-plugin-react-hooks warns that `useVirtualizer` cannot be memoized by React Compiler; the app does not run the compiler, so the warning stays visible rather than silenced.
 - WebKit paints nothing while the screen is locked, with the display asleep or awake: the document turns `hidden` and `requestAnimationFrame` stops, so the bench driver fails at once rather than measure.
-  A window that others cover turns `hidden` too, so the bench window stays above other windows.
+  A window that others cover turns `hidden` too, unless WebKit's occlusion detection is off, as in the bench ([bench](../../docs/bench.md#the-window)).
 - A process started from a terminal has the terminal as its responsible process, and so do its `com.apple.WebKit.*` processes; `twigo-bench launch` starts the app responsible for itself, and `twigo-bench sample` refuses an app that is not.
 - The bench build has the identifier `io.twigo.ide.bench`, so it shares neither the single-instance lock nor the window state with Twigo.
 - WebContent's physical footprint misleads: pages WebKit reused stay off it and unmapped graphics count on it, so read resident size and the `WebKit Malloc` zone's allocated bytes in `vmmap -summary`; blocks of 16 KB in `heap` are JavaScriptCore's heap ([bench](../../docs/bench.md#on-the-rust-path)).

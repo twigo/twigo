@@ -29,6 +29,8 @@ const WAIT_MS = 5000;
 /** The list waits for the space's discovery, then lists every pod. */
 const FIRST_PAINT_WAIT_MS = 30_000;
 const PAINT_TIMEOUT_MS = 1000;
+/** Longer than the harness's settling and sampling, as `bench/harness.sh` checks. */
+const VISIBLE_MS = 30_000;
 
 /** A restart count the churn set, painted at `at`, in Unix milliseconds. */
 export interface Paint {
@@ -206,11 +208,25 @@ function nextBatch(
   return within(matched, WAIT_MS, what).finally(stop);
 }
 
+/** The editor area mounts after its space opens, and until then no editor can open. */
+async function openEditor(workbench: Workbench, uri: string): Promise<number> {
+  const deadline = performance.now() + WAIT_MS;
+  for (;;) {
+    const clicked = performance.now();
+    try {
+      workbench.editors.open(uri);
+      return clicked;
+    } catch (error) {
+      if (clicked > deadline) throw error;
+      await sleep(50);
+    }
+  }
+}
+
 /** Opens the space's pod list: from the click to its first rows painted. */
 async function open(workbench: Workbench, probe: Probe, space: string) {
   const opened = probe.next();
-  const clicked = performance.now();
-  workbench.editors.open(`k8s-list://${space}/v1/pods`);
+  const clicked = await openEditor(workbench, `k8s-list://${space}/v1/pods`);
   const list = await within(
     opened,
     FIRST_PAINT_WAIT_MS,
@@ -381,12 +397,21 @@ async function changes(
 /**
  * Opens the space's pod list, then scrolls it, sorts it and watches it
  * change, timing each in the webview (ARCHITECTURE 3.8). `steady` runs once
- * the list is open under churn, for the harness to sample memory.
+ * the list is open under churn, for the harness to sample memory, and `visible`
+ * once the driver only sleeps, for it to sample the page's own CPU.
  */
 export async function drive(
   workbench: Workbench,
   probe: Probe,
-  { space, steady }: { space: string; steady: () => Promise<void> },
+  {
+    space,
+    steady,
+    visible,
+  }: {
+    space: string;
+    steady: () => Promise<void>;
+    visible: () => Promise<void>;
+  },
 ): Promise<Results> {
   const first = await open(workbench, probe, space);
   await sleep(1000);
@@ -396,6 +421,8 @@ export async function drive(
   const list = probe.lists[probe.lists.length - 1] ?? first.list;
   await top();
   const changed = await changes(list, steady);
+  await visible();
+  await sleep(VISIBLE_MS);
   return {
     rows: list.total,
     refreshMs,

@@ -10,7 +10,7 @@ publish.workspace = true
 
 [features]
 # The bench mode of bench/harness.sh: commands that write results and quit (src/bench.rs).
-bench = ["dep:serde_json"]
+bench = ["dep:objc2", "dep:serde_json"]
 
 [build-dependencies]
 tauri-build.workspace = true
@@ -28,3 +28,6 @@ twigo-env.workspace = true
 twigo-ipc.workspace = true
 twigo-keyboard.workspace = true
 twigo-netmon.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { workspace = true, optional = true }

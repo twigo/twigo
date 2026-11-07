@@ -4,5 +4,23 @@
   "build": {
     "beforeBuildCommand": "pnpm build:bench",
     "frontendDist": "../dist-bench"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Twigo",
+        "width": 1280,
+        "height": 800,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 20,
+          "y": 20
+        },
+        "x": -1240,
+        "y": 100,
+        "focus": false
+      }
+    ]
   }
 }

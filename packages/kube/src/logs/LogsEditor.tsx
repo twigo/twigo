@@ -51,7 +51,7 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
     () => session?.getSnapshot(),
   );
   const tab = tabs.get(uri);
-  const now = useNow(1000);
+  const now = useNow();
   const [element, setElement] = useState<HTMLDivElement | null>(null);
   const width = useWidth(element);
 

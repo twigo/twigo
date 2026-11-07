@@ -516,6 +516,8 @@ fn main() {
         .plugin(tauri_plugin_dialog::init());
     #[cfg(feature = "bench")]
     let builder = builder.plugin(bench::plugin());
+    #[cfg(all(feature = "bench", target_os = "macos"))]
+    let builder = builder.activate_ignoring_other_apps(false);
     let app = builder
         .setup(|app| {
             let main = MainThread::new().ok_or("Tauri ran setup off the main thread")?;

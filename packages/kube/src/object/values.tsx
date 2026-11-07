@@ -110,7 +110,7 @@ function LabelChip({ name, value }: { name: string; value: string }) {
 }
 
 function Time({ at }: { at: string }) {
-  const now = useNow(1000);
+  const now = useNow();
   const when = Date.parse(at);
   if (Number.isNaN(when)) return <span>{at}</span>;
   const date = new Date(when).toLocaleString();
@@ -131,7 +131,7 @@ export function Age({
   /** After the age: ` ago`. */
   suffix?: string;
 }) {
-  const now = useNow(1000);
+  const now = useNow();
   const when = at === null ? Number.NaN : Date.parse(at);
   if (Number.isNaN(when)) return null;
   return (
@@ -144,7 +144,7 @@ export function Age({
 
 /** A sentence of text and times, the times read as it shows. */
 export function Sentence({ spans }: { spans: readonly Span[] }) {
-  const now = useNow(1000);
+  const now = useNow();
   return (
     <>
       {spans.map((span, index) => {

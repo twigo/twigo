@@ -582,8 +582,9 @@ It builds the app's bench mode in release, runs a churn generator at 100 changes
 - **Webview memory** is the resident size of the WebKit processes the app is responsible for, the process macOS records as having asked for them, but the GPU process; the harness starts the app responsible for itself, since one started from a terminal shares the terminal's.
   Their physical footprint and the GPU process are shown apart and never judged: footprint leaves out pages WebKit reused and counts graphics that resident size does not, so it swings between runs ([bench](bench.md#on-the-rust-path)).
 - **Idle CPU** is the CPU time of the app and those WebKit processes over 30 s with the window hidden, as a share of one core.
+- **Visible CPU** is the same over 20 s with the window on screen, while the driver sleeps; it is shown and never judged, since it swings too much to tell a regression from noise ([bench](bench.md#the-visible-window)).
 
-The report judges every metric but those two, and fails the run on a missed target.
+The report judges every metric but those three, and fails the run on a missed target.
 CI does not run the harness yet: it needs an unlocked GUI session, since WebKit paints nothing behind a locked screen, and Linux needs the sampler's WebKitGTK branch.
 
 The bench also replays the cases that broke other clients, and one that loopback cannot show:
@@ -730,7 +731,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 - A pinned list keeps its namespaces, text and health in its URI and shows at the top of the explorer; a kind whose list is open shows its rows and its worst health there.
 - Single-key verbs work only when a table is focused (context key `listFocus`): `l` logs, `s` shell, `e` edit YAML, `d` describe/overview, `y` copy YAML, `f` port-forward, `⇧J` jump to owner, `⌘⌫` delete (with confirmation), off a bare key since k9s users deleted the wrong object from one ([research](research/workbench-design.md)).
   These are ordinary commands with keybindings, so users can remap them.
-- Changed cells flash briefly: the cell's background starts at the `--flash` tint and fades out over 1 s.
+- Changed cells flash briefly: the cell's background starts at the `--flash` tint and fades out over 1 s, as the opacity of a layer behind the text, which runs on the compositor and leaves the page asleep ([bench](bench.md#the-visible-window)).
   A batch that changes more than 8 rows flashes nothing, so a rollout does not strobe the table.
   The flash is a setting, on by default.
 

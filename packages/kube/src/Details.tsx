@@ -120,7 +120,7 @@ export function Details({
       ? (cellTone(gvr, selected.columns[statusAt]?.name ?? "", status) ?? "ok")
       : undefined;
   const warnings = warningCount(snapshot.overview, snapshot.events?.events);
-  const now = useNow(1000);
+  const now = useNow();
   const lookup = keys.lookup(element);
 
   return (

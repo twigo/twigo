@@ -29,10 +29,10 @@ Findings that belong to no step yet.
   - A CronJob shows its last schedule and last success but not its next run, which needs its schedule read in its time zone.
   - A claim's Used By follows the whole objects of every pod in its namespace while its Overview is shown, as kubectl lists them; a projection watch (3.3) that keeps only their volumes would cost less (decision 8 of M1).
   - A node's Overview asks for `resource.k8s.io/v1` ResourceSlices, which Kubernetes 1.33 does not serve: there the need fails and retries while the Overview is shown, and the section stays out, as kubectl leaves it out.
-- The visible window ([bench](docs/bench.md#what-the-budgets-do-not-measure)), which no budget judges:
-  - It took 21.7 % of a core at 100 changes/s and 3.9 % with no changes, in one run; turning the flash and the clock of ages off gave 15.6 % and 9.9 %, so what wakes the page with no changes is not known. Profile it first, with the bench window not over a desktop in use.
-  - Candidates: the flash's `background-color` keyframes, about 6 points under churn; a row memo in `DataGrid`, since each batch renders every row of the window; the batcher's tick while nothing changes.
+- The visible window ([bench](docs/bench.md#the-visible-window)):
+  - A row memo in `DataGrid`, since each batch renders every row of the window; JavaScript is about half of WebContent's main thread under churn, which is 2.1 % of a core by Name.
 - The bench:
+  - Core RSS read 153 MB, over its 150 MB, in one run of fifteen on fresh clusters on 2026-11-07, and 140 to 147 MB in the others, on kube 5; 141 to 144 MB in three on kube 4.2. Whether kube 5 moved it was not measured.
   - `no rows sorted by Restarts descending` stopped one driver run in about forty on 2026-11-07, in a build with the clock of ages off; not investigated.
   - One run read a footprint of 404 MB with 235 MiB resident; what it held is not known.
 - The grid's row actions (`packages/ui/src/grid/DataGrid.tsx`):
