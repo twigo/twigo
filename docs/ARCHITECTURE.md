@@ -5,7 +5,7 @@ It aims to match Lens feature for feature without its login wall, its weight or 
 This document fixes the architecture; the M0 spikes in `docs/spikes/` correct it wherever they measured otherwise.
 
 - Status: M0 in progress, steps 1 to 5 done, steps 6 and 7 in review, 2026-11-01
-- Stack: Tauri 2 (2.12.x), Rust with kube-rs (4.2.x, k8s-openapi 0.28), React 19 + TypeScript, Tailwind 4, shadcn/ui, pnpm monorepo
+- Stack: Tauri 2 (2.12.x), Rust with kube-rs (5.0.x, k8s-openapi 0.29), React 19 + TypeScript, Tailwind 4, shadcn/ui, pnpm monorepo
 - Reference code: the retired NATS IDE at `6ee327f`, whose history survives only in a local checkout; section 1 maps what carries over
 
 ## 0. Context
@@ -323,7 +323,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   - Nothing fails silently.
 - **Dead connections.**
   kube 4.0 removed the global read timeout, and a watch can stall silently after sleep or a network change.
-  - Every watch sets `timeoutSeconds`, kube's 290 ([`params.rs`](https://github.com/kube-rs/kube/blob/4.2.0/kube-core/src/params.rs#L381)), and uses TCP keepalive.
+  - Every watch sets `timeoutSeconds`, kube's 290 ([`params.rs`](https://github.com/kube-rs/kube/blob/5.0.0/kube-core/src/params.rs#L383)), and uses TCP keepalive.
   - The HTTP/2 connection sends keep-alive pings, while idle too, since one dead connection now stalls every watch of the cluster.
     A failed ping closes it.
     Both take client-go's timings: keepalive after 30 s, and a ping once the connection has read nothing for 30 s, answered within 15 s.
@@ -373,7 +373,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
 | **Metadata** | List and watch with `Accept: application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1` and `…as=PartialObjectMetadata…`, managedFields skipped at deserialisation               | Indexes: namespaces (for the picker), CRDs and APIServices (discovery invalidation), and owner references for the "Related" tab.                                                                                             |
 | **Object**   | List and watch with `fieldSelector=metadata.name=…`, another field selector or none, as a Table with `includeObject=Object`: whole objects with their cells                             | An open editor: live YAML, overview, conflict detection; an object's events; what its describer reads while its Overview is shown, such as a namespace's ReplicaSets or EndpointSlices, or a node's pods by `spec.nodeName`. |
 
-All three run on the hub's own list and watch rather than kube-runtime's `watcher`, which 4.2 cannot start from a `resourceVersion` once it is recreated, nor tell to re-watch on wake or after a probe: it reopens a quiet watch only after `timeoutSeconds` and 5 s, without a probe ([`next_with_idle_timeout`](https://github.com/kube-rs/kube/blob/4.2.0/kube-runtime/src/watcher.rs#L483-L505)).
+All three run on the hub's own list and watch rather than kube-runtime's `watcher`, which 5.0 cannot start from a `resourceVersion` once it is recreated, nor tell to re-watch on wake or after a probe: it reopens a quiet watch only after `timeoutSeconds` and 5 s, without a probe ([`next_with_idle_timeout`](https://github.com/kube-rs/kube/blob/5.0.0/kube-runtime/src/watcher.rs#L529-L548)).
 
 Table details that the decoder handles, checked on kind clusters from 1.33 to 1.37 ([Table decoder spike](spikes/table-decoder.md)):
 
@@ -504,7 +504,7 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
   - The values merge into the rows in Rust as extra cells.
 - **Discovery and OpenAPI.**
   - Aggregated discovery, GA since 1.30: one request each to `/api` and `/apis`, with client-go's `Accept`, the aggregated form first and plain JSON after it ([`acceptDiscoveryFormats`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/client-go/discovery/discovery_client.go#L68)).
-    kube's `run_aggregated()` is not used: it sends no `If-None-Match`, and it reads a legacy `APIGroupList` as an empty list, since its `items` default ([`v2.rs`](https://github.com/kube-rs/kube/blob/4.2.0/kube-core/src/discovery/v2.rs#L20-L28)).
+    kube's `run_aggregated()` is not used: it sends no `If-None-Match`, and it reads a legacy `APIGroupList` as an empty list, since its `items` default ([`v2.rs`](https://github.com/kube-rs/kube/blob/5.0.0/kube-core/src/discovery/v2.rs#L20-L28)).
   - There is no fallback to legacy discovery, since every supported release serves the aggregated form.
     An answer of another type, as from a proxy that drops the `Accept` header, fails and says that the server did not answer aggregated discovery.
   - Discovery answers with the resources that have the `list` verb, each at its group's most preferred version that serves it, as client-go's [`ServerPreferredResourcesWithContext`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/client-go/discovery/discovery_client.go#L976-L1044) picks them.
@@ -1645,11 +1645,11 @@ Destructive actions (delete, drain, scale to 0) use dry-run where the API suppor
 ## Appendix: references
 
 Facts were checked on 2026-10-31 against sources or docs.
-Versions: kube 4.2.0, k8s-openapi 0.28, Tauri 2.12.5, wasmtime 50, Kubernetes 1.37.
+Versions: kube 5.0.0 and k8s-openapi 0.29 (rechecked on 2026-11-07), Tauri 2.12.5, wasmtime 50, Kubernetes 1.37.
 
 - kube-rs:
-  - https://github.com/kube-rs/kube/tree/4.2.0 (HTTP/1.1 only: `kube-client/Cargo.toml`; exec auth: `kube-client/src/client/auth/mod.rs`; WebSocket protocols: `kube-client/src/client/upgrade.rs`)
-  - https://docs.rs/kube/4.2.0/kube/runtime/watcher/struct.Config.html
+  - https://github.com/kube-rs/kube/tree/5.0.0 (HTTP/1.1 only: `kube-client/Cargo.toml`; exec auth: `kube-client/src/client/auth/mod.rs`; WebSocket protocols: `kube-client/src/client/upgrade.rs`)
+  - https://docs.rs/kube/5.0.0/kube/runtime/watcher/struct.Config.html
 - Kubernetes:
   - Table fetches: https://kubernetes.io/docs/reference/using-api/api-concepts/#table-fetches
   - Server-side apply: https://kubernetes.io/docs/reference/using-api/server-side-apply/
