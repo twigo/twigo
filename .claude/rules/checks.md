@@ -6,7 +6,7 @@
 - One Rust test: `cargo test -p twigo-cache --test table_fixtures <name>`.
 - Frontend: `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r test`, `pnpm format:check`; one package: `pnpm --filter @twigo/workbench test`.
 - The app: `TWIGO_KUBECONFIG=<kind kubeconfig> pnpm tauri dev`; the CI build is `pnpm tauri build --debug --no-bundle`.
-- The UI on the mock backend: `pnpm --filter @twigo/desktop dev`, then http://localhost:1420/ in a browser; `?scenario=forbidden` pins a view state (`MOCK_SCENARIOS` in `packages/protocol/src/mock`), `?scenario=deviceCode`, `browser`, `pluginFailed`, `untrusted` or `review` pins prod-eu's credentials, and `?layout=french` picks a keyboard layout (`MOCK_LAYOUTS`).
+- The UI on the mock backend: `pnpm --filter @twigo/desktop dev`, then http://localhost:1420/ in a browser; `?scenario=forbidden` pins a view state (`MOCK_SCENARIOS` in `packages/protocol/src/mock`), `?scenario=deviceCode`, `browser`, `pluginFailed`, `untrusted` or `review` pins prod-eu's credentials, `?scenario=policyFile` puts `prod-*` under an admin's policy file, and `?layout=french` picks a keyboard layout (`MOCK_LAYOUTS`).
 - The TypeScript of the IPC types: `TWIGO_UPDATE_TYPESCRIPT=1 cargo test -p twigo-ipc --test typescript`.
 - The mock's keyboard layouts: `cargo run -p twigo-keyboard --example record` on a Mac reads installed layouts without selecting them and rewrites `packages/protocol/src/mock/layouts`.
 - The mock's resources: `TWIGO_TEST_KUBECONFIG=<kind kubeconfig> cargo run -p twigo-kube --example record_discovery` rewrites `packages/protocol/src/mock/resources.json` from the cluster's discovery, as `resources_watch` answers it.
@@ -30,7 +30,7 @@
   Their pods run on kind's node from its `docker.io/kindest/local-path-helper` image with `imagePullPolicy: Never`, so nothing is pulled; it has bash and no other command, so their scripts sleep by reading a coprocess that never writes, and a forced restart is `crictl stop` through `docker exec`.
 - The hub's heap at 5,000 pods: `bench/pods.sh <kubeconfig> 5000`, then `TWIGO_TEST_KUBECONFIG=<kubeconfig> cargo run --release -p twigo-cache --example hub_memory`, next to `--example table_memory`.
 - Before a push, run only the checks the change affects.
-  CI runs the rest, the live tests on every release when `twigo-cache`, `twigo-kube`, `twigo-core`, `twigo-sessions`, `bench/harness`, `bench/cluster.sh`, `bench/pods.sh` or the Cargo files change, and the frame probe on WebKitGTK when `bench/ipc` or the Cargo files change.
+  CI runs the rest, the live tests on every release when `twigo-cache`, `twigo-kube`, `twigo-policy`, `twigo-core`, `twigo-sessions`, `bench/harness`, `bench/cluster.sh`, `bench/pods.sh` or the Cargo files change, and the frame probe on WebKitGTK when `bench/ipc` or the Cargo files change.
 
 ## Gotchas
 
@@ -48,6 +48,7 @@
 - Kubernetes clients come only from `twigo_kube::client::Clients`: `api` speaks HTTP/2, `sessions` HTTP/1.1 for exec, attach and port-forward.
   `api` counts its streams, 24 watches at most by default, so a test or tool that opens more raises `Options::budgets`, or its watches wait.
   Never `Config::infer()`, `~/.kube/config` or the current context: tests and examples read `TWIGO_TEST_KUBECONFIG` and refuse contexts other than `kind-*` and `kwok-*`.
+- `Clients::new` takes the gate of the context it is for, so no client goes around the policy: the app's comes from `Policy::gate`, and tests and tools that own their clusters pass `Gate::unrestricted()`.
 - Exec plugins run only through `twigo_kube::credentials`, never kube's exec auth, which `Clients::new` strips.
   An unknown command may ask the person to sign in, so it runs only while a window has the focus: tests build their `Registry` with focus on, and the app runs a plugin only once its `HOME`'s `trust.json` lists it, else it starts with the review of untrusted plugins.
 - k8s-openapi moves only together with kube: kube 5.0 requires `^0.29`.
