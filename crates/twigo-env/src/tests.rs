@@ -29,7 +29,14 @@ impl Fakes {
 
     fn script(&self, name: &str, body: &str) -> PathBuf {
         let path = self.dir.path().join(name);
-        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("a script");
+        let draft = self.dir.path().join(format!("{name}.draft"));
+        std::fs::write(&draft, format!("#!/bin/sh\n{body}\n")).expect("a draft");
+        let copied = std::process::Command::new("/bin/cp")
+            .arg(&draft)
+            .arg(&path)
+            .status()
+            .expect("cp");
+        assert!(copied.success());
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
         path
     }

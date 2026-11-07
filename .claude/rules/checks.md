@@ -56,6 +56,8 @@
   CI does not build for Windows, so its green says nothing about them and Dependabot ignores both; check a bump with the Windows `cargo clippy` command above.
 - zbus stays on the major that `tauri-plugin-opener` and `tauri-plugin-single-instance` require, or Linux builds two D-Bus stacks; Dependabot ignores its majors until they move.
 - A test that counts connections with `lsof` gets a test binary of its own, because `lsof` counts the whole process.
+- On Linux a script this process wrote is busy (`ETXTBSY`) while a child forked meanwhile holds its descriptor until `exec`, and a spawn with `pre_exec` always forks, so twigo-env's tests have `cp` write their scripts.
+  twigo-core's and twigo-kube's tests write theirs in-process; no such failure has been seen there.
 - tauri-build fails unless the `isolation` features in `Cargo.toml` match the config's pattern, so each pattern of the IPC bench is a crate of its own: `bench/ipc/brownfield` and `bench/ipc/isolation`.
 - Under the isolation pattern a `frame-src` must list the isolation frame's scheme, or every invoke waits forever.
   Tauri names it `isolation-<uuid>` anew on every build and adds it to `default-src` only, so `bench/ipc/isolation/src/main.rs` adds it to `frame-src` at startup from `Context::pattern()`.
