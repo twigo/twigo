@@ -39,6 +39,7 @@ export interface YamlEditorProps {
   readonly buffers?: {
     buffer(uri: string, make: () => EditorBuffer): EditorBuffer;
     takeFocus(uri: string): boolean;
+    focus(uri: string): void;
   };
 }
 
@@ -175,11 +176,14 @@ export default function YamlEditor({
       if (!setting.current) changed.current?.(created.getValue());
     });
     return () => {
+      const held = instance.hasTextFocus();
       buffer.view = instance.saveViewState();
       buffer.focus = undefined;
       content.dispose();
       instance.dispose();
       if (!buffers) created.dispose();
+      // A view that goes with the focus, as its space goes, hands it to the next.
+      if (held) buffers?.focus(uri);
       model.current = undefined;
       view.current = undefined;
     };

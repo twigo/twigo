@@ -118,6 +118,9 @@ export function registerKube(workbench: Workbench): void {
       />
     ),
     actions: ({ uri }) => <ObjectTabSwitch uri={uri} tabs={objectTabs} />,
+    focus: (uri) => {
+      services.edits.copies.focusBuffer(uri);
+    },
   });
 
   editors.register({
@@ -172,6 +175,9 @@ export function registerKube(workbench: Workbench): void {
         discovery={services.discovery}
       />
     ),
+    focus: (uri) => {
+      services.edits.copies.focusBuffer(uri);
+    },
   });
 
   commands.register({

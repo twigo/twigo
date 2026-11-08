@@ -169,6 +169,11 @@ export class WorkingCopies {
     else this.#focusing.add(uri);
   }
 
+  /** As `focus`, for an editor that has a buffer: an object shown on another tab has no text to focus. */
+  focusBuffer(uri: string): void {
+    if (this.#buffers.has(uri)) this.focus(uri);
+  }
+
   /** Whether the editor was asked for focus while it had no view, which its new view takes. */
   takeFocus(uri: string): boolean {
     return this.#focusing.delete(uri);

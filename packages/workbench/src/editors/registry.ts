@@ -31,6 +31,8 @@ export interface EditorProvider {
   /** The tab's icon, which may depend on the URI (the kind of a list). */
   readonly icon?: ComponentType<{ uri: string; className?: string }>;
   readonly component: ComponentType<EditorProps>;
+  /** Gives the editor the keyboard focus, if it has something of its own to hold it, such as a text editor. */
+  readonly focus?: (uri: string) => void;
   /** What the editor shows at the right of its group's tab strip while it is the group's active one. */
   readonly actions?: ComponentType<EditorProps>;
 }
@@ -159,7 +161,10 @@ export class Editors {
             this.changes.emit();
           })
         : undefined;
-    if (area === "editor") this.#setActive(api.activePanel);
+    if (area === "editor") {
+      this.#setActive(api.activePanel);
+      this.#keepFocus("editor");
+    }
     for (const [uri, later] of [...this.#leaving]) {
       if (later.area !== area || later.space !== space) continue;
       this.#leaving.delete(uri);
@@ -204,6 +209,7 @@ export class Editors {
       if (!preview) this.pin(uri);
       this.reveal(open.area);
       open.panel.api.setActive();
+      this.#keepFocus(open.area);
       return;
     }
     const api = this.#apis.get(area);
@@ -233,6 +239,7 @@ export class Editors {
       }),
     });
     replaced?.api.close();
+    this.#keepFocus(area);
   }
 
   /** Turns a preview tab into an ordinary one. */
@@ -289,21 +296,15 @@ export class Editors {
   }
 
   /**
-   * Closes an editor, and gives the keyboard focus to the editor that becomes
-   * active if closing it dropped the focus to the page. One that belongs to another space than
-   * its area shows closes when that space's dock is mounted, as an open for it
-   * waits.
+   * Closes an editor. One that belongs to another space than its area shows
+   * closes when that space's dock is mounted, as an open for it waits.
    */
   close(uri: string): void {
     this.#waiting.delete(uri);
     const open = this.#find(uri);
     if (open) {
-      const held = open.panel.group.element.contains(document.activeElement);
       open.panel.api.close();
-      // A focused element that goes takes the keyboard focus to the page.
-      if (held && document.activeElement === document.body) {
-        this.#apis.get(open.area)?.focus();
-      }
+      this.#keepFocus(open.area);
       return;
     }
     const provider = this.resolve(uri);
@@ -319,6 +320,20 @@ export class Editors {
     const panel = this.#apis.get(area)?.activePanel;
     if (!panel || panel.group.panels.length < 2) return;
     panel.api.moveTo({ group: panel.group, position: side });
+    this.#keepFocus(area);
+  }
+
+  /**
+   * An editor that opens, closes or moves, or a space that shows, takes a
+   * focused element away, and the browser puts the keyboard focus on the page,
+   * where no key reaches an editor. The active group then takes it, and an
+   * editor that can hold it, its own.
+   */
+  #keepFocus(area: Area): void {
+    if (document.activeElement !== document.body) return;
+    this.#apis.get(area)?.focus();
+    const uri = this.activeIn(area);
+    if (uri !== undefined) this.resolve(uri)?.focus?.(uri);
   }
 
   #find(uri: string): { area: Area; panel: IDockviewPanel } | undefined {

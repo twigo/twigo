@@ -252,6 +252,80 @@ test("closing the editor that holds the keyboard focus gives it to the editor th
   ).toBe(true);
 });
 
+test("opening, moving or a space shown gives the active group the focus that fell to the page, and an editor that can hold it its own", async () => {
+  const { workbench, editors } = await mounted();
+  const focused: string[] = [];
+  workbench.editors.register({
+    id: "test.field",
+    scheme: "field",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <input aria-label={uri} />,
+    focus: (uri) => {
+      focused.push(uri);
+    },
+  });
+  act(() => {
+    editors.open("field://a");
+  });
+  act(() => {
+    screen.getByLabelText("field://a").focus();
+  });
+  act(() => {
+    editors.open("field://b");
+  });
+  expect(document.activeElement).not.toBe(document.body);
+  expect(focused).toEqual(["field://a", "field://b"]);
+
+  act(() => {
+    (document.activeElement as HTMLElement).blur();
+  });
+  act(() => {
+    editors.open("field://a");
+  });
+  expect(document.activeElement).not.toBe(document.body);
+  expect(focused).toEqual(["field://a", "field://b", "field://a"]);
+
+  act(() => {
+    editors.moveActive("right");
+  });
+  act(() => {
+    (document.activeElement as HTMLElement).blur();
+  });
+  act(() => {
+    editors.moveActive("bottom");
+  });
+  act(() => {
+    (document.activeElement as HTMLElement).blur();
+  });
+  expect(document.activeElement).toBe(document.body);
+  const [first, second] = workbench.spaces.list;
+  act(() => {
+    if (second) workbench.spaces.select(second.id);
+  });
+  act(() => {
+    if (first) workbench.spaces.select(first.id);
+  });
+  expect(document.activeElement).not.toBe(document.body);
+});
+
+test("a focus already held outside the editor area stays where it is when an editor opens", async () => {
+  const { workbench, editors } = await mounted();
+  workbench.editors.register({
+    id: "test.field",
+    scheme: "field",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <input aria-label={uri} />,
+  });
+  const outside = document.createElement("input");
+  document.body.append(outside);
+  outside.focus();
+  act(() => {
+    editors.open("field://a");
+  });
+  expect(document.activeElement).toBe(outside);
+  outside.remove();
+});
+
 test("closing an editor says so, while moving it or switching spaces does not", async () => {
   const { workbench, editors } = await mounted();
   const closed: string[] = [];
