@@ -986,7 +986,6 @@ test("a delete whose object went before it ran says so and takes nothing else", 
   };
   await run(backend, first.id);
   expect(await run(backend, second.id)).toEqual([
-    { state: "running", text: `Waiting for job ${job} to go` },
     { state: "done", text: `Job ${job} was already gone`, undoUntil: null },
   ]);
   const still = await answered(backend.invoke("command_plan", lastStays));

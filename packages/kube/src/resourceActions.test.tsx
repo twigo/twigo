@@ -199,6 +199,15 @@ test("⌘⌫ with marked rows deletes those rows", async () => {
   await settle(2);
   expect(workbench.keys.lookup(main)("listMarked")).toBe(true);
 
+  run.mockResolvedValueOnce({ state: "failed" });
+  fireEvent.keyDown(main, {
+    code: "Backspace",
+    key: "Backspace",
+    metaKey: true,
+  });
+  await settle(2);
+  expect(workbench.keys.lookup(main)("listMarked")).toBe(true);
+
   run.mockResolvedValueOnce({ state: "stopped" });
   fireEvent.keyDown(main, {
     code: "Backspace",

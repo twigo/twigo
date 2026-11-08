@@ -436,8 +436,8 @@ export class MockBus {
       new IpcError("notFound", `${kind.name} "${name}" not found`);
     const objects: ObjectRef[] = [];
     const following: ObjectRef[] = [];
-    /** Each removes its object, and says whether it was still there. */
-    const deletes: (() => boolean)[] = [];
+    /** Whether each object is still there, and what removes it. */
+    const deletes: { there: () => boolean; remove: () => void }[] = [];
     let replacedBy: string | undefined;
     // As Rust's: an object gone since it was marked stays out.
     const kept: ResourceRef[] = [];
@@ -462,19 +462,21 @@ export class MockBus {
           if (!pod) throw gone(name);
           objects.push(object("Pod", "v1"));
           replacedBy = `${deploymentOf(pod)}-${pod.templateHash}`;
-          deletes.push(() => {
-            if (!cluster.pods.includes(pod)) return false;
-            cluster.deletePod(pod, Date.now());
-            return true;
+          deletes.push({
+            there: () => cluster.pods.includes(pod),
+            remove: () => {
+              cluster.deletePod(pod, Date.now());
+            },
           });
         } else if (resource === "nodes") {
           if (!cluster.nodes.some((node) => node.name === name))
             throw gone(name);
           objects.push(object("Node", "v1"));
-          deletes.push(() => {
-            if (!cluster.nodes.some((node) => node.name === name)) return false;
-            cluster.deleteNode(name);
-            return true;
+          deletes.push({
+            there: () => cluster.nodes.some((node) => node.name === name),
+            remove: () => {
+              cluster.deleteNode(name);
+            },
           });
         } else if (resource === "deployments") {
           const pods = this.#deployment(cluster, target);
@@ -490,16 +492,16 @@ export class MockBus {
             });
           }
           following.push(...pods.map(podRef));
-          deletes.push(() => {
-            const key = `${namespace ?? ""}/${name}`;
-            const there =
+          const key = `${namespace ?? ""}/${name}`;
+          deletes.push({
+            there: () =>
               namespace !== null &&
               (cluster.podsOf(namespace, name).length > 0 ||
-                cluster.emptied.has(key));
-            if (!there) return false;
-            cluster.deleteDeployment(namespace, name);
-            cluster.emptied.delete(key);
-            return true;
+                cluster.emptied.has(key)),
+            remove: () => {
+              if (namespace !== null) cluster.deleteDeployment(namespace, name);
+              cluster.emptied.delete(key);
+            },
           });
         } else {
           const list: (CronJob | Job)[] =
@@ -525,19 +527,20 @@ export class MockBus {
                 })),
             );
           }
-          deletes.push(() => {
-            const at = list.indexOf(found);
-            if (at < 0) return false;
-            list.splice(at, 1);
-            if (resource === "cronjobs") {
-              for (const job of cluster.jobs.filter(
-                (candidate) =>
-                  candidate.namespace === namespace && candidate.owner === name,
-              ))
-                cluster.jobs.splice(cluster.jobs.indexOf(job), 1);
-            }
-            cluster.version++;
-            return true;
+          deletes.push({
+            there: () => list.includes(found),
+            remove: () => {
+              list.splice(list.indexOf(found), 1);
+              if (resource === "cronjobs") {
+                for (const job of cluster.jobs.filter(
+                  (candidate) =>
+                    candidate.namespace === namespace &&
+                    candidate.owner === name,
+                ))
+                  cluster.jobs.splice(cluster.jobs.indexOf(job), 1);
+              }
+              cluster.version++;
+            },
           });
         }
         kept.push(target);
@@ -625,22 +628,29 @@ export class MockBus {
       write: { verb: "delete", target: writes[0] ?? "" },
       space,
       run: (tell) => {
+        // As Rust's: what went before the run is told at once, and the
+        // wait counts only what it sent.
+        const going = deletes.filter(({ there }) => there());
+        const gone = deletes.length - going.length;
+        const text =
+          gone === 0
+            ? `Deleted ${what}`
+            : several
+              ? `Deleted ${counted(going.length, kind.words)}; ${String(gone)} ${gone === 1 ? "was" : "were"} already gone`
+              : `${capital(what)} was already gone`;
+        if (going.length === 0) {
+          tell({ state: "done", text, undoUntil: null });
+          return;
+        }
         tell({
           state: "running",
           text: several
-            ? `Waiting for ${String(kept.length)} of ${what} to go`
+            ? `Waiting for ${String(going.length)} of ${counted(going.length, kind.words)} to go`
             : `Waiting for ${what} to go`,
         });
         setTimeout(() => {
-          const gone = deletes.filter((remove) => !remove()).length;
+          for (const { remove } of going) remove();
           this.host.changed();
-          const sent = deletes.length - gone;
-          const text =
-            gone === 0
-              ? `Deleted ${what}`
-              : several
-                ? `Deleted ${counted(sent, kind.words)}; ${String(gone)} ${gone === 1 ? "was" : "were"} already gone`
-                : `${capital(what)} was already gone`;
           tell({ state: "done", text, undoUntil: null });
         }, GRACE_MS);
       },
