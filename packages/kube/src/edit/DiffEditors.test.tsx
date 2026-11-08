@@ -36,6 +36,31 @@ async function shown(uri: string) {
   return { workbench, edits };
 }
 
+test("a diff tab that is the active editor and displays the preview makes it shown, and one in the background does not", async () => {
+  const { workbench, edits, uri } = await setupEdit("live", "dev");
+  await edits.previews.run(uri, {
+    space: "dev",
+    opened: null,
+    text: edits.copies.get(uri)?.text ?? "",
+  });
+  const answered = () => edits.previews.get(uri);
+  expect(answered()).toMatchObject({ state: "answered", shown: false });
+  const diff = diffUri({ kind: "apply", editor: uri });
+  const discovery = new Discovery(workbench);
+  const view = () => (
+    <DiffEditor uri={diff} edits={edits} discovery={discovery} />
+  );
+  const active = vi.spyOn(workbench.editors, "active", "get");
+  active.mockReturnValue("k8s://dev//v1/pods/default/other");
+  const { rerender } = render(view(), { wrapper: inWorkbench(workbench) });
+  expect(await screen.findByTestId("diff")).toBeTruthy();
+  expect(answered()).toMatchObject({ shown: false });
+
+  active.mockReturnValue(diff);
+  rerender(view());
+  expect(answered()).toMatchObject({ shown: true });
+});
+
 test("the diff against the server follows the object itself, which nothing else has open", async () => {
   const workbench = await testWorkbench("ready");
   const edits = createEdits(workbench);

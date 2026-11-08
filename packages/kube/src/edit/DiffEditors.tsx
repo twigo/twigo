@@ -28,7 +28,7 @@ export function DiffEditor({
   }
   switch (input.kind) {
     case "apply":
-      return <ApplyDiff edits={edits} editor={input.editor} />;
+      return <ApplyDiff edits={edits} editor={input.editor} uri={uri} />;
     case "server":
       return (
         <ServerDiff edits={edits} discovery={discovery} editor={input.editor} />
@@ -45,15 +45,31 @@ export function DiffEditor({
   }
 }
 
-function ApplyDiff({ edits, editor }: { edits: EditServices; editor: string }) {
+function ApplyDiff({
+  edits,
+  editor,
+  uri,
+}: {
+  edits: EditServices;
+  editor: string;
+  uri: string;
+}) {
+  const { editors } = useWorkbench();
   useChanges(edits.previews.changes);
   useChanges(edits.copies.changes);
+  useChanges(editors.changes);
+  const preview = edits.previews.get(editor);
+  // An answer that came while its space was away is shown once its tab is on screen.
+  const onScreen = editors.active === uri && preview?.state === "answered";
+  useEffect(() => {
+    if (onScreen) edits.previews.shown(editor);
+  }, [edits.previews, editor, onScreen]);
   return (
     <div className="h-full bg-editor">
       <PreviewPage
         edits={edits}
         uri={editor}
-        preview={edits.previews.get(editor)}
+        preview={preview}
         current={edits.copies.get(editor)?.text ?? ""}
       />
     </div>
