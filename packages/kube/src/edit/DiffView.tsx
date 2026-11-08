@@ -9,6 +9,7 @@ export default function DiffView({
   readonly modified: string;
 }) {
   const host = useRef<HTMLDivElement>(null);
+  const diff = useRef<editor.IStandaloneDiffEditor>(undefined);
   const models = useRef<{
     original: editor.ITextModel;
     modified: editor.ITextModel;
@@ -35,6 +36,7 @@ export default function DiffView({
       renderOverviewRuler: false,
     });
     view.setModel(pair);
+    diff.current = view;
     models.current = pair;
     return () => {
       // A diff still being computed fails once its models are gone.
@@ -42,14 +44,27 @@ export default function DiffView({
       view.dispose();
       pair.original.dispose();
       pair.modified.dispose();
+      diff.current = undefined;
       models.current = undefined;
     };
   }, []);
   useEffect(() => {
     const pair = models.current;
-    if (!pair) return;
-    if (pair.original.getValue() !== original) pair.original.setValue(original);
-    if (pair.modified.getValue() !== modified) pair.modified.setValue(modified);
+    const view = diff.current;
+    if (!pair || !view) return;
+    // `setValue` puts the cursor and the selection back at the start.
+    const update = (
+      model: editor.ITextModel,
+      side: editor.ICodeEditor,
+      text: string,
+    ) => {
+      if (model.getValue() === text) return;
+      const where = side.saveViewState();
+      model.setValue(text);
+      if (where) side.restoreViewState(where);
+    };
+    update(pair.original, view.getOriginalEditor(), original);
+    update(pair.modified, view.getModifiedEditor(), modified);
   }, [original, modified]);
   return <div ref={host} className="h-full w-full" />;
 }

@@ -746,6 +746,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   - Closing an editor keeps its copy, which the tab shows again when the object opens anew.
   - An object that is deleted, or that the cluster cannot be asked for, leaves the YAML tab its editor while a copy exists, on the object the copy was based on, with a bar that says why the object is not there.
   - The diff against the server, like the diff of two objects, follows the object itself rather than what its editor last saw, so it holds after a restart and when the editor's tab is closed, and it tells the copy what it read, so that Keep mine from it locks to the version it shows; a diff of two objects says which of them it cannot read, and that a Secret's values are hidden as their sizes.
+    A side that the object changes under updates in place and keeps the cursor and the selection of whoever is reading it.
   - The service also keeps each shown YAML editor's Monaco model, which holds its undo stack, and the cursor and scroll of its view, so they survive a switch between Overview and YAML.
     They go when the editor closes, the copy staying as text; a text that comes from outside, the live object once a copy has ended, replaces the model's and leaves the cursor and scroll where they were, and clears the undo stack.
 - **Overview.**
