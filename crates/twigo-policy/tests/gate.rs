@@ -99,6 +99,14 @@ fn table() -> Vec<Row> {
         row("discovery", get.clone(), "/apis", Read, OPEN),
         row("the version", get.clone(), "/version", Read, OPEN),
         row("openapi", get.clone(), "/openapi/v3/api/v1", Read, OPEN),
+        row("the openapi index", get.clone(), "/openapi/v3", Read, OPEN),
+        row(
+            "an openapi document by its hash",
+            get.clone(),
+            "/openapi/v3/apis/apps/v1?hash=0A1B",
+            Read,
+            OPEN,
+        ),
         // POSTs that only ask
         row(
             "access review",

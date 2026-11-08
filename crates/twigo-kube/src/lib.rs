@@ -4,3 +4,4 @@ pub mod discovery;
 mod disk;
 pub mod errors;
 pub mod kubeconfig;
+pub mod openapi;
