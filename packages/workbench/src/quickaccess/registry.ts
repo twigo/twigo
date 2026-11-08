@@ -85,9 +85,19 @@ export interface QuickAccessList {
   accept(options: AcceptOptions): void;
 }
 
+/**
+ * Rows asked for each value typed, as a provider's are, for a list too long
+ * to hold or one that a backend filters.
+ */
+export type PickSource = (
+  filter: string,
+) => readonly QuickPickItem[] | Promise<readonly QuickPickItem[]>;
+
 interface Pick {
   readonly placeholder: string;
+  /** The rows the widget filters; none when `source` gives them. */
   readonly items: readonly QuickPickItem[];
+  readonly source: PickSource | undefined;
   readonly resolve: (item: QuickPickItem | undefined) => void;
 }
 
@@ -165,16 +175,25 @@ export class QuickAccess {
     this.#open({ value, pick: undefined, ask: undefined });
   }
 
-  /** Lets the user pick one item; undefined if they dismiss quick access. */
+  /**
+   * Lets the user pick one item; undefined if they dismiss quick access.
+   * The items are a list, or a source asked for the rows of each value typed.
+   */
   pick(
     placeholder: string,
-    items: readonly QuickPickItem[],
+    items: readonly QuickPickItem[] | PickSource,
   ): Promise<QuickPickItem | undefined> {
     this.#settle(undefined);
     return new Promise((resolve) => {
+      const listed = typeof items === "function";
       this.#open({
         value: "",
-        pick: { placeholder, items, resolve },
+        pick: {
+          placeholder,
+          items: listed ? [] : items,
+          source: listed ? items : undefined,
+          resolve,
+        },
         ask: undefined,
       });
     });

@@ -66,12 +66,16 @@ function Open({ session }: { session: Session }) {
   const [selected, setSelected] = useState("");
   const root = useRef<HTMLDivElement>(null);
 
+  const source = pick?.source;
   useEffect(() => {
-    if (pick || ask) return;
+    if (ask || (pick && !source)) return;
+    const target = source ? undefined : quickAccess.resolve(value);
+    const load = source
+      ? () => source(value)
+      : target && (() => target.provider.items(target.filter, context));
+    if (!load) return;
     let live = true;
-    const target = quickAccess.resolve(value);
-    if (!target) return;
-    Promise.resolve(target.provider.items(target.filter, context)).then(
+    Promise.resolve(load()).then(
       (items) => {
         if (live) setLoaded({ value, result: { state: "ready", items } });
       },
@@ -87,11 +91,11 @@ function Open({ session }: { session: Session }) {
     return () => {
       live = false;
     };
-  }, [quickAccess, value, pick, ask, context]);
+  }, [quickAccess, value, pick, source, ask, context]);
 
   const result: Loaded = ask
     ? { state: "ready", items: [] }
-    : pick
+    : pick && !source
       ? { state: "ready", items: filtered(pick.items, value) }
       : loaded?.value === value
         ? loaded.result

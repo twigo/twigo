@@ -18,6 +18,7 @@ export { Changes } from "./changes";
 export { useChanges, useWorkbench } from "./react";
 export type {
   AcceptOptions,
+  PickSource,
   QuickAccessContext,
   QuickAccessProvider,
   QuickPickItem,

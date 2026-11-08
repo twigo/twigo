@@ -47,6 +47,33 @@ const selected = () =>
   document.querySelector('[cmdk-item][aria-selected="true"]')?.textContent;
 const footer = () => screen.getByLabelText("Keys").textContent;
 
+test("a pick with a source is asked for the rows of each value typed, and shows them as they come", async () => {
+  const workbench = await testWorkbench();
+  const source = vi.fn((filter: string): QuickPickItem[] =>
+    filter === ""
+      ? [{ id: "a", label: "alpha" }]
+      : [{ id: "z", label: "zulu" }],
+  );
+  render(<QuickAccessWidget />, { wrapper: inWorkbench(workbench) });
+  let picked: Promise<QuickPickItem | undefined> | undefined;
+  await act(async () => {
+    picked = workbench.quickAccess.pick("Compare with…", source);
+    await Promise.resolve();
+  });
+  expect(screen.getByText("alpha")).toBeTruthy();
+
+  await act(async () => {
+    fireEvent.change(input(), { target: { value: "u" } });
+    await Promise.resolve();
+  });
+  expect(source).toHaveBeenLastCalledWith("u");
+  expect(screen.queryByText("alpha")).toBeNull();
+  expect(screen.getByText("zulu")).toBeTruthy();
+
+  press("Enter");
+  await expect(picked).resolves.toEqual({ id: "z", label: "zulu" });
+});
+
 test("items loaded for another value are neither shown nor accepted", async () => {
   const workbench = await testWorkbench();
   const pending = new Map<string, (items: QuickPickItem[]) => void>();
