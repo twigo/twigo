@@ -40,7 +40,6 @@ async function withEveryEnablement() {
   return workbench;
 }
 
-/** The kinds whose actions only their lists show, and those actions. */
 const KINDS = [
   { group: "", kind: "Node", commands: /^k8s\.node\./ },
   { group: "apps", kind: "Deployment", commands: /^k8s\.resource\.restart$/ },

@@ -240,7 +240,6 @@ test("a Reveal whose Secret closed before it ran fails, and says so", async () =
   ]);
 });
 
-/** The first pod's Deployment in qa, and how many pods it has. */
 function deployment() {
   const first = pod("qa");
   const name = deploymentOf(first);
@@ -564,7 +563,7 @@ test("suspending a job that runs asks, and so does undoing its resume", async ()
       () => undefined,
     ),
   );
-  await vi.advanceTimersByTimeAsync(10);
+  await vi.advanceTimersByTimeAsync(5000);
   const resume = await answered(backend.invoke("command_plan", suspend(false)));
   expect(resume.friction).toEqual({ kind: "atOnce" });
   await answered(

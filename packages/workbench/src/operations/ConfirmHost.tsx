@@ -64,7 +64,7 @@ export function ConfirmHost() {
       {...(plan.friction.kind === "typed" && { typed: plan.friction.text })}
       confirm={plan.confirm}
       icon={look.icon}
-      destructive={look.destructive}
+      destructive={plan.destructive}
       onConfirm={asking.confirm}
       onCancel={asking.cancel}
     />

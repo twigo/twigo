@@ -1,4 +1,4 @@
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { Trash2 } from "lucide-react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
@@ -12,6 +12,7 @@ import {
 import { createMockBackend } from "@twigo/protocol/mock";
 import { notify, Toaster } from "@twigo/ui";
 import { testWorkbench } from "../testing";
+import { WorkbenchView } from "../WorkbenchView";
 import { COUNTING_DOWN, UNDOABLE, type Outcome } from "./service";
 
 beforeEach(() => {
@@ -24,7 +25,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const LOOK = { icon: Trash2, destructive: true };
+const LOOK = { icon: Trash2 };
 
 const REQUEST: PlanRequest = {
   action: "delete",
@@ -48,6 +49,7 @@ function plan(friction: Plan["friction"]): Plan {
     friction,
     question: "Delete pod web-1 in default from dev?",
     confirm: "Delete pod",
+    destructive: true,
     consequences: ["Its replica set web-5d4f replaces it."],
     affected: [],
     kubectl: "kubectl --context dev delete pods web-1 -n default",
@@ -516,7 +518,36 @@ test("an undo Rust refused leaves the undo to try again", async () => {
   expect(keys.lookup(null)(UNDOABLE)).toEqual(["dev"]);
 });
 
-test("an undo that asks draws a button that takes something away", async () => {
+test("an undo's button takes something away only when its plan says so, and a cancel keeps the undo", async () => {
+  vi.spyOn(notify, "undoable").mockReturnValue({ dismiss: vi.fn() });
+  const until = Date.now() + 30_000;
+  const scaled = await started(plan({ kind: "atOnce" }), [
+    { state: "done", text: "Scaled deployment web to 2", undoUntil: until },
+  ]);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await scaled.outcome;
+  const { workbench } = scaled;
+  render(<WorkbenchView workbench={workbench} />);
+  const button = () => screen.getByRole("button", { name: /^Undo/ });
+  for (const destructive of [true, false]) {
+    vi.spyOn(workbench.backend, "invoke").mockResolvedValueOnce({
+      ...plan({ kind: "confirm" }),
+      id: destructive ? 9 : 10,
+      confirm: "Undo",
+      destructive,
+    });
+    const undone = workbench.operations.undo("dev");
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(button().className.includes("bg-destructive")).toBe(destructive);
+    act(() => {
+      workbench.operations.asking?.cancel();
+    });
+    await expect(undone).resolves.toEqual({ state: "cancelled" });
+    expect(workbench.keys.lookup(null)(UNDOABLE)).toEqual(["dev"]);
+  }
+});
+
+test("an undo's dialog closes when the undo ends", async () => {
   vi.spyOn(notify, "undoable").mockReturnValue({ dismiss: vi.fn() });
   const until = Date.now() + 30_000;
   const scaled = await started(plan({ kind: "atOnce" }), [
@@ -525,19 +556,16 @@ test("an undo that asks draws a button that takes something away", async () => {
   await act(() => vi.advanceTimersByTimeAsync(20));
   await scaled.outcome;
   const { operations, backend } = scaled.workbench;
-  const asks: Plan = {
+  vi.spyOn(backend, "invoke").mockResolvedValueOnce({
     ...plan({ kind: "confirm" }),
     id: 9,
-    consequences: ["Its pods go, and none take their place."],
-  };
-  vi.spyOn(backend, "invoke").mockResolvedValueOnce(asks);
-  void operations.undo("dev");
+  });
+  const undone = operations.undo("dev");
   await act(() => vi.advanceTimersByTimeAsync(0));
   expect(operations.asking?.plan.id).toBe(9);
-  expect(operations.asking?.look).toEqual({
-    icon: LOOK.icon,
-    destructive: true,
-  });
+  await act(() => vi.advanceTimersByTimeAsync(30_000));
+  expect(operations.asking).toBeUndefined();
+  await expect(undone).resolves.toEqual({ state: "cancelled" });
 });
 
 test("a done run whose undo is not offered still says so", async () => {

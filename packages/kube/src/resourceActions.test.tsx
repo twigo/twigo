@@ -82,7 +82,7 @@ test("⌘⌫ on a row asks the bus to delete it, and its dialog names the cluste
         }) as unknown,
       ],
     },
-    expect.objectContaining({ destructive: true }),
+    expect.objectContaining({ icon: expect.anything() as unknown }),
   );
   const dialog = screen.getByRole("dialog");
   expect(dialog.textContent).toMatch(
@@ -91,7 +91,6 @@ test("⌘⌫ on a row asks the bus to delete it, and its dialog names the cluste
   expect(screen.getByLabelText("Type staging to confirm")).toBeTruthy();
 });
 
-/** The workbench with a list of staging open. */
 async function openInStaging(scenario: "ready" | "viewer", uri: string) {
   const workbench = await mountKube(createMockBackend(scenario));
   act(() => {
@@ -105,7 +104,6 @@ async function openInStaging(scenario: "ready" | "viewer", uri: string) {
   return workbench;
 }
 
-/** The first grid with its first row selected and the focus. */
 async function selectFirst(): Promise<HTMLElement> {
   const main = screen.getAllByRole("grid")[0];
   if (!main) throw new Error("a list");
@@ -163,7 +161,7 @@ test("⇧S asks for the replicas in quick access and scales to what is typed", a
   await settle(2);
   expect(run).toHaveBeenCalledWith(
     expect.objectContaining({ action: "scale", space: "staging", replicas: 7 }),
-    expect.objectContaining({ destructive: false }),
+    expect.objectContaining({ icon: expect.anything() as unknown }),
   );
 });
 

@@ -81,7 +81,7 @@ export function registerResourceActions(
   /** Plans and runs a request of the bus on the selected row's space. */
   const act = async (
     request: (space: string, found: { selected: Selected }) => PlanRequest,
-    look: { icon: LucideIcon; destructive: boolean },
+    look: { icon: LucideIcon },
   ) => {
     const found = target();
     const space = found && parseListUri(found.uri)?.space;
@@ -257,7 +257,7 @@ export function registerResourceActions(
             target: reference(found),
             replicas: Number(typed.trim()),
           }),
-          { icon: Scaling, destructive: Number(typed.trim()) === 0 },
+          { icon: Scaling },
         );
       },
     },
@@ -278,7 +278,7 @@ export function registerResourceActions(
             space,
             target: reference(found),
           }),
-          { icon: RotateCcw, destructive: false },
+          { icon: RotateCcw },
         ),
     },
     {
@@ -299,7 +299,7 @@ export function registerResourceActions(
             node: node(found),
             unschedulable: true,
           }),
-          { icon: CircleSlash, destructive: false },
+          { icon: CircleSlash },
         ),
     },
     {
@@ -320,7 +320,7 @@ export function registerResourceActions(
             node: node(found),
             unschedulable: false,
           }),
-          { icon: CircleCheck, destructive: false },
+          { icon: CircleCheck },
         ),
     },
     {
@@ -336,7 +336,6 @@ export function registerResourceActions(
       run: () =>
         act((space, found) => ({ action: "drain", space, node: node(found) }), {
           icon: ArrowDownToLine,
-          destructive: true,
         }),
     },
     {
@@ -360,7 +359,7 @@ export function registerResourceActions(
               name,
             };
           },
-          { icon: Play, destructive: false },
+          { icon: Play },
         ),
     },
     {
@@ -381,7 +380,7 @@ export function registerResourceActions(
             target: reference(found),
             suspend: true,
           }),
-          { icon: CirclePause, destructive: false },
+          { icon: CirclePause },
         ),
     },
     {
@@ -402,7 +401,7 @@ export function registerResourceActions(
             target: reference(found),
             suspend: false,
           }),
-          { icon: CirclePlay, destructive: false },
+          { icon: CirclePlay },
         ),
     },
     {
@@ -423,7 +422,7 @@ export function registerResourceActions(
             space,
             targets: [reference(found)],
           }),
-          { icon: Trash2, destructive: true },
+          { icon: Trash2 },
         ),
     },
     {
@@ -450,7 +449,7 @@ export function registerResourceActions(
         });
         await workbench.operations.run(
           { action: "delete", space: list.space, targets },
-          { icon: Trash2, destructive: true },
+          { icon: Trash2 },
         );
       },
     },

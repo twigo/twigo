@@ -570,6 +570,7 @@ export class MockBus {
         context,
         question: `Delete ${what}${place} from ${context}?`,
         confirm: several ? `Delete ${what}` : `Delete ${kind.words}`,
+        destructive: true,
         consequences,
         affected,
         kubectl,
@@ -625,6 +626,7 @@ export class MockBus {
         context,
         question: `Scale ${what} in ${ns} to ${String(replicas)} on ${context}?`,
         confirm: `Scale to ${String(replicas)}`,
+        destructive: zero,
         consequences: zero ? ["Its pods go, and none take their place."] : [],
         affected:
           zero && pods.length > 0
@@ -694,6 +696,7 @@ export class MockBus {
         context,
         question: `Restart ${what} in ${namespace ?? ""} on ${context}?`,
         confirm: "Restart deployment",
+        destructive: false,
         consequences: [
           "Its pods are replaced in turn, as its update strategy says.",
         ],
@@ -738,6 +741,7 @@ export class MockBus {
         context,
         question: `${capital(verb)} node ${name} on ${context}?`,
         confirm: `${capital(verb)} node`,
+        destructive: false,
         consequences: [
           unschedulable
             ? "No new pods are scheduled on it; those on it stay."
@@ -788,6 +792,7 @@ export class MockBus {
         context,
         question: `Drain node ${name} on ${context}?`,
         confirm: "Drain node",
+        destructive: true,
         consequences: [
           "It is cordoned first, and stays cordoned.",
           "A disruption budget may hold a pod back; Twigo asks again every 5 s.",
@@ -844,6 +849,7 @@ export class MockBus {
         context,
         question: `Trigger cron job ${name} in ${namespace} on ${context} now?`,
         confirm: "Trigger cron job",
+        destructive: false,
         consequences: [
           `Job ${job} runs once from its template, beside its schedule.`,
         ],
@@ -857,17 +863,11 @@ export class MockBus {
       run: (tell) => {
         cluster.trigger(namespace, name, job, Date.now());
         this.host.changed();
-        setTimeout(() => {
-          const made = cluster.jobs.find(
-            (candidate) =>
-              candidate.namespace === namespace && candidate.name === job,
-          );
-          if (made?.completed === null) {
-            made.completed = Date.now();
-            cluster.version++;
-            this.host.changed();
-          }
-        }, JOB_MS);
+        const made = cluster.jobs.find(
+          (candidate) =>
+            candidate.namespace === namespace && candidate.name === job,
+        );
+        if (made) this.#runs(cluster, made);
         tell({ state: "done", text: `Created job ${job}`, undoUntil: null });
       },
     };
@@ -945,6 +945,7 @@ export class MockBus {
         context,
         question: `${verb} ${what} in ${namespace ?? ""} on ${context}?`,
         confirm: `${verb} ${kind}`,
+        destructive: asked.risk.kind === "lasting",
         consequences: asked.consequences,
         affected: asked.affected,
         kubectl: line(suspend),
@@ -954,7 +955,7 @@ export class MockBus {
       write,
       space,
       run: (tell) => {
-        cluster.suspend(found, suspend);
+        this.#switch(cluster, found, suspend);
         this.host.changed();
         tell({
           state: "undoable",
@@ -969,12 +970,34 @@ export class MockBus {
             done: `${back.done} ${what}`,
             kubectl: line(!suspend),
             put: () => {
-              cluster.suspend(found, !suspend);
+              this.#switch(cluster, found, !suspend);
             },
           },
         });
       },
     };
+  }
+
+  /** Completes a running Job after its time, unless it was suspended or went meanwhile. */
+  #runs(cluster: Cluster, job: Job): void {
+    setTimeout(() => {
+      if (
+        !cluster.jobs.includes(job) ||
+        job.suspend ||
+        job.completed !== null
+      ) {
+        return;
+      }
+      job.completed = Date.now();
+      cluster.version++;
+      this.host.changed();
+    }, JOB_MS);
+  }
+
+  /** Suspends a Job or a CronJob, or resumes it; a resumed Job runs again. */
+  #switch(cluster: Cluster, found: CronJob | Job, suspend: boolean): void {
+    cluster.suspend(found, suspend);
+    if (!suspend && "completed" in found) this.#runs(cluster, found);
   }
 
   #undo(space: string): Planned {
@@ -989,6 +1012,7 @@ export class MockBus {
         context: revert.context,
         question: revert.question,
         confirm: "Undo",
+        destructive: asked.risk.kind === "lasting",
         consequences: asked.consequences,
         affected: asked.affected,
         kubectl: revert.kubectl,
@@ -1023,6 +1047,7 @@ export class MockBus {
         context,
         question: `Reveal ${key} of secret ${name} in ${namespace} from ${context}?`,
         confirm: "Reveal value",
+        destructive: false,
         consequences: [
           `It shows until you hide it or close the secret${binary ? ", as base64" : ""}.`,
         ],

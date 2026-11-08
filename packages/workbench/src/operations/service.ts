@@ -23,10 +23,9 @@ export const UNDOABLE = "operationUndo";
 /** Puts back the active space's last action (decision 5 of M2). */
 export const UNDO = "workbench.action.undo";
 
-/** How a command's caller draws its friction: the button's icon, and whether it destroys. */
+/** How a command's caller draws its friction: the button's icon; the plan says whether it destroys. */
 export interface Look {
   readonly icon: LucideIcon;
-  readonly destructive: boolean;
 }
 
 /** A plan a dialog asks the person to confirm. */
@@ -50,6 +49,8 @@ interface Undo {
   readonly look: Look;
   /** While its own run is planned or goes, so a second ⌘Z waits. */
   undoing: boolean;
+  /** Its own plan, while a dialog may ask about it. */
+  plan?: PlanId;
   readonly dismiss: () => void;
 }
 
@@ -103,14 +104,14 @@ export class Operations {
 
   /** Plans `request`, asks as its friction says, and runs it once the person agrees. */
   run(request: PlanRequest, look: Look): Promise<Outcome> {
-    return this.#run(request, () => look, undefined);
+    return this.#run(request, look, undefined);
   }
 
-  /** As `run`, telling `taken` once Rust took the run, which a refused one it did not. */
+  /** As `run`, for the undo it puts back, if it does. */
   async #run(
     request: PlanRequest,
-    looks: (plan: Plan) => Look,
-    taken: (() => void) | undefined,
+    look: Look,
+    undo: Undo | undefined,
   ): Promise<Outcome> {
     let plan: Plan;
     try {
@@ -119,7 +120,7 @@ export class Operations {
       this.#refused(error);
       return { state: "failed" };
     }
-    const look = looks(plan);
+    if (undo) undo.plan = plan.id;
     const agreed = await this.#ask(plan, look, JSON.stringify(request));
     if (!agreed) {
       this.backend.invoke("command_cancel", plan.id).catch(this.report);
@@ -130,6 +131,15 @@ export class Operations {
       request.action === "reveal" || request.action === "undo"
         ? undefined
         : request.space;
+    // Rust takes the undo as its run starts; a refused one leaves it.
+    const taken =
+      undo && space === undefined && request.action === "undo"
+        ? () => {
+            if (this.#undos.get(request.space) === undo) {
+              this.#drop(request.space);
+            }
+          }
+        : undefined;
     return this.#execute(plan, agreed.typed, space, look, taken);
   }
 
@@ -138,18 +148,7 @@ export class Operations {
     const undo = this.#undos.get(space);
     if (!undo || undo.undoing) return { state: "cancelled" };
     undo.undoing = true;
-    // Rust takes the undo as its run starts; a refused one leaves it. One
-    // that asks, as back to zero, takes something away.
-    const outcome = await this.#run(
-      { action: "undo", space },
-      (plan) => ({
-        icon: undo.look.icon,
-        destructive: plan.consequences.length > 0,
-      }),
-      () => {
-        if (this.#undos.get(space) === undo) this.#drop(space);
-      },
-    );
+    const outcome = await this.#run({ action: "undo", space }, undo.look, undo);
     undo.undoing = false;
     return outcome;
   }
@@ -375,6 +374,10 @@ export class Operations {
     undo.dismiss();
     this.#undos.delete(space);
     this.#undoable();
+    // A dialog that asks about an undo that ended asks about nothing.
+    if (undo.plan !== undefined && this.#asking?.plan.id === undo.plan) {
+      this.#asking.cancel();
+    }
   }
 
   /** Offers a space's undo until it ends, its toast going with it. */
