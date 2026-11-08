@@ -6,7 +6,7 @@ import {
   type Workbench,
 } from "@twigo/workbench";
 import { WorkingCopies } from "./copies";
-import { parseDiffUri, parseObjectUri } from "../uri";
+import { parseDiffUri, parseObjectUri, parseUntitledUri } from "../uri";
 import { Previews } from "./previews";
 import { Schemas } from "./schemas";
 
@@ -91,16 +91,9 @@ export function editKeys(
   };
 }
 
-/**
- * The space an editor belongs to: an object's is its URI's, a new manifest's
- * is where it was written, and the editor of a manifest without text yet
- * belongs to whichever shows it.
- */
-export function editorSpace(
-  { copies }: Pick<EditServices, "copies">,
-  uri: string,
-): string | undefined {
-  return parseObjectUri(uri)?.space ?? copies.get(uri)?.space;
+/** The space an editor belongs to: an object's and a new manifest's URI name it. */
+export function editorSpace(uri: string): string | undefined {
+  return (parseObjectUri(uri) ?? parseUntitledUri(uri))?.space;
 }
 
 /**

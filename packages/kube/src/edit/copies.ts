@@ -14,7 +14,7 @@ import { parseObjectUri, parseUntitledUri, untitledUri } from "../uri";
  * the object as it was opened and the text the person made of it.
  */
 export interface WorkingCopy {
-  /** The space whose cluster the edit is of, or for a new manifest where it goes. */
+  /** The space the editor belongs to: whose cluster an object's edit is of, and where a new manifest was written. */
   readonly space: string;
   readonly base: string | undefined;
   readonly lock: string | undefined;
@@ -122,7 +122,7 @@ export class WorkingCopies {
   >();
   readonly #focusing = new Set<string>();
   readonly #loaded = new Set<string>();
-  #manifests = 0;
+  readonly #manifests = new Map<string, number>();
   readonly #seen = new Map<
     string,
     { readonly live: string; readonly statusSubresource: boolean }
@@ -223,9 +223,12 @@ export class WorkingCopies {
     if (copy) this.#set(uri, { ...copy, target });
   }
 
-  nextManifest(): string {
-    this.#manifests += 1;
-    return untitledUri(this.#manifests);
+  /** The URI of a new manifest in `space`, numbered after those the space's backups hold. */
+  nextManifest(space: string): string {
+    this.#load(space);
+    const n = (this.#manifests.get(space) ?? 0) + 1;
+    this.#manifests.set(space, n);
+    return untitledUri({ space, n });
   }
 
   see(uri: string, live: string, statusSubresource: boolean): void {
@@ -355,7 +358,13 @@ export class WorkingCopies {
       if (this.#copies.has(uri)) continue;
       this.#copies.set(uri, { space, base, lock, locked, target, text });
       this.editors.setDirty(uri, true);
-      this.#manifests = Math.max(this.#manifests, parseUntitledUri(uri) ?? 0);
+      const manifest = parseUntitledUri(uri);
+      if (manifest) {
+        this.#manifests.set(
+          space,
+          Math.max(this.#manifests.get(space) ?? 0, manifest.n),
+        );
+      }
     }
     if (Object.keys(stored).length > 0) this.changes.emit();
   }

@@ -1,5 +1,12 @@
 import { expect, test } from "vitest";
-import { listUri, objectUri, parseListUri, parseObjectUri } from "./uri";
+import {
+  listUri,
+  objectUri,
+  parseListUri,
+  parseObjectUri,
+  parseUntitledUri,
+  untitledUri,
+} from "./uri";
 
 const PODS = { group: "", version: "v1", resource: "pods" };
 const DEPLOYMENTS = { group: "apps", version: "v1", resource: "deployments" };
@@ -69,4 +76,23 @@ test("a core object in a namespace and a grouped cluster-scoped one differ", () 
     parseObjectUri("k8s://s/kwok.x-k8s.io/v1alpha1/stages/pod-ready")
       ?.namespace,
   ).toBeUndefined();
+});
+
+test.each([
+  [{ space: "dev", n: 1 }, "untitled://dev/manifest-1"],
+  [{ space: "dev+qa", n: 12 }, "untitled://dev%2Bqa/manifest-12"],
+])("%o round-trips through %s", (input, uri) => {
+  expect(untitledUri(input)).toBe(uri);
+  expect(parseUntitledUri(uri)).toEqual(input);
+});
+
+test.each([
+  "untitled://manifest-1",
+  "untitled:///manifest-1",
+  "untitled://dev/manifest-0",
+  "untitled://dev/manifest-1/2",
+  "untitled://dev/other-1",
+  "k8s://dev/manifest-1",
+])("%s is no new manifest", (uri) => {
+  expect(parseUntitledUri(uri)).toBeUndefined();
 });

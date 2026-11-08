@@ -145,7 +145,11 @@ test("Keep mine locks to the new version, keeps the old base and asks again only
 test("copies survive a restart in their space, and mark their editors again", async () => {
   const first = await services();
   first.copies.edit(DEPLOYMENT, "replicas: 2\n", opened);
-  first.copies.write("untitled://manifest-1", "prod-eu", "kind: ConfigMap\n");
+  first.copies.write(
+    "untitled://prod-eu/manifest-1",
+    "prod-eu",
+    "kind: ConfigMap\n",
+  );
   await backedUp(first.state);
 
   const next = await services(first.backend);
@@ -157,7 +161,7 @@ test("copies survive a restart in their space, and mark their editors again", as
     text: "replicas: 2\n",
   });
   expect(next.dirty.get(DEPLOYMENT)).toBe(true);
-  expect(next.copies.get("untitled://manifest-1")).toMatchObject({
+  expect(next.copies.get("untitled://prod-eu/manifest-1")).toMatchObject({
     base: undefined,
     text: "kind: ConfigMap\n",
   });
@@ -165,7 +169,7 @@ test("copies survive a restart in their space, and mark their editors again", as
   await backedUp(next.state);
   const last = await services(first.backend);
   expect(last.copies.get(DEPLOYMENT)).toBeUndefined();
-  expect(last.copies.get("untitled://manifest-1")).toBeDefined();
+  expect(last.copies.get("untitled://prod-eu/manifest-1")).toBeDefined();
 });
 
 test("a space missing from the list at the start has its copies taken up when it appears, before its first edit stores anything", async () => {
@@ -195,6 +199,31 @@ test("a space missing from the list at the start has its copies taken up when it
   expect(late.dirty.get(web)).toBe(true);
 });
 
+test("a new manifest is numbered within its space, after the backups the space holds", async () => {
+  const first = await services(undefined, ["prod-eu", "staging"]);
+  expect(first.copies.nextManifest("prod-eu")).toBe(
+    "untitled://prod-eu/manifest-1",
+  );
+  expect(first.copies.nextManifest("prod-eu")).toBe(
+    "untitled://prod-eu/manifest-2",
+  );
+  expect(first.copies.nextManifest("staging")).toBe(
+    "untitled://staging/manifest-1",
+  );
+  first.copies.write("untitled://prod-eu/manifest-2", "prod-eu", "kind: A\n");
+  first.copies.write("untitled://staging/manifest-1", "staging", "kind: B\n");
+  await backedUp(first.state);
+
+  const next = await services(first.backend, ["prod-eu", "staging"]);
+  expect(next.copies.nextManifest("prod-eu")).toBe(
+    "untitled://prod-eu/manifest-3",
+  );
+  expect(next.copies.nextManifest("staging")).toBe(
+    "untitled://staging/manifest-2",
+  );
+  expect(next.copies.nextManifest("dev")).toBe("untitled://dev/manifest-1");
+});
+
 test("what the person typed into a Secret never reaches the state", async () => {
   const typed = "password: hunter2-typed-by-hand";
   const secret = JSON.stringify({
@@ -221,9 +250,13 @@ test("what the person typed into a Secret never reaches the state", async () => 
 
   copies.edit(SECRET, typed, { space: "prod-eu", base: secret, lock: "5" });
   copies.edit(DEPLOYMENT, "replicas: 2\n", opened);
-  copies.write("untitled://manifest-1", "prod-eu", `${typed}\nkind: Secret\n`);
-  copies.write("untitled://manifest-2", "prod-eu", `${typed}\n`);
-  copies.write("untitled://manifest-3", "prod-eu", "kind: ConfigMap\n");
+  copies.write(
+    "untitled://prod-eu/manifest-1",
+    "prod-eu",
+    `${typed}\nkind: Secret\n`,
+  );
+  copies.write("untitled://prod-eu/manifest-2", "prod-eu", `${typed}\n`);
+  copies.write("untitled://prod-eu/manifest-3", "prod-eu", "kind: ConfigMap\n");
   await backedUp(state);
 
   expect(copies.get(SECRET)?.text).toBe(typed);
@@ -235,7 +268,7 @@ test("what the person typed into a Secret never reaches the state", async () => 
   >;
   expect(Object.keys(edits).sort()).toEqual([
     DEPLOYMENT,
-    "untitled://manifest-3",
+    "untitled://prod-eu/manifest-3",
   ]);
 });
 
@@ -278,7 +311,7 @@ test("a Secret's manifest typed into another object's editor never reaches the s
 
 test("a new manifest whose kind may still become Secret stays out of the state while it is typed, a kind that cannot stays in", () => {
   const values = "apiVersion: v1\ndata:\n  password: aHVudGVyMg==\n";
-  const manifest = "untitled://manifest-1";
+  const manifest = "untitled://prod-eu/manifest-1";
   for (const kind of ["", "S", "Sec", "Secre", "Secret", "secret", "SECRET"]) {
     expect(
       mayHoldSecret(
@@ -309,14 +342,18 @@ test("a manifest typed in the order values then kind never sends the values whil
   const values = "apiVersion: v1\ndata:\n  password: aHVudGVyMg==\n";
   for (const kind of ["Sec", "secret"]) {
     copies.write(
-      "untitled://manifest-1",
+      "untitled://prod-eu/manifest-1",
       "prod-eu",
       `${values}kind: ${kind}\n`,
     );
     await backedUp(state);
   }
   expect(sent.join("")).not.toContain("aHVudGVyMg");
-  copies.write("untitled://manifest-1", "prod-eu", `${values}kind: Con\n`);
+  copies.write(
+    "untitled://prod-eu/manifest-1",
+    "prod-eu",
+    `${values}kind: Con\n`,
+  );
   await backedUp(state);
   expect(sent.join("")).toContain("aHVudGVyMg");
 });
@@ -325,7 +362,7 @@ test("a manifest that cannot be read is left out of the backup and does not stop
   const { backend, copies, state } = await services();
   copies.edit(DEPLOYMENT, "replicas: 2\n", opened);
   copies.write(
-    "untitled://manifest-1",
+    "untitled://prod-eu/manifest-1",
     "prod-eu",
     "spec:\n  rules:\n    - host: *.example.com\n",
   );
@@ -423,10 +460,10 @@ test("an object that shows the edit by the time its plan is done holds nothing, 
   expect(copies.get(DEPLOYMENT)).toBeUndefined();
   expect(copies.held(DEPLOYMENT)).toBeUndefined();
 
-  copies.write("untitled://manifest-1", "prod-eu", "kind: ConfigMap\n");
-  copies.applied("untitled://manifest-1");
-  expect(copies.get("untitled://manifest-1")).toBeUndefined();
-  expect(copies.held("untitled://manifest-1")).toBeUndefined();
+  copies.write("untitled://prod-eu/manifest-1", "prod-eu", "kind: ConfigMap\n");
+  copies.applied("untitled://prod-eu/manifest-1");
+  expect(copies.get("untitled://prod-eu/manifest-1")).toBeUndefined();
+  expect(copies.held("untitled://prod-eu/manifest-1")).toBeUndefined();
 });
 
 test("an edit applied on top of Keep mine waits for the object to differ from the one it locked to", async () => {

@@ -144,16 +144,23 @@ export function parseLogsUri(uri: string): LogTarget | undefined {
 
 export const UNTITLED_SCHEME = "untitled";
 
-/** A new manifest (ARCHITECTURE 4.3): `untitled://manifest-<n>`. */
-export function untitledUri(n: number): string {
-  return `${UNTITLED_SCHEME}://manifest-${String(n)}`;
+/** A new manifest and the space it was written in (ARCHITECTURE 4.3): `untitled://<space>/manifest-<n>`, the space encoded as an object's is. */
+export interface ManifestInput {
+  readonly space: string;
+  readonly n: number;
 }
 
-export function parseUntitledUri(uri: string): number | undefined {
+export function untitledUri({ space, n }: ManifestInput): string {
+  return `${UNTITLED_SCHEME}://${encodeURIComponent(space)}/manifest-${String(n)}`;
+}
+
+export function parseUntitledUri(uri: string): ManifestInput | undefined {
   const url = new URL(uri);
   if (url.protocol !== `${UNTITLED_SCHEME}:`) return undefined;
-  const found = /^manifest-([1-9]\d*)$/.exec(url.host);
-  return found?.[1] === undefined ? undefined : Number(found[1]);
+  const found = /^\/manifest-([1-9]\d*)$/.exec(url.pathname);
+  return found?.[1] === undefined || url.host === ""
+    ? undefined
+    : { space: decodeURIComponent(url.host), n: Number(found[1]) };
 }
 
 export const DIFF_SCHEME = "diff";

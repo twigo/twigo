@@ -126,7 +126,7 @@ export function registerKube(workbench: Workbench): void {
     space: (uri) => {
       const input = parseDiffUri(uri.href);
       if (input?.kind === "objects") return input.space;
-      return input && editorSpace(services.edits, input.editor);
+      return input && editorSpace(input.editor);
     },
     title: (uri) => {
       const input = parseDiffUri(uri.href);
@@ -155,8 +155,8 @@ export function registerKube(workbench: Workbench): void {
   editors.register({
     id: "kube.manifest",
     scheme: UNTITLED_SCHEME,
-    space: (uri) => services.edits.copies.get(uri.href)?.space,
-    title: (uri) => `Manifest ${String(parseUntitledUri(uri.href) ?? "")}`,
+    space: (uri) => parseUntitledUri(uri.href)?.space,
+    title: (uri) => `Manifest ${String(parseUntitledUri(uri.href)?.n ?? "")}`,
     icon: ({ className }) => <FileCode className={className} />,
     component: ({ uri }) => (
       <ManifestEditor

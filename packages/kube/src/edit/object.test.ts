@@ -208,7 +208,7 @@ test("no text throws, whatever it holds", () => {
     expect(() => parseManifest(text), JSON.stringify(text)).not.toThrow();
     expect(() => statusLines(text), JSON.stringify(text)).not.toThrow();
     expect(
-      () => mayHoldSecret("untitled://manifest-1", text),
+      () => mayHoldSecret("untitled://prod-eu/manifest-1", text),
       JSON.stringify(text),
     ).not.toThrow();
   }

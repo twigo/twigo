@@ -1,4 +1,10 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Backend } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
@@ -8,14 +14,30 @@ import { ManifestEditor } from "./ManifestEditor";
 import { createEdits } from "./services";
 
 vi.mock("./YamlEditor", () => ({
-  default: ({ schema }: { schema?: { source: string } }) => (
-    <p data-testid="schema">{schema?.source ?? "none"}</p>
+  default: ({
+    schema,
+    onChange,
+  }: {
+    schema?: { source: string };
+    onChange?: (text: string) => void;
+  }) => (
+    <>
+      <p data-testid="schema">{schema?.source ?? "none"}</p>
+      <button
+        type="button"
+        onClick={() => {
+          onChange?.("kind: ConfigMap\n");
+        }}
+      >
+        type
+      </button>
+    </>
   ),
 }));
 
 afterEach(cleanup);
 
-const URI = "untitled://manifest-1";
+const URI = "untitled://prod-eu/manifest-1";
 
 async function typing(kinds: readonly string[]) {
   const real = createMockBackend("ready");
@@ -68,4 +90,34 @@ test("a schema's id names its space, since two clusters serve different ones for
       "twigo://schema/prod-eu/apps/v1/Deployment",
     );
   });
+});
+
+test("what is typed belongs to the space the URI names, whichever space is shown", async () => {
+  const workbench = await testWorkbench("ready");
+  const edits = createEdits(workbench);
+  const discovery = new Discovery(workbench);
+  workbench.spaces.select("prod-eu");
+  const staging = "untitled://staging/manifest-1";
+  render(<ManifestEditor uri={staging} edits={edits} discovery={discovery} />, {
+    wrapper: inWorkbench(workbench),
+  });
+  fireEvent.click(screen.getByRole("button", { name: "type" }));
+  expect(edits.copies.get(staging)).toMatchObject({
+    space: "staging",
+    text: "kind: ConfigMap\n",
+  });
+  expect(edits.copies.get("untitled://prod-eu/manifest-1")).toBeUndefined();
+});
+
+test("a URI that names no space is no manifest", async () => {
+  const workbench = await testWorkbench("ready");
+  render(
+    <ManifestEditor
+      uri="untitled://manifest-1"
+      edits={createEdits(workbench)}
+      discovery={new Discovery(workbench)}
+    />,
+    { wrapper: inWorkbench(workbench) },
+  );
+  expect(screen.getByText("Not a manifest")).toBeTruthy();
 });

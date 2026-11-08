@@ -65,7 +65,7 @@ export function registerEdits(
 
   /** Whether the space the editor belongs to is the one shown: what opens or closes tabs waits otherwise. */
   const inView = (uri: string): boolean => {
-    const space = editorSpace(edits, uri);
+    const space = editorSpace(uri);
     return space === undefined || space === spaces.active?.id;
   };
 
@@ -507,8 +507,10 @@ export function registerEdits(
     title: "New Manifest",
     category: "File",
     icon: FilePlus,
+    enablement: "space.count > 0",
     run: () => {
-      editors.open(copies.nextManifest());
+      const space = spaces.active?.id;
+      if (space !== undefined) editors.open(copies.nextManifest(space));
     },
   });
   menus.append("menubar/file", {

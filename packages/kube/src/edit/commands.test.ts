@@ -273,7 +273,7 @@ test("text typed while the plan runs stays, and the copy is not ended as if it w
 
 test("another target context ends the preview and its diff, which named the old one", async () => {
   const { workbench, edits, close } = await setupEdit("live", "dev");
-  const manifest = "untitled://manifest-7";
+  const manifest = "untitled://dev/manifest-7";
   edits.copies.write(
     manifest,
     "dev",
@@ -307,7 +307,7 @@ test("another target context ends the preview and its diff, which named the old 
 
 test("an empty manifest has no target context to change, a manifest with text has", async () => {
   const { workbench, edits } = await setupEdit("live", "dev");
-  const manifest = "untitled://manifest-8";
+  const manifest = "untitled://dev/manifest-8";
   const offered = () =>
     workbench
       .actions(
@@ -322,9 +322,24 @@ test("an empty manifest has no target context to change, a manifest with text ha
   expect(offered()).toContain("k8s.manifest.target");
 });
 
+test("New Manifest opens a tab that names the space shown, numbered within it", async () => {
+  const { workbench, open } = await setupEdit("live", "dev");
+  const create = () =>
+    workbench.commands.execute("k8s.manifest.new", workbench.keys.lookup(null));
+  await create();
+  await create();
+  workbench.spaces.select("staging");
+  await create();
+  expect(open.mock.calls.map(([uri]) => uri)).toEqual([
+    "untitled://dev/manifest-1",
+    "untitled://dev/manifest-2",
+    "untitled://staging/manifest-1",
+  ]);
+});
+
 test("a new manifest has no object on the server to compare with, reload or keep its text against", async () => {
   const { workbench, edits, uri } = await setupEdit("live", "dev");
-  const manifest = "untitled://manifest-9";
+  const manifest = "untitled://dev/manifest-9";
   edits.copies.write(manifest, "dev", "kind: ConfigMap\n");
   const lookup = (editor: string) =>
     editLookup(edits, editor, workbench.keys.lookup(null));
@@ -446,7 +461,7 @@ test("a manifest applied to another context stays, and a toast says what was mad
   workbench.spaces.select("staging");
   await discovery.resources("staging");
   workbench.spaces.select("dev");
-  const manifest = "untitled://manifest-3";
+  const manifest = "untitled://dev/manifest-3";
   edits.copies.write(manifest, "dev", MANIFEST);
   vi.spyOn(workbench.quickAccess, "pick").mockResolvedValue({
     id: "staging",
@@ -491,7 +506,7 @@ test("a manifest applied to its own context opens the object it made and ends", 
     "dev",
   );
   await discovery.resources("dev");
-  const manifest = "untitled://manifest-4";
+  const manifest = "untitled://dev/manifest-4";
   edits.copies.write(manifest, "dev", MANIFEST);
   vi.spyOn(workbench.quickAccess, "pick").mockResolvedValue({
     id: "dev",

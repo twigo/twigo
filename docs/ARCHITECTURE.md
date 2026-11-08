@@ -678,7 +678,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 | `exec://<ctx>/<ns>/<pod>/<container>`                               | Terminal (xterm)                                                                                                                                               |
 | `pf://<space>/<forward-id>`                                         | Port-forward tab: state, target and resolved pod, local address, open connections, bytes, errors, a quick HTTP request tester                                  |
 | `diff://edit/apply?editor=<uri>`, `diff://<space>/objects?…`        | Monaco diff: the apply dry-run of an editor's edit, its opened object against the server's now (`edit/server`), Compare with…, any two objects                 |
-| `untitled://manifest-n`                                             | New manifest; its first Apply asks for the target context and, once applied, opens the object it made                                                          |
+| `untitled://<space>/manifest-n`                                     | New manifest of a space, numbered within it; its first Apply asks for the target context and, once applied, opens the object it made                           |
 | `twigo://settings`, `twigo://keybindings`, `twigo://extension/<id>` | Settings UI, keybindings UI, extension details                                                                                                                 |
 
 - **Details and preview tabs.**
@@ -699,6 +699,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   An open for the URI of a space other than the one shown waits for that space's dock and opens there when it is the next one mounted; if another space comes first, it is forgotten.
   A close for such a URI waits for that space's dock too, whichever space is mounted first, so a tab whose edit ended while the person was elsewhere does not stay behind; opening the URI again, or closing one that waits to open, withdraws what waits.
   A provider says which space a URI is of, so an answer that arrives after a switch of spaces cannot open a tab in the wrong space.
+  A new manifest's URI names the space it was written in, as an object's does, and its number counts within that space, so a number reused after a restart cannot show the text of one space in another's tab.
 - **Object URIs.**
   The core group is an empty segment, `k8s://prod//v1/pods/payments/api-0`, so an object in a namespace has five path segments and a cluster-scoped one four.
 - **Sub-tabs.**
