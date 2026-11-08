@@ -71,6 +71,7 @@ export function AnswerView({
           uri={uri}
           message={answer.message}
           recreates={answer.recreate !== null}
+          space={space}
         />
       );
   }
@@ -201,22 +202,39 @@ function Immutable({
   uri,
   message,
   recreates,
+  space,
 }: {
   edits: EditServices;
   uri: string;
   message: string;
   recreates: boolean;
+  space: string;
 }) {
+  const workbench = useWorkbench();
+  useChanges(workbench.catalog.changes);
+  useChanges(workbench.spaces.changes);
+  const found = workbench.spaces.list.find(({ id }) => id === space);
+  const access = found && accessOfSpace(workbench.catalog, found);
+  const policed =
+    access?.mode === "read-only" && setByPolicyFile(access.source)
+      ? access
+      : undefined;
   return (
     <Panel>
       <Callout tone="error" title="The server refuses to change that field">
         <p>{message}</p>
-        {recreates && (
-          <p className="text-xs text-muted-foreground">
-            Delete and recreate deletes the object and creates it from your
-            YAML. Twigo asks before it does.
-          </p>
-        )}
+        {recreates &&
+          (policed ? (
+            <p className="text-xs text-muted-foreground">
+              <span className="font-medium">{chipLabel(policed)}:</span> Delete
+              and recreate is not offered. {describeAccess(policed)}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Delete and recreate deletes the object and creates it from your
+              YAML. Twigo asks before it does.
+            </p>
+          ))}
         <EditActions
           edits={edits}
           uri={uri}

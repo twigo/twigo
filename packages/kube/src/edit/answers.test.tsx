@@ -131,6 +131,40 @@ test("under a policy file's lock the diff says so in the chip's words and offers
   ).toBeTruthy();
 });
 
+test("under a policy file's lock the Immutable bar says why in the chip's words, not what Delete and recreate would do", async () => {
+  const immutable = {
+    state: "immutable",
+    message: "spec.selector is immutable",
+    recreate: 7,
+  } as const;
+  const view = async (scenario: MockScenario) => {
+    const { workbench, edits, uri } = await setupEdit(scenario, "prod-eu");
+    render(
+      <AnswerView
+        edits={edits}
+        uri={uri}
+        answer={immutable}
+        dropped={[]}
+        space="prod-eu"
+        outdated={false}
+      />,
+      { wrapper: inWorkbench(workbench) },
+    );
+  };
+  await view("live");
+  expect(screen.getByText(/deletes the object and creates it/)).toBeTruthy();
+  cleanup();
+
+  await view("policyFile");
+  expect(screen.queryByText(/deletes the object and creates it/)).toBeNull();
+  const note = screen.getByText(/Delete and recreate is not offered/);
+  expect(note.textContent).toContain("Production · read-only:");
+  expect(note.textContent).toContain(
+    "prod-* in /Library/Application Support/Twigo/policy.json",
+  );
+  expect(buttons()).not.toContain("Delete and recreate");
+});
+
 test("a diff of a text that changed since is outdated and cannot be applied", async () => {
   const { workbench, edits, uri, run } = await setupEdit("live");
   await run("k8s.edit.apply");
