@@ -29,7 +29,11 @@ export type Preview =
       readonly forced: boolean;
       /** The conflicting fields the person gave up, as the engine names them. */
       readonly dropped: readonly string[];
+      /** Whether the diff tab that a ready answer needs was opened for the person. */
+      readonly shown: boolean;
     };
+
+export type Answered = Extract<Preview, { readonly state: "answered" }>;
 
 /**
  * Each editor's last preview, by its URI. The engine keeps what a preview
@@ -47,11 +51,12 @@ export class Previews {
     return this.#previews.get(editor);
   }
 
+  /** The answer, unless a newer preview or a clear came while it was asked: that one has the last word. */
   async run(
     editor: string,
     subject: Subject,
     choices: { force?: boolean; drop?: readonly string[] } = {},
-  ): Promise<Preview> {
+  ): Promise<Preview | undefined> {
     const asked = (this.#asked.get(editor) ?? 0) + 1;
     this.#asked.set(editor, asked);
     const parsed = parseManifest(subject.text);
@@ -79,12 +84,12 @@ export class Previews {
         subject,
         forced: request.force,
         dropped: request.drop,
+        shown: false,
       };
     } catch (error) {
       next = { state: "failed", message: toIpcError(error).message };
     }
-    // A newer preview, or a clear, has the last word.
-    if (this.#asked.get(editor) !== asked) return next;
+    if (this.#asked.get(editor) !== asked) return undefined;
     return this.#set(editor, next);
   }
 
@@ -109,6 +114,13 @@ export class Previews {
     const last = this.#previews.get(editor);
     if (last && !(last.state === "answered" && last.answer.state === "ready"))
       this.clear(editor);
+  }
+
+  /** The editor's answer was put in front of the person. */
+  shown(editor: string): void {
+    const last = this.#previews.get(editor);
+    if (last?.state !== "answered" || last.shown) return;
+    this.#set(editor, { ...last, shown: true });
   }
 
   clear(editor: string): void {

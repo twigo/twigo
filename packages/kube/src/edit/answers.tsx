@@ -1,7 +1,7 @@
 import { lazy, Suspense, useMemo, type ReactNode } from "react";
-import { CircleAlert, Info, Lock } from "lucide-react";
+import { CircleAlert, GitCompare, Info, Lock } from "lucide-react";
 import type { ApplyPreviewed } from "@twigo/protocol";
-import { Banner, Callout, Skeleton, Table } from "@twigo/ui";
+import { Banner, Callout, EmptyState, Skeleton, Table } from "@twigo/ui";
 import {
   accessOfSpace,
   chipLabel,
@@ -19,19 +19,29 @@ export function AnswerView({
   edits,
   uri,
   answer,
+  dropped,
   space,
   outdated,
 }: {
   edits: EditServices;
   uri: string;
   answer: ApplyPreviewed;
+  /** The conflicting fields the person gave up, which the answer was asked without. */
+  dropped: readonly string[];
   space: string;
   /** The text changed since the preview, so its plan would send the old one. */
   outdated: boolean;
 }) {
   switch (answer.state) {
     case "unchanged":
-      return <Unchanged edits={edits} uri={uri} ignored={answer.ignored} />;
+      return (
+        <Unchanged
+          edits={edits}
+          uri={uri}
+          ignored={answer.ignored}
+          dropped={dropped}
+        />
+      );
     case "ready":
       return (
         <Ready
@@ -45,7 +55,14 @@ export function AnswerView({
     case "conflicts":
       return <Conflicts edits={edits} uri={uri} answer={answer} />;
     case "stale":
-      return <Stale edits={edits} uri={uri} message={answer.message} />;
+      return (
+        <Stale
+          edits={edits}
+          uri={uri}
+          message={answer.message}
+          keepable={answer.keepable}
+        />
+      );
     case "immutable":
       return (
         <Immutable
@@ -86,10 +103,12 @@ function Unchanged({
   edits,
   uri,
   ignored,
+  dropped,
 }: {
   edits: EditServices;
   uri: string;
   ignored: readonly string[];
+  dropped: readonly string[];
 }) {
   return (
     <Banner
@@ -98,7 +117,9 @@ function Unchanged({
       title="Nothing to apply"
       action={<EditActions edits={edits} uri={uri} menus={["edit/answer"]} />}
     >
-      The YAML says what the object has now.
+      {dropped.length > 0
+        ? `Nothing is left to send once ${dropped.join(", ")} ${dropped.length === 1 ? "is" : "are"} out of it. Your YAML still holds your ${dropped.length === 1 ? "value" : "values"}.`
+        : "The YAML says what the object has now."}
       {ignored.length > 0 && ` Left out: ${ignored.join(", ")}.`}
     </Banner>
   );
@@ -147,18 +168,21 @@ function Stale({
   edits,
   uri,
   message,
+  keepable,
 }: {
   edits: EditServices;
   uri: string;
   message: string;
+  keepable: boolean;
 }) {
   return (
     <Panel>
       <Callout tone="warn" title="Changed on the server since you opened it">
         <p>{message}</p>
         <p className="text-xs text-muted-foreground">
-          Keep mine applies your changes on top of the new version. Reload takes
-          the server&apos;s and drops yours.
+          {keepable &&
+            "Keep mine applies your changes on top of the new version. "}
+          Reload takes the server&apos;s and drops yours.
         </p>
         <EditActions
           edits={edits}
@@ -249,6 +273,8 @@ function Ready({
         </span>
         <span className="text-muted-foreground">against</span>
         <span className="font-medium">the result of the dry run</span>
+        <span className="text-muted-foreground">on</span>
+        <span className="font-medium">{found?.name ?? space}</span>
         <span className="flex-1" />
         <EditActions edits={edits} uri={uri} menus={["edit/diff"]} />
       </div>
@@ -327,9 +353,9 @@ export function PreviewPage({
 }) {
   if (preview === undefined) {
     return (
-      <div className="p-3 text-muted-foreground">
-        Nothing is being previewed. Apply the edit to see its diff.
-      </div>
+      <EmptyState icon={GitCompare} title="Nothing is being previewed">
+        Apply the edit to see its diff.
+      </EmptyState>
     );
   }
   switch (preview.state) {
@@ -343,6 +369,7 @@ export function PreviewPage({
           edits={edits}
           uri={uri}
           answer={preview.answer}
+          dropped={preview.dropped}
           space={preview.subject.space}
           outdated={preview.subject.text !== current}
         />

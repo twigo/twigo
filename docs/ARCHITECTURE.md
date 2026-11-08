@@ -1574,6 +1574,11 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
    A preview keeps what it prepared in Rust for its window under an id, once, and the plan of that id sends exactly that.
 6. Apply, by a bus plan that the person has just read the diff of: at once in `read-write`, a confirmation in `guarded`, blocked in `read-only`.
    A `409 FieldManagerConflict` shows a table per field with the owning manager, and offers **Force** or **Drop my change**.
+   Giving up every conflicting field can leave nothing to send, and the bar then says that, and that the YAML still holds the change.
+   The plan takes the preview when it is made, once the gate has allowed it: a cancelled confirmation, a failed run and a stopped one end the preview and close its diff, while a plan the gate refuses, as in `read-only`, leaves it for an Apply after an unlock.
+   The edit ends only if its text is still what the plan sent, so what was typed while it ran stays.
+   An answer that arrives after the person went to another space, or that a newer preview or a clear replaced, opens no tab; the first stays with its editor, which offers to show it.
+   A new manifest applied to another context than its own space's stays, as the person may apply it elsewhere too, and a toast says what was made where and goes there.
 7. A field the user deleted goes by the apply only when Twigo's Apply entry is its only owner.
    Another manager's or nobody's stays after an apply, so it needs a separate merge patch with `null`, shown as its own step in the diff.
    The patch is sent after the apply, on the `resourceVersion` the apply returned; a merge patch cannot address a list element, so a removal inside a list sends the outermost list whole, as it stands after the apply minus the removal, and nothing is sent when the dry-run already shows it gone.

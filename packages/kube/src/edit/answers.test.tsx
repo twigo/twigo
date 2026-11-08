@@ -4,7 +4,7 @@ import type { ApplyPreviewed } from "@twigo/protocol";
 import type { MockScenario } from "@twigo/protocol/mock";
 import { inWorkbench } from "@twigo/workbench/testing";
 import { setupEdit } from "../../test/edits";
-import { PreviewPage } from "./answers";
+import { AnswerView, PreviewPage } from "./answers";
 import { placementOf } from "./placement";
 
 vi.mock("./DiffView", () => ({
@@ -54,6 +54,14 @@ test("each answer has its own view, with its own choices", async () => {
   await shown("applyStale");
   expect(screen.getByText(/the object has been modified/)).toBeTruthy();
   expect(buttons()).toEqual(["Compare", "Reload", "Keep mine", "Dismiss"]);
+  cleanup();
+
+  await shown("applyListsMoved");
+  expect(
+    screen.getByText(/so keeping yours would revert that change/),
+  ).toBeTruthy();
+  expect(screen.queryByText(/Keep mine applies/)).toBeNull();
+  expect(buttons()).toEqual(["Compare", "Reload", "Dismiss"]);
   cleanup();
 
   await shown("applyRecreate");
@@ -152,4 +160,58 @@ test("a ready answer shows in a tab of its own, and the others in a bar over the
     stale: "bar",
     immutable: "bar",
   });
+});
+
+test("giving up every conflicting field says nothing is left to send and that the text still holds the change", async () => {
+  const { workbench, edits, uri, run } = await setupEdit("applyConflicts");
+  await run("k8s.edit.apply");
+  await run("k8s.edit.dropMine");
+  const preview = edits.previews.get(uri);
+  render(
+    <PreviewPage
+      edits={edits}
+      uri={uri}
+      preview={preview}
+      current={edits.copies.get(uri)?.text ?? ""}
+    />,
+    { wrapper: inWorkbench(workbench) },
+  );
+  expect(screen.getByText("Nothing to apply")).toBeTruthy();
+  const note = screen.getByText(/Nothing is left to send/).textContent;
+  expect(note).toContain(".spec.replicas, .metadata.labels.team are out of it");
+  expect(note).toContain("Your YAML still holds your values");
+  expect(screen.queryByText(/says what the object has now/)).toBeNull();
+});
+
+test("an unchanged answer with no field given up says the YAML is the object", async () => {
+  const { workbench, edits, uri } = await setupEdit("live");
+  render(
+    <AnswerView
+      edits={edits}
+      uri={uri}
+      answer={{ state: "unchanged", ignored: [] }}
+      dropped={[]}
+      space="dev"
+      outdated={false}
+    />,
+    { wrapper: inWorkbench(workbench) },
+  );
+  expect(
+    screen.getByText(/The YAML says what the object has now/),
+  ).toBeTruthy();
+});
+
+test("a diff names the context it applies to, and nothing previewed has an empty state", async () => {
+  await shown("live", "prod-eu");
+  expect(screen.getByText("on")).toBeTruthy();
+  expect(screen.getByText("prod-eu")).toBeTruthy();
+  cleanup();
+
+  const { workbench, edits, uri } = await setupEdit("live");
+  render(
+    <PreviewPage edits={edits} uri={uri} preview={undefined} current="" />,
+    { wrapper: inWorkbench(workbench) },
+  );
+  expect(screen.getByText("Nothing is being previewed")).toBeTruthy();
+  expect(screen.getByText("Apply the edit to see its diff.")).toBeTruthy();
 });

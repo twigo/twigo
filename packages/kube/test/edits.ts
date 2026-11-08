@@ -16,24 +16,30 @@ export const base = {
 export const EDITED =
   "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: settings\n  namespace: default\ndata:\n  a: '1'\n";
 
-export async function setupEdit(scenario: MockScenario, space = "dev") {
+/** `gate` holds each `apply_preview` until it settles. */
+export async function setupEdit(
+  scenario: MockScenario,
+  space = "dev",
+  gate?: Promise<void>,
+) {
   const real = createMockBackend(scenario);
   const sent: ApplyRequest[] = [];
   const backend: Backend = {
-    invoke: (command, request) => {
-      if (command === "apply_preview") sent.push(request as ApplyRequest);
+    invoke: async (command, request) => {
+      if (command === "apply_preview") {
+        sent.push(request as ApplyRequest);
+        await gate;
+      }
       return real.invoke(command, request);
     },
     subscribe: (command, request, onMessage) =>
       real.subscribe(command, request, onMessage),
   };
   const workbench = await testWorkbench(scenario, backend);
+  workbench.spaces.select(space);
   const edits = createEdits(workbench);
-  registerEdits(workbench, {
-    discovery: new Discovery(workbench),
-    edits,
-    tabs: new ObjectTabs(),
-  });
+  const discovery = new Discovery(workbench);
+  registerEdits(workbench, { discovery, edits, tabs: new ObjectTabs() });
   const open = vi
     .spyOn(workbench.editors, "open")
     .mockImplementation(() => undefined);
@@ -53,5 +59,5 @@ export async function setupEdit(scenario: MockScenario, space = "dev") {
       editLookup(edits, uri, workbench.keys.lookup(null)),
       { uri },
     );
-  return { workbench, edits, sent, open, close, uri, run };
+  return { workbench, edits, discovery, sent, open, close, uri, run };
 }

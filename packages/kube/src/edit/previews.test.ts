@@ -119,6 +119,21 @@ test("an answer that comes after the preview was cleared is dropped", async () =
   const previews = new Previews(backend);
   const pending = previews.run("a", subject(EDITED));
   previews.clear("a");
-  await pending;
+  await expect(pending).resolves.toBeUndefined();
   expect(previews.get("a")).toBeUndefined();
+});
+
+test("an answer that a newer preview came before is nothing to show, and the newer one is kept", async () => {
+  const { backend } = recording("live");
+  const previews = new Previews(backend);
+  const older = previews.run("a", subject(EDITED));
+  const newer = previews.run("a", subject(`${EDITED}# newer\n`));
+  await expect(older).resolves.toBeUndefined();
+  expect(await newer).toBe(previews.get("a"));
+  expect(previews.get("a")).toMatchObject({
+    state: "answered",
+    shown: false,
+  });
+  previews.shown("a");
+  expect(previews.get("a")).toMatchObject({ shown: true });
 });

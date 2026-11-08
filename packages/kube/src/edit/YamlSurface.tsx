@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo } from "react";
-import { TriangleAlert } from "lucide-react";
+import { Eye, TriangleAlert } from "lucide-react";
 import { Banner, Skeleton } from "@twigo/ui";
 import { useChanges } from "@twigo/workbench";
 import { EditActions } from "./actions";
@@ -100,11 +100,24 @@ export function YamlSurface({
         </Banner>
       )}
       {failed && <FailedBar failure={failed} />}
+      {answered && !barred && !answered.shown && (
+        <Banner
+          tone="info"
+          icon={Eye}
+          title="A preview of your edit is ready"
+          action={
+            <EditActions edits={edits} uri={uri} menus={["edit/preview"]} />
+          }
+        >
+          It came while you were in another space.
+        </Banner>
+      )}
       {answered && barred && (
         <AnswerView
           edits={edits}
           uri={uri}
           answer={answered.answer}
+          dropped={answered.dropped}
           space={answered.subject.space}
           outdated={answered.subject.text !== text}
         />

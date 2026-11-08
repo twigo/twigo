@@ -1,5 +1,6 @@
 import {
   Check,
+  Eye,
   FilePlus,
   GitCompare,
   GitMerge,
@@ -21,8 +22,14 @@ import { diffUri, parseObjectUri } from "../uri";
 import { placementOf } from "./placement";
 import { comparisons } from "./compare";
 import { parseManifest } from "./object";
-import type { Preview, Subject } from "./previews";
-import { EDIT_KEYS, editKeys, type EditServices } from "./services";
+import type { Answered, Preview, Subject } from "./previews";
+import {
+  EDIT_KEYS,
+  editKeys,
+  editorSpace,
+  sourceOf,
+  type EditServices,
+} from "./services";
 
 export interface EditContext {
   readonly discovery: Discovery;
@@ -44,13 +51,23 @@ export function registerEdits(
     workbench;
   const { copies, previews } = edits;
 
-  const editorOf = (args: unknown): string | undefined =>
-    typeof args === "object" &&
-    args !== null &&
-    "uri" in args &&
-    typeof args.uri === "string"
-      ? args.uri
-      : editors.active;
+  /** The editor a command acts on: a diff's is the editor whose edit it shows. */
+  const editorOf = (args: unknown): string | undefined => {
+    const uri =
+      typeof args === "object" &&
+      args !== null &&
+      "uri" in args &&
+      typeof args.uri === "string"
+        ? args.uri
+        : editors.active;
+    return uri === undefined ? undefined : sourceOf(uri);
+  };
+
+  /** Whether the space the editor belongs to is the one shown: what opens or closes tabs waits otherwise. */
+  const inView = (uri: string): boolean => {
+    const space = editorSpace(edits, uri);
+    return space === undefined || space === spaces.active?.id;
+  };
 
   const reference = (uri: string): ResourceRef | undefined => {
     const input = parseObjectUri(uri);
@@ -82,7 +99,10 @@ export function registerEdits(
         })),
     );
     if (!picked) return undefined;
-    copies.retarget(uri, picked.id);
+    if (picked.id !== copies.get(uri)?.target) {
+      copies.retarget(uri, picked.id);
+      dropPreview(uri);
+    }
     return picked.id;
   };
 
@@ -116,15 +136,35 @@ export function registerEdits(
     editors.close(diffUri({ kind: "server", editor: uri }));
   };
 
-  const present = (uri: string, result: Preview) => {
+  /** What a preview showed goes: its answer, which a bar or a diff drew, and the diff. */
+  const dropPreview = (uri: string) => {
+    previews.clear(uri);
+    closeDiffs(uri);
+  };
+
+  /** Shows the editor again and gives it the focus, as the bar or the diff that had it goes. */
+  const back = (uri: string) => {
+    if (!inView(uri)) return;
+    editors.open(uri);
+  };
+
+  /**
+   * Puts an answer in front of the person: a ready one in a tab of its own,
+   * the others in the editor's bar. A preview a newer one or a clear
+   * replaced is nothing to show, and one that came after the person went to
+   * another space stays with its editor, whose bar offers to show it.
+   */
+  const present = (uri: string, result: Preview | undefined) => {
+    if (result === undefined || !inView(uri)) return;
     if (parseObjectUri(uri)) tabs.set(uri, "yaml");
     const page =
       result.state === "answered" && placementOf(result.answer) === "page";
     editors.close(diffUri({ kind: "apply", editor: uri }));
     if (page) {
       editors.open(diffUri({ kind: "apply", editor: uri }));
+      previews.shown(uri);
     } else {
-      editors.open(uri);
+      back(uri);
     }
   };
 
@@ -137,16 +177,20 @@ export function registerEdits(
     present(uri, await previews.run(uri, subject, choices));
   };
 
-  const openCreated = (uri: string, space: string, text: string) => {
+  /** The object a new manifest makes, as the editor that shows it and as words. */
+  const createdBy = (
+    space: string,
+    text: string,
+  ): { readonly uri: string; readonly what: string } | undefined => {
     const parsed = parseManifest(text);
     const resources = discovery.get(space);
-    if (!parsed.ok || resources.state !== "ready") return;
+    if (!parsed.ok || resources.state !== "ready") return undefined;
     const { apiVersion, kind, metadata } = parsed.object as {
       apiVersion?: string;
       kind?: string;
       metadata?: { name?: string; namespace?: string };
     };
-    if (!apiVersion || !kind || !metadata?.name) return;
+    if (!apiVersion || !kind || !metadata?.name) return undefined;
     const slash = apiVersion.lastIndexOf("/");
     const created: ObjectRef = {
       group: slash < 0 ? "" : apiVersion.slice(0, slash),
@@ -155,44 +199,83 @@ export function registerEdits(
       namespace: metadata.namespace ?? "default",
       name: metadata.name,
     };
-    const target = refUri(space, resources.value, created);
-    if (!target) return;
-    editors.open(target);
-    editors.close(uri);
+    const uri = refUri(space, resources.value, created);
+    return uri === undefined
+      ? undefined
+      : {
+          uri,
+          what: `${kind} ${metadata.namespace === undefined ? "" : `${metadata.namespace}/`}${metadata.name}`,
+        };
   };
 
-  const finish = (uri: string) => {
+  /**
+   * The plan of `last` is done. The edit ends only if its text is still what
+   * the plan sent: what was typed while it ran stays, to be applied or
+   * discarded, and the object it was based on is then changed on the server.
+   * A new manifest applied to another space than its editor's stays too, for
+   * the person to apply elsewhere, and the toast says what was made where.
+   */
+  const finish = (uri: string, last: Answered) => {
     const copy = copies.get(uri);
-    const last = previews.get(uri);
-    copies.applied(
-      uri,
-      last?.state === "answered" && last.answer.state === "ready"
-        ? last.answer.result
-        : undefined,
-    );
-    previews.clear(uri);
-    closeDiffs(uri);
-    if (copy?.base === undefined && copy && last?.state === "answered") {
-      openCreated(uri, last.subject.space, copy.text);
-    } else {
-      editors.open(uri);
+    if (answered(uri)?.answer === last.answer) dropPreview(uri);
+    if (copy?.text !== last.subject.text) {
+      back(uri);
+      return;
+    }
+    if (copy.base !== undefined) {
+      copies.applied(
+        uri,
+        last.answer.state === "ready" ? last.answer.result : undefined,
+      );
+      back(uri);
+      return;
+    }
+    const target = last.subject.space;
+    const created = createdBy(target, copy.text);
+    if (target !== copy.space) {
+      const name = spaces.list.find(({ id }) => id === target)?.name ?? target;
+      notify.success(
+        created ? `Created ${created.what} in ${name}` : `Applied to ${name}`,
+        created && {
+          action: {
+            label: `Open in ${name}`,
+            run: () => {
+              spaces.select(target);
+              editors.open(created.uri);
+            },
+          },
+        },
+      );
+      back(uri);
+      return;
+    }
+    copies.applied(uri);
+    if (created && inView(uri)) {
+      editors.open(created.uri);
+      editors.close(uri);
     }
   };
 
-  const confirm = async (
-    uri: string,
-    id: number,
-    space: string,
-    look: LucideIcon,
-  ) => {
+  const confirm = async (uri: string, id: number, look: LucideIcon) => {
+    const last = answered(uri);
+    if (!last) return;
     const outcome = await workbench.operations.run(
-      { action: "apply", space, preview: id },
+      { action: "apply", space: last.subject.space, preview: id },
       { icon: look },
     );
-    if (outcome.state === "done") finish(uri);
+    if (outcome.state === "done") {
+      finish(uri, last);
+    } else if (
+      outcome.state !== "refused" &&
+      answered(uri)?.answer === last.answer
+    ) {
+      // The plan took the preview, whatever came of it.
+      dropPreview(uri);
+      back(uri);
+    }
   };
 
-  const answered = (uri: string) => {
+  const answered = (uri: string): Answered | undefined => {
     const last = previews.get(uri);
     return last?.state === "answered" ? last : undefined;
   };
@@ -222,8 +305,8 @@ export function registerEdits(
       menus: [["edit/toolbar", "navigation", "edit.dirty"]],
       run: (uri) => {
         copies.drop(uri);
-        previews.clear(uri);
-        closeDiffs(uri);
+        dropPreview(uri);
+        back(uri);
       },
     },
     {
@@ -269,24 +352,22 @@ export function registerEdits(
       menus: [["edit/changed", "navigation"]],
       run: (uri) => {
         copies.drop(uri);
-        previews.clear(uri);
-        closeDiffs(uri);
-        editors.open(uri);
+        dropPreview(uri);
+        back(uri);
       },
     },
     {
       id: "k8s.edit.keepMine",
       title: "Keep mine",
       icon: GitMerge,
-      enablement: "edit.dirty",
-      menus: [["edit/changed", "navigation"]],
+      enablement: "edit.dirty && edit.keepable",
+      menus: [["edit/changed", "navigation", "edit.keepable"]],
       run: async (uri) => {
         const stale = answered(uri)?.answer.state === "stale";
         copies.keepMine(uri);
-        previews.clear(uri);
-        closeDiffs(uri);
+        dropPreview(uri);
         if (stale) await preview(uri);
-        else editors.open(uri);
+        else back(uri);
       },
     },
     {
@@ -296,8 +377,7 @@ export function registerEdits(
       enablement: "edit.conflicts",
       menus: [["edit/conflicts", "navigation"]],
       run: async (uri) => {
-        const next = await previews.again(uri, { force: true });
-        if (next) present(uri, next);
+        present(uri, await previews.again(uri, { force: true }));
       },
     },
     {
@@ -309,15 +389,17 @@ export function registerEdits(
       run: async (uri) => {
         const last = answered(uri);
         if (last?.answer.state !== "conflicts") return;
-        const next = await previews.again(uri, {
-          drop: [
-            ...new Set([
-              ...last.dropped,
-              ...last.answer.conflicts.map(({ path }) => path),
-            ]),
-          ],
-        });
-        if (next) present(uri, next);
+        present(
+          uri,
+          await previews.again(uri, {
+            drop: [
+              ...new Set([
+                ...last.dropped,
+                ...last.answer.conflicts.map(({ path }) => path),
+              ]),
+            ],
+          }),
+        );
       },
     },
     {
@@ -330,7 +412,7 @@ export function registerEdits(
         const last = answered(uri);
         if (last?.answer.state !== "immutable" || last.answer.recreate === null)
           return;
-        await confirm(uri, last.answer.recreate, last.subject.space, Trash2);
+        await confirm(uri, last.answer.recreate, Trash2);
       },
     },
     {
@@ -346,7 +428,7 @@ export function registerEdits(
           notify.info("The YAML changed after this preview: apply it again.");
           return;
         }
-        await confirm(uri, last.answer.id, last.subject.space, Check);
+        await confirm(uri, last.answer.id, Check);
       },
     },
     {
@@ -356,17 +438,27 @@ export function registerEdits(
       enablement: "edit.answered",
       menus: [["edit/answer", "navigation"]],
       run: (uri) => {
-        previews.clear(uri);
-        closeDiffs(uri);
-        editors.open(uri);
+        dropPreview(uri);
+        back(uri);
+      },
+    },
+    {
+      id: "k8s.edit.show",
+      title: "Show Preview",
+      icon: Eye,
+      enablement: "edit.unshown",
+      menus: [["edit/preview", "navigation"]],
+      run: (uri) => {
+        editors.open(diffUri({ kind: "apply", editor: uri }));
+        previews.shown(uri);
       },
     },
     {
       id: "k8s.manifest.target",
       title: "Change Target Context…",
       icon: Target,
-      enablement: "edit.new",
-      menus: [["edit/toolbar", "navigation", "edit.new"]],
+      enablement: "edit.new && edit.dirty",
+      menus: [["edit/toolbar", "navigation", "edit.new && edit.dirty"]],
       run: async (uri) => {
         await chooseTarget(uri);
       },
@@ -418,14 +510,14 @@ export function registerEdits(
     {
       key: "mod+s",
       command: "k8s.edit.apply",
-      when: "editorFocus && edit.dirty",
+      when: "editorFocus && edit.dirty && editor.type != kube.diff",
     },
   ]);
 
   const follow = () => {
-    const uri = editors.active;
+    const active = editors.active;
     const now: Readonly<Record<string, ContextValue>> =
-      uri === undefined ? {} : editKeys(edits, uri);
+      active === undefined ? {} : editKeys(edits, sourceOf(active));
     for (const key of EDIT_KEYS) keys.set(key, now[key]);
   };
   editors.changes.subscribe(follow);

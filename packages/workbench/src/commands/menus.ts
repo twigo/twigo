@@ -24,6 +24,7 @@ export type MenuId =
   | "edit/conflicts"
   | "edit/immutable"
   | "edit/diff"
+  | "edit/preview"
   | "edit/answer"
   | "space/context"
   | "statusBar"

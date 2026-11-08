@@ -1,6 +1,6 @@
 import type { ContextValue, Lookup, Workbench } from "@twigo/workbench";
 import { WorkingCopies } from "./copies";
-import { parseObjectUri } from "../uri";
+import { parseDiffUri, parseObjectUri } from "../uri";
 import { Previews } from "./previews";
 import { Schemas } from "./schemas";
 
@@ -43,7 +43,13 @@ export function editKeys(
     "edit.dirty": copies.get(uri) !== undefined,
     "edit.answered": answer !== undefined,
     "edit.conflicts": answer?.state === "conflicts",
+    "edit.keepable": answer?.state !== "stale" || answer.keepable,
     "edit.ready": answer?.state === "ready",
+    // A ready diff that no tab was opened for, because its editor was not shown when it came.
+    "edit.unshown":
+      answer?.state === "ready" && preview?.state === "answered"
+        ? !preview.shown
+        : false,
     // A ready diff of the text as it is now: its plan sends exactly that.
     "edit.applicable":
       answer?.state === "ready" &&
@@ -65,13 +71,24 @@ export function editorSpace(
   return parseObjectUri(uri)?.space ?? copies.get(uri)?.space;
 }
 
+/**
+ * The editor whose edit an editor is about: a diff of an apply or of the
+ * server's object is of the editor it follows, anything else is its own.
+ */
+export function sourceOf(uri: string): string {
+  const diff = parseDiffUri(uri);
+  return diff && diff.kind !== "objects" ? diff.editor : uri;
+}
+
 export const EDIT_KEYS: readonly string[] = [
   "edit.object",
   "edit.new",
   "edit.dirty",
   "edit.answered",
   "edit.conflicts",
+  "edit.keepable",
   "edit.ready",
+  "edit.unshown",
   "edit.applicable",
   "edit.recreate",
 ];
