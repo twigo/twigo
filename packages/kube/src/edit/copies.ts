@@ -15,9 +15,7 @@ import { parseObjectUri, parseUntitledUri, untitledUri } from "../uri";
 export interface WorkingCopy {
   /** The space whose cluster the edit is of, or for a new manifest where it goes. */
   readonly space: string;
-  /** The object's JSON as it was opened; none for a new manifest. */
   readonly base: string | undefined;
-  /** The `resourceVersion` the apply is held to. */
   readonly lock: string | undefined;
   /**
    * The object as it stood at `lock`, when "Keep mine" locked to a newer
@@ -31,7 +29,6 @@ export interface WorkingCopy {
   readonly text: string;
 }
 
-/** What the first change of an object takes from the object as it is shown. */
 export interface Opened {
   readonly space: string;
   readonly base: string;
@@ -49,7 +46,6 @@ const COPIES = v.record(
   }),
 );
 
-/** The key of a space's state that holds its working copies. */
 const KEY = "edits";
 
 const PERSIST_AFTER_MS = 300;
@@ -112,10 +108,6 @@ export class WorkingCopies {
     return this.#copies.get(uri);
   }
 
-  /**
-   * The text the person made of an object, the first change taking `opened`
-   * as what it is based on. A text that is the object again ends the copy.
-   */
   edit(uri: string, text: string, opened: Opened): void {
     const copy = this.#copies.get(uri);
     const base = copy?.base ?? opened.base;
@@ -133,7 +125,6 @@ export class WorkingCopies {
     });
   }
 
-  /** The text of a new manifest, in the space it was written in; none ends the copy. */
   write(uri: string, space: string, text: string): void {
     if (text === "") {
       this.drop(uri);
@@ -149,29 +140,22 @@ export class WorkingCopies {
     });
   }
 
-  /** Where the apply of a new manifest goes. */
   retarget(uri: string, target: string): void {
     const copy = this.#copies.get(uri);
     if (copy) this.#set(uri, { ...copy, target });
   }
 
-  /** The URI of a new manifest that no copy and no earlier call has used. */
   nextManifest(): string {
     this.#manifests += 1;
     return untitledUri(this.#manifests);
   }
 
-  /**
-   * The object as its editor shows it now, which "changed on the server"
-   * compares with; `statusSubresource` is whether its resource has one.
-   */
   see(uri: string, live: string, statusSubresource: boolean): void {
     const before = this.serverChanged(uri);
     this.#seen.set(uri, { live, statusSubresource });
     if (this.serverChanged(uri) !== before) this.changes.emit();
   }
 
-  /** The object as the editor last showed it. */
   live(uri: string): string | undefined {
     return this.#seen.get(uri)?.live;
   }
@@ -193,7 +177,6 @@ export class WorkingCopies {
     );
   }
 
-  /** "Keep mine": the apply is held to the version on the server now, and the edit stays measured against what it was opened on. */
   keepMine(uri: string): void {
     const copy = this.#copies.get(uri);
     const live = this.#seen.get(uri)?.live;
@@ -203,7 +186,6 @@ export class WorkingCopies {
     this.#set(uri, { ...copy, lock, locked: live });
   }
 
-  /** Ends the copy: the editor shows the live object again. */
   drop(uri: string): void {
     const copy = this.#copies.get(uri);
     if (!copy) return;
@@ -213,7 +195,6 @@ export class WorkingCopies {
     this.changes.emit();
   }
 
-  /** Writes what changed now rather than after the pause. */
   flush(): void {
     for (const [space, timer] of this.#timers) {
       clearTimeout(timer);

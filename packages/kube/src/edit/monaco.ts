@@ -57,7 +57,6 @@ const yaml = configureMonacoYaml(
 
 const schemas = new Map<string, SchemasSettings>();
 
-/** Validates and completes the model at `model` by `schema`; none removes its schema. */
 export function setSchema(
   model: Uri,
   source: string,

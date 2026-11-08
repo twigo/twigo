@@ -38,7 +38,6 @@ export function readVariants(search: string): Variants {
 
 let current: Variants | undefined;
 
-/** The window's variants, read from its address once. */
 export function variants(): Variants {
   current ??= readVariants(globalThis.location.search);
   return current;

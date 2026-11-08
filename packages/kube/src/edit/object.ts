@@ -7,7 +7,6 @@ import {
   stringify,
 } from "yaml";
 
-/** An object of the cluster as the webview holds it: JSON. */
 export type KubeObject = Record<string, unknown>;
 
 /**
@@ -18,7 +17,6 @@ export function yamlOfObject(value: unknown): string {
   return stringify(value, { version: "1.1" });
 }
 
-/** The YAML of the JSON Rust sends: without managedFields, a Secret's values masked. */
 export function yamlOfJson(json: string): string {
   return yamlOfObject(JSON.parse(json));
 }
@@ -106,7 +104,6 @@ export function statusLines(
   };
 }
 
-/** What an object is, from its apiVersion and kind. */
 export function kindOf(object: unknown):
   | {
       readonly group: string;
@@ -126,7 +123,6 @@ export function kindOf(object: unknown):
   };
 }
 
-/** The `resourceVersion` an object carries. */
 export function resourceVersionOf(json: string): string | undefined {
   const { metadata } = JSON.parse(json) as { metadata?: KubeObject };
   const version = metadata?.resourceVersion;

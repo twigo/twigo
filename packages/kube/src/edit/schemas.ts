@@ -1,7 +1,6 @@
 import { toIpcError, type Backend } from "@twigo/protocol";
 import { Changes } from "@twigo/workbench";
 
-/** A kind whose schema the editor asks for. */
 export interface SchemaKind {
   readonly space: string;
   readonly group: string;
@@ -26,12 +25,10 @@ export class Schemas {
 
   constructor(private readonly backend: Backend) {}
 
-  /** What came of asking, none while nothing has asked. */
   get(kind: SchemaKind): SchemaState | undefined {
     return this.#states.get(keyOf(kind));
   }
 
-  /** Asks for the kind's schema unless that was asked already. */
   ensure(kind: SchemaKind): void {
     const key = keyOf(kind);
     if (this.#states.has(key)) return;

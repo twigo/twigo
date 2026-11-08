@@ -8,21 +8,17 @@ import {
 import { Changes } from "@twigo/workbench";
 import { parseManifest } from "./object";
 
-/** What an edit is previewed with, kept to ask again with other choices. */
 export interface Subject {
   readonly space: string;
-  /** None for a new manifest. */
   readonly opened: OpenedEdit | null;
   readonly text: string;
 }
 
-/** Where the text goes wrong, or what the engine refused. */
 export interface Failure {
   readonly message: string;
   readonly at?: { readonly line: number; readonly column: number };
 }
 
-/** The dry-run of an editor's edit (ARCHITECTURE 6.5): under way, refused, or what the cluster said. */
 export type Preview =
   | { readonly state: "running" }
   | ({ readonly state: "failed" } & Failure)
@@ -53,7 +49,6 @@ export class Previews {
     return this.#previews.get(editor);
   }
 
-  /** Whether the editor's own tab shows the diff. */
   inPlace(editor: string): boolean {
     return this.#inPlace.has(editor);
   }
@@ -65,10 +60,6 @@ export class Previews {
     this.changes.emit();
   }
 
-  /**
-   * Parses the text and asks the engine to dry-run it; the text that does
-   * not parse stays in the editor, with where it goes wrong.
-   */
   async run(
     editor: string,
     subject: Subject,
@@ -110,7 +101,6 @@ export class Previews {
     return this.#set(editor, next);
   }
 
-  /** Asks again for the same text, with other choices about the conflicts. */
   async again(
     editor: string,
     choices: { force?: boolean; drop?: readonly string[] },
@@ -134,7 +124,6 @@ export class Previews {
       this.clear(editor);
   }
 
-  /** Forgets the preview, and whatever answer is still on its way. */
   clear(editor: string): void {
     this.#asked.set(editor, (this.#asked.get(editor) ?? 0) + 1);
     const had = this.#previews.delete(editor);
