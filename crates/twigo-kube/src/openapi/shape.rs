@@ -217,6 +217,27 @@ impl<'a> Node<'a> {
         }
     }
 
+    /// Whether `name` is a field this object declares, as against a key of a
+    /// map, whose schema is that of all its values.
+    pub fn declares(&self, name: &str) -> bool {
+        let Kind::Schema(typed) = self.kind else {
+            return false;
+        };
+        typed
+            .schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .is_some_and(|properties| properties.contains_key(name))
+    }
+
+    /// Whether this field may hold a null as a value, which the server keeps.
+    pub fn nullable(&self) -> bool {
+        match self.kind {
+            Kind::Schema(typed) => typed.schema.get("nullable") == Some(&Value::Bool(true)),
+            Kind::Deduced | Kind::Untyped => false,
+        }
+    }
+
     /// Whether the schema types this place, as against a value the server
     /// deduces from what it gets, or leaves untyped.
     pub fn typed(&self) -> bool {

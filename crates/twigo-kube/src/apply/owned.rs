@@ -68,6 +68,18 @@ impl Ownership {
             .any(|other| other.fields.holds(path.elements()))
     }
 
+    /// Whether another manager's hold keeps what Twigo stops naming on the
+    /// server: its member, or anything under it when the path is a field the
+    /// schema declares.
+    pub fn others_keep(&self, path: &Path, declared: bool) -> bool {
+        if declared {
+            return self.others_hold(path);
+        }
+        self.others
+            .iter()
+            .any(|other| other.fields.contains(path.elements()))
+    }
+
     /// Whether every entry is at `api_version`, so that the paths compare.
     pub fn at_version(&self, api_version: &str) -> bool {
         self.ours

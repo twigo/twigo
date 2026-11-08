@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{Map, Value};
 
 use super::fields::{Element, Path};
+use super::owned::Ownership;
 use crate::openapi::{ListType, Node};
 
 /// Lays `change` over `into`, field by field as the server would merge the
@@ -95,10 +96,8 @@ fn is_empty_container(value: &Value) -> bool {
     }
 }
 
-/// Takes `path` out of `value`, and says whether it was there. With `prune`,
-/// a map or list the removal emptied and an element it left with only its
-/// keys go too, so a claim on them does not stay behind.
-pub(super) fn remove(value: &mut Value, path: &[Element], prune: bool) -> bool {
+/// Takes `path` out of `value`, and says whether it was there.
+pub(super) fn remove(value: &mut Value, path: &[Element]) -> bool {
     let Some((first, rest)) = path.split_first() else {
         return false;
     };
@@ -110,14 +109,7 @@ pub(super) fn remove(value: &mut Value, path: &[Element], prune: bool) -> bool {
             if rest.is_empty() {
                 return map.remove(name).is_some();
             }
-            let Some(child) = map.get_mut(name) else {
-                return false;
-            };
-            let removed = remove(child, rest, prune);
-            if removed && prune && is_empty_container(child) {
-                map.remove(name);
-            }
-            removed
+            map.get_mut(name).is_some_and(|child| remove(child, rest))
         }
         element => {
             let Value::Array(items) = value else {
@@ -130,10 +122,75 @@ pub(super) fn remove(value: &mut Value, path: &[Element], prune: bool) -> bool {
                 items.remove(index);
                 return true;
             }
-            let removed = remove(&mut items[index], rest, prune);
-            if removed && prune && !beyond_keys(&items[index], element) {
+            remove(&mut items[index], rest)
+        }
+    }
+}
+
+/// Takes a removal out of a configuration. What it empties the edit still
+/// holds, an element with nothing left but its keys, a map or a list, and the
+/// server deletes the whole of what an apply no longer names unless another
+/// manager holds it ([`Updater::prune`]), the fields nobody owns under it
+/// included: so it stays named, a claim on what the person kept, and goes only
+/// when another manager's hold keeps it on the server anyway. That hold is a
+/// member of the set for an element or a map's key, whereas anything under it
+/// holds a field the schema declares ([`EnsureNamedFieldsAreMembers`]). A map
+/// left truly empty the server drops regardless (kind 1.37, 2026-11-08), so
+/// the claim keeps what is around it.
+///
+/// [`Updater::prune`]: https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/merge/update.go#L256-L280
+/// [`EnsureNamedFieldsAreMembers`]: https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/fieldpath/set.go#L133-L151
+pub(super) fn release(
+    config: &mut Value,
+    path: &[Element],
+    node: Option<Node<'_>>,
+    at: &mut Path,
+    ownership: &Ownership,
+) -> bool {
+    let Some((first, rest)) = path.split_first() else {
+        return false;
+    };
+    match first {
+        Element::Field(name) => {
+            let Value::Object(map) = config else {
+                return false;
+            };
+            if rest.is_empty() {
+                return map.remove(name).is_some();
+            }
+            let Some(child) = map.get_mut(name) else {
+                return false;
+            };
+            at.push(first.clone());
+            let field = node.and_then(|node| node.field(name));
+            let removed = release(child, rest, field, at, ownership);
+            let declared = node.is_some_and(|node| node.declares(name));
+            let empty = removed && is_empty_container(child);
+            if empty && ownership.others_keep(at, declared) {
+                map.remove(name);
+            }
+            at.pop();
+            removed
+        }
+        element => {
+            let Value::Array(items) = config else {
+                return false;
+            };
+            let Some(index) = items.iter().position(|item| element.matches(item)) else {
+                return false;
+            };
+            if rest.is_empty() {
+                items.remove(index);
+                return true;
+            }
+            at.push(element.clone());
+            let item_node = node.and_then(|node| node.items());
+            let removed = release(&mut items[index], rest, item_node, at, ownership);
+            let bare = removed && !beyond_keys(&items[index], element);
+            if bare && ownership.others_keep(at, false) {
                 items.remove(index);
             }
+            at.pop();
             removed
         }
     }
@@ -227,7 +284,7 @@ pub fn still_has(object: &Value, path: &Path) -> bool {
 pub fn without(object: &Value, paths: &[Path]) -> Value {
     let mut result = object.clone();
     for path in paths {
-        remove(&mut result, path.elements(), false);
+        remove(&mut result, path.elements());
     }
     result
 }
@@ -263,7 +320,7 @@ pub fn merge_patch(object: &Value, removals: &[Path]) -> Option<Value> {
         let mut changed = false;
         for other in removals {
             if other.elements().starts_with(prefix) {
-                changed |= remove(&mut list, &other.elements()[index..], false);
+                changed |= remove(&mut list, &other.elements()[index..]);
             }
         }
         if changed {
@@ -288,7 +345,7 @@ pub(super) fn combined(
     let mut after = object.clone();
     merge(&mut after, changed, node);
     for removal in removals {
-        remove(&mut after, removal.elements(), false);
+        remove(&mut after, removal.elements());
     }
     for (path, list) in rewritten {
         place(&mut after, path.elements(), Value::Array(list.clone()));

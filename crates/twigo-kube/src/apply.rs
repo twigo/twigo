@@ -33,12 +33,18 @@
 //! as staying, and the dry-run's answer settles it, since what it no longer
 //! holds needs no patch.
 //!
+//! A map or a list element a removal empties stays in the configuration
+//! while the edit holds it, as the server deletes the whole of what an apply
+//! stops naming, what nobody owns in it included, unless another manager
+//! holds it (`merge::release`).
+//!
 //! Some edits no apply can express without owning what it does not change:
-//! a list's elements put in another order, one inserted before the end (an
-//! apply could say where only by naming every element of the list, and the
-//! server puts a new one last), an element of a key held twice, changed or
-//! removed, or a change an apply cannot validate with the old field still
-//! there (`strategy: Recreate` over another manager's `rollingUpdate`). They
+//! a list's elements put in another order, one inserted before the end (the
+//! server places a new element before the next one the configuration shares
+//! with the object, but an edit moving elements names more of the list than
+//! the person changed), an element of a key held twice, changed or removed,
+//! or a change an apply cannot validate with the old field still there
+//! (`strategy: Recreate` over another manager's `rollingUpdate`). They
 //! go by one JSON merge patch that carries the changes and the removals
 //! together ([`Combined`]), as `kubectl edit` does.
 //!
@@ -249,7 +255,13 @@ pub fn build(edit: Edit<'_>) -> Result<Built, Refusal> {
     let has_changes = !changed.as_object().is_some_and(Map::is_empty);
     merge::merge(&mut config, changed.clone(), Some(root));
     for removal in &removals {
-        merge::remove(&mut config, removal.elements(), true);
+        merge::release(
+            &mut config,
+            removal.elements(),
+            Some(root),
+            &mut Path::default(),
+            &ownership,
+        );
     }
     merge::retain(
         &mut config,
@@ -280,7 +292,10 @@ pub fn build(edit: Edit<'_>) -> Result<Built, Refusal> {
             api_version,
             edited["kind"].as_str().unwrap_or_default(),
             &edited["metadata"],
-            Some(lock),
+            Some(Held {
+                resource_version: lock,
+                uid: live["metadata"].get("uid"),
+            }),
         )
     });
     Ok(Built {
@@ -328,8 +343,8 @@ pub fn manifest(
 
 /// `object` without the nulls of fields the schema types, whose absence is
 /// what the person meant. Where the schema does not type a place, a deduced
-/// or untyped node, a field it does not know, or in an atomic value, a null
-/// is a value, which the server keeps.
+/// or untyped node, a field it does not know, or in an atomic value, and on
+/// a field it says is `nullable`, a null is a value, which the server keeps.
 fn normalized(object: &Value, root: Option<Node<'_>>) -> Value {
     fn strip(value: &mut Value, node: Node<'_>) {
         if !node.typed() {
@@ -338,7 +353,10 @@ fn normalized(object: &Value, root: Option<Node<'_>>) -> Value {
         match value {
             Value::Object(map) if !node.atomic_map() => {
                 map.retain(|name, value| {
-                    !value.is_null() || !node.field(name).is_some_and(|field| field.typed())
+                    !value.is_null()
+                        || !node
+                            .field(name)
+                            .is_some_and(|field| field.typed() && !field.nullable())
                 });
                 for (name, value) in map.iter_mut() {
                     if let Some(field) = node.field(name) {
@@ -499,13 +517,22 @@ fn ignored(base: Option<&Value>, edited: &Value, status_subresource: bool) -> Ve
     ignored
 }
 
-/// A configuration with its identity and, for an edit, its lock.
+/// What holds a configuration of an edit to the object it was made from: the
+/// `resourceVersion`, and the uid, as an apply to a name nothing has creates
+/// it whatever `resourceVersion` it holds to, and with a uid is refused with
+/// a `409` (kind 1.37, 2026-11-08).
+struct Held<'a> {
+    resource_version: &'a str,
+    uid: Option<&'a Value>,
+}
+
+/// A configuration with its identity and, for an edit, what holds it.
 fn finish(
     mut config: Value,
     api_version: &str,
     kind: &str,
     metadata: &Value,
-    lock: Option<&str>,
+    held: Option<Held<'_>>,
 ) -> Value {
     if !config.is_object() {
         config = json!({});
@@ -522,8 +549,15 @@ fn finish(
     if let Some(namespace) = metadata.get("namespace") {
         meta.insert("namespace".to_owned(), namespace.clone());
     }
-    if let Some(lock) = lock {
-        meta.insert("resourceVersion".to_owned(), json!(lock));
+    if let Some(Held {
+        resource_version,
+        uid,
+    }) = held
+    {
+        meta.insert("resourceVersion".to_owned(), json!(resource_version));
+        if let Some(uid) = uid {
+            meta.insert("uid".to_owned(), uid.clone());
+        }
     }
     config
 }

@@ -83,8 +83,8 @@ fn of_value(
 }
 
 /// Whether what stayed changed order, or something new stands before what
-/// stayed: an apply puts a new element after every other, and it could say
-/// where only by naming every element, owning them all.
+/// stayed: an apply could say so only by naming, and so owning, more of the
+/// list than the person changed.
 fn moved<T: PartialEq>(was: &[T], now: &[T]) -> bool {
     let stayed_was = was.iter().filter(|item| now.contains(item));
     let stayed_now = now.iter().filter(|item| was.contains(item));
@@ -139,8 +139,8 @@ fn occurrences(
 /// carries its keys and its changes, a new element goes whole, and one gone
 /// is removed by its keys. An element whose items are atomic is taken whole,
 /// keys included, as the server takes an atomic map ([`doMap`]). An apply
-/// cannot address one of two elements with a key, and it could say where an
-/// element stands only by naming every element of the list, so a list whose
+/// cannot address one of two elements with a key, and an edit that moves
+/// elements names more of the list than the person changed, so a list whose
 /// elements moved or whose duplicated key is touched, by the edit too, is
 /// left to a merge patch; a duplicate nobody touched sends nothing, as an
 /// apply that names its key replaces every element of it ([`visitListItems`]).

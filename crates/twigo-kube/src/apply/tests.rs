@@ -422,7 +422,10 @@ fn what_no_configuration_may_carry_is_reported_not_sent() {
     assert_eq!(result.ignored, vec![".status", ".metadata.uid"]);
     let config = result.config.unwrap();
     assert_eq!(config.get("status"), None);
-    assert_eq!(config["metadata"].get("uid"), None);
+    assert_eq!(
+        config["metadata"]["uid"], live["metadata"]["uid"],
+        "the edit's uid is not sent"
+    );
 }
 
 #[test]
@@ -1118,38 +1121,61 @@ fn a_co_owner_of_a_list_element_or_a_deduced_map_keeps_a_removal_for_the_patch()
 }
 
 #[test]
-fn a_removal_of_twigo_s_only_field_in_an_element_takes_the_element_out_of_the_configuration() {
+fn a_removal_keeps_the_element_it_empties_named_unless_another_manager_holds_it_as_a_member() {
     let document = apps();
     let root = deployment_root(&document);
-    let containers = |container: Value| json!({ "spec": { "template": { "spec": { "containers": [container] } } } });
-    let live = deployment_with(
-        json!({}),
-        vec![manager(
-            "twigo",
-            "Apply",
-            json!({ "f:spec": { "f:template": { "f:spec": { "f:containers": {
-                item("app"): { ".": {}, "f:name": {}, "f:workingDir": {} },
-            } } } } }),
-        )],
+    let element = |fields: Value| json!({ "f:spec": { "f:template": { "f:spec": { "f:containers": { item("app"): fields } } } } });
+    let twigo = manager(
+        "twigo",
+        "Apply",
+        element(json!({ ".": {}, "f:name": {}, "f:workingDir": {} })),
     );
-    let mut live = live;
-    live["spec"] =
-        containers(json!({ "name": "app", "image": "x", "workingDir": "/x" }))["spec"].clone();
+    let bare = Some(json!({ "name": "app" }));
+    for (case, others, expected) in [
+        ("Twigo alone holds it", vec![], bare.clone()),
+        (
+            "another holds it as a member",
+            vec![manager(
+                "gitops",
+                "Apply",
+                element(json!({ ".": {}, "f:name": {}, "f:image": {} })),
+            )],
+            None,
+        ),
+        (
+            "another holds only a field under it, and the server deletes it all the same",
+            vec![manager("helm", "Update", element(json!({ "f:image": {} })))],
+            bare.clone(),
+        ),
+    ] {
+        let mut managers = others;
+        managers.push(twigo.clone());
+        let mut live = deployment_with(json!({}), managers);
+        live["spec"] = json!({ "template": { "spec": { "containers": [
+            { "name": "app", "image": "x", "workingDir": "/x" },
+        ] } } });
+        let base = view(&live);
+        let mut edited = base.clone();
+        edited["spec"]["template"]["spec"]["containers"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("workingDir");
+        let result = built(&live, &base, &edited, root, &[]);
+        let config = result.config.expect(case);
+        match &expected {
+            Some(element) => assert_eq!(
+                config["spec"]["template"]["spec"]["containers"],
+                json!([element]),
+                "{case}: {config}"
+            ),
+            None => assert_eq!(config.get("spec"), None, "{case}: {config}"),
+        }
+    }
+    let mut live = deployment_with(json!({}), vec![twigo.clone()]);
+    live["spec"] = json!({ "template": { "spec": { "containers": [
+        { "name": "app", "image": "x", "workingDir": "/x" },
+    ] } } });
     let base = view(&live);
-    let mut edited = base.clone();
-    edited["spec"]["template"]["spec"]["containers"][0]
-        .as_object_mut()
-        .unwrap()
-        .remove("workingDir");
-    let result = built(&live, &base, &edited, root, &[]);
-    assert_eq!(result.removals, vec![]);
-    let config = result.config.unwrap();
-    assert_eq!(
-        config.get("spec"),
-        None,
-        "no claim is left on the element: {config}"
-    );
-
     let mut edited = base.clone();
     edited["spec"]["template"]["spec"]["containers"]
         .as_array_mut()
@@ -1160,6 +1186,177 @@ fn a_removal_of_twigo_s_only_field_in_an_element_takes_the_element_out_of_the_co
         result.config.unwrap()["spec"]["template"]["spec"]["containers"][1],
         json!({ "name": "only-keys" }),
         "an element the person added with only its keys stays"
+    );
+}
+
+#[test]
+fn a_removal_keeps_the_map_or_list_it_empties_named_unless_another_manager_keeps_it() {
+    let document = apps();
+    let root = deployment_root(&document);
+    let volume = |fields: Value| json!({ "f:spec": { "f:template": { "f:spec": { "f:volumes": { item("cache"): fields } } } } });
+    let twigo = manager(
+        "twigo",
+        "Apply",
+        volume(json!({ ".": {}, "f:name": {}, "f:emptyDir": { "f:medium": {} } })),
+    );
+    let live_with = |managers: Vec<Value>, empty_dir: Value| {
+        let mut live = deployment_with(json!({}), managers);
+        live["spec"] = json!({ "template": { "spec": { "volumes": [
+            { "name": "cache", "emptyDir": empty_dir },
+        ] } } });
+        live
+    };
+    let edited_of = |live: &Value, empty_dir: Value| {
+        let mut edited = view(live);
+        edited["spec"]["template"]["spec"]["volumes"][0]["emptyDir"] = empty_dir;
+        edited
+    };
+
+    let live = live_with(vec![twigo.clone()], json!({ "medium": "Memory" }));
+    let result = built(&live, &view(&live), &edited_of(&live, json!({})), root, &[]);
+    assert_eq!(
+        result.config.unwrap()["spec"]["template"]["spec"]["volumes"],
+        json!([{ "name": "cache", "emptyDir": {} }]),
+        "the edit keeps the map, and nobody else holds it"
+    );
+
+    for (case, other) in [
+        (
+            "a member",
+            manager("gitops", "Apply", volume(json!({ "f:emptyDir": {} }))),
+        ),
+        (
+            "a declared field held by anything under it",
+            manager(
+                "helm",
+                "Update",
+                volume(json!({ "f:emptyDir": { "f:sizeLimit": {} } })),
+            ),
+        ),
+    ] {
+        let live = live_with(
+            vec![other, twigo.clone()],
+            json!({ "medium": "Memory", "sizeLimit": "1Gi" }),
+        );
+        let edited = edited_of(&live, json!({ "sizeLimit": "1Gi" }));
+        let result = built(&live, &view(&live), &edited, root, &[]);
+        assert_eq!(
+            result.config.unwrap()["spec"]["template"]["spec"]["volumes"],
+            json!([{ "name": "cache" }]),
+            "{case}: the map goes, and the volume stays named"
+        );
+    }
+
+    let document = items_document();
+    let root = synthetic_root(&document);
+    let free = |fields: Value| json!({ "f:free": fields });
+    let twigo = manager("twigo", "Apply", free(json!({ "f:m": { "f:k": {} } })));
+    for (case, other, expected) in [
+        ("nobody else holds it", None, Some(json!({}))),
+        (
+            "a deduced map's key held as a member",
+            Some(free(json!({ "f:m": {} }))),
+            None,
+        ),
+        (
+            "a deduced map's key held only under it",
+            Some(free(json!({ "f:m": { "f:z": {} } }))),
+            Some(json!({})),
+        ),
+    ] {
+        let mut managers = vec![twigo.clone()];
+        managers.extend(other.map(|fields| manager("gitops", "Apply", fields)));
+        let live = owned_by(
+            widget(json!({ "free": { "m": { "k": "1", "z": "2" } } })),
+            managers,
+        );
+        let base = view(&live);
+        let mut edited = base.clone();
+        edited["free"]["m"].as_object_mut().unwrap().remove("k");
+        let config = built(&live, &base, &edited, root, &[]).config.unwrap();
+        assert_eq!(
+            config["free"].get("m").cloned(),
+            expected,
+            "{case}: {config}"
+        );
+    }
+
+    let twigo = manager(
+        "twigo",
+        "Apply",
+        json!({ "f:items": { item("x"): { ".": {}, "f:name": {}, "f:value": {} } } }),
+    );
+    let live = owned_by(
+        widget(json!({ "items": [{ "name": "x", "value": "1" }] })),
+        vec![twigo.clone()],
+    );
+    let base = view(&live);
+    let mut edited = base.clone();
+    edited["items"] = json!([]);
+    assert_eq!(
+        built(&live, &base, &edited, root, &[]).config.unwrap()["items"],
+        json!([]),
+        "the edit keeps the list, emptied"
+    );
+    let live = owned_by(
+        widget(json!({ "items": [{ "name": "x", "value": "1" }, { "name": "y", "value": "2" }] })),
+        vec![
+            twigo,
+            manager(
+                "gitops",
+                "Apply",
+                json!({ "f:items": { item("y"): { ".": {}, "f:name": {}, "f:value": {} } } }),
+            ),
+        ],
+    );
+    let base = view(&live);
+    let mut edited = base.clone();
+    edited["items"].as_array_mut().unwrap().remove(0);
+    let config = built(&live, &base, &edited, root, &[]).config.unwrap();
+    assert_eq!(config.get("items"), None, "{config}");
+}
+
+#[test]
+fn a_null_on_a_nullable_field_is_a_value_and_elsewhere_it_is_no_value() {
+    let document = synthetic(json!({
+        "nullable": { "type": "string", "nullable": true },
+        "typed": { "type": "string" },
+    }));
+    let root = synthetic_root(&document);
+    let object = json!({ "metadata": {}, "nullable": null, "typed": null });
+    assert_eq!(
+        normalized(&object, Some(root)),
+        json!({ "metadata": {}, "nullable": null })
+    );
+
+    let live = owned_by(widget(json!({ "nullable": "set", "typed": "t" })), vec![]);
+    let base = view(&live);
+    let mut edited = base.clone();
+    edited["nullable"] = Value::Null;
+    let result = built(&live, &base, &edited, root, &[]);
+    assert_eq!(result.removals, vec![], "a null is no removal here");
+    assert_eq!(result.config.unwrap()["nullable"], Value::Null);
+}
+
+#[test]
+fn a_configuration_of_an_edit_holds_to_the_uid_it_was_built_from() {
+    let document = apps();
+    let root = deployment_root(&document);
+    let live = deployment();
+    let uid = live["metadata"]["uid"].clone();
+    assert!(uid.is_string(), "the fixture holds one");
+    let base = view(&live);
+    let mut edited = base.clone();
+    edited["metadata"]["annotations"] = json!({ "mine": "1" });
+    let config = built(&live, &base, &edited, root, &[]).config.unwrap();
+    assert_eq!(config["metadata"]["uid"], uid);
+    assert_eq!(config["metadata"]["resourceVersion"], "42");
+
+    let (config, _) = manifest(&edited, true, Some(root), &[]);
+    assert_eq!(
+        config.unwrap()["metadata"].get("uid"),
+        None,
+        "a manifest may create its object"
     );
 }
 
