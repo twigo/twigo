@@ -60,6 +60,16 @@ const KEY = "edits";
 
 const PERSIST_AFTER_MS = 300;
 
+function differs(
+  live: string,
+  since: string,
+  statusSubresource: boolean,
+): boolean {
+  return (
+    comparable(live, statusSubresource) !== comparable(since, statusSubresource)
+  );
+}
+
 /**
  * Whether a copy is or may become a Secret's, whose text must never reach the
  * state file. A manifest that does not parse or names no kind yet may turn
@@ -96,6 +106,10 @@ export class WorkingCopies {
   readonly #copies = new Map<string, WorkingCopy>();
   readonly #timers = new Map<string, ReturnType<typeof setTimeout>>();
   readonly #buffers = new Map<string, EditorBuffer>();
+  readonly #held = new Map<
+    string,
+    { readonly text: string; readonly since: string }
+  >();
   #manifests = 0;
   readonly #seen = new Map<
     string,
@@ -139,9 +153,11 @@ export class WorkingCopies {
   closed(uri: string): void {
     this.#buffers.get(uri)?.model.dispose();
     this.#buffers.delete(uri);
+    this.#held.delete(uri);
   }
 
   edit(uri: string, text: string, opened: Opened): void {
+    this.#held.delete(uri);
     const copy = this.#copies.get(uri);
     const base = copy?.base ?? opened.base;
     if (text === yamlOfJson(base)) {
@@ -159,6 +175,7 @@ export class WorkingCopies {
   }
 
   write(uri: string, space: string, text: string): void {
+    this.#held.delete(uri);
     if (text === "") {
       this.drop(uri);
       return;
@@ -186,7 +203,41 @@ export class WorkingCopies {
   see(uri: string, live: string, statusSubresource: boolean): void {
     const before = this.serverChanged(uri);
     this.#seen.set(uri, { live, statusSubresource });
-    if (this.serverChanged(uri) !== before) this.changes.emit();
+    const held = this.#held.get(uri);
+    const shown =
+      held !== undefined && differs(live, held.since, statusSubresource);
+    if (shown) this.#held.delete(uri);
+    if (shown || this.serverChanged(uri) !== before) this.changes.emit();
+  }
+
+  /**
+   * The text of an edit whose plan is done, shown in place of the live
+   * object until the object comes by its watch with what the edit changed,
+   * so that the editor never shows the object as it was.
+   */
+  held(uri: string): string | undefined {
+    return this.#held.get(uri)?.text;
+  }
+
+  /**
+   * The edit's plan is done and the copy ends. The object has not shown the
+   * change yet if it still equals what the copy was based on, or locked to,
+   * and its text is held until `see` finds it different: a status write moves
+   * the `resourceVersion` without that, so the lock alone would let the old
+   * object show.
+   */
+  applied(uri: string): void {
+    const copy = this.#copies.get(uri);
+    const seen = this.#seen.get(uri);
+    const since = copy?.locked ?? copy?.base;
+    if (
+      copy &&
+      since !== undefined &&
+      !(seen && differs(seen.live, since, seen.statusSubresource))
+    ) {
+      this.#held.set(uri, { text: copy.text, since });
+    }
+    this.drop(uri);
   }
 
   live(uri: string): string | undefined {
@@ -205,8 +256,7 @@ export class WorkingCopies {
     return (
       since !== undefined &&
       seen !== undefined &&
-      comparable(seen.live, seen.statusSubresource) !==
-        comparable(since, seen.statusSubresource)
+      differs(seen.live, since, seen.statusSubresource)
     );
   }
 

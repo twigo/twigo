@@ -7,7 +7,8 @@ import { YamlSurface } from "./YamlSurface";
 /**
  * The YAML tab of an object's editor (ARCHITECTURE 4.3): the live object's
  * text until the person changes it, then a working copy that the live
- * object does not overwrite.
+ * object does not overwrite, and once it is applied that text again until
+ * the live object shows the change.
  */
 export function YamlTab({
   edits,
@@ -26,7 +27,7 @@ export function YamlTab({
   useChanges(copies.changes);
   const live = useMemo(() => yamlOfJson(json), [json]);
   const kind = useMemo(() => kindOf(JSON.parse(json)), [json]);
-  const text = copies.get(uri)?.text ?? live;
+  const text = copies.get(uri)?.text ?? copies.held(uri) ?? live;
   useEffect(() => {
     copies.see(uri, json, statusLocked);
   }, [copies, uri, json, statusLocked]);
@@ -48,7 +49,11 @@ export function YamlTab({
       statusLocked={statusLocked}
       schemaKind={kind}
       note={
-        copies.get(uri) ? "Edited, not applied" : "In sync with the cluster"
+        copies.get(uri)
+          ? "Edited, not applied"
+          : copies.held(uri) === undefined
+            ? "In sync with the cluster"
+            : "Applied, waiting for the cluster's copy"
       }
     />
   );

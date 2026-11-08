@@ -16,6 +16,7 @@ test("Apply… dry-runs the edit and opens its diff, and Apply applies it and en
   await vi.waitFor(() => {
     expect(edits.copies.get(uri)).toBeUndefined();
   });
+  expect(edits.copies.held(uri)).toBe(EDITED);
   expect(edits.previews.get(uri)).toBeUndefined();
   expect(close).toHaveBeenCalledWith(diffUri({ kind: "apply", editor: uri }));
 });
@@ -135,4 +136,5 @@ test("Delete and recreate plans by the preview's id and asks first, as it destro
   await vi.waitFor(() => {
     expect(edits.copies.get(uri)).toBeUndefined();
   });
+  expect(edits.copies.held(uri)).toBe(EDITED);
 });

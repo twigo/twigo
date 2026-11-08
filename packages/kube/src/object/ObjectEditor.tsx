@@ -41,9 +41,11 @@ export function ObjectEditor({
       ? resources.value.find((resource) => sameGvr(resource.gvr, input.gvr))
       : undefined;
   const query = input && objectQuery(input, resources);
-  // An edit holds the object's text until it is applied, so the object is
-  // followed for what changes under it, whichever view is shown.
-  const editing = edits.copies.get(uri) !== undefined;
+  // An edit holds the object's text until it is applied, and an applied one
+  // until the object shows it, so the object is followed for what changes
+  // under it, whichever view is shown.
+  const editing =
+    edits.copies.get(uri) !== undefined || edits.copies.held(uri) !== undefined;
   const { snapshot, values, id } = useObject(backend, query, {
     overview: tab === "overview",
     manifest: tab === "yaml" || editing,

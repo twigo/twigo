@@ -207,3 +207,90 @@ test("an editor's buffer is made once and kept for as long as the editor lives, 
   copies.closed("k8s://prod-eu/apps/v1/deployments/default/other");
   expect(second.dispose).not.toHaveBeenCalled();
 });
+
+const applied = (replicas: number, version: string) =>
+  JSON.stringify({
+    ...JSON.parse(base),
+    metadata: { name: "web", namespace: "default", resourceVersion: version },
+    spec: { replicas },
+  });
+
+test("an applied edit's text stays the editor's until the object shows what it changed", async () => {
+  const { copies, dirty } = await services();
+  copies.edit(DEPLOYMENT, "replicas: 2\n", opened);
+  copies.see(DEPLOYMENT, base, true);
+  copies.applied(DEPLOYMENT);
+  expect(copies.get(DEPLOYMENT)).toBeUndefined();
+  expect(dirty.get(DEPLOYMENT)).toBe(false);
+  expect(copies.held(DEPLOYMENT)).toBe("replicas: 2\n");
+
+  const status = JSON.stringify({
+    ...JSON.parse(base),
+    metadata: { name: "web", namespace: "default", resourceVersion: "11" },
+    status: { readyReplicas: 0 },
+  });
+  copies.see(DEPLOYMENT, status, true);
+  expect(copies.held(DEPLOYMENT)).toBe("replicas: 2\n");
+  copies.see(DEPLOYMENT, applied(2, "12"), true);
+  expect(copies.held(DEPLOYMENT)).toBeUndefined();
+});
+
+test("an object that shows the edit by the time its plan is done holds nothing, and a new manifest has no object to wait for", async () => {
+  const { copies } = await services();
+  copies.edit(DEPLOYMENT, "replicas: 2\n", opened);
+  copies.see(DEPLOYMENT, applied(2, "12"), true);
+  copies.applied(DEPLOYMENT);
+  expect(copies.get(DEPLOYMENT)).toBeUndefined();
+  expect(copies.held(DEPLOYMENT)).toBeUndefined();
+
+  copies.write("untitled://manifest-1", "prod-eu", "kind: ConfigMap\n");
+  copies.applied("untitled://manifest-1");
+  expect(copies.get("untitled://manifest-1")).toBeUndefined();
+  expect(copies.held("untitled://manifest-1")).toBeUndefined();
+});
+
+test("an edit applied on top of Keep mine waits for the object to differ from the one it locked to", async () => {
+  const { copies } = await services();
+  copies.edit(DEPLOYMENT, "replicas: 2\n", opened);
+  const theirs = applied(4, "12");
+  copies.see(DEPLOYMENT, theirs, true);
+  copies.keepMine(DEPLOYMENT);
+  copies.applied(DEPLOYMENT);
+  expect(copies.held(DEPLOYMENT)).toBe("replicas: 2\n");
+  copies.see(DEPLOYMENT, theirs, true);
+  expect(copies.held(DEPLOYMENT)).toBe("replicas: 2\n");
+  copies.see(DEPLOYMENT, applied(2, "13"), true);
+  expect(copies.held(DEPLOYMENT)).toBeUndefined();
+});
+
+test("typing into the held text, or closing its editor, ends the hold", async () => {
+  const { copies } = await services();
+  copies.edit(DEPLOYMENT, "replicas: 2\n", opened);
+  copies.see(DEPLOYMENT, base, true);
+  copies.applied(DEPLOYMENT);
+  copies.edit(DEPLOYMENT, "replicas: 3\n", opened);
+  expect(copies.held(DEPLOYMENT)).toBeUndefined();
+  expect(copies.get(DEPLOYMENT)?.text).toBe("replicas: 3\n");
+
+  copies.applied(DEPLOYMENT);
+  expect(copies.held(DEPLOYMENT)).toBe("replicas: 3\n");
+  copies.closed(DEPLOYMENT);
+  expect(copies.held(DEPLOYMENT)).toBeUndefined();
+});
+
+test("a hold is told to those who follow the copies, and is never written to the state", async () => {
+  const { backend, copies, state } = await services();
+  copies.edit(DEPLOYMENT, "replicas: 2\n", opened);
+  copies.see(DEPLOYMENT, base, true);
+  const told = vi.fn();
+  copies.changes.subscribe(told);
+  copies.applied(DEPLOYMENT);
+  expect(told).toHaveBeenCalled();
+  told.mockClear();
+  copies.see(DEPLOYMENT, applied(2, "12"), true);
+  expect(told).toHaveBeenCalledTimes(1);
+  copies.flush();
+  await state.settled();
+  const stored = await backend.invoke("state_load", null);
+  expect(stored.spaces["prod-eu"]?.edits ?? "{}").toBe("{}");
+});

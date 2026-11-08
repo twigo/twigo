@@ -59,6 +59,7 @@ import {
   type QueryResult,
 } from "./query";
 
+export { APPLIED_LAG_MS } from "./edits";
 export { UNMARKED } from "./fixtures";
 
 /**

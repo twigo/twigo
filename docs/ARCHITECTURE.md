@@ -705,6 +705,8 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
     It compares the live object with `locked`, else `base`, without `resourceVersion` and `generation`, and without `status` where the resource has the `status` subresource, so a controller's status write raises nothing.
   - Keep mine sends the old `base`, the new `lock` and `locked` (`OpenedEdit`), since diffing against the new live object would revert the other writer's change.
   - Save runs the apply flow (6.5): the text is parsed with the `yaml` package at version 1.1, which is the one dialect, and a text of several documents is refused, since the engine previews one object at a time.
+  - When the plan of an apply is done the copy ends, but its text stays the editor's until the live object differs from the one the copy was based on, or locked to, compared as "changed on server" is, so that the editor never shows the object as it was while the new one comes by its watch.
+    A status write does not end it, as it moves the `resourceVersion` without changing the object; typing or closing the editor does, and it is never written to the state.
   - Unsaved working copies survive a restart (backups per space, the `edits` key of the space's state), written a pause of 300 ms after the last change.
     A Secret's never is: not an object of the `secrets` resource, and not a new manifest that does not parse, names no kind yet or mentions a Secret, since the values may be typed before the kind.
   - Closing an editor keeps its copy, which the tab shows again when the object opens anew.
