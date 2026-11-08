@@ -218,6 +218,7 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
       <span data-preview={params?.preview ?? false} className="truncate">
         {api.title}
       </span>
+      {params && provider?.marker && <provider.marker uri={params.uri} />}
       <button
         type="button"
         aria-label={`Close ${api.title ?? ""}`}

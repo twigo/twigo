@@ -4,6 +4,7 @@ import { Discovery } from "./discovery";
 import { ListStatuses } from "./list/listStatus";
 import { ListStates } from "./listState";
 import { PinnedLists } from "./explorer/pinned";
+import { createEdits, type EditServices } from "./edit/services";
 import { OverviewStates } from "./object/overviewStates";
 import { ListPresets } from "./presets";
 import { Selection } from "./selection";
@@ -25,6 +26,8 @@ export interface ListServices {
   readonly overviews: OverviewStates;
   /** What RBAC lets the person do, for the `capability.*` keys. */
   readonly capabilities: Capabilities;
+  /** Each YAML editor's working copy, preview and schema. */
+  readonly edits: EditServices;
 }
 
 export function createServices(workbench: Workbench): ListServices {
@@ -45,5 +48,6 @@ export function createServices(workbench: Workbench): ListServices {
     pinned: new PinnedLists(workbench.spaces),
     overviews: new OverviewStates(),
     capabilities,
+    edits: createEdits(workbench),
   };
 }

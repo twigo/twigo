@@ -1,15 +1,17 @@
-import { useMemo } from "react";
-import type { ObjectQuery, ObjectRef } from "@twigo/protocol";
+import { useEffect, useMemo } from "react";
+import type { ObjectRef } from "@twigo/protocol";
 import { EmptyState, InlineActions, Segmented } from "@twigo/ui";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { sameGvr, useResources, type Discovery } from "../discovery";
+import type { EditServices } from "../edit/services";
+import { YamlTab } from "../edit/YamlTab";
 import { logsKind } from "../logs/entries";
 import { parseObjectUri } from "../uri";
 import { ObjectContent } from "./ObjectContent";
 import type { OverviewStates } from "./overviewStates";
 import { OBJECT_TABS, type ObjectTab, type ObjectTabs } from "./tabs";
 import { useReveal } from "./reveal";
-import { refUri, useObject } from "./useObject";
+import { objectQuery, refUri, useObject } from "./useObject";
 
 /**
  * A `k8s://` editor (ARCHITECTURE 4.3): one object, live, as its Overview,
@@ -21,34 +23,39 @@ export function ObjectEditor({
   discovery,
   overviews,
   tabs,
+  edits,
 }: EditorProps & {
   discovery: Discovery;
   overviews: OverviewStates;
   tabs: ObjectTabs;
+  edits: EditServices;
 }) {
   const { backend, editors, commands, keys } = useWorkbench();
   const input = useMemo(() => parseObjectUri(uri), [uri]);
   const resources = useResources(discovery, input?.space ?? "");
   useChanges(tabs.changes);
+  useChanges(edits.copies.changes);
   const tab = tabs.get(uri);
   const known =
     input && resources.state === "ready"
       ? resources.value.find((resource) => sameGvr(resource.gvr, input.gvr))
       : undefined;
-  const query: ObjectQuery | undefined = input && {
-    space: input.space,
-    gvr: input.gvr,
-    namespaced: known?.namespaced ?? input.namespace !== undefined,
-    namespace: input.namespace ?? null,
-    name: input.name,
-  };
+  const query = input && objectQuery(input, resources);
+  // An edit holds the object's text until it is applied, so the object is
+  // followed for what changes under it, whichever view is shown.
+  const editing = edits.copies.get(uri) !== undefined;
   const { snapshot, values, id } = useObject(backend, query, {
     overview: tab === "overview",
-    manifest: tab === "yaml",
+    manifest: tab === "yaml" || editing,
     events: tab === "events",
     related: tab === "related",
   });
   const reveal = useReveal(id);
+  const statusLocked = known?.subresources.includes("status") ?? false;
+  const manifest = snapshot.manifest;
+  useEffect(() => {
+    if (manifest !== undefined) edits.copies.see(uri, manifest, statusLocked);
+  }, [edits.copies, uri, manifest, statusLocked]);
   if (!input) return <EmptyState title="Not an object">{uri}</EmptyState>;
   const open = (target: ObjectRef) => {
     if (resources.state !== "ready") return;
@@ -67,6 +74,15 @@ export function ObjectEditor({
       values={values}
       reveal={reveal}
       onOpen={open}
+      yaml={(json) => (
+        <YamlTab
+          edits={edits}
+          uri={uri}
+          space={input.space}
+          json={json}
+          statusLocked={statusLocked}
+        />
+      )}
       {...(input.namespace !== undefined && {
         onLogs: (choice) => {
           void commands.execute("k8s.logs.open", keys.lookup(null), {

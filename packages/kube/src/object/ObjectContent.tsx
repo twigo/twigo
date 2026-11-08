@@ -24,6 +24,7 @@ export function ObjectContent({
   snapshot,
   values,
   reveal,
+  yaml,
   onOpen,
   onLogs,
 }: {
@@ -36,6 +37,8 @@ export function ObjectContent({
   snapshot: ObjectSnapshot;
   values: OverviewProps["values"];
   reveal?: OverviewProps["reveal"];
+  /** The YAML tab of an editor that edits; without it the tab is read-only, as the details show it. */
+  yaml?: (json: string) => ReactNode;
   onOpen: (target: ObjectRef) => void;
   onLogs?: OverviewProps["onLogs"];
 }) {
@@ -67,9 +70,10 @@ export function ObjectContent({
       )}
       {tab === "yaml" && (
         <Shown snapshot={snapshot} has={snapshot.manifest !== undefined}>
-          {snapshot.manifest !== undefined && (
-            <Manifest json={snapshot.manifest} />
-          )}
+          {snapshot.manifest !== undefined &&
+            (yaml?.(snapshot.manifest) ?? (
+              <Manifest json={snapshot.manifest} />
+            ))}
         </Shown>
       )}
       {tab === "events" && (
