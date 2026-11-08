@@ -708,6 +708,8 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   - Unsaved working copies survive a restart (backups per space, the `edits` key of the space's state), written a pause of 300 ms after the last change.
     A Secret's never is: not an object of the `secrets` resource, and not a new manifest that does not parse, names no kind yet or mentions a Secret, since the values may be typed before the kind.
   - Closing an editor keeps its copy, which the tab shows again when the object opens anew.
+  - The service also keeps each shown YAML editor's Monaco model, which holds its undo stack, and the cursor and scroll of its view, so they survive a switch between Overview and YAML.
+    They go when the editor closes, the copy staying as text; a text that comes from outside, the live object once a copy has ended, replaces the model's and leaves the cursor and scroll where they were, and clears the undo stack.
 - **Overview.**
   One document per object, described in Rust by `twigo-describe` and rendered alike by the drawer, the Overview tab and MCP's describe-style summaries (6.6) ([research](research/details.md)).
   - Sections have ids and an order, the object's state first: Diagnostics when something is wrong, the kind's first section, conditions, the kind's other sections, extension sections, then metadata and events last.

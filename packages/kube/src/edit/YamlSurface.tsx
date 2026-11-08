@@ -116,6 +116,7 @@ export function YamlSurface({
             text={text}
             onChange={onChange}
             statusLocked={statusLocked}
+            buffers={edits.copies}
             {...(schema && { schema })}
             {...(error && { error })}
           />

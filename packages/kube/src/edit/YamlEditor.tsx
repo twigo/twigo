@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import type { EditorBuffer } from "./copies";
 import { editor, MarkerSeverity, setSchema, Uri } from "./monaco";
 import { statusLines } from "./object";
 
@@ -19,6 +20,13 @@ export interface YamlEditorProps {
   readonly statusLocked?: boolean;
   readonly schema?: { readonly source: string; readonly schema: object };
   readonly error?: TextError;
+  /**
+   * Keeps the editor's model, cursor, scroll and undo while it is not shown.
+   * Without it they go with the view, as in a read-only viewer.
+   */
+  readonly buffers?: {
+    buffer(uri: string, make: () => EditorBuffer): EditorBuffer;
+  };
 }
 
 const STATUS_IS_THE_SERVERS = {
@@ -30,8 +38,7 @@ const MARKER_OWNER = "twigo";
 /**
  * The YAML editor, bundled locally and loaded on its first use (ARCHITECTURE
  * 4.6), on the app's light or dark theme. Its text lives in the editor's
- * working copy, so this keeps nothing of its own: a model for as long as the
- * editor is shown.
+ * working copy and its model in `buffers`, so this keeps nothing of its own.
  */
 export default function YamlEditor({
   uri,
@@ -41,6 +48,7 @@ export default function YamlEditor({
   statusLocked = false,
   schema,
   error,
+  buffers,
 }: YamlEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const model = useRef<editor.ITextModel>(undefined);
@@ -55,9 +63,16 @@ export default function YamlEditor({
 
   useEffect(() => {
     if (!host.current) return;
-    const modelUri = Uri.from({ scheme: "twigo-edit", path: `/${uri}` });
-    editor.getModel(modelUri)?.dispose();
-    const created = editor.createModel(latest.current, "yaml", modelUri);
+    const make = (): EditorBuffer => ({
+      model: editor.createModel(
+        latest.current,
+        "yaml",
+        Uri.from({ scheme: "twigo-edit", path: `/${uri}` }),
+      ),
+      view: null,
+    });
+    const buffer = buffers ? buffers.buffer(uri, make) : make();
+    const created = buffer.model;
     const instance = editor.create(host.current, {
       model: created,
       readOnly,
@@ -71,26 +86,31 @@ export default function YamlEditor({
       insertSpaces: true,
       detectIndentation: false,
     });
+    if (buffer.view) instance.restoreViewState(buffer.view);
     model.current = created;
     view.current = instance;
     const content = created.onDidChangeContent(() => {
       if (!setting.current) changed.current?.(created.getValue());
     });
     return () => {
+      buffer.view = instance.saveViewState();
       content.dispose();
       instance.dispose();
-      created.dispose();
+      if (!buffers) created.dispose();
       model.current = undefined;
       view.current = undefined;
     };
-  }, [uri, readOnly]);
+  }, [uri, readOnly, buffers]);
 
   useEffect(() => {
     const current = model.current;
     if (!current || current.getValue() === text) return;
+    // `setValue` puts the cursor back at the start.
+    const where = view.current?.saveViewState();
     setting.current = true;
     current.setValue(text);
     setting.current = false;
+    if (where) view.current?.restoreViewState(where);
   }, [text]);
 
   useEffect(() => {

@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import type { editor } from "monaco-editor/editor";
 import { Changes, type StateStore } from "@twigo/workbench";
 import {
   comparable,
@@ -27,6 +28,15 @@ export interface WorkingCopy {
   /** For a new manifest, the space its apply goes to; none until the person says. */
   readonly target: string | undefined;
   readonly text: string;
+}
+
+/**
+ * What Monaco keeps of an editor while the editor is not shown: its model,
+ * whose undo stack lives there, and the cursor and scroll of its view.
+ */
+export interface EditorBuffer {
+  readonly model: editor.ITextModel;
+  view: editor.ICodeEditorViewState | null;
 }
 
 export interface Opened {
@@ -74,11 +84,18 @@ export function mayHoldSecret(uri: string, text: string): boolean {
  * discards it or takes the server's. Copies live in memory and, a Secret's
  * apart, in their space's state, so they survive a restart; closing the
  * editor keeps them.
+ *
+ * It also keeps each shown editor's Monaco buffer, so that cursor, scroll and
+ * undo outlive the view that shows them, as on a switch between an object's
+ * Overview and YAML. A buffer goes when its editor closes, and a copy that
+ * ends while the editor is open sets its text to the object's, which clears
+ * the undo stack.
  */
 export class WorkingCopies {
   readonly changes = new Changes();
   readonly #copies = new Map<string, WorkingCopy>();
   readonly #timers = new Map<string, ReturnType<typeof setTimeout>>();
+  readonly #buffers = new Map<string, EditorBuffer>();
   #manifests = 0;
   readonly #seen = new Map<
     string,
@@ -106,6 +123,22 @@ export class WorkingCopies {
 
   get(uri: string): WorkingCopy | undefined {
     return this.#copies.get(uri);
+  }
+
+  /** The editor's buffer, `make`d the first time it is shown. */
+  buffer(uri: string, make: () => EditorBuffer): EditorBuffer {
+    let buffer = this.#buffers.get(uri);
+    if (!buffer) {
+      buffer = make();
+      this.#buffers.set(uri, buffer);
+    }
+    return buffer;
+  }
+
+  /** The editor closed: its buffer goes, and its copy, if it has one, stays as text. */
+  closed(uri: string): void {
+    this.#buffers.get(uri)?.model.dispose();
+    this.#buffers.delete(uri);
   }
 
   edit(uri: string, text: string, opened: Opened): void {

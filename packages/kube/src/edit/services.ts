@@ -10,12 +10,16 @@ export interface EditServices {
 }
 
 export function createEdits(workbench: Workbench): EditServices {
+  const copies = new WorkingCopies(
+    workbench.state,
+    workbench.editors,
+    workbench.spaces.list.map(({ id }) => id),
+  );
+  workbench.editors.onClose((uri) => {
+    copies.closed(uri);
+  });
   return {
-    copies: new WorkingCopies(
-      workbench.state,
-      workbench.editors,
-      workbench.spaces.list.map(({ id }) => id),
-    ),
+    copies,
     schemas: new Schemas(workbench.backend),
     previews: new Previews(workbench.backend),
   };

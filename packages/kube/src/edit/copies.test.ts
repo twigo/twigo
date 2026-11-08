@@ -1,8 +1,8 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import type { Backend } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { StateStore } from "@twigo/workbench";
-import { WorkingCopies } from "./copies";
+import { WorkingCopies, type EditorBuffer } from "./copies";
 import { yamlOfJson } from "./object";
 
 const DEPLOYMENT = "k8s://prod-eu/apps/v1/deployments/default/web";
@@ -177,4 +177,33 @@ test("what the person typed into a Secret never reaches the state", async () => 
     DEPLOYMENT,
     "untitled://manifest-3",
   ]);
+});
+
+function fakeBuffer() {
+  const dispose = vi.fn();
+  const buffer: EditorBuffer = {
+    model: { dispose } as unknown as EditorBuffer["model"],
+    view: null,
+  };
+  return { buffer, dispose };
+}
+
+test("an editor's buffer is made once and kept for as long as the editor lives, its copy outliving it", async () => {
+  const { copies } = await services();
+  copies.edit(DEPLOYMENT, "replicas: 2\n", opened);
+  const first = fakeBuffer();
+  const make = vi.fn(() => first.buffer);
+  expect(copies.buffer(DEPLOYMENT, make)).toBe(first.buffer);
+  first.buffer.view = {} as EditorBuffer["view"];
+  expect(copies.buffer(DEPLOYMENT, make)).toBe(first.buffer);
+  expect(make).toHaveBeenCalledTimes(1);
+  expect(first.dispose).not.toHaveBeenCalled();
+
+  copies.closed(DEPLOYMENT);
+  expect(first.dispose).toHaveBeenCalledTimes(1);
+  expect(copies.get(DEPLOYMENT)?.text).toBe("replicas: 2\n");
+  const second = fakeBuffer();
+  expect(copies.buffer(DEPLOYMENT, () => second.buffer)).toBe(second.buffer);
+  copies.closed("k8s://prod-eu/apps/v1/deployments/default/other");
+  expect(second.dispose).not.toHaveBeenCalled();
 });
