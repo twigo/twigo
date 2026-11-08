@@ -712,10 +712,26 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   - Keep mine sends the old `base`, the new `lock` and `locked` (`OpenedEdit`), since diffing against the new live object would revert the other writer's change.
   - Save runs the apply flow (6.5): the text is parsed with the `yaml` package at version 1.1, set to read what kubectl reads, which is the one dialect, and a text of several documents is refused, since the engine previews one object at a time.
     kubectl reads a manifest with sigs.k8s.io/yaml v1.6.0 over go.yaml.in/yaml/v2 v2.4.4, which Kubernetes v1.37.0 pins ([go.mod](https://github.com/kubernetes/kubernetes/blob/v1.37.0/go.mod)).
+    The rule: every text reads as kubectl reads it or is a parse error at its line, and every value the writer writes reads back equal in the webview and in kubectl, so that an object the cluster holds always opens and reads back.
+    A refusal costs a person a pair of quotes, and a wrong value costs a live object.
     Dates, sexagesimal numbers (`22:22`), sets, ordered maps and binary are no types there, so `2024-01-01` and `22:22` stay strings, as keys too, and `0o777` is `511`.
-    What JSON cannot carry through the IPC is a parse error at its line instead of a changed value: `.inf` and `.nan`, an integer past 2^53, a key that is empty or not a single value, a tag Twigo does not read (`!!set`, `!!omap`, `!!binary`, `!!float 1`, `!!timestamp`, a local tag), an alias with no anchor and a merge of something else than maps.
-    A key named `<<` is written quoted, so that it reads back as that key and not as a merge.
-    `packages/kube/test/k8s-yaml/` records what kubectl made of 139 texts (`go run .` there), and a test holds the webview to it: what differs is a duplicate key, which kubectl takes the last of and the webview refuses, and the refusals above.
+    Whether a plain scalar is a number is decided by the rules of `resolve` in go.yaml.in/yaml/v2 v2.4.4 (`resolve.go`), which `goNumber` follows.
+    What JSON cannot carry through the IPC is a parse error at its line: `.inf`, `.nan`, an integer past 2^53, negative zero.
+    So is a key that is empty, not a single value, or a float, which kubectl names at 32 bits.
+    So is what Twigo does not read: a tag (`!!set`, `!!omap`, `!!binary`, `!!float`, `!!int`, `!!timestamp`, a local tag), a directive, an anchor outside `[0-9A-Za-z_-]`, an alias with no anchor or inside its own anchor, a merge of something else than maps.
+    A key JSON makes one of two (`1` and `"1"`, `y` and `true`) is refused, since kubectl takes the last of such keys or, over a Go map, a random one.
+    Where the two scanners read a text apart it is refused too, each named at its line.
+    A merge whose result depends on where it stands is one: a key set before the `<<` that also sets it, or a second `<<`.
+    So is a tab that starts a line or follows a block indicator, a control character, and a BOM past the first character.
+    So are U+0085, U+2028, U+2029 and a lone CR, which are line breaks to kubectl and text to the webview.
+    In double quotes `\/`, a surrogate escape and an escaped line break are refused.
+    So is a key that spans lines or whose `:` is not on its line, and a `?` whose `:` is not in its column.
+    Inside `[ ]` or `{ }`, so is a plain scalar that spans lines, holds a `?` or starts with `:`, and a key whose `:` touches the next indicator.
+    An empty document before the object is refused, as `YAMLToJSON` reads only the first.
+    Lines of spaces are refused in a block scalar with an indentation indicator, or at the end of a text with no final line break.
+    The writer quotes what would read as something else, a key named `<<` among it, uses double quotes where the block form cannot carry a string (a line that starts with a tab or holds only spaces, a string that starts with a line break), escapes U+0085, U+2028, U+2029, DEL, C1, U+FFFE, U+FFFF and a BOM, and writes an integer past 2^53 as an exponent.
+    `packages/kube/test/k8s-yaml/` holds the check, recorded from Go (`node record.mjs` there): what Go made of 897 texts, and that it read back 9,781 written values equal, and a Vitest test fails on any difference and lists each refusal with its reason in `refused.json`.
+    As recorded on 2026-11-08: no difference, 524 texts read alike, 218 refused by both, 155 refused here that Go reads (duplicate keys, float keys, integers past 2^53, the tags and the line breaks above).
   - When the plan of an apply is done the copy ends, but its text stays the editor's until the live object differs from the one the copy was based on, or locked to, compared as "changed on server" is, so that the editor never shows the object as it was while the new one comes by its watch.
     A status write does not end it, as it moves the `resourceVersion` without changing the object; the object equal to the `result` of the preview that was applied does, so that an apply that changes nothing in the object holds nothing for good; typing or closing the editor does, and it is never written to the state.
     A Secret's text is not held at all: its values are masked to their sizes, so a value rotated to one of the same size would leave the object looking as it was, and the typed plaintext on show.
