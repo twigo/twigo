@@ -168,6 +168,58 @@ test("an editor waiting for a space that does not come next is forgotten", async
   expect(tabs()).toEqual([]);
 });
 
+test("a close for an editor of another space reaches its dock when that space is mounted, whichever space comes first", async () => {
+  const { workbench, editors, tabs } = await mounted();
+  const closed: string[] = [];
+  editors.onClose((uri) => closed.push(uri));
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  act(() => {
+    editors.open("note://dead?space=staging");
+    editors.open("note://kept?space=staging");
+  });
+  act(() => {
+    workbench.spaces.select("prod-eu");
+  });
+  act(() => {
+    editors.close("note://dead?space=staging");
+  });
+  expect(closed).toEqual([]);
+
+  act(() => {
+    workbench.spaces.select("dev");
+  });
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  expect(tabs()).toEqual([{ title: "kept", preview: "false" }]);
+  expect(closed).toEqual(["note://dead?space=staging"]);
+});
+
+test("opening an editor again withdraws a close that waits for its space, and closing one withdraws an open", async () => {
+  const { workbench, editors, tabs } = await mounted();
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  act(() => {
+    editors.open("note://again?space=staging");
+  });
+  act(() => {
+    workbench.spaces.select("prod-eu");
+  });
+  act(() => {
+    editors.close("note://again?space=staging");
+    editors.open("note://again?space=staging");
+    editors.open("note://never?space=staging");
+    editors.close("note://never?space=staging");
+  });
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  expect(tabs()).toEqual([{ title: "again", preview: "false" }]);
+});
+
 test("closing an editor says so, while moving it or switching spaces does not", async () => {
   const { workbench, editors } = await mounted();
   const closed: string[] = [];

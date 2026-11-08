@@ -80,6 +80,11 @@ export class Editors {
       readonly options: OpenOptions;
     }
   >();
+  /** Editors of a space whose dock is not shown, to close when it is. */
+  readonly #leaving = new Map<
+    string,
+    { readonly space: string; readonly area: Area }
+  >();
   #active: string | undefined;
 
   /** `reveal` shows a hidden area before an editor opens in it. */
@@ -134,7 +139,8 @@ export class Editors {
   /**
    * An area's dockview while it is mounted, and the space it shows. What
    * waited for the space opens in it; what waited for another is forgotten,
-   * since the person went elsewhere.
+   * since the person went elsewhere. What was closed for the space closes in
+   * it, however many other spaces came first.
    */
   attach(api: DockviewApi, area: Area, space: string): () => void {
     this.#apis.set(area, api);
@@ -154,6 +160,11 @@ export class Editors {
           })
         : undefined;
     if (area === "editor") this.#setActive(api.activePanel);
+    for (const [uri, later] of [...this.#leaving]) {
+      if (later.area !== area || later.space !== space) continue;
+      this.#leaving.delete(uri);
+      api.getPanel(uri)?.api.close();
+    }
     for (const [uri, later] of [...this.#waiting]) {
       if (later.area !== area) continue;
       this.#waiting.delete(uri);
@@ -181,6 +192,7 @@ export class Editors {
     const { preview = false, side = false } = options;
     const provider = this.resolve(uri);
     if (!provider) throw new Error(`no editor opens ${uri}`);
+    this.#leaving.delete(uri);
     const area = provider.area ?? "editor";
     const space = provider.space?.(new URL(uri));
     if (space !== undefined && this.#spaces.get(area) !== space) {
@@ -276,8 +288,23 @@ export class Editors {
     this.changes.emit();
   }
 
+  /**
+   * Closes an editor. One that belongs to another space than its area shows
+   * closes when that space's dock is mounted, as an open for it waits.
+   */
   close(uri: string): void {
-    this.#find(uri)?.panel.api.close();
+    this.#waiting.delete(uri);
+    const open = this.#find(uri);
+    if (open) {
+      open.panel.api.close();
+      return;
+    }
+    const provider = this.resolve(uri);
+    const space = provider?.space?.(new URL(uri));
+    const area = provider?.area ?? "editor";
+    if (space !== undefined && this.#spaces.get(area) !== space) {
+      this.#leaving.set(uri, { space, area });
+    }
   }
 
   /** Moves an area's active editor into a new group beside its own. */
