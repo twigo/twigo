@@ -1585,6 +1585,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
    An atomic map or list is a value like any other, so an apply carries it empty and Twigo owns it.
    Those go by one JSON merge patch that carries the changes and the removals together, a list on the path whole, under field manager `twigo-edit`, as `kubectl edit` would, held to the `resourceVersion` and validated strictly, as an apply is, or a typo would be lost with only a warning; the preview says which strategy it is, so the diff can say so, and the plan's `kubectl` is that patch.
    A list that goes whole while the server holds it otherwise than the edit was opened with answers **Stale**: nothing can merge it, and "Keep mine" would revert the other writer.
+   That answer says `keepable: false`, and the editor offers Reload alone; a `409` answers `keepable: true`.
    A conflict answers before validation does on the server, so a `409` is never routed here.
    It adds no field to the `twigo` Apply entry.
 8. Immutable fields return 422; the dry-run catches this before any write.

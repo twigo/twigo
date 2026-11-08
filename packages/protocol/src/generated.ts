@@ -60,7 +60,13 @@ live: unknown, result: unknown, warnings: Array<string>,
  * What goes by a merge patch: a separate step after a
  * server-side apply, or part of the one patch.
  */
-removals: Array<string>, ignored: Array<string>, strategy: ApplyStrategy, } | { "state": "conflicts", conflicts: Array<ApplyConflict>, } | { "state": "stale", message: string, } | { "state": "immutable", message: string, recreate: PreviewId | null, };
+removals: Array<string>, ignored: Array<string>, strategy: ApplyStrategy, } | { "state": "conflicts", conflicts: Array<ApplyConflict>, } | { "state": "stale", message: string, 
+/**
+ * Whether "Keep mine" answers it. It does not for a list sent whole,
+ * which keeping the edit would send again, reverting the other
+ * writer's change; only a reload answers that.
+ */
+keepable: boolean, } | { "state": "immutable", message: string, recreate: PreviewId | null, };
 
 /**
  * An edit to preview, parsed by the webview's YAML parser, so there is one

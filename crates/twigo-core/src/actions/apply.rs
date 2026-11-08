@@ -644,6 +644,18 @@ fn holds_null(value: &Value) -> bool {
     }
 }
 
+/// The answer to an edit that sends a list whole that the server holds
+/// otherwise: keeping the edit sends it whole again, so only a reload answers.
+fn lists_moved(paths: &[String]) -> ApplyPreviewed {
+    ApplyPreviewed::Stale {
+        message: format!(
+            "{} changed on the server since this edit was opened, and the edit sends it whole, so keeping yours would revert that change",
+            paths.join(", ")
+        ),
+        keepable: false,
+    }
+}
+
 /// Builds and dry-runs an edit, and keeps what it prepared for the plan. The
 /// object is read again and the whole done over when a status write alone
 /// landed between the read and the dry-run, up to [`ATTEMPTS`] times.
@@ -746,14 +758,7 @@ pub(crate) async fn preview(
                     dropped: &dropped,
                 }) {
                     Ok(built) => built,
-                    Err(Refusal::ListsMoved(paths)) => {
-                        return Ok(ApplyPreviewed::Stale {
-                            message: format!(
-                                "{} changed on the server since this edit was opened, and the edit sends it whole, so keeping yours would revert that change",
-                                paths.join(", ")
-                            ),
-                        });
-                    }
+                    Err(Refusal::ListsMoved(paths)) => return Ok(lists_moved(&paths)),
                     Err(Refusal::Foreign(foreign)) => {
                         return Err(IpcError::new(
                             ErrorKind::Conflict,
@@ -1048,7 +1053,10 @@ async fn answer_refused(refused: Refused, attempt: &Try<'_>) -> Result<ApplyPrev
     } = attempt;
     match refused {
         Refused::Conflicts(conflicts) => Ok(ApplyPreviewed::Conflicts { conflicts }),
-        Refused::Stale(message) => Ok(ApplyPreviewed::Stale { message }),
+        Refused::Stale(message) => Ok(ApplyPreviewed::Stale {
+            message,
+            keepable: true,
+        }),
         Refused::Other(error) => Err(error),
         Refused::Immutable(message) => {
             let job = target.is("batch", &["jobs"]);
@@ -2349,9 +2357,23 @@ mod tests {
         ));
         let answer = fell_back(&attempt, &combined, &invalid, &[]).await;
         assert!(
-            matches!(answer, Some(Ok(ApplyPreviewed::Stale { .. }))),
+            matches!(
+                answer,
+                Some(Ok(ApplyPreviewed::Stale { keepable: true, .. }))
+            ),
             "{answer:?}"
         );
+    }
+
+    #[test]
+    fn a_list_sent_whole_that_moved_cannot_be_kept() {
+        match lists_moved(&[".spec.template.spec.containers".to_owned()]) {
+            ApplyPreviewed::Stale { message, keepable } => {
+                assert!(!keepable);
+                assert!(message.starts_with(".spec.template.spec.containers changed"));
+            }
+            other => panic!("expected stale, got {other:?}"),
+        }
     }
 
     #[tokio::test]

@@ -110,6 +110,10 @@ pub enum ApplyPreviewed {
     /// server holds otherwise, which Twigo answers without asking it.
     Stale {
         message: String,
+        /// Whether "Keep mine" answers it. It does not for a list sent whole,
+        /// which keeping the edit would send again, reverting the other
+        /// writer's change; only a reload answers that.
+        keepable: bool,
     },
     /// The server refused an immutable field: `recreate` is the id whose
     /// plan deletes and creates it anew, for Pods and Jobs only.

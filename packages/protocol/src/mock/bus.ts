@@ -462,6 +462,7 @@ export class MockBus {
         return {
           state: "stale",
           message: `Operation cannot be fulfilled on ${resource} "${name}": the object has been modified; please apply your changes to the latest version and try again`,
+          keepable: true,
         };
       case "immutable":
         return {

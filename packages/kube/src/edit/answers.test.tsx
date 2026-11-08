@@ -135,7 +135,7 @@ test("a ready answer shows in a tab of its own, and the others in a bar over the
       strategy: "serverSideApply",
     },
     conflicts: { state: "conflicts", conflicts: [] },
-    stale: { state: "stale", message: "" },
+    stale: { state: "stale", message: "", keepable: true },
     immutable: { state: "immutable", message: "", recreate: null },
   };
   expect(

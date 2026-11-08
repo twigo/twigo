@@ -578,8 +578,9 @@ async fn a_stale_lock_answers_stale_and_keep_mine_does_not_revert_the_other_writ
     )
     .await
     {
-        ApplyPreviewed::Stale { message } => {
+        ApplyPreviewed::Stale { message, keepable } => {
             assert!(message.contains("modified"), "{message}");
+            assert!(keepable, "a 409 is answered by keeping the edit");
         }
         other => panic!("expected stale, got {other:?}"),
     }
@@ -1578,7 +1579,9 @@ async fn a_spec_or_a_metadata_change_between_the_preview_and_the_run_does_not_ap
         )
         .await
         {
-            ApplyPreviewed::Stale { .. } => {}
+            ApplyPreviewed::Stale { keepable, .. } => {
+                assert!(keepable, "{name}: a 409 is answered by keeping the edit");
+            }
             other => panic!("{name}: expected stale, got {other:?}"),
         }
     }
@@ -2520,7 +2523,9 @@ async fn a_preview_is_replaced_by_a_newer_one_whatever_that_answers() {
     )
     .await
     {
-        ApplyPreviewed::Stale { .. } => {}
+        ApplyPreviewed::Stale { keepable, .. } => {
+            assert!(keepable, "a 409 is answered by keeping the edit");
+        }
         other => panic!("expected stale, got {other:?}"),
     }
     let refused = core
@@ -3512,7 +3517,16 @@ async fn keep_mine_with_a_list_sent_whole_is_stale_when_the_server_holds_it_othe
     );
     keep_mine.opened.as_mut().unwrap().lock = rv(&current);
     let answer = preview(&core, keep_mine).await;
-    assert!(matches!(answer, ApplyPreviewed::Stale { .. }), "{answer:?}");
+    assert!(
+        matches!(
+            answer,
+            ApplyPreviewed::Stale {
+                keepable: false,
+                ..
+            }
+        ),
+        "{answer:?}"
+    );
 
     merge_patch(
         &cluster.admin,
@@ -3528,7 +3542,13 @@ async fn keep_mine_with_a_list_sent_whole_is_stale_when_the_server_holds_it_othe
     keep_mine.opened.as_mut().unwrap().lock = rv(&current);
     let answer = preview(&core, keep_mine).await;
     assert!(
-        matches!(answer, ApplyPreviewed::Stale { .. }),
+        matches!(
+            answer,
+            ApplyPreviewed::Stale {
+                keepable: false,
+                ..
+            }
+        ),
         "the outer element is gone: {answer:?}"
     );
     let after = read(&cluster.admin, &path).await;
