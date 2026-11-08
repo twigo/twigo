@@ -22,6 +22,7 @@ export function registerLogs(workbench: Workbench, tabs: LogsTabs): void {
     id: "kube.logs",
     scheme: LOGS_SCHEME,
     area: "panel",
+    space: (uri) => parseLogsUri(uri.href)?.space,
     title: (uri) => {
       const input = parseLogsUri(uri.href);
       return input

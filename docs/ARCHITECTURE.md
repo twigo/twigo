@@ -692,6 +692,10 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
     The upstreams it leaves behind linger as a list's do, and give way to any watch that waits for the budget (3.2).
     Opening the resource from its details opens a preview tab (italic title); editing it or double-clicking its tab pins it.
     Opening an object from a list's details, or following a link in an object, pins the tab it came from, so the object opens beside it rather than in its place.
+- **A URI and its space.**
+  Each space has its own docks, and an editor opens in the dock of the space its URI names.
+  An open for the URI of a space other than the one shown waits for that space's dock and opens there when it is the next one mounted; if another space comes first, it is forgotten.
+  A provider says which space a URI is of, so an answer that arrives after a switch of spaces cannot open a tab in the wrong space.
 - **Object URIs.**
   The core group is an empty segment, `k8s://prod//v1/pods/payments/api-0`, so an object in a namespace has five path segments and a cluster-scoped one four.
 - **Sub-tabs.**

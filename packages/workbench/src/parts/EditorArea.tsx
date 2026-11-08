@@ -117,7 +117,7 @@ export function SpaceDock({
       }));
     };
     const changes = api.onDidLayoutChange(save);
-    const detach = workbench.editors.attach(api, area);
+    const detach = workbench.editors.attach(api, area, space);
     // Dockview reports layout changes a microtask late (its AsapEvent), so
     // the layout is saved once more as the space goes away, after the
     // listener stops, so nothing the teardown reports can overwrite it.

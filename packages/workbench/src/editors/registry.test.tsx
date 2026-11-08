@@ -12,6 +12,7 @@ async function mounted() {
     id: "test.note",
     scheme: "note",
     title: (uri) => uri.host,
+    space: (uri) => uri.searchParams.get("space") ?? undefined,
     component: ({ uri }) => <p>body of {uri}</p>,
   });
   render(
@@ -126,6 +127,45 @@ test("each space keeps its own editors", async () => {
     workbench.spaces.select("prod-eu");
   });
   expect(tabs()).toEqual([{ title: "prod", preview: "false" }]);
+});
+
+test("an editor of another space never lands in the dock of the one shown, and opens once its space is", async () => {
+  const { workbench, editors, tabs } = await mounted();
+  act(() => {
+    editors.open("note://later?space=staging");
+    editors.open("note://here?space=prod-eu");
+  });
+  expect(tabs()).toEqual([{ title: "here", preview: "false" }]);
+  expect(editors.active).toBe("note://here?space=prod-eu");
+
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  expect(tabs()).toEqual([{ title: "later", preview: "false" }]);
+  expect(editors.active).toBe("note://later?space=staging");
+
+  act(() => {
+    workbench.spaces.select("prod-eu");
+  });
+  expect(tabs()).toEqual([{ title: "here", preview: "false" }]);
+});
+
+test("an editor waiting for a space that does not come next is forgotten", async () => {
+  const { workbench, editors, tabs } = await mounted();
+  act(() => {
+    editors.open("note://later?space=staging");
+  });
+  act(() => {
+    workbench.spaces.select("dev");
+  });
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  expect(tabs()).toEqual([]);
+  act(() => {
+    workbench.spaces.select("prod-eu");
+  });
+  expect(tabs()).toEqual([]);
 });
 
 test("closing an editor says so, while moving it or switching spaces does not", async () => {

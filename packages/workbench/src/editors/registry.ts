@@ -22,6 +22,12 @@ export interface EditorProvider {
   /** Where its editors open; the editor area by default. */
   readonly area?: Area;
   readonly title: (uri: URL) => string;
+  /**
+   * The space whose dock the editor belongs in, if it belongs to one: an
+   * editor of another space than the one shown waits for that space's dock
+   * rather than land in this one's.
+   */
+  readonly space?: (uri: URL) => string | undefined;
   /** The tab's icon, which may depend on the URI (the kind of a list). */
   readonly icon?: ComponentType<{ uri: string; className?: string }>;
   readonly component: ComponentType<EditorProps>;
@@ -43,6 +49,11 @@ export interface EditorParams {
   readonly preview: boolean;
 }
 
+export interface OpenOptions {
+  readonly preview?: boolean;
+  readonly side?: boolean;
+}
+
 export const EDITOR_COMPONENT = "editor";
 export const EDITOR_TAB = "editor-tab";
 
@@ -58,6 +69,17 @@ export class Editors {
   readonly #closed = new Set<(uri: string) => void>();
   readonly #dirty = new Set<string>();
   readonly #apis = new Map<Area, DockviewApi>();
+  /** The space each mounted area shows. */
+  readonly #spaces = new Map<Area, string>();
+  /** Editors of a space whose dock is not shown, to open when it is. */
+  readonly #waiting = new Map<
+    string,
+    {
+      readonly space: string;
+      readonly area: Area;
+      readonly options: OpenOptions;
+    }
+  >();
   #active: string | undefined;
 
   /** `reveal` shows a hidden area before an editor opens in it. */
@@ -109,9 +131,14 @@ export class Editors {
     };
   }
 
-  /** An area's dockview while it is mounted. */
-  attach(api: DockviewApi, area: Area = "editor"): () => void {
+  /**
+   * An area's dockview while it is mounted, and the space it shows. What
+   * waited for the space opens in it; what waited for another is forgotten,
+   * since the person went elsewhere.
+   */
+  attach(api: DockviewApi, area: Area, space: string): () => void {
     this.#apis.set(area, api);
+    this.#spaces.set(area, space);
     const active = api.onDidActivePanelChange(({ panel }) => {
       if (area === "editor") this.#setActive(panel);
       else this.changes.emit();
@@ -127,12 +154,18 @@ export class Editors {
           })
         : undefined;
     if (area === "editor") this.#setActive(api.activePanel);
+    for (const [uri, later] of [...this.#waiting]) {
+      if (later.area !== area) continue;
+      this.#waiting.delete(uri);
+      if (later.space === space) this.open(uri, later.options);
+    }
     return () => {
       active.dispose();
       removal.dispose();
       added?.dispose();
       if (this.#apis.get(area) === api) {
         this.#apis.delete(area);
+        this.#spaces.delete(area);
         if (area === "editor") this.#setActive(undefined);
       }
     };
@@ -141,17 +174,19 @@ export class Editors {
   /**
    * Opens an editor in its provider's area: in the area's active group, or
    * with `side` in a new group to its right. An open URI is focused where
-   * it is, since a URI is one panel.
+   * it is, since a URI is one panel. One that belongs to another space than
+   * the area shows opens when that space comes next.
    */
-  open(
-    uri: string,
-    {
-      preview = false,
-      side = false,
-    }: { preview?: boolean; side?: boolean } = {},
-  ): void {
+  open(uri: string, options: OpenOptions = {}): void {
+    const { preview = false, side = false } = options;
     const provider = this.resolve(uri);
     if (!provider) throw new Error(`no editor opens ${uri}`);
+    const area = provider.area ?? "editor";
+    const space = provider.space?.(new URL(uri));
+    if (space !== undefined && this.#spaces.get(area) !== space) {
+      this.#waiting.set(uri, { space, area, options });
+      return;
+    }
     const open = this.#find(uri);
     if (open) {
       if (!preview) this.pin(uri);
@@ -159,10 +194,9 @@ export class Editors {
       open.panel.api.setActive();
       return;
     }
-    const target = provider.area ?? "editor";
-    const api = this.#apis.get(target);
-    if (!api) throw new Error(`no ${target} area is mounted`);
-    this.reveal(target);
+    const api = this.#apis.get(area);
+    if (!api) throw new Error(`no ${area} area is mounted`);
+    this.reveal(area);
     const group = api.activeGroup;
     // Changes of its own pin an editor that opens again.
     const previewed = preview && !this.#dirty.has(uri);

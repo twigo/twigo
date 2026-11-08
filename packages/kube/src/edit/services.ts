@@ -1,5 +1,6 @@
 import type { ContextValue, Lookup, Workbench } from "@twigo/workbench";
 import { WorkingCopies } from "./copies";
+import { parseObjectUri } from "../uri";
 import { Previews } from "./previews";
 import { Schemas } from "./schemas";
 
@@ -50,6 +51,18 @@ export function editKeys(
       preview.subject.text === copies.get(uri)?.text,
     "edit.recreate": answer?.state === "immutable" && answer.recreate !== null,
   };
+}
+
+/**
+ * The space an editor belongs to: an object's is its URI's, a new manifest's
+ * is where it was written, and the editor of a manifest without text yet
+ * belongs to whichever shows it.
+ */
+export function editorSpace(
+  { copies }: Pick<EditServices, "copies">,
+  uri: string,
+): string | undefined {
+  return parseObjectUri(uri)?.space ?? copies.get(uri)?.space;
 }
 
 export const EDIT_KEYS: readonly string[] = [

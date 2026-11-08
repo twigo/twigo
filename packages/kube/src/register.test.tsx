@@ -96,3 +96,17 @@ test("a space whose discovery failed shows an error dot, active or not", async (
   expect(dot("staging")).toBe("error");
   expect(dot("prod-eu")).toBe("ok");
 });
+
+test("an editor of another space waits for its space instead of opening in the one shown", async () => {
+  const workbench = await mountKube();
+  act(() => {
+    workbench.editors.open("k8s-list://staging/v1/pods");
+  });
+  await settle();
+  expect(workbench.editors.active).toBeUndefined();
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  await settle();
+  expect(workbench.editors.active).toBe("k8s-list://staging/v1/pods");
+});

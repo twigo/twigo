@@ -19,6 +19,7 @@ import {
 import { registerLogs } from "./logs/register";
 import { LogsTabs } from "./logs/state";
 import { registerResourceActions } from "./resourceActions";
+import { editorSpace } from "./edit/services";
 import { createServices, type ListServices } from "./services";
 import {
   DIFF_SCHEME,
@@ -90,6 +91,7 @@ export function registerKube(workbench: Workbench): void {
   editors.register({
     id: "kube.list",
     scheme: LIST_SCHEME,
+    space: (uri) => parseListUri(uri.href)?.space,
     title: (uri) => {
       const resource = parseListUri(uri.href)?.gvr.resource ?? uri.href;
       return resource.charAt(0).toUpperCase() + resource.slice(1);
@@ -103,6 +105,7 @@ export function registerKube(workbench: Workbench): void {
   editors.register({
     id: "kube.object",
     scheme: OBJECT_SCHEME,
+    space: (uri) => parseObjectUri(uri.href)?.space,
     title: (uri) => parseObjectUri(uri.href)?.name ?? uri.href,
     icon: ObjectIcon,
     component: ({ uri }) => (
@@ -120,6 +123,11 @@ export function registerKube(workbench: Workbench): void {
   editors.register({
     id: "kube.diff",
     scheme: DIFF_SCHEME,
+    space: (uri) => {
+      const input = parseDiffUri(uri.href);
+      if (input?.kind === "objects") return input.space;
+      return input && editorSpace(services.edits, input.editor);
+    },
     title: (uri) => {
       const input = parseDiffUri(uri.href);
       if (!input) return uri.href;
@@ -147,6 +155,7 @@ export function registerKube(workbench: Workbench): void {
   editors.register({
     id: "kube.manifest",
     scheme: UNTITLED_SCHEME,
+    space: (uri) => services.edits.copies.get(uri.href)?.space,
     title: (uri) => `Manifest ${String(parseUntitledUri(uri.href) ?? "")}`,
     icon: ({ className }) => <FileCode className={className} />,
     component: ({ uri }) => <ManifestEditor uri={uri} edits={services.edits} />,
