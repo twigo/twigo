@@ -45,7 +45,7 @@ pub fn request(error: &kube::Error) -> IpcError {
 
 /// The status a refused request answers with, as kube's
 /// `handle_api_errors` reads it, which `Client::send` leaves to its caller.
-pub(crate) fn refused(status: StatusCode, body: &[u8]) -> kube::Error {
+pub fn refused(status: StatusCode, body: &[u8]) -> kube::Error {
     let status = serde_json::from_slice::<Status>(body).unwrap_or_else(|_| {
         Status::failure(&String::from_utf8_lossy(body), "Failed to parse error data")
             .with_code(status.as_u16())

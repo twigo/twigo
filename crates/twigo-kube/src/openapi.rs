@@ -79,7 +79,7 @@ const INDEX: &str = "/openapi/v3";
 /// The schemas of one group/version's OpenAPI v3 document.
 #[derive(Debug)]
 pub struct Document {
-    schemas: Map<String, Value>,
+    pub(crate) schemas: Map<String, Value>,
 }
 
 #[derive(Debug, thiserror::Error)]
