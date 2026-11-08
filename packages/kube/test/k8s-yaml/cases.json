@@ -992,5 +992,7 @@
  "v: |\n  \n  a\n",
  "' null': a0x\n",
  "'n ull': a\n",
- "{'n ull': a}\n"
+ "{'n ull': a}\n",
+ "!!str <<: 1\n",
+ "a: 1\n!!str <<: 2\n"
 ]
