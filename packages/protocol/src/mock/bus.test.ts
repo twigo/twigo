@@ -1158,3 +1158,44 @@ test("an apply is at once in read-write, asks in guarded and is blocked in read-
   );
   expect(blocked.kind).toBe("permissions");
 });
+
+test("a recreate is blocked by its first write, a delete, in read-only", async () => {
+  const backend = createMockBackend();
+  await answered(backend.invoke("space_open", "qa"));
+  const answer = await answered(
+    backend.invoke("apply_preview", applyEdit("recreate")),
+  );
+  if (answer.state !== "immutable" || answer.recreate === null) {
+    throw new Error("expected a recreate");
+  }
+  await answered(
+    backend.invoke("context_mode_set", { context: "qa", mode: "read-only" }),
+  );
+  const blocked = await refused(
+    backend.invoke("command_plan", {
+      action: "apply",
+      space: "qa",
+      preview: answer.recreate,
+    }),
+  );
+  expect(blocked.kind).toBe("permissions");
+  expect(blocked.message).toContain("delete");
+});
+
+test("a newer preview of an object replaces an older one, whatever it answers", async () => {
+  const backend = createMockBackend();
+  await answered(backend.invoke("space_open", "qa"));
+  const older = await answered(
+    backend.invoke("apply_preview", applyEdit(null)),
+  );
+  if (older.state !== "ready") throw new Error("expected ready");
+  await answered(backend.invoke("apply_preview", applyEdit("stale")));
+  const gone = await refused(
+    backend.invoke("command_plan", {
+      action: "apply",
+      space: "qa",
+      preview: older.id,
+    }),
+  );
+  expect(gone.kind).toBe("notFound");
+});

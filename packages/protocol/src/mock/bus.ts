@@ -309,6 +309,11 @@ export class MockBus {
     const resource = opened?.target.gvr.resource ?? `${kind.toLowerCase()}s`;
     const target = `${resource}/${name}${namespace === undefined ? "" : ` in ${namespace}`}`;
     const what = `${kind.toLowerCase()} ${name}`;
+    for (const [id, kept] of this.#previews) {
+      if (kept.context === context && kept.target === target) {
+        this.#previews.delete(id);
+      }
+    }
     const prepared = (recreate: boolean): number => {
       const id = ++this.#previewId;
       this.#previews.set(id, { recreate, context, target, what });
@@ -397,9 +402,8 @@ export class MockBus {
       throw new IpcError("notFound", `no preview ${preview} waits to apply`);
     }
     const { context, recreate, target, what } = previewed;
-    this.#authorize(context, this.host.access(context), {
-      write: { verb: "patch", target },
-    });
+    const write = { verb: recreate ? "delete" : "patch", target };
+    this.#authorize(context, this.host.access(context), { write });
     this.#previews.delete(preview);
     const words = recreate ? "Recreated" : "Applied";
     return {
@@ -418,7 +422,7 @@ export class MockBus {
         doing: `${recreate ? "Recreating" : "Applying"} ${what}`,
       },
       risk: recreate ? { kind: "lasting" } : { kind: "reviewed" },
-      write: { verb: "patch", target },
+      write,
       space,
       run: (tell) => {
         tell({ state: "done", text: `${words} ${what}`, undoUntil: null });
