@@ -6,7 +6,7 @@ export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
-      // @todo: drop this once monaco-worker-manager imports
+      // @todo: drop this alias once monaco-worker-manager imports
       // `monaco-editor/editor/editor.worker`: its 2.0.1, the latest, asks
       // for the path below, which Monaco 0.57's `exports` no longer maps
       // (`./*.js` is `./esm/vs/*.js`), so monaco-yaml's worker would not build.

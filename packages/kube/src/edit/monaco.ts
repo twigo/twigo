@@ -43,10 +43,11 @@ function createWebWorker<T extends object>({
  * schemas it validates by are those of the models that have one.
  */
 const yaml = configureMonacoYaml(
-  // @todo: pass `editor` as it is once monaco-worker-manager, which monaco-yaml
-  // asks for its worker, speaks Monaco's worker API of 0.56 and later: its
-  // `createWebWorker({ moduleId, label, createData })` is the API of 0.55 and
-  // before, and 2.0.1 is the latest.
+  // @todo: drop `createWebWorker` above and pass `editor` as it is once
+  // monaco-worker-manager, which monaco-yaml asks for its worker, speaks
+  // Monaco's worker API of 0.56 and later: its `createWebWorker({ moduleId,
+  // label, createData })` is the API of 0.55 and before, and 2.0.1 is the
+  // latest.
   { editor: { ...editor, createWebWorker }, languages, Uri },
   {
     yamlVersion: "1.1",
