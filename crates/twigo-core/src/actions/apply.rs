@@ -750,7 +750,10 @@ pub(crate) async fn preview(
         );
         let request = merge_request(&target, &patch, true, FIELD_MANAGER)?;
         match send(&clients.api, request).await {
-            Ok((_, told)) => warnings.extend(told),
+            Ok((object, told)) => {
+                warnings.extend(told);
+                add_answered(&mut secrets, &object);
+            }
             Err(error) => {
                 return answer_refused(
                     Refused::of(&error, &secrets),

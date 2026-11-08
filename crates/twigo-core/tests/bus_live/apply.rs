@@ -2969,3 +2969,59 @@ async fn a_co_owner_of_an_element_keeps_it_for_the_patch_on_the_server() {
     delete_crd(&cluster, &crd_name).await;
     cluster.delete(&namespace).await;
 }
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn the_one_merge_patch_adds_no_field_to_what_twigo_applied() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-owns").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    let mut object = deployment("web");
+    object["spec"]["template"]["spec"]["containers"][0]["env"] = json!([
+        { "name": "A", "value": "1" },
+        { "name": "B", "value": "2" },
+    ]);
+    post(&cluster.admin, &deployments(&namespace), &object).await;
+    server_apply(
+        &cluster.admin,
+        &path,
+        &json!({
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": { "name": "web" },
+            "spec": { "replicas": 3 },
+        }),
+        "twigo",
+    )
+    .await;
+    let live = settled(&cluster.admin, &path).await;
+    let mine = json!({ "f:spec": { "f:replicas": {} } });
+    assert_eq!(entry(&live, "twigo", "Apply").unwrap(), &mine);
+
+    let mut edited = view(&live);
+    edited["spec"]["template"]["spec"]["containers"][0]["env"]
+        .as_array_mut()
+        .unwrap()
+        .reverse();
+    edited["metadata"]["annotations"]["mine"] = json!("1");
+    let target = deployment_ref(&namespace, "web");
+    let (id, _) =
+        by_patch(preview(&core, edit(&cluster, target, &live, edited, false, vec![])).await);
+    applied(&core, &cluster, id).await;
+
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(after["metadata"]["annotations"]["mine"], "1");
+    assert_eq!(after["spec"]["replicas"], 3);
+    assert_eq!(
+        after["spec"]["template"]["spec"]["containers"][0]["env"][0]["name"],
+        "B"
+    );
+    assert_eq!(entry(&after, "twigo", "Apply").unwrap(), &mine);
+    assert_eq!(
+        manager_entry(&after, "twigo-edit").unwrap()["operation"],
+        "Update"
+    );
+    cluster.delete(&namespace).await;
+}
