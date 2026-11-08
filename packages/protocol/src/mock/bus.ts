@@ -130,14 +130,15 @@ type Told =
       readonly revert: Revert;
     };
 
-type Run = (tell: (event: Told) => void) => void;
+/** `live` says whether it still runs: a stop ends it. */
+type Run = (tell: (event: Told) => void, live: () => boolean) => void;
 
 interface Planned {
   readonly plan: Omit<Plan, "id" | "friction" | "mode" | "environment">;
   readonly risk: Risk;
   /** What the gate reads of the write it sends, none for a Reveal. */
   readonly write?: { readonly verb: string; readonly target: string };
-  /** The space whose last action it is once it ends. */
+  /** The space whose last action it is once it starts; none for an undo, which takes its own. */
   readonly space?: string;
   /** What a stop while it runs says. */
   readonly stopped?: string;
@@ -219,6 +220,8 @@ export class MockBus {
     string,
     { readonly id: number; readonly until: number; readonly revert: Revert }
   >();
+  /** The run of each space that started last. */
+  readonly #latest = new Map<string, PlanId>();
   #next = 0;
   #undoId = 0;
   #jobs = 0;
@@ -291,14 +294,16 @@ export class MockBus {
       throw new IpcError("invalidInput", `type ${friction.text} to confirm`);
     }
     this.#authorize(context, access, planned);
+    const { space } = planned;
+    if (space !== undefined) {
+      this.#latest.set(space, id);
+      this.#undos.delete(space);
+    }
     let ended = false;
     const end = (undo: Revert | undefined) => {
       ended = true;
       this.#stopping.delete(id);
-      const { space } = planned;
-      if (space === undefined) return null;
-      if (!undo) {
-        this.#undos.delete(space);
+      if (space === undefined || !undo || this.#latest.get(space) !== id) {
         return null;
       }
       const until = Date.now() + UNDO_MS;
@@ -322,7 +327,7 @@ export class MockBus {
     };
     setTimeout(() => {
       try {
-        planned.run(tell);
+        planned.run(tell, () => !ended);
       } catch (error) {
         if (!(error instanceof IpcError)) throw error;
         tell({
@@ -750,7 +755,7 @@ export class MockBus {
     const pods = cluster.pods.filter((pod) => pod.node === name);
     const total = counted(pods.length, "pod");
     return {
-      stopped: `Stopped draining node ${name}, which stays cordoned; 0 of ${total} went`,
+      stopped: `Stopped draining node ${name}, which stays cordoned; it evicted 0 of ${total}`,
       plan: {
         context,
         question: `Drain node ${name} on ${context}?`,
@@ -769,7 +774,7 @@ export class MockBus {
       risk: { kind: "lasting" },
       write,
       space,
-      run: (tell) => {
+      run: (tell, live) => {
         cluster.cordon(name, true);
         this.host.changed();
         tell({
@@ -777,6 +782,7 @@ export class MockBus {
           text: `Evicting ${total} from node ${name}`,
         });
         setTimeout(() => {
+          if (!live()) return;
           cluster.drain(name, Date.now());
           this.host.changed();
           tell({
@@ -937,7 +943,6 @@ export class MockBus {
       },
       risk: { kind: "reversible" },
       write: revert.write,
-      space,
       run: (tell) => {
         const live = this.#undos.get(space);
         if (live?.id !== id || Date.now() >= live.until) {

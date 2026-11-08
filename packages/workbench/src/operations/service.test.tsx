@@ -342,3 +342,83 @@ test("an action without an undo ends the one before it in its space", async () =
   await restarted;
   expect(workbench.keys.lookup(null)(UNDOABLE)).toEqual([]);
 });
+
+test("an undo's toast goes when it ends, and a refused run leaves it", async () => {
+  const dismiss = vi.fn();
+  vi.spyOn(notify, "undoable").mockReturnValue({ dismiss });
+  const events: OperationEvent[] = [
+    {
+      state: "done",
+      text: "Scaled deployment web to 5",
+      undoUntil: Date.now() + 30_000,
+    },
+  ];
+  const { backend } = bus(plan({ kind: "atOnce" }), events);
+  const workbench = await testWorkbench("ready", backend);
+  const scaled = workbench.operations.run(REQUEST, LOOK);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await scaled;
+
+  vi.spyOn(backend, "subscribe").mockRejectedValueOnce(
+    new IpcError("conflict", "dev is guarded now"),
+  );
+  const refused = workbench.operations.run(REQUEST, LOOK);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await expect(refused).resolves.toEqual({ state: "failed" });
+  expect(workbench.keys.lookup(null)(UNDOABLE)).toEqual(["dev"]);
+  expect(dismiss).not.toHaveBeenCalled();
+
+  await act(() => vi.advanceTimersByTimeAsync(30_000));
+  expect(dismiss).toHaveBeenCalledOnce();
+  expect(workbench.keys.lookup(null)(UNDOABLE)).toEqual([]);
+});
+
+test("a second ⌘Z while the undo goes does nothing", async () => {
+  vi.spyOn(notify, "undoable").mockReturnValue({ dismiss: vi.fn() });
+  const until = Date.now() + 30_000;
+  const scaled = await started(plan({ kind: "atOnce" }), [
+    { state: "done", text: "Scaled deployment web to 5", undoUntil: until },
+  ]);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await scaled.outcome;
+  const { operations, keys } = scaled.workbench;
+  let finish: (outcome: Outcome) => void = () => undefined;
+  const run = vi
+    .spyOn(operations, "run")
+    .mockReturnValue(new Promise((resolve) => (finish = resolve)));
+  const first = operations.undo("dev");
+  await expect(operations.undo("dev")).resolves.toEqual({
+    state: "cancelled",
+  });
+  expect(run).toHaveBeenCalledOnce();
+  finish({ state: "done" });
+  await first;
+  expect(keys.lookup(null)(UNDOABLE)).toEqual([]);
+});
+
+test("⌘Z cancels a countdown before it undoes, and undoes in a list otherwise", async () => {
+  const workbench = await testWorkbench();
+  const execute = vi
+    .spyOn(workbench.commands, "execute")
+    .mockResolvedValue(true);
+  workbench.keys.set("listFocus", true);
+  workbench.keys.set("space.id", "dev");
+  workbench.keys.set(UNDOABLE, ["dev"]);
+  const press = () =>
+    workbench.keybindings.dispatch(
+      new KeyboardEvent("keydown", { code: "KeyZ", metaKey: true }),
+    );
+  press();
+  expect(execute).toHaveBeenLastCalledWith(
+    "workbench.action.undo",
+    expect.any(Function),
+    undefined,
+  );
+  workbench.keys.set(COUNTING_DOWN, true);
+  press();
+  expect(execute).toHaveBeenLastCalledWith(
+    "workbench.action.cancelCountdown",
+    expect.any(Function),
+    undefined,
+  );
+});

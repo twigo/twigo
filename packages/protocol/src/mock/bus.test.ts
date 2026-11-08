@@ -390,6 +390,47 @@ test("a drain cordons the node and lists the pods it evicts", async () => {
   expect(again.message).toBe(`Node ${node} is cordoned already`);
 });
 
+test("a stopped drain evicts nothing more and leaves the node cordoned", async () => {
+  const backend = createMockBackend("live");
+  await answered(backend.invoke("space_open", "qa"));
+  const { node, name } = pod("qa");
+  const plan = await answered(
+    backend.invoke("command_plan", { action: "drain", space: "qa", node }),
+  );
+  const events: OperationEvent[] = [];
+  await answered(
+    backend.subscribe(
+      "command_execute",
+      { plan: plan.id, typed: null },
+      (event) => {
+        events.push(event);
+      },
+    ),
+  );
+  await answered(backend.invoke("command_cancel", plan.id));
+  await vi.advanceTimersByTimeAsync(2000);
+  const pods = plan.affected[0]?.objects.length ?? 0;
+  expect(events[events.length - 1]).toEqual({
+    state: "stopped",
+    text: `Stopped draining node ${node}, which stays cordoned; it evicted 0 of ${String(pods)} pod${pods === 1 ? "" : "s"}`,
+  });
+  const again = await answered(
+    backend.invoke("command_plan", { action: "drain", space: "qa", node }),
+  );
+  expect(again.affected[0]?.objects.map((object) => object.name)).toContain(
+    name,
+  );
+  const uncordon = await answered(
+    backend.invoke("command_plan", {
+      action: "cordon",
+      space: "qa",
+      node,
+      unschedulable: false,
+    }),
+  );
+  expect(uncordon.question).toBe(`Uncordon node ${node} on qa?`);
+});
+
 test("a trigger asks in a dialog and names the job it makes", async () => {
   const backend = createMockBackend("live");
   await answered(backend.invoke("space_open", "qa"));

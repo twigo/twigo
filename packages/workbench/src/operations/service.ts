@@ -3,6 +3,7 @@ import type {
   Backend,
   OperationEvent,
   Plan,
+  PlanId,
   PlanRequest,
 } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
@@ -44,6 +45,14 @@ export interface Running {
   readonly stop: () => void;
 }
 
+/** A space's undo while it lasts. */
+interface Undo {
+  readonly look: Look;
+  /** While its own run is planned or goes, so a second ⌘Z waits. */
+  undoing: boolean;
+  readonly dismiss: () => void;
+}
+
 /** How a run ended, for its caller: a Reveal's value among them. */
 export type Outcome =
   | { readonly state: "done" | "stopped" | "cancelled" | "failed" }
@@ -70,10 +79,9 @@ export class Operations {
   }[] = [];
   #all: readonly Running[] = [];
   /** Each space's undo while it lasts, by space. */
-  readonly #undos = new Map<
-    string,
-    { readonly look: Look; readonly dismiss: () => void }
-  >();
+  readonly #undos = new Map<string, Undo>();
+  /** The run of each space that started last, as Rust counts its last action. */
+  readonly #latest = new Map<string, PlanId>();
 
   /** `cancelKeys` and `undoKeys` label the keys that cancel a countdown and undo, if any do. */
   constructor(
@@ -107,15 +115,27 @@ export class Operations {
       this.backend.invoke("command_cancel", plan.id).catch(this.report);
       return { state: "cancelled" };
     }
-    const space = request.action === "reveal" ? undefined : request.space;
+    // An undo takes its own and leaves a later one standing, as in Rust.
+    const space =
+      request.action === "reveal" || request.action === "undo"
+        ? undefined
+        : request.space;
     return this.#execute(plan, agreed.typed, space, look);
   }
 
-  /** Puts back the space's last action while its undo lasts, as ⌘Z does. */
+  /** Puts back the space's last action while its undo lasts, as ⌘Z does; a second press while it goes does nothing. */
   async undo(space: string): Promise<Outcome> {
     const undo = this.#undos.get(space);
-    if (!undo) return { state: "cancelled" };
-    return this.run({ action: "undo", space }, undo.look);
+    if (!undo || undo.undoing) return { state: "cancelled" };
+    undo.undoing = true;
+    const outcome = await this.run({ action: "undo", space }, undo.look);
+    undo.undoing = false;
+    if (outcome.state !== "cancelled" && this.#undos.get(space) === undo) {
+      undo.dismiss();
+      this.#undos.delete(space);
+      this.#undoable();
+    }
+    return outcome;
   }
 
   /** Cancels the newest countdown, as ⌘Z does. */
@@ -245,6 +265,15 @@ export class Operations {
   ): Promise<Outcome> {
     return new Promise((resolve) => {
       let ended = false;
+      let begun = false;
+      // Once Rust took the run, which a refused one it did not, the space's
+      // last action is this one.
+      const begin = () => {
+        if (begun || space === undefined) return;
+        begun = true;
+        this.#latest.set(space, plan.id);
+        this.#drop(space);
+      };
       const end = (
         outcome: Outcome,
         done?: { text: string; undoUntil: number | null },
@@ -252,14 +281,23 @@ export class Operations {
         if (ended) return;
         ended = true;
         if (this.#running.delete(plan.id)) this.#changed();
-        // The space's last action is this one now, as in Rust.
-        if (space !== undefined) this.#ended(space, plan.context, look, done);
+        const undoUntil = done?.undoUntil ?? null;
+        if (
+          space !== undefined &&
+          done !== undefined &&
+          undoUntil !== null &&
+          begun &&
+          this.#latest.get(space) === plan.id
+        ) {
+          this.#offer(space, plan.context, look, done.text, undoUntil);
+        }
         resolve(outcome);
       };
       const stop = () => {
         this.backend.invoke("command_cancel", plan.id).catch(this.report);
       };
       const told = (event: OperationEvent) => {
+        begin();
         switch (event.state) {
           case "running":
             if (ended) return;
@@ -300,7 +338,7 @@ export class Operations {
           { plan: plan.id, typed: typed ?? null },
           told,
         )
-        .catch((error: unknown) => {
+        .then(begin, (error: unknown) => {
           this.report(error);
           end({ state: "failed" });
         });
@@ -312,46 +350,50 @@ export class Operations {
     this.changes.emit();
   }
 
-  /** Keeps a space's undo until it ends, and drops the one an earlier action left. */
-  #ended(
+  /** Ends a space's undo and its toast. */
+  #drop(space: string): void {
+    const undo = this.#undos.get(space);
+    if (!undo) return;
+    undo.dismiss();
+    this.#undos.delete(space);
+    this.#undoable();
+  }
+
+  /** Offers a space's undo until it ends, its toast going with it. */
+  #offer(
     space: string,
     context: string,
     look: Look,
-    done: { text: string; undoUntil: number | null } | undefined,
+    text: string,
+    until: number,
   ): void {
-    this.#undos.get(space)?.dismiss();
-    this.#undos.delete(space);
-    const undoUntil = done?.undoUntil ?? null;
-    if (done && undoUntil !== null) {
-      const keys = this.undoKeys();
-      const toast = notify.undoable({
-        icon: CircleCheck,
-        message: done.text,
-        detail: (left) => `${context} · undo for ${String(left)}\u00a0s`,
-        until: undoUntil,
-        seconds: Math.max(1, Math.round((undoUntil - Date.now()) / 1000)),
-        action: {
-          label: "Undo",
-          ...(keys !== undefined && { keys }),
-          run: () => {
-            this.undo(space).catch(this.report);
-          },
+    const keys = this.undoKeys();
+    const toast = notify.undoable({
+      icon: CircleCheck,
+      message: text,
+      detail: (left) => `${context} · undo for ${String(left)}\u00a0s`,
+      until,
+      seconds: Math.max(1, Math.round((until - Date.now()) / 1000)),
+      action: {
+        label: "Undo",
+        ...(keys !== undefined && { keys }),
+        run: () => {
+          this.undo(space).catch(this.report);
         },
-      });
-      const timer = setTimeout(() => {
-        if (this.#undos.get(space) !== entry) return;
-        this.#undos.delete(space);
-        this.#undoable();
-      }, undoUntil - Date.now());
-      const entry = {
-        look,
-        dismiss: () => {
-          clearTimeout(timer);
-          toast.dismiss();
-        },
-      };
-      this.#undos.set(space, entry);
-    }
+      },
+    });
+    const timer = setTimeout(() => {
+      if (this.#undos.get(space) === undo) this.#drop(space);
+    }, until - Date.now());
+    const undo: Undo = {
+      look,
+      undoing: false,
+      dismiss: () => {
+        clearTimeout(timer);
+        toast.dismiss();
+      },
+    };
+    this.#undos.set(space, undo);
     this.#undoable();
   }
 

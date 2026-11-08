@@ -41,36 +41,51 @@ test("a key names the list's own resource or one by kubectl's name", () => {
   expect(accessOf("resource.selected", DEPLOYMENTS)).toBeUndefined();
 });
 
-test("a key holds until its answer says no, and each is asked once a namespace", async () => {
-  const invoke = vi.fn(() => Promise.resolve([false, true]));
-  const capabilities = new Capabilities({
-    invoke,
-  } as unknown as Pick<Backend, "invoke">);
-  const keys = ["resource.capability.delete", "capability.create.jobs.batch"];
-  expect(capabilities.values("qa", DEPLOYMENTS, "web", keys)).toEqual({
+test("each list asks for its own resource, and again when its selection moves", async () => {
+  const invoke = vi.fn(
+    (
+      _command: string,
+      request: { namespace: string | null; checks: { resource: string }[] },
+    ) =>
+      Promise.resolve(
+        request.checks.map(
+          ({ resource }) => resource !== "pods" && request.namespace === "shop",
+        ),
+      ),
+  );
+  const capabilities = new Capabilities(
+    { invoke } as unknown as Pick<Backend, "invoke">,
+    vi.fn(),
+  );
+  const keys = ["resource.capability.delete"];
+  const PODS = { group: "", version: "v1", resource: "pods" };
+  capabilities.ask("pods", "qa", PODS, "shop", keys);
+  capabilities.ask("deployments", "qa", DEPLOYMENTS, "shop", keys);
+  expect(capabilities.values("pods", keys)).toEqual({
     "resource.capability.delete": true,
-    "capability.create.jobs.batch": true,
-  });
-  capabilities.values("qa", DEPLOYMENTS, "web", keys);
-  expect(invoke).toHaveBeenCalledOnce();
-  expect(invoke).toHaveBeenCalledWith("access_review", {
-    space: "qa",
-    namespace: "web",
-    checks: [
-      {
-        verb: "delete",
-        group: "apps",
-        resource: "deployments",
-        subresource: null,
-      },
-      { verb: "create", group: "batch", resource: "jobs", subresource: null },
-    ],
   });
   await Promise.resolve();
-  expect(capabilities.values("qa", DEPLOYMENTS, "web", keys)).toEqual({
+  expect(capabilities.values("pods", keys)).toEqual({
     "resource.capability.delete": false,
-    "capability.create.jobs.batch": true,
   });
-  capabilities.values("qa", DEPLOYMENTS, "shop", keys);
+  expect(capabilities.values("deployments", keys)).toEqual({
+    "resource.capability.delete": true,
+  });
   expect(invoke).toHaveBeenCalledTimes(2);
+
+  capabilities.ask("deployments", "qa", DEPLOYMENTS, "shop", keys);
+  expect(invoke).toHaveBeenCalledTimes(2);
+  capabilities.ask("deployments", "qa", DEPLOYMENTS, "web", keys);
+  expect(invoke).toHaveBeenCalledTimes(3);
+  expect(capabilities.values("deployments", keys)).toEqual({
+    "resource.capability.delete": true,
+  });
+  await Promise.resolve();
+  expect(capabilities.values("deployments", keys)).toEqual({
+    "resource.capability.delete": false,
+  });
+
+  capabilities.closed("deployments");
+  capabilities.ask("deployments", "qa", DEPLOYMENTS, "web", keys);
+  expect(invoke).toHaveBeenCalledTimes(4);
 });

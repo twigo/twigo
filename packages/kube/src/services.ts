@@ -29,8 +29,12 @@ export interface ListServices {
 
 export function createServices(workbench: Workbench): ListServices {
   const states = new ListStates();
+  const capabilities = new Capabilities(workbench.backend, (error) => {
+    workbench.report(error);
+  });
   workbench.editors.onClose((uri) => {
     states.closed(uri);
+    capabilities.closed(uri);
   });
   return {
     discovery: new Discovery(workbench),
@@ -40,6 +44,6 @@ export function createServices(workbench: Workbench): ListServices {
     statuses: new ListStatuses(),
     pinned: new PinnedLists(workbench.spaces),
     overviews: new OverviewStates(),
-    capabilities: new Capabilities(workbench.backend),
+    capabilities,
   };
 }

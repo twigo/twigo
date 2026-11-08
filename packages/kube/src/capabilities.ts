@@ -11,61 +11,74 @@ export const CAPABILITY_PREFIXES = [OWN, NAMED] as const;
 
 /**
  * What RBAC lets the person do, as the `capability.*` context keys say it
- * (ARCHITECTURE 5.1): each key one SelfSubjectAccessReview that Rust keeps
- * with the context's clients. A key reads true until its answer comes, so
- * only what the cluster refuses is disabled, and the server still decides.
+ * (ARCHITECTURE 5.1), per list editor: each list asks Rust, which keeps
+ * each SelfSubjectAccessReview with the context's clients, whenever what it
+ * asks changes, and keeps its last answers meanwhile. A key reads true
+ * until an answer says no, so only what the cluster refuses is disabled,
+ * and the server still decides.
  */
 export class Capabilities {
   readonly changes = new Changes();
-  /** Answers by space, namespace and key. */
-  readonly #answers = new Map<string, boolean>();
-  readonly #asked = new Set<string>();
+  readonly #lists = new Map<
+    string,
+    {
+      readonly asked: string;
+      readonly answers: Readonly<Record<string, boolean>>;
+    }
+  >();
 
-  constructor(private readonly backend: Pick<Backend, "invoke">) {}
+  constructor(
+    private readonly backend: Pick<Backend, "invoke">,
+    private readonly report: (error: unknown) => void,
+  ) {}
+
+  /** The keys' values for a list's selected object. */
+  values(uri: string, keys: readonly string[]): Record<string, boolean> {
+    const answers = this.#lists.get(uri)?.answers ?? {};
+    return Object.fromEntries(keys.map((key) => [key, answers[key] ?? true]));
+  }
 
   /**
-   * The keys' values for an object of `resource` in `namespace`, none for a
-   * cluster-scoped one; asks for the ones not known yet.
+   * Asks for the keys of a list's selected object of `resource` in
+   * `namespace`, none for a cluster-scoped one, unless the list asked for
+   * the same already.
    */
-  values(
+  ask(
+    uri: string,
     space: string,
     resource: Gvr,
     namespace: string | undefined,
     keys: readonly string[],
-  ): Record<string, boolean> {
-    const values: Record<string, boolean> = {};
-    const missing: { key: string; access: Access }[] = [];
-    for (const key of keys) {
+  ): void {
+    const checks = keys.flatMap((key) => {
       const access = accessOf(key, resource);
-      if (!access) continue;
-      const id = `${space}\u0000${namespace ?? ""}\u0000${key}`;
-      const answer = this.#answers.get(id);
-      values[key] = answer ?? true;
-      if (answer === undefined && !this.#asked.has(id)) {
-        this.#asked.add(id);
-        missing.push({ key: id, access });
-      }
-    }
-    if (missing.length > 0) {
-      this.backend
-        .invoke("access_review", {
-          space,
-          namespace: namespace ?? null,
-          checks: missing.map(({ access }) => access),
-        })
-        .then(
-          (answers) => {
-            missing.forEach(({ key }, index) => {
-              this.#answers.set(key, answers[index] ?? true);
-            });
-            this.changes.emit();
-          },
-          () => {
-            for (const { key } of missing) this.#asked.delete(key);
-          },
-        );
-    }
-    return values;
+      return access ? [{ key, access }] : [];
+    });
+    const asked = JSON.stringify([space, namespace ?? null, checks]);
+    const list = this.#lists.get(uri);
+    if (list?.asked === asked) return;
+    this.#lists.set(uri, { asked, answers: list?.answers ?? {} });
+    if (checks.length === 0) return;
+    this.backend
+      .invoke("access_review", {
+        space,
+        namespace: namespace ?? null,
+        checks: checks.map(({ access }) => access),
+      })
+      .then((answers) => {
+        if (this.#lists.get(uri)?.asked !== asked) return;
+        this.#lists.set(uri, {
+          asked,
+          answers: Object.fromEntries(
+            checks.map(({ key }, index) => [key, answers[index] ?? true]),
+          ),
+        });
+        this.changes.emit();
+      }, this.report);
+  }
+
+  closed(uri: string): void {
+    this.#lists.delete(uri);
   }
 }
 

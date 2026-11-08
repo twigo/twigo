@@ -117,12 +117,20 @@ function Loaded({
   useChanges(commands.changes);
   const selected = selection.get(uri);
   const namespace = selected && objectOf(selected).namespace;
-  const allowed = capabilities.values(
-    input.space,
-    resource.gvr,
-    namespace,
-    CAPABILITY_PREFIXES.flatMap((prefix) => commands.referenced(prefix)),
+  const referenced = CAPABILITY_PREFIXES.flatMap((prefix) =>
+    commands.referenced(prefix),
   );
+  const capabilityKeys = JSON.stringify(referenced);
+  useEffect(() => {
+    capabilities.ask(
+      uri,
+      input.space,
+      resource.gvr,
+      namespace,
+      JSON.parse(capabilityKeys) as string[],
+    );
+  }, [capabilities, uri, input.space, resource.gvr, namespace, capabilityKeys]);
+  const allowed = capabilities.values(uri, referenced);
   const scoped = JSON.stringify({
     ...allowed,
     ...rowState(resource, selected),
