@@ -18,11 +18,11 @@ use tauri_plugin_opener::OpenerExt;
 use twigo_core::{Core, PolicyFile};
 use twigo_env::Environment;
 use twigo_ipc::{
-    Ack, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ErrorKind, ExecReview,
-    Execute, GetValues, IpcError, KeyboardLayout, ListBatch, ListQuery, LogBatch, ObjectBatch,
-    OpenLogs, OpenObject, OperationEvent, Plan, PlanId, PlanRequest, SetContextEnvironment,
-    SetContextMode, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellEnvironment,
-    Space, StateEntry, StateSnapshot, SubscriptionId,
+    AccessQuery, Ack, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ErrorKind,
+    ExecReview, Execute, GetValues, IpcError, KeyboardLayout, ListBatch, ListQuery, LogBatch,
+    ObjectBatch, OpenLogs, OpenObject, OperationEvent, Plan, PlanId, PlanRequest,
+    SetContextEnvironment, SetContextMode, SetLogSource, SetLogView, SetLogWindow, SetParts,
+    SetWindow, ShellEnvironment, Space, StateEntry, StateSnapshot, SubscriptionId,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
 
@@ -222,6 +222,11 @@ async fn command_execute(
 #[tauri::command]
 fn command_cancel(webview: Webview, app: State<'_, App>, request: PlanId) {
     app.core.command_cancel(webview.label(), request);
+}
+
+#[tauri::command]
+async fn access_review(app: State<'_, App>, request: AccessQuery) -> Result<Vec<bool>, IpcError> {
+    app.core.access_review(request).await
 }
 
 #[tauri::command]
@@ -642,6 +647,7 @@ fn main() {
             command_plan,
             command_execute,
             command_cancel,
+            access_review,
             spaces_list,
             space_open,
             state_load,

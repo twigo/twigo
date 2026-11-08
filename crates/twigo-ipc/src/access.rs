@@ -96,6 +96,26 @@ pub struct SetContextEnvironment {
     pub environment: Option<Environment>,
 }
 
+/// What the person asks whether they may do in a space, as RBAC names it,
+/// in one namespace or, with none, in all of them and for cluster-scoped
+/// resources.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AccessQuery {
+    pub space: String,
+    pub namespace: Option<String>,
+    pub checks: Vec<Access>,
+}
+
+/// One thing RBAC may allow: `patch` on `deployments/scale` of `apps`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+pub struct Access {
+    pub verb: String,
+    /// Empty for the core group.
+    pub group: String,
+    pub resource: String,
+    pub subresource: Option<String>,
+}
+
 /// What the gate takes a request for (ARCHITECTURE 6.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]

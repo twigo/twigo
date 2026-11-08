@@ -21,6 +21,7 @@
     "allow-command-plan",
     "allow-command-execute",
     "allow-command-cancel",
+    "allow-access-review",
     "allow-spaces-list",
     "allow-space-open",
     "allow-state-load",

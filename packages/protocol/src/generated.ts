@@ -1,6 +1,31 @@
 // Generated from crates/twigo-ipc: TWIGO_UPDATE_TYPESCRIPT=1 cargo test -p twigo-ipc --test typescript
 
+/**
+ * One thing RBAC may allow: `patch` on `deployments/scale` of `apps`.
+ */
+export type Access = { verb: string, 
+/**
+ * Empty for the core group.
+ */
+group: string, resource: string, subresource: string | null, };
+
+/**
+ * What the person asks whether they may do in a space, as RBAC names it,
+ * in one namespace or, with none, in all of them and for cluster-scoped
+ * resources.
+ */
+export type AccessQuery = { space: string, namespace: string | null, checks: Array<Access>, };
+
 export type Ack = { id: SubscriptionId, seq: number, };
+
+/**
+ * Objects that one thing happens to.
+ */
+export type Affected = { 
+/**
+ * What happens to them: `With it go`, `Evicts`.
+ */
+title: string, objects: Array<ObjectRef>, };
 
 export type AnsiColor = "black" | "red" | "green" | "yellow" | "blue" | "magenta" | "cyan" | "white" | "brightBlack" | "brightRed" | "brightGreen" | "brightYellow" | "brightBlue" | "brightMagenta" | "brightCyan" | "brightWhite";
 
@@ -805,7 +830,7 @@ export type OpenObject = { object: ObjectQuery, parts: ObjectParts, };
  * How a running plan goes, over its channel; every kind but `running` is
  * the last.
  */
-export type OperationEvent = { "state": "running", text: string, } | { "state": "done", text: string, } | { "state": "stopped", text: string, } | { "state": "revealed", value: string, binary: boolean, } | { "state": "failed", error: IpcError, };
+export type OperationEvent = { "state": "running", text: string, } | { "state": "done", text: string, undoUntil: number | null, } | { "state": "stopped", text: string, } | { "state": "revealed", value: string, binary: boolean, } | { "state": "failed", error: IpcError, };
 
 /**
  * An object described for people: sections in their order, each a list of
@@ -832,6 +857,11 @@ confirm: string,
  */
 consequences: Array<string>, 
 /**
+ * The exact objects it acts on and those that follow, by what happens
+ * to them.
+ */
+affected: Array<Affected>, 
+/**
  * The kubectl command that does the same.
  */
 kubectl: string, 
@@ -846,7 +876,7 @@ export type PlanId = number;
 /**
  * What a person asks a command to do.
  */
-export type PlanRequest = { "action": "delete", space: string, target: ResourceRef, } | { "action": "reveal", object: SubscriptionId, key: string, };
+export type PlanRequest = { "action": "delete", space: string, targets: Array<ResourceRef>, } | { "action": "scale", space: string, target: ResourceRef, replicas: number, } | { "action": "restart", space: string, target: ResourceRef, } | { "action": "cordon", space: string, node: string, unschedulable: boolean, } | { "action": "drain", space: string, node: string, } | { "action": "trigger", space: string, namespace: string, name: string, } | { "action": "suspend", space: string, target: ResourceRef, suspend: boolean, } | { "action": "undo", space: string, } | { "action": "reveal", object: SubscriptionId, key: string, };
 
 export type PluginStatus = { "state": "idle" } | { "state": "waiting" } | { "state": "running", 
 /**
@@ -884,7 +914,11 @@ export type RequestClass = "read" | "dryRun" | "write" | "secretRead" | "forward
  * A resource the space's clusters serve, from discovery: what the explorer
  * lists and what `:` in quick access resolves names against (ARCHITECTURE 4.5).
  */
-export type Resource = { gvr: Gvr, kind: string, singular: string, shortNames: Array<string>, namespaced: boolean, };
+export type Resource = { gvr: Gvr, kind: string, singular: string, shortNames: Array<string>, namespaced: boolean, 
+/**
+ * Its subresources as discovery names them: `status`, `scale`.
+ */
+subresources: Array<string>, };
 
 /**
  * An object of a space, by its resource as discovery names it.
@@ -1096,6 +1130,7 @@ export type Commands = {
   command_plan: { request: PlanRequest; response: Plan; message: null };
   command_execute: { request: Execute; response: null; message: OperationEvent };
   command_cancel: { request: PlanId; response: null; message: null };
+  access_review: { request: AccessQuery; response: Array<boolean>; message: null };
   space_open: { request: string; response: Space; message: null };
   resources_watch: { request: string; response: null; message: Discovered };
   namespaces_list: { request: string; response: Array<string>; message: null };

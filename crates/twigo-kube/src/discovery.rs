@@ -159,6 +159,11 @@ impl Discovery {
                             .unwrap_or_else(|| kind.to_lowercase()),
                         short_names: resource.short_names.clone(),
                         namespaced: resource.scope.as_deref() == Some("Namespaced"),
+                        subresources: resource
+                            .subresources
+                            .iter()
+                            .filter_map(|subresource| subresource.subresource.clone())
+                            .collect(),
                     });
                 }
             }

@@ -1,20 +1,24 @@
-//! Deletes an object as `kubectl delete` does (kubectl v0.37.1,
-//! `pkg/cmd/delete`): its dependents in the background, then waits until the
-//! object of the uid it deleted is gone, which a new object of the same name
-//! does not hold up. A precondition on that uid keeps it from deleting an
-//! object that took the name after the plan.
+//! Deletes objects as `kubectl delete` does (kubectl v0.37.1,
+//! `pkg/cmd/delete`): their dependents in the background, then waits until
+//! each object of the uid it deleted is gone, which a new object of the same
+//! name does not hold up. A precondition on that uid keeps it from deleting
+//! an object that took the name after the plan. Several are the marked rows
+//! of one list, so they share a resource.
 
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Weak;
 
-use http::header::CONTENT_TYPE;
+use futures::future::{join_all, try_join_all};
+use http::Method;
 use kube::api::{DeleteParams, Preconditions, PropagationPolicy};
 use serde_json::Value;
-use twigo_cache::hub::Resource;
-use twigo_ipc::{ErrorKind, IpcError, ResourceRef};
-use twigo_policy::Attributes;
+use twigo_cache::hub::{Query, Resource, RowFormat};
+use twigo_cache::request::field_value;
+use twigo_ipc::{Affected, ErrorKind, IpcError, ResourceRef};
 use twigo_policy::friction::Risk;
 
-use super::{kind_words, kubectl, sentence};
+use super::dependents::{Deleted, dependents};
+use super::{Target, clients_for, counted, get, kind_words, kubectl, object_ref, plural, sentence};
 use crate::Core;
 use crate::bus::{Finished, Planned, Progress};
 
@@ -32,120 +36,198 @@ const WIDE: [(&str, &str); 3] = [
 pub(crate) async fn delete(
     core: &Core,
     space: &str,
-    target: ResourceRef,
+    targets: Vec<ResourceRef>,
 ) -> Result<Planned, IpcError> {
-    let context = core.context(space)?;
-    let resource = Resource {
-        group: target.gvr.group,
-        version: target.gvr.version,
-        resource: target.gvr.resource,
-        namespaced: target.namespaced,
+    let Some(first) = targets.first() else {
+        return Err(IpcError::new(ErrorKind::InvalidInput, "nothing to delete"));
     };
-    let namespace = target.namespace.filter(|_| resource.namespaced);
-    let name = target.name;
-    let path = resource.object_path(namespace.as_deref(), &name)?;
-    // As the request reads with its body: a DELETE's class is its path's.
-    let attributes = Attributes::of(
-        &http::Request::delete(&path)
-            .body(())
-            .expect("an object's path makes a request"),
-    );
+    if targets
+        .iter()
+        .any(|target| target.gvr != first.gvr || target.namespaced != first.namespaced)
+    {
+        return Err(IpcError::new(
+            ErrorKind::InvalidInput,
+            "a delete of several objects takes them from one resource",
+        ));
+    }
+    let targets = targets
+        .into_iter()
+        .map(|target| Target::of(core, space, target))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut names = HashSet::new();
+    let targets: Vec<Target> = targets
+        .into_iter()
+        .filter(|target| names.insert((target.namespace.clone(), target.name.clone())))
+        .collect();
+    let context = targets[0].context.clone();
+    let resource = targets[0].resource.clone();
+    let writes: Vec<_> = targets
+        .iter()
+        .map(|target| target.attributes(Method::DELETE, None))
+        .collect();
     // Before anything goes out: a read-only context says so at once.
-    core.authorize(&context, std::slice::from_ref(&attributes))?;
+    core.authorize(&context, &writes)?;
     let clients = core
         .clients(&context)
         .await
         .map_err(|error| IpcError::from(&error))?;
-    let get = http::Request::get(&path)
-        .body(Vec::new())
-        .expect("an object's path makes a request");
-    let object: Value = clients
-        .api
-        .request(get)
-        .await
-        .map_err(|error| twigo_kube::errors::request(&error))?;
-    let uid = object["metadata"]["uid"]
-        .as_str()
-        .ok_or_else(|| IpcError::new(ErrorKind::Internal, format!("{name} has no uid")))?
-        .to_owned();
-    let kind = kind_words(object["kind"].as_str().unwrap_or(&resource.resource));
-    let what = format!("{kind} {name}");
+    let objects = try_join_all(targets.iter().map(|target| get(&clients, &target.path))).await?;
+    let uids = objects
+        .iter()
+        .zip(&targets)
+        .map(|(object, target)| {
+            object["metadata"]["uid"]
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| {
+                    IpcError::new(ErrorKind::Internal, format!("{} has no uid", target.name))
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let kind = kind_words(objects[0]["kind"].as_str().unwrap_or(&resource.resource));
 
+    let deleted: Vec<Deleted<'_>> = targets
+        .iter()
+        .zip(&uids)
+        .filter_map(|(target, uid)| {
+            Some(Deleted {
+                group: &resource.group,
+                resource: &resource.resource,
+                namespace: target.namespace.as_deref()?,
+                uid,
+            })
+        })
+        .collect();
+    let following = dependents(&clients, &deleted).await;
     let wide = WIDE.contains(&(resource.group.as_str(), resource.resource.as_str()));
-    let controller = (resource.group.is_empty() && resource.resource == "pods")
-        .then(|| controller(&object))
-        .flatten();
-    let (risk, consequences) = match (wide, controller) {
-        (true, _) => (
-            Risk::Wide { name: name.clone() },
-            wide_consequences(&resource, &object),
-        ),
-        (false, Some((owner, owner_name))) => (
-            Risk::Replaced,
-            vec![format!(
-                "Its {} {owner_name} replaces it.",
-                kind_words(&owner)
-            )],
-        ),
-        (false, None) => (Risk::One, Vec::new()),
+    let several = targets.len() > 1;
+    let mut consequences = Vec::new();
+    let risk = if several {
+        Risk::Wide {
+            name: targets.len().to_string(),
+        }
+    } else if wide {
+        Risk::Wide {
+            name: targets[0].name.clone(),
+        }
+    } else if let Some((owner, owner_name)) = (resource.group.is_empty()
+        && resource.resource == "pods")
+        .then(|| controller(&objects[0]))
+        .flatten()
+    {
+        consequences.push(format!(
+            "Its {} {owner_name} replaces it.",
+            kind_words(&owner)
+        ));
+        Risk::Replaced
+    } else {
+        Risk::Lasting
     };
-
-    let options = DeleteParams {
-        propagation_policy: Some(PropagationPolicy::Background),
-        preconditions: Some(Preconditions {
-            uid: Some(uid.clone()),
-            resource_version: None,
-        }),
-        ..DeleteParams::default()
-    };
-    let request = http::Request::delete(&path)
-        .header(CONTENT_TYPE, "application/json")
-        .body(serde_json::to_vec(&options).expect("delete options serialize"))
-        .expect("an object's path makes a request");
-
-    let kind_name = resource.name();
-    let mut words = vec![
-        "kubectl",
-        "--context",
-        &context,
-        "delete",
-        &kind_name,
-        &name,
-    ];
-    if let Some(namespace) = &namespace {
-        words.extend(["-n", namespace]);
+    if wide {
+        consequences.extend(wide_consequences(&resource, &objects, several));
     }
-    let line = kubectl(&words)?;
-    let place = namespace
-        .as_deref()
-        .map(|namespace| format!(" in {namespace}"))
-        .unwrap_or_default();
+    consequences.extend(following.unknown);
+    let mut affected = Vec::new();
+    if several {
+        affected.push(Affected {
+            title: "Deletes".to_owned(),
+            objects: objects.iter().map(object_ref).collect(),
+        });
+    }
+    if !following.objects.is_empty() {
+        affected.push(Affected {
+            title: if several {
+                "With them go"
+            } else {
+                "With it go"
+            }
+            .to_owned(),
+            objects: following.objects,
+        });
+    }
+
+    let what = if several {
+        counted(targets.len(), &kind)
+    } else {
+        format!("{kind} {}", targets[0].name)
+    };
+    let place = place(&targets);
+    let line = kubectl_lines(&targets, &context, &resource)?;
     let connection = clients.connection();
     let run = Run {
         core: core.this.clone(),
         connection,
         context: context.clone(),
         resource,
-        namespace,
-        name: name.clone(),
-        uid,
+        kind: kind.clone(),
         what: what.clone(),
-        request,
+        targets: targets.into_iter().zip(uids).collect(),
     };
     Ok(Planned {
         question: format!("Delete {what}{place} from {context}?"),
-        confirm: format!("Delete {kind}"),
+        confirm: if several {
+            format!("Delete {what}")
+        } else {
+            format!("Delete {kind}")
+        },
         doing: format!("Deleting {what}"),
         consequences,
+        affected,
         kubectl: line,
         command: "delete",
-        target: attributes.target(),
-        writes: vec![attributes],
+        target: if several {
+            format!("{what}{place}")
+        } else {
+            writes[0].target()
+        },
+        writes,
         context,
         connection,
+        space: Some(space.to_owned()),
         risk,
         run: Box::new(move |progress| Box::pin(run.run(progress))),
     })
+}
+
+/// ` in default`, ` in 3 namespaces`, or nothing for cluster-scoped objects.
+fn place(targets: &[Target]) -> String {
+    let namespaces: HashSet<_> = targets
+        .iter()
+        .filter_map(|target| target.namespace.as_deref())
+        .collect();
+    match namespaces.len() {
+        0 => String::new(),
+        1 => targets[0].place(),
+        count => format!(" in {count} namespaces"),
+    }
+}
+
+/// One kubectl command a namespace, joined so a shell runs them in turn.
+fn kubectl_lines(
+    targets: &[Target],
+    context: &str,
+    resource: &Resource,
+) -> Result<String, IpcError> {
+    let mut by_namespace: BTreeMap<Option<&str>, Vec<&str>> = BTreeMap::new();
+    for target in targets {
+        by_namespace
+            .entry(target.namespace.as_deref())
+            .or_default()
+            .push(&target.name);
+    }
+    let kind_name = resource.name();
+    let lines = by_namespace
+        .into_iter()
+        .map(|(namespace, names)| {
+            let mut words = vec!["kubectl", "--context", context, "delete", &kind_name];
+            words.extend(names);
+            if let Some(namespace) = namespace {
+                words.extend(["-n", namespace]);
+            }
+            kubectl(&words)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(lines.join(" && "))
 }
 
 /// The kind and name of the pod's controller, when it is one that replaces
@@ -158,13 +240,15 @@ fn controller(object: &Value) -> Option<(String, String)> {
     replaces.then(|| Some((kind.to_owned(), owner["name"].as_str()?.to_owned())))?
 }
 
-fn wide_consequences(resource: &Resource, object: &Value) -> Vec<String> {
+fn wide_consequences(resource: &Resource, objects: &[Value], several: bool) -> Vec<String> {
     match resource.resource.as_str() {
+        "namespaces" if several => vec!["Every object in them goes with them.".to_owned()],
         "namespaces" => vec!["Every object in it goes with it.".to_owned()],
-        "customresourcedefinitions" => object["spec"]["names"]["kind"]
-            .as_str()
-            .map(|kind| vec![format!("Every object of kind {kind} goes with it.")])
-            .unwrap_or_default(),
+        "customresourcedefinitions" => objects
+            .iter()
+            .filter_map(|object| object["spec"]["names"]["kind"].as_str())
+            .map(|kind| format!("Every object of kind {kind} goes with it."))
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -176,83 +260,239 @@ struct Run {
     connection: Option<u64>,
     context: String,
     resource: Resource,
-    namespace: Option<String>,
-    name: String,
-    uid: String,
-    /// `pod web-1`.
+    /// `pod`.
+    kind: String,
+    /// `pod web-1`, `3 pods`.
     what: String,
-    request: http::Request<Vec<u8>>,
+    /// Each with the uid it read.
+    targets: Vec<(Target, String)>,
+}
+
+/// How the server answered the delete of one object.
+enum Answer {
+    Sent(String),
+    Gone,
+    Replaced(String),
+    Failed(String, IpcError),
 }
 
 impl Run {
     async fn run(self, progress: Progress) -> Result<Finished, IpcError> {
-        let core = self
-            .core
-            .upgrade()
-            .ok_or_else(|| IpcError::new(ErrorKind::Unavailable, "Twigo is quitting"))?;
-        let clients = core
-            .clients(&self.context)
-            .await
-            .map_err(|error| IpcError::from(&error))?;
-        let what = &self.what;
-        if clients.connection() != self.connection {
-            return Err(IpcError::new(
-                ErrorKind::Conflict,
-                format!(
-                    "{} names another cluster now than when Twigo asked, so it deleted nothing",
-                    self.context
-                ),
-            ));
-        }
-        match clients.api.request_text(self.request).await {
-            Ok(_) => {}
-            Err(kube::Error::Api(status)) if status.code == 404 => {
-                return Ok(Finished::Done(format!(
-                    "{} was already gone",
-                    sentence(what)
-                )));
+        let (core, clients) = clients_for(
+            &self.core,
+            &self.context,
+            self.connection,
+            "deleted nothing",
+        )
+        .await?;
+        let sent = join_all(self.targets.iter().map(|(target, uid)| {
+            let clients = &clients;
+            async move {
+                let options = DeleteParams {
+                    propagation_policy: Some(PropagationPolicy::Background),
+                    preconditions: Some(Preconditions {
+                        uid: Some(uid.clone()),
+                        resource_version: None,
+                    }),
+                    ..DeleteParams::default()
+                };
+                let request = super::write(
+                    Method::DELETE,
+                    &target.path,
+                    "application/json",
+                    &serde_json::to_value(&options).expect("delete options serialize"),
+                );
+                match clients.api.request_text(request).await {
+                    Ok(_) => Answer::Sent(uid.clone()),
+                    Err(kube::Error::Api(status)) if status.code == 404 => Answer::Gone,
+                    Err(kube::Error::Api(status)) if status.code == 409 => {
+                        Answer::Replaced(target.name.clone())
+                    }
+                    Err(error) => {
+                        Answer::Failed(target.name.clone(), twigo_kube::errors::request(&error))
+                    }
+                }
             }
-            Err(kube::Error::Api(status)) if status.code == 409 => {
-                return Err(IpcError::new(
-                    ErrorKind::Conflict,
-                    format!("{what} was replaced since you confirmed, so Twigo deleted nothing"),
-                ));
+        }))
+        .await;
+        if let [only] = sent.as_slice() {
+            let what = &self.what;
+            match only {
+                Answer::Sent(_) => {}
+                Answer::Gone => {
+                    return Ok(Finished::Done(format!(
+                        "{} was already gone",
+                        sentence(what)
+                    )));
+                }
+                Answer::Replaced(_) => {
+                    return Err(IpcError::new(
+                        ErrorKind::Conflict,
+                        format!(
+                            "{what} was replaced since you confirmed, so Twigo deleted nothing"
+                        ),
+                    ));
+                }
+                Answer::Failed(_, error) => return Err(error.clone()),
             }
-            Err(error) => return Err(twigo_kube::errors::request(&error)),
         }
-        let deleted = format!("Deleted {what}");
-        let stopped = || {
+        let waiting: HashSet<String> = sent
+            .iter()
+            .filter_map(|sent| match sent {
+                Answer::Sent(uid) => Some(uid.clone()),
+                _ => None,
+            })
+            .collect();
+        let (gone, replaced, failed) = sent.iter().fold(
+            (0, Vec::new(), Vec::new()),
+            |(gone, mut replaced, mut failed), sent| {
+                match sent {
+                    Answer::Gone => return (gone + 1, replaced, failed),
+                    Answer::Replaced(name) => replaced.push(name.as_str()),
+                    Answer::Failed(name, error) => failed.push((name.as_str(), error)),
+                    Answer::Sent(_) => {}
+                }
+                (gone, replaced, failed)
+            },
+        );
+        let deleted = self.told(waiting.len(), gone, &replaced, &failed);
+        if waiting.is_empty() {
+            return match failed.first() {
+                Some((_, error)) => Err(IpcError::new(error.kind, deleted)),
+                None => Ok(Finished::Done(deleted)),
+            };
+        }
+
+        let namespaces: Vec<String> = self
+            .targets
+            .iter()
+            .filter_map(|(target, _)| target.namespace.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let field_selector = match self.targets.as_slice() {
+            [(target, _)] => Some(format!("metadata.name={}", field_value(&target.name))),
+            _ => None,
+        };
+        let watched = core
+            .hub
+            .rows(Query {
+                context: self.context.clone(),
+                resource: self.resource.clone(),
+                format: RowFormat::Metadata,
+                namespaces,
+                field_selector,
+            })
+            .await;
+        let stopped = |left: usize| {
+            let still = if self.targets.len() == 1 {
+                self.what.clone()
+            } else {
+                counted(left, &self.kind)
+            };
+            let are = if left == 1 { "is" } else { "are" };
             Finished::Stopped(format!(
-                "Stopped waiting for {what}, which is still being deleted"
+                "Stopped waiting for {still}, which {are} still being deleted"
             ))
         };
-        let mut followed =
-            core.hub
-                .object(&self.context, self.resource, self.namespace, &self.name)?;
+        let mut followed = match watched {
+            Ok(followed) => followed,
+            Err(_) => {
+                return Ok(Finished::Done(format!(
+                    "{deleted}; Twigo cannot watch {} go",
+                    if self.targets.len() == 1 {
+                        "it"
+                    } else {
+                        "them"
+                    }
+                )));
+            }
+        };
         tokio::select! {
             whole = followed.whole() => if whole.is_err() {
-                return Ok(Finished::Done(format!("{deleted}; Twigo cannot watch it go")));
+                return Ok(Finished::Done(format!(
+                    "{deleted}; Twigo cannot watch {} go",
+                    if self.targets.len() == 1 { "it" } else { "them" }
+                )));
             },
-            () = progress.stopped() => return Ok(stopped()),
+            () = progress.stopped() => return Ok(stopped(waiting.len())),
         }
-        let mut told = false;
+        let mut told = None;
         loop {
-            let present = followed
+            let left = followed
                 .items()
                 .iter()
-                .any(|object| object.meta.uid.as_deref() == Some(self.uid.as_str()));
-            if !present {
-                return Ok(Finished::Done(deleted));
+                .filter(|row| {
+                    row.meta
+                        .uid
+                        .as_deref()
+                        .is_some_and(|uid| waiting.contains(uid))
+                })
+                .count();
+            if left == 0 {
+                return match failed.first() {
+                    Some((_, error)) => Err(IpcError::new(error.kind, deleted)),
+                    None => Ok(Finished::Done(deleted)),
+                };
             }
-            if !told {
-                progress.running(format!("Waiting for {what} to go"));
-                told = true;
+            if told != Some(left) {
+                progress.running(if self.targets.len() == 1 {
+                    format!("Waiting for {} to go", self.what)
+                } else {
+                    format!(
+                        "Waiting for {left} of {} to go",
+                        counted(waiting.len(), &self.kind)
+                    )
+                });
+                told = Some(left);
             }
             tokio::select! {
                 () = followed.changed() => {}
-                () = progress.stopped() => return Ok(stopped()),
+                () = progress.stopped() => return Ok(stopped(left)),
             }
         }
+    }
+
+    /// How it went, in a sentence: `Deleted 4 pods; 1 was already gone`.
+    fn told(
+        &self,
+        sent: usize,
+        gone: usize,
+        replaced: &[&str],
+        failed: &[(&str, &IpcError)],
+    ) -> String {
+        if self.targets.len() == 1 {
+            return format!("Deleted {}", self.what);
+        }
+        let mut told = if failed.is_empty() {
+            format!("Deleted {}", counted(sent, &self.kind))
+        } else {
+            format!(
+                "Deleted {sent} of {}",
+                counted(self.targets.len(), &self.kind)
+            )
+        };
+        if gone > 0 {
+            let was = if gone == 1 { "was" } else { "were" };
+            told.push_str(&format!("; {gone} {was} already gone"));
+        }
+        if !replaced.is_empty() {
+            let kind = if replaced.len() == 1 {
+                self.kind.clone()
+            } else {
+                plural(&self.kind)
+            };
+            let were = if replaced.len() == 1 { "was" } else { "were" };
+            told.push_str(&format!(
+                "; {kind} {} {were} replaced since you confirmed, so Twigo left {}",
+                replaced.join(", "),
+                if replaced.len() == 1 { "it" } else { "them" }
+            ));
+        }
+        for (name, error) in failed {
+            told.push_str(&format!("; {} {name}: {}", self.kind, error.message));
+        }
+        told
     }
 }
 

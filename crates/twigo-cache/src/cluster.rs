@@ -1,11 +1,11 @@
 //! What the hub learns about a context's cluster over its clients: whether
-//! it streams lists, and whether the person may list a resource
-//! cluster-wide. A rebuild of the clients may point them at another
+//! it streams lists, and what RBAC lets the person do. A rebuild of the clients may point them at another
 //! server, so the facts go with the clients they were learnt over.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
+use twigo_ipc::Access;
 use twigo_kube::client::Clients;
 
 #[derive(Default)]
@@ -17,8 +17,8 @@ pub(crate) struct Cluster {
 struct Facts {
     clients: Weak<Clients>,
     streaming: Option<bool>,
-    /// By group and resource.
-    may_list: HashMap<(String, String), bool>,
+    /// By namespace, none for all of them, and what is asked.
+    may: HashMap<(Option<String>, Access), bool>,
 }
 
 impl Cluster {
@@ -32,17 +32,28 @@ impl Cluster {
         self.facts(clients).streaming = Some(streaming);
     }
 
-    pub fn may_list(&self, clients: &Arc<Clients>, group: &str, resource: &str) -> Option<bool> {
+    pub fn may(
+        &self,
+        clients: &Arc<Clients>,
+        namespace: Option<&str>,
+        access: &Access,
+    ) -> Option<bool> {
         self.facts(clients)
-            .may_list
-            .get(&(group.to_owned(), resource.to_owned()))
+            .may
+            .get(&(namespace.map(str::to_owned), access.clone()))
             .copied()
     }
 
-    pub fn set_may_list(&self, clients: &Arc<Clients>, group: &str, resource: &str, may: bool) {
+    pub fn set_may(
+        &self,
+        clients: &Arc<Clients>,
+        namespace: Option<&str>,
+        access: &Access,
+        may: bool,
+    ) {
         self.facts(clients)
-            .may_list
-            .insert((group.to_owned(), resource.to_owned()), may);
+            .may
+            .insert((namespace.map(str::to_owned), access.clone()), may);
     }
 
     fn facts(&self, clients: &Arc<Clients>) -> MutexGuard<'_, Facts> {

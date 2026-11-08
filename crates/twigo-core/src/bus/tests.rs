@@ -39,6 +39,7 @@ fn planned(core: &Core, risk: Risk, runs: &Runs) -> Planned {
     Planned {
         context: "kind-a".to_owned(),
         connection: core.policy.connection("kind-a"),
+        space: Some("kind-a".to_owned()),
         risk,
         writes: vec![Attributes::action(
             "delete",
@@ -52,6 +53,7 @@ fn planned(core: &Core, risk: Risk, runs: &Runs) -> Planned {
         question: "Delete config map m in a from kind-a?".to_owned(),
         confirm: "Delete config map".to_owned(),
         consequences: Vec::new(),
+        affected: Vec::new(),
         kubectl: "kubectl --context kind-a delete configmaps m -n a".to_owned(),
         doing: "Deleting config map m".to_owned(),
         run: Box::new(move |progress: Progress| {
@@ -117,7 +119,7 @@ async fn a_plan_runs_once_and_only_from_its_own_window() {
     let dir = tempfile::tempdir().unwrap();
     let core = running(dir.path());
     let runs = Runs::default();
-    let plan = new_plan(&core, "main", Risk::One, &runs).await;
+    let plan = new_plan(&core, "main", Risk::Lasting, &runs).await;
     assert_eq!(plan.friction, Friction::Confirm);
 
     assert_eq!(
@@ -206,7 +208,7 @@ async fn a_mode_that_asks_for_more_than_the_plan_did_refuses_it() {
     let dir = tempfile::tempdir().unwrap();
     let core = running(dir.path());
     let runs = Runs::default();
-    let plan = new_plan(&core, "main", Risk::One, &runs).await;
+    let plan = new_plan(&core, "main", Risk::Lasting, &runs).await;
     core.set_context_mode(SetContextMode {
         context: "kind-a".to_owned(),
         mode: Some(Mode::Guarded),
@@ -218,7 +220,7 @@ async fn a_mode_that_asks_for_more_than_the_plan_did_refuses_it() {
         Err(ErrorKind::Conflict)
     );
 
-    let typed = new_plan(&core, "main", Risk::One, &runs).await;
+    let typed = new_plan(&core, "main", Risk::Lasting, &runs).await;
     assert_eq!(
         typed.friction,
         Friction::Typed {
@@ -252,7 +254,7 @@ async fn a_plan_never_runs_on_another_cluster_its_context_names_now() {
     let dir = tempfile::tempdir().unwrap();
     let core = running(dir.path());
     let runs = Runs::default();
-    let plan = new_plan(&core, "main", Risk::One, &runs).await;
+    let plan = new_plan(&core, "main", Risk::Lasting, &runs).await;
     let mut contexts = core.catalog.subscribe();
     contexts.borrow_and_update();
     std::fs::write(
@@ -276,8 +278,8 @@ async fn a_reload_drops_the_window_s_plans_and_stops_its_runs() {
     let dir = tempfile::tempdir().unwrap();
     let core = running(dir.path());
     let runs = Runs::default();
-    let waiting = new_plan(&core, "main", Risk::One, &runs).await;
-    let started = new_plan(&core, "main", Risk::One, &runs).await;
+    let waiting = new_plan(&core, "main", Risk::Lasting, &runs).await;
+    let started = new_plan(&core, "main", Risk::Lasting, &runs).await;
     let (events, send) = events();
     core.command_execute(
         "main",
@@ -322,7 +324,7 @@ async fn the_audit_log_has_what_a_person_confirmed_and_how_it_ended() {
     let dir = tempfile::tempdir().unwrap();
     let core = running(dir.path());
     let runs = Runs::default();
-    let plan = new_plan(&core, "main", Risk::One, &runs).await;
+    let plan = new_plan(&core, "main", Risk::Lasting, &runs).await;
     execute(&core, "main", plan.id, None).await.unwrap();
     until("the run starts", || *runs.lock().unwrap() == 1).await;
     core.command_cancel("main", plan.id);
@@ -359,7 +361,7 @@ async fn a_plan_asked_for_by_a_page_that_reloaded_is_not_kept() {
     let access = core.policy.access("kind-a");
     let refused = core
         .bus
-        .keep(ticket, planned(&core, Risk::One, &runs), &access)
+        .keep(ticket, planned(&core, Risk::Lasting, &runs), &access)
         .unwrap_err();
     assert_eq!(refused.kind, ErrorKind::Unavailable);
 }
@@ -369,7 +371,7 @@ async fn a_plan_taken_before_its_page_reloaded_does_not_run() {
     let dir = tempfile::tempdir().unwrap();
     let core = running(dir.path());
     let runs = Runs::default();
-    let plan = new_plan(&core, "main", Risk::One, &runs).await;
+    let plan = new_plan(&core, "main", Risk::Lasting, &runs).await;
     let (_, ticket) = core.bus.take("main", plan.id).unwrap();
     core.drop_window("main");
     let (_, stop) = Progress::new(|_| true);
@@ -469,7 +471,10 @@ async fn a_plan_whose_read_waited_across_an_edit_of_its_context_never_runs() {
                 namespace: Some("a".to_owned()),
                 name: "m".to_owned(),
             };
-            let request = twigo_ipc::PlanRequest::Delete { space, target };
+            let request = twigo_ipc::PlanRequest::Delete {
+                space,
+                targets: vec![target],
+            };
             core.command_plan("main", request).await
         }
     });

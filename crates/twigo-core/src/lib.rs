@@ -25,10 +25,10 @@ use twigo_cache::hub::{Connect, Hub, Query, Resource, RowFormat};
 use twigo_cache::view::Spec;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    Ack, ClusterVersion, Context, DownloadLogs, ErrorKind, Execute, Friction, GetValues, IpcError,
-    ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject, OperationEvent, Plan,
-    PlanId, PlanRequest, SetContextEnvironment, SetContextMode, SetLogSource, SetLogView,
-    SetLogWindow, SetParts, SetWindow, SubscriptionId, ViewState,
+    AccessQuery, Ack, ClusterVersion, Context, DownloadLogs, ErrorKind, Execute, Friction,
+    GetValues, IpcError, ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject,
+    OperationEvent, Plan, PlanId, PlanRequest, SetContextEnvironment, SetContextMode, SetLogSource,
+    SetLogView, SetLogWindow, SetParts, SetWindow, SubscriptionId, ViewState,
 };
 use twigo_kube::client::{Actor, Clients, ProxyEnv};
 use twigo_kube::credentials::{ExecError, OidcError, Provider, Registry, Source, Timeouts};
@@ -39,8 +39,9 @@ use twigo_policy::friction::{covers, friction};
 use twigo_policy::{Audit, Entry, Policy};
 use twigo_sessions::logs::Session;
 
+use actions::undo::Undos;
 pub use auth::AuthFollower;
-use bus::{Bus, Progress, Waiting};
+use bus::{Bus, Finished, Progress, Waiting};
 use catalog::Catalog;
 use connections::Connections;
 use objects::{Opened, Target};
@@ -65,6 +66,7 @@ pub struct Core {
     objects: Subscriptions<Opened>,
     logs: Subscriptions<Session>,
     bus: Arc<Bus>,
+    undos: Arc<Undos>,
     discovery: Arc<Cache>,
     credentials: Registry,
     /// Whether a Twigo window has the focus, which a plugin that may ask
@@ -116,6 +118,7 @@ impl Core {
             objects: Subscriptions::new("object"),
             logs: Subscriptions::new("logs"),
             bus: Arc::default(),
+            undos: Arc::default(),
             discovery: Arc::new(Cache::new(cache.join("discovery"))),
             state,
             catalog,
@@ -286,7 +289,34 @@ impl Core {
     pub async fn command_plan(&self, window: &str, request: PlanRequest) -> Result<Plan, IpcError> {
         let ticket = self.bus.ticket(window);
         let planned = match request {
-            PlanRequest::Delete { space, target } => actions::delete(self, &space, target).await?,
+            PlanRequest::Delete { space, targets } => {
+                actions::delete(self, &space, targets).await?
+            }
+            PlanRequest::Scale {
+                space,
+                target,
+                replicas,
+            } => actions::scale(self, &space, target, replicas).await?,
+            PlanRequest::Restart { space, target } => {
+                actions::restart(self, &space, target).await?
+            }
+            PlanRequest::Cordon {
+                space,
+                node,
+                unschedulable,
+            } => actions::cordon(self, &space, node, unschedulable).await?,
+            PlanRequest::Drain { space, node } => actions::drain(self, &space, node).await?,
+            PlanRequest::Trigger {
+                space,
+                namespace,
+                name,
+            } => actions::trigger(self, &space, namespace, name).await?,
+            PlanRequest::Suspend {
+                space,
+                target,
+                suspend,
+            } => actions::suspend(self, &space, target, suspend).await?,
+            PlanRequest::Undo { space } => actions::undo(self, &space)?,
             PlanRequest::Reveal { object, key } => actions::reveal(self, window, object, key)?,
         };
         self.authorize(&planned.context, &planned.writes)?;
@@ -360,15 +390,29 @@ impl Core {
             mode: access.mode,
             friction: &planned_friction,
         });
-        let (bus, policy, window) = (
+        let (bus, undos, policy, window) = (
             Arc::clone(&self.bus),
+            Arc::clone(&self.undos),
             Arc::clone(&self.policy),
             window.to_owned(),
         );
-        let (command, target, run) = (planned.command, planned.target, planned.run);
+        let (command, target, space, connection, run) = (
+            planned.command,
+            planned.target,
+            planned.space,
+            planned.connection,
+            planned.run,
+        );
         tokio::spawn(async move {
-            let (event, outcome, message) = match run(progress.clone()).await {
-                Ok(finished) => finished.told(),
+            let ended = run(progress.clone()).await;
+            // The space's last action is this one now, with its undo if it
+            // has one.
+            let undo_until = space.and_then(|space| {
+                let revert = ended.as_ref().ok().and_then(Finished::revert);
+                undos.ended(&space, revert.map(|revert| (revert, connection)))
+            });
+            let (event, outcome, message) = match ended {
+                Ok(finished) => finished.told(undo_until),
                 Err(error) => {
                     let message = error.message.clone();
                     (OperationEvent::Failed { error }, "failed", message)
@@ -385,6 +429,22 @@ impl Core {
             bus.ended(&window, request.plan);
         });
         Ok(())
+    }
+
+    /// Whether the person may do each check in a space's context, a check
+    /// the cluster cannot answer counting as allowed (ARCHITECTURE 5.1).
+    pub async fn access_review(&self, query: AccessQuery) -> Result<Vec<bool>, IpcError> {
+        let context = self.context(&query.space)?;
+        let namespace = query.namespace.as_deref();
+        let answers = query
+            .checks
+            .iter()
+            .map(|access| self.hub.may(&context, namespace, access));
+        Ok(futures::future::join_all(answers)
+            .await
+            .into_iter()
+            .map(|may| may.unwrap_or(true))
+            .collect())
     }
 
     /// Drops a plan that has not run, or stops one that runs.

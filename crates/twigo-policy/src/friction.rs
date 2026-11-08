@@ -11,12 +11,15 @@ pub const COUNTDOWN_SECONDS: u32 = 5;
 /// What a command risks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Risk {
+    /// An undo puts it back: scale, cordon, suspend (decision 1 of M2).
+    Reversible,
     /// A pod that its controller replaces goes.
     Replaced,
-    /// One object goes.
-    One,
-    /// An object goes with everything it holds, as a namespace, a node or
-    /// a CustomResourceDefinition does; `name` is what the person types.
+    /// What it does stays: an object goes, pods are replaced, a Job runs.
+    Lasting,
+    /// It reaches everything an object holds, as deleting a namespace, a
+    /// node or a CustomResourceDefinition does, or many objects at once;
+    /// `name` is what the person types.
     Wide { name: String },
     /// Secret-grade data shows (3.6).
     Reveal,
@@ -32,6 +35,7 @@ pub fn friction(risk: &Risk, context: &str, access: &ContextAccess) -> Friction 
         (Risk::Reveal, Mode::ReadWrite) => Friction::AtOnce,
         (Risk::Reveal, Mode::Guarded | Mode::ReadOnly) => Friction::Confirm,
         (_, Mode::Guarded | Mode::ReadOnly) => typed_context(),
+        (Risk::Reversible, Mode::ReadWrite) => Friction::AtOnce,
         (Risk::Replaced, Mode::ReadWrite)
             if access.environment != Some(Environment::Production) =>
         {
@@ -39,7 +43,7 @@ pub fn friction(risk: &Risk, context: &str, access: &ContextAccess) -> Friction 
                 seconds: COUNTDOWN_SECONDS,
             }
         }
-        (Risk::Replaced | Risk::One, Mode::ReadWrite) => Friction::Confirm,
+        (Risk::Replaced | Risk::Lasting, Mode::ReadWrite) => Friction::Confirm,
         (Risk::Wide { name }, Mode::ReadWrite) => Friction::Typed { text: name.clone() },
     }
 }
@@ -94,11 +98,19 @@ mod tests {
                 production,
                 Friction::Confirm,
             ),
-            (Risk::One, Mode::ReadWrite, None, Friction::Confirm),
+            (Risk::Lasting, Mode::ReadWrite, None, Friction::Confirm),
+            (Risk::Reversible, Mode::ReadWrite, None, Friction::AtOnce),
+            (
+                Risk::Reversible,
+                Mode::ReadWrite,
+                production,
+                Friction::AtOnce,
+            ),
+            (Risk::Reversible, Mode::Guarded, None, typed("kind-a")),
             (wide.clone(), Mode::ReadWrite, None, typed("payments")),
             (wide.clone(), Mode::ReadWrite, production, typed("payments")),
             (Risk::Replaced, Mode::Guarded, None, typed("kind-a")),
-            (Risk::One, Mode::Guarded, None, typed("kind-a")),
+            (Risk::Lasting, Mode::Guarded, None, typed("kind-a")),
             (wide.clone(), Mode::Guarded, None, typed("kind-a")),
             (wide, Mode::ReadOnly, production, typed("kind-a")),
             (Risk::Reveal, Mode::ReadWrite, production, Friction::AtOnce),

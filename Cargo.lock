@@ -5684,6 +5684,9 @@ name = "twigo-core"
 version = "0.1.0"
 dependencies = [
  "atomic-write-file",
+ "fastrand",
+ "form_urlencoded",
+ "futures",
  "http",
  "jiff",
  "k8s-openapi",

@@ -51,6 +51,7 @@ pub(crate) fn reveal(
             "It shows until you hide it or close the secret{}.",
             if binary { ", as base64" } else { "" }
         )],
+        affected: Vec::new(),
         kubectl: line,
         doing: format!("Revealing {key}"),
         command: "reveal",
@@ -58,6 +59,7 @@ pub(crate) fn reveal(
         writes: Vec::new(),
         context,
         connection,
+        space: None,
         risk: Risk::Reveal,
         run: Box::new(move |_| {
             Box::pin(async move {
