@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ApplyRequest, ObjectBatch, OperationEvent } from "../generated";
 import { IpcError } from "../error";
+import { APPLIED_LAG_MS } from "./edits";
 import { createMockBackend, type MockScenario } from "./index";
 
 beforeEach(() => {
@@ -170,13 +171,12 @@ async function opened(
   return { manifests, latest: () => manifests()[manifests().length - 1] };
 }
 
-test("an applied edit leaves the object, for the one open and the next to open", async () => {
-  const backend = await backendOf("live");
-  const object = await opened(backend);
-  const first = object.latest();
-  if (first === undefined) throw new Error("the object did not open");
-
-  const edited = { ...first, data: { changed: "yes" } };
+/** Previews `edited` against the object as opened, plans it and runs the plan. */
+async function applyEdit(
+  backend: ReturnType<typeof createMockBackend>,
+  first: Manifest,
+  edited: unknown,
+): Promise<OperationEvent[]> {
   const answer = await settled(
     backend.invoke("apply_preview", {
       space: "qa",
@@ -215,7 +215,20 @@ test("an applied edit leaves the object, for the one open and the next to open",
     },
     (event) => events.push(event),
   );
-  await vi.advanceTimersByTimeAsync(2000);
+  await vi.advanceTimersByTimeAsync(10);
+  return events;
+}
+
+test("an applied edit leaves the object, for the one open and the next to open", async () => {
+  const backend = await backendOf("live");
+  const object = await opened(backend);
+  const first = object.latest();
+  if (first === undefined) throw new Error("the object did not open");
+
+  const events = await applyEdit(backend, first, {
+    ...first,
+    data: { changed: "yes" },
+  });
   expect(events[events.length - 1]?.state).toBe("done");
 
   const now = object.latest();
@@ -225,6 +238,26 @@ test("an applied edit leaves the object, for the one open and the next to open",
   );
   const next = await opened(backend);
   expect(next.latest()?.data).toEqual({ changed: "yes" });
+});
+
+test("applyLate leaves the applied object after the plan is done", async () => {
+  const backend = await backendOf("applyLate");
+  const object = await opened(backend);
+  const first = object.latest();
+  if (first === undefined) throw new Error("the object did not open");
+
+  const events = await applyEdit(backend, first, {
+    ...first,
+    data: { changed: "yes" },
+  });
+  expect(events[events.length - 1]?.state).toBe("done");
+  expect(object.latest()?.data).toEqual(first.data);
+
+  await vi.advanceTimersByTimeAsync(APPLIED_LAG_MS);
+  expect(object.latest()?.data).toEqual({ changed: "yes" });
+  expect(object.latest()?.metadata.resourceVersion).not.toBe(
+    first.metadata.resourceVersion,
+  );
 });
 
 test("serverChange has a colleague edit the open object, and statusChange only a controller write its status", async () => {

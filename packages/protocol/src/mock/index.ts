@@ -25,6 +25,7 @@ import {
 } from "./auth";
 import { Cluster } from "./cluster";
 import {
+  APPLIED_LAG_MS,
   EDIT_SCENARIOS,
   isEditScenario,
   MockEdits,
@@ -72,7 +73,8 @@ type ListScenario = "live" | ViewState["state"];
  * file over `prod-*`, `viewer`: live lists for a person who may only read,
  * or a pinned state of prod-eu's credentials, or what `apply_preview` answers
  * to an edit (`applyConflicts`), or an open object that changes on its own
- * (`serverChange`, `statusChange`).
+ * (`serverChange`, `statusChange`), or one that an apply leaves late
+ * (`applyLate`).
  */
 export type MockScenario =
   | ListScenario
@@ -226,16 +228,20 @@ export function createMockBackend(
       const namespace = known.namespaced
         ? (metadata.namespace ?? "default")
         : null;
-      edits.put(
-        MockEdits.key(
-          context,
-          group,
-          known.gvr.resource,
-          namespace,
-          metadata.name,
-        ),
-        edited,
+      const key = MockEdits.key(
+        context,
+        group,
+        known.gvr.resource,
+        namespace,
+        metadata.name,
       );
+      if (scenario === "applyLate") {
+        setTimeout(() => {
+          edits.put(key, edited);
+        }, APPLIED_LAG_MS);
+      } else {
+        edits.put(key, edited);
+      }
     },
     access: (context) => access.of(context),
     context: (id) => space(id).contexts[0],

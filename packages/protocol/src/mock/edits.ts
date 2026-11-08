@@ -1,7 +1,8 @@
 /**
  * Pins what `apply_preview` answers to an edit that changes something, or
  * has an opened object change on its own: `?scenario=applyConflicts` and the
- * like. Any other scenario answers a changed edit as ready.
+ * like. Any other scenario answers a changed edit as ready. `applyLate`
+ * leaves an applied object after the plan is done, as a watch may deliver it.
  */
 export type EditScenario =
   | "applyUnchanged"
@@ -12,7 +13,8 @@ export type EditScenario =
   | "applyRemovals"
   | "applyMergePatch"
   | "serverChange"
-  | "statusChange";
+  | "statusChange"
+  | "applyLate";
 
 export const EDIT_SCENARIOS: readonly EditScenario[] = [
   "applyUnchanged",
@@ -24,6 +26,7 @@ export const EDIT_SCENARIOS: readonly EditScenario[] = [
   "applyMergePatch",
   "serverChange",
   "statusChange",
+  "applyLate",
 ];
 
 export function isEditScenario(scenario: string): scenario is EditScenario {
@@ -46,6 +49,9 @@ type Fields = Record<string, unknown>;
 /** How long an open object waits before it changes on its own, then between changes. */
 export const FIRST_CHANGE_MS = 4000;
 export const NEXT_CHANGE_MS = 12_000;
+
+/** How long after its plan is done `applyLate` leaves an applied object. */
+export const APPLIED_LAG_MS = 1500;
 
 /**
  * The objects the mock's edits left, by what names them, so that an object
