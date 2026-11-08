@@ -1510,7 +1510,8 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     - deleting a pod that its ReplicaSet, StatefulSet or DaemonSet replaces, outside production, sends after a 5 s toast with Cancel, as Headlamp holds it, and ⌘Z cancels it too; in production it asks in a dialog, and a Job's or a workflow's pod, which may not come back, asks in one everywhere;
     - deleting one object asks in a dialog that names the cluster in its question and lists what follows, with the equivalent kubectl command;
     - a namespace, a node or a CustomResourceDefinition asks for the object's name typed, and a delete of several objects for the context's, as `guarded` does;
-    - in `guarded` every write asks for the context's name typed, whatever it risks, and a Reveal asks in a dialog, as in `read-only`; in `read-write` a Reveal shows at once;
+    - an apply, whose diff the person has just read (6.5), runs at once in `read-write` and asks in a dialog in `guarded`;
+    - in `guarded` every other write asks for the context's name typed, whatever it risks, and a Reveal asks in a dialog, as in `read-only`; in `read-write` a Reveal shows at once;
     - the confirming button names its action, `Delete namespace`, never Yes or OK.
   - Delete is ⌘⌫, never a bare key (4.4).
 
@@ -1526,17 +1527,24 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
      Which a field is comes from the kind's OpenAPI schema, read as the server converts it (3.6).
    - Applying the whole object would make Twigo a co-owner of every field.
      Fields that a GitOps tool later removes would then stay behind.
-3. Add the opened `resourceVersion` as an optimistic lock.
+   - `status` where the resource has a status subresource, and the server's metadata, never enter it: an edit that changes them is answered with what was ignored.
+   - A `twigo` entry at another apiVersion than the one opened: the server prunes it at the version it was written with, so where its paths do not reach the object at the version opened, the preview refuses rather than leave fields out and lose them.
+3. Add the opened `resourceVersion` as an optimistic lock, passed apart from the base: "Keep mine" after a change on the server diffs against the old base and locks to the new version, since diffing against the new live object would revert the other writer's change.
+   A status update moves it too, so an object a controller is still writing to answers **Stale** until it settles or the person keeps theirs.
 4. Dry-run: `PATCH` with `Patch::Apply`, `PatchParams::apply("twigo")`, `dry_run`, and `validation_strict()` (kubectl's default; the server's is Warn).
    Use `Client::send` so `Warning` headers are kept, because kube-rs drops them.
+   A field the typed conversion does not know, or a value it cannot convert, answers `500` rather than `422` (kind 1.37, 2026-11-08); it is reported as invalid input with the server's message.
 5. Show live against the dry-run result in a Monaco diff.
    Both sides are cleaned of managedFields, and Secret data is masked.
    The diff includes defaults and webhook mutations, which a local diff cannot know.
-6. Apply.
+   A preview keeps what it prepared in Rust for its window under an id, once, and the plan of that id sends exactly that.
+6. Apply, by a bus plan that the person has just read the diff of: at once in `read-write`, a confirmation in `guarded`, blocked in `read-only`.
    A `409 FieldManagerConflict` shows a table per field with the owning manager, and offers **Force** or **Drop my change**.
-7. A field the user deleted but another manager owns needs a separate merge patch with `null`, shown as its own step in the diff.
+7. A field the user deleted goes by the apply only when Twigo's Apply entry is its only owner.
+   Another manager's or nobody's stays after an apply, so it needs a separate merge patch with `null`, shown as its own step in the diff.
+   The patch is sent after the apply, on the `resourceVersion` the apply returned; a merge patch cannot address a list element, so a removal inside a list sends the outermost list whole, as it stands after the apply minus the removal, and nothing is sent when the dry-run already shows it gone.
 8. Immutable fields return 422; the dry-run catches this before any write.
-   Delete-and-recreate is offered only for Pods and Jobs, with confirmation.
+   Delete-and-recreate is offered only for Pods and Jobs, with confirmation; the uid is held by a precondition, and what the Job controller generates, its selector and its `controller-uid` and `job-name` labels, does not go along.
 
 Destructive actions (delete, drain, scale to 0) list the exact objects and need a confirmation that matches the policy mode.
 Their plans read the objects and what the garbage collector takes with them (every object whose owners all go, among what the core's controllers make) and send nothing before the confirmation: a server dry-run of a DELETE or an eviction is a write to the gate, which reads no body (6.4), and a fault in that body would delete unconfirmed.
