@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Backend, Discovered } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { mountKube, settle } from "../test/workbench";
+import { diffUri } from "./uri";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -109,4 +110,27 @@ test("an editor of another space waits for its space instead of opening in the o
   });
   await settle();
   expect(workbench.editors.active).toBe("k8s-list://staging/v1/pods");
+});
+
+test("the tab of a diff names a new manifest as its own tab does, and an object by its name", async () => {
+  const workbench = await mountKube();
+  act(() => {
+    workbench.editors.open(
+      diffUri({ kind: "apply", editor: "untitled://prod-eu/manifest-2" }),
+    );
+    workbench.editors.open(
+      diffUri({
+        kind: "server",
+        editor: "k8s://prod-eu//v1/pods/auth/auth-api-1a4uyl1-r2bkk",
+      }),
+    );
+  });
+  await settle();
+  const titles = [...document.querySelectorAll(".dv-tab")].map(
+    (tab) => tab.textContent,
+  );
+  expect(titles).toEqual([
+    "Apply · Manifest 2",
+    "Server · auth-api-1a4uyl1-r2bkk",
+  ]);
 });

@@ -131,8 +131,15 @@ export function registerKube(workbench: Workbench): void {
     title: (uri) => {
       const input = parseDiffUri(uri.href);
       if (!input) return uri.href;
-      const name = (editor: string) =>
-        parseObjectUri(editor)?.name ?? editor.replace(/^\w+:\/\//, "");
+      const name = (editor: string) => {
+        const manifest = parseUntitledUri(editor);
+        return (
+          parseObjectUri(editor)?.name ??
+          (manifest
+            ? `Manifest ${String(manifest.n)}`
+            : editor.replace(/^\w+:\/\//, ""))
+        );
+      };
       switch (input.kind) {
         case "apply":
           return `Apply · ${name(input.editor)}`;
