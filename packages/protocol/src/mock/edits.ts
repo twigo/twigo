@@ -86,11 +86,11 @@ export class MockEdits {
    * them, with a new `resourceVersion`.
    */
   put(key: string, object: Fields): Fields {
-    const { metadata, ...rest } = masked(object);
+    const masks = masked(object);
     const written = {
-      ...rest,
+      ...masks,
       metadata: {
-        ...(metadata as Fields),
+        ...(masks.metadata as Fields),
         resourceVersion: String(++this.#version),
       },
     };
