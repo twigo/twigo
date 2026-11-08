@@ -18,16 +18,12 @@ use tokio::time::Instant;
 use twigo_ipc::{ErrorKind, IpcError};
 use twigo_policy::friction::Risk;
 
-use super::{Target, clients_for, get, sentence, write};
+use super::{ATTEMPTS, Target, clients_for, get, patch_as_of, sentence};
 use crate::Core;
 use crate::bus::{Finished, Planned};
 
 /// How long an action's undo lasts after it ends.
 pub(crate) const UNDO_FOR: Duration = Duration::from_secs(30);
-
-/// How many times an undo reads the object again when its write lost to a
-/// status change, before it gives up.
-const ATTEMPTS: usize = 5;
 
 /// What an undo asks before it runs, as a plan of the same write would.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -276,18 +272,12 @@ async fn run(
         if !revert.unchanged.holds(&object) {
             return Err(left(format!("{what} changed since you {past} it")));
         }
-        let mut patch = revert.patch.clone();
-        patch["metadata"]["resourceVersion"] = object["metadata"]["resourceVersion"].clone();
-        let request = write(
-            Method::PATCH,
-            &revert.target.subpath(revert.subresource),
-            revert.content_type,
-            &patch,
-        );
-        match clients.api.request_text(request).await {
-            Ok(_) => return Ok(Finished::Done(revert.done.clone())),
-            Err(kube::Error::Api(status)) if status.code == 409 => {}
-            Err(error) => return Err(twigo_kube::errors::request(&error)),
+        let path = revert.target.subpath(revert.subresource);
+        if patch_as_of(&clients, &path, revert.content_type, &revert.patch, &object)
+            .await?
+            .is_some()
+        {
+            return Ok(Finished::Done(revert.done.clone()));
         }
     }
     Err(left(format!("{what} kept changing")))
@@ -386,6 +376,42 @@ mod tests {
                 .ended("s", started, Some((revert("e"), Some(1))))
                 .is_some()
         );
+    }
+
+    #[tokio::test]
+    async fn an_undo_that_cannot_reach_its_cluster_is_gone_all_the_same() {
+        let dir = tempfile::tempdir().unwrap();
+        let kubeconfig = dir.path().join("config");
+        std::fs::write(
+            &kubeconfig,
+            "clusters: [{ name: c, cluster: { server: 'http://127.0.0.1:1' } }]\nusers: [{ name: u, user: {} }]\ncontexts: [{ name: kind-b, context: { cluster: c, user: u } }]\n",
+        )
+        .unwrap();
+        let core = crate::Core::new(
+            dir.path(),
+            &dir.path().join("cache"),
+            &dir.path().join("policy.json"),
+        );
+        let (_status, followed) = tokio::sync::watch::channel(twigo_env::Status::Resolved(
+            std::sync::Arc::new(twigo_env::ShellEnv::from_iter([])),
+        ));
+        tokio::spawn({
+            let core = std::sync::Arc::clone(&core);
+            async move { core.run(followed, Some(kubeconfig)).await }
+        });
+        action(&core.undos, "s", Some("kwok-node-5"));
+        let (id, connection, revert) = core.undos.get("s").unwrap();
+        let weak = std::sync::Arc::downgrade(&core);
+        let Err(error) = super::run(weak, "s".to_owned(), id, connection, revert).await else {
+            panic!("an undo without its cluster ran");
+        };
+        assert_eq!(
+            error.kind,
+            twigo_ipc::ErrorKind::NotFound,
+            "{}",
+            error.message
+        );
+        assert!(core.undos.get("s").is_none());
     }
 
     #[test]

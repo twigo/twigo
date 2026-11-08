@@ -1,7 +1,10 @@
 //! Marks a node unschedulable, or schedulable again, as `kubectl cordon`
 //! and `kubectl uncordon` do (kubectl v0.37.1, `pkg/drain/cordon.go`): a
 //! strategic merge patch of `spec.unschedulable`, which uncordon removes.
-//! Either runs at once with an undo (decision 1 of M2).
+//! Either runs at once with an undo (decision 1 of M2). The run reads the
+//! node first and writes as of that read, so its undo puts back only what
+//! its own write changed: a node someone cordoned meanwhile is cordoned
+//! already, as kubectl says, and offers no undo.
 
 use std::sync::Weak;
 
@@ -12,7 +15,7 @@ use twigo_ipc::{ErrorKind, IpcError};
 use twigo_policy::friction::Risk;
 
 use super::undo::{Asks, Revert, Unchanged};
-use super::{STRATEGIC_MERGE_PATCH, Target, clients_for, get, write};
+use super::{ATTEMPTS, STRATEGIC_MERGE_PATCH, Target, clients_for, get, patch_as_of};
 use crate::Core;
 use crate::bus::{Finished, Planned};
 
@@ -34,6 +37,20 @@ pub(crate) fn patch(unschedulable: bool) -> Value {
         Value::Null
     };
     json!({ "spec": { "unschedulable": value } })
+}
+
+/// Whether `node` is cordoned, or not, as `unschedulable` says.
+fn is(node: &Value, unschedulable: bool) -> bool {
+    node["spec"]["unschedulable"].as_bool().unwrap_or(false) == unschedulable
+}
+
+fn already(name: &str, unschedulable: bool) -> String {
+    let already = if unschedulable {
+        "cordoned already"
+    } else {
+        "not cordoned"
+    };
+    format!("Node {name} is {already}")
 }
 
 /// The words of a cordon, or of an uncordon.
@@ -78,15 +95,10 @@ pub(crate) async fn cordon(
         .map_err(|error| IpcError::from(&error))?;
     let object = get(&clients, &target.path).await?;
     let name = &target.name;
-    if object["spec"]["unschedulable"].as_bool().unwrap_or(false) == unschedulable {
-        let already = if unschedulable {
-            "cordoned already"
-        } else {
-            "not cordoned"
-        };
+    if is(&object, unschedulable) {
         return Err(IpcError::new(
             ErrorKind::InvalidInput,
-            format!("Node {name} is {already}"),
+            already(name, unschedulable),
         ));
     }
     let Words {
@@ -137,17 +149,25 @@ async fn send(
     done: String,
 ) -> Result<Finished, IpcError> {
     let (_, clients) = clients_for(&core, &target.context, connection, "changed nothing").await?;
-    let written: Value = clients
-        .api
-        .request(write(
-            Method::PATCH,
-            &target.path,
-            STRATEGIC_MERGE_PATCH,
-            &patch(unschedulable),
-        ))
-        .await
-        .map_err(|error| twigo_kube::errors::request(&error))?;
     let name = target.name.clone();
+    let mut answer = None;
+    for _ in 0..ATTEMPTS {
+        let node = get(&clients, &target.path).await?;
+        if is(&node, unschedulable) {
+            return Ok(Finished::Done(already(&name, unschedulable)));
+        }
+        let patch = patch(unschedulable);
+        answer = patch_as_of(&clients, &target.path, STRATEGIC_MERGE_PATCH, &patch, &node).await?;
+        if answer.is_some() {
+            break;
+        }
+    }
+    let Some(written) = answer else {
+        return Err(IpcError::new(
+            ErrorKind::Conflict,
+            format!("Node {name} kept changing, so Twigo changed nothing"),
+        ));
+    };
     let text = format!("{done} {name}");
     let back = words(!unschedulable);
     let (Some(uid), Ok(kubectl)) = (

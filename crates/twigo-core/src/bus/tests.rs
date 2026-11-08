@@ -2,6 +2,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use serde_json::{Value, json};
 use tokio::sync::watch;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{ErrorKind, Execute, Friction, Mode, OperationEvent, PlanId, SetContextMode};
@@ -516,10 +517,10 @@ async fn a_plan_whose_read_waited_across_an_edit_of_its_context_never_runs() {
 }
 
 /// A server that answers each request line by `answer`, given how many
-/// times that line came before.
+/// times that line came before, and notes each line with its body.
 struct Scripted {
     port: u16,
-    seen: Arc<Mutex<Vec<String>>>,
+    seen: Arc<Mutex<Vec<(String, String)>>>,
 }
 
 impl Scripted {
@@ -561,10 +562,11 @@ impl Scripted {
                             read.extend_from_slice(&buffer[..n]);
                         }
                         let line = head.lines().next().unwrap_or_default().to_owned();
+                        let body = String::from_utf8_lossy(&read[end..end + length]).into_owned();
                         let before = {
                             let mut seen = seen.lock().unwrap();
-                            let before = seen.iter().filter(|other| **other == line).count();
-                            seen.push(line.clone());
+                            let before = seen.iter().filter(|(other, _)| *other == line).count();
+                            seen.push((line.clone(), body));
                             before
                         };
                         let (status, body) = answer(&line, before);
@@ -582,22 +584,34 @@ impl Scripted {
 }
 
 #[tokio::test]
-async fn a_scale_that_happened_is_done_when_the_read_after_it_fails() {
+async fn a_scale_that_lost_to_another_write_reads_again_and_its_undo_holds_to_its_own() {
     const OBJECT: &str = "GET /apis/apps/v1/namespaces/a/deployments/d HTTP/1.1";
     const SCALE: &str = "GET /apis/apps/v1/namespaces/a/deployments/d/scale HTTP/1.1";
     const PATCH: &str = "PATCH /apis/apps/v1/namespaces/a/deployments/d/scale HTTP/1.1";
-    let server = Scripted::start(|line, before| match line {
-        OBJECT if before == 0 => (
+    let server = Scripted::start(|line, before| match (line, before) {
+        (OBJECT, 0 | 1) => (
             200,
-            r#"{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"d","namespace":"a","uid":"u-1","generation":1}}"#,
+            r#"{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"d","namespace":"a","uid":"u-1","generation":1,"resourceVersion":"1"}}"#,
         ),
-        OBJECT => (
-            500,
-            r#"{"kind":"Status","apiVersion":"v1","status":"Failure","message":"etcd is away","code":500}"#,
+        (OBJECT, 2) => (
+            200,
+            r#"{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"d","namespace":"a","uid":"u-1","generation":1,"resourceVersion":"2"}}"#,
         ),
-        SCALE | PATCH => (
+        (OBJECT, _) => (
+            200,
+            r#"{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"d","namespace":"a","uid":"u-1","generation":2,"resourceVersion":"3"}}"#,
+        ),
+        (SCALE, _) => (
             200,
             r#"{"apiVersion":"autoscaling/v1","kind":"Scale","metadata":{"name":"d","namespace":"a"},"spec":{"replicas":1}}"#,
+        ),
+        (PATCH, 0) => (
+            409,
+            r#"{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Conflict","code":409}"#,
+        ),
+        (PATCH, _) => (
+            200,
+            r#"{"apiVersion":"autoscaling/v1","kind":"Scale","metadata":{"name":"d","namespace":"a"},"spec":{"replicas":3}}"#,
         ),
         _ => (404, r#"{"kind":"Status","apiVersion":"v1","code":404}"#),
     })
@@ -620,7 +634,7 @@ async fn a_scale_that_happened_is_done_when_the_read_after_it_fails() {
         name: "d".to_owned(),
     };
     let request = twigo_ipc::PlanRequest::Scale {
-        space,
+        space: space.clone(),
         target,
         replicas: 3,
     };
@@ -638,13 +652,49 @@ async fn a_scale_that_happened_is_done_when_the_read_after_it_fails() {
     .await
     .unwrap();
     until("the scale ends", || !told.lock().unwrap().is_empty()).await;
+    assert!(
+        matches!(
+            told.lock().unwrap().as_slice(),
+            [OperationEvent::Done { text, undo_until: Some(_) }] if text == "Scaled deployment d to 3"
+        ),
+        "{:?}",
+        told.lock().unwrap()
+    );
+    let patches: Vec<Value> = server
+        .seen
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(line, _)| line == PATCH)
+        .map(|(_, body)| serde_json::from_str(body).unwrap())
+        .collect();
+    assert_eq!(
+        patches,
+        [
+            json!({ "metadata": { "resourceVersion": "1" }, "spec": { "replicas": 3 } }),
+            json!({ "metadata": { "resourceVersion": "2" }, "spec": { "replicas": 3 } }),
+        ]
+    );
+
+    let undo = twigo_ipc::PlanRequest::Undo { space };
+    let plan = core.command_plan("main", undo).await.unwrap();
+    let (told, send) = events();
+    core.command_execute(
+        "main",
+        Execute {
+            plan: plan.id,
+            typed: None,
+        },
+        send,
+    )
+    .await
+    .unwrap();
+    until("the undo ends", || !told.lock().unwrap().is_empty()).await;
     assert_eq!(
         told.lock().unwrap().as_slice(),
         [OperationEvent::Done {
-            text: "Scaled deployment d to 3".to_owned(),
+            text: "Scaled deployment d back to 1".to_owned(),
             undo_until: None,
         }]
     );
-    let seen = server.seen.lock().unwrap().clone();
-    assert!(seen.iter().any(|line| line == PATCH), "{seen:?}");
 }

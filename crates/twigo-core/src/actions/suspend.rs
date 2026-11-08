@@ -2,7 +2,9 @@
 //! `spec.suspend`, as `kubectl patch` sends it, since kubectl has no verb
 //! for it. Either runs at once with an undo (decision 1 of M2), but for
 //! suspending a Job that runs pods, whose work an undo cannot bring back:
-//! that asks first and lists them.
+//! that asks first and lists them. A Job that ended or is ending is
+//! neither suspended nor resumed, since its controller leaves it be. The run reads the object first and writes as of
+//! that read, so its undo puts back only what its own write changed.
 
 use std::sync::Weak;
 
@@ -14,7 +16,7 @@ use twigo_kube::client::Clients;
 use twigo_policy::friction::Risk;
 
 use super::undo::{Asks, Revert, Unchanged};
-use super::{MERGE_PATCH, Target, clients_for, get, kind_words, sentence, write};
+use super::{ATTEMPTS, MERGE_PATCH, Target, clients_for, get, kind_words, patch_as_of, sentence};
 use crate::Core;
 use crate::bus::{Finished, Planned};
 
@@ -40,15 +42,17 @@ pub(crate) async fn suspend(
     let object = get(&clients, &target.path).await?;
     let kind = kind_words(object["kind"].as_str().unwrap_or_default());
     let what = format!("{kind} {}", target.name);
-    if object["spec"]["suspend"].as_bool().unwrap_or(false) == suspend {
-        let already = if suspend {
-            "suspended already"
-        } else {
-            "not suspended"
-        };
+    if is(&object, suspend) {
         return Err(IpcError::new(
             ErrorKind::InvalidInput,
-            format!("{} is {already}", sentence(&what)),
+            already(&what, suspend),
+        ));
+    }
+    if let Some(how) = ended(&object) {
+        let verb = if suspend { "suspend" } else { "resume" };
+        return Err(IpcError::new(
+            ErrorKind::InvalidInput,
+            format!("{} {how}, so there is nothing to {verb}", sentence(&what)),
         ));
     }
     let cronjob = target.resource.resource == "cronjobs";
@@ -104,6 +108,45 @@ pub(crate) async fn suspend(
     })
 }
 
+/// Whether `object` is suspended, or not, as `suspend` says.
+fn is(object: &Value, suspend: bool) -> bool {
+    object["spec"]["suspend"].as_bool().unwrap_or(false) == suspend
+}
+
+fn already(what: &str, suspend: bool) -> String {
+    let already = if suspend {
+        "suspended already"
+    } else {
+        "not suspended"
+    };
+    format!("{} is {already}", sentence(what))
+}
+
+/// How a Job ended, or is ending, as `kubectl get` prints it (kubernetes
+/// v1.37.1, `pkg/printers/internalversion/printers.go`): its controller
+/// leaves one that finished be (`pkg/controller/job/job_controller.go`,
+/// `syncJob`) and ends one whose end it has decided. None for a CronJob.
+fn ended(object: &Value) -> Option<&'static str> {
+    let holds = |kind: &str| {
+        object["status"]["conditions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|condition| condition["type"] == kind && condition["status"] == "True")
+    };
+    if object["kind"] != "Job" {
+        None
+    } else if holds("Complete") || holds("SuccessCriteriaMet") {
+        Some("has completed")
+    } else if holds("Failed") || holds("FailureTarget") {
+        Some("has failed")
+    } else if !object["metadata"]["deletionTimestamp"].is_null() {
+        Some("is being deleted")
+    } else {
+        None
+    }
+}
+
 /// What suspending a Job risks: its job controller deletes the pods it
 /// runs (kubernetes v1.37.1, `pkg/controller/job/job_controller.go`), so
 /// their work is lost and a resume starts new ones; one that runs none an
@@ -137,58 +180,61 @@ pub(crate) async fn stopping(
         }
         query.finish()
     };
-    let pods: Vec<ObjectRef> = match get(
+    let pods: Option<Vec<ObjectRef>> = match get(
         clients,
         &format!("/api/v1/namespaces/{namespace}/pods?{query}"),
     )
     .await
     {
-        Ok(list) => list["items"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|pod| {
-                let owned = pod["metadata"]["ownerReferences"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .any(|owner| owner["uid"] == uid && owner["controller"] == true);
-                owned
-                    && !matches!(
-                        pod["status"]["phase"].as_str(),
-                        Some("Succeeded" | "Failed")
-                    )
-                    && pod["metadata"]["deletionTimestamp"].is_null()
-            })
-            .map(|pod| ObjectRef {
-                group: String::new(),
-                version: "v1".to_owned(),
-                kind: "Pod".to_owned(),
-                namespace: Some(namespace.to_owned()),
-                name: pod["metadata"]["name"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_owned(),
-            })
-            .collect(),
-        Err(_) => Vec::new(),
+        Ok(list) => Some(
+            list["items"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|pod| {
+                    let owned = pod["metadata"]["ownerReferences"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .any(|owner| owner["uid"] == uid && owner["controller"] == true);
+                    owned
+                        && !matches!(
+                            pod["status"]["phase"].as_str(),
+                            Some("Succeeded" | "Failed")
+                        )
+                        && pod["metadata"]["deletionTimestamp"].is_null()
+                })
+                .map(|pod| ObjectRef {
+                    group: String::new(),
+                    version: "v1".to_owned(),
+                    kind: "Pod".to_owned(),
+                    namespace: Some(namespace.to_owned()),
+                    name: pod["metadata"]["name"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_owned(),
+                })
+                .collect(),
+        ),
+        Err(_) => None,
     };
-    let affected = if pods.is_empty() {
-        Vec::new()
-    } else {
-        vec![Affected {
+    let mut consequences = vec![
+        "Its running pods stop and their work is lost; when it resumes, new ones start.".to_owned(),
+    ];
+    let affected = match pods {
+        Some(pods) if !pods.is_empty() => vec![Affected {
             title: "Its pods stop".to_owned(),
             objects: pods,
-        }]
+        }],
+        Some(_) => Vec::new(),
+        None => {
+            consequences.push(format!(
+                "Twigo cannot read the pods in {namespace}, so it cannot say which run."
+            ));
+            Vec::new()
+        }
     };
-    (
-        Risk::Lasting,
-        vec![
-            "Its running pods stop and their work is lost; when it resumes, new ones start."
-                .to_owned(),
-        ],
-        affected,
-    )
+    (Risk::Lasting, consequences, affected)
 }
 
 struct Words {
@@ -251,14 +297,26 @@ impl Run {
             "changed nothing",
         )
         .await?;
-        let patch = json!({ "spec": { "suspend": self.suspend } });
-        let written: serde_json::Value = clients
-            .api
-            .request(write(Method::PATCH, &target.path, MERGE_PATCH, &patch))
-            .await
-            .map_err(|error| twigo_kube::errors::request(&error))?;
-        let (words, back) = (Words::of(self.suspend), Words::of(!self.suspend));
         let what = &self.what;
+        let patch = json!({ "spec": { "suspend": self.suspend } });
+        let mut answer = None;
+        for _ in 0..ATTEMPTS {
+            let object = get(&clients, &target.path).await?;
+            if is(&object, self.suspend) {
+                return Ok(Finished::Done(already(what, self.suspend)));
+            }
+            answer = patch_as_of(&clients, &target.path, MERGE_PATCH, &patch, &object).await?;
+            if answer.is_some() {
+                break;
+            }
+        }
+        let Some(written) = answer else {
+            return Err(IpcError::new(
+                ErrorKind::Conflict,
+                format!("{} kept changing, so Twigo changed nothing", sentence(what)),
+            ));
+        };
+        let (words, back) = (Words::of(self.suspend), Words::of(!self.suspend));
         let done = format!("{} {what}", words.done);
         let (Some(generation), Some(uid), Ok(kubectl)) = (
             written["metadata"]["generation"].as_i64(),

@@ -37,6 +37,10 @@ use crate::Core;
 pub(crate) const MERGE_PATCH: &str = "application/merge-patch+json";
 pub(crate) const STRATEGIC_MERGE_PATCH: &str = "application/strategic-merge-patch+json";
 
+/// How many times a write tied to what it read reads again after losing to
+/// another write, before it gives up.
+pub(crate) const ATTEMPTS: usize = 5;
+
 /// An object a plan acts on, from what the webview named.
 #[derive(Debug, Clone)]
 pub(crate) struct Target {
@@ -137,6 +141,29 @@ pub(crate) async fn get(clients: &Clients, path: &str) -> Result<Value, IpcError
         .request(request)
         .await
         .map_err(|error| twigo_kube::errors::request(&error))
+}
+
+/// Sends `patch` to `path` as of `read`, the object just read: with its
+/// resourceVersion, so a write in between makes it fail with a `409`
+/// instead of being lost to it. `None` on that `409`.
+pub(crate) async fn patch_as_of(
+    clients: &Clients,
+    path: &str,
+    content_type: &str,
+    patch: &Value,
+    read: &Value,
+) -> Result<Option<Value>, IpcError> {
+    let mut patch = patch.clone();
+    patch["metadata"]["resourceVersion"] = read["metadata"]["resourceVersion"].clone();
+    match clients
+        .api
+        .request::<Value>(write(Method::PATCH, path, content_type, &patch))
+        .await
+    {
+        Ok(answer) => Ok(Some(answer)),
+        Err(kube::Error::Api(status)) if status.code == 409 => Ok(None),
+        Err(error) => Err(twigo_kube::errors::request(&error)),
+    }
 }
 
 /// A request that sends `body` as `content_type`.

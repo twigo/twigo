@@ -3,7 +3,10 @@
 //! subresource's `spec.replicas`. Any count runs at once with an undo
 //! (decision 1 of M2), but for what an undo cannot bring back: to zero it
 //! asks first and lists the pods that go, and fewer pods of a StatefulSet
-//! that deletes their claims ask and list the claims.
+//! that deletes their claims ask and list the claims. The run reads the
+//! object and writes as of that read, so its undo puts back only what its
+//! own write changed, and it scales nothing once the replicas moved from
+//! those its plan was made from.
 
 use std::sync::Weak;
 
@@ -14,7 +17,7 @@ use twigo_policy::friction::Risk;
 
 use super::dependents::{Deleted, dependents};
 use super::undo::{Asks, Revert, Unchanged};
-use super::{MERGE_PATCH, Target, clients_for, get, kind_words, sentence, write};
+use super::{ATTEMPTS, MERGE_PATCH, Target, clients_for, get, kind_words, patch_as_of, sentence};
 use crate::Core;
 use crate::bus::{Finished, Planned};
 use twigo_kube::client::Clients;
@@ -56,6 +59,7 @@ pub(crate) async fn scale(
         core: core.this.clone(),
         connection,
         target,
+        from,
         replicas,
         what: what.clone(),
         kind_name,
@@ -214,6 +218,8 @@ struct Run {
     core: Weak<Core>,
     connection: Option<u64>,
     target: Target,
+    /// The replicas its plan was made from.
+    from: u64,
     replicas: u32,
     /// `deployment web`.
     what: String,
@@ -232,24 +238,51 @@ impl Run {
         )
         .await?;
         let scale = target.subpath(Some("scale"));
-        let before = get(&clients, &scale).await?;
-        let from = before["spec"]["replicas"].as_u64().unwrap_or_default();
-        let patch = json!({ "spec": { "replicas": self.replicas } });
-        clients
-            .api
-            .request_text(write(Method::PATCH, &scale, MERGE_PATCH, &patch))
-            .await
-            .map_err(|error| twigo_kube::errors::request(&error))?;
         let what = &self.what;
-        let done = format!("Scaled {what} to {}", self.replicas);
-        // The scale's answer carries no generation: the object's, read now,
-        // is what an undo holds to. The replicas changed whatever this read
-        // finds, so its failure only takes the undo away.
-        let Ok(object) = get(&clients, &target.path).await else {
-            return Ok(Finished::Done(done));
+        let (from, to) = (self.from, u64::from(self.replicas));
+        let patch = json!({ "spec": { "replicas": to } });
+        let mut written = None;
+        for _ in 0..ATTEMPTS {
+            // The scale carries the object's resourceVersion but not its
+            // generation, so the write goes as of the object's read.
+            let object = get(&clients, &target.path).await?;
+            let current = get(&clients, &scale).await?;
+            let now = current["spec"]["replicas"].as_u64().unwrap_or(0);
+            if now == to {
+                return Ok(Finished::Done(format!(
+                    "{} has {to} replicas already",
+                    sentence(what)
+                )));
+            }
+            if now != from {
+                return Err(IpcError::new(
+                    ErrorKind::Conflict,
+                    format!(
+                        "{} has {now} replicas now, not the {from} Twigo asked about, so it scaled nothing",
+                        sentence(what)
+                    ),
+                ));
+            }
+            if patch_as_of(&clients, &scale, MERGE_PATCH, &patch, &object)
+                .await?
+                .is_some()
+            {
+                written = Some(object);
+                break;
+            }
+        }
+        let Some(object) = written else {
+            return Err(IpcError::new(
+                ErrorKind::Conflict,
+                format!("{} kept changing, so Twigo scaled nothing", sentence(what)),
+            ));
         };
+        let done = format!("Scaled {what} to {}", self.replicas);
+        // A change of its replicas moves its generation by one.
         let (Some(generation), Some(uid)) = (
-            object["metadata"]["generation"].as_i64(),
+            object["metadata"]["generation"]
+                .as_i64()
+                .map(|read| read + 1),
             object["metadata"]["uid"].as_str(),
         ) else {
             return Ok(Finished::Done(done));

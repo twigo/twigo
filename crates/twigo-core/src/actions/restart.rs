@@ -2,14 +2,16 @@
 //! v0.37.1, `pkg/polymorphichelpers/objectrestarter.go`): a strategic merge
 //! patch that stamps `kubectl.kubernetes.io/restartedAt` on its pod
 //! template, which its controller rolls out as its update strategy says. A
-//! paused Deployment is refused, as kubectl refuses it.
+//! paused Deployment is refused, as kubectl refuses it. The plan lists the
+//! pods that strategy replaces: none under `OnDelete`, and only those from
+//! a StatefulSet's partition up.
 
 use std::sync::Weak;
 
 use http::Method;
 use jiff::Timestamp;
-use serde_json::json;
-use twigo_ipc::{Affected, ErrorKind, IpcError, ResourceRef};
+use serde_json::{Value, json};
+use twigo_ipc::{Affected, ErrorKind, IpcError, ObjectRef, ResourceRef};
 use twigo_policy::friction::Risk;
 
 use super::dependents::{Deleted, dependents};
@@ -63,8 +65,8 @@ pub(crate) async fn restart(
         .into_iter()
         .filter(|object| object.group.is_empty() && object.kind == "Pod")
         .collect();
-    let mut consequences =
-        vec!["Its pods are replaced in turn, as its update strategy says.".to_owned()];
+    let (said, pods) = replaced(&target, &object, pods);
+    let mut consequences = vec![said];
     consequences.extend(following.unknown);
     let affected = if pods.is_empty() {
         Vec::new()
@@ -98,6 +100,60 @@ pub(crate) async fn restart(
         risk: Risk::Lasting,
         run: Box::new(move |_| Box::pin(send(this, connection, run, done))),
     })
+}
+
+/// What a new template does to `pods` of `object`, and those it replaces,
+/// as its controller rolls it out (kubernetes v1.37.1,
+/// `pkg/controller/statefulset/stateful_set_control.go`, `updateStatefulSet`;
+/// `pkg/controller/daemon/daemon_controller.go`, `updateDaemonSet`).
+fn replaced(target: &Target, object: &Value, pods: Vec<ObjectRef>) -> (String, Vec<ObjectRef>) {
+    let strategy = if target.resource.resource == "deployments" {
+        &object["spec"]["strategy"]
+    } else {
+        &object["spec"]["updateStrategy"]
+    };
+    match strategy["type"].as_str() {
+        Some("OnDelete") => (
+            "Its pods keep running: its update strategy is OnDelete, so each takes the new template only once it is deleted.".to_owned(),
+            Vec::new(),
+        ),
+        Some("Recreate") => (
+            "All its pods stop before new ones start, as its update strategy is Recreate.".to_owned(),
+            pods,
+        ),
+        _ if target.resource.resource == "statefulsets" => {
+            // Its partition counts from its first ordinal.
+            let partition = strategy["rollingUpdate"]["partition"].as_u64().unwrap_or(0);
+            let start = object["spec"]["ordinals"]["start"].as_u64().unwrap_or(0);
+            if partition == 0 {
+                return (
+                    "Its pods are replaced in turn, as its update strategy says.".to_owned(),
+                    pods,
+                );
+            }
+            let prefix = format!("{}-", target.name);
+            let from = start + partition;
+            let pods = pods
+                .into_iter()
+                .filter(|pod| {
+                    pod.name
+                        .strip_prefix(&prefix)
+                        .and_then(|ordinal| ordinal.parse::<u64>().ok())
+                        .is_some_and(|ordinal| ordinal >= from)
+                })
+                .collect();
+            (
+                format!(
+                    "Its pods from ordinal {from} up are replaced in turn; those below its partition keep running."
+                ),
+                pods,
+            )
+        }
+        _ => (
+            "Its pods are replaced in turn, as its update strategy says.".to_owned(),
+            pods,
+        ),
+    }
 }
 
 async fn send(

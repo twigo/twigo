@@ -104,6 +104,17 @@ async fn pods_of(pods: &Api<Pod>, app: &str, count: usize) -> Vec<String> {
         .unwrap_or_else(|_| panic!("{count} pods of {app} within 60 s"))
 }
 
+async fn uids(pods: &Api<Pod>, app: &str) -> std::collections::BTreeMap<String, String> {
+    pods.list(&ListParams::default().labels(&format!("app={app}")))
+        .await
+        .unwrap()
+        .items
+        .into_iter()
+        .filter(|pod| pod.metadata.deletion_timestamp.is_none())
+        .filter_map(|pod| Some((pod.metadata.name?, pod.metadata.uid?)))
+        .collect()
+}
+
 fn done(told: &[OperationEvent]) -> (&str, Option<i64>) {
     match told.last() {
         Some(OperationEvent::Done { text, undo_until }) => (text, *undo_until),
@@ -209,6 +220,21 @@ async fn scale_runs_at_once_and_its_undo_puts_it_back_unless_someone_else_change
         error.message,
         "Deployment web changed since you scaled it, so Twigo left it"
     );
+    assert_eq!(replicas().await, Some(4));
+
+    let moved = plan(&core, scale(5)).await.unwrap();
+    merge(&deployments, "web", json!({ "spec": { "replicas": 3 } })).await;
+    let told = run(&core, &moved, None).await.unwrap();
+    let error = failed(&told);
+    assert_eq!(error.kind, ErrorKind::Conflict, "{}", error.message);
+    assert_eq!(
+        error.message,
+        "Deployment web has 3 replicas now, not the 4 Twigo asked about, so it scaled nothing"
+    );
+    let there = plan(&core, scale(4)).await.unwrap();
+    merge(&deployments, "web", json!({ "spec": { "replicas": 4 } })).await;
+    let told = run(&core, &there, None).await.unwrap();
+    assert_eq!(done(&told), ("Deployment web has 4 replicas already", None));
     assert_eq!(replicas().await, Some(4));
 
     let running = pods_of(&pods, "web", 4).await;
@@ -317,6 +343,14 @@ async fn cordon_and_uncordon_run_at_once_and_their_undo_holds_to_the_field() {
     let again = plan(&core, cordon(true)).await.unwrap_err();
     assert_eq!(again.kind, ErrorKind::InvalidInput);
 
+    let late = plan(&core, cordon(false)).await.unwrap();
+    merge(&nodes, name, json!({ "spec": { "unschedulable": null } })).await;
+    let told = run(&core, &late, None).await.unwrap();
+    let expected = format!("Node {name} is not cordoned");
+    assert_eq!(done(&told), (expected.as_str(), None));
+    assert!(!unschedulable().await);
+    merge(&nodes, name, json!({ "spec": { "unschedulable": true } })).await;
+
     let uncordon = plan(&core, cordon(false)).await.unwrap();
     run(&core, &uncordon, None).await.unwrap();
     assert!(!unschedulable().await);
@@ -382,6 +416,75 @@ async fn a_restart_stamps_the_template_and_lists_the_pods_it_replaces() {
     kubectl(&by_kubectl, &kubeconfig);
     let second = stamp().await.expect("kubectl stamps it");
     assert_ne!(first, second);
+
+    let sets = Api::<StatefulSet>::namespaced(cluster.admin.clone(), &namespace);
+    let set = |name: &str, strategy: Value| {
+        json!({
+            "metadata": { "name": name },
+            "spec": {
+                "replicas": 3,
+                "serviceName": name,
+                "ordinals": { "start": 2 },
+                "selector": { "matchLabels": { "app": name } },
+                "updateStrategy": strategy,
+                "template": {
+                    "metadata": { "labels": { "app": name } },
+                    "spec": {
+                        "nodeName": "kwok-node-1",
+                        "containers": [{ "name": "app", "image": "fake" }],
+                    },
+                },
+            },
+        })
+    };
+    create(&sets, set("kept", json!({ "type": "OnDelete" }))).await;
+    let partitioned = json!({ "type": "RollingUpdate", "rollingUpdate": { "partition": 1 } });
+    create(&sets, set("part", partitioned)).await;
+    pods_of(&pods, "kept", 3).await;
+    pods_of(&pods, "part", 3).await;
+    let restart_set = |name: &str| PlanRequest::Restart {
+        space: context.clone(),
+        target: reference("apps", "v1", "statefulsets", Some(&namespace), name),
+    };
+    let (kept, part) = (uids(&pods, "kept").await, uids(&pods, "part").await);
+
+    let planned = plan(&core, restart_set("kept")).await.unwrap();
+    assert!(planned.affected.is_empty(), "{:?}", planned.affected);
+    assert_eq!(
+        planned.consequences,
+        [
+            "Its pods keep running: its update strategy is OnDelete, so each takes the new template only once it is deleted."
+        ]
+    );
+    run(&core, &planned, None).await.unwrap();
+    let planned = plan(&core, restart_set("part")).await.unwrap();
+    let mut replaced = names(&planned, "Replaces");
+    replaced.sort();
+    assert_eq!(replaced, ["part-3", "part-4"]);
+    assert_eq!(
+        planned.consequences,
+        [
+            "Its pods from ordinal 3 up are replaced in turn; those below its partition keep running."
+        ]
+    );
+    run(&core, &planned, None).await.unwrap();
+    let rolled = || async {
+        let status = sets.get("part").await.unwrap().status.unwrap();
+        (status.updated_replicas, status.ready_replicas)
+    };
+    eventually("the pods past the partition are replaced", || async {
+        let now = uids(&pods, "part").await;
+        let replaced = ["part-3", "part-4"].iter().all(|name| {
+            now.get(*name)
+                .is_some_and(|uid| part.get(*name) != Some(uid))
+        });
+        replaced && rolled().await == (Some(2), Some(3))
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(rolled().await, (Some(2), Some(3)));
+    assert_eq!(uids(&pods, "part").await.get("part-2"), part.get("part-2"));
+    assert_eq!(uids(&pods, "kept").await, kept);
 
     merge(&deployments, "web", json!({ "spec": { "paused": true } })).await;
     let paused = plan(&core, restart()).await.unwrap_err();
@@ -617,6 +720,150 @@ async fn suspend_and_resume_run_at_once_and_their_undo_holds_to_the_generation()
     core.command_cancel("main", by_kubectl.id);
     kubectl(&by_kubectl, &kubeconfig);
     assert!(job_suspended().await);
+
+    create(&cronjobs, cronjob("late", false)).await;
+    let late = plan(&core, suspend("cronjobs", "late", true))
+        .await
+        .unwrap();
+    merge(&cronjobs, "late", json!({ "spec": { "suspend": true } })).await;
+    let told = run(&core, &late, None).await.unwrap();
+    assert_eq!(done(&told), ("Cron job late is suspended already", None));
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_job_s_suspend_lists_the_pods_it_owns_and_says_what_it_cannot_read() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("owned").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let context = &cluster.context;
+    let jobs = Api::<Job>::namespaced(cluster.admin.clone(), &namespace);
+    let pods = Api::<Pod>::namespaced(cluster.admin.clone(), &namespace);
+    let deployments = Api::<Deployment>::namespaced(cluster.admin.clone(), &namespace);
+    create(&deployments, deployment("manual", 1, "kwok-node-2")).await;
+    pods_of(&pods, "manual", 1).await;
+    create(
+        &jobs,
+        json!({
+            "metadata": { "name": "chosen" },
+            "spec": {
+                "manualSelector": true,
+                "selector": { "matchLabels": { "app": "manual" } },
+                "template": {
+                    "metadata": { "labels": { "app": "manual" } },
+                    "spec": {
+                        "nodeSelector": { "twigo.io/no-such-node": "anywhere" },
+                        "restartPolicy": "Never",
+                        "containers": [{ "name": "app", "image": "fake" }],
+                    },
+                },
+            },
+        }),
+    )
+    .await;
+    let chosen = jobs.get("chosen").await.unwrap().metadata.uid.unwrap();
+    let own = tokio::time::timeout(WAIT, async {
+        loop {
+            let owned: Vec<String> = pods
+                .list(&ListParams::default())
+                .await
+                .unwrap()
+                .items
+                .into_iter()
+                .filter(|pod| {
+                    pod.metadata
+                        .owner_references
+                        .iter()
+                        .flatten()
+                        .any(|owner| owner.uid == chosen)
+                })
+                .filter_map(|pod| pod.metadata.name)
+                .collect();
+            let active = jobs
+                .get("chosen")
+                .await
+                .unwrap()
+                .status
+                .and_then(|status| status.active);
+            if owned.len() == 1 && active == Some(1) {
+                return owned;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("the job runs a pod");
+    let suspend = |name: &str| PlanRequest::Suspend {
+        space: context.clone(),
+        target: reference("batch", "v1", "jobs", Some(&namespace), name),
+        suspend: true,
+    };
+    let stopping = plan(&core, suspend("chosen")).await.unwrap();
+    assert_eq!(stopping.friction, Friction::Confirm);
+    assert_eq!(names(&stopping, "Its pods stop"), own);
+    core.command_cancel("main", stopping.id);
+
+    create(
+        &Api::<k8s_openapi::api::rbac::v1::Role>::namespaced(cluster.admin.clone(), &namespace),
+        json!({
+            "metadata": { "name": "suspender" },
+            "rules": [{ "apiGroups": ["batch"], "resources": ["jobs"], "verbs": ["get", "patch"] }],
+        }),
+    )
+    .await;
+    let role = json!({ "kind": "Role", "name": "suspender" });
+    let (_dir, suspender, space) = as_account(&cluster, &namespace, "suspender", role).await;
+    let blind = plan(
+        &suspender,
+        PlanRequest::Suspend {
+            space,
+            target: reference("batch", "v1", "jobs", Some(&namespace), "chosen"),
+            suspend: true,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(blind.friction, Friction::Confirm);
+    assert!(blind.affected.is_empty(), "{:?}", blind.affected);
+    let unread = format!("Twigo cannot read the pods in {namespace}, so it cannot say which run.");
+    assert!(
+        blind.consequences.contains(&unread),
+        "{:?}",
+        blind.consequences
+    );
+    suspender.command_cancel("main", blind.id);
+
+    create(
+        &jobs,
+        json!({
+            "metadata": { "name": "finished" },
+            "spec": { "template": { "spec": {
+                "nodeName": "kwok-node-2",
+                "restartPolicy": "Never",
+                "containers": [{ "name": "app", "image": "fake" }],
+            } } },
+        }),
+    )
+    .await;
+    eventually("the job completes", || async {
+        jobs.get("finished")
+            .await
+            .unwrap()
+            .status
+            .and_then(|status| status.conditions)
+            .unwrap_or_default()
+            .iter()
+            .any(|condition| condition.type_ == "Complete" && condition.status == "True")
+    })
+    .await;
+    let ended = plan(&core, suspend("finished")).await.unwrap_err();
+    assert_eq!(ended.kind, ErrorKind::InvalidInput);
+    assert_eq!(
+        ended.message,
+        "Job finished has completed, so there is nothing to suspend"
+    );
     cluster.delete(&namespace).await;
 }
 

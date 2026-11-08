@@ -166,7 +166,9 @@ struct Owner {
 
 #[derive(Deserialize)]
 struct List {
-    items: Vec<Listed>,
+    /// `null` when empty: kube-apiserver v1.37.1 lists no objects as metadata
+    /// with a nil slice, which Go encodes so.
+    items: Option<Vec<Listed>>,
     metadata: ListMeta,
 }
 
@@ -222,7 +224,7 @@ async fn list(clients: &Clients, made: &Made, namespace: &str) -> Result<Vec<Ite
             .request(request)
             .await
             .map_err(|error| twigo_kube::errors::request(&error))?;
-        items.extend(page.items.into_iter().map(|listed| Item {
+        items.extend(page.items.into_iter().flatten().map(|listed| Item {
             name: listed.metadata.name,
             uid: listed.metadata.uid,
             owners: listed.metadata.owner_references,
@@ -231,5 +233,19 @@ async fn list(clients: &Clients, made: &Made, namespace: &str) -> Result<Vec<Ite
             Some(token) => next = Some(token),
             None => return Ok(items),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::List;
+
+    #[test]
+    fn a_list_of_no_objects_as_metadata_has_none() {
+        let list: List = serde_json::from_str(
+            r#"{"kind":"PartialObjectMetadataList","apiVersion":"meta.k8s.io/v1","metadata":{"resourceVersion":"49774"},"items":null}"#,
+        )
+        .unwrap();
+        assert!(list.items.into_iter().flatten().next().is_none());
     }
 }
