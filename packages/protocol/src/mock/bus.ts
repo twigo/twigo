@@ -15,6 +15,7 @@ import type {
   PlanRequest,
   ResourceRef,
 } from "../generated";
+import { masked } from "./edits";
 import {
   cordoned,
   deploymentOf,
@@ -200,6 +201,10 @@ interface Previewed {
   readonly job: boolean;
   /** What a merge patch after the apply removes. */
   readonly removals: readonly string[];
+  /** The edit, which an apply leaves as the object. */
+  readonly edited: Record<string, unknown>;
+  /** The resource of an edit of an opened object. */
+  readonly resource: ResourceRef["gvr"] | undefined;
 }
 
 /** The annotation a mock edit names the preview's answer by. */
@@ -240,8 +245,9 @@ function applyConsequences({ step, job, removals }: Previewed): string[] {
 }
 
 /** An object as a side of the diff, as Rust's `side`: without what would only be noise. */
-function side(object: unknown): unknown {
-  if (typeof object !== "object" || object === null) return object;
+function side(value: unknown): unknown {
+  if (typeof value !== "object" || value === null) return value;
+  const object = masked(value as Record<string, unknown>);
   const { metadata } = object as { metadata?: object };
   if (metadata === undefined) return object;
   return {
@@ -270,6 +276,14 @@ export interface BusHost {
   };
   /** Tells the lists that the cluster changed. */
   changed(): void;
+  /** What `apply_preview` answers to every edit that changes something, unless the edit names an answer. */
+  readonly answer: string | undefined;
+  /** An edit was applied: the object in `context` is `edited` now. */
+  applied(
+    context: string,
+    resource: { readonly group: string; readonly resource: string } | undefined,
+    edited: Record<string, unknown>,
+  ): void;
 }
 
 /** `1 pod`, `3 pods`: the mock's kinds all count with an s. */
@@ -337,10 +351,12 @@ export class MockBus {
 
   /**
    * `apply_preview` over the mock: it merges nothing. An edit's annotation
-   * `mock.twigo.io/answer` names the answer (`unchanged`, `conflicts`, `stale`,
-   * `immutable`, `recreate`, `removals` for a ready answer with a removal step,
-   * or `merge-patch` for one that goes as a single merge patch); any other edit
-   * is ready, an edit equal to its base unchanged.
+   * `mock.twigo.io/answer`, or else the scenario, names the answer
+   * (`unchanged`, `conflicts`, `stale`, `immutable`, `recreate`, `removals` for
+   * a ready answer with a removal step, or `merge-patch` for one that goes as
+   * a single merge patch); any other edit is ready, an edit equal to its base
+   * unchanged. An edit that names another object than the one it edits is
+   * refused, as Rust refuses it.
    */
   applyPreview(request: ApplyRequest): ApplyPreviewed {
     const { space, opened, edited } = request;
@@ -357,6 +373,37 @@ export class MockBus {
     };
     const name = object.metadata?.name ?? opened?.target.name ?? "";
     const kind = object.kind ?? opened?.target.gvr.resource ?? "object";
+    const same =
+      opened !== null && JSON.stringify(opened.base) === JSON.stringify(edited);
+    const answer =
+      object.metadata?.annotations?.[ANSWER] ??
+      (same ? undefined : this.host.answer);
+    const live = opened?.base as
+      { kind?: string; apiVersion?: string } | undefined;
+    if (opened && live) {
+      const refused = (what: string, named: unknown, target: unknown) =>
+        new IpcError(
+          "invalidInput",
+          `the edit names ${what} ${JSON.stringify(named)}, but it is an edit of ${JSON.stringify(target)}`,
+        );
+      const other = (["apiVersion", "kind"] as const).find(
+        (field) => (edited as Record<string, unknown>)[field] !== live[field],
+      );
+      if (other)
+        throw refused(
+          other,
+          (edited as Record<string, unknown>)[other],
+          live[other],
+        );
+      if (name !== opened.target.name)
+        throw refused("name", name, opened.target.name);
+      if ((object.metadata?.namespace ?? null) !== opened.target.namespace)
+        throw refused(
+          "namespace",
+          object.metadata?.namespace,
+          opened.target.namespace,
+        );
+    }
     const namespace = opened?.target.namespace ?? object.metadata?.namespace;
     const resource = opened?.target.gvr.resource ?? `${kind.toLowerCase()}s`;
     const target = `${resource}/${name}${namespace === undefined ? "" : ` in ${namespace}`}`;
@@ -386,17 +433,15 @@ export class MockBus {
         named,
         job: resource === "jobs",
         removals,
+        edited: edited as Record<string, unknown>,
+        resource: opened?.target.gvr,
       });
       return id;
     };
-    if (
-      opened &&
-      JSON.stringify(opened.base) === JSON.stringify(edited) &&
-      object.metadata?.annotations?.[ANSWER] === undefined
-    ) {
+    if (same && answer === undefined) {
       return { state: "unchanged", ignored: [] };
     }
-    switch (object.metadata?.annotations?.[ANSWER]) {
+    switch (answer) {
       case "unchanged":
         return { state: "unchanged", ignored: [".status"] };
       case "conflicts":
@@ -471,7 +516,7 @@ export class MockBus {
     if (previewed === undefined) {
       throw new IpcError("notFound", `no preview ${preview} waits to apply`);
     }
-    const { step, context, target, what } = previewed;
+    const { step, context, target, what, edited, resource } = previewed;
     const recreate = step === "recreate";
     const write = { verb: recreate ? "delete" : "patch", target };
     this.#authorize(context, this.host.access(context), { write });
@@ -495,6 +540,7 @@ export class MockBus {
       space,
       previewed: `${context}/${target}`,
       run: (tell) => {
+        this.host.applied(context, resource, edited);
         tell({ state: "done", text: `${words} ${what}`, undoUntil: null });
       },
     };

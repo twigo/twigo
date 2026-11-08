@@ -24,6 +24,13 @@ import {
   type AuthScenario,
 } from "./auth";
 import { Cluster } from "./cluster";
+import {
+  EDIT_SCENARIOS,
+  isEditScenario,
+  MockEdits,
+  PINNED_ANSWERS,
+  type EditScenario,
+} from "./edits";
 import { KINDS, wireRow, type MockKind, type MockRow } from "./kinds";
 import { CLUSTER_STREAMS } from "../logs";
 import { MockLogs } from "./logs";
@@ -63,10 +70,17 @@ type ListScenario = "live" | ViewState["state"];
  * A list scenario, `shellTimeout`: live lists while the login shell's
  * environment timed out, `policyFile`: live lists with an admin's policy
  * file over `prod-*`, `viewer`: live lists for a person who may only read,
- * or a pinned state of prod-eu's credentials.
+ * or a pinned state of prod-eu's credentials, or what `apply_preview` answers
+ * to an edit (`applyConflicts`), or an open object that changes on its own
+ * (`serverChange`, `statusChange`).
  */
 export type MockScenario =
-  ListScenario | "shellTimeout" | "policyFile" | "viewer" | AuthScenario;
+  | ListScenario
+  | "shellTimeout"
+  | "policyFile"
+  | "viewer"
+  | AuthScenario
+  | EditScenario;
 
 export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "live",
@@ -74,6 +88,7 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "policyFile",
   "viewer",
   ...AUTH_SCENARIOS,
+  ...EDIT_SCENARIOS,
   "queued",
   "connecting",
   "syncing",
@@ -138,7 +153,8 @@ export function createMockBackend(
     scenario === "shellTimeout" ||
     scenario === "policyFile" ||
     scenario === "viewer" ||
-    isAuthScenario(scenario)
+    isAuthScenario(scenario) ||
+    isEditScenario(scenario)
       ? "live"
       : scenario;
   const auth = new MockAuth(pinsAuth ? scenario : undefined);
@@ -188,7 +204,39 @@ export function createMockBackend(
   };
 
   const objectContexts = new Map<number, string>();
+  const edits = new MockEdits();
   const bus = new MockBus({
+    answer: isEditScenario(scenario) ? PINNED_ANSWERS[scenario] : undefined,
+    applied: (context, opened, edited) => {
+      const { apiVersion, kind, metadata } = edited as {
+        apiVersion?: string;
+        kind?: string;
+        metadata?: { name?: string; namespace?: string };
+      };
+      const group =
+        opened?.group ?? (apiVersion ?? "").split("/").slice(0, -1).join("/");
+      const known = RESOURCES.find(
+        (candidate) =>
+          candidate.gvr.group === group &&
+          (opened
+            ? candidate.gvr.resource === opened.resource
+            : candidate.kind === kind),
+      );
+      if (!known || metadata?.name === undefined) return;
+      const namespace = known.namespaced
+        ? (metadata.namespace ?? "default")
+        : null;
+      edits.put(
+        MockEdits.key(
+          context,
+          group,
+          known.gvr.resource,
+          namespace,
+          metadata.name,
+        ),
+        edited,
+      );
+    },
     access: (context) => access.of(context),
     context: (id) => space(id).contexts[0],
     cluster,
@@ -380,7 +428,7 @@ export function createMockBackend(
       return null;
     },
     object_close: (id) => {
-      object(id);
+      object(id).close();
       objects.delete(id);
       objectContexts.delete(id);
       return null;
@@ -489,6 +537,24 @@ export function createMockBackend(
           parts,
           context === undefined ? undefined : cluster(context),
           onMessage,
+          context === undefined
+            ? undefined
+            : {
+                edits,
+                key: MockEdits.key(
+                  context,
+                  query.gvr.group,
+                  query.gvr.resource,
+                  query.namespace,
+                  query.name,
+                ),
+                ...(scenario === "serverChange" && {
+                  change: "server" as const,
+                }),
+                ...(scenario === "statusChange" && {
+                  change: "status" as const,
+                }),
+              },
         ),
       );
       return id;
