@@ -109,12 +109,6 @@ function setBy(source: ModeSource): string {
   }
 }
 
-/**
- * What puts an action back, as `actions::undo::Revert` holds it. Only the
- * bus writes to the mock's cluster, and every action takes the space's
- * undo, so no object changes under one: Rust's check that nobody changed
- * it has nothing to find here.
- */
 /** What a plan risks, says follows and lists, beside its words. */
 interface Asked {
   readonly risk: Risk;
@@ -128,6 +122,12 @@ const AT_ONCE: Asked = {
   affected: [],
 };
 
+/**
+ * What puts an action back, as `actions::undo::Revert` holds it. Only the
+ * bus writes to the mock's cluster, and every action takes the space's
+ * undo, so no object changes under one: Rust's check that nobody changed
+ * it has nothing to find here.
+ */
 interface Revert {
   readonly context: string;
   readonly write: { readonly verb: string; readonly target: string };

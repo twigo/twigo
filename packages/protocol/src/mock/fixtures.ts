@@ -155,11 +155,6 @@ export const JOB_COLUMNS: readonly Column[] = [
   { name: "Selector", kind: "string", priority: 1 },
 ];
 
-/**
- * The columns kube-apiserver sends for core events
- * (crates/twigo-cache/tests/fixtures/events-list.json): no Age, Name last
- * and wide only, Count declared a string and sent as an integer.
- */
 /** The columns kube-apiserver sends for CronJobs (crates/twigo-cache/tests/fixtures/cronjobs-list.json). */
 export const CRONJOB_COLUMNS: readonly Column[] = [
   { name: "Name", kind: "string", priority: 0 },
@@ -174,6 +169,11 @@ export const CRONJOB_COLUMNS: readonly Column[] = [
   { name: "Selector", kind: "string", priority: 1 },
 ];
 
+/**
+ * The columns kube-apiserver sends for core events
+ * (crates/twigo-cache/tests/fixtures/events-list.json): no Age, Name last
+ * and wide only, Count declared a string and sent as an integer.
+ */
 export const EVENT_COLUMNS: readonly Column[] = [
   { name: "Last Seen", kind: "string", priority: 0 },
   { name: "Type", kind: "string", priority: 0 },

@@ -120,10 +120,11 @@ impl Command for CommandCancel {
     type Message = ();
 }
 
-/// Whether the person may do each check, by one SelfSubjectAccessReview
-/// each, kept with the context's clients (ARCHITECTURE 5.1): the
-/// `capability.*` context keys. A check the cluster cannot answer counts as
-/// allowed, so the server decides.
+/// Whether the person may do each check, by SelfSubjectAccessReviews kept
+/// with the context's clients, a no for 30 s (ARCHITECTURE 5.1): the
+/// `capability.*` context keys. A check of one object asks for its whole
+/// resource first, and by name only when that says no. A check the cluster
+/// cannot answer counts as allowed, so the server decides.
 pub struct AccessReview;
 
 impl Command for AccessReview {

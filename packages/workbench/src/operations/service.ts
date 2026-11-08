@@ -167,7 +167,6 @@ export class Operations {
     this.#countdowns[this.#countdowns.length - 1]?.cancel();
   }
 
-  /** `request` names what the plan acts on, so a second countdown of it replaces the first. */
   /**
    * Says why a plan was refused; a context that is read-only by what the
    * person may lift offers the unlock right there, which a policy file's
@@ -232,6 +231,7 @@ export class Operations {
     });
   }
 
+  /** `request` names what the plan acts on, so a second countdown of it replaces the first. */
   #countdown(
     plan: Plan,
     seconds: number,

@@ -2,8 +2,10 @@
 //! scale` does (kubectl v0.37.1, `pkg/scale`): a merge patch of the
 //! subresource's `spec.replicas`. Any count runs at once with an undo
 //! (decision 1 of M2), but for what an undo cannot bring back: to zero it
-//! asks first and lists the pods that go, and fewer pods of a StatefulSet
-//! that deletes their claims ask and list the claims. The run reads the
+//! asks first and lists the pods that go, fewer pods of a StatefulSet that
+//! deletes their claims ask and list the claims, and a custom resource whose
+//! Scale says no replicas, which may be unset, asks and offers no undo. The
+//! run reads the
 //! object and writes as of that read, so its undo puts back only what its
 //! own write changed, and it scales nothing once the replicas moved from
 //! those its plan was made from.
