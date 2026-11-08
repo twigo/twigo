@@ -932,3 +932,66 @@ test("a run whose object went since its plan fails, as Rust's read of it does", 
     },
   ]);
 });
+
+test("a delete whose object went before it ran says so and takes nothing else", async () => {
+  const backend = createMockBackend("live");
+  await answered(backend.invoke("space_open", "qa"));
+  const trigger = await answered(
+    backend.invoke("command_plan", {
+      action: "trigger",
+      space: "qa",
+      namespace: "batch",
+      name: "cleanup",
+    }),
+  );
+  await run(backend, trigger.id);
+  const job =
+    /^Job (\S+) runs once/.exec(trigger.consequences[0] ?? "")?.[1] ?? "";
+  const remove: PlanRequest = {
+    action: "delete",
+    space: "qa",
+    targets: [
+      {
+        gvr: { group: "batch", version: "v1", resource: "jobs" },
+        namespaced: true,
+        namespace: "batch",
+        name: job,
+      },
+    ],
+  };
+  const first = await answered(backend.invoke("command_plan", remove));
+  const second = await answered(backend.invoke("command_plan", remove));
+  const cron: PlanRequest = {
+    action: "suspend",
+    space: "qa",
+    target: {
+      gvr: { group: "batch", version: "v1", resource: "cronjobs" },
+      namespaced: true,
+      namespace: "batch",
+      name: "cleanup",
+    },
+    suspend: true,
+  };
+  await run(backend, first.id);
+  expect(await run(backend, second.id)).toEqual([
+    { state: "running", text: `Waiting for job ${job} to go` },
+    { state: "done", text: `Job ${job} was already gone`, undoUntil: null },
+  ]);
+  const still = await answered(backend.invoke("command_plan", cron));
+  expect(still.question).toContain("cron job cleanup");
+});
+
+test("pods that come and go leave each deployment its replicas", () => {
+  const cluster = new Cluster("staging", POD_COUNT.staging ?? 0, 0);
+  const count = () => {
+    const per = new Map<string, number>();
+    for (const pod of cluster.pods) {
+      const key = `${pod.namespace}/${deploymentOf(pod)}`;
+      per.set(key, (per.get(key) ?? 0) + 1);
+    }
+    return per;
+  };
+  const before = count();
+  for (let tick = 0; tick < 20; tick++) cluster.churn(3, [], Date.now());
+  expect(count()).toEqual(before);
+});

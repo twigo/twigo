@@ -190,8 +190,21 @@ export class Cluster {
     }
     for (const pod of targets) this.#change(pod);
     if (this.pods.length > 0) {
-      const gone = Math.floor(this.#random() * this.pods.length);
-      this.pods.splice(gone, 1, this.#pod(now, now));
+      const at = Math.floor(this.#random() * this.pods.length);
+      const gone = this.pods[at];
+      const fresh = this.#pod(now, now);
+      if (gone) {
+        // Its ReplicaSet replaces it, so its Deployment keeps its count.
+        const name = `${gone.generateName}${fresh.name.slice(fresh.generateName.length)}`;
+        this.pods.splice(at, 1, {
+          ...fresh,
+          id: `${this.context}/${gone.namespace}/${name}`,
+          namespace: gone.namespace,
+          generateName: gone.generateName,
+          templateHash: gone.templateHash,
+          name,
+        });
+      }
     }
     this.now = now;
     this.version++;

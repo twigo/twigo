@@ -436,7 +436,8 @@ export class MockBus {
       new IpcError("notFound", `${kind.name} "${name}" not found`);
     const objects: ObjectRef[] = [];
     const following: ObjectRef[] = [];
-    const deletes: (() => void)[] = [];
+    /** Each removes its object, and says whether it was still there. */
+    const deletes: (() => boolean)[] = [];
     let replacedBy: string | undefined;
     // As Rust's: an object gone since it was marked stays out.
     const kept: ResourceRef[] = [];
@@ -462,15 +463,18 @@ export class MockBus {
           objects.push(object("Pod", "v1"));
           replacedBy = `${deploymentOf(pod)}-${pod.templateHash}`;
           deletes.push(() => {
-            const still = cluster.pods.find((candidate) => candidate === pod);
-            if (still) cluster.deletePod(still, Date.now());
+            if (!cluster.pods.includes(pod)) return false;
+            cluster.deletePod(pod, Date.now());
+            return true;
           });
         } else if (resource === "nodes") {
           if (!cluster.nodes.some((node) => node.name === name))
             throw gone(name);
           objects.push(object("Node", "v1"));
           deletes.push(() => {
+            if (!cluster.nodes.some((node) => node.name === name)) return false;
             cluster.deleteNode(name);
+            return true;
           });
         } else if (resource === "deployments") {
           const pods = this.#deployment(cluster, target);
@@ -487,8 +491,15 @@ export class MockBus {
           }
           following.push(...pods.map(podRef));
           deletes.push(() => {
-            if (namespace !== null) cluster.deleteDeployment(namespace, name);
-            cluster.emptied.delete(`${namespace ?? ""}/${name}`);
+            const key = `${namespace ?? ""}/${name}`;
+            const there =
+              namespace !== null &&
+              (cluster.podsOf(namespace, name).length > 0 ||
+                cluster.emptied.has(key));
+            if (!there) return false;
+            cluster.deleteDeployment(namespace, name);
+            cluster.emptied.delete(key);
+            return true;
           });
         } else {
           const list: (CronJob | Job)[] =
@@ -515,7 +526,9 @@ export class MockBus {
             );
           }
           deletes.push(() => {
-            list.splice(list.indexOf(found), 1);
+            const at = list.indexOf(found);
+            if (at < 0) return false;
+            list.splice(at, 1);
             if (resource === "cronjobs") {
               for (const job of cluster.jobs.filter(
                 (candidate) =>
@@ -524,6 +537,7 @@ export class MockBus {
                 cluster.jobs.splice(cluster.jobs.indexOf(job), 1);
             }
             cluster.version++;
+            return true;
           });
         }
         kept.push(target);
@@ -618,9 +632,16 @@ export class MockBus {
             : `Waiting for ${what} to go`,
         });
         setTimeout(() => {
-          for (const remove of deletes) remove();
+          const gone = deletes.filter((remove) => !remove()).length;
           this.host.changed();
-          tell({ state: "done", text: `Deleted ${what}`, undoUntil: null });
+          const sent = deletes.length - gone;
+          const text =
+            gone === 0
+              ? `Deleted ${what}`
+              : several
+                ? `Deleted ${counted(sent, kind.words)}; ${String(gone)} ${gone === 1 ? "was" : "were"} already gone`
+                : `${capital(what)} was already gone`;
+          tell({ state: "done", text, undoUntil: null });
         }, GRACE_MS);
       },
     };

@@ -438,7 +438,8 @@ export function registerResourceActions(
         const list = uri === undefined ? undefined : parseListUri(uri);
         if (!uri || !list) return;
         const namespaced = lookup("resource.namespaced") === true;
-        const targets = [...selection.marks(uri)].map((id) => {
+        const marked = [...selection.marks(uri)];
+        const targets = marked.map((id) => {
           const { namespace, name } = objectOfRow(id, namespaced);
           return {
             gvr: list.gvr,
@@ -447,10 +448,11 @@ export function registerResourceActions(
             name,
           };
         });
-        await workbench.operations.run(
+        const outcome = await workbench.operations.run(
           { action: "delete", space: list.space, targets },
           { icon: Trash2 },
         );
+        if (outcome.state === "done") selection.mark(uri, marked, false);
       },
     },
     {

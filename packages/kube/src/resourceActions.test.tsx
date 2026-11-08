@@ -186,6 +186,18 @@ test("⌘⌫ with marked rows deletes those rows", async () => {
   const [request] = run.mock.calls[0] ?? [];
   expect(request).toMatchObject({ action: "delete", space: "staging" });
   expect(request?.action === "delete" && request.targets).toHaveLength(2);
+  expect(workbench.keys.lookup(main)("listMarked")).toBe(false);
+
+  run.mockResolvedValueOnce({ state: "cancelled" });
+  fireEvent.keyDown(main, { code: "KeyX", key: "x" });
+  await settle(2);
+  fireEvent.keyDown(main, {
+    code: "Backspace",
+    key: "Backspace",
+    metaKey: true,
+  });
+  await settle(2);
+  expect(workbench.keys.lookup(main)("listMarked")).toBe(true);
 });
 
 test("a list asks for its capability keys again when the catalog lists the contexts anew", async () => {

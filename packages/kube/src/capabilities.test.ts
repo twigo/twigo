@@ -347,3 +347,33 @@ test("a no is asked again after 30 s, as Rust asks RBAC again, until the list cl
     vi.useRealTimers();
   }
 });
+
+test("asking the same again starts no second round of asks", async () => {
+  vi.useFakeTimers();
+  try {
+    const invoke = vi.fn().mockResolvedValue([false]);
+    const capabilities = new Capabilities({ invoke }, vi.fn());
+    const keys = ["resource.capability.delete"];
+    const at = (namespace: string) => {
+      capabilities.ask("pods", "qa", PODS_GVR, { namespace }, keys, {});
+    };
+    const BASIS = {};
+    const same = () => {
+      capabilities.ask("pods", "qa", PODS_GVR, { namespace: "a" }, keys, BASIS);
+    };
+    same();
+    await vi.advanceTimersByTimeAsync(0);
+    at("b");
+    await vi.advanceTimersByTimeAsync(0);
+    same();
+    await vi.advanceTimersByTimeAsync(0);
+    capabilities.closed("pods");
+    same();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(invoke).toHaveBeenCalledTimes(4);
+    await vi.advanceTimersByTimeAsync(REFUSED_MS);
+    expect(invoke).toHaveBeenCalledTimes(5);
+  } finally {
+    vi.useRealTimers();
+  }
+});

@@ -40,6 +40,8 @@ export class Capabilities {
       readonly asked: string;
       readonly basis: unknown;
       readonly answers: Readonly<Record<string, boolean>>;
+      /** The ask whose answers these are, so only its own re-asks go on. */
+      readonly ask: object;
     }
   >();
 
@@ -120,12 +122,10 @@ export class Capabilities {
     const asked = JSON.stringify([space, queries]);
     const list = this.#lists.get(entry);
     if (list?.asked === asked && list.basis === basis) return;
-    this.#lists.set(entry, { asked, basis, answers: {} });
+    const ask = {};
+    this.#lists.set(entry, { asked, basis, answers: {}, ask });
     if (list && Object.keys(list.answers).length > 0) this.changes.emit();
-    const current = () => {
-      const now = this.#lists.get(entry);
-      return now?.asked === asked && now.basis === basis;
-    };
+    const current = () => this.#lists.get(entry)?.ask === ask;
     const asking = queries.filter(({ checks }) => checks.length > 0);
     if (asking.length === 0) return;
     const send = () => {
@@ -147,7 +147,7 @@ export class Capabilities {
               answers[key] = (answers[key] ?? true) && yes;
             });
           });
-          this.#lists.set(entry, { asked, basis, answers });
+          this.#lists.set(entry, { asked, basis, answers, ask });
           this.changes.emit();
           if (Object.values(answers).includes(false)) {
             setTimeout(() => {
