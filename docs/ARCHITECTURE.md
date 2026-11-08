@@ -677,8 +677,8 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 | `logs://<space>/<group>/<version>/<resource>/<ns>/<name>`           | Logs tab in the panel (4.6): a pod's, or a workload's pods' merged; the core group an empty segment, as in `k8s://`                                            |
 | `exec://<ctx>/<ns>/<pod>/<container>`                               | Terminal (xterm)                                                                                                                                               |
 | `pf://<space>/<forward-id>`                                         | Port-forward tab: state, target and resolved pod, local address, open connections, bytes, errors, a quick HTTP request tester                                  |
-| `diff://…`                                                          | Monaco diff: the apply dry-run, Compare with…, any two objects                                                                                                 |
-| `untitled://manifest-n`                                             | New manifest; Apply asks for the target context                                                                                                                |
+| `diff://edit/apply?editor=<uri>`, `diff://<space>/objects?…`        | Monaco diff: the apply dry-run of an editor's edit, its opened object against the server's now (`edit/server`), Compare with…, any two objects                 |
+| `untitled://manifest-n`                                             | New manifest; its first Apply asks for the target context and, once applied, opens the object it made                                                          |
 | `twigo://settings`, `twigo://keybindings`, `twigo://extension/<id>` | Settings UI, keybindings UI, extension details                                                                                                                 |
 
 - **Details and preview tabs.**
@@ -698,9 +698,16 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   A resource editor's Overview, YAML, Events and Related switch at the right of its group's tab bar, where a list keeps its filters; Rust follows only the one shown.
 - **Working copies.**
   A YAML editor that the user has changed holds a working copy based on the opened `resourceVersion`.
+  - The service is keyed by the editor's URI and holds the object as opened (`base`), the `lock` an apply is held to, the object at that lock after "Keep mine" (`locked`) and the text.
+    A text that is the object again ends the copy.
+  - A dirty editor pins its tab and marks it, and the live object does not overwrite its text, so the object stays followed on the other views while the copy lives.
   - When the live object changes underneath, the editor shows "changed on server" with Compare, Reload and Keep mine.
-  - Save runs the apply flow (6.5).
-  - Unsaved working copies survive a restart (backups per space).
+    It compares the live object with `locked`, else `base`, without `resourceVersion` and `generation`, and without `status` where the resource has the `status` subresource, so a controller's status write raises nothing.
+  - Keep mine sends the old `base`, the new `lock` and `locked` (`OpenedEdit`), since diffing against the new live object would revert the other writer's change.
+  - Save runs the apply flow (6.5): the text is parsed with the `yaml` package at version 1.1, which is the one dialect, and a text of several documents is refused, since the engine previews one object at a time.
+  - Unsaved working copies survive a restart (backups per space, the `edits` key of the space's state), written a pause of 300 ms after the last change.
+    A Secret's never is: not an object of the `secrets` resource, and not a new manifest that does not parse, names no kind yet or mentions a Secret, since the values may be typed before the kind.
+  - Closing an editor keeps its copy, which the tab shows again when the object opens anew.
 - **Overview.**
   One document per object, described in Rust by `twigo-describe` and rendered alike by the drawer, the Overview tab and MCP's describe-style summaries (6.6) ([research](research/details.md)).
   - Sections have ids and an order, the object's state first: Diagnostics when something is wrong, the kind's first section, conditions, the kind's other sections, extension sections, then metadata and events last.
@@ -878,6 +885,11 @@ Extensions add commands, not prefixes.
   - The diff editor is Monaco's DiffEditor.
   - Monaco is bundled locally (no CDN loader) and loaded lazily on the first YAML or diff editor.
     It is built from the tree-shakeable entry points of monaco-editor 0.57 (`monaco-editor/editor`, then each language and feature it needs), and its editor worker is a Vite `?worker` module served from the app.
+  - monaco-yaml 5.5.1 runs on those entry points, since it takes the Monaco namespace as an argument, with `yamlVersion: "1.1"`; its worker is a Vite `?worker` too, whose build has no `eval` and no `new Function`, so `script-src 'self'` should cover it; it was not run under Tauri's CSP yet.
+    A model's schema comes from `schema_get` once its editor holds a copy, and the editor works without one when that fails.
+  - monaco-yaml asks monaco-worker-manager 2.0.1, the latest and from 2022, for its worker, and that does not fit Monaco 0.56 and later in two ways: it imports `monaco-editor/esm/vs/editor/editor.worker.js`, which the `exports` of 0.57 no longer map (`./*.js` is `./esm/vs/*.js`), and it calls `editor.createWebWorker({ moduleId, label, createData })`, which takes a `worker` now.
+    The desktop's Vite config aliases the first path to `monaco-editor/editor/editor.worker`, and `packages/kube/src/edit/monaco.ts` hands monaco-yaml an `editor` whose `createWebWorker` makes the YAML worker and sends it `createData` as Monaco's own workers are sent theirs; both are marked `@todo` for the day monaco-worker-manager follows Monaco.
+    The dev server also pre-bundles `path-browserify`, which only the YAML worker imports.
   - CodeMirror 6 was rejected: its YAML schema support is weaker, and two editors would be waste.
 
 ### 4.7 Notifications and progress
@@ -1030,6 +1042,7 @@ interface CommandDescriptor {
   - `resource/title` (resource editor toolbar)
   - `view/title`, `view/item`
   - `editor/title`
+  - `edit/toolbar`, `edit/changed`, `edit/conflicts`, `edit/immutable`, `edit/diff`, `edit/answer` (the YAML editor's toolbar and the bars of what an apply answered, 4.3, 6.5)
   - `space/context`
   - `statusBar`
   - `explorer/kind`

@@ -53,3 +53,10 @@ Findings that belong to no step yet.
 - The grid's row actions (`packages/ui/src/grid/DataGrid.tsx`):
   - Shift+Tab no longer stops on the menu button of a row without the cursor, which mounts once the focus is on that row.
   - WebView2 may fire `focusout` when the window deactivates, which would unmount a focused menu button of a row without the cursor; not verified, matters once Windows ships (D2).
+- The YAML editor (`packages/kube/src/edit`, ARCHITECTURE 4.3, 4.6):
+  - monaco-yaml's worker was built and run in a browser on the mock, not in the app: Tauri's CSP has not met it, and the built file was only searched for `eval` and `new Function`.
+  - The alias in `apps/desktop/vite.config.ts` and the `createWebWorker` in `monaco.ts` carry `@todo`s for monaco-worker-manager to follow Monaco 0.56 and later; a newer monaco-yaml or monaco-worker-manager than 5.5.1 and 2.0.1 may make both go (not published on 2026-11-08).
+  - After an apply the working copy ends when its plan is done, and the editor shows the live object, which comes by the watch: against kind the order of the two was not measured, so the old text may show for a moment.
+  - Closing a dirty editor keeps its copy and Discard Changes asks nothing.
+  - Compare with… offers the objects of the kind in the space and those opened lately, not another space's.
+  - In the dev server a diff editor logs "no diff result available" as it mounts, under StrictMode's second mount; the production build served by `vite preview` logged none (2026-11-08).
