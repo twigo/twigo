@@ -1530,7 +1530,9 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
    - `status` where the resource has a status subresource, and the server's metadata, never enter it: an edit that changes them is answered with what was ignored.
    - A `twigo` entry at another apiVersion than the one opened: the server prunes it at the version it was written with, so where its paths do not reach the object at the version opened, the preview refuses rather than leave fields out and lose them.
 3. Add the opened `resourceVersion` as an optimistic lock, passed apart from the base: "Keep mine" after a change on the server diffs against the old base and locks to the new version, since diffing against the new live object would revert the other writer's change.
-   A status update moves it too, so an object a controller is still writing to answers **Stale** until it settles or the person keeps theirs.
+   A status update moves it too, so where the resource has a `status` subresource only what such a write leaves alone says an object changed: `metadata.resourceVersion`, `generation`, `managedFields` and `status` are left out when comparing.
+   The preview holds to the server's version when the two compare equal, and a run that loses to a write that left them equal reads the object and sends again, as many times as an undo does (6.4), the merge patch included; anything else answers **Stale**, or fails as changed on the server.
+   A Secret has no such subresource, and its masked view cannot tell a changed value of the same size, so it stays strict.
 4. Dry-run: `PATCH` with `Patch::Apply`, `PatchParams::apply("twigo")`, `dry_run`, and `validation_strict()` (kubectl's default; the server's is Warn).
    Use `Client::send` so `Warning` headers are kept, because kube-rs drops them.
    A field the typed conversion does not know, or a value it cannot convert, answers `500` rather than `422` (kind 1.37, 2026-11-08); it is reported as invalid input with the server's message.

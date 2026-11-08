@@ -1472,3 +1472,115 @@ async fn a_warning_of_the_dry_run_reaches_the_preview() {
     );
     cluster.delete(&namespace).await;
 }
+
+async fn status_write(admin: &kube::Client, path: &str, value: u32) {
+    merge_patch(
+        admin,
+        &format!("{path}/status"),
+        &json!({ "status": { "collisionCount": value } }),
+        "status-writer",
+    )
+    .await;
+}
+
+fn failed(events: &[twigo_ipc::OperationEvent]) -> &twigo_ipc::IpcError {
+    match events.last() {
+        Some(twigo_ipc::OperationEvent::Failed { error }) => error,
+        other => panic!("expected the run to fail, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_status_write_at_the_preview_and_at_the_run_still_applies() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-status").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    post(&cluster.admin, &deployments(&namespace), &deployment("web")).await;
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["metadata"]["annotations"]["mine"] = json!("1");
+    let target = deployment_ref(&namespace, "web");
+
+    status_write(&cluster.admin, &path, 1).await;
+    let (id, result, _, _) = ready(
+        preview(
+            &core,
+            edit(&cluster, target.clone(), &live, edited, false, vec![]),
+        )
+        .await,
+    );
+    assert_eq!(result["metadata"]["annotations"]["mine"], "1");
+    status_write(&cluster.admin, &path, 2).await;
+    applied(&core, &cluster, id).await;
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(after["metadata"]["annotations"]["mine"], "1");
+
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["metadata"]["annotations"]
+        .as_object_mut()
+        .unwrap()
+        .remove("theirs");
+    let (id, _, removals, _) =
+        ready(preview(&core, edit(&cluster, target, &live, edited, false, vec![])).await);
+    assert_eq!(removals, vec![".metadata.annotations.theirs"]);
+    status_write(&cluster.admin, &path, 3).await;
+    applied(&core, &cluster, id).await;
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(after["metadata"]["annotations"].get("theirs"), None);
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_spec_or_a_metadata_change_between_the_preview_and_the_run_does_not_apply() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-changed").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    post(&cluster.admin, &deployments(&namespace), &deployment("web")).await;
+    let target = deployment_ref(&namespace, "web");
+    for (name, change) in [
+        ("spec", json!({ "spec": { "paused": true } })),
+        (
+            "metadata",
+            json!({ "metadata": { "labels": { "other": "writer" } } }),
+        ),
+    ] {
+        let live = settled(&cluster.admin, &path).await;
+        let mut edited = view(&live);
+        edited["metadata"]["annotations"]["mine"] = json!(name);
+        let (id, _, _, _) = ready(
+            preview(
+                &core,
+                edit(&cluster, target.clone(), &live, edited, false, vec![]),
+            )
+            .await,
+        );
+        merge_patch(&cluster.admin, &path, &change, "other").await;
+        let plan = plan(&core, &cluster, id).await;
+        let events = run(&core, &plan, None).await.unwrap();
+        let error = failed(&events);
+        assert_eq!(error.kind, ErrorKind::Conflict, "{name}: {error:?}");
+        assert!(error.message.contains("changed since"), "{error:?}");
+        let after = read(&cluster.admin, &path).await;
+        assert_eq!(after["metadata"]["annotations"].get("mine"), None, "{name}");
+
+        let mut edited = view(&live);
+        edited["metadata"]["annotations"]["mine"] = json!(name);
+        match preview(
+            &core,
+            edit(&cluster, target.clone(), &live, edited, false, vec![]),
+        )
+        .await
+        {
+            ApplyPreviewed::Stale { .. } => {}
+            other => panic!("{name}: expected stale, got {other:?}"),
+        }
+    }
+    cluster.delete(&namespace).await;
+}

@@ -13,6 +13,11 @@
 //! A merge patch cannot address a list element, so a removal inside a list
 //! sends the outermost list on its path whole, as it stands after the
 //! apply, under the `resourceVersion` the apply returned.
+//!
+//! A `resourceVersion` moves on every status write, so for a resource with a
+//! `status` subresource only [`comparable`] says an object changed: the
+//! preview holds to the server's version when only what a status write moves
+//! has, and a run that loses to one reads the object and sends again.
 
 use std::collections::BTreeSet;
 use std::sync::Weak;
@@ -30,9 +35,13 @@ use kube::core::{GroupVersionKind, Request, Status};
 use serde_json::{Value, json};
 use twigo_cache::hub::Resource;
 use twigo_ipc::{
-    ApplyConflict, ApplyPreviewed, ApplyRequest, ErrorKind, IpcError, PreviewId, Resource as Served,
+    ApplyConflict, ApplyPreviewed, ApplyRequest, ErrorKind, IpcError, OpenedEdit, PreviewId,
+    Resource as Served,
 };
-use twigo_kube::apply::{self, Edit, FIELD_MANAGER, Path, merge_patch, still_has, without};
+use twigo_kube::apply::{
+    self, Edit, FIELD_MANAGER, Path, comparable, merge_patch, still_has, without,
+};
+use twigo_kube::client::Clients;
 use twigo_kube::discovery::Discovery;
 use twigo_kube::errors;
 use twigo_kube::openapi::Document;
@@ -40,7 +49,9 @@ use twigo_policy::Attributes;
 use twigo_policy::friction::Risk;
 use twigo_policy::redact::{for_view, is_mask};
 
-use super::{Target, attributes, clients_for, get, kind_words, kubectl, sentence, write};
+use super::{
+    ATTEMPTS, Target, attributes, clients_for, get, kind_words, kubectl, lost, sentence, write,
+};
 use crate::Core;
 use crate::bus::{Finished, Planned, Progress};
 
@@ -77,6 +88,10 @@ struct ApplyStep {
     /// The `resourceVersion` the merge patch holds to when no apply goes
     /// first.
     lock: Option<String>,
+    /// The object as [`comparable`] reads it, for a resource with a `status`
+    /// subresource: a run that lost to a write sends again only if it reads
+    /// the same.
+    comparable: Option<Value>,
     /// Every value a Secret's edit could echo, to scrub from messages.
     secrets: Vec<String>,
 }
@@ -104,8 +119,7 @@ impl Refused {
         let message = scrub(&status.message, secrets);
         match status.code {
             409 => {
-                let conflicts: Vec<ApplyConflict> = causes(status)
-                    .filter(|cause| cause.reason == "FieldManagerConflict")
+                let conflicts: Vec<ApplyConflict> = field_conflicts(status)
                     .map(|cause| ApplyConflict {
                         path: cause.field.clone(),
                         manager: conflict_manager(&cause.message),
@@ -132,6 +146,10 @@ fn causes(status: &Status) -> impl Iterator<Item = &kube::core::response::Status
         .as_ref()
         .into_iter()
         .flat_map(|details| details.causes.iter())
+}
+
+fn field_conflicts(status: &Status) -> impl Iterator<Item = &kube::core::response::StatusCause> {
+    causes(status).filter(|cause| cause.reason == "FieldManagerConflict")
 }
 
 /// `conflict with "kubectl-create" using apps/v1` names its manager in quotes.
@@ -371,10 +389,66 @@ fn warning_text(header: &str) -> Option<String> {
     Some(quoted.replace("\\\"", "\"").replace("\\\\", "\\"))
 }
 
-/// `patch` held to `resource_version`.
-fn locked(mut patch: Value, resource_version: &str) -> Value {
-    patch["metadata"]["resourceVersion"] = json!(resource_version);
+/// `patch` held to `resource_version`, when there is one.
+fn locked(patch: &Value, resource_version: Option<&str>) -> Value {
+    let mut patch = patch.clone();
+    if let Some(version) = resource_version {
+        patch["metadata"]["resourceVersion"] = json!(version);
+    }
     patch
+}
+
+/// The `resourceVersion` an edit holds to: the one it was opened at, or the
+/// server's when only what a status write moves has changed since, for a
+/// resource with a `status` subresource. A Secret has none, and its masked
+/// view cannot tell a changed value of the same size, so it stays strict.
+fn held_lock(opened: &OpenedEdit, live: Option<&Value>, status_subresource: bool) -> String {
+    match live.and_then(|live| Some((live, resource_version(live)?))) {
+        Some((live, version))
+            if status_subresource
+                && version != opened.lock
+                && comparable(&opened.base) == comparable(live) =>
+        {
+            version.to_owned()
+        }
+        _ => opened.lock.clone(),
+    }
+}
+
+/// Sends a write held to `lock`. A `409` that is no field conflict means it
+/// lost to another write: when `comparable` says the object reads the same,
+/// it sends again on the new version, up to [`ATTEMPTS`] times; otherwise
+/// that `409` stands.
+async fn send_held(
+    clients: &Clients,
+    target: &Target,
+    comparable_to: Option<&Value>,
+    mut lock: Option<String>,
+    request: impl Fn(Option<&str>) -> Result<http::Request<Vec<u8>>, IpcError>,
+) -> Result<Result<(Value, Vec<String>), kube::Error>, IpcError> {
+    let mut last = None;
+    for attempt in 0..ATTEMPTS {
+        match send(&clients.api, request(lock.as_deref())?).await {
+            Err(kube::Error::Api(status))
+                if status.code == 409 && field_conflicts(&status).next().is_none() =>
+            {
+                let Some(expected) = comparable_to else {
+                    return Ok(Err(kube::Error::Api(status)));
+                };
+                let now = get(clients, &target.path).await?;
+                if comparable(&now) != *expected {
+                    return Ok(Err(kube::Error::Api(status)));
+                }
+                lock = resource_version(&now).map(str::to_owned);
+                last = Some(status);
+                lost(attempt).await;
+            }
+            sent => return Ok(sent),
+        }
+    }
+    Ok(Err(kube::Error::Api(
+        last.expect("every try that goes on loses to a write"),
+    )))
 }
 
 fn resource_version(object: &Value) -> Option<&str> {
@@ -445,6 +519,9 @@ pub(crate) async fn preview(
     if is_secret(&edited) {
         refuse_masks(opened.as_ref().map(|opened| &opened.base), &edited)?;
     }
+    let lock = opened
+        .as_ref()
+        .map(|opened| held_lock(opened, live.as_ref(), status_subresource));
 
     let group = target.resource.group.clone();
     let version = target.resource.version.clone();
@@ -467,7 +544,7 @@ pub(crate) async fn preview(
                 edited: &edited,
                 root,
                 status_subresource,
-                lock: &opened.lock,
+                lock: lock.as_deref().unwrap_or_default(),
                 dropped: &dropped,
             })
             .map_err(|foreign| {
@@ -535,14 +612,10 @@ pub(crate) async fn preview(
     let empty = json!({});
     let live_or_empty = live.as_ref().unwrap_or(&empty);
     if !removals.is_empty() {
-        let lock = opened
-            .as_ref()
-            .map(|opened| opened.lock.as_str())
-            .unwrap_or_default();
         let patch = locked(
-            merge_patch(live_or_empty, &removals)
+            &merge_patch(live_or_empty, &removals)
                 .expect("every removal was read in the live object"),
-            lock,
+            lock.as_deref(),
         );
         let request = merge_request(&target, &patch, true)?;
         if let Err(error) = send(&clients.api, request).await {
@@ -580,8 +653,8 @@ pub(crate) async fn preview(
     if !removals.is_empty() {
         writes.push(target.attributes(Method::PATCH, None));
     }
-    let lock = opened.as_ref().map(|opened| opened.lock.clone());
     let warnings: Vec<String> = warnings.iter().map(|text| scrub(text, &secrets)).collect();
+    let comparable_to = live.as_ref().filter(|_| status_subresource).map(comparable);
     let live_view = side(live.clone().unwrap_or(Value::Null));
     let id = keep(Prepared {
         context: target.context.clone(),
@@ -596,6 +669,7 @@ pub(crate) async fn preview(
             removals: removals.clone(),
             live: live.unwrap_or(Value::Null),
             lock,
+            comparable: comparable_to,
             secrets,
         })),
         target,
@@ -840,10 +914,18 @@ impl Run {
         .await?;
         let step = &self.step;
         let what = &self.what;
+        let target = &self.target;
         let (object, lock, applied) = match &step.config {
             Some(config) => {
-                let request = apply_request(&self.target, config, step.force, false)?;
-                match send(&clients.api, request).await {
+                let sent = send_held(
+                    &clients,
+                    target,
+                    step.comparable.as_ref(),
+                    step.lock.clone(),
+                    |lock| apply_request(target, &locked(config, lock), step.force, false),
+                )
+                .await?;
+                match sent {
                     Ok((object, _)) => {
                         let version = resource_version(&object).map(str::to_owned);
                         (object, version, true)
@@ -871,12 +953,12 @@ impl Run {
         let Some(patch) = merge_patch(&object, &step.removals) else {
             return Ok(Finished::Done(format!("Applied {what}")));
         };
-        let patch = match &lock {
-            Some(lock) => locked(patch, lock),
-            None => patch,
-        };
-        let request = merge_request(&self.target, &patch, false)?;
-        match send(&clients.api, request).await {
+        let baseline = step.comparable.as_ref().map(|_| comparable(&object));
+        let sent = send_held(&clients, target, baseline.as_ref(), lock, |lock| {
+            merge_request(target, &locked(&patch, lock), false)
+        })
+        .await?;
+        match sent {
             Ok(_) if applied => Ok(Finished::Done(format!(
                 "Applied {what} and removed {}",
                 removals_text(&step.removals)
@@ -885,6 +967,14 @@ impl Run {
                 "Removed {} from {what}",
                 removals_text(&step.removals)
             ))),
+            Err(kube::Error::Api(status)) if status.code == 409 && !applied => Err(IpcError::new(
+                ErrorKind::Conflict,
+                format!(
+                    "{} changed since the diff, so Twigo removed nothing: {}",
+                    sentence(what),
+                    scrub(&status.message, &step.secrets)
+                ),
+            )),
             Err(error) => {
                 let failed = scrubbed(errors::request(&error), &step.secrets);
                 let message = if applied {
@@ -1013,6 +1103,7 @@ impl Recreate {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use twigo_ipc::ResourceRef;
 
     use super::*;
 
@@ -1061,6 +1152,46 @@ mod tests {
                 "{field}"
             );
         }
+    }
+
+    #[test]
+    fn an_edit_holds_to_the_live_version_only_when_a_status_write_alone_moved_it() {
+        let live = json!({
+            "metadata": { "name": "web", "resourceVersion": "9", "generation": 2 },
+            "spec": { "replicas": 1 },
+            "status": { "replicas": 1 },
+        });
+        let opened = |base: Value, lock: &str| OpenedEdit {
+            target: ResourceRef {
+                gvr: twigo_ipc::Gvr {
+                    group: "apps".to_owned(),
+                    version: "v1".to_owned(),
+                    resource: "deployments".to_owned(),
+                },
+                namespaced: true,
+                namespace: Some("n".to_owned()),
+                name: "web".to_owned(),
+            },
+            base,
+            lock: lock.to_owned(),
+        };
+        let mut same = live.clone();
+        same["metadata"]["resourceVersion"] = json!("3");
+        same["metadata"]["generation"] = json!(1);
+        same["status"]["replicas"] = json!(0);
+        assert_eq!(
+            held_lock(&opened(same.clone(), "3"), Some(&live), true),
+            "9"
+        );
+        assert_eq!(
+            held_lock(&opened(same.clone(), "3"), Some(&live), false),
+            "3",
+            "a resource with no status subresource stays strict"
+        );
+        let mut changed = same.clone();
+        changed["spec"]["replicas"] = json!(2);
+        assert_eq!(held_lock(&opened(changed, "3"), Some(&live), true), "3");
+        assert_eq!(held_lock(&opened(same, "9"), Some(&live), true), "9");
     }
 
     #[test]
