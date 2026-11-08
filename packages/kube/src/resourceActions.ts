@@ -30,6 +30,11 @@ const SUSPENDS =
   "resource.group == batch && resource.kind =~ /^(Job|CronJob)$/";
 const CRON_JOB = "resource.group == batch && resource.kind == CronJob";
 
+/** A kind as a sentence names it: `StatefulSet` → `stateful set`. */
+function kindWords(kind: string): string {
+  return kind.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
+}
+
 /**
  * The replicas a row says its object wants: a ReplicaSet's Desired, or what
  * follows the slash of a Deployment's or StatefulSet's Ready.
@@ -230,12 +235,13 @@ export function registerResourceActions(
         if (!found) return;
         const { name } = objectOf(found.selected);
         const now = replicasOf(found.selected);
+        const what = `${kindWords(found.selected.kind)} ${name}`;
         const typed = await workbench.quickAccess.input({
           placeholder: "Replicas",
           prompt:
             now === undefined
-              ? `Scale ${found.selected.kind} ${name}`
-              : `Scale ${found.selected.kind} ${name}, now at ${String(now)}`,
+              ? `Scale ${what}`
+              : `Scale ${what}, now at ${String(now)}`,
           acceptLabel: "Scale",
           value: now === undefined ? "" : String(now),
           validate: (value) =>
@@ -280,7 +286,7 @@ export function registerResourceActions(
       title: "Cordon",
       icon: CircleSlash,
       key: "shift+c",
-      when: `${NODE} && resource.capability.patch`,
+      when: `${NODE} && !resource.cordoned && resource.capability.patch`,
       menus: [
         ["resource/context", "5_actions"],
         ["resource/details", "5_actions"],
@@ -301,7 +307,7 @@ export function registerResourceActions(
       title: "Uncordon",
       icon: CircleCheck,
       key: "shift+u",
-      when: `${NODE} && resource.capability.patch`,
+      when: `${NODE} && resource.cordoned && resource.capability.patch`,
       menus: [
         ["resource/context", "5_actions"],
         ["resource/details", "5_actions"],
@@ -362,7 +368,7 @@ export function registerResourceActions(
       title: "Suspend",
       icon: CirclePause,
       key: "shift+p",
-      when: `${SUSPENDS} && resource.capability.patch`,
+      when: `${SUSPENDS} && !resource.suspended && resource.capability.patch`,
       menus: [
         ["resource/context", "5_actions"],
         ["resource/details", "5_actions"],
@@ -383,7 +389,7 @@ export function registerResourceActions(
       title: "Resume",
       icon: CirclePlay,
       key: "shift+o",
-      when: `${SUSPENDS} && resource.capability.patch`,
+      when: `${SUSPENDS} && resource.suspended && resource.capability.patch`,
       menus: [
         ["resource/context", "5_actions"],
         ["resource/details", "5_actions"],

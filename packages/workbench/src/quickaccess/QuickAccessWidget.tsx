@@ -179,6 +179,12 @@ function Open({ session }: { session: Session }) {
       >
         <CommandInput
           autoFocus
+          // An input starts with all its value selected, as VS Code's.
+          {...(ask && {
+            onFocus: (event) => {
+              event.currentTarget.select();
+            },
+          })}
           value={value}
           onValueChange={(next) => {
             quickAccess.setValue(next);
@@ -213,6 +219,7 @@ function Open({ session }: { session: Session }) {
         </CommandList>
         <Footer
           provider={provider}
+          moves={!ask}
           acceptLabel={
             ask?.acceptLabel ?? (pick ? "Select" : provider?.acceptLabel)
           }
@@ -299,9 +306,12 @@ function Row({
  */
 function Footer({
   provider,
+  moves,
   acceptLabel,
 }: {
   provider: QuickAccessProvider | undefined;
+  /** Whether it shows rows to move through; an input does not. */
+  moves: boolean;
   /** What Enter does: `Open` unless it says. */
   acceptLabel: string | undefined;
 }) {
@@ -325,7 +335,7 @@ function Footer({
       aria-label="Keys"
       className="flex h-[30px] shrink-0 items-center gap-3.5 border-t border-border px-3 text-[11px] whitespace-nowrap text-muted-foreground"
     >
-      {move.length > 0 && <Hint keys={move}>Move</Hint>}
+      {moves && move.length > 0 && <Hint keys={move}>Move</Hint>}
       {accept.length > 0 && <Hint keys={accept}>{acceptLabel ?? "Open"}</Hint>}
       {side.length > 0 && <Hint keys={side}>Open to the side</Hint>}
       <span className="flex-1" />
