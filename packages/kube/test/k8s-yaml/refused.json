@@ -67,13 +67,13 @@
     "a: 1\n... x\n": "Unexpected scalar at node end",
     "a: 1\n? b\n": "A ? key needs its : on a line of its own, in the same column.",
     "a: 1\na: 2\n": "Map keys must be unique: a is set twice.",
-    "a: 1\n b: 2\n": "Kubectl refuses a key that spans lines.",
+    "a: 1\n b: 2\n": "Kubectl reads a raw U+2028 or U+2029 as a line break here; a double-quoted escape reads as the character.",
     "a: 1\n﻿b: 2\n": "Kubectl does not read U+FEFF here; a double-quoted escape does.",
     "a: 1\rb: 2\r": "Kubectl does not read U+000D here; a double-quoted escape does.",
     "a: 1 # c\rb: 2\n": "Kubectl does not read U+000D here; a double-quoted escape does.",
     "a: 1 # c b: 2\n": "Kubectl reads a raw U+2028 or U+2029 as a line break here; a double-quoted escape reads as the character.",
     "a: 1b: 2\n": "Kubectl does not read U+0085 here; a double-quoted escape does.",
-    "a: 1 b: 2\n": "Kubectl refuses a key that spans lines.",
+    "a: 1 b: 2\n": "Kubectl reads a raw U+2028 or U+2029 as a line break here; a double-quoted escape reads as the character.",
     "a: 2\n<<: {a: 1}\n": "The key a is set before the merge that also sets it, and kubectl takes the merge's.",
     "a: >\n  x   y\n": "Kubectl reads a raw U+2028 or U+2029 as a line break here; a double-quoted escape reads as the character.",
     "a: [\n1\n]\n": "Flow sequence in block collection must be sufficiently indented and end with a ]",

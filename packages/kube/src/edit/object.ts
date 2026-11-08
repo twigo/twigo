@@ -777,7 +777,9 @@ function scannerProblem(
         /[\n\u2028\u2029]/.test(item.key.source)
       ) {
         found = {
-          message: "Kubectl refuses a key that spans lines.",
+          message: item.key.source.includes("\n")
+            ? "Kubectl refuses a key that spans lines."
+            : SEPARATOR_MESSAGE,
           offset: item.key.offset,
         };
         return CST.visit.BREAK;
