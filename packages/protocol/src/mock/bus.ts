@@ -188,7 +188,6 @@ interface Waiting {
 /** What a preview left for the plan of its id, as Rust's `Prepared`. */
 interface Previewed {
   readonly recreate: boolean;
-  readonly space: string;
   readonly context: string;
   /** `configmaps/settings in default`. */
   readonly target: string;
@@ -311,7 +310,7 @@ export class MockBus {
     const what = `${kind.toLowerCase()} ${name}`;
     const prepared = (recreate: boolean): number => {
       const id = ++this.#previewId;
-      this.#previews.set(id, { recreate, space, context, target, what });
+      this.#previews.set(id, { recreate, context, target, what });
       return id;
     };
     if (
@@ -378,12 +377,12 @@ export class MockBus {
     }
   }
 
-  #apply(preview: number): Planned {
+  #apply(space: string, preview: number): Planned {
     const previewed = this.#previews.get(preview);
     if (previewed === undefined) {
       throw new IpcError("notFound", `no preview ${preview} waits to apply`);
     }
-    const { context, recreate, space, target, what } = previewed;
+    const { context, recreate, target, what } = previewed;
     this.#authorize(context, this.host.access(context), {
       write: { verb: "patch", target },
     });
@@ -451,7 +450,7 @@ export class MockBus {
       case "reveal":
         return this.#reveal(request.object, request.key);
       case "apply":
-        return this.#apply(request.preview);
+        return this.#apply(request.space, request.preview);
     }
   }
 

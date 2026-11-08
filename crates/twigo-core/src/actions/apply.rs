@@ -53,7 +53,6 @@ pub(crate) struct Prepared {
     pub path: String,
     pub writes: Vec<Attributes>,
     connection: Option<u64>,
-    space: String,
     target: Target,
     /// `deployment web`.
     what: String,
@@ -520,7 +519,6 @@ pub(crate) async fn preview(
                         &edited,
                         live.as_ref(),
                         clients.connection(),
-                        &space,
                     );
                 }
             }
@@ -555,7 +553,6 @@ pub(crate) async fn preview(
                 &edited,
                 live.as_ref(),
                 clients.connection(),
-                &space,
             );
         }
     }
@@ -591,7 +588,6 @@ pub(crate) async fn preview(
         path: target.path.clone(),
         writes,
         connection: clients.connection(),
-        space,
         kubectl: line,
         what,
         step: Step::Apply(Box::new(ApplyStep {
@@ -623,7 +619,6 @@ fn answer_refused(
     edited: &Value,
     live: Option<&Value>,
     connection: Option<u64>,
-    space: &str,
 ) -> Result<ApplyPreviewed, IpcError> {
     match refused {
         Refused::Conflicts(conflicts) => Ok(ApplyPreviewed::Conflicts { conflicts }),
@@ -633,9 +628,9 @@ fn answer_refused(
             let job = target.is("batch", &["jobs"]);
             let recreatable = job || target.is("", &["pods"]);
             let recreate = match (recreatable, live) {
-                (true, Some(live)) => Some(keep(recreation(
-                    target, edited, live, connection, space, job,
-                )?)?),
+                (true, Some(live)) => {
+                    Some(keep(recreation(target, edited, live, connection, job)?)?)
+                }
                 _ => None,
             };
             Ok(ApplyPreviewed::Immutable { message, recreate })
@@ -650,7 +645,6 @@ fn recreation(
     edited: &Value,
     live: &Value,
     connection: Option<u64>,
-    space: &str,
     job: bool,
 ) -> Result<Prepared, IpcError> {
     let uid = live["metadata"]["uid"]
@@ -671,7 +665,6 @@ fn recreation(
         path: target.path.clone(),
         writes,
         connection,
-        space: space.to_owned(),
         target: target.clone(),
         what: format!(
             "{} {}",
@@ -728,14 +721,18 @@ fn apply_line(
 }
 
 /// The plan of a preview, by its id, which takes it.
-pub(crate) fn apply(core: &Core, window: &str, preview: PreviewId) -> Result<Planned, IpcError> {
+pub(crate) fn apply(
+    core: &Core,
+    window: &str,
+    space: String,
+    preview: PreviewId,
+) -> Result<Planned, IpcError> {
     let prepared = core.bus.take_preview(window, preview, |prepared| {
         core.authorize(&prepared.context, &prepared.writes)
     })?;
     let Prepared {
         context,
         connection,
-        space,
         target,
         what,
         kubectl,
@@ -1018,6 +1015,53 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    fn deployment_target() -> Target {
+        Target::in_context(
+            "kind-a".to_owned(),
+            Resource {
+                group: "apps".to_owned(),
+                version: "v1".to_owned(),
+                resource: "deployments".to_owned(),
+                namespaced: true,
+            },
+            Some("n".to_owned()),
+            "web".to_owned(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn an_edit_that_names_another_object_is_refused() {
+        let target = deployment_target();
+        let live = json!({
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": { "name": "web", "namespace": "n" },
+        });
+        assert_eq!(same_object(&target, &live, &live), Ok(()));
+        for (path, value) in [
+            ("apiVersion", json!("apps/v2")),
+            ("kind", json!("StatefulSet")),
+        ] {
+            let mut edited = live.clone();
+            edited[path] = value;
+            assert_eq!(
+                same_object(&target, &live, &edited).unwrap_err().kind,
+                ErrorKind::InvalidInput,
+                "{path}"
+            );
+        }
+        for (field, value) in [("name", json!("other")), ("namespace", json!("elsewhere"))] {
+            let mut edited = live.clone();
+            edited["metadata"][field] = value;
+            assert_eq!(
+                same_object(&target, &live, &edited).unwrap_err().kind,
+                ErrorKind::InvalidInput,
+                "{field}"
+            );
+        }
+    }
 
     #[test]
     fn a_warning_header_gives_its_text() {

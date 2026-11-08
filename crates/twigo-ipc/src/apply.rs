@@ -9,7 +9,8 @@ use ts_rs::TS;
 use crate::ResourceRef;
 
 /// What a preview prepared, kept in Rust for the window that asked until a
-/// plan takes it (`PlanRequest::Apply`) or the window goes.
+/// plan takes it (`PlanRequest::Apply`) or the window goes; a newer preview
+/// of the same object replaces it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 pub struct PreviewId(pub u32);
 

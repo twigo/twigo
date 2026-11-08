@@ -1075,7 +1075,11 @@ test("apply_preview answers each case of the enum, and a ready one's plan runs o
   if (ready.state !== "ready") throw new Error("expected ready");
   expect(ready.live).toEqual({ ...EDITED, data: { a: "0" } });
   const plan = await answered(
-    backend.invoke("command_plan", { action: "apply", preview: ready.id }),
+    backend.invoke("command_plan", {
+      action: "apply",
+      space: "qa",
+      preview: ready.id,
+    }),
   );
   expect(plan.friction).toEqual({ kind: "atOnce" });
   expect(plan.confirm).toBe("Apply");
@@ -1084,7 +1088,11 @@ test("apply_preview answers each case of the enum, and a ready one's plan runs o
     { state: "done", text: "Applied configmap settings", undoUntil: null },
   ]);
   const again = await refused(
-    backend.invoke("command_plan", { action: "apply", preview: ready.id }),
+    backend.invoke("command_plan", {
+      action: "apply",
+      space: "qa",
+      preview: ready.id,
+    }),
   );
   expect(again.kind).toBe("notFound");
 });
@@ -1101,6 +1109,7 @@ test("a recreate's plan asks and names what it deletes", async () => {
   const plan = await answered(
     backend.invoke("command_plan", {
       action: "apply",
+      space: "qa",
       preview: answer.recreate,
     }),
   );
@@ -1121,7 +1130,11 @@ test("an apply is at once in read-write, asks in guarded and is blocked in read-
     );
     if (answer.state !== "ready") throw new Error("expected ready");
     const plan = await answered(
-      backend.invoke("command_plan", { action: "apply", preview: answer.id }),
+      backend.invoke("command_plan", {
+        action: "apply",
+        space: "qa",
+        preview: answer.id,
+      }),
     );
     expect(plan.friction).toEqual(expected);
   }
@@ -1136,7 +1149,11 @@ test("an apply is at once in read-write, asks in guarded and is blocked in read-
   );
   if (answer.state !== "ready") throw new Error("expected ready");
   const blocked = await refused(
-    backend.invoke("command_plan", { action: "apply", preview: answer.id }),
+    backend.invoke("command_plan", {
+      action: "apply",
+      space: "qa",
+      preview: answer.id,
+    }),
   );
   expect(blocked.kind).toBe("permissions");
 });

@@ -155,14 +155,20 @@ fn ready(answer: ApplyPreviewed) -> (PreviewId, Value, Vec<String>, Vec<String>)
     }
 }
 
-async fn plan(core: &Core, id: PreviewId) -> Plan {
-    core.command_plan("main", PlanRequest::Apply { preview: id })
-        .await
-        .unwrap()
+async fn plan(core: &Core, cluster: &Cluster, id: PreviewId) -> Plan {
+    core.command_plan(
+        "main",
+        PlanRequest::Apply {
+            space: cluster.context.clone(),
+            preview: id,
+        },
+    )
+    .await
+    .unwrap()
 }
 
-async fn applied(core: &Core, id: PreviewId) {
-    let plan = plan(core, id).await;
+async fn applied(core: &Core, cluster: &Cluster, id: PreviewId) {
+    let plan = plan(core, cluster, id).await;
     let events = run(core, &plan, None).await.unwrap();
     assert!(
         matches!(events.last(), Some(twigo_ipc::OperationEvent::Done { .. })),
@@ -214,7 +220,7 @@ async fn a_second_edit_keeps_the_first_and_twigo_owns_only_what_it_should() {
     assert!(removals.is_empty());
     assert_eq!(result["metadata"].get("managedFields"), None);
     assert_eq!(result["metadata"].get("resourceVersion"), None);
-    applied(&core, id).await;
+    applied(&core, &cluster, id).await;
 
     let live = settled(&cluster.admin, &path).await;
     assert_eq!(live["spec"]["replicas"], 5);
@@ -239,7 +245,7 @@ async fn a_second_edit_keeps_the_first_and_twigo_owns_only_what_it_should() {
         )
         .await,
     );
-    applied(&core, id).await;
+    applied(&core, &cluster, id).await;
 
     let live = settled(&cluster.admin, &path).await;
     assert_eq!(live["spec"]["replicas"], 5, "a forced replicas: 5 stayed");
@@ -307,7 +313,7 @@ async fn a_conflict_answers_its_field_and_manager_and_force_and_drop_both_work()
         .await,
     );
     assert_eq!(result["spec"]["replicas"], 1);
-    applied(&core, id).await;
+    applied(&core, &cluster, id).await;
     let after_drop = settled(&cluster.admin, &path).await;
     assert_eq!(after_drop["spec"]["replicas"], 1);
     assert_eq!(after_drop["metadata"]["annotations"]["mine"], "1");
@@ -324,7 +330,7 @@ async fn a_conflict_answers_its_field_and_manager_and_force_and_drop_both_work()
         .await,
     );
     assert_eq!(result["spec"]["replicas"], 3);
-    applied(&core, id).await;
+    applied(&core, &cluster, id).await;
     let forced = read(&cluster.admin, &path).await;
     assert_eq!(forced["spec"]["replicas"], 3);
     assert!(
@@ -368,7 +374,7 @@ async fn a_field_another_manager_owns_goes_by_the_merge_patch_inside_a_list_too(
         result["spec"]["template"]["spec"]["containers"][0].get("workingDir"),
         None
     );
-    let plan = plan(&core, id).await;
+    let plan = plan(&core, &cluster, id).await;
     assert!(
         plan.kubectl.contains("patch deployments.apps web")
             && plan.kubectl.contains("--type=merge"),
@@ -427,7 +433,7 @@ async fn a_field_only_twigo_owns_goes_without_a_merge_patch() {
         ready(preview(&core, edit(&cluster, target, &live, edited, false, vec![])).await);
     assert!(removals.is_empty(), "{removals:?}");
     assert_eq!(result["data"], json!({ "a": "1" }));
-    let plan = plan(&core, id).await;
+    let plan = plan(&core, &cluster, id).await;
     assert!(!plan.kubectl.contains(" patch "), "{}", plan.kubectl);
     let events = run(&core, &plan, None).await.unwrap();
     assert!(matches!(
@@ -470,7 +476,7 @@ async fn a_plan_s_kubectl_line_does_what_the_plan_does_with_its_merge_patch() {
     let (id, _, removals, _) =
         ready(preview(&core, edit(&cluster, target, &live, edited, true, vec![])).await);
     assert_eq!(removals, vec![".metadata.annotations.theirs"]);
-    let plan = plan(&core, id).await;
+    let plan = plan(&core, &cluster, id).await;
     assert!(
         plan.kubectl.contains("--force-conflicts"),
         "{}",
@@ -512,7 +518,7 @@ async fn a_port_without_protocol_and_an_edited_one_pair_by_key() {
     let (id, _, removals, _) =
         ready(preview(&core, edit(&cluster, target, &live, edited, true, vec![])).await);
     assert!(removals.is_empty(), "{removals:?}");
-    applied(&core, id).await;
+    applied(&core, &cluster, id).await;
 
     let after = read(&cluster.admin, &path).await;
     assert_eq!(
@@ -581,7 +587,7 @@ async fn a_stale_lock_answers_stale_and_keep_mine_does_not_revert_the_other_writ
     keep.opened.as_mut().unwrap().lock = rv(&current);
     let (id, result, _, _) = ready(preview(&core, keep).await);
     assert_eq!(result["metadata"]["labels"]["other"], "writer");
-    applied(&core, id).await;
+    applied(&core, &cluster, id).await;
 
     let after = read(&cluster.admin, &path).await;
     assert_eq!(after["metadata"]["labels"]["other"], "writer");
@@ -642,7 +648,7 @@ async fn an_immutable_field_is_caught_at_the_dry_run_and_only_a_pod_or_a_job_off
         }
         other => panic!("expected a recreate, got {other:?}"),
     };
-    let pod_plan = plan(&core, recreate).await;
+    let pod_plan = plan(&core, &cluster, recreate).await;
     assert!(pod_plan.destructive);
     let events = run(&core, &pod_plan, None).await.unwrap();
     assert!(
@@ -687,7 +693,7 @@ async fn an_immutable_field_is_caught_at_the_dry_run_and_only_a_pod_or_a_job_off
         } => recreate,
         other => panic!("expected a recreate, got {other:?}"),
     };
-    let plan = plan(&core, recreate).await;
+    let plan = plan(&core, &cluster, recreate).await;
     let events = run(&core, &plan, None).await.unwrap();
     assert!(
         matches!(events.last(), Some(twigo_ipc::OperationEvent::Done { .. })),
@@ -752,7 +758,7 @@ async fn a_recreate_s_kubectl_line_does_what_the_plan_does() {
         } => recreate,
         other => panic!("expected a recreate, got {other:?}"),
     };
-    let plan = plan(&core, recreate).await;
+    let plan = plan(&core, &cluster, recreate).await;
     kubectl(&plan, &kubeconfig);
     let recreated = read(&cluster.admin, &path).await;
     assert_ne!(recreated["metadata"]["uid"], live["metadata"]["uid"]);
@@ -823,7 +829,7 @@ async fn no_secret_value_reaches_the_webview_by_any_answer() {
     secret_text_free("the preview", &serde_json::to_string(&answer).unwrap());
     let (id, result, _, _) = ready(answer);
     assert_eq!(result["data"]["password"], "<12 bytes>");
-    let plan = plan(&core, id).await;
+    let plan = plan(&core, &cluster, id).await;
     secret_text_free("the plan", &serde_json::to_string(&plan).unwrap());
     assert!(
         plan.kubectl.ends_with(&format!("-f - -n {namespace}")),
@@ -919,7 +925,13 @@ async fn read_only_lets_the_preview_answer_and_blocks_the_apply() {
     assert_eq!(result["metadata"]["annotations"]["mine"], "1");
 
     let refused = core
-        .command_plan("main", PlanRequest::Apply { preview: id })
+        .command_plan(
+            "main",
+            PlanRequest::Apply {
+                space: cluster.context.clone(),
+                preview: id,
+            },
+        )
         .await
         .unwrap_err();
     assert_eq!(refused.kind, ErrorKind::Permissions);
@@ -933,7 +945,7 @@ async fn read_only_lets_the_preview_answer_and_blocks_the_apply() {
     })
     .await
     .unwrap();
-    applied(&core, id).await;
+    applied(&core, &cluster, id).await;
     let after = read(&cluster.admin, &path).await;
     assert_eq!(after["metadata"]["annotations"]["mine"], "1");
     cluster.delete(&namespace).await;
@@ -968,15 +980,27 @@ async fn a_preview_applies_once_and_belongs_to_its_window() {
     );
     let not_found = |error: twigo_ipc::IpcError| assert_eq!(error.kind, ErrorKind::NotFound);
     not_found(
-        core.command_plan("other", PlanRequest::Apply { preview: id })
-            .await
-            .unwrap_err(),
+        core.command_plan(
+            "other",
+            PlanRequest::Apply {
+                space: cluster.context.clone(),
+                preview: id,
+            },
+        )
+        .await
+        .unwrap_err(),
     );
-    applied(&core, id).await;
+    applied(&core, &cluster, id).await;
     not_found(
-        core.command_plan("main", PlanRequest::Apply { preview: id })
-            .await
-            .unwrap_err(),
+        core.command_plan(
+            "main",
+            PlanRequest::Apply {
+                space: cluster.context.clone(),
+                preview: id,
+            },
+        )
+        .await
+        .unwrap_err(),
     );
 
     let live = settled(&cluster.admin, &path).await;
@@ -986,9 +1010,15 @@ async fn a_preview_applies_once_and_belongs_to_its_window() {
         ready(preview(&core, edit(&cluster, target, &live, edited, true, vec![])).await);
     core.drop_window("main");
     not_found(
-        core.command_plan("main", PlanRequest::Apply { preview: again })
-            .await
-            .unwrap_err(),
+        core.command_plan(
+            "main",
+            PlanRequest::Apply {
+                space: cluster.context.clone(),
+                preview: again,
+            },
+        )
+        .await
+        .unwrap_err(),
     );
     cluster.delete(&namespace).await;
 }
@@ -1031,7 +1061,7 @@ async fn a_manifest_without_a_base_is_its_whole_object_and_comes_from_discovery(
     assert_eq!(live, Value::Null);
     assert_eq!(ignored, vec![".metadata.uid"]);
     assert_eq!(result["data"], json!({ "a": "1" }));
-    applied(&core, id).await;
+    applied(&core, &cluster, id).await;
     let after = read(&cluster.admin, &path).await;
     assert_eq!(after["data"], json!({ "a": "1" }));
     assert_eq!(
@@ -1201,7 +1231,7 @@ async fn a_crd_with_a_list_map_pairs_by_key_and_a_preserved_field_is_taken_as_it
     let (id, result, removals, _) = ready(answer);
     assert!(removals.is_empty(), "{removals:?}");
     assert_eq!(result["spec"]["free"]["keep"], json!({ "deep": 1 }));
-    applied(&core, id).await;
+    applied(&core, &cluster, id).await;
 
     let after = read(&cluster.admin, &path).await;
     assert_eq!(
@@ -1303,7 +1333,7 @@ async fn an_entry_at_another_version_is_carried_when_its_paths_still_reach_the_o
         result["spec"],
         json!({ "first": "kept", "second": "added" })
     );
-    applied(&core, id).await;
+    applied(&core, &cluster, id).await;
 
     let after = read(&cluster.admin, &stable).await;
     assert_eq!(after["spec"], json!({ "first": "kept", "second": "added" }));
@@ -1315,5 +1345,130 @@ async fn an_entry_at_another_version_is_carried_when_its_paths_still_reach_the_o
         .unwrap();
     assert_eq!(twigo["apiVersion"], format!("{group}/v1"));
     delete_crd(&cluster, &crd_name).await;
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn an_apply_and_its_merge_patch_land_together_through_the_bus() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-both").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    post(&cluster.admin, &deployments(&namespace), &deployment("web")).await;
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["metadata"]["annotations"]["mine"] = json!("1");
+    edited["metadata"]["annotations"]
+        .as_object_mut()
+        .unwrap()
+        .remove("theirs");
+    let target = deployment_ref(&namespace, "web");
+    let (id, result, removals, _) =
+        ready(preview(&core, edit(&cluster, target, &live, edited, false, vec![])).await);
+    assert_eq!(removals, vec![".metadata.annotations.theirs"]);
+    assert_eq!(result["metadata"]["annotations"].get("theirs"), None);
+    assert_eq!(result["metadata"]["annotations"]["mine"], "1");
+    applied(&core, &cluster, id).await;
+
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(after["metadata"]["annotations"]["mine"], "1");
+    assert_eq!(after["metadata"]["annotations"].get("theirs"), None);
+    assert_eq!(
+        entry(&after, "twigo", "Apply").unwrap(),
+        &json!({ "f:metadata": { "f:annotations": { "f:mine": {} } } })
+    );
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn what_the_server_refuses_shows_at_the_dry_run_and_sends_nothing() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-refused").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    post(&cluster.admin, &deployments(&namespace), &deployment("web")).await;
+    let live = settled(&cluster.admin, &path).await;
+    let target = deployment_ref(&namespace, "web");
+
+    let mut removal = view(&live);
+    removal["spec"].as_object_mut().unwrap().remove("selector");
+    match preview(
+        &core,
+        edit(&cluster, target.clone(), &live, removal, false, vec![]),
+    )
+    .await
+    {
+        ApplyPreviewed::Immutable { message, recreate } => {
+            assert!(message.contains("selector"), "{message}");
+            assert_eq!(recreate, None);
+        }
+        other => panic!("expected the merge patch's refusal, got {other:?}"),
+    }
+
+    let mut invalid = view(&live);
+    invalid["spec"]["replicas"] = json!(-1);
+    let refused = core
+        .apply_preview(
+            "main",
+            edit(&cluster, target.clone(), &live, invalid, true, vec![]),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::InvalidInput);
+    assert!(refused.message.contains("replicas"), "{}", refused.message);
+
+    let mut unknown = view(&live);
+    unknown["spec"]["bogus"] = json!(true);
+    let refused = core
+        .apply_preview(
+            "main",
+            edit(&cluster, target, &live, unknown, false, vec![]),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::InvalidInput);
+    assert!(refused.message.contains("bogus"), "{}", refused.message);
+    assert_eq!(rv(&read(&cluster.admin, &path).await), rv(&live));
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_warning_of_the_dry_run_reaches_the_preview() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-warning").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let answer = preview(
+        &core,
+        ApplyRequest {
+            space: cluster.context.clone(),
+            opened: None,
+            edited: json!({
+                "apiVersion": "networking.k8s.io/v1",
+                "kind": "Ingress",
+                "metadata": {
+                    "name": "edge",
+                    "namespace": namespace,
+                    "annotations": { "kubernetes.io/ingress.class": "nginx" },
+                },
+                "spec": { "defaultBackend": { "service": { "name": "a", "port": { "number": 80 } } } },
+            }),
+            force: false,
+            drop: vec![],
+        },
+    )
+    .await;
+    let (_, _, _, warnings) = ready(answer);
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning.contains("deprecated")),
+        "{warnings:?}"
+    );
     cluster.delete(&namespace).await;
 }

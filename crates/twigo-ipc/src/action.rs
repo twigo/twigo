@@ -73,7 +73,7 @@ pub enum PlanRequest {
     Reveal { object: SubscriptionId, key: String },
     /// Applies what a preview prepared, or for a Pod or a Job whose edit
     /// the server refused as immutable deletes it and creates it anew.
-    Apply { preview: PreviewId },
+    Apply { space: String, preview: PreviewId },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]

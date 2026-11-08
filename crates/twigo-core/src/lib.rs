@@ -323,7 +323,7 @@ impl Core {
             } => actions::suspend(self, &space, target, suspend).await?,
             PlanRequest::Undo { space } => actions::undo(self, &space).await?,
             PlanRequest::Reveal { object, key } => actions::reveal(self, window, object, key)?,
-            PlanRequest::Apply { preview } => actions::apply(self, window, preview)?,
+            PlanRequest::Apply { space, preview } => actions::apply(self, window, space, preview)?,
         };
         self.authorize(&planned.context, &planned.writes)?;
         let access = self.policy.access(&planned.context);

@@ -953,7 +953,7 @@ export type PlanId = number;
 /**
  * What a person asks a command to do.
  */
-export type PlanRequest = { "action": "delete", space: string, targets: Array<ResourceRef>, } | { "action": "scale", space: string, target: ResourceRef, replicas: number, } | { "action": "restart", space: string, target: ResourceRef, } | { "action": "cordon", space: string, node: string, unschedulable: boolean, } | { "action": "drain", space: string, node: string, } | { "action": "trigger", space: string, namespace: string, name: string, } | { "action": "suspend", space: string, target: ResourceRef, suspend: boolean, } | { "action": "undo", space: string, } | { "action": "reveal", object: SubscriptionId, key: string, } | { "action": "apply", preview: PreviewId, };
+export type PlanRequest = { "action": "delete", space: string, targets: Array<ResourceRef>, } | { "action": "scale", space: string, target: ResourceRef, replicas: number, } | { "action": "restart", space: string, target: ResourceRef, } | { "action": "cordon", space: string, node: string, unschedulable: boolean, } | { "action": "drain", space: string, node: string, } | { "action": "trigger", space: string, namespace: string, name: string, } | { "action": "suspend", space: string, target: ResourceRef, suspend: boolean, } | { "action": "undo", space: string, } | { "action": "reveal", object: SubscriptionId, key: string, } | { "action": "apply", space: string, preview: PreviewId, };
 
 export type PluginStatus = { "state": "idle" } | { "state": "waiting" } | { "state": "running", 
 /**
@@ -972,7 +972,8 @@ installHint: string | null, };
 
 /**
  * What a preview prepared, kept in Rust for the window that asked until a
- * plan takes it (`PlanRequest::Apply`) or the window goes.
+ * plan takes it (`PlanRequest::Apply`) or the window goes; a newer preview
+ * of the same object replaces it.
  */
 export type PreviewId = number;
 
