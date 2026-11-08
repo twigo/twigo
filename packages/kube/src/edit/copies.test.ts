@@ -179,6 +179,44 @@ test("what the person typed into a Secret never reaches the state", async () => 
   ]);
 });
 
+test("a Secret's manifest typed into another object's editor never reaches the state, and a ConfigMap's text that does not parse still does", async () => {
+  const configmap = "k8s://prod-eu//v1/configmaps/default/settings";
+  const typed = "password: hunter2-pasted-into-a-configmap";
+  const sent: string[] = [];
+  const real = createMockBackend("ready");
+  const backend: Backend = {
+    invoke: (command, request) => {
+      if (command === "state_set") sent.push(JSON.stringify(request));
+      return real.invoke(command, request);
+    },
+    subscribe: (command, request, onMessage) =>
+      real.subscribe(command, request, onMessage),
+  };
+  const { copies, state } = await services(backend);
+  const settings = JSON.stringify({
+    apiVersion: "v1",
+    kind: "ConfigMap",
+    metadata: { name: "settings", namespace: "default", resourceVersion: "3" },
+  });
+  const opened = { space: "prod-eu", base: settings, lock: "3" };
+
+  copies.edit(
+    configmap,
+    `apiVersion: v1\nkind: Secret\nstringData:\n  ${typed}\n`,
+    opened,
+  );
+  copies.edit(DEPLOYMENT, `replicas: 2\nnote: [unfinished\n`, {
+    space: "prod-eu",
+    base,
+    lock: "10",
+  });
+  copies.flush();
+  await state.settled();
+
+  expect(sent.join("")).not.toContain("hunter2");
+  expect(sent.join("")).toContain("unfinished");
+});
+
 test("a manifest that cannot be read is left out of the backup and does not stop the backup of the others", async () => {
   const { backend, copies, state } = await services();
   copies.edit(DEPLOYMENT, "replicas: 2\n", opened);

@@ -713,7 +713,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   - When the plan of an apply is done the copy ends, but its text stays the editor's until the live object differs from the one the copy was based on, or locked to, compared as "changed on server" is, so that the editor never shows the object as it was while the new one comes by its watch.
     A status write does not end it, as it moves the `resourceVersion` without changing the object; typing or closing the editor does, and it is never written to the state.
   - Unsaved working copies survive a restart (backups per space, the `edits` key of the space's state), written a pause of 300 ms after the last change.
-    A Secret's never is: not an object of the `secrets` resource, and not a new manifest that does not parse, names no kind yet or mentions a Secret, since the values may be typed before the kind.
+    A Secret's never is: not an object of the `secrets` resource, not the text of any editor that mentions a Secret, since a Secret's manifest can be pasted into another object's editor, and not a new manifest that does not parse or names no kind yet, since the values may be typed before the kind.
   - Closing an editor keeps its copy, which the tab shows again when the object opens anew.
   - The service also keeps each shown YAML editor's Monaco model, which holds its undo stack, and the cursor and scroll of its view, so they survive a switch between Overview and YAML.
     They go when the editor closes, the copy staying as text; a text that comes from outside, the live object once a copy has ended, replaces the model's and leaves the cursor and scroll where they were, and clears the undo stack.

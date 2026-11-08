@@ -70,21 +70,23 @@ function differs(
   );
 }
 
+function isSecretUri(uri: string): boolean {
+  const object = parseObjectUri(uri);
+  return object?.gvr.group === "" && object.gvr.resource === "secrets";
+}
+
 /**
  * Whether a copy is or may become a Secret's, whose text must never reach the
- * state file. A manifest that does not parse or names no kind yet may turn
+ * state file: an object of the `secrets` resource, text of any editor that
+ * mentions a Secret, since one can be pasted into another object's editor,
+ * and a new manifest that does not parse or names no kind yet, which may turn
  * into a Secret once its kind is typed, after the values.
  */
 export function mayHoldSecret(uri: string, text: string): boolean {
-  const object = parseObjectUri(uri);
-  if (object)
-    return object.gvr.group === "" && object.gvr.resource === "secrets";
+  if (isSecretUri(uri) || /\bSecret\b/.test(text)) return true;
+  if (parseObjectUri(uri)) return false;
   const parsed = parseManifest(text);
-  return (
-    !parsed.ok ||
-    typeof parsed.object.kind !== "string" ||
-    /\bSecret\b/.test(text)
-  );
+  return !parsed.ok || typeof parsed.object.kind !== "string";
 }
 
 /**
