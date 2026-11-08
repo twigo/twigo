@@ -141,3 +141,63 @@ export function parseLogsUri(uri: string): LogTarget | undefined {
     name,
   };
 }
+
+export const UNTITLED_SCHEME = "untitled";
+
+/** A new manifest (ARCHITECTURE 4.3): `untitled://manifest-<n>`. */
+export function untitledUri(n: number): string {
+  return `${UNTITLED_SCHEME}://manifest-${String(n)}`;
+}
+
+export function parseUntitledUri(uri: string): number | undefined {
+  const url = new URL(uri);
+  if (url.protocol !== `${UNTITLED_SCHEME}:`) return undefined;
+  const found = /^manifest-([1-9]\d*)$/.exec(url.host);
+  return found?.[1] === undefined ? undefined : Number(found[1]);
+}
+
+export const DIFF_SCHEME = "diff";
+
+/**
+ * What a `diff://` editor compares (ARCHITECTURE 4.3): the dry-run of an
+ * edit, an edit's opened object against the server's now, or any two
+ * objects.
+ */
+export type DiffInput =
+  | {
+      readonly kind: "apply" | "server";
+      /** The editor whose edit it is, an object's or a new manifest's. */
+      readonly editor: string;
+    }
+  | {
+      readonly kind: "objects";
+      readonly space: string;
+      readonly left: string;
+      readonly right: string;
+    };
+
+export function diffUri(input: DiffInput): string {
+  const query = new URLSearchParams(
+    input.kind === "objects"
+      ? { left: input.left, right: input.right }
+      : { editor: input.editor },
+  );
+  const host = input.kind === "objects" ? input.space : "edit";
+  return `${DIFF_SCHEME}://${encodeURIComponent(host)}/${input.kind}?${query.toString()}`;
+}
+
+export function parseDiffUri(uri: string): DiffInput | undefined {
+  const url = new URL(uri);
+  if (url.protocol !== `${DIFF_SCHEME}:`) return undefined;
+  const kind = url.pathname.slice(1);
+  const editor = url.searchParams.get("editor");
+  if ((kind === "apply" || kind === "server") && editor) {
+    return { kind, editor };
+  }
+  const left = url.searchParams.get("left");
+  const right = url.searchParams.get("right");
+  if (kind === "objects" && left && right) {
+    return { kind, space: decodeURIComponent(url.host), left, right };
+  }
+  return undefined;
+}
