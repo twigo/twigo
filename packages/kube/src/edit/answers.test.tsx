@@ -121,7 +121,7 @@ test("a diff of a text that changed since is outdated and cannot be applied", as
 
 const EDITED_PLUS = "apiVersion: v1\nkind: ConfigMap\ndata:\n  a: '2'";
 
-test("where an answer shows follows its kind and the variant", () => {
+test("a ready answer shows in a tab of its own, and the others in a bar over the editor", () => {
   const answers: Record<ApplyPreviewed["state"], ApplyPreviewed> = {
     unchanged: { state: "unchanged", ignored: [] },
     ready: {
@@ -138,19 +138,18 @@ test("where an answer shows follows its kind and the variant", () => {
     stale: { state: "stale", message: "" },
     immutable: { state: "immutable", message: "", recreate: null },
   };
-  const placed = (conflicts: "bar" | "diff") =>
+  expect(
     Object.fromEntries(
       Object.entries(answers).map(([state, answer]) => [
         state,
-        placementOf(answer, { conflicts }),
+        placementOf(answer),
       ]),
-    );
-  expect(placed("bar")).toEqual({
+    ),
+  ).toEqual({
     unchanged: "bar",
     ready: "page",
     conflicts: "bar",
     stale: "bar",
     immutable: "bar",
   });
-  expect(placed("diff")).toMatchObject({ conflicts: "page", ready: "page" });
 });

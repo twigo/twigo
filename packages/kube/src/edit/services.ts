@@ -46,7 +46,6 @@ export function editKeys(
       preview?.state === "answered" &&
       preview.subject.text === copies.get(uri)?.text,
     "edit.recreate": answer?.state === "immutable" && answer.recreate !== null,
-    "edit.inPlace": previews.inPlace(uri),
   };
 }
 
@@ -60,7 +59,6 @@ export const EDIT_KEYS: readonly string[] = [
   "edit.ready",
   "edit.applicable",
   "edit.recreate",
-  "edit.inPlace",
 ];
 
 export function editLookup(

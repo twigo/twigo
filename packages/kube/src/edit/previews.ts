@@ -32,32 +32,19 @@ export type Preview =
     };
 
 /**
- * Each editor's last preview, by its URI, and whether the editor shows its
- * diff in place of its text. The engine keeps what a preview prepared under
- * its id for the window, and a newer preview of the object replaces it, so a
- * preview here is the newest one asked.
+ * Each editor's last preview, by its URI. The engine keeps what a preview
+ * prepared under its id for the window, and a newer preview of the object
+ * replaces it, so a preview here is the newest one asked.
  */
 export class Previews {
   readonly changes = new Changes();
   readonly #previews = new Map<string, Preview>();
-  readonly #inPlace = new Set<string>();
   readonly #asked = new Map<string, number>();
 
   constructor(private readonly backend: Backend) {}
 
   get(editor: string): Preview | undefined {
     return this.#previews.get(editor);
-  }
-
-  inPlace(editor: string): boolean {
-    return this.#inPlace.has(editor);
-  }
-
-  setInPlace(editor: string, inPlace: boolean): void {
-    if (this.#inPlace.has(editor) === inPlace) return;
-    if (inPlace) this.#inPlace.add(editor);
-    else this.#inPlace.delete(editor);
-    this.changes.emit();
   }
 
   async run(
@@ -126,9 +113,7 @@ export class Previews {
 
   clear(editor: string): void {
     this.#asked.set(editor, (this.#asked.get(editor) ?? 0) + 1);
-    const had = this.#previews.delete(editor);
-    const shown = this.#inPlace.delete(editor);
-    if (had || shown) this.changes.emit();
+    if (this.#previews.delete(editor)) this.changes.emit();
   }
 
   #set(editor: string, preview: Preview): Preview {

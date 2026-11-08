@@ -1,7 +1,6 @@
 import { FileCode, FolderTree, GitCompare } from "lucide-react";
 import { Changes, type Workbench } from "@twigo/workbench";
 import { Explorer, EXPLORER_VIEW } from "./explorer/Explorer";
-import { ChangedMarker } from "./edit/ChangedMarker";
 import { registerEdits } from "./edit/commands";
 import { DiffEditor } from "./edit/DiffEditors";
 import { ManifestEditor } from "./edit/ManifestEditor";
@@ -116,7 +115,6 @@ export function registerKube(workbench: Workbench): void {
       />
     ),
     actions: ({ uri }) => <ObjectTabSwitch uri={uri} tabs={objectTabs} />,
-    marker: ({ uri }) => <ChangedMarker uri={uri} edits={services.edits} />,
   });
 
   editors.register({

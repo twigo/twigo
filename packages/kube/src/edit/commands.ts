@@ -1,5 +1,4 @@
 import {
-  ArrowLeft,
   Check,
   FilePlus,
   GitCompare,
@@ -24,7 +23,6 @@ import { comparisons } from "./compare";
 import { parseManifest } from "./object";
 import type { Preview, Subject } from "./previews";
 import { EDIT_KEYS, editKeys, type EditServices } from "./services";
-import { variants } from "./variants";
 
 export interface EditContext {
   readonly discovery: Discovery;
@@ -45,7 +43,6 @@ export function registerEdits(
   const { commands, menus, keybindings, editors, keys, quickAccess, spaces } =
     workbench;
   const { copies, previews } = edits;
-  const choice = variants();
 
   const editorOf = (args: unknown): string | undefined =>
     typeof args === "object" &&
@@ -122,11 +119,9 @@ export function registerEdits(
   const present = (uri: string, result: Preview) => {
     if (parseObjectUri(uri)) tabs.set(uri, "yaml");
     const page =
-      result.state === "answered" &&
-      placementOf(result.answer, choice) === "page";
+      result.state === "answered" && placementOf(result.answer) === "page";
     editors.close(diffUri({ kind: "apply", editor: uri }));
-    previews.setInPlace(uri, page && choice.diff === "inplace");
-    if (page && choice.diff === "tab") {
+    if (page) {
       editors.open(diffUri({ kind: "apply", editor: uri }));
     } else {
       editors.open(uri);
@@ -350,17 +345,6 @@ export function registerEdits(
       },
     },
     {
-      id: "k8s.edit.back",
-      title: "Back to YAML",
-      icon: ArrowLeft,
-      enablement: "edit.inPlace",
-      menus: [["edit/diff", "navigation", "edit.inPlace"]],
-      run: (uri) => {
-        previews.setInPlace(uri, false);
-        editors.open(uri);
-      },
-    },
-    {
       id: "k8s.edit.dismiss",
       title: "Dismiss",
       icon: X,
@@ -430,11 +414,6 @@ export function registerEdits(
       key: "mod+s",
       command: "k8s.edit.apply",
       when: "editorFocus && edit.dirty",
-    },
-    {
-      key: "escape",
-      command: "k8s.edit.back",
-      when: "editorFocus && edit.inPlace",
     },
   ]);
 

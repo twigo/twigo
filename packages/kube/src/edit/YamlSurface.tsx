@@ -7,7 +7,6 @@ import { AnswerView, FailedBar } from "./answers";
 import { placementOf } from "./placement";
 import type { SchemaKind } from "./schemas";
 import type { EditServices } from "./services";
-import { variants } from "./variants";
 
 const YamlEditor = lazy(() => import("./YamlEditor"));
 
@@ -74,10 +73,8 @@ export function YamlSurface({
   );
   const answered = preview?.state === "answered" ? preview : undefined;
   const barred =
-    answered !== undefined &&
-    placementOf(answered.answer, variants()) === "bar";
-  const changed =
-    variants().changed === "bar" && edits.copies.serverChanged(uri);
+    answered !== undefined && placementOf(answered.answer) === "bar";
+  const changed = edits.copies.serverChanged(uri);
 
   return (
     <div className="flex h-full min-h-0 flex-col">

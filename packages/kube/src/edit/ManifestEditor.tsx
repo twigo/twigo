@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
-import { PreviewPage } from "./answers";
 import { kindOf, parseManifest } from "./object";
 import type { EditServices } from "./services";
 import { YamlSurface } from "./YamlSurface";
@@ -16,7 +15,6 @@ export function ManifestEditor({
   const { spaces } = useWorkbench();
   const { copies, previews } = edits;
   useChanges(copies.changes);
-  useChanges(previews.changes);
   useChanges(spaces.changes);
   const copy = copies.get(uri);
   const text = copy?.text ?? "";
@@ -28,16 +26,6 @@ export function ManifestEditor({
   const target = copy?.target;
   const targetName = spaces.list.find(({ id }) => id === target)?.name;
 
-  if (previews.inPlace(uri)) {
-    return (
-      <PreviewPage
-        edits={edits}
-        uri={uri}
-        preview={previews.get(uri)}
-        current={text}
-      />
-    );
-  }
   return (
     <YamlSurface
       edits={edits}
