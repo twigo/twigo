@@ -417,7 +417,7 @@ async fn a_field_only_twigo_owns_goes_without_a_merge_patch() {
         &json!({
             "apiVersion": "v1",
             "kind": "ConfigMap",
-            "metadata": { "name": "settings", "annotations": { "mine": "1" } },
+            "metadata": { "name": "settings", "annotations": { "mine": "1", "kept": "2" } },
             "data": { "a": "1", "b": "2" },
         }),
         "twigo",
@@ -445,7 +445,7 @@ async fn a_field_only_twigo_owns_goes_without_a_merge_patch() {
 
     let after = read(&cluster.admin, &path).await;
     assert_eq!(after["data"], json!({ "a": "1" }));
-    assert_eq!(after["metadata"].get("annotations"), None);
+    assert_eq!(after["metadata"]["annotations"], json!({ "kept": "2" }));
     assert_eq!(
         entry(&after, "twigo", "Update"),
         None,
@@ -453,8 +453,7 @@ async fn a_field_only_twigo_owns_goes_without_a_merge_patch() {
     );
     assert_eq!(
         entry(&after, "twigo", "Apply").unwrap(),
-        &json!({ "f:data": { "f:a": {} }, "f:metadata": { "f:annotations": {} } }),
-        "the edit kept the emptied map, so Twigo still names it"
+        &json!({ "f:data": { "f:a": {} }, "f:metadata": { "f:annotations": { "f:kept": {} } } }),
     );
     cluster.delete(&namespace).await;
 }
@@ -4396,6 +4395,247 @@ async fn a_typo_on_the_merge_patch_route_is_refused_rather_than_lost() {
     assert!(
         refused.message.starts_with("strict decoding error"),
         "{refused:?}"
+    );
+    cluster.delete(&namespace).await;
+}
+
+fn crd_object(group: &str, kind: &str, name: &str, spec: Value) -> Value {
+    json!({
+        "apiVersion": format!("{group}/v1"),
+        "kind": kind,
+        "metadata": { "name": name },
+        "spec": spec,
+    })
+}
+
+async fn forget_other_managers(admin: &kube::Client, path: &str, written: &Value) {
+    let twigo_only: Vec<Value> = written["metadata"]["managedFields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["manager"] == "twigo")
+        .cloned()
+        .collect();
+    merge_patch(
+        admin,
+        path,
+        &json!({ "metadata": { "managedFields": twigo_only } }),
+        "other",
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn an_edit_that_leaves_a_map_or_a_list_empty_goes_by_the_one_merge_patch() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-empty").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let group = format!("e{}.twigo.test", unique());
+    let crd_name = with_crd(
+        &cluster,
+        widget_crd(
+            &group,
+            "things",
+            "Thing",
+            json!({
+                "type": "object",
+                "properties": {
+                    "other": { "type": "string" },
+                    "rules": {
+                        "type": "array",
+                        "x-kubernetes-list-type": "map",
+                        "x-kubernetes-list-map-keys": ["k"],
+                        "items": {
+                            "type": "object",
+                            "required": ["k"],
+                            "properties": { "k": { "type": "string" }, "v": { "type": "string" } },
+                        },
+                    },
+                    "tags": {
+                        "type": "array",
+                        "x-kubernetes-list-type": "set",
+                        "items": { "type": "string" },
+                    },
+                    "sub": {
+                        "type": "object",
+                        "properties": { "x": { "type": "string" }, "y": { "type": "string" } },
+                    },
+                    "labels": { "type": "object", "additionalProperties": { "type": "string" } },
+                    "free": { "type": "object", "x-kubernetes-preserve-unknown-fields": true },
+                    "conf": {
+                        "type": "object",
+                        "x-kubernetes-map-type": "atomic",
+                        "additionalProperties": { "type": "string" },
+                    },
+                    "lst": {
+                        "type": "array",
+                        "x-kubernetes-list-type": "atomic",
+                        "items": { "type": "string" },
+                    },
+                },
+            }),
+        ),
+    )
+    .await;
+    let collection = format!("/apis/{group}/v1/namespaces/{namespace}/things");
+    let admin = cluster.admin.clone();
+    eventually("the things are served", || {
+        let admin = admin.clone();
+        let collection = collection.clone();
+        async move {
+            admin
+                .request::<Value>(http::Request::get(collection).body(Vec::new()).unwrap())
+                .await
+                .is_ok()
+        }
+    })
+    .await;
+
+    for (name, applied_spec, unowned, edited_spec, by_merge_patch) in [
+        (
+            "rules",
+            json!({ "rules": [{ "k": "a", "v": "1" }] }),
+            Some(json!({ "other": "theirs" })),
+            json!({ "rules": [], "other": "theirs" }),
+            true,
+        ),
+        (
+            "tags",
+            json!({ "tags": ["a", "b"] }),
+            None,
+            json!({ "tags": [] }),
+            true,
+        ),
+        (
+            "typed",
+            json!({ "sub": { "x": "1" } }),
+            None,
+            json!({ "sub": {} }),
+            true,
+        ),
+        (
+            "additional",
+            json!({ "labels": { "a": "1" } }),
+            None,
+            json!({ "labels": {} }),
+            true,
+        ),
+        (
+            "preserved",
+            json!({ "free": { "a": { "b": 1 } } }),
+            None,
+            json!({ "free": {} }),
+            true,
+        ),
+        (
+            "nested",
+            json!({ "free": { "a": { "b": 1 }, "z": 1 } }),
+            None,
+            json!({ "free": { "a": {}, "z": 1 } }),
+            true,
+        ),
+        (
+            "unnameable",
+            json!({ "rules": [{ "k": "a" }] }),
+            Some(json!({ "rules": [{ "k": "a" }, { "k": "b" }] })),
+            json!({ "rules": [{ "k": "b" }] }),
+            true,
+        ),
+        (
+            "atomic-map",
+            json!({ "conf": { "a": "1" }, "other": "n" }),
+            None,
+            json!({ "conf": {}, "other": "n" }),
+            false,
+        ),
+        (
+            "atomic-list",
+            json!({ "lst": ["1"], "other": "n" }),
+            None,
+            json!({ "lst": [], "other": "n" }),
+            false,
+        ),
+    ] {
+        let path = format!("{collection}/{name}");
+        server_apply(
+            &cluster.admin,
+            &path,
+            &crd_object(&group, "Thing", name, applied_spec),
+            "twigo",
+        )
+        .await;
+        if let Some(unowned) = unowned {
+            let written =
+                merge_patch(&cluster.admin, &path, &json!({ "spec": unowned }), "other").await;
+            forget_other_managers(&cluster.admin, &path, &written).await;
+        }
+        let live = settled(&cluster.admin, &path).await;
+        let mut edited = view(&live);
+        edited["spec"] = edited_spec.clone();
+        let request = edit(
+            &cluster,
+            reference(&group, "v1", "things", Some(&namespace), name),
+            &live,
+            edited,
+            false,
+            vec![],
+        );
+        let answer = wait_served(&core, &request).await;
+        let (id, result) = if by_merge_patch {
+            by_patch(answer)
+        } else {
+            let (id, result, _, _) = ready(answer);
+            (id, result)
+        };
+        assert_eq!(result["spec"], edited_spec, "{name}: the preview");
+        applied(&core, &cluster, id).await;
+        let after = read(&cluster.admin, &path).await;
+        assert_eq!(after["spec"], edited_spec, "{name}: the server");
+    }
+
+    delete_crd(&cluster, &crd_name).await;
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_built_in_s_emptied_map_goes_by_the_patch_and_its_element_stays() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-emptydir").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    let mut body = with_containers("web", json!([{ "name": "app", "image": "fake:1" }]));
+    body["spec"]["template"]["spec"]["volumes"] =
+        json!([{ "name": "cache", "emptyDir": { "medium": "Memory" } }]);
+    server_apply(&cluster.admin, &path, &body, "twigo").await;
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["spec"]["template"]["spec"]["volumes"][0]["emptyDir"] = json!({});
+    let (id, result) = by_patch(
+        preview(
+            &core,
+            edit(
+                &cluster,
+                deployment_ref(&namespace, "web"),
+                &live,
+                edited,
+                false,
+                vec![],
+            ),
+        )
+        .await,
+    );
+    assert_eq!(
+        result["spec"]["template"]["spec"]["volumes"],
+        json!([{ "name": "cache", "emptyDir": {} }]),
+    );
+    applied(&core, &cluster, id).await;
+    assert_eq!(
+        read(&cluster.admin, &path).await["spec"]["template"]["spec"]["volumes"],
+        json!([{ "name": "cache", "emptyDir": {} }]),
     );
     cluster.delete(&namespace).await;
 }

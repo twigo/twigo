@@ -1114,7 +1114,7 @@ fn a_co_owner_of_a_list_element_or_a_deduced_map_keeps_a_removal_for_the_patch()
     );
     let base = view(&live);
     let mut edited = base.clone();
-    edited["items"] = json!([]);
+    edited.as_object_mut().unwrap().remove("items");
     let result = built(&live, &base, &edited, root, &[]);
     assert_eq!(result.removals, vec![], "Twigo alone holds it");
     assert!(result.config.is_some());
@@ -1190,7 +1190,7 @@ fn a_removal_keeps_the_element_it_empties_named_unless_another_manager_holds_it_
 }
 
 #[test]
-fn a_removal_keeps_the_map_or_list_it_empties_named_unless_another_manager_keeps_it() {
+fn a_removal_keeps_the_map_it_empties_in_the_configuration_unless_another_manager_keeps_it() {
     let document = apps();
     let root = deployment_root(&document);
     let volume = |fields: Value| json!({ "f:spec": { "f:template": { "f:spec": { "f:volumes": { item("cache"): fields } } } } });
@@ -1211,14 +1211,6 @@ fn a_removal_keeps_the_map_or_list_it_empties_named_unless_another_manager_keeps
         edited["spec"]["template"]["spec"]["volumes"][0]["emptyDir"] = empty_dir;
         edited
     };
-
-    let live = live_with(vec![twigo.clone()], json!({ "medium": "Memory" }));
-    let result = built(&live, &view(&live), &edited_of(&live, json!({})), root, &[]);
-    assert_eq!(
-        result.config.unwrap()["spec"]["template"]["spec"]["volumes"],
-        json!([{ "name": "cache", "emptyDir": {} }]),
-        "the edit keeps the map, and nobody else holds it"
-    );
 
     for (case, other) in [
         (
@@ -1287,18 +1279,6 @@ fn a_removal_keeps_the_map_or_list_it_empties_named_unless_another_manager_keeps
         json!({ "f:items": { item("x"): { ".": {}, "f:name": {}, "f:value": {} } } }),
     );
     let live = owned_by(
-        widget(json!({ "items": [{ "name": "x", "value": "1" }] })),
-        vec![twigo.clone()],
-    );
-    let base = view(&live);
-    let mut edited = base.clone();
-    edited["items"] = json!([]);
-    assert_eq!(
-        built(&live, &base, &edited, root, &[]).config.unwrap()["items"],
-        json!([]),
-        "the edit keeps the list, emptied"
-    );
-    let live = owned_by(
         widget(json!({ "items": [{ "name": "x", "value": "1" }, { "name": "y", "value": "2" }] })),
         vec![
             twigo,
@@ -1314,6 +1294,273 @@ fn a_removal_keeps_the_map_or_list_it_empties_named_unless_another_manager_keeps
     edited["items"].as_array_mut().unwrap().remove(0);
     let config = built(&live, &base, &edited, root, &[]).config.unwrap();
     assert_eq!(config.get("items"), None, "{config}");
+}
+
+fn emptying_document() -> Document {
+    synthetic(json!({
+        "metadata": { "type": "object", "properties": {
+            "name": { "type": "string" },
+            "annotations": { "type": "object", "additionalProperties": { "type": "string" } },
+        } },
+        "spec": { "type": "object", "properties": {
+            "note": { "type": "string" },
+            "other": { "type": "string" },
+            "rules": {
+                "type": "array",
+                "x-kubernetes-list-type": "map",
+                "x-kubernetes-list-map-keys": ["k"],
+                "items": { "type": "object", "required": ["k"], "properties": {
+                    "k": { "type": "string" },
+                    "v": { "type": "string" },
+                } },
+            },
+            "tags": {
+                "type": "array",
+                "x-kubernetes-list-type": "set",
+                "items": { "type": "string" },
+            },
+            "sub": { "type": "object", "properties": {
+                "x": { "type": "string" },
+                "y": { "type": "string" },
+            } },
+            "labels": { "type": "object", "additionalProperties": { "type": "string" } },
+            "free": { "type": "object", "x-kubernetes-preserve-unknown-fields": true },
+            "conf": {
+                "type": "object",
+                "x-kubernetes-map-type": "atomic",
+                "additionalProperties": { "type": "string" },
+            },
+            "lst": {
+                "type": "array",
+                "x-kubernetes-list-type": "atomic",
+                "items": { "type": "string" },
+            },
+            "items": {
+                "type": "array",
+                "x-kubernetes-list-type": "map",
+                "x-kubernetes-list-map-keys": ["name"],
+                "items": { "type": "object", "required": ["name"], "properties": {
+                    "name": { "type": "string" },
+                    "sub": { "type": "object", "properties": { "x": { "type": "string" } } },
+                    "nested": {
+                        "type": "array",
+                        "x-kubernetes-list-type": "map",
+                        "x-kubernetes-list-map-keys": ["id"],
+                        "items": { "type": "object", "required": ["id"], "properties": {
+                            "id": { "type": "string" },
+                        } },
+                    },
+                } },
+            },
+        } },
+    }))
+}
+
+#[test]
+fn an_edit_that_leaves_a_map_or_a_list_empty_goes_by_the_one_merge_patch() {
+    let document = emptying_document();
+    let root = synthetic_root(&document);
+    for (case, spec, edited, patch) in [
+        (
+            "a list map, Twigo's only field under spec, beside an unowned field",
+            json!({ "rules": [{ "k": "a", "v": "1" }], "other": "theirs" }),
+            json!({ "rules": [], "other": "theirs" }),
+            json!({ "rules": [] }),
+        ),
+        (
+            "a set",
+            json!({ "tags": ["a", "b"] }),
+            json!({ "tags": [] }),
+            json!({ "tags": [] }),
+        ),
+        (
+            "a typed map",
+            json!({ "sub": { "x": "1" } }),
+            json!({ "sub": {} }),
+            json!({ "sub": { "x": null } }),
+        ),
+        (
+            "an additionalProperties map",
+            json!({ "labels": { "a": "1", "b": "2" } }),
+            json!({ "labels": {} }),
+            json!({ "labels": { "a": null, "b": null } }),
+        ),
+        (
+            "a preserved map",
+            json!({ "free": { "a": { "b": 1 } } }),
+            json!({ "free": {} }),
+            json!({ "free": { "a": null } }),
+        ),
+        (
+            "a map nested in a preserved one",
+            json!({ "free": { "a": { "b": 1 }, "z": 1 } }),
+            json!({ "free": { "a": {}, "z": 1 } }),
+            json!({ "free": { "a": { "b": null } } }),
+        ),
+        (
+            "a map in a list element, which goes with its list",
+            json!({ "items": [{ "name": "x", "sub": { "x": "1" } }] }),
+            json!({ "items": [{ "name": "x", "sub": {} }] }),
+            json!({ "items": [{ "name": "x", "sub": {} }] }),
+        ),
+        (
+            "a list in a list element",
+            json!({ "items": [{ "name": "x", "nested": [{ "id": "n" }] }] }),
+            json!({ "items": [{ "name": "x", "nested": [] }] }),
+            json!({ "items": [{ "name": "x", "nested": [] }] }),
+        ),
+    ] {
+        let fields = |spec: &Value| {
+            let names: serde_json::Map<String, Value> = spec
+                .as_object()
+                .unwrap()
+                .keys()
+                .filter(|name| *name != "other")
+                .map(|name| (format!("f:{name}"), json!({})))
+                .collect();
+            json!({ "f:spec": names })
+        };
+        let live = owned_by(
+            widget(json!({ "spec": spec })),
+            vec![manager("twigo", "Apply", fields(&spec))],
+        );
+        let base = view(&live);
+        let mut changed = base.clone();
+        changed["spec"] = edited;
+        let result = built(&live, &base, &changed, root, &[]);
+        assert_eq!(result.config, None, "{case}");
+        assert_eq!(only_patch(&result), &json!({ "spec": patch }), "{case}");
+    }
+
+    let document = apps();
+    let root = deployment_root(&document);
+    let mut live = deployment_with(json!({}), vec![]);
+    live["spec"] = json!({ "template": { "spec": { "volumes": [
+        { "name": "cache", "emptyDir": { "medium": "Memory" } },
+    ] } } });
+    let base = view(&live);
+    let mut edited = base.clone();
+    edited["spec"]["template"]["spec"]["volumes"][0]["emptyDir"] = json!({});
+    let result = built(&live, &base, &edited, root, &[]);
+    assert_eq!(
+        only_patch(&result),
+        &json!({ "spec": { "template": { "spec": { "volumes": [
+            { "name": "cache", "emptyDir": {} },
+        ] } } } }),
+        "a built-in's map, the volume kept"
+    );
+}
+
+#[test]
+fn what_an_apply_can_say_empty_stays_an_apply() {
+    let document = emptying_document();
+    let root = synthetic_root(&document);
+    for (case, before, after, sent) in [
+        (
+            "an atomic map",
+            json!({ "conf": { "a": "1" } }),
+            json!({ "conf": {} }),
+            json!({ "conf": {} }),
+        ),
+        (
+            "an atomic list",
+            json!({ "lst": ["1"] }),
+            json!({ "lst": [] }),
+            json!({ "lst": [] }),
+        ),
+        (
+            "a deduced list, which is atomic",
+            json!({ "free": { "l": [1, 2] } }),
+            json!({ "free": { "l": [] } }),
+            json!({ "free": { "l": [] } }),
+        ),
+        (
+            "a map the edit adds empty",
+            json!({ "note": "n" }),
+            json!({ "note": "n", "sub": {} }),
+            json!({ "sub": {} }),
+        ),
+    ] {
+        let live = owned_by(widget(json!({ "spec": before })), vec![]);
+        let base = view(&live);
+        let mut edited = base.clone();
+        edited["spec"] = after;
+        let result = built(&live, &base, &edited, root, &[]);
+        assert_eq!(result.combined, Combined::None, "{case}");
+        assert_eq!(result.config.unwrap()["spec"], sent, "{case}");
+    }
+
+    let live = owned_by(
+        widget(json!({ "spec": { "sub": {}, "note": "n" } })),
+        vec![],
+    );
+    let base = view(&live);
+    let mut edited = base.clone();
+    edited["spec"]["note"] = json!("m");
+    let result = built(&live, &base, &edited, root, &[]);
+    assert_eq!(
+        result.combined,
+        Combined::None,
+        "a map that was empty already is no edit of it"
+    );
+}
+
+#[test]
+fn a_list_that_loses_twigo_s_last_element_while_the_edit_keeps_one_nobody_owns_goes_by_the_patch() {
+    let document = emptying_document();
+    let root = synthetic_root(&document);
+    let rule = |name: &str| format!("k:{{\"k\":\"{name}\"}}");
+    let twigo = manager(
+        "twigo",
+        "Apply",
+        json!({ "f:spec": { "f:rules": { rule("a"): { ".": {}, "f:k": {} } } } }),
+    );
+    let live = owned_by(
+        widget(json!({ "spec": { "rules": [{ "k": "a" }, { "k": "b" }] } })),
+        vec![twigo.clone()],
+    );
+    let base = view(&live);
+    let mut edited = base.clone();
+    edited["spec"]["rules"].as_array_mut().unwrap().remove(0);
+    let result = built(&live, &base, &edited, root, &[]);
+    assert_eq!(
+        only_patch(&result),
+        &json!({ "spec": { "rules": [{ "k": "b" }] } })
+    );
+
+    let live = owned_by(
+        widget(json!({ "spec": { "tags": ["a", "b"] } })),
+        vec![manager(
+            "twigo",
+            "Apply",
+            json!({ "f:spec": { "f:tags": { "v:\"a\"": {} } } }),
+        )],
+    );
+    let base = view(&live);
+    let mut edited = base.clone();
+    edited["spec"]["tags"] = json!(["b"]);
+    assert_eq!(
+        only_patch(&built(&live, &base, &edited, root, &[])),
+        &json!({ "spec": { "tags": ["b"] } })
+    );
+
+    let live = owned_by(
+        widget(json!({ "spec": { "rules": [{ "k": "a" }, { "k": "b" }] } })),
+        vec![
+            twigo,
+            manager(
+                "helm",
+                "Update",
+                json!({ "f:spec": { "f:rules": { rule("b"): { ".": {}, "f:k": {} } } } }),
+            ),
+        ],
+    );
+    let base = view(&live);
+    let mut edited = base.clone();
+    edited["spec"]["rules"].as_array_mut().unwrap().remove(0);
+    let result = built(&live, &base, &edited, root, &[]);
+    assert_eq!(result.combined, Combined::None, "another manager keeps it");
+    assert_eq!(result.config.unwrap().get("spec"), None);
 }
 
 #[test]
@@ -1947,7 +2194,9 @@ fn the_fallback_lists_every_removal_it_carries_those_the_apply_would_take_too() 
     let document = items_document();
     let root = synthetic_root(&document);
     let live = owned_by(
-        widget(json!({ "metadata": { "annotations": { "mine": "1", "theirs": "2" } } })),
+        widget(
+            json!({ "metadata": { "annotations": { "mine": "1", "theirs": "2", "kept": "3" } } }),
+        ),
         vec![
             manager(
                 "twigo",
@@ -1963,7 +2212,7 @@ fn the_fallback_lists_every_removal_it_carries_those_the_apply_would_take_too() 
     );
     let base = view(&live);
     let mut edited = base.clone();
-    edited["metadata"]["annotations"] = json!({});
+    edited["metadata"]["annotations"] = json!({ "kept": "3" });
     let result = built(&live, &base, &edited, root, &[]);
     assert_eq!(paths(&result.removals), [".metadata.annotations.theirs"]);
     let Combined::Fallback { removals, .. } = &result.combined else {

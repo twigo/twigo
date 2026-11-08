@@ -17,6 +17,14 @@ pub(super) struct Found {
     /// Lists an apply cannot express, each as the edit left it: one whose
     /// elements changed order, or whose duplicated key is touched.
     pub rewritten: Vec<(Path, Vec<Value>)>,
+    /// Whether the edit leaves empty a map or a list the object held filled,
+    /// which no apply can say: an empty list claims nothing ([`doList`]), and
+    /// a map a prune emptied is left null ([`removingWalker`]). An atomic one
+    /// is a value like any other.
+    ///
+    /// [`doList`]: https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/typed/tofieldset.go#L132-L147
+    /// [`removingWalker`]: https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/typed/remove.go#L171-L173
+    pub emptied: bool,
 }
 
 /// The changes between two maps; a key in `skip` is a list map's key, which
@@ -70,14 +78,19 @@ fn of_value(
     }
     match (before, after, node) {
         (Value::Object(before), Value::Object(after), Some(node)) if !node.atomic_map() => {
+            found.emptied |= after.is_empty();
             let changes = of_map(before, after, Some(node), &[], at, found);
             (!changes.is_empty()).then_some(Value::Object(changes))
         }
-        (Value::Array(before), Value::Array(after), Some(node)) => match node.list() {
-            ListType::Atomic => Some(Value::Array(after.clone())),
-            ListType::Set => of_set(before, after, at, found),
-            ListType::Map { keys } => of_list_map(before, after, &keys, node, at, found),
-        },
+        (Value::Array(before), Value::Array(after), Some(node)) => {
+            let list = node.list();
+            found.emptied |= after.is_empty() && list != ListType::Atomic;
+            match list {
+                ListType::Atomic => Some(Value::Array(after.clone())),
+                ListType::Set => of_set(before, after, at, found),
+                ListType::Map { keys } => of_list_map(before, after, &keys, node, at, found),
+            }
+        }
         _ => Some(after.clone()),
     }
 }

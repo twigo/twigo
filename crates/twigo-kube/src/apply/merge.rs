@@ -127,25 +127,31 @@ pub(super) fn remove(value: &mut Value, path: &[Element]) -> bool {
     }
 }
 
-/// Takes a removal out of a configuration. What it empties the edit still
-/// holds, an element with nothing left but its keys, a map or a list, and the
-/// server deletes the whole of what an apply no longer names unless another
-/// manager holds it ([`Updater::prune`]), the fields nobody owns under it
-/// included: so it stays named, a claim on what the person kept, and goes only
-/// when another manager's hold keeps it on the server anyway. That hold is a
-/// member of the set for an element or a map's key, whereas anything under it
-/// holds a field the schema declares ([`EnsureNamedFieldsAreMembers`]). A map
-/// left truly empty the server drops regardless (kind 1.37, 2026-11-08), so
-/// the claim keeps what is around it.
+/// Takes a removal out of a configuration. What it empties here the edit still
+/// holds, as a map or a list the edit left empty goes by the one patch
+/// ([`Found::emptied`]): an element with nothing left but its keys, or a map
+/// whose other fields are not Twigo's. The server deletes the whole of what an
+/// apply no longer names unless another manager holds it ([`Updater::prune`]),
+/// the fields nobody owns under it included: so it stays named, a claim on
+/// what the person kept, and goes only when another manager's hold keeps it on
+/// the server anyway. That hold is a member of the set for an element or a
+/// map's key, whereas anything under it holds a field the schema declares
+/// ([`EnsureNamedFieldsAreMembers`]). A list has no such claim, as an empty
+/// one names nothing ([`doList`]): one that loses Twigo's last element, what
+/// the edit keeps of it being nobody's, sets `unnameable`, as an apply would
+/// delete that too.
 ///
+/// [`Found::emptied`]: super::changes::Found::emptied
 /// [`Updater::prune`]: https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/merge/update.go#L256-L280
 /// [`EnsureNamedFieldsAreMembers`]: https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/fieldpath/set.go#L133-L151
+/// [`doList`]: https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/typed/tofieldset.go#L132-L147
 pub(super) fn release(
     config: &mut Value,
     path: &[Element],
     node: Option<Node<'_>>,
     at: &mut Path,
     ownership: &Ownership,
+    unnameable: &mut bool,
 ) -> bool {
     let Some((first, rest)) = path.split_first() else {
         return false;
@@ -163,11 +169,14 @@ pub(super) fn release(
             };
             at.push(first.clone());
             let field = node.and_then(|node| node.field(name));
-            let removed = release(child, rest, field, at, ownership);
-            let declared = node.is_some_and(|node| node.declares(name));
-            let empty = removed && is_empty_container(child);
-            if empty && ownership.others_keep(at, declared) {
-                map.remove(name);
+            let removed = release(child, rest, field, at, ownership, unnameable);
+            if removed && is_empty_container(child) {
+                let declared = node.is_some_and(|node| node.declares(name));
+                if ownership.others_keep(at, declared) {
+                    map.remove(name);
+                } else {
+                    *unnameable |= child.is_array();
+                }
             }
             at.pop();
             removed
@@ -185,7 +194,14 @@ pub(super) fn release(
             }
             at.push(element.clone());
             let item_node = node.and_then(|node| node.items());
-            let removed = release(&mut items[index], rest, item_node, at, ownership);
+            let removed = release(
+                &mut items[index],
+                rest,
+                item_node,
+                at,
+                ownership,
+                unnameable,
+            );
             let bare = removed && !beyond_keys(&items[index], element);
             if bare && ownership.others_keep(at, false) {
                 items.remove(index);

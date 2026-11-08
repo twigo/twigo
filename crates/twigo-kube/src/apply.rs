@@ -33,18 +33,20 @@
 //! as staying, and the dry-run's answer settles it, since what it no longer
 //! holds needs no patch.
 //!
-//! A map or a list element a removal empties stays in the configuration
-//! while the edit holds it, as the server deletes the whole of what an apply
-//! stops naming, what nobody owns in it included, unless another manager
-//! holds it (`merge::release`).
+//! A map or a list element a removal empties in the configuration stays
+//! there while the edit holds it, as the server deletes the whole of what an
+//! apply stops naming, what nobody owns in it included, unless another
+//! manager holds it (`merge::release`).
 //!
 //! Some edits no apply can express without owning what it does not change:
 //! a list's elements put in another order, one inserted before the end (the
 //! server places a new element before the next one the configuration shares
 //! with the object, but an edit moving elements names more of the list than
 //! the person changed), an element of a key held twice, changed or removed,
-//! or a change an apply cannot validate with the old field still there
-//! (`strategy: Recreate` over another manager's `rollingUpdate`). They
+//! a change an apply cannot validate with the old field still there
+//! (`strategy: Recreate` over another manager's `rollingUpdate`), a map or a
+//! list the edit leaves empty, as no apply can say it stays, empty, or a list
+//! that loses Twigo's last element while the edit keeps one nobody owns. They
 //! go by one JSON merge patch that carries the changes and the removals
 //! together ([`Combined`]), as `kubectl edit` does.
 //!
@@ -205,6 +207,7 @@ pub fn build(edit: Edit<'_>) -> Result<Built, Refusal> {
     let Found {
         mut removals,
         rewritten,
+        emptied,
     } = found;
     removals.retain(|removal| still_has(live, removal));
     let moved: Vec<String> = rewritten
@@ -219,19 +222,10 @@ pub fn build(edit: Edit<'_>) -> Result<Built, Refusal> {
     }
     let object = Value::Object(editable(live, status_subresource));
 
-    if !rewritten.is_empty() {
-        let patch = merge::combined(&object, changed, &removals, &rewritten, Some(root));
-        let combined = if patch.is_empty() {
-            Combined::None
-        } else {
-            Combined::Only(Value::Object(patch))
-        };
-        return Ok(Built {
-            config: None,
-            removals,
-            ignored,
-            combined,
-        });
+    if !rewritten.is_empty() || emptied {
+        return Ok(by_one_patch(
+            &object, changed, removals, &rewritten, root, ignored,
+        ));
     }
 
     let ownership = Ownership::of(live);
@@ -254,6 +248,7 @@ pub fn build(edit: Edit<'_>) -> Result<Built, Refusal> {
     };
     let has_changes = !changed.as_object().is_some_and(Map::is_empty);
     merge::merge(&mut config, changed.clone(), Some(root));
+    let mut unnameable = false;
     for removal in &removals {
         merge::release(
             &mut config,
@@ -261,7 +256,11 @@ pub fn build(edit: Edit<'_>) -> Result<Built, Refusal> {
             Some(root),
             &mut Path::default(),
             &ownership,
+            &mut unnameable,
         );
+    }
+    if unnameable {
+        return Ok(by_one_patch(&object, changed, removals, &[], root, ignored));
     }
     merge::retain(
         &mut config,
@@ -304,6 +303,30 @@ pub fn build(edit: Edit<'_>) -> Result<Built, Refusal> {
         ignored,
         combined,
     })
+}
+
+/// What an edit no apply can express sends: the one merge patch, or nothing
+/// when `object` is already what the edit asks.
+fn by_one_patch(
+    object: &Value,
+    changed: Value,
+    removals: Vec<Path>,
+    rewritten: &[(Path, Vec<Value>)],
+    root: Node<'_>,
+    ignored: Vec<String>,
+) -> Built {
+    let patch = merge::combined(object, changed, &removals, rewritten, Some(root));
+    let combined = if patch.is_empty() {
+        Combined::None
+    } else {
+        Combined::Only(Value::Object(patch))
+    };
+    Built {
+        config: None,
+        removals,
+        ignored,
+        combined,
+    }
 }
 
 /// The configuration of a manifest with no object behind it: all of it, but
