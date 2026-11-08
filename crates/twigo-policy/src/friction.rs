@@ -24,6 +24,9 @@ pub enum Risk {
     Wide { name: String },
     /// Secret-grade data shows (3.6).
     Reveal,
+    /// The person has just read what it changes: an apply, whose diff 6.5
+    /// shows before it runs.
+    Reviewed,
 }
 
 /// The friction of `risk` on `context`. A `read-only` context blocks a
@@ -35,6 +38,8 @@ pub fn friction(risk: &Risk, context: &str, access: &ContextAccess) -> Friction 
     match (risk, access.mode) {
         (Risk::Reveal, Mode::ReadWrite) => Friction::AtOnce,
         (Risk::Reveal, Mode::Guarded | Mode::ReadOnly) => Friction::Confirm,
+        (Risk::Reviewed, Mode::ReadWrite) => Friction::AtOnce,
+        (Risk::Reviewed, Mode::Guarded | Mode::ReadOnly) => Friction::Confirm,
         (_, Mode::Guarded | Mode::ReadOnly) => typed_context(),
         (Risk::Reversible, Mode::ReadWrite) => Friction::AtOnce,
         (Risk::Replaced, Mode::ReadWrite)
@@ -117,6 +122,20 @@ mod tests {
             (Risk::Reveal, Mode::ReadWrite, production, Friction::AtOnce),
             (Risk::Reveal, Mode::Guarded, None, Friction::Confirm),
             (Risk::Reveal, Mode::ReadOnly, None, Friction::Confirm),
+            (Risk::Reviewed, Mode::ReadWrite, None, Friction::AtOnce),
+            (
+                Risk::Reviewed,
+                Mode::ReadWrite,
+                production,
+                Friction::AtOnce,
+            ),
+            (Risk::Reviewed, Mode::Guarded, None, Friction::Confirm),
+            (
+                Risk::Reviewed,
+                Mode::ReadOnly,
+                production,
+                Friction::Confirm,
+            ),
         ];
         for (risk, mode, environment, expected) in cases {
             assert_eq!(
