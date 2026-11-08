@@ -224,11 +224,45 @@ fn invalid_body(message: &str) -> bool {
 }
 
 /// Takes every value in `secrets` out of `text`, where it stands as a whole
-/// token, so that a short value does not garble the words around it.
+/// token, so that a short value does not garble the words around it. For a
+/// Secret the patched object a refusal quotes goes whole, as no token matches
+/// what the server wrote of its values: JSON, HTML characters escaped, quoted
+/// again as a string ([`applyPatchToCurrentObject`]'s `field.Invalid`).
+///
+/// [`applyPatchToCurrentObject`]: https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/patch.go#L356-L358
 fn scrub(text: &str, secrets: &[String]) -> String {
-    secrets.iter().fold(text.to_owned(), |text, value| {
-        whole_tokens_replaced(&text, value)
-    })
+    let text = if secrets.is_empty() {
+        text.to_owned()
+    } else {
+        without_quoted_object(text)
+    };
+    secrets
+        .iter()
+        .fold(text, |text, value| whole_tokens_replaced(&text, value))
+}
+
+/// `text` with the object of a `patch: Invalid value: "…"` left out.
+fn without_quoted_object(text: &str) -> String {
+    const OPENING: &str = "patch: Invalid value: \"";
+    let Some(start) = text.find(OPENING).map(|at| at + OPENING.len()) else {
+        return text.to_owned();
+    };
+    let mut escaped = false;
+    for (index, c) in text[start..].char_indices() {
+        match c {
+            _ if escaped => escaped = false,
+            '\\' => escaped = true,
+            '"' => {
+                return format!(
+                    "{}{HIDDEN}{}",
+                    &text[..start - 1],
+                    &text[start + index + 1..]
+                );
+            }
+            _ => {}
+        }
+    }
+    text.to_owned()
 }
 
 fn whole_tokens_replaced(text: &str, value: &str) -> String {
@@ -2049,6 +2083,26 @@ mod tests {
         assert_eq!(
             scrub("a a-bcd spat a_b ahunter2 hunter2 at x= cx=", &secrets),
             format!("{HIDDEN} {HIDDEN}-bcd spat a_b ahunter2 {HIDDEN} at {HIDDEN} cx=")
+        );
+    }
+
+    #[test]
+    fn a_refusal_that_quotes_the_patched_object_loses_it_for_a_secret() {
+        let message = r#""" is invalid: patch: Invalid value: "{\"data\":{\"bad\":\"@@@\"},\"stringData\":{\"k\":\"sec\\\"ret\\nnl\\u003ctag\\u003e\"},\"type\":\"Opaque\"}": illegal base64 data at input byte 0"#;
+        assert_eq!(
+            scrub(message, &["sec\"ret\nnl<tag>".to_owned()]),
+            format!(
+                "\"\" is invalid: patch: Invalid value: {HIDDEN}: illegal base64 data at input byte 0"
+            )
+        );
+        assert_eq!(
+            scrub(message, &[]),
+            message,
+            "only a Secret has values to hide"
+        );
+        assert_eq!(
+            scrub("no quoted object here", &["x".to_owned()]),
+            "no quoted object here"
         );
     }
 

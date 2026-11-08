@@ -4639,3 +4639,46 @@ async fn a_built_in_s_emptied_map_goes_by_the_patch_and_its_element_stays() {
     );
     cluster.delete(&namespace).await;
 }
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_refusal_quoting_a_secret_s_patched_object_shows_none_of_its_values() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-quoted").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let (path, _) = secret_kept(&cluster, &namespace).await;
+    merge_patch(
+        &cluster.admin,
+        &path,
+        &json!({ "metadata": { "annotations": { "a": "1" } } }),
+        "other",
+    )
+    .await;
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = masked_base(&live);
+    edited["metadata"]["annotations"] = json!({});
+    edited["stringData"] = json!({ "k": "tYped\"quote\nline<tag>" });
+    edited["data"]["bad"] = json!("@@@");
+    let request = ApplyRequest {
+        space: cluster.context.clone(),
+        opened: Some(OpenedEdit {
+            target: reference("", "v1", "secrets", Some(&namespace), "db"),
+            base: masked_base(&live),
+            lock: rv(&live),
+            locked: None,
+        }),
+        edited,
+        force: false,
+        drop: vec![],
+    };
+    let refused = core.apply_preview("main", request).await.unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::InvalidInput, "{refused:?}");
+    assert!(
+        refused.message.contains("illegal base64"),
+        "the reason stays: {refused:?}"
+    );
+    assert!(!refused.message.contains("tYped"), "{refused:?}");
+    secret_text_free("the refusal", &refused.message);
+    cluster.delete(&namespace).await;
+}
