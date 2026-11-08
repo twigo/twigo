@@ -452,7 +452,9 @@ export function registerResourceActions(
           { action: "delete", space: list.space, targets },
           { icon: Trash2 },
         );
-        if (outcome.state === "done") selection.mark(uri, marked, false);
+        if (outcome.state === "done" || outcome.state === "stopped") {
+          selection.mark(uri, marked, false);
+        }
       },
     },
     {

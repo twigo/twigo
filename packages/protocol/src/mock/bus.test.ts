@@ -947,6 +947,17 @@ test("a delete whose object went before it ran says so and takes nothing else", 
   await run(backend, trigger.id);
   const job =
     /^Job (\S+) runs once/.exec(trigger.consequences[0] ?? "")?.[1] ?? "";
+  const later = await answered(
+    backend.invoke("command_plan", {
+      action: "trigger",
+      space: "qa",
+      namespace: "batch",
+      name: "cleanup",
+    }),
+  );
+  await run(backend, later.id);
+  const last =
+    /^Job (\S+) runs once/.exec(later.consequences[0] ?? "")?.[1] ?? "";
   const remove: PlanRequest = {
     action: "delete",
     space: "qa",
@@ -961,24 +972,25 @@ test("a delete whose object went before it ran says so and takes nothing else", 
   };
   const first = await answered(backend.invoke("command_plan", remove));
   const second = await answered(backend.invoke("command_plan", remove));
-  const cron: PlanRequest = {
-    action: "suspend",
+  const lastStays: PlanRequest = {
+    action: "delete",
     space: "qa",
-    target: {
-      gvr: { group: "batch", version: "v1", resource: "cronjobs" },
-      namespaced: true,
-      namespace: "batch",
-      name: "cleanup",
-    },
-    suspend: true,
+    targets: [
+      {
+        gvr: { group: "batch", version: "v1", resource: "jobs" },
+        namespaced: true,
+        namespace: "batch",
+        name: last,
+      },
+    ],
   };
   await run(backend, first.id);
   expect(await run(backend, second.id)).toEqual([
     { state: "running", text: `Waiting for job ${job} to go` },
     { state: "done", text: `Job ${job} was already gone`, undoUntil: null },
   ]);
-  const still = await answered(backend.invoke("command_plan", cron));
-  expect(still.question).toContain("cron job cleanup");
+  const still = await answered(backend.invoke("command_plan", lastStays));
+  expect(still.question).toContain(`job ${last}`);
 });
 
 test("pods that come and go leave each deployment its replicas", () => {
