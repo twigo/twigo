@@ -25,7 +25,8 @@
 //! A `resourceVersion` moves on every status write, so for a resource with a
 //! `status` subresource only [`comparable`] says an object changed: a preview
 //! holds to the server's version when only what a status write moves has,
-//! and does itself over when one lands between its read and its dry-run. A
+//! and does itself over when one lands between its read and any of its
+//! dry-runs, that of the combined patch included. A
 //! run that loses to one reads the object and sends again, unless
 //! [`comparable_with_owners`] tells otherwise: a co-owner that arrived since
 //! would make a removal silently not happen. The merge patch after an apply
@@ -160,6 +161,9 @@ impl Refused {
                     Self::Conflicts(conflicts)
                 }
             }
+            422 if let Some(strict) = strict_refusal(&status.message) => Self::Other(
+                IpcError::new(ErrorKind::InvalidInput, scrub(strict, secrets)),
+            ),
             422 if immutable(status) => Self::Immutable(message),
             500 if invalid_body(&status.message) => {
                 Self::Other(IpcError::new(ErrorKind::InvalidInput, message))
@@ -198,6 +202,16 @@ fn immutable(status: &Status) -> bool {
             || cause.message.contains("may not change")
             || cause.message.contains("updates to statefulset spec")
     })
+}
+
+/// What a strict merge patch's `422` says of the fields it did not know: the
+/// rest of it quotes the whole object, which holds a Secret's values and any
+/// word of it would read as a field that cannot change (kind 1.37,
+/// 2026-11-08).
+fn strict_refusal(message: &str) -> Option<&str> {
+    message
+        .rfind("strict decoding error")
+        .map(|at| &message[at..])
 }
 
 /// A body the server cannot read as the kind answers `500`: a field the
@@ -423,6 +437,24 @@ fn merge_request(
         .map_err(built)
 }
 
+/// The one merge patch of an edit, validated as strictly as an apply is:
+/// the server's default would lose a typo with only a warning.
+fn combined_request(
+    target: &Target,
+    patch: &Value,
+    dry_run: bool,
+) -> Result<http::Request<Vec<u8>>, IpcError> {
+    let params = PatchParams {
+        dry_run,
+        field_manager: Some(EDIT_FIELD_MANAGER.to_owned()),
+        ..PatchParams::default()
+    }
+    .validation_strict();
+    Request::new(collection(target))
+        .patch(&target.name, &params, &Patch::Merge(patch))
+        .map_err(built)
+}
+
 /// An answer's object and warnings, or the server's refusal, through
 /// `Client::send`, as kube-rs drops the `Warning` headers.
 async fn send(
@@ -484,7 +516,7 @@ fn held_lock(opened: &OpenedEdit, live: Option<&Value>, status_subresource: bool
 /// Sends a write held to `lock`. A `409` that is no field conflict means it
 /// lost to another write: when [`comparable_with_owners`] says the object
 /// reads the same, it sends again on the new version, up to [`ATTEMPTS`]
-/// times; otherwise that `409` stands.
+/// times; otherwise, the object gone included, that `409` stands.
 async fn send_held(
     clients: &Clients,
     target: &Target,
@@ -501,7 +533,13 @@ async fn send_held(
                 let Some(expected) = comparable_to else {
                     return Ok(Err(kube::Error::Api(status)));
                 };
-                let now = get(clients, &target.path).await?;
+                let now = match get(clients, &target.path).await {
+                    Ok(now) => now,
+                    Err(gone) if gone.kind == ErrorKind::NotFound => {
+                        return Ok(Err(kube::Error::Api(status)));
+                    }
+                    Err(failed) => return Err(failed),
+                };
                 if comparable_with_owners(&now) != *expected {
                     return Ok(Err(kube::Error::Api(status)));
                 }
@@ -750,14 +788,28 @@ pub(crate) async fn preview(
             && attempt + 1 < ATTEMPTS
         {
             lost(attempt).await;
-            let now = get(&clients, &target.path).await?;
-            if comparable(&now) == comparable(read) {
+            if let Some(now) = read_again(&clients, &target, read).await? {
                 live = Some(now);
                 attempt += 1;
                 continue;
             }
         }
         return Ok(answer);
+    }
+}
+
+/// The object once more, when only what a status write moves has changed
+/// since `read`; none when it changed, or is gone, and the `Stale` answer
+/// stands.
+async fn read_again(
+    clients: &Clients,
+    target: &Target,
+    read: &Value,
+) -> Result<Option<Value>, IpcError> {
+    match get(clients, &target.path).await {
+        Ok(now) => Ok((comparable(&now) == comparable(read)).then_some(now)),
+        Err(gone) if gone.kind == ErrorKind::NotFound => Ok(None),
+        Err(failed) => Err(failed),
     }
 }
 
@@ -909,7 +961,8 @@ async fn dry_run(
 
 /// The one merge patch in place of an apply or its patch that answered
 /// `422`, as the server validates each with the old fields still there,
-/// when its own dry-run is clean; otherwise that `422` stands.
+/// when its own dry-run is clean; a `409` of that dry-run answers as any
+/// other's does, and otherwise that `422` stands.
 async fn fell_back(
     attempt: &Try<'_>,
     combined: &Combined,
@@ -923,14 +976,20 @@ async fn fell_back(
     if status.code != 422 {
         return None;
     }
-    let (object, told) = dry_run_patch(
+    let dry_run = dry_run_patch(
         attempt.clients,
         attempt.target,
         patch,
         attempt.lock.as_deref(),
     )
-    .await
-    .ok()?;
+    .await;
+    let (object, told) = match dry_run {
+        Ok(answered) => answered,
+        Err(lost) if matches!(&lost, kube::Error::Api(status) if status.code == 409) => {
+            return Some(answer_refused(Refused::of(&lost, secrets), attempt).await);
+        }
+        Err(_) => return None,
+    };
     Some(answer_patch(
         attempt,
         secrets,
@@ -1005,20 +1064,11 @@ fn controller_owner(live: &Value) -> Option<String> {
     ))
 }
 
-/// Whether a refused create says nothing of the body, only of the object it
-/// replaces: a valid body answers `409` AlreadyExists with the name taken
-/// (kind 1.37, 2026-11-08), and the `403` of a namespace at its quota, where
-/// the old object still counts, has no structured cause, only its wording
-/// ([`exceeded quota`]).
-///
-/// [`exceeded quota`]: https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/admission/plugin/resourcequota/controller.go#L622
-fn taken_by_the_old_object(status: &Status) -> bool {
-    (status.code == 409 && status.reason == "AlreadyExists")
-        || (status.code == 403 && status.message.contains("exceeded quota"))
-}
-
-/// Whether a create of `body` would be accepted, by the server's dry-run:
-/// an invalid body answers `422` even with the name taken.
+/// Whether a create of `body` would be accepted, by the server's dry-run: a
+/// valid body answers `409` AlreadyExists with the name taken, and an
+/// invalid one `422` even so (kind 1.37, 2026-11-08). A namespace at its
+/// quota refuses it, the old object still counting, so it gets no recreate:
+/// a workload lost is worse than the person deleting and creating by hand.
 async fn can_create(clients: &Clients, target: &Target, body: &Value) -> Result<(), IpcError> {
     let path = format!(
         "{}?dryRun=All&fieldManager={FIELD_MANAGER}&fieldValidation=Strict",
@@ -1031,7 +1081,9 @@ async fn can_create(clients: &Clients, target: &Target, body: &Value) -> Result<
     .await
     {
         Ok(_) => Ok(()),
-        Err(kube::Error::Api(status)) if taken_by_the_old_object(&status) => Ok(()),
+        Err(kube::Error::Api(status)) if status.code == 409 && status.reason == "AlreadyExists" => {
+            Ok(())
+        }
         Err(error) => Err(errors::request(&error)),
     }
 }
@@ -1134,7 +1186,7 @@ async fn dry_run_patch(
     patch: &Value,
     lock: Option<&str>,
 ) -> Result<(Value, Vec<String>), kube::Error> {
-    let request = merge_request(target, &locked(patch, lock), true, EDIT_FIELD_MANAGER)
+    let request = combined_request(target, &locked(patch, lock), true)
         .expect("a merge patch is a body the server reads");
     send(&clients.api, request).await
 }
@@ -1206,7 +1258,7 @@ pub(crate) async fn apply(
     space: String,
     preview: PreviewId,
 ) -> Result<Planned, IpcError> {
-    let prepared = core.bus.take_preview(window, preview, |prepared| {
+    let (prepared, started) = core.bus.take_preview(window, preview, |prepared| {
         core.authorize(&prepared.context, &prepared.writes)
     })?;
     let Prepared {
@@ -1219,6 +1271,7 @@ pub(crate) async fn apply(
         step,
         object,
     } = prepared;
+    let preview_of = (object, started);
     let this = core.this.clone();
     let place = target.place();
     let audit_target = writes
@@ -1262,7 +1315,7 @@ pub(crate) async fn apply(
                 connection,
                 space: Some(space),
                 risk: Risk::Reviewed,
-                previewed: Some(object),
+                previewed: Some(preview_of.clone()),
                 run: Box::new(move |_| Box::pin(run.run())),
             }
         }
@@ -1292,7 +1345,7 @@ pub(crate) async fn apply(
                 connection,
                 space: Some(space),
                 risk: Risk::Reviewed,
-                previewed: Some(object),
+                previewed: Some(preview_of.clone()),
                 run: Box::new(move |_| Box::pin(run.run())),
             }
         }
@@ -1350,7 +1403,7 @@ pub(crate) async fn apply(
                 connection,
                 space: Some(space),
                 risk: Risk::Lasting,
-                previewed: Some(object),
+                previewed: Some(preview_of),
                 run: Box::new(move |progress| Box::pin(run.run(progress))),
             }
         }
@@ -1463,13 +1516,15 @@ impl Run {
 /// such as the Deployment controller's revision annotation, so it reads
 /// again, rebuilds from what the server holds now, and sends on that
 /// version, up to [`ATTEMPTS`] times: a removal is idempotent, and the lock
-/// keeps a rebuilt list from clobbering anyone.
+/// keeps a rebuilt list from clobbering anyone. An object replaced meanwhile,
+/// by its uid, is not patched.
 async fn remove_after_apply(
     clients: &Clients,
     target: &Target,
     mut object: Value,
     patch_of: impl Fn(&Value) -> Option<Value>,
 ) -> Result<(), IpcError> {
+    let uid = object["metadata"]["uid"].clone();
     let mut last = None;
     for attempt in 0..ATTEMPTS {
         let Some(patch) = patch_of(&object) else {
@@ -1483,6 +1538,12 @@ async fn remove_after_apply(
                 last = Some(status);
                 lost(attempt).await;
                 object = get(clients, &target.path).await?;
+                if object["metadata"]["uid"] != uid {
+                    return Err(IpcError::new(
+                        ErrorKind::Conflict,
+                        "the object was replaced since the apply, so Twigo patched nothing",
+                    ));
+                }
             }
             Err(error) => return Err(errors::request(&error)),
         }
@@ -1518,14 +1579,7 @@ impl PatchRun {
             target,
             step.comparable.as_ref(),
             step.lock.clone(),
-            |lock| {
-                merge_request(
-                    target,
-                    &locked(&step.patch, lock),
-                    false,
-                    EDIT_FIELD_MANAGER,
-                )
-            },
+            |lock| combined_request(target, &locked(&step.patch, lock), false),
         )
         .await?;
         match sent {
@@ -2099,29 +2153,172 @@ mod tests {
     }
 
     #[test]
-    fn a_full_quota_or_a_taken_name_says_nothing_of_a_body_and_nothing_else_does() {
-        let status = |code: u16, reason: &str, message: &str| {
-            Status::failure(message, reason).with_code(code)
+    fn a_strict_refusal_says_only_what_it_did_not_know() {
+        let quoted = r#"{\"immutable\":\"hunter2\",\"typo\":\"x\"}"#;
+        let status = |message: String, cause: String| {
+            serde_json::from_value::<Status>(json!({
+                "status": "Failure",
+                "reason": "Invalid",
+                "code": 422,
+                "message": message,
+                "details": { "causes": [{ "message": cause, "field": "patch" }] },
+            }))
+            .unwrap()
         };
-        assert!(taken_by_the_old_object(&status(
-            409,
-            "AlreadyExists",
-            "pods \"p\" already exists"
-        )));
-        assert!(taken_by_the_old_object(&status(
-            403,
-            "Forbidden",
-            "pods \"p\" is forbidden: exceeded quota: q, requested: pods=1, used: pods=1, limited: pods=1"
-        )));
-        assert!(!taken_by_the_old_object(&status(
-            403,
-            "Forbidden",
-            "pods is forbidden: User \"u\" cannot create resource \"pods\""
-        )));
-        assert!(!taken_by_the_old_object(&status(
-            409,
-            "Conflict",
-            "the object has been modified"
-        )));
+        let message = format!(
+            r#" "" is invalid: patch: Invalid value: "{quoted}": strict decoding error: unknown field "typo""#
+        );
+        let refused = status(message.clone(), message);
+        match Refused::of(
+            &kube::Error::Api(Box::new(refused)),
+            &["hunter2".to_owned()],
+        ) {
+            Refused::Other(error) => {
+                assert_eq!(error.kind, ErrorKind::InvalidInput);
+                assert_eq!(
+                    error.message,
+                    r#"strict decoding error: unknown field "typo""#
+                );
+            }
+            _ => panic!("the word immutable in the object says nothing of a field"),
+        }
+    }
+
+    #[test]
+    fn the_one_merge_patch_asks_for_strict_validation_dry_run_and_real() {
+        let target = deployment_target();
+        for dry_run in [true, false] {
+            let request = combined_request(&target, &json!({}), dry_run).unwrap();
+            let query = request.uri().query().unwrap_or_default();
+            assert!(query.contains("fieldValidation=Strict"), "{query}");
+            assert!(query.contains("fieldManager=twigo-edit"), "{query}");
+            assert_eq!(query.contains("dryRun=All"), dry_run, "{query}");
+        }
+    }
+
+    fn not_found() -> (u16, Value) {
+        (
+            404,
+            json!({
+                "kind": "Status",
+                "apiVersion": "v1",
+                "status": "Failure",
+                "reason": "NotFound",
+                "code": 404,
+                "message": "deployments.apps \"web\" not found",
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_run_that_lost_to_the_object_s_deletion_keeps_its_conflict() {
+        let target = deployment_target();
+        let (clients, seen) = scripted(vec![lost_to_a_write(), not_found()]);
+        let expected = json!({});
+        let sent = send_held(
+            &clients,
+            &target,
+            Some(&expected),
+            Some("2".to_owned()),
+            |_| Ok(http::Request::get("/x").body(Vec::new()).unwrap()),
+        )
+        .await
+        .unwrap();
+        match sent {
+            Err(kube::Error::Api(status)) => assert_eq!(status.code, 409),
+            other => panic!("expected the conflict to stand, got {other:?}"),
+        }
+        assert_eq!(seen.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_preview_that_lost_to_the_object_s_deletion_stays_stale() {
+        let target = deployment_target();
+        let (clients, _) = scripted(vec![not_found()]);
+        assert_eq!(
+            read_again(&clients, &target, &json!({})).await.unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn a_status_write_alone_is_read_again_and_anything_else_is_not() {
+        let target = deployment_target();
+        let read = json!({ "metadata": { "resourceVersion": "1" }, "spec": { "replicas": 1 } });
+        let mut moved = read.clone();
+        moved["metadata"]["resourceVersion"] = json!("2");
+        moved["status"] = json!({ "observed": 1 });
+        let (clients, _) = scripted(vec![(200, moved.clone())]);
+        assert_eq!(
+            read_again(&clients, &target, &read).await.unwrap(),
+            Some(moved)
+        );
+        let mut changed = read.clone();
+        changed["spec"]["replicas"] = json!(2);
+        let (clients, _) = scripted(vec![(200, changed)]);
+        assert_eq!(read_again(&clients, &target, &read).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn a_status_write_during_the_fallback_answers_as_any_preview_s_409() {
+        let target = deployment_target();
+        let (clients, _) = scripted(vec![lost_to_a_write()]);
+        let object = Previewed {
+            context: "kind-a".to_owned(),
+            group: "apps".to_owned(),
+            kind: "Deployment".to_owned(),
+            namespace: Some("n".to_owned()),
+            name: "web".to_owned(),
+        };
+        let edited = json!({});
+        let keep = |_: Prepared| -> Result<PreviewId, IpcError> {
+            panic!("nothing is kept from a lost dry-run")
+        };
+        let attempt = Try {
+            clients: &clients,
+            target: &target,
+            object: &object,
+            edited: &edited,
+            live: None,
+            ignored: Vec::new(),
+            secret: false,
+            comparable_to: None,
+            lock: Some("1".to_owned()),
+            keep: &keep,
+        };
+        let combined = Combined::Fallback {
+            patch: json!({ "spec": { "replicas": 2 } }),
+            removals: Vec::new(),
+        };
+        let invalid = kube::Error::Api(Box::new(
+            Status::failure("invalid", "Invalid").with_code(422),
+        ));
+        let answer = fell_back(&attempt, &combined, &invalid, &[]).await;
+        assert!(
+            matches!(answer, Some(Ok(ApplyPreviewed::Stale { .. }))),
+            "{answer:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_object_replaced_since_the_apply_is_not_patched() {
+        let target = deployment_target();
+        let mut applied = holding("2", json!(["a", "gone"]));
+        applied["metadata"]["uid"] = json!("old");
+        let mut replaced = holding("9", json!(["a", "gone"]));
+        replaced["metadata"]["uid"] = json!("new");
+        let (clients, seen) = scripted(vec![lost_to_a_write(), (200, replaced)]);
+        let failed = remove_after_apply(&clients, &target, applied, whole_args)
+            .await
+            .unwrap_err();
+        assert_eq!(failed.kind, ErrorKind::Conflict, "{failed:?}");
+        assert!(failed.message.contains("replaced"), "{failed:?}");
+        let methods: Vec<Method> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(method, _)| method.clone())
+            .collect();
+        assert_eq!(methods, [Method::PATCH, Method::GET]);
     }
 }

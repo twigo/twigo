@@ -1,6 +1,7 @@
 //! An apply of an edit on kind: what each answer of the preview is for, and
 //! what is on the server after it, field by field.
 
+use k8s_openapi::api::core::v1::{ConfigMap, Secret};
 use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 use kube::Api;
 use kube::api::PostParams;
@@ -452,7 +453,8 @@ async fn a_field_only_twigo_owns_goes_without_a_merge_patch() {
     );
     assert_eq!(
         entry(&after, "twigo", "Apply").unwrap(),
-        &json!({ "f:data": { "f:a": {} } })
+        &json!({ "f:data": { "f:a": {} }, "f:metadata": { "f:annotations": {} } }),
+        "the edit kept the emptied map, so Twigo still names it"
     );
     cluster.delete(&namespace).await;
 }
@@ -3766,7 +3768,7 @@ async fn keep_mine_holds_through_a_status_write_by_the_view_it_locked_to() {
 
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
-async fn a_full_quota_does_not_refuse_a_recreate_and_the_recreate_goes_through_it() {
+async fn a_namespace_at_its_quota_gets_no_recreate_and_the_message_says_why() {
     let cluster = Cluster::connect().await;
     let namespace = cluster.namespace("apply-quota").await;
     let dir = tempfile::tempdir().unwrap();
@@ -3796,7 +3798,7 @@ async fn a_full_quota_does_not_refuse_a_recreate_and_the_recreate_goes_through_i
     .await;
     let live = read(&cluster.admin, &path).await;
     let uid = live["metadata"]["uid"].clone();
-    let id = recreate_of(
+    match preview(
         &core,
         edit(
             &cluster,
@@ -3807,11 +3809,15 @@ async fn a_full_quota_does_not_refuse_a_recreate_and_the_recreate_goes_through_i
             vec![],
         ),
     )
-    .await;
-    applied(&core, &cluster, id).await;
-    let after = read(&cluster.admin, &path).await;
-    assert_ne!(after["metadata"]["uid"], uid);
-    assert_eq!(after["spec"]["containers"][0]["command"], json!(["sh"]));
+    .await
+    {
+        ApplyPreviewed::Immutable {
+            message,
+            recreate: None,
+        } => assert!(message.contains("exceeded quota"), "{message}"),
+        other => panic!("expected no recreate, got {other:?}"),
+    }
+    assert_eq!(read(&cluster.admin, &path).await["metadata"]["uid"], uid);
     cluster.delete(&namespace).await;
 }
 
@@ -3898,5 +3904,522 @@ async fn a_name_with_the_word_immutable_is_no_immutable_field() {
         .await
         .unwrap_err();
     assert_eq!(refused.kind, ErrorKind::InvalidInput, "{refused:?}");
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_value_deleted_from_an_env_element_keeps_the_element_on_the_server() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-env").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    server_apply(
+        &cluster.admin,
+        &path,
+        &with_containers(
+            "web",
+            json!([{
+                "name": "app",
+                "image": "fake:1",
+                "env": env_of(&[("A", "1"), ("B", "2")]),
+            }]),
+        ),
+        "twigo",
+    )
+    .await;
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    containers_mut(&mut edited)[0]["env"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("value");
+    let (id, result, removals, _) = ready(
+        preview(
+            &core,
+            edit(
+                &cluster,
+                deployment_ref(&namespace, "web"),
+                &live,
+                edited,
+                false,
+                vec![],
+            ),
+        )
+        .await,
+    );
+    let expected = json!([{ "name": "A" }, { "name": "B", "value": "2" }]);
+    assert_eq!(removals, Vec::<String>::new());
+    assert_eq!(containers(&result)[0]["env"], expected);
+    applied(&core, &cluster, id).await;
+    assert_eq!(
+        containers(&read(&cluster.admin, &path).await)[0]["env"],
+        expected
+    );
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_target_port_deleted_from_a_service_s_only_port_keeps_the_port() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-port").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("/api/v1/namespaces/{namespace}/services/s");
+    server_apply(
+        &cluster.admin,
+        &path,
+        &json!({
+            "apiVersion": "v1",
+            "kind": "Service",
+            "metadata": { "name": "s" },
+            "spec": {
+                "selector": { "a": "b" },
+                "ports": [{ "port": 80, "protocol": "TCP", "targetPort": 8080 }],
+            },
+        }),
+        "twigo",
+    )
+    .await;
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["spec"]["ports"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("targetPort");
+    let (id, result, _, _) = ready(
+        preview(
+            &core,
+            edit(
+                &cluster,
+                reference("", "v1", "services", Some(&namespace), "s"),
+                &live,
+                edited,
+                false,
+                vec![],
+            ),
+        )
+        .await,
+    );
+    let expected = json!([{ "port": 80, "protocol": "TCP", "targetPort": 80 }]);
+    assert_eq!(result["spec"]["ports"], expected);
+    applied(&core, &cluster, id).await;
+    assert_eq!(read(&cluster.admin, &path).await["spec"]["ports"], expected);
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_map_emptied_by_an_edit_that_keeps_it_stays_on_the_server() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-emptied").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    let mut object = with_containers("web", json!([{ "name": "app", "image": "fake:1" }]));
+    object["spec"]["template"]["spec"]["volumes"] =
+        json!([{ "name": "cache", "emptyDir": { "medium": "Memory" } }]);
+    server_apply(&cluster.admin, &path, &object, "twigo").await;
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["spec"]["template"]["spec"]["volumes"][0]["emptyDir"] = json!({});
+    let (id, result, _, _) = ready(
+        preview(
+            &core,
+            edit(
+                &cluster,
+                deployment_ref(&namespace, "web"),
+                &live,
+                edited,
+                false,
+                vec![],
+            ),
+        )
+        .await,
+    );
+    let expected = json!([{ "name": "cache", "emptyDir": {} }]);
+    assert_eq!(result["spec"]["template"]["spec"]["volumes"], expected);
+    applied(&core, &cluster, id).await;
+    assert_eq!(
+        read(&cluster.admin, &path).await["spec"]["template"]["spec"]["volumes"],
+        expected
+    );
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_field_nobody_owns_stays_when_twigo_s_last_field_in_its_map_goes() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-unowned").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .subsec_nanos();
+    let group = format!("a{nanos}.twigo.test");
+    let crd_name = with_crd(
+        &cluster,
+        widget_crd(
+            &group,
+            "things",
+            "Thing",
+            json!({
+                "type": "object",
+                "properties": {
+                    "settings": {
+                        "type": "object",
+                        "properties": {
+                            "mine": { "type": "string" },
+                            "theirs": { "type": "string" },
+                        },
+                    },
+                },
+            }),
+        ),
+    )
+    .await;
+    let collection = format!("/apis/{group}/v1/namespaces/{namespace}/things");
+    let path = format!("{collection}/one");
+    let admin = cluster.admin.clone();
+    eventually("the things are served", || {
+        let admin = admin.clone();
+        let collection = collection.clone();
+        async move {
+            admin
+                .request::<Value>(http::Request::get(collection).body(Vec::new()).unwrap())
+                .await
+                .is_ok()
+        }
+    })
+    .await;
+    server_apply(
+        &cluster.admin,
+        &path,
+        &json!({
+            "apiVersion": format!("{group}/v1"),
+            "kind": "Thing",
+            "metadata": { "name": "one" },
+            "spec": { "settings": { "mine": "1" } },
+        }),
+        "twigo",
+    )
+    .await;
+    let written = merge_patch(
+        &cluster.admin,
+        &path,
+        &json!({ "spec": { "settings": { "theirs": "2" } } }),
+        "other",
+    )
+    .await;
+    let twigo_only: Vec<Value> = written["metadata"]["managedFields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["manager"] == "twigo")
+        .cloned()
+        .collect();
+    merge_patch(
+        &cluster.admin,
+        &path,
+        &json!({ "metadata": { "managedFields": twigo_only } }),
+        "other",
+    )
+    .await;
+    let live = settled(&cluster.admin, &path).await;
+    assert_eq!(entry(&live, "other", "Update"), None, "nobody owns theirs");
+
+    let mut edited = view(&live);
+    edited["spec"]["settings"]
+        .as_object_mut()
+        .unwrap()
+        .remove("mine");
+    let request = edit(
+        &cluster,
+        reference(&group, "v1", "things", Some(&namespace), "one"),
+        &live,
+        edited,
+        false,
+        vec![],
+    );
+    let (id, result, _, _) = ready(wait_served(&core, &request).await);
+    assert_eq!(result["spec"], json!({ "settings": { "theirs": "2" } }));
+    applied(&core, &cluster, id).await;
+    assert_eq!(
+        read(&cluster.admin, &path).await["spec"],
+        json!({ "settings": { "theirs": "2" } })
+    );
+    delete_crd(&cluster, &crd_name).await;
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_co_owner_s_field_stays_when_twigo_s_last_field_in_the_element_goes() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-coowner").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    let port = json!({ "name": "http", "containerPort": 80, "protocol": "TCP" });
+    server_apply(
+        &cluster.admin,
+        &path,
+        &with_containers(
+            "web",
+            json!([{ "name": "app", "image": "fake:1", "ports": [port] }]),
+        ),
+        "twigo",
+    )
+    .await;
+    let mut with_host = port.clone();
+    with_host["hostPort"] = json!(8080);
+    merge_patch(
+        &cluster.admin,
+        &path,
+        &json!({ "spec": { "template": { "spec": { "containers": [
+            { "name": "app", "image": "fake:1", "ports": [with_host] },
+        ] } } } }),
+        "other",
+    )
+    .await;
+    let live = settled(&cluster.admin, &path).await;
+    let other = entry(&live, "other", "Update").unwrap().to_string();
+    assert!(
+        !other.contains("\".\""),
+        "the other holds no member: {other}"
+    );
+    let mut edited = view(&live);
+    containers_mut(&mut edited)[0]["ports"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("name");
+    let (id, _, removals, _) = ready(
+        preview(
+            &core,
+            edit(
+                &cluster,
+                deployment_ref(&namespace, "web"),
+                &live,
+                edited,
+                false,
+                vec![],
+            ),
+        )
+        .await,
+    );
+    assert_eq!(removals, Vec::<String>::new());
+    applied(&core, &cluster, id).await;
+    assert_eq!(
+        containers(&read(&cluster.admin, &path).await)[0]["ports"],
+        json!([{ "containerPort": 80, "protocol": "TCP", "hostPort": 8080 }]),
+    );
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_null_on_a_nullable_field_reaches_the_server() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-null").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .subsec_nanos();
+    let group = format!("a{nanos}.twigo.test");
+    let crd_name = with_crd(
+        &cluster,
+        widget_crd(
+            &group,
+            "things",
+            "Thing",
+            json!({
+                "type": "object",
+                "properties": {
+                    "note": { "type": "string", "nullable": true },
+                },
+            }),
+        ),
+    )
+    .await;
+    let collection = format!("/apis/{group}/v1/namespaces/{namespace}/things");
+    let path = format!("{collection}/one");
+    let admin = cluster.admin.clone();
+    eventually("the things are served", || {
+        let admin = admin.clone();
+        let collection = collection.clone();
+        async move {
+            admin
+                .request::<Value>(http::Request::get(collection).body(Vec::new()).unwrap())
+                .await
+                .is_ok()
+        }
+    })
+    .await;
+    server_apply(
+        &cluster.admin,
+        &path,
+        &json!({
+            "apiVersion": format!("{group}/v1"),
+            "kind": "Thing",
+            "metadata": { "name": "one" },
+            "spec": { "note": "set" },
+        }),
+        "twigo",
+    )
+    .await;
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["spec"]["note"] = Value::Null;
+    let request = edit(
+        &cluster,
+        reference(&group, "v1", "things", Some(&namespace), "one"),
+        &live,
+        edited,
+        false,
+        vec![],
+    );
+    let (id, result, removals, _) = ready(wait_served(&core, &request).await);
+    assert_eq!(removals, Vec::<String>::new());
+    assert_eq!(result["spec"], json!({ "note": null }));
+    applied(&core, &cluster, id).await;
+    assert_eq!(
+        read(&cluster.admin, &path).await["spec"],
+        json!({ "note": null })
+    );
+    delete_crd(&cluster, &crd_name).await;
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_config_map_deleted_after_its_preview_does_not_come_back() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-gone-cm").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    cluster.config_map(&namespace, "m").await;
+    let path = format!("/api/v1/namespaces/{namespace}/configmaps/m");
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["data"] = json!({ "a": "1" });
+    let (id, _, _, _) = ready(
+        preview(
+            &core,
+            edit(
+                &cluster,
+                reference("", "v1", "configmaps", Some(&namespace), "m"),
+                &live,
+                edited,
+                false,
+                vec![],
+            ),
+        )
+        .await,
+    );
+    let maps = Api::<ConfigMap>::namespaced(cluster.admin.clone(), &namespace);
+    maps.delete("m", &Default::default()).await.unwrap();
+
+    let plan = plan(&core, &cluster, id).await;
+    let events = run(&core, &plan, None).await.unwrap();
+    let error = failed(&events);
+    assert_eq!(error.kind, ErrorKind::Conflict, "{error:?}");
+    assert!(error.message.contains("changed since"), "{error:?}");
+    assert_eq!(Cluster::uid(&maps, "m").await, None, "nothing was created");
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_secret_deleted_after_its_preview_does_not_come_back_with_real_values() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-gone-secret").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let (_, live) = secret_kept(&cluster, &namespace).await;
+    let mut edited = masked_base(&live);
+    edited["metadata"]["annotations"] = json!({ "note": "1" });
+    let request = ApplyRequest {
+        space: cluster.context.clone(),
+        opened: Some(OpenedEdit {
+            target: reference("", "v1", "secrets", Some(&namespace), "db"),
+            base: masked_base(&live),
+            lock: rv(&live),
+            locked: None,
+        }),
+        edited,
+        force: false,
+        drop: vec![],
+    };
+    let (id, _, _, _) = ready(preview(&core, request).await);
+    let secrets = Api::<Secret>::namespaced(cluster.admin.clone(), &namespace);
+    secrets.delete("db", &Default::default()).await.unwrap();
+
+    let plan = plan(&core, &cluster, id).await;
+    let events = run(&core, &plan, None).await.unwrap();
+    let error = failed(&events);
+    assert_eq!(error.kind, ErrorKind::Conflict, "{error:?}");
+    secret_text_free("the failure", &error.message);
+    assert_eq!(
+        Cluster::uid(&secrets, "db").await,
+        None,
+        "nothing was created"
+    );
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_typo_on_the_merge_patch_route_is_refused_rather_than_lost() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-strict").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    post(
+        &cluster.admin,
+        &deployments(&namespace),
+        &with_containers(
+            "web",
+            json!([{
+                "name": "app",
+                "image": "fake:1",
+                "env": env_of(&[("A", "1"), ("B", "2")]),
+            }]),
+        ),
+    )
+    .await;
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    containers_mut(&mut edited)[0]["env"]
+        .as_array_mut()
+        .unwrap()
+        .reverse();
+    edited["spec"]["typoField"] = json!(1);
+    let refused = core
+        .apply_preview(
+            "main",
+            edit(
+                &cluster,
+                deployment_ref(&namespace, "web"),
+                &live,
+                edited,
+                false,
+                vec![],
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::InvalidInput, "{refused:?}");
+    assert!(refused.message.contains("typoField"), "{refused:?}");
+    assert!(
+        refused.message.starts_with("strict decoding error"),
+        "{refused:?}"
+    );
     cluster.delete(&namespace).await;
 }

@@ -884,12 +884,45 @@ fn previewed(name: &str) -> Previewed {
 }
 
 async fn plan_of(core: &Core, window: &str, object: &Previewed, runs: &Runs) -> twigo_ipc::Plan {
+    let started = core.bus.start_preview(window, object);
+    plan_started(core, window, object, started, runs)
+        .await
+        .unwrap()
+}
+
+async fn plan_started(
+    core: &Core,
+    window: &str,
+    object: &Previewed,
+    started: u64,
+    runs: &Runs,
+) -> Result<twigo_ipc::Plan, twigo_ipc::IpcError> {
     core.catalog.contexts().await;
     let ticket = core.bus.ticket(window);
     let access = core.policy.access("kind-a");
     let mut planned = planned(core, Risk::Reviewed, runs);
-    planned.previewed = Some(object.clone());
-    core.bus.keep(ticket, planned, &access).unwrap()
+    planned.previewed = Some((object.clone(), started));
+    core.bus.keep(ticket, planned, &access)
+}
+
+#[tokio::test]
+async fn a_newer_preview_stops_a_plan_still_being_built_from_an_older_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path());
+    let runs = Runs::default();
+    let object = previewed("m");
+    let older = core.bus.start_preview("main", &object);
+    let newer = core.bus.start_preview("main", &object);
+
+    let refused = plan_started(&core, "main", &object, older, &runs)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::Conflict, "{refused:?}");
+
+    let kept = plan_started(&core, "main", &object, newer, &runs)
+        .await
+        .unwrap();
+    core.bus.cancel("main", kept.id);
 }
 
 #[tokio::test]
@@ -898,7 +931,10 @@ async fn a_newer_preview_drops_a_plan_made_from_an_older_one_and_no_other() {
     let core = running(dir.path());
     let runs = Runs::default();
     let object = previewed("m");
-    let older = plan_of(&core, "main", &object, &runs).await;
+    let started = core.bus.start_preview("main", &object);
+    let older = plan_started(&core, "main", &object, started, &runs)
+        .await
+        .unwrap();
     let other = plan_of(&core, "main", &previewed("n"), &runs).await;
     let unrelated = new_plan(&core, "main", Risk::Reviewed, &runs).await;
     let elsewhere = plan_of(&core, "other", &object, &runs).await;
@@ -934,7 +970,9 @@ async fn a_manifest_whose_preview_fails_at_discovery_still_ends_the_older_previe
         .bus
         .keep_preview(&ticket, started, Prepared::of(object.clone()))
         .unwrap();
-    let waiting_after = plan_of(&core, "main", &object, &runs).await;
+    let waiting_after = plan_started(&core, "main", &object, started, &runs)
+        .await
+        .unwrap();
 
     let refused = core
         .apply_preview(

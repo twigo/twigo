@@ -60,9 +60,10 @@ pub(crate) struct Planned {
     pub affected: Vec<Affected>,
     pub kubectl: String,
     pub doing: String,
-    /// The object of the preview it was made from: a newer preview of it
-    /// drops the plan while it waits.
-    pub previewed: Option<Previewed>,
+    /// The object of the preview it was made from, with what `start_preview`
+    /// answered that preview: a newer preview of it drops the plan, or
+    /// keeps it from being kept at all while it is still being built.
+    pub previewed: Option<(Previewed, u64)>,
     pub run: Run,
 }
 
@@ -202,9 +203,9 @@ struct Window {
     /// Counts the drops, so a plan a dropped page asked for is not kept.
     generation: u64,
     entries: HashMap<PlanId, Entry>,
-    /// What each preview prepared, until a plan takes it or a newer preview
-    /// of the same object starts.
-    previews: HashMap<PreviewId, Prepared>,
+    /// What each preview prepared, with what `start_preview` answered it,
+    /// until a plan takes it or a newer preview of the same object starts.
+    previews: HashMap<PreviewId, (Prepared, u64)>,
     /// The newest preview started of each object, so an older one that
     /// finishes later keeps nothing.
     started: HashMap<Previewed, u64>,
@@ -252,6 +253,14 @@ impl Bus {
                 "the page that asked for the plan is gone",
             ));
         }
+        if let Some((object, started)) = &planned.previewed
+            && window.started.get(object) != Some(started)
+        {
+            return Err(IpcError::new(
+                ErrorKind::Conflict,
+                "a newer preview of this object replaced this one",
+            ));
+        }
         let plan = Plan {
             id,
             context: planned.context.clone(),
@@ -286,9 +295,11 @@ impl Bus {
         inner.next_started += 1;
         let started = inner.next_started;
         let window = inner.windows.entry(window.to_owned()).or_default();
-        window.previews.retain(|_, kept| kept.object != *object);
+        window
+            .previews
+            .retain(|_, (kept, _)| kept.object != *object);
         window.entries.retain(|_, entry| {
-            !matches!(entry, Entry::Waiting(waiting) if waiting.planned.previewed.as_ref() == Some(object))
+            !matches!(entry, Entry::Waiting(waiting) if waiting.planned.previewed.as_ref().is_some_and(|(previewed, _)| previewed == object))
         });
         window.started.insert(object.clone(), started);
         started
@@ -318,21 +329,22 @@ impl Bus {
                 "a newer preview of this object replaced this one",
             ));
         }
-        window.previews.insert(id, prepared);
+        window.previews.insert(id, (prepared, started));
         Ok(id)
     }
 
-    /// Takes what a preview prepared, so none is applied twice, once
-    /// `allowed` lets it; refused previews stay for their window.
+    /// Takes what a preview prepared, so none is applied twice, with what
+    /// `start_preview` answered it, once `allowed` lets it; refused previews
+    /// stay for their window.
     pub(crate) fn take_preview(
         &self,
         window: &str,
         id: PreviewId,
         allowed: impl FnOnce(&Prepared) -> Result<(), IpcError>,
-    ) -> Result<Prepared, IpcError> {
+    ) -> Result<(Prepared, u64), IpcError> {
         let mut inner = self.inner();
         let held = inner.windows.get_mut(window);
-        let Some(prepared) = held.as_ref().and_then(|held| held.previews.get(&id)) else {
+        let Some((prepared, _)) = held.as_ref().and_then(|held| held.previews.get(&id)) else {
             return Err(IpcError::new(
                 ErrorKind::NotFound,
                 format!("no preview {} waits to apply", id.0),
