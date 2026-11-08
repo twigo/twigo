@@ -31,6 +31,10 @@ const UNDO_MS = 30_000;
 /** How long a triggered Job runs before it completes. */
 const JOB_MS = 4000;
 
+/** What a CronJob's resume says, as Rust's `suspend::RESUMED`. */
+const RESUMED =
+  "Its schedule starts jobs again, and the latest run it missed while suspended starts at once, unless its starting deadline has passed.";
+
 /** What a command risks, as `twigo_policy::friction::Risk` says. */
 type Risk =
   | { readonly kind: "reversible" }
@@ -434,92 +438,110 @@ export class MockBus {
     const following: ObjectRef[] = [];
     const deletes: (() => void)[] = [];
     let replacedBy: string | undefined;
+    // As Rust's: an object gone since it was marked stays out.
+    const kept: ResourceRef[] = [];
+    const left: string[] = [];
+    let missing: IpcError | undefined;
     for (const target of targets) {
-      const namespace = namespaceOf(target);
-      const { name } = target;
-      const object = (objectKind: string, version: string): ObjectRef => ({
-        group,
-        version,
-        kind: objectKind,
-        namespace,
-        name,
-      });
-      if (resource === "pods") {
-        const pod = cluster.pods.find(
-          (candidate) =>
-            candidate.namespace === namespace && candidate.name === name,
-        );
-        if (!pod) throw gone(name);
-        objects.push(object("Pod", "v1"));
-        replacedBy = `${deploymentOf(pod)}-${pod.templateHash}`;
-        deletes.push(() => {
-          const still = cluster.pods.find((candidate) => candidate === pod);
-          if (still) cluster.deletePod(still, Date.now());
+      try {
+        const namespace = namespaceOf(target);
+        const { name } = target;
+        const object = (objectKind: string, version: string): ObjectRef => ({
+          group,
+          version,
+          kind: objectKind,
+          namespace,
+          name,
         });
-      } else if (resource === "nodes") {
-        if (!cluster.nodes.some((node) => node.name === name)) throw gone(name);
-        objects.push(object("Node", "v1"));
-        deletes.push(() => {
-          cluster.deleteNode(name);
-        });
-      } else if (resource === "deployments") {
-        const pods = this.#deployment(cluster, target);
-        objects.push(object("Deployment", "v1"));
-        const sets = new Set(pods.map((pod) => pod.templateHash));
-        for (const hash of sets) {
-          following.push({
-            group: "apps",
-            version: "v1",
-            kind: "ReplicaSet",
-            namespace,
-            name: `${name}-${hash}`,
+        if (resource === "pods") {
+          const pod = cluster.pods.find(
+            (candidate) =>
+              candidate.namespace === namespace && candidate.name === name,
+          );
+          if (!pod) throw gone(name);
+          objects.push(object("Pod", "v1"));
+          replacedBy = `${deploymentOf(pod)}-${pod.templateHash}`;
+          deletes.push(() => {
+            const still = cluster.pods.find((candidate) => candidate === pod);
+            if (still) cluster.deletePod(still, Date.now());
+          });
+        } else if (resource === "nodes") {
+          if (!cluster.nodes.some((node) => node.name === name))
+            throw gone(name);
+          objects.push(object("Node", "v1"));
+          deletes.push(() => {
+            cluster.deleteNode(name);
+          });
+        } else if (resource === "deployments") {
+          const pods = this.#deployment(cluster, target);
+          objects.push(object("Deployment", "v1"));
+          const sets = new Set(pods.map((pod) => pod.templateHash));
+          for (const hash of sets) {
+            following.push({
+              group: "apps",
+              version: "v1",
+              kind: "ReplicaSet",
+              namespace,
+              name: `${name}-${hash}`,
+            });
+          }
+          following.push(...pods.map(podRef));
+          deletes.push(() => {
+            if (namespace !== null) cluster.deleteDeployment(namespace, name);
+            cluster.emptied.delete(`${namespace ?? ""}/${name}`);
+          });
+        } else {
+          const list: (CronJob | Job)[] =
+            resource === "jobs" ? cluster.jobs : cluster.cronJobs;
+          const found = list.find(
+            (candidate) =>
+              candidate.namespace === namespace && candidate.name === name,
+          );
+          if (!found) throw gone(name);
+          objects.push(object(resource === "jobs" ? "Job" : "CronJob", "v1"));
+          if (resource === "cronjobs") {
+            following.push(
+              ...cluster.jobs
+                .filter(
+                  (job) => job.namespace === namespace && job.owner === name,
+                )
+                .map((job) => ({
+                  group: "batch",
+                  version: "v1",
+                  kind: "Job",
+                  namespace,
+                  name: job.name,
+                })),
+            );
+          }
+          deletes.push(() => {
+            list.splice(list.indexOf(found), 1);
+            if (resource === "cronjobs") {
+              for (const job of cluster.jobs.filter(
+                (candidate) =>
+                  candidate.namespace === namespace && candidate.owner === name,
+              ))
+                cluster.jobs.splice(cluster.jobs.indexOf(job), 1);
+            }
+            cluster.version++;
           });
         }
-        following.push(...pods.map(podRef));
-        deletes.push(() => {
-          if (namespace !== null) cluster.deleteDeployment(namespace, name);
-          cluster.emptied.delete(`${namespace ?? ""}/${name}`);
-        });
-      } else {
-        const list: (CronJob | Job)[] =
-          resource === "jobs" ? cluster.jobs : cluster.cronJobs;
-        const found = list.find(
-          (candidate) =>
-            candidate.namespace === namespace && candidate.name === name,
-        );
-        if (!found) throw gone(name);
-        objects.push(object(resource === "jobs" ? "Job" : "CronJob", "v1"));
-        if (resource === "cronjobs") {
-          following.push(
-            ...cluster.jobs
-              .filter(
-                (job) => job.namespace === namespace && job.owner === name,
-              )
-              .map((job) => ({
-                group: "batch",
-                version: "v1",
-                kind: "Job",
-                namespace,
-                name: job.name,
-              })),
-          );
+        kept.push(target);
+      } catch (error) {
+        if (!(error instanceof IpcError) || error.kind !== "notFound") {
+          throw error;
         }
-        deletes.push(() => {
-          list.splice(list.indexOf(found), 1);
-          if (resource === "cronjobs") {
-            for (const job of cluster.jobs.filter(
-              (candidate) =>
-                candidate.namespace === namespace && candidate.owner === name,
-            ))
-              cluster.jobs.splice(cluster.jobs.indexOf(job), 1);
-          }
-          cluster.version++;
-        });
+        left.push(target.name);
+        missing ??= error;
       }
     }
-    const several = targets.length > 1;
+    const [shown] = kept;
+    if (!shown) {
+      throw missing ?? new IpcError("invalidInput", "nothing to delete");
+    }
+    const several = kept.length > 1;
     const namespaces = new Set(
-      targets.map(namespaceOf).filter((namespace) => namespace !== null),
+      kept.map(namespaceOf).filter((namespace) => namespace !== null),
     );
     const place =
       namespaces.size === 0
@@ -528,10 +550,10 @@ export class MockBus {
           ? ` in ${[...namespaces][0] ?? ""}`
           : ` in ${String(namespaces.size)} namespaces`;
     const what = several
-      ? counted(targets.length, kind.words)
-      : `${kind.words} ${first.name}`;
+      ? counted(kept.length, kind.words)
+      : `${kind.words} ${shown.name}`;
     const byNamespace = new Map<string | null, string[]>();
-    for (const target of targets) {
+    for (const target of kept) {
       const namespace = namespaceOf(target);
       byNamespace.set(namespace, [
         ...(byNamespace.get(namespace) ?? []),
@@ -544,19 +566,24 @@ export class MockBus {
         ([namespace, names]) =>
           `kubectl --context ${context} delete ${kind.name} ${names.join(" ")}${inNamespace(namespace)}`,
       )
-      .join(" && ");
+      .join("; ");
     const wide = resource === "nodes";
     const consequences: string[] = [];
     let risk: Risk;
     if (several) {
       risk = { kind: "wide", name: context };
     } else if (wide) {
-      risk = { kind: "wide", name: first.name };
+      risk = { kind: "wide", name: shown.name };
     } else if (resource === "pods" && replacedBy !== undefined) {
       consequences.push(`Its replica set ${replacedBy} replaces it.`);
       risk = { kind: "replaced" };
     } else {
       risk = { kind: "lasting" };
+    }
+    if (left.length > 0) {
+      consequences.push(
+        `Gone already, so not in this delete: ${left.join(", ")}.`,
+      );
     }
     const affected: Affected[] = [];
     if (several) affected.push({ title: "Deletes", objects });
@@ -587,7 +614,7 @@ export class MockBus {
         tell({
           state: "running",
           text: several
-            ? `Waiting for ${String(targets.length)} of ${what} to go`
+            ? `Waiting for ${String(kept.length)} of ${what} to go`
             : `Waiting for ${what} to go`,
         });
         setTimeout(() => {
@@ -965,7 +992,7 @@ export class MockBus {
             consequences: [
               suspend
                 ? "No new jobs start on its schedule until it resumes; those running go on."
-                : "Its schedule starts jobs again.",
+                : RESUMED,
             ],
           }
         : suspend
@@ -1000,6 +1027,9 @@ export class MockBus {
             context,
             write,
             asks: () => {
+              if (suspend && resource === "cronjobs") {
+                return { ...AT_ONCE, consequences: [RESUMED] };
+              }
               if (suspend || resource !== "jobs") return AT_ONCE;
               const why = left();
               if (why) throw new IpcError("conflict", why);

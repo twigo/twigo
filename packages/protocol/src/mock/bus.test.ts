@@ -844,3 +844,56 @@ test("a Job that completes before its suspend runs is not suspended, nor its res
     `Job ${next} has completed since you resumed it, so Twigo left it`,
   );
 });
+
+test("a delete of marked rows leaves out one gone since, and a cron job's resume says what it starts", async () => {
+  const backend = createMockBackend("live");
+  await answered(backend.invoke("space_open", "qa"));
+  const { namespace, name } = pod("qa");
+  const ref = (named: string) => ({
+    gvr: { group: "", version: "v1", resource: "pods" },
+    namespaced: true,
+    namespace,
+    name: named,
+  });
+  const plan = await answered(
+    backend.invoke("command_plan", {
+      action: "delete",
+      space: "qa",
+      targets: [ref(name), ref("ghost")],
+    }),
+  );
+  expect(plan.question).toBe(`Delete pod ${name} in ${namespace} from qa?`);
+  expect(plan.friction).toEqual({ kind: "countdown", seconds: 5 });
+  expect(plan.consequences).toContain(
+    "Gone already, so not in this delete: ghost.",
+  );
+  await answered(backend.invoke("command_cancel", plan.id));
+  const error = await refused(
+    backend.invoke("command_plan", {
+      action: "delete",
+      space: "qa",
+      targets: [ref("ghost")],
+    }),
+  );
+  expect(error.kind).toBe("notFound");
+
+  const cron = (suspend: boolean): PlanRequest => ({
+    action: "suspend",
+    space: "qa",
+    target: {
+      gvr: { group: "batch", version: "v1", resource: "cronjobs" },
+      namespaced: true,
+      namespace: "batch",
+      name: "cleanup",
+    },
+    suspend,
+  });
+  const suspended = await answered(backend.invoke("command_plan", cron(true)));
+  await run(backend, suspended.id);
+  const back = await answered(
+    backend.invoke("command_plan", { action: "undo", space: "qa" }),
+  );
+  expect(back.consequences).toEqual([
+    "Its schedule starts jobs again, and the latest run it missed while suspended starts at once, unless its starting deadline has passed.",
+  ]);
+});

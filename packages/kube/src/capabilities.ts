@@ -119,6 +119,7 @@ export class Capabilities {
     const list = this.#lists.get(entry);
     if (list?.asked === asked && list.basis === basis) return;
     this.#lists.set(entry, { asked, basis, answers: {} });
+    if (list && Object.keys(list.answers).length > 0) this.changes.emit();
     const current = () => {
       const now = this.#lists.get(entry);
       return now?.asked === asked && now.basis === basis;

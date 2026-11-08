@@ -268,3 +268,38 @@ test("the delete of marked rows asks for those rows, not the selected one", asyn
   );
   expect(workbench.commands.enabled("k8s.resource.delete", lookup)).toBe(true);
 });
+
+test("a row moved onto from one whose delete was refused may be deleted while its own review is out", async () => {
+  const workbench = await openInStaging("ready", "k8s-list://staging/v1/pods");
+  const original = workbench.backend.invoke.bind(workbench.backend);
+  let refused: string | null = null;
+  let held = false;
+  vi.spyOn(workbench.backend, "invoke").mockImplementation(
+    (command: string, request: unknown) => {
+      if (command !== "access_review") {
+        return original(command as never, request as never);
+      }
+      const query = request as AccessQuery;
+      if (held) return new Promise(() => undefined);
+      return Promise.resolve(
+        query.checks.map((check) => {
+          if (check.verb === "delete" && check.name !== null)
+            refused ??= check.name;
+          return !(check.verb === "delete" && check.name === refused);
+        }),
+      );
+    },
+  );
+  const main = await selectFirst();
+  await settle(4);
+  const lookup = () => workbench.keys.lookup(main);
+  expect(workbench.commands.enabled("k8s.resource.delete", lookup())).toBe(
+    false,
+  );
+  held = true;
+  fireEvent.keyDown(main, { code: "ArrowDown", key: "ArrowDown" });
+  await settle(4);
+  expect(workbench.commands.enabled("k8s.resource.delete", lookup())).toBe(
+    true,
+  );
+});
