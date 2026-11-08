@@ -3,10 +3,13 @@ import type { Selected } from "./selection";
 
 /**
  * What a selected row's cells say of its object, as context keys of its
- * list, so a menu offers Uncordon only on a cordoned node and Resume only
- * on a suspended Job or CronJob. The cells are as kube-apiserver prints
- * them (kind 1.37, 2026-11-08): a node's Status `Ready,SchedulingDisabled`,
- * a Job's Status `Suspended`, a CronJob's Suspend `True`.
+ * list, so a menu offers Uncordon only on a cordoned node, Resume only on a
+ * suspended Job or CronJob, and neither Suspend nor Resume on a Job that
+ * ended. The cells are as kube-apiserver prints them (kind 1.37,
+ * 2026-11-08; kubernetes v1.37.1, `pkg/printers/internalversion/printers.go`):
+ * a node's Status `Ready,SchedulingDisabled`, a Job's Status `Suspended`, or
+ * `Complete`, `Failed`, `Terminating`, `FailureTarget` or `SuccessCriteriaMet`
+ * once it ends, a CronJob's Suspend `True`.
  */
 const STATES: readonly {
   readonly key: string;
@@ -30,6 +33,21 @@ const STATES: readonly {
     kind: "Job",
     column: "Status",
     holds: (cell) => cell === "Suspended",
+  },
+  {
+    key: "resource.ended",
+    group: "batch",
+    kind: "Job",
+    column: "Status",
+    holds: (cell) =>
+      typeof cell === "string" &&
+      [
+        "Complete",
+        "Failed",
+        "Terminating",
+        "FailureTarget",
+        "SuccessCriteriaMet",
+      ].includes(cell),
   },
   {
     key: "resource.suspended",

@@ -147,11 +147,12 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
     fields: ["metadata.name", "metadata.namespace"],
     rows: (cluster, withNamespace) =>
       cluster.jobs.map((job) => {
-        const status = job.suspend
-          ? "Suspended"
-          : job.completed === null
-            ? "Running"
-            : "Complete";
+        const status =
+          job.completed !== null
+            ? "Complete"
+            : job.suspend
+              ? "Suspended"
+              : "Running";
         return {
           id: job.id,
           namespace: job.namespace,

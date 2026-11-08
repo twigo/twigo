@@ -367,7 +367,7 @@ export function registerResourceActions(
       title: "Suspend",
       icon: CirclePause,
       key: "shift+p",
-      when: `${SUSPENDS} && !resource.suspended && resource.capability.patch`,
+      when: `${SUSPENDS} && !resource.suspended && !resource.ended && resource.capability.patch`,
       menus: [
         ["resource/context", "5_actions"],
         ["resource/details", "5_actions"],
@@ -388,7 +388,7 @@ export function registerResourceActions(
       title: "Resume",
       icon: CirclePlay,
       key: "shift+o",
-      when: `${SUSPENDS} && resource.suspended && resource.capability.patch`,
+      when: `${SUSPENDS} && resource.suspended && !resource.ended && resource.capability.patch`,
       menus: [
         ["resource/context", "5_actions"],
         ["resource/details", "5_actions"],
@@ -431,7 +431,7 @@ export function registerResourceActions(
       icon: Trash2,
       key: "mod+backspace",
       keyWhen: "listMarked",
-      when: "resource.capability.delete",
+      when: "marked.capability.delete",
       menus: [["resource/marked", "8_delete"]],
       run: async (lookup) => {
         const uri = editors.active;

@@ -652,3 +652,113 @@ test("a viewer may read and nothing else", async () => {
     ),
   ).toEqual([true, true, true]);
 });
+
+test("only a Job's latest start completes it, and one that completed is neither suspended nor resumed", async () => {
+  const backend = createMockBackend("live");
+  await answered(backend.invoke("space_open", "qa"));
+  const execute = async (plan: number) => {
+    await answered(
+      backend.subscribe(
+        "command_execute",
+        { plan, typed: null },
+        () => undefined,
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(10);
+  };
+  const trigger = await answered(
+    backend.invoke("command_plan", {
+      action: "trigger",
+      space: "qa",
+      namespace: "batch",
+      name: "cleanup",
+    }),
+  );
+  await execute(trigger.id);
+  const job = /^Job (\S+) runs once/.exec(trigger.consequences[0] ?? "")?.[1];
+  const suspend = (on: boolean): PlanRequest => ({
+    action: "suspend",
+    space: "qa",
+    target: {
+      gvr: { group: "batch", version: "v1", resource: "jobs" },
+      namespaced: true,
+      namespace: "batch",
+      name: job ?? "",
+    },
+    suspend: on,
+  });
+  await execute(
+    (await answered(backend.invoke("command_plan", suspend(true)))).id,
+  );
+  await vi.advanceTimersByTimeAsync(1000);
+  await execute(
+    (await answered(backend.invoke("command_plan", suspend(false)))).id,
+  );
+  await vi.advanceTimersByTimeAsync(3000);
+  const running = await answered(backend.invoke("command_plan", suspend(true)));
+  expect(running.friction).toEqual({ kind: "confirm" });
+  await answered(backend.invoke("command_cancel", running.id));
+  await vi.advanceTimersByTimeAsync(1100);
+  const error = await refused(backend.invoke("command_plan", suspend(true)));
+  expect(error.kind).toBe("invalidInput");
+  expect(error.message).toBe(
+    `Job ${job ?? ""} has completed, so there is nothing to suspend`,
+  );
+});
+
+test("a scale whose replicas moved since its plan scales nothing, and one that finds them there offers no undo", async () => {
+  const backend = createMockBackend("live");
+  await answered(backend.invoke("space_open", "qa"));
+  const { target, name, count } = deployment();
+  const scale = (replicas: number): PlanRequest => ({
+    action: "scale",
+    space: "qa",
+    target,
+    replicas,
+  });
+  const late = await answered(backend.invoke("command_plan", scale(count + 3)));
+  const there = await answered(
+    backend.invoke("command_plan", scale(count + 1)),
+  );
+  const again = await answered(
+    backend.invoke("command_plan", scale(count + 1)),
+  );
+  await run(backend, there.id);
+  expect(await run(backend, late.id)).toEqual([
+    {
+      state: "failed",
+      error: {
+        kind: "conflict",
+        message: `Deployment ${name} has ${String(count + 1)} replicas now, not the ${String(count)} Twigo asked about, so it scaled nothing`,
+      },
+    },
+  ]);
+  expect(await run(backend, again.id)).toEqual([
+    {
+      state: "done",
+      text: `Deployment ${name} has ${String(count + 1)} replicas already`,
+      undoUntil: null,
+    },
+  ]);
+});
+
+test("a cordon that finds the node cordoned already offers no undo", async () => {
+  const backend = createMockBackend("live");
+  await answered(backend.invoke("space_open", "qa"));
+  const cordon: PlanRequest = {
+    action: "cordon",
+    space: "qa",
+    node: "qa-node-1",
+    unschedulable: true,
+  };
+  const first = await answered(backend.invoke("command_plan", cordon));
+  const second = await answered(backend.invoke("command_plan", cordon));
+  await run(backend, first.id);
+  expect(await run(backend, second.id)).toEqual([
+    {
+      state: "done",
+      text: "Node qa-node-1 is cordoned already",
+      undoUntil: null,
+    },
+  ]);
+});

@@ -568,6 +568,32 @@ test("an undo's dialog closes when the undo ends", async () => {
   await expect(undone).resolves.toEqual({ state: "cancelled" });
 });
 
+test("an undo whose plan comes back after the undo ended asks nothing", async () => {
+  vi.spyOn(notify, "undoable").mockReturnValue({ dismiss: vi.fn() });
+  const until = Date.now() + 30_000;
+  const scaled = await started(plan({ kind: "atOnce" }), [
+    { state: "done", text: "Scaled deployment web to 2", undoUntil: until },
+  ]);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await scaled.outcome;
+  const { operations, backend } = scaled.workbench;
+  let answer: (planned: Plan) => void = () => undefined;
+  const invoke = vi.spyOn(backend, "invoke");
+  invoke.mockImplementationOnce(
+    () =>
+      new Promise<Plan>((resolve) => {
+        answer = resolve;
+      }),
+  );
+  const undone = operations.undo("dev");
+  await act(() => vi.advanceTimersByTimeAsync(30_000));
+  answer({ ...plan({ kind: "confirm" }), id: 9 });
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  expect(operations.asking).toBeUndefined();
+  await expect(undone).resolves.toEqual({ state: "cancelled" });
+  expect(invoke).toHaveBeenCalledWith("command_cancel", 9);
+});
+
 test("a done run whose undo is not offered still says so", async () => {
   const success = vi.spyOn(notify, "success");
   vi.spyOn(notify, "undoable").mockReturnValue({ dismiss: vi.fn() });

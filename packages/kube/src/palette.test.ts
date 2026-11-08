@@ -31,6 +31,7 @@ async function withEveryEnablement() {
   workbench.keys.set("resource.scalable", true);
   for (const capability of [
     "resource.capability.delete",
+    "marked.capability.delete",
     "resource.capability.patch",
     "resource.capability.patch/scale",
     "capability.create.pods/eviction",

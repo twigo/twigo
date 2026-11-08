@@ -65,7 +65,7 @@ test("each list asks for its own resource, and again when its selection moves", 
   expect(capabilities.values("pods", keys)).toEqual({
     "resource.capability.delete": true,
   });
-  await Promise.resolve();
+  await settled();
   expect(capabilities.values("pods", keys)).toEqual({
     "resource.capability.delete": false,
   });
@@ -81,7 +81,7 @@ test("each list asks for its own resource, and again when its selection moves", 
   expect(capabilities.values("deployments", keys)).toEqual({
     "resource.capability.delete": true,
   });
-  await Promise.resolve();
+  await settled();
   expect(capabilities.values("deployments", keys)).toEqual({
     "resource.capability.delete": false,
   });
@@ -91,4 +91,57 @@ test("each list asks for its own resource, and again when its selection moves", 
   expect(invoke).toHaveBeenCalledTimes(4);
   capabilities.ask("deployments", "qa", DEPLOYMENTS, "web", keys, {});
   expect(invoke).toHaveBeenCalledTimes(5);
+});
+
+function settled(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
+test("the delete of marked rows holds only where every namespace they are in allows it", async () => {
+  const invoke = vi.fn(
+    (_command: string, request: { namespace: string | null }) =>
+      Promise.resolve([request.namespace === "shop"]),
+  );
+  const capabilities = new Capabilities(
+    { invoke } as unknown as Pick<Backend, "invoke">,
+    vi.fn(),
+  );
+  const BASIS = {};
+  expect(capabilities.marked("deployments")).toBe(true);
+  capabilities.askMarked(
+    "deployments",
+    "qa",
+    DEPLOYMENTS,
+    ["shop", "shop"],
+    BASIS,
+  );
+  await settled();
+  expect(invoke).toHaveBeenCalledTimes(1);
+  expect(invoke).toHaveBeenLastCalledWith("access_review", {
+    space: "qa",
+    namespace: "shop",
+    checks: [
+      {
+        verb: "delete",
+        group: "apps",
+        resource: "deployments",
+        subresource: null,
+      },
+    ],
+  });
+  expect(capabilities.marked("deployments")).toBe(true);
+  capabilities.askMarked(
+    "deployments",
+    "qa",
+    DEPLOYMENTS,
+    ["shop", "web"],
+    BASIS,
+  );
+  await settled();
+  expect(invoke).toHaveBeenCalledTimes(3);
+  expect(capabilities.marked("deployments")).toBe(false);
+  capabilities.closed("deployments");
+  expect(capabilities.marked("deployments")).toBe(true);
 });

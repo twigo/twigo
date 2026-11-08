@@ -9,6 +9,12 @@ const NAMED = "capability.";
 /** The prefixes of the capability keys (ARCHITECTURE 5.1). */
 export const CAPABILITY_PREFIXES = [OWN, NAMED] as const;
 
+/** Whether the person may delete a list's marked rows, wherever they are. */
+export const MARKED_DELETE = "marked.capability.delete";
+const DELETE = `${OWN}delete`;
+/** Beside a list's own entry, the entry of its marked rows. */
+const MARKED = "#marked";
+
 /**
  * What RBAC lets the person do, as the `capability.*` context keys say it
  * (ARCHITECTURE 5.1), per list editor: each list asks Rust, which keeps
@@ -54,37 +60,78 @@ export class Capabilities {
     keys: readonly string[],
     basis: unknown,
   ): void {
+    this.#ask(uri, space, resource, [namespace ?? null], keys, basis);
+  }
+
+  /**
+   * Asks whether the person may delete a list's marked rows, in each
+   * namespace they are in, as `ask` asks for the selected one: the marks,
+   * not the selection, are what its Delete takes.
+   */
+  askMarked(
+    uri: string,
+    space: string,
+    resource: Gvr,
+    namespaces: readonly (string | undefined)[],
+    basis: unknown,
+  ): void {
+    const where = [
+      ...new Set(namespaces.map((namespace) => namespace ?? null)),
+    ];
+    this.#ask(`${uri}${MARKED}`, space, resource, where, [DELETE], basis);
+  }
+
+  /** `MARKED_DELETE` for a list. */
+  marked(uri: string): boolean {
+    return this.values(`${uri}${MARKED}`, [DELETE])[DELETE] ?? true;
+  }
+
+  /** Each key holds where every namespace's answer says yes. */
+  #ask(
+    entry: string,
+    space: string,
+    resource: Gvr,
+    namespaces: readonly (string | null)[],
+    keys: readonly string[],
+    basis: unknown,
+  ): void {
     const checks = keys.flatMap((key) => {
       const access = accessOf(key, resource);
       return access ? [{ key, access }] : [];
     });
-    const asked = JSON.stringify([space, namespace ?? null, checks]);
-    const list = this.#lists.get(uri);
+    const asked = JSON.stringify([space, [...namespaces].sort(), checks]);
+    const list = this.#lists.get(entry);
     if (list?.asked === asked && list.basis === basis) return;
-    this.#lists.set(uri, { asked, basis, answers: list?.answers ?? {} });
-    if (checks.length === 0) return;
-    this.backend
-      .invoke("access_review", {
-        space,
-        namespace: namespace ?? null,
-        checks: checks.map(({ access }) => access),
-      })
-      .then((answers) => {
-        const current = this.#lists.get(uri);
-        if (current?.asked !== asked || current.basis !== basis) return;
-        this.#lists.set(uri, {
-          asked,
-          basis,
-          answers: Object.fromEntries(
-            checks.map(({ key }, index) => [key, answers[index] ?? true]),
-          ),
-        });
-        this.changes.emit();
-      }, this.report);
+    this.#lists.set(entry, { asked, basis, answers: list?.answers ?? {} });
+    if (checks.length === 0 || namespaces.length === 0) return;
+    Promise.all(
+      namespaces.map((namespace) =>
+        this.backend.invoke("access_review", {
+          space,
+          namespace,
+          checks: checks.map(({ access }) => access),
+        }),
+      ),
+    ).then((answered) => {
+      const current = this.#lists.get(entry);
+      if (current?.asked !== asked || current.basis !== basis) return;
+      this.#lists.set(entry, {
+        asked,
+        basis,
+        answers: Object.fromEntries(
+          checks.map(({ key }, index) => [
+            key,
+            answered.every((answers) => answers[index] ?? true),
+          ]),
+        ),
+      });
+      this.changes.emit();
+    }, this.report);
   }
 
   closed(uri: string): void {
     this.#lists.delete(uri);
+    this.#lists.delete(`${uri}${MARKED}`);
   }
 }
 

@@ -4,10 +4,10 @@ import type { Resource } from "@twigo/protocol";
 import { ActionBar, EmptyState, GridSkeleton } from "@twigo/ui";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { Details } from "../Details";
-import { CAPABILITY_PREFIXES } from "../capabilities";
+import { CAPABILITY_PREFIXES, MARKED_DELETE } from "../capabilities";
 import { logsKind } from "../logs/entries";
 import { rowState } from "../rowState";
-import { objectOf } from "../selection";
+import { objectOf, objectOfRow } from "../selection";
 import { sameGvr, useResources } from "../discovery";
 import { pluralTitle } from "../kinds";
 import type { ListServices } from "../services";
@@ -141,12 +141,27 @@ function Loaded({
     capabilityKeys,
     contexts,
   ]);
+  const marks = selection.marks(uri);
+  const marked = JSON.stringify(
+    [...marks].map((id) => objectOfRow(id, resource.namespaced).namespace),
+  );
+  useEffect(() => {
+    const namespaces = JSON.parse(marked) as (string | undefined)[];
+    if (namespaces.length === 0) return;
+    capabilities.askMarked(
+      uri,
+      input.space,
+      resource.gvr,
+      namespaces,
+      contexts,
+    );
+  }, [capabilities, uri, input.space, resource.gvr, marked, contexts]);
   const allowed = capabilities.values(uri, referenced);
   const scoped = JSON.stringify({
     ...allowed,
     ...rowState(resource, selected),
+    [MARKED_DELETE]: capabilities.marked(uri),
   });
-  const marks = selection.marks(uri);
   const [open, setOpen] = useState(selected?.reveal === true);
   const [revealed, setRevealed] = useState(selected);
   if (selected !== revealed) {

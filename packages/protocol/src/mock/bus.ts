@@ -237,6 +237,8 @@ export class MockBus {
   >();
   /** The run of each space that started last. */
   readonly #latest = new Map<string, PlanId>();
+  /** How many times each Job was set running. */
+  readonly #started = new WeakMap<Job, number>();
   #next = 0;
   #undoId = 0;
   #jobs = 0;
@@ -640,6 +642,20 @@ export class MockBus {
       space,
       run: (tell) => {
         const from = cluster.podsOf(ns, name).length;
+        if (from === replicas) {
+          tell({
+            state: "done",
+            text: `${capital(what)} has ${String(replicas)} replicas already`,
+            undoUntil: null,
+          });
+          return;
+        }
+        if (from !== pods.length) {
+          throw new IpcError(
+            "conflict",
+            `${capital(what)} has ${String(from)} replicas now, not the ${String(pods.length)} Twigo asked about, so it scaled nothing`,
+          );
+        }
         cluster.scale(ns, name, replicas, Date.now());
         this.host.changed();
         tell({
@@ -724,11 +740,9 @@ export class MockBus {
     const cluster = this.host.cluster(context);
     const node = cluster.nodes.find((candidate) => candidate.name === name);
     if (!node) throw new IpcError("notFound", `nodes "${name}" not found`);
+    const already = `Node ${name} is ${unschedulable ? "cordoned already" : "not cordoned"}`;
     if (cordoned(node) === unschedulable) {
-      throw new IpcError(
-        "invalidInput",
-        `Node ${name} is ${unschedulable ? "cordoned already" : "not cordoned"}`,
-      );
+      throw new IpcError("invalidInput", already);
     }
     const words = (cordon: boolean) =>
       cordon
@@ -755,6 +769,10 @@ export class MockBus {
       write,
       space,
       run: (tell) => {
+        if (cordoned(node) === unschedulable) {
+          tell({ state: "done", text: already, undoUntil: null });
+          return;
+        }
         cluster.cordon(name, unschedulable);
         this.host.changed();
         tell({
@@ -896,10 +914,14 @@ export class MockBus {
       throw new IpcError("notFound", `${resource}.batch "${name}" not found`);
     }
     const what = `${kind} ${name}`;
+    const already = `${capital(what)} is ${suspend ? "suspended already" : "not suspended"}`;
     if (found.suspend === suspend) {
+      throw new IpcError("invalidInput", already);
+    }
+    if ("completed" in found && found.completed !== null) {
       throw new IpcError(
         "invalidInput",
-        `${capital(what)} is ${suspend ? "suspended already" : "not suspended"}`,
+        `${capital(what)} has completed, so there is nothing to ${suspend ? "suspend" : "resume"}`,
       );
     }
     const words = (on: boolean) =>
@@ -955,6 +977,10 @@ export class MockBus {
       write,
       space,
       run: (tell) => {
+        if (found.suspend === suspend) {
+          tell({ state: "done", text: already, undoUntil: null });
+          return;
+        }
         this.#switch(cluster, found, suspend);
         this.host.changed();
         tell({
@@ -978,10 +1004,13 @@ export class MockBus {
     };
   }
 
-  /** Completes a running Job after its time, unless it was suspended or went meanwhile. */
+  /** Completes a Job its latest start set running after its time, unless it was suspended or went meanwhile. */
   #runs(cluster: Cluster, job: Job): void {
+    const start = (this.#started.get(job) ?? 0) + 1;
+    this.#started.set(job, start);
     setTimeout(() => {
       if (
+        this.#started.get(job) !== start ||
         !cluster.jobs.includes(job) ||
         job.suspend ||
         job.completed !== null

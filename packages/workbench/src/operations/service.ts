@@ -120,7 +120,16 @@ export class Operations {
       this.#refused(error);
       return { state: "failed" };
     }
-    if (undo) undo.plan = plan.id;
+    if (undo) {
+      if (
+        request.action === "undo" &&
+        this.#undos.get(request.space) !== undo
+      ) {
+        this.backend.invoke("command_cancel", plan.id).catch(this.report);
+        return { state: "cancelled" };
+      }
+      undo.plan = plan.id;
+    }
     const agreed = await this.#ask(plan, look, JSON.stringify(request));
     if (!agreed) {
       this.backend.invoke("command_cancel", plan.id).catch(this.report);

@@ -206,3 +206,38 @@ test("a list asks for its capability keys again when the catalog lists the conte
   await settle(4);
   expect(reviews()).toBeGreaterThan(before);
 });
+
+test("the delete of marked rows is asked where they are, and a viewer may not", async () => {
+  for (const [scenario, allowed] of [
+    ["viewer", false],
+    ["ready", true],
+  ] as const) {
+    const workbench = await openInStaging(
+      scenario,
+      "k8s-list://staging/v1/pods",
+    );
+    const invoke = vi.spyOn(workbench.backend, "invoke");
+    const main = await selectFirst();
+    fireEvent.keyDown(main, { code: "KeyX", key: "x" });
+    await settle(4);
+    const marked = invoke.mock.calls.filter(
+      ([command, request]) =>
+        command === "access_review" &&
+        JSON.stringify((request as { checks: unknown }).checks) ===
+          JSON.stringify([
+            { verb: "delete", group: "", resource: "pods", subresource: null },
+          ]),
+    );
+    expect(marked.length).toBeGreaterThan(0);
+    for (const [, request] of marked) {
+      expect((request as { namespace: string | null }).namespace).toEqual(
+        expect.any(String),
+      );
+    }
+    const lookup = workbench.keys.lookup(main);
+    expect(
+      workbench.commands.enabled("k8s.resource.deleteMarked", lookup),
+    ).toBe(allowed);
+    cleanup();
+  }
+});

@@ -45,7 +45,13 @@ test("a row says whether its node is cordoned and its job suspended", () => {
       resource("batch", "Job"),
       selected(["Name", "Status"], ["j", "Suspended"]),
     ),
-  ).toEqual({ "resource.suspended": true });
+  ).toEqual({ "resource.suspended": true, "resource.ended": false });
+  expect(
+    rowState(
+      resource("batch", "Job"),
+      selected(["Name", "Status"], ["j", "Complete"]),
+    ),
+  ).toEqual({ "resource.suspended": false, "resource.ended": true });
   expect(
     rowState(
       resource("batch", "CronJob"),
