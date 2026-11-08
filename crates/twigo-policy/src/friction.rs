@@ -19,7 +19,8 @@ pub enum Risk {
     Lasting,
     /// It reaches everything an object holds, as deleting a namespace, a
     /// node or a CustomResourceDefinition does, or many objects at once;
-    /// `name` is what the person types.
+    /// `name` is what the person types: the object's name, or for many the
+    /// context's, as `guarded` asks.
     Wide { name: String },
     /// Secret-grade data shows (3.6).
     Reveal,

@@ -412,7 +412,7 @@ test("a trigger asks in a dialog and names the job it makes", async () => {
   ]);
 });
 
-test("a delete of several asks for their count typed and lists them", async () => {
+test("a delete of several asks for the context's name typed and lists them", async () => {
   const backend = createMockBackend("live");
   await answered(backend.invoke("space_open", "qa"));
   const pods = new Cluster("qa", POD_COUNT.qa ?? 0, 0).pods.slice(0, 3);
@@ -428,7 +428,7 @@ test("a delete of several asks for their count typed and lists them", async () =
       })),
     }),
   );
-  expect(plan.friction).toEqual({ kind: "typed", text: "3" });
+  expect(plan.friction).toEqual({ kind: "typed", text: "qa" });
   expect(plan.confirm).toBe("Delete 3 pods");
   expect(plan.affected[0]).toEqual({
     title: "Deletes",

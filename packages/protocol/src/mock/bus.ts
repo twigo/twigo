@@ -525,7 +525,7 @@ export class MockBus {
     const consequences: string[] = [];
     let risk: Risk;
     if (several) {
-      risk = { kind: "wide", name: String(targets.length) };
+      risk = { kind: "wide", name: context };
     } else if (wide) {
       risk = { kind: "wide", name: first.name };
     } else if (resource === "pods" && replacedBy !== undefined) {

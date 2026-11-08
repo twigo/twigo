@@ -446,7 +446,7 @@ async fn an_object_replaced_since_the_plan_is_left_standing() {
 
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
-async fn a_delete_lists_what_goes_with_it_and_several_ask_for_their_count() {
+async fn a_delete_lists_what_goes_with_it_and_several_ask_for_the_context_s_name() {
     let cluster = Cluster::connect().await;
     let first = cluster.namespace("several").await;
     let second = cluster.namespace("several").await;
@@ -540,7 +540,7 @@ async fn a_delete_lists_what_goes_with_it_and_several_ask_for_their_count() {
     assert_eq!(
         plan.friction,
         Friction::Typed {
-            text: "3".to_owned()
+            text: context.clone()
         }
     );
     assert_eq!(
@@ -560,10 +560,10 @@ async fn a_delete_lists_what_goes_with_it_and_several_ask_for_their_count() {
         })
         .collect();
     assert_eq!(plan.kubectl, lines.join(" && "));
-    let refused = run(&core, &plan, Some("2")).await.unwrap_err();
+    let refused = run(&core, &plan, Some("3")).await.unwrap_err();
     assert_eq!(refused.kind, ErrorKind::InvalidInput);
     let plan = core.command_plan("main", several(&three)).await.unwrap();
-    let told = run(&core, &plan, Some("3")).await.unwrap();
+    let told = run(&core, &plan, Some(context)).await.unwrap();
     assert_eq!(
         told.last(),
         Some(&OperationEvent::Done {
@@ -597,7 +597,7 @@ async fn a_delete_lists_what_goes_with_it_and_several_ask_for_their_count() {
         .await
         .unwrap();
     let replacement = cluster.config_map(&first, "g").await;
-    let told = run(&core, &plan, Some("2")).await.unwrap();
+    let told = run(&core, &plan, Some(context)).await.unwrap();
     assert_eq!(
         told.last(),
         Some(&OperationEvent::Done {

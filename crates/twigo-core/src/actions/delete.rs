@@ -104,7 +104,7 @@ pub(crate) async fn delete(
     let mut consequences = Vec::new();
     let risk = if several {
         Risk::Wide {
-            name: targets.len().to_string(),
+            name: context.clone(),
         }
     } else if wide {
         Risk::Wide {
