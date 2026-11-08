@@ -1199,3 +1199,108 @@ test("a newer preview of an object replaces an older one, whatever it answers", 
   );
   expect(gone.kind).toBe("notFound");
 });
+
+function planOf(
+  backend: ReturnType<typeof createMockBackend>,
+  preview: number,
+) {
+  return answered(
+    backend.invoke("command_plan", { action: "apply", space: "qa", preview }),
+  );
+}
+
+test("a plan's kubectl line and consequences say how its edit is sent", async () => {
+  const backend = createMockBackend();
+  await answered(backend.invoke("space_open", "qa"));
+
+  const byPatch = await answered(
+    backend.invoke("apply_preview", applyEdit("merge-patch")),
+  );
+  if (byPatch.state !== "ready") throw new Error("expected ready");
+  const patchPlan = await planOf(backend, byPatch.id);
+  expect(patchPlan.kubectl).toContain(
+    "kubectl patch configmaps settings -n default --type=merge --field-manager=twigo-edit",
+  );
+  expect(patchPlan.kubectl).not.toContain("--server-side");
+  expect(patchPlan.consequences).toEqual([
+    "An apply cannot express this edit, so it goes as one merge patch under field manager twigo-edit, as kubectl edit would.",
+  ]);
+
+  const withRemoval = await answered(
+    backend.invoke("apply_preview", applyEdit("removals")),
+  );
+  if (withRemoval.state !== "ready") throw new Error("expected ready");
+  const removalPlan = await planOf(backend, withRemoval.id);
+  expect(removalPlan.kubectl).toContain("--server-side");
+  expect(removalPlan.kubectl).toContain("--type=merge");
+  expect(removalPlan.consequences).toEqual([
+    "Then a merge patch removes .metadata.labels.team.",
+  ]);
+
+  const replaced = await answered(
+    backend.invoke("apply_preview", applyEdit("recreate")),
+  );
+  if (replaced.state !== "immutable" || replaced.recreate === null) {
+    throw new Error("expected a recreate");
+  }
+  const recreatePlan = await planOf(backend, replaced.recreate);
+  expect(recreatePlan.kubectl).toContain(
+    "kubectl delete configmaps settings -n default && kubectl create",
+  );
+  expect(recreatePlan.kubectl).not.toContain("--server-side");
+  expect(recreatePlan.consequences).toEqual([
+    "It goes, and a new one with a new uid takes its place.",
+  ]);
+});
+
+test("a Job's recreate says it runs again, in its own words", async () => {
+  const backend = createMockBackend();
+  await answered(backend.invoke("space_open", "qa"));
+  const edit = applyEdit("recreate");
+  const answer = await answered(
+    backend.invoke("apply_preview", {
+      ...edit,
+      opened: {
+        ...edit.opened,
+        target: {
+          ...edit.opened.target,
+          gvr: { group: "batch", version: "v1", resource: "jobs" },
+        },
+      },
+    }),
+  );
+  if (answer.state !== "immutable" || answer.recreate === null) {
+    throw new Error("expected a recreate");
+  }
+  const plan = await planOf(backend, answer.recreate);
+  expect(plan.consequences).toEqual([
+    "It goes with its pods, and a new one with a new uid runs from the start, whatever this one finished.",
+  ]);
+  expect(plan.kubectl).toContain("kubectl delete jobs.batch settings");
+});
+
+test("the two sides of a preview lose resourceVersion and generation, as Rust's do", async () => {
+  const backend = createMockBackend();
+  await answered(backend.invoke("space_open", "qa"));
+  const edit = applyEdit(null);
+  const server = { resourceVersion: "9", generation: 2 };
+  const answer = await answered(
+    backend.invoke("apply_preview", {
+      ...edit,
+      opened: {
+        ...edit.opened,
+        base: {
+          ...edit.opened.base,
+          metadata: { ...edit.opened.base.metadata, ...server },
+        },
+      },
+      edited: {
+        ...edit.edited,
+        metadata: { ...edit.edited.metadata, ...server },
+      },
+    }),
+  );
+  if (answer.state !== "ready") throw new Error("expected ready");
+  expect(answer.live).toEqual({ ...EDITED, data: { a: "0" } });
+  expect(answer.result).toEqual(EDITED);
+});

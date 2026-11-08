@@ -187,20 +187,70 @@ interface Waiting {
 
 /** What a preview left for the plan of its id, as Rust's `Prepared`. */
 interface Previewed {
-  readonly recreate: boolean;
+  readonly step: "apply" | "mergePatch" | "recreate";
   readonly context: string;
   /** `configmaps/settings in default`. */
   readonly target: string;
   /** `configmap settings`. */
   readonly what: string;
+  /** `configmaps settings -n default`, as kubectl names the object. */
+  readonly named: string;
+  readonly job: boolean;
+  /** What a merge patch after the apply removes. */
+  readonly removals: readonly string[];
 }
 
 /** The annotation a mock edit names the preview's answer by. */
 const ANSWER = "mock.twigo.io/answer";
 
-/** The mock's stand-in for Rust's kubectl line: not run, as the mock sends nothing. */
-const APPLY_KUBECTL =
-  "kubectl apply --server-side --field-manager=twigo -f - < the edit";
+/** The mock's stand-ins for Rust's kubectl lines: not run, as the mock sends nothing. */
+function applyKubectl({ step, named, removals }: Previewed): string {
+  if (step === "mergePatch") {
+    return `kubectl patch ${named} --type=merge --field-manager=twigo-edit -p '<the edit>'`;
+  }
+  if (step === "recreate") {
+    return `kubectl delete ${named} && kubectl create --field-manager twigo -f - < the edit`;
+  }
+  const apply =
+    "kubectl apply --server-side --field-manager=twigo -f - < the edit";
+  return removals.length === 0
+    ? apply
+    : `${apply} && kubectl patch ${named} --type=merge --field-manager=twigo -p '<what goes>'`;
+}
+
+/** What follows a plan, in the words of Rust's `apply`. */
+function applyConsequences({ step, job, removals }: Previewed): string[] {
+  if (step === "mergePatch") {
+    return [
+      "An apply cannot express this edit, so it goes as one merge patch under field manager twigo-edit, as kubectl edit would.",
+    ];
+  }
+  if (step === "recreate") {
+    return [
+      job
+        ? "It goes with its pods, and a new one with a new uid runs from the start, whatever this one finished."
+        : "It goes, and a new one with a new uid takes its place.",
+    ];
+  }
+  return removals.length === 0
+    ? []
+    : [`Then a merge patch removes ${removals.join(", ")}.`];
+}
+
+/** An object as a side of the diff, as Rust's `side`: without what would only be noise. */
+function side(object: unknown): unknown {
+  if (typeof object !== "object" || object === null) return object;
+  const { metadata } = object as { metadata?: object };
+  if (metadata === undefined) return object;
+  return {
+    ...object,
+    metadata: Object.fromEntries(
+      Object.entries(metadata).filter(
+        ([name]) => name !== "resourceVersion" && name !== "generation",
+      ),
+    ),
+  };
+}
 
 /** What the mock backend's bus reaches. */
 export interface BusHost {
@@ -309,14 +359,27 @@ export class MockBus {
     const resource = opened?.target.gvr.resource ?? `${kind.toLowerCase()}s`;
     const target = `${resource}/${name}${namespace === undefined ? "" : ` in ${namespace}`}`;
     const what = `${kind.toLowerCase()} ${name}`;
+    const group = opened?.target.gvr.group ?? "";
+    const named = `${group === "" ? resource : `${resource}.${group}`} ${name}${inNamespace(namespace ?? null)}`;
     for (const [id, kept] of this.#previews) {
       if (kept.context === context && kept.target === target) {
         this.#previews.delete(id);
       }
     }
-    const prepared = (recreate: boolean): number => {
+    const prepared = (
+      step: Previewed["step"],
+      removals: readonly string[] = [],
+    ): number => {
       const id = ++this.#previewId;
-      this.#previews.set(id, { recreate, context, target, what });
+      this.#previews.set(id, {
+        step,
+        context,
+        target,
+        what,
+        named,
+        job: resource === "jobs",
+        removals,
+      });
       return id;
     };
     if (
@@ -358,14 +421,14 @@ export class MockBus {
         return {
           state: "immutable",
           message: `${kind} "${name}" is invalid: spec.template: Invalid value: field is immutable`,
-          recreate: prepared(true),
+          recreate: prepared("recreate"),
         };
       case "removals":
         return {
           state: "ready",
-          id: prepared(false),
-          live: opened?.base ?? null,
-          result: edited,
+          id: prepared("apply", [".metadata.labels.team"]),
+          live: side(opened?.base ?? null),
+          result: side(edited),
           warnings: ["metadata.annotations: this annotation is deprecated"],
           removals: [".metadata.labels.team"],
           ignored: [".status"],
@@ -374,9 +437,9 @@ export class MockBus {
       case "merge-patch":
         return {
           state: "ready",
-          id: prepared(false),
-          live: opened?.base ?? null,
-          result: edited,
+          id: prepared("mergePatch"),
+          live: side(opened?.base ?? null),
+          result: side(edited),
           warnings: [],
           removals: [".spec.strategy.rollingUpdate"],
           ignored: [],
@@ -385,9 +448,9 @@ export class MockBus {
       default:
         return {
           state: "ready",
-          id: prepared(false),
-          live: opened?.base ?? null,
-          result: edited,
+          id: prepared("apply"),
+          live: side(opened?.base ?? null),
+          result: side(edited),
           warnings: [],
           removals: [],
           ignored: [],
@@ -401,7 +464,8 @@ export class MockBus {
     if (previewed === undefined) {
       throw new IpcError("notFound", `no preview ${preview} waits to apply`);
     }
-    const { context, recreate, target, what } = previewed;
+    const { step, context, target, what } = previewed;
+    const recreate = step === "recreate";
     const write = { verb: recreate ? "delete" : "patch", target };
     this.#authorize(context, this.host.access(context), { write });
     this.#previews.delete(preview);
@@ -414,11 +478,9 @@ export class MockBus {
           : `Apply your changes to ${what} on ${context}?`,
         confirm: recreate ? `Delete and recreate ${what}` : "Apply",
         destructive: recreate,
-        consequences: recreate
-          ? ["It goes, and a new one with a new uid takes its place."]
-          : [],
+        consequences: applyConsequences(previewed),
         affected: [],
-        kubectl: APPLY_KUBECTL,
+        kubectl: applyKubectl(previewed),
         doing: `${recreate ? "Recreating" : "Applying"} ${what}`,
       },
       risk: recreate ? { kind: "lasting" } : { kind: "reviewed" },
