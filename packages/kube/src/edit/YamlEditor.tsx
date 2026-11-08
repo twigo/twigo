@@ -1,7 +1,14 @@
 import { useEffect, useRef } from "react";
 import type { EditorBuffer } from "./copies";
-import { editor, MarkerSeverity, setSchema, Uri } from "./monaco";
+import type { IKeyboardEvent, IPosition } from "monaco-editor/editor";
+import { editor, KeyCode, MarkerSeverity, setSchema, Uri } from "./monaco";
 import { statusLines } from "./object";
+import {
+  joinsStatus,
+  touchesStatus,
+  type Place,
+  type StatusBlock,
+} from "./statusLock";
 
 /** A place in the text that does not parse, 1-based. */
 export interface TextError {
@@ -35,6 +42,32 @@ const STATUS_IS_THE_SERVERS = {
 };
 
 const MARKER_OWNER = "twigo";
+
+const MAC = navigator.userAgent.includes("Mac");
+
+const placeOf = ({ lineNumber, column }: IPosition): Place => ({
+  line: lineNumber,
+  column,
+});
+
+/** Undo and redo, ⌘Z and ⌘Y or Ctrl's. */
+function undoes(event: IKeyboardEvent): boolean {
+  return (
+    (event.metaKey || event.ctrlKey) &&
+    (event.keyCode === KeyCode.KeyZ || event.keyCode === KeyCode.KeyY)
+  );
+}
+
+/** The keys that delete at the cursor: Backspace and Delete with any word or line modifier, and macOS's Ctrl+H, Ctrl+D and Ctrl+K. */
+function deletes(event: IKeyboardEvent): "backwards" | "forwards" | undefined {
+  if (event.keyCode === KeyCode.Backspace) return "backwards";
+  if (event.keyCode === KeyCode.Delete) return "forwards";
+  if (!MAC || !event.ctrlKey || event.metaKey || event.altKey) return undefined;
+  if (event.keyCode === KeyCode.KeyH) return "backwards";
+  if (event.keyCode === KeyCode.KeyD || event.keyCode === KeyCode.KeyK)
+    return "forwards";
+  return undefined;
+}
 
 /**
  * The YAML editor, bundled locally and loaded on its first use (ARCHITECTURE
@@ -134,18 +167,24 @@ export default function YamlEditor({
     if (!current || !instance || readOnly || !statusLocked) return;
     let range = statusLines(current.getValue());
     let known = current.getVersionId();
-    const lock = () => {
+    const block = (): StatusBlock | undefined => {
       if (current.getVersionId() !== known) {
         range = statusLines(current.getValue());
         known = current.getVersionId();
       }
-      const lines = range;
+      return (
+        range && { ...range, endColumn: current.getLineMaxColumn(range.to) }
+      );
+    };
+    const lock = () => {
+      const found = block();
       const touched =
-        lines !== undefined &&
-        (instance.getSelections() ?? []).some(
-          (selection) =>
-            selection.startLineNumber <= lines.to &&
-            selection.endLineNumber >= lines.from,
+        found !== undefined &&
+        (instance.getSelections() ?? []).some((selection) =>
+          touchesStatus(found, {
+            start: placeOf(selection.getStartPosition()),
+            end: placeOf(selection.getEndPosition()),
+          }),
         );
       instance.updateOptions({
         readOnly: touched,
@@ -153,9 +192,37 @@ export default function YamlEditor({
       });
     };
     lock();
+    // Monaco reads a key after this does, and a read-only editor refuses
+    // undo and redo along with typing, so a key sets the lock for itself,
+    // and the cursor's lock comes back once Monaco has acted.
+    const keys = instance.onKeyDown((event) => {
+      const found = block();
+      const caret = instance.getPosition();
+      if (undoes(event)) {
+        instance.updateOptions({ readOnly: false });
+      } else {
+        const direction = deletes(event);
+        if (
+          !direction ||
+          !found ||
+          !caret ||
+          !instance.getSelection()?.isEmpty() ||
+          !joinsStatus(found, placeOf(caret), direction, (line) =>
+            current.getLineMaxColumn(line),
+          )
+        )
+          return;
+        instance.updateOptions({
+          readOnly: true,
+          readOnlyMessage: STATUS_IS_THE_SERVERS,
+        });
+      }
+      setTimeout(lock, 0);
+    });
     const selection = instance.onDidChangeCursorSelection(lock);
     const content = current.onDidChangeContent(lock);
     return () => {
+      keys.dispose();
       selection.dispose();
       content.dispose();
       instance.updateOptions({ readOnly: false });

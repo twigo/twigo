@@ -26,6 +26,7 @@ vi.mock("./monaco", () => {
   const dispose = () => ({ dispose: () => undefined });
   return {
     MarkerSeverity: { Error: 8 },
+    KeyCode: {},
     Uri: { from: ({ path }: { path: string }) => path },
     setSchema: () => Promise.resolve(undefined),
     editor: {
