@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import type { Backend } from "@twigo/protocol";
-import { accessOf, Capabilities } from "./capabilities";
+import { accessOf, Capabilities, REFUSED_MS } from "./capabilities";
 
 const DEPLOYMENTS = { group: "apps", version: "v1", resource: "deployments" };
 
@@ -311,4 +311,39 @@ test("a new question that drops an answer tells the list at once", async () => {
   expect(capabilities.values("pods", keys)["resource.capability.delete"]).toBe(
     true,
   );
+});
+
+test("a no is asked again after 30 s, as Rust asks RBAC again, until the list closes", async () => {
+  vi.useFakeTimers();
+  try {
+    const invoke = vi
+      .fn()
+      .mockResolvedValueOnce([false])
+      .mockResolvedValueOnce([true])
+      .mockResolvedValueOnce([false])
+      .mockResolvedValue([false]);
+    const capabilities = new Capabilities({ invoke }, vi.fn());
+    const keys = ["resource.capability.delete"];
+    const delete_ = () =>
+      capabilities.values("pods", keys)["resource.capability.delete"];
+    capabilities.ask("pods", "qa", PODS_GVR, { namespace: "a" }, keys, {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(delete_()).toBe(false);
+    await vi.advanceTimersByTimeAsync(REFUSED_MS - 1);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(delete_()).toBe(true);
+    await vi.advanceTimersByTimeAsync(REFUSED_MS * 2);
+    expect(invoke).toHaveBeenCalledTimes(2);
+
+    capabilities.ask("pods", "qa", PODS_GVR, { namespace: "b" }, keys, {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(invoke).toHaveBeenCalledTimes(3);
+    capabilities.closed("pods");
+    await vi.advanceTimersByTimeAsync(REFUSED_MS * 2);
+    expect(invoke).toHaveBeenCalledTimes(3);
+  } finally {
+    vi.useRealTimers();
+  }
 });

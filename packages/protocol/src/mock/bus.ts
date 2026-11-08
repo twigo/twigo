@@ -672,6 +672,7 @@ export class MockBus {
       write,
       space,
       run: (tell) => {
+        this.#deployment(cluster, target);
         const from = cluster.podsOf(ns, name).length;
         if (from === replicas) {
           tell({
@@ -758,6 +759,7 @@ export class MockBus {
       write,
       space,
       run: (tell) => {
+        this.#deployment(cluster, target);
         cluster.restart(namespace ?? "", name, Date.now());
         this.host.changed();
         tell({ state: "done", text: `Restarted ${what}`, undoUntil: null });
@@ -800,6 +802,9 @@ export class MockBus {
       write,
       space,
       run: (tell) => {
+        if (!cluster.nodes.includes(node)) {
+          throw new IpcError("notFound", `nodes "${name}" not found`);
+        }
         if (cordoned(node) === unschedulable) {
           tell({ state: "done", text: already, undoUntil: null });
           return;
@@ -857,6 +862,9 @@ export class MockBus {
       write,
       space,
       run: (tell, live) => {
+        if (!cluster.nodes.some((node) => node.name === name)) {
+          throw new IpcError("notFound", `nodes "${name}" not found`);
+        }
         cluster.cordon(name, true);
         this.host.changed();
         tell({
@@ -910,6 +918,14 @@ export class MockBus {
       write,
       space,
       run: (tell) => {
+        if (
+          !cluster.cronJobs.some(
+            (cronJob) =>
+              cronJob.namespace === namespace && cronJob.name === name,
+          )
+        ) {
+          throw new IpcError("notFound", `cronjobs.batch "${name}" not found`);
+        }
         cluster.trigger(namespace, name, job, Date.now());
         this.host.changed();
         const made = cluster.jobs.find(
@@ -1013,6 +1029,12 @@ export class MockBus {
       write,
       space,
       run: (tell) => {
+        if (!list.includes(found)) {
+          throw new IpcError(
+            "notFound",
+            `${resource}.batch "${name}" not found`,
+          );
+        }
         if (found.suspend === suspend) {
           tell({ state: "done", text: already, undoUntil: null });
           return;

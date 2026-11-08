@@ -897,3 +897,38 @@ test("a delete of marked rows leaves out one gone since, and a cron job's resume
     "Its schedule starts jobs again, and the latest run it missed while suspended starts at once, unless its starting deadline has passed.",
   ]);
 });
+
+test("a run whose object went since its plan fails, as Rust's read of it does", async () => {
+  const backend = createMockBackend("live");
+  await answered(backend.invoke("space_open", "qa"));
+  const node = "qa-node-2";
+  const cordon = await answered(
+    backend.invoke("command_plan", {
+      action: "cordon",
+      space: "qa",
+      node,
+      unschedulable: true,
+    }),
+  );
+  const remove = await answered(
+    backend.invoke("command_plan", {
+      action: "delete",
+      space: "qa",
+      targets: [
+        {
+          gvr: { group: "", version: "v1", resource: "nodes" },
+          namespaced: false,
+          namespace: null,
+          name: node,
+        },
+      ],
+    }),
+  );
+  await run(backend, remove.id, node);
+  expect(await run(backend, cordon.id)).toEqual([
+    {
+      state: "failed",
+      error: { kind: "notFound", message: `nodes "${node}" not found` },
+    },
+  ]);
+});

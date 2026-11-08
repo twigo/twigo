@@ -14,6 +14,8 @@ export const MARKED_DELETE = "marked.capability.delete";
 const DELETE = `${OWN}delete`;
 /** Beside a list's own entry, the entry of its marked rows. */
 const MARKED = "#marked";
+/** How long a no holds before the list asks again, as Rust's `cluster::REFUSED_FOR`. */
+export const REFUSED_MS = 30_000;
 
 /** An object a list asks about: none of either for the resource as a whole. */
 export interface Asked {
@@ -126,31 +128,39 @@ export class Capabilities {
     };
     const asking = queries.filter(({ checks }) => checks.length > 0);
     if (asking.length === 0) return;
-    Promise.all(
-      asking.map(({ namespace, checks }) =>
-        this.backend.invoke("access_review", {
-          space,
-          namespace,
-          checks: checks.map(({ access }) => access),
-        }),
-      ),
-    ).then(
-      (answered) => {
-        if (!current()) return;
-        const answers: Record<string, boolean> = {};
-        asking.forEach(({ checks }, at) => {
-          checks.forEach(({ key }, index) => {
-            const yes = answered[at]?.[index] ?? true;
-            answers[key] = (answers[key] ?? true) && yes;
+    const send = () => {
+      Promise.all(
+        asking.map(({ namespace, checks }) =>
+          this.backend.invoke("access_review", {
+            space,
+            namespace,
+            checks: checks.map(({ access }) => access),
+          }),
+        ),
+      ).then(
+        (answered) => {
+          if (!current()) return;
+          const answers: Record<string, boolean> = {};
+          asking.forEach(({ checks }, at) => {
+            checks.forEach(({ key }, index) => {
+              const yes = answered[at]?.[index] ?? true;
+              answers[key] = (answers[key] ?? true) && yes;
+            });
           });
-        });
-        this.#lists.set(entry, { asked, basis, answers });
-        this.changes.emit();
-      },
-      (error: unknown) => {
-        this.report(error);
-      },
-    );
+          this.#lists.set(entry, { asked, basis, answers });
+          this.changes.emit();
+          if (Object.values(answers).includes(false)) {
+            setTimeout(() => {
+              if (current()) send();
+            }, REFUSED_MS);
+          }
+        },
+        (error: unknown) => {
+          this.report(error);
+        },
+      );
+    };
+    send();
   }
 
   closed(uri: string): void {

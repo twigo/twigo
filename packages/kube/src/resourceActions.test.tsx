@@ -303,3 +303,25 @@ test("a row moved onto from one whose delete was refused may be deleted while it
     true,
   );
 });
+
+test("marked rows marked again after their marks were cleared are asked about again", async () => {
+  const workbench = await openInStaging("ready", "k8s-list://staging/v1/pods");
+  const invoke = vi.spyOn(workbench.backend, "invoke");
+  const main = await selectFirst();
+  const marked = () =>
+    invoke.mock.calls.filter(
+      ([command, request]) =>
+        command === "access_review" &&
+        (request as AccessQuery).checks.length === 1 &&
+        (request as AccessQuery).checks[0]?.verb === "delete",
+    ).length;
+  fireEvent.keyDown(main, { code: "KeyX", key: "x" });
+  await settle(4);
+  const once = marked();
+  expect(once).toBeGreaterThan(0);
+  fireEvent.keyDown(main, { code: "Escape", key: "Escape" });
+  await settle(4);
+  fireEvent.keyDown(main, { code: "KeyX", key: "x" });
+  await settle(4);
+  expect(marked()).toBeGreaterThan(once);
+});

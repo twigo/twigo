@@ -151,7 +151,6 @@ function Loaded({
   );
   useEffect(() => {
     const objects = JSON.parse(marked) as Asked[];
-    if (objects.length === 0) return;
     capabilities.askMarked(uri, input.space, resource.gvr, objects, contexts);
   }, [capabilities, uri, input.space, resource.gvr, marked, contexts]);
   const allowed = capabilities.values(uri, referenced);
