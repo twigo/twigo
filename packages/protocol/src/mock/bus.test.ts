@@ -1182,6 +1182,25 @@ test("a recreate is blocked by its first write, a delete, in read-only", async (
   expect(blocked.message).toContain("delete");
 });
 
+test("a newer preview of an object drops the plan of an older one that waits", async () => {
+  const backend = createMockBackend();
+  await answered(backend.invoke("space_open", "qa"));
+  const older = await answered(
+    backend.invoke("apply_preview", applyEdit(null)),
+  );
+  if (older.state !== "ready") throw new Error("expected ready");
+  const waiting = await planOf(backend, older.id);
+  await answered(backend.invoke("apply_preview", applyEdit("stale")));
+  const gone = await refused(
+    backend.subscribe(
+      "command_execute",
+      { plan: waiting.id, typed: null },
+      () => undefined,
+    ),
+  );
+  expect(gone.kind).toBe("notFound");
+});
+
 test("a newer preview of an object replaces an older one, whatever it answers", async () => {
   const backend = createMockBackend();
   await answered(backend.invoke("space_open", "qa"));

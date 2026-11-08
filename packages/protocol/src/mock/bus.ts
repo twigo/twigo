@@ -176,6 +176,8 @@ interface Planned {
   readonly space?: string;
   /** What a stop while it runs says. */
   readonly stopped?: string;
+  /** The object of the preview it was made from: a newer preview of it drops the plan. */
+  readonly previewed?: string;
   readonly run: Run;
 }
 
@@ -366,6 +368,11 @@ export class MockBus {
         this.#previews.delete(id);
       }
     }
+    for (const [id, waiting] of this.#waiting) {
+      if (waiting.planned.previewed === `${context}/${target}`) {
+        this.#waiting.delete(id);
+      }
+    }
     const prepared = (
       step: Previewed["step"],
       removals: readonly string[] = [],
@@ -486,6 +493,7 @@ export class MockBus {
       risk: recreate ? { kind: "lasting" } : { kind: "reviewed" },
       write,
       space,
+      previewed: `${context}/${target}`,
       run: (tell) => {
         tell({ state: "done", text: `${words} ${what}`, undoUntil: null });
       },
