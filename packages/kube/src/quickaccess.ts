@@ -403,7 +403,7 @@ function recentItem(
  * text holds it as a substring in any case of ASCII letters
  * (twigo-cache's view filter); a negation or a regex marks nothing.
  */
-function substring(label: string, filter: string): TextRange[] {
+export function substring(label: string, filter: string): TextRange[] {
   const search = lowerAscii(filter.trim());
   const at = search === "" ? -1 : lowerAscii(label).indexOf(search);
   return at < 0 ? [] : [{ start: at, end: at + search.length }];

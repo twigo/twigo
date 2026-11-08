@@ -237,7 +237,7 @@ export function registerEdits(
         if (!ref) return;
         const picked = await quickAccess.pick(
           "Compare with…",
-          await comparisons(workbench, uri, ref.namespaced),
+          comparisons(workbench, uri, ref.namespaced),
         );
         if (picked) {
           editors.open(
