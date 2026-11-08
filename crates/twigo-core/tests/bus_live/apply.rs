@@ -1597,6 +1597,18 @@ fn by_patch(answer: ApplyPreviewed) -> (PreviewId, Value) {
     }
 }
 
+fn by_apply(answer: ApplyPreviewed) -> (PreviewId, Value) {
+    match answer {
+        ApplyPreviewed::Ready {
+            id,
+            result,
+            strategy: ApplyStrategy::ServerSideApply,
+            ..
+        } => (id, result),
+        other => panic!("expected the apply, got {other:?}"),
+    }
+}
+
 fn strategy_deployment(name: &str) -> Value {
     let mut object = deployment(name);
     object["spec"]["template"]["spec"]["containers"][0]["env"] =
@@ -4493,17 +4505,19 @@ async fn an_edit_that_leaves_a_map_or_a_list_empty_goes_by_the_one_merge_patch()
     })
     .await;
 
-    for (name, applied_spec, unowned, edited_spec, by_merge_patch) in [
+    for (name, applied_spec, unowned, co_owner, edited_spec, by_merge_patch) in [
         (
             "rules",
             json!({ "rules": [{ "k": "a", "v": "1" }] }),
             Some(json!({ "other": "theirs" })),
+            None,
             json!({ "rules": [], "other": "theirs" }),
             true,
         ),
         (
             "tags",
             json!({ "tags": ["a", "b"] }),
+            None,
             None,
             json!({ "tags": [] }),
             true,
@@ -4512,12 +4526,14 @@ async fn an_edit_that_leaves_a_map_or_a_list_empty_goes_by_the_one_merge_patch()
             "typed",
             json!({ "sub": { "x": "1" } }),
             None,
+            None,
             json!({ "sub": {} }),
             true,
         ),
         (
             "additional",
             json!({ "labels": { "a": "1" } }),
+            None,
             None,
             json!({ "labels": {} }),
             true,
@@ -4526,6 +4542,7 @@ async fn an_edit_that_leaves_a_map_or_a_list_empty_goes_by_the_one_merge_patch()
             "preserved",
             json!({ "free": { "a": { "b": 1 } } }),
             None,
+            None,
             json!({ "free": {} }),
             true,
         ),
@@ -4533,13 +4550,23 @@ async fn an_edit_that_leaves_a_map_or_a_list_empty_goes_by_the_one_merge_patch()
             "nested",
             json!({ "free": { "a": { "b": 1 }, "z": 1 } }),
             None,
+            None,
             json!({ "free": { "a": {}, "z": 1 } }),
+            true,
+        ),
+        (
+            "co-owned",
+            json!({ "rules": [{ "k": "a", "v": "1" }] }),
+            None,
+            Some(json!({ "rules": [{ "k": "a", "v": "2" }] })),
+            json!({ "rules": [] }),
             true,
         ),
         (
             "unnameable",
             json!({ "rules": [{ "k": "a" }] }),
             Some(json!({ "rules": [{ "k": "a" }, { "k": "b" }] })),
+            None,
             json!({ "rules": [{ "k": "b" }] }),
             true,
         ),
@@ -4547,12 +4574,14 @@ async fn an_edit_that_leaves_a_map_or_a_list_empty_goes_by_the_one_merge_patch()
             "atomic-map",
             json!({ "conf": { "a": "1" }, "other": "n" }),
             None,
+            None,
             json!({ "conf": {}, "other": "n" }),
             false,
         ),
         (
             "atomic-list",
             json!({ "lst": ["1"], "other": "n" }),
+            None,
             None,
             json!({ "lst": [], "other": "n" }),
             false,
@@ -4571,6 +4600,15 @@ async fn an_edit_that_leaves_a_map_or_a_list_empty_goes_by_the_one_merge_patch()
                 merge_patch(&cluster.admin, &path, &json!({ "spec": unowned }), "other").await;
             forget_other_managers(&cluster.admin, &path, &written).await;
         }
+        if let Some(spec) = co_owner {
+            server_apply(
+                &cluster.admin,
+                &path,
+                &crd_object(&group, "Thing", name, spec),
+                "gitops",
+            )
+            .await;
+        }
         let live = settled(&cluster.admin, &path).await;
         let mut edited = view(&live);
         edited["spec"] = edited_spec.clone();
@@ -4586,8 +4624,7 @@ async fn an_edit_that_leaves_a_map_or_a_list_empty_goes_by_the_one_merge_patch()
         let (id, result) = if by_merge_patch {
             by_patch(answer)
         } else {
-            let (id, result, _, _) = ready(answer);
-            (id, result)
+            by_apply(answer)
         };
         assert_eq!(result["spec"], edited_spec, "{name}: the preview");
         applied(&core, &cluster, id).await;
