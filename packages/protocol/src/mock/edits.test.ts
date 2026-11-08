@@ -486,7 +486,9 @@ test("an edit of what an apply leaves out is unchanged and says what was left ou
       request({
         status: deployment.status,
         spec: deployment.spec,
-        ...deployment,
+        metadata: deployment.metadata,
+        kind: deployment.kind,
+        apiVersion: deployment.apiVersion,
       }),
     ),
   );
