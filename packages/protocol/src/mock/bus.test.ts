@@ -273,7 +273,7 @@ test("a scale runs at once, and its undo puts it back for 30 s", async () => {
   const up = await answered(backend.invoke("command_plan", scale(count + 2)));
   expect(up.friction).toEqual({ kind: "atOnce" });
   expect(up.kubectl).toBe(
-    `kubectl --context qa scale deployments.apps ${name} --replicas ${String(count + 2)} -n ${namespace}`,
+    `kubectl --context qa scale deployments.apps ${name} --current-replicas ${String(count)} --replicas ${String(count + 2)} -n ${namespace}`,
   );
   const started = Date.now();
   const [done] = await run(backend, up.id);
@@ -638,6 +638,7 @@ test("a viewer may read and nothing else", async () => {
     group: "",
     resource: "pods",
     subresource: null,
+    name: null,
   }));
   const viewer = createMockBackend("viewer");
   expect(
@@ -761,4 +762,85 @@ test("a cordon that finds the node cordoned already offers no undo", async () =>
       undoUntil: null,
     },
   ]);
+});
+
+test("a Job that completes before its suspend runs is not suspended, nor its resume undone", async () => {
+  const backend = createMockBackend("live");
+  await answered(backend.invoke("space_open", "qa"));
+  const execute = async (plan: number) => {
+    const events: OperationEvent[] = [];
+    await answered(
+      backend.subscribe("command_execute", { plan, typed: null }, (event) => {
+        events.push(event);
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(10);
+    return events;
+  };
+  const trigger = await answered(
+    backend.invoke("command_plan", {
+      action: "trigger",
+      space: "qa",
+      namespace: "batch",
+      name: "cleanup",
+    }),
+  );
+  await execute(trigger.id);
+  const job =
+    /^Job (\S+) runs once/.exec(trigger.consequences[0] ?? "")?.[1] ?? "";
+  const suspend = (on: boolean): PlanRequest => ({
+    action: "suspend",
+    space: "qa",
+    target: {
+      gvr: { group: "batch", version: "v1", resource: "jobs" },
+      namespaced: true,
+      namespace: "batch",
+      name: job,
+    },
+    suspend: on,
+  });
+  const late = await answered(backend.invoke("command_plan", suspend(true)));
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(await execute(late.id)).toEqual([
+    {
+      state: "failed",
+      error: {
+        kind: "invalidInput",
+        message: `Job ${job} has completed, so there is nothing to suspend`,
+      },
+    },
+  ]);
+
+  const again = await answered(
+    backend.invoke("command_plan", {
+      action: "trigger",
+      space: "qa",
+      namespace: "batch",
+      name: "cleanup",
+    }),
+  );
+  await execute(again.id);
+  const next =
+    /^Job (\S+) runs once/.exec(again.consequences[0] ?? "")?.[1] ?? "";
+  const of = (on: boolean): PlanRequest => ({
+    action: "suspend",
+    space: "qa",
+    target: {
+      gvr: { group: "batch", version: "v1", resource: "jobs" },
+      namespaced: true,
+      namespace: "batch",
+      name: next,
+    },
+    suspend: on,
+  });
+  await execute((await answered(backend.invoke("command_plan", of(true)))).id);
+  await execute((await answered(backend.invoke("command_plan", of(false)))).id);
+  await vi.advanceTimersByTimeAsync(5000);
+  const error = await refused(
+    backend.invoke("command_plan", { action: "undo", space: "qa" }),
+  );
+  expect(error.kind).toBe("conflict");
+  expect(error.message).toBe(
+    `Job ${next} has completed since you resumed it, so Twigo left it`,
+  );
 });

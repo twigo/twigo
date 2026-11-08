@@ -4,7 +4,11 @@ import type { Resource } from "@twigo/protocol";
 import { ActionBar, EmptyState, GridSkeleton } from "@twigo/ui";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { Details } from "../Details";
-import { CAPABILITY_PREFIXES, MARKED_DELETE } from "../capabilities";
+import {
+  CAPABILITY_PREFIXES,
+  MARKED_DELETE,
+  type Asked,
+} from "../capabilities";
 import { logsKind } from "../logs/entries";
 import { rowState } from "../rowState";
 import { objectOf, objectOfRow } from "../selection";
@@ -117,7 +121,7 @@ function Loaded({
   useChanges(commands.changes);
   useChanges(catalog.changes);
   const selected = selection.get(uri);
-  const namespace = selected && objectOf(selected).namespace;
+  const object = JSON.stringify(selected ? objectOf(selected) : {});
   const referenced = CAPABILITY_PREFIXES.flatMap((prefix) =>
     commands.referenced(prefix),
   );
@@ -128,7 +132,7 @@ function Loaded({
       uri,
       input.space,
       resource.gvr,
-      namespace,
+      JSON.parse(object) as Asked,
       JSON.parse(capabilityKeys) as string[],
       contexts,
     );
@@ -137,24 +141,18 @@ function Loaded({
     uri,
     input.space,
     resource.gvr,
-    namespace,
+    object,
     capabilityKeys,
     contexts,
   ]);
   const marks = selection.marks(uri);
   const marked = JSON.stringify(
-    [...marks].map((id) => objectOfRow(id, resource.namespaced).namespace),
+    [...marks].map((id) => objectOfRow(id, resource.namespaced)),
   );
   useEffect(() => {
-    const namespaces = JSON.parse(marked) as (string | undefined)[];
-    if (namespaces.length === 0) return;
-    capabilities.askMarked(
-      uri,
-      input.space,
-      resource.gvr,
-      namespaces,
-      contexts,
-    );
+    const objects = JSON.parse(marked) as Asked[];
+    if (objects.length === 0) return;
+    capabilities.askMarked(uri, input.space, resource.gvr, objects, contexts);
   }, [capabilities, uri, input.space, resource.gvr, marked, contexts]);
   const allowed = capabilities.values(uri, referenced);
   const scoped = JSON.stringify({

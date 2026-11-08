@@ -1041,8 +1041,8 @@ interface CommandDescriptor {
   - `selection.count`
   - `editor.open`, `editor.dirty`, `editor.type`
   - `capability.<verb>.<resource>[/<subresource>]`, the resource by kubectl's name (`capability.create.jobs.batch`), and `resource.capability.<verb>[/<subresource>]` for the list's own resource, which a command of every resource, as delete, cannot name.
-    A list asks `access_review` for the keys some command's enablement reads, in the selected row's namespace; Rust answers each with a SelfSubjectAccessReview kept with the context's clients.
-    The Delete of the marked rows reads `marked.capability.delete` instead, the list's delete asked in each namespace the marked rows are in, and true only where every answer is.
+    A list asks `access_review` for the keys some command's enablement reads, in the selected row's namespace and, for the list's own resource, by the row's name, which a rule that lists `resourceNames` needs; Rust answers each with a SelfSubjectAccessReview kept with the context's clients, for the whole resource first and by name only when that says no, and asks about a namespace in that namespace, as kube-apiserver authorizes it.
+    The Delete of the marked rows reads `marked.capability.delete` instead, the list's delete asked for each marked row, and true only where every answer is.
     A key holds until its answer says no, and one the cluster cannot answer holds, so only what RBAC refuses is disabled and the server still decides.
   - `operationUndo`: the spaces whose last action an undo puts back now
   - `platform`

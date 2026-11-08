@@ -129,6 +129,8 @@ interface Revert {
   readonly write: { readonly verb: string; readonly target: string };
   /** What the undo asks as it is planned, as Rust's `Asks`. */
   readonly asks: () => Asked;
+  /** Why the undo is refused as it runs, as Rust's `ended_since`. */
+  readonly left?: () => string | undefined;
   readonly question: string;
   readonly doing: string;
   readonly done: string;
@@ -634,7 +636,9 @@ export class MockBus {
           zero && pods.length > 0
             ? [{ title: "Its pods go", objects: pods.map(podRef) }]
             : [],
-        kubectl: line(`--replicas ${String(replicas)}`),
+        kubectl: line(
+          `--current-replicas ${String(pods.length)} --replicas ${String(replicas)}`,
+        ),
         doing: `Scaling ${what} to ${String(replicas)}`,
       },
       risk: zero ? { kind: "lasting" } : { kind: "reversible" },
@@ -918,12 +922,17 @@ export class MockBus {
     if (found.suspend === suspend) {
       throw new IpcError("invalidInput", already);
     }
-    if ("completed" in found && found.completed !== null) {
-      throw new IpcError(
+    const ended = () => "completed" in found && found.completed !== null;
+    const nothing = () =>
+      new IpcError(
         "invalidInput",
         `${capital(what)} has completed, so there is nothing to ${suspend ? "suspend" : "resume"}`,
       );
-    }
+    if (ended()) throw nothing();
+    const left = () =>
+      ended()
+        ? `${capital(what)} has completed since you ${suspend ? "suspended" : "resumed"} it, so Twigo left it`
+        : undefined;
     const words = (on: boolean) =>
       on
         ? { verb: "Suspend", doing: "Suspending", done: "Suspended" }
@@ -981,6 +990,7 @@ export class MockBus {
           tell({ state: "done", text: already, undoUntil: null });
           return;
         }
+        if (ended()) throw nothing();
         this.#switch(cluster, found, suspend);
         this.host.changed();
         tell({
@@ -989,8 +999,13 @@ export class MockBus {
           revert: {
             context,
             write,
-            asks: () =>
-              !suspend && resource === "jobs" ? stopping() : AT_ONCE,
+            asks: () => {
+              if (suspend || resource !== "jobs") return AT_ONCE;
+              const why = left();
+              if (why) throw new IpcError("conflict", why);
+              return stopping();
+            },
+            left: resource === "jobs" ? left : undefined,
             question: `${back.verb} ${what} in ${namespace ?? ""} on ${context}?`,
             doing: `${back.doing} ${what}`,
             done: `${back.done} ${what}`,
@@ -1058,6 +1073,8 @@ export class MockBus {
           );
         }
         this.#undos.delete(space);
+        const why = revert.left?.();
+        if (why) throw new IpcError("conflict", why);
         revert.put();
         this.host.changed();
         tell({ state: "done", text: revert.done, undoUntil: null });
