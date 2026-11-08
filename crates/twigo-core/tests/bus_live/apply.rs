@@ -12,7 +12,7 @@ use twigo_ipc::{
     PlanRequest, PreviewId, ResourceRef, SetContextMode,
 };
 
-use super::{Cluster, core, eventually, kubectl, reference, run};
+use super::{Cluster, core, eventually, kubectl, reference, run, unique};
 
 fn deployments(namespace: &str) -> String {
     format!("/apis/apps/v1/namespaces/{namespace}/deployments")
@@ -1160,11 +1160,7 @@ async fn a_crd_with_a_list_map_pairs_by_key_and_a_preserved_field_is_taken_as_it
     let namespace = cluster.namespace("apply-crd").await;
     let dir = tempfile::tempdir().unwrap();
     let (core, _) = core(dir.path(), &cluster).await;
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .subsec_nanos();
-    let group = format!("g{nanos}.twigo.test");
+    let group = format!("g{}.twigo.test", unique());
     let crd_name = with_crd(
         &cluster,
         widget_crd(
@@ -1274,11 +1270,7 @@ async fn an_entry_at_another_version_is_carried_when_its_paths_still_reach_the_o
     let namespace = cluster.namespace("apply-versions").await;
     let dir = tempfile::tempdir().unwrap();
     let (core, _) = core(dir.path(), &cluster).await;
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .subsec_nanos();
-    let group = format!("v{nanos}.twigo.test");
+    let group = format!("v{}.twigo.test", unique());
     let schema = json!({
         "type": "object",
         "properties": { "first": { "type": "string" }, "second": { "type": "string" } },
@@ -2909,11 +2901,7 @@ async fn a_co_owner_of_an_element_keeps_it_for_the_patch_on_the_server() {
     let namespace = cluster.namespace("apply-coowner").await;
     let dir = tempfile::tempdir().unwrap();
     let (core, _) = core(dir.path(), &cluster).await;
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .subsec_nanos();
-    let group = format!("o{nanos}.twigo.test");
+    let group = format!("o{}.twigo.test", unique());
     let crd_name = with_crd(
         &cluster,
         widget_crd(
@@ -3350,11 +3338,7 @@ async fn a_crd_s_atomic_items_stay_whole_and_a_null_in_a_preserved_field_stays()
     let namespace = cluster.namespace("apply-crd2").await;
     let dir = tempfile::tempdir().unwrap();
     let (core, _) = core(dir.path(), &cluster).await;
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .subsec_nanos();
-    let group = format!("a{nanos}.twigo.test");
+    let group = format!("a{}.twigo.test", unique());
     let crd_name = with_crd(
         &cluster,
         widget_crd(
@@ -4056,11 +4040,7 @@ async fn a_field_nobody_owns_stays_when_twigo_s_last_field_in_its_map_goes() {
     let namespace = cluster.namespace("apply-unowned").await;
     let dir = tempfile::tempdir().unwrap();
     let (core, _) = core(dir.path(), &cluster).await;
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .subsec_nanos();
-    let group = format!("a{nanos}.twigo.test");
+    let group = format!("a{}.twigo.test", unique());
     let crd_name = with_crd(
         &cluster,
         widget_crd(
@@ -4227,11 +4207,7 @@ async fn a_null_on_a_nullable_field_reaches_the_server() {
     let namespace = cluster.namespace("apply-null").await;
     let dir = tempfile::tempdir().unwrap();
     let (core, _) = core(dir.path(), &cluster).await;
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .subsec_nanos();
-    let group = format!("a{nanos}.twigo.test");
+    let group = format!("a{}.twigo.test", unique());
     let crd_name = with_crd(
         &cluster,
         widget_crd(

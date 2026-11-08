@@ -12,6 +12,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use k8s_openapi::api::core::v1::{ConfigMap, Namespace};
@@ -25,6 +26,21 @@ use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{Execute, Gvr, IpcError, OperationEvent, Plan, PlanRequest, ResourceRef};
 
 pub const WAIT: Duration = Duration::from_secs(60);
+
+pub fn unique() -> String {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .subsec_nanos();
+    format!("{nanos}-{}", NEXT.fetch_add(1, Ordering::Relaxed))
+}
+
+#[test]
+fn names_made_at_the_same_instant_differ() {
+    let names: std::collections::HashSet<String> = (0..20_000).map(|_| unique()).collect();
+    assert_eq!(names.len(), 20_000);
+}
 
 /// The test cluster: its context and an admin client.
 pub struct Cluster {
@@ -55,11 +71,7 @@ impl Cluster {
     }
 
     pub async fn namespace(&self, prefix: &str) -> String {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .subsec_nanos();
-        let namespace = format!("core-bus-{prefix}-{nanos}");
+        let namespace = format!("core-bus-{prefix}-{}", unique());
         Api::<Namespace>::all(self.admin.clone())
             .create(
                 &PostParams::default(),
