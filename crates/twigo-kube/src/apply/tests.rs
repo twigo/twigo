@@ -1630,6 +1630,27 @@ fn what_twigo_owns_keeps_a_null_of_the_live_object_on_an_unrelated_edit() {
         config["free"],
         json!({ "hosts": [{ "host": "a", "tls": null }] })
     );
+
+    let live = owned_by(
+        widget(json!({
+            "items": [{ "name": "a", "value": null }],
+            "tags": ["x"],
+        })),
+        vec![manager(
+            "twigo",
+            "Apply",
+            json!({ "f:items": { item("a"): { ".": {}, "f:name": {}, "f:value": {} } } }),
+        )],
+    );
+    let base = view(&live);
+    let mut edited = base.clone();
+    edited["tags"].as_array_mut().unwrap().push(json!("y"));
+    let config = built(&live, &base, &edited, root, &[]).config.unwrap();
+    assert_eq!(
+        config["items"],
+        json!([{ "name": "a", "value": null }]),
+        "extraction reads the raw live object"
+    );
 }
 
 #[test]
