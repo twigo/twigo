@@ -21,6 +21,7 @@ export type MenuId =
   | "editor/title"
   | "edit/toolbar"
   | "edit/changed"
+  | "edit/server"
   | "edit/conflicts"
   | "edit/immutable"
   | "edit/diff"

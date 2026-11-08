@@ -353,7 +353,10 @@ export function registerEdits(
       title: "Reload",
       icon: RefreshCw,
       enablement: "edit.object && edit.dirty",
-      menus: [["edit/changed", "navigation"]],
+      menus: [
+        ["edit/changed", "navigation"],
+        ["edit/server", "navigation"],
+      ],
       run: (uri) => {
         copies.drop(uri);
         dropPreview(uri);
@@ -365,7 +368,10 @@ export function registerEdits(
       title: "Keep mine",
       icon: GitMerge,
       enablement: "edit.object && edit.dirty && edit.keepable",
-      menus: [["edit/changed", "navigation", "edit.keepable"]],
+      menus: [
+        ["edit/changed", "navigation", "edit.keepable"],
+        ["edit/server", "navigation", "edit.keepable"],
+      ],
       run: async (uri) => {
         const stale = answered(uri)?.answer.state === "stale";
         copies.keepMine(uri);

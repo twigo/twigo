@@ -5,6 +5,7 @@ import { Discovery } from "../discovery";
 import { diffUri } from "../uri";
 import { DiffEditor } from "./DiffEditors";
 import { resourceVersionOf, yamlOfJson } from "./object";
+import { setupEdit } from "../../test/edits";
 import { createEdits } from "./services";
 
 vi.mock("./DiffView", () => ({
@@ -99,6 +100,22 @@ test("the diff against the server tells the working copy what it read, so that K
     locked: seen,
   });
   expect(edits.copies.serverChanged(POD)).toBe(false);
+});
+
+test("the diff against the server offers Reload and Keep mine, and no Compare, which is where it is", async () => {
+  const { workbench, edits, discovery, uri } = await setupEdit("ready", "dev");
+  render(
+    <DiffEditor
+      uri={diffUri({ kind: "server", editor: uri })}
+      edits={edits}
+      discovery={discovery}
+    />,
+    { wrapper: inWorkbench(workbench) },
+  );
+  await screen.findByTestId("diff");
+  expect(
+    screen.getAllByRole("button").map((button) => button.textContent.trim()),
+  ).toEqual(["Reload", "Keep mine"]);
 });
 
 test("comparing objects says when one cannot be read, and that a Secret's values are hidden", async () => {

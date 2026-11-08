@@ -140,7 +140,7 @@ function ServerDiff({
         icon={GitCompare}
         title="As you opened it, and on the server now"
         action={
-          <EditActions edits={edits} uri={editor} menus={["edit/changed"]} />
+          <EditActions edits={edits} uri={editor} menus={["edit/server"]} />
         }
       >
         {isSecret(base) && SECRET_NOTE}
