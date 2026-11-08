@@ -74,6 +74,20 @@ test("a pick with a source is asked for the rows of each value typed, and shows 
   await expect(picked).resolves.toEqual({ id: "z", label: "zulu" });
 });
 
+test("a pick's notice says what its rows are, and shows with none", async () => {
+  const workbench = await testWorkbench();
+  render(<QuickAccessWidget />, { wrapper: inWorkbench(workbench) });
+  await act(async () => {
+    void workbench.quickAccess.pick("Compare with…", () => ({
+      items: [],
+      notice: "Only your namespaces",
+    }));
+    await Promise.resolve();
+  });
+  expect(screen.getByRole("status").textContent).toBe("Only your namespaces");
+  expect(screen.getByText("No results")).toBeTruthy();
+});
+
 test("items loaded for another value are neither shown nor accepted", async () => {
   const workbench = await testWorkbench();
   const pending = new Map<string, (items: QuickPickItem[]) => void>();

@@ -75,13 +75,16 @@ type ListScenario = "live" | ViewState["state"];
  * or a pinned state of prod-eu's credentials, or what `apply_preview` answers
  * to an edit (`applyConflicts`), or an open object that changes on its own
  * (`serverChange`, `statusChange`), or one that an apply leaves late
- * (`applyLate`).
+ * (`applyLate`), or `rbacNamespaces`: live lists for a person whose
+ * RoleBindings reach only the namespace `default`, so a cluster-wide list
+ * and one of any other namespace are forbidden.
  */
 export type MockScenario =
   | ListScenario
   | "shellTimeout"
   | "policyFile"
   | "viewer"
+  | "rbacNamespaces"
   | AuthScenario
   | EditScenario;
 
@@ -90,6 +93,7 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "shellTimeout",
   "policyFile",
   "viewer",
+  "rbacNamespaces",
   ...AUTH_SCENARIOS,
   ...EDIT_SCENARIOS,
   "queued",
@@ -156,6 +160,7 @@ export function createMockBackend(
     scenario === "shellTimeout" ||
     scenario === "policyFile" ||
     scenario === "viewer" ||
+    scenario === "rbacNamespaces" ||
     isAuthScenario(scenario) ||
     isEditScenario(scenario)
       ? "live"
@@ -520,7 +525,13 @@ export function createMockBackend(
               error: { kind: "invalidInput", message: selected },
             }
           : lists === "forbidden" ||
-              (lists === "live" && FORBIDDEN[context]?.includes(resource))
+              (lists === "live" && FORBIDDEN[context]?.includes(resource)) ||
+              (scenario === "rbacNamespaces" &&
+                !(
+                  query.namespaced &&
+                  query.namespaces.length > 0 &&
+                  query.namespaces.every((name) => name === "default")
+                ))
             ? forbidden
             : lists;
       subscriptions.set(

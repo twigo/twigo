@@ -50,7 +50,11 @@ export function QuickAccessWidget() {
 
 type Loaded =
   | { readonly state: "loading" }
-  | { readonly state: "ready"; readonly items: readonly QuickPickItem[] }
+  | {
+      readonly state: "ready";
+      readonly items: readonly QuickPickItem[];
+      readonly notice?: string;
+    }
   | { readonly state: "failed"; readonly message: string };
 
 /** cmdk's own keys, which go to the keybinding service instead. */
@@ -76,8 +80,16 @@ function Open({ session }: { session: Session }) {
     if (!load) return;
     let live = true;
     Promise.resolve(load()).then(
-      (items) => {
-        if (live) setLoaded({ value, result: { state: "ready", items } });
+      (picked) => {
+        if (live) {
+          setLoaded({
+            value,
+            result:
+              "items" in picked
+                ? { state: "ready", ...picked }
+                : { state: "ready", items: picked },
+          });
+        }
       },
       (error: unknown) => {
         if (live) {
@@ -198,6 +210,14 @@ function Open({ session }: { session: Session }) {
           }
         />
         <CommandList>
+          {result.state === "ready" && result.notice !== undefined && (
+            <p
+              role="status"
+              className="px-3 py-2 text-xs text-muted-foreground"
+            >
+              {result.notice}
+            </p>
+          )}
           {ask ? (
             <Asked message={ask.validate(value)} prompt={ask.prompt} />
           ) : result.state === "failed" ? (

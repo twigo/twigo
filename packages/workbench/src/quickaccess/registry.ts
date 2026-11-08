@@ -89,9 +89,12 @@ export interface QuickAccessList {
  * Rows asked for each value typed, as a provider's are, for a list too long
  * to hold or one that a backend filters.
  */
-export type PickSource = (
-  filter: string,
-) => readonly QuickPickItem[] | Promise<readonly QuickPickItem[]>;
+export type PickSource = (filter: string) => Picked | Promise<Picked>;
+
+/** The rows of a pick, and what the person should know of them, over the rows or in place of them. */
+export type Picked =
+  | readonly QuickPickItem[]
+  | { readonly items: readonly QuickPickItem[]; readonly notice: string };
 
 interface Pick {
   readonly placeholder: string;

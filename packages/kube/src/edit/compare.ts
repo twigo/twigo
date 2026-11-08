@@ -1,4 +1,4 @@
-import { ListView } from "@twigo/protocol";
+import { IpcError, ListView, type ListSnapshot } from "@twigo/protocol";
 import {
   filtered,
   type PickSource,
@@ -16,7 +16,9 @@ import { objectUri, parseObjectUri } from "../uri";
  * namespace and not the ones selected for the lists, whose name holds the
  * text, which Rust filters as the live upstream serves them, so an object past
  * the first rows is found by typing its name, then the objects the space
- * opened lately, of any kind.
+ * opened lately, of any kind. Someone who may not list the kind cluster-wide
+ * gets the selected namespaces and the object's own instead, and is told so;
+ * not there either, and the picker says that.
  */
 export function comparisons(
   workbench: Workbench,
@@ -26,25 +28,50 @@ export function comparisons(
   return async (filter) => {
     const object = parseObjectUri(uri);
     if (!object) return [];
-    const { backend, recent } = workbench;
+    const { backend, recent, spaces } = workbench;
     const text = filter.trim();
-    const snapshot = await firstRows(
-      new ListView(backend, {
-        space: object.space,
-        gvr: object.gvr,
-        namespaced,
-        namespaces: [],
-        labelSelector: null,
-        fieldSelector: null,
-        owners: null,
-        text: text === "" ? null : text,
-        columns: null,
-        sort: null,
-        countBy: null,
-        groupBy: null,
-        values: null,
-      }),
-    );
+    const rows = (namespaces: readonly string[]): Promise<ListSnapshot> =>
+      firstRows(
+        new ListView(backend, {
+          space: object.space,
+          gvr: object.gvr,
+          namespaced,
+          namespaces: [...namespaces],
+          labelSelector: null,
+          fieldSelector: null,
+          owners: null,
+          text: text === "" ? null : text,
+          columns: null,
+          sort: null,
+          countBy: null,
+          groupBy: null,
+          values: null,
+        }),
+      );
+    let snapshot = await rows([]);
+    let notice: string | undefined;
+    if (snapshot.status.state === "forbidden") {
+      const namespaces = namespaced
+        ? [
+            ...new Set([
+              ...spaces.state(object.space).namespaces,
+              ...(object.namespace === undefined ? [] : [object.namespace]),
+            ]),
+          ]
+        : [];
+      if (namespaces.length > 0) {
+        snapshot = await rows(namespaces);
+        notice = `You may not list ${object.gvr.resource} in this cluster: these are from the namespaces selected and the object's own.`;
+      }
+      if (namespaces.length === 0 || snapshot.status.state === "forbidden") {
+        throw new IpcError(
+          "forbidden",
+          namespaces.length === 0
+            ? `You may not list ${object.gvr.resource} in this cluster.`
+            : `You may not list ${object.gvr.resource} in this cluster, nor in the namespaces selected or the object's own.`,
+        );
+      }
+    }
     const sameKind = snapshot.ids.flatMap((id) => {
       const { namespace, name } = objectOfRow(id, namespaced);
       const target = objectUri({
@@ -85,6 +112,7 @@ export function comparisons(
               } satisfies QuickPickItem,
             ];
       });
-    return [...sameKind, ...filtered(lately, filter)];
+    const items = [...sameKind, ...filtered(lately, filter)];
+    return notice === undefined ? items : { items, notice };
   };
 }
