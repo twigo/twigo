@@ -31,6 +31,8 @@ export type Preview =
       readonly dropped: readonly string[];
       /** Whether the diff tab that a ready answer needs was opened for the person. */
       readonly shown: boolean;
+      /** Whether a plan of this preview runs: the engine plans a preview once. */
+      readonly planning: boolean;
     };
 
 export type Answered = Extract<Preview, { readonly state: "answered" }>;
@@ -85,6 +87,7 @@ export class Previews {
         forced: request.force,
         dropped: request.drop,
         shown: false,
+        planning: false,
       };
     } catch (error) {
       next = { state: "failed", message: toIpcError(error).message };
@@ -120,6 +123,18 @@ export class Previews {
     const last = this.#previews.get(editor);
     if (last?.state !== "answered" || last.shown) return;
     this.#set(editor, { ...last, shown: true });
+  }
+
+  /** A plan of the editor's preview `answer` starts or ends; one of an older preview is nothing. */
+  planning(editor: string, answer: ApplyPreviewed, planning: boolean): void {
+    const last = this.#previews.get(editor);
+    if (
+      last?.state !== "answered" ||
+      last.answer !== answer ||
+      last.planning === planning
+    )
+      return;
+    this.#set(editor, { ...last, planning });
   }
 
   clear(editor: string): void {

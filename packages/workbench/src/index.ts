@@ -37,5 +37,10 @@ export type {
   Watermark,
 } from "./views/registry";
 export { SpaceTile } from "./parts/SpaceTile";
-export { accessOfSpace, chipLabel } from "./spaces/modes";
+export {
+  accessOfSpace,
+  chipLabel,
+  describeAccess,
+  setByPolicyFile,
+} from "./spaces/modes";
 export { WorkbenchView } from "./WorkbenchView";

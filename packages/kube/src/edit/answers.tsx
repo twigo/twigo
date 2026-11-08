@@ -5,6 +5,8 @@ import { Banner, Callout, EmptyState, Skeleton, Table } from "@twigo/ui";
 import {
   accessOfSpace,
   chipLabel,
+  describeAccess,
+  setByPolicyFile,
   useChanges,
   useWorkbench,
 } from "@twigo/workbench";
@@ -251,10 +253,11 @@ function Ready({
   const { warnings, removals, ignored, strategy } = answer;
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {lock !== undefined && (
+      {lock !== undefined && access && (
         <Banner tone="info" icon={Lock} title={lock}>
-          The dry run and this diff work. Apply is refused until the context is
-          unlocked.
+          {setByPolicyFile(access.source)
+            ? `The dry run and this diff work, and Apply is not offered. ${describeAccess(access)}`
+            : "The dry run and this diff work. Apply is refused until the context is unlocked."}
         </Banner>
       )}
       {outdated && (

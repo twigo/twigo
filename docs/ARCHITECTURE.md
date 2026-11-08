@@ -1598,6 +1598,8 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
    The diff includes defaults and webhook mutations, which a local diff cannot know.
    A preview keeps what it prepared in Rust for its window under an id, once, and the plan of that id sends exactly that.
 6. Apply, by a bus plan that the person has just read the diff of: at once in `read-write`, a confirmation in `guarded`, blocked in `read-only`.
+   Apply is offered for a diff that was shown, and again only when the plan of that preview has ended, since the engine plans a preview once.
+   Under an admin's policy file the lock cannot be lifted, so Apply is not offered and the diff says why in the words of the context's chip; a read-only the person set refuses it as the gate does, and it works after an unlock.
    A `409 FieldManagerConflict` shows a table per field with the owning manager, and offers **Force** or **Drop my change**.
    Giving up every conflicting field can leave nothing to send, and the bar then says that, and that the YAML still holds the change.
    The plan takes the preview when it is made, once the gate has allowed it: a cancelled confirmation, a failed run and a stopped one end the preview and close its diff, while a plan the gate refuses, as in `read-only`, leaves it for an Apply after an unlock.

@@ -43,6 +43,73 @@ test("in read-only the dry run and the diff work and Apply is refused by the gat
   expect(edits.previews.get(uri)).toMatchObject({
     answer: { state: "ready" },
   });
+  expect(
+    editLookup(edits, uri, workbench.keys.lookup(null))("edit.applicable"),
+  ).toBe(true);
+});
+
+test("a second Apply while the plan of a preview runs plans nothing, and the preview can be planned again once the gate refuses it", async () => {
+  const { workbench, edits, uri, run } = await setupEdit("live", "staging");
+  const keys = () => editLookup(edits, uri, workbench.keys.lookup(null));
+  await run("k8s.edit.apply");
+  const operation = vi.spyOn(workbench.operations, "run");
+  const first = run("k8s.edit.confirm");
+  await vi.waitFor(() => {
+    expect(workbench.operations.asking).toBeDefined();
+  });
+  expect(keys()("edit.applicable")).toBe(false);
+  expect(
+    workbench
+      .actions("edit/diff", keys(), { uri })
+      .flat()
+      .find(({ id }) => id === "k8s.edit.confirm")?.disabled,
+  ).toBe(true);
+  await run("k8s.edit.confirm");
+  expect(operation).toHaveBeenCalledTimes(1);
+
+  workbench.operations.asking?.confirm(undefined);
+  await first;
+  await vi.waitFor(() => {
+    expect(edits.copies.get(uri)).toBeUndefined();
+  });
+  expect(operation).toHaveBeenCalledTimes(1);
+});
+
+test("under a policy file's lock Apply is not offered, and the diff says why in the chip's words, while a session's read-only still offers it", async () => {
+  const { workbench, edits, uri, run } = await setupEdit(
+    "policyFile",
+    "prod-eu",
+  );
+  await run("k8s.edit.apply");
+  const keys = editLookup(edits, uri, workbench.keys.lookup(null));
+  expect(keys("edit.ready")).toBe(true);
+  expect(keys("edit.policyLocked")).toBe(true);
+  expect(keys("edit.applicable")).toBe(false);
+  const offered = (menu: "edit/diff" | "commandPalette") =>
+    workbench
+      .actions(menu, keys, { uri })
+      .flat()
+      .map(({ id }) => id);
+  expect(offered("edit/diff")).not.toContain("k8s.edit.confirm");
+  expect(offered("commandPalette")).not.toContain("k8s.edit.confirm");
+  const operation = vi.spyOn(workbench.operations, "run");
+  await run("k8s.edit.confirm");
+  expect(operation).not.toHaveBeenCalled();
+
+  const session = await setupEdit("live", "prod-eu");
+  await session.run("k8s.edit.apply");
+  const open = editLookup(
+    session.edits,
+    session.uri,
+    session.workbench.keys.lookup(null),
+  );
+  expect(open("edit.policyLocked")).toBe(false);
+  expect(
+    session.workbench
+      .actions("edit/diff", open, { uri: session.uri })
+      .flat()
+      .map(({ id }) => id),
+  ).toContain("k8s.edit.confirm");
 });
 
 test("a text that does not parse stays in the editor, with no diff and nothing sent", async () => {
@@ -305,12 +372,25 @@ test("an answer that comes after the person left the space stays with its editor
   workbench.spaces.select("dev");
   const keys = editLookup(edits, uri, workbench.keys.lookup(null));
   expect(keys("edit.unshown")).toBe(true);
+  expect(keys("edit.applicable")).toBe(false);
+  const operation = vi.spyOn(workbench.operations, "run");
+  await run("k8s.edit.confirm");
+  expect(operation).not.toHaveBeenCalled();
+  expect(
+    workbench
+      .actions("commandPalette", keys)
+      .flat()
+      .map(({ id }) => id),
+  ).not.toContain("k8s.edit.confirm");
   await run("k8s.edit.show");
   expect(open).toHaveBeenCalledWith(diff);
   expect(edits.previews.get(uri)).toMatchObject({ shown: true });
   expect(
     editLookup(edits, uri, workbench.keys.lookup(null))("edit.unshown"),
   ).toBe(false);
+  expect(
+    editLookup(edits, uri, workbench.keys.lookup(null))("edit.applicable"),
+  ).toBe(true);
 });
 
 test("a plan done in another space than its editor's ends the copy and opens nothing", async () => {

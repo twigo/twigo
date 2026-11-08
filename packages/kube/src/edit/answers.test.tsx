@@ -105,6 +105,27 @@ test("a read-only context says so in the chip's words, and a writable one does n
   expect(screen.queryByText(/read-only/)).toBeNull();
 });
 
+test("under a policy file's lock the diff says so in the chip's words and offers no Apply", async () => {
+  await shown("policyFile", "prod-eu");
+  expect(screen.getByText("Production · read-only")).toBeTruthy();
+  expect(await screen.findByTestId("diff")).toBeTruthy();
+  const note = screen.getByText(/Apply is not offered/).textContent;
+  expect(note).toContain(
+    "prod-* in /Library/Application Support/Twigo/policy.json sets this",
+  );
+  expect(note).toContain("Twigo cannot change or unlock it");
+  expect(
+    screen.queryByText(/refused until the context is unlocked/),
+  ).toBeNull();
+  expect(buttons()).toEqual([]);
+  cleanup();
+
+  await shown("live", "prod-eu");
+  expect(
+    screen.getByText(/refused until the context is unlocked/),
+  ).toBeTruthy();
+});
+
 test("a diff of a text that changed since is outdated and cannot be applied", async () => {
   const { workbench, edits, uri, run } = await setupEdit("live");
   await run("k8s.edit.apply");

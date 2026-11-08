@@ -256,11 +256,17 @@ export function registerEdits(
 
   const confirm = async (uri: string, id: number, look: LucideIcon) => {
     const last = answered(uri);
-    if (!last) return;
-    const outcome = await workbench.operations.run(
-      { action: "apply", space: last.subject.space, preview: id },
-      { icon: look },
-    );
+    if (!last || last.planning) return;
+    previews.planning(uri, last.answer, true);
+    let outcome: Awaited<ReturnType<typeof workbench.operations.run>>;
+    try {
+      outcome = await workbench.operations.run(
+        { action: "apply", space: last.subject.space, preview: id },
+        { icon: look },
+      );
+    } finally {
+      previews.planning(uri, last.answer, false);
+    }
     if (outcome.state === "done") {
       finish(uri, last);
     } else if (
@@ -418,7 +424,7 @@ export function registerEdits(
       title: "Apply",
       icon: Check,
       enablement: "edit.applicable",
-      menus: [["edit/diff", "navigation", "edit.ready"]],
+      menus: [["edit/diff", "navigation", "edit.ready && !edit.policyLocked"]],
       run: async (uri) => {
         const last = answered(uri);
         if (last?.answer.state !== "ready") return;

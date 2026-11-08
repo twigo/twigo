@@ -1,4 +1,10 @@
-import type { ContextValue, Lookup, Workbench } from "@twigo/workbench";
+import {
+  accessOfSpace,
+  setByPolicyFile,
+  type ContextValue,
+  type Lookup,
+  type Workbench,
+} from "@twigo/workbench";
 import { WorkingCopies } from "./copies";
 import { parseDiffUri, parseObjectUri } from "../uri";
 import { Previews } from "./previews";
@@ -8,6 +14,8 @@ export interface EditServices {
   readonly copies: WorkingCopies;
   readonly schemas: Schemas;
   readonly previews: Previews;
+  /** Whether the space's context is read-only by an admin's policy file, which nothing in Twigo lifts. */
+  lockedByPolicy(space: string): boolean;
 }
 
 export function createEdits(workbench: Workbench): EditServices {
@@ -23,8 +31,20 @@ export function createEdits(workbench: Workbench): EditServices {
     copies,
     schemas: new Schemas(workbench.backend),
     previews: new Previews(workbench.backend),
+    lockedByPolicy: (id) => {
+      const space = workbench.spaces.list.find(
+        (candidate) => candidate.id === id,
+      );
+      const access = space && accessOfSpace(workbench.catalog, space);
+      return access?.mode === "read-only" && setByPolicyFile(access.source);
+    },
   };
 }
+
+export type EditKeys = Pick<
+  EditServices,
+  "copies" | "previews" | "lockedByPolicy"
+>;
 
 /**
  * What holds of an editor's edit, as context keys: the `when` of the
@@ -32,11 +52,14 @@ export function createEdits(workbench: Workbench): EditServices {
  * and a bar looks its own editor's up.
  */
 export function editKeys(
-  { copies, previews }: Pick<EditServices, "copies" | "previews">,
+  { copies, previews, lockedByPolicy }: EditKeys,
   uri: string,
 ): Readonly<Record<string, ContextValue>> {
   const preview = previews.get(uri);
   const answer = preview?.state === "answered" ? preview.answer : undefined;
+  const refused =
+    preview?.state === "answered" && lockedByPolicy(preview.subject.space);
+  const planning = preview?.state === "answered" && preview.planning;
   return {
     "edit.object": uri.startsWith("k8s:"),
     "edit.new": uri.startsWith("untitled:"),
@@ -50,12 +73,21 @@ export function editKeys(
       answer?.state === "ready" && preview?.state === "answered"
         ? !preview.shown
         : false,
-    // A ready diff of the text as it is now: its plan sends exactly that.
+    // Where no unlock can lift the lock, the plan could only fail.
+    "edit.policyLocked": refused,
+    // A ready diff that was shown, of the text as it is now: its plan sends exactly that, and the engine plans a preview once.
     "edit.applicable":
       answer?.state === "ready" &&
       preview?.state === "answered" &&
-      preview.subject.text === copies.get(uri)?.text,
-    "edit.recreate": answer?.state === "immutable" && answer.recreate !== null,
+      preview.shown &&
+      preview.subject.text === copies.get(uri)?.text &&
+      !planning &&
+      !refused,
+    "edit.recreate":
+      answer?.state === "immutable" &&
+      answer.recreate !== null &&
+      !planning &&
+      !refused,
   };
 }
 
@@ -89,15 +121,12 @@ export const EDIT_KEYS: readonly string[] = [
   "edit.keepable",
   "edit.ready",
   "edit.unshown",
+  "edit.policyLocked",
   "edit.applicable",
   "edit.recreate",
 ];
 
-export function editLookup(
-  edits: Pick<EditServices, "copies" | "previews">,
-  uri: string,
-  base: Lookup,
-): Lookup {
+export function editLookup(edits: EditKeys, uri: string, base: Lookup): Lookup {
   const keys = editKeys(edits, uri);
   return (key) => (key in keys ? keys[key] : base(key));
 }
