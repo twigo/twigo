@@ -22,7 +22,7 @@ export function createEdits(workbench: Workbench): EditServices {
   const copies = new WorkingCopies(
     workbench.state,
     workbench.editors,
-    workbench.spaces.list.map(({ id }) => id),
+    workbench.spaces,
   );
   workbench.editors.onClose((uri) => {
     copies.closed(uri);

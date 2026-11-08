@@ -121,6 +121,7 @@ export class WorkingCopies {
     }
   >();
   readonly #focusing = new Set<string>();
+  readonly #loaded = new Set<string>();
   #manifests = 0;
   readonly #seen = new Map<
     string,
@@ -132,18 +133,16 @@ export class WorkingCopies {
     private readonly editors: {
       setDirty(uri: string, dirty: boolean): void;
     },
-    spaces: readonly string[],
+    spaces: {
+      readonly list: readonly { readonly id: string }[];
+      readonly changes: Changes;
+    },
   ) {
-    for (const space of spaces) {
-      const stored = this.state.get(space, KEY, COPIES, {});
-      for (const [uri, { base, lock, locked, target, text }] of Object.entries(
-        stored,
-      )) {
-        this.#copies.set(uri, { space, base, lock, locked, target, text });
-        this.editors.setDirty(uri, true);
-        this.#manifests = Math.max(this.#manifests, parseUntitledUri(uri) ?? 0);
-      }
-    }
+    const load = () => {
+      for (const { id } of spaces.list) this.#load(id);
+    };
+    load();
+    spaces.changes.subscribe(load);
   }
 
   get(uri: string): WorkingCopy | undefined {
@@ -184,6 +183,7 @@ export class WorkingCopies {
   }
 
   edit(uri: string, text: string, opened: Opened): void {
+    this.#load(opened.space);
     this.#held.delete(uri);
     const copy = this.#copies.get(uri);
     const base = copy?.base ?? opened.base;
@@ -202,6 +202,7 @@ export class WorkingCopies {
   }
 
   write(uri: string, space: string, text: string): void {
+    this.#load(space);
     this.#held.delete(uri);
     if (text === "") {
       this.drop(uri);
@@ -319,14 +320,6 @@ export class WorkingCopies {
     this.changes.emit();
   }
 
-  flush(): void {
-    for (const [space, timer] of this.#timers) {
-      clearTimeout(timer);
-      this.#timers.delete(space);
-      this.#store(space);
-    }
-  }
-
   #set(uri: string, copy: WorkingCopy): void {
     this.#copies.set(uri, copy);
     this.editors.setDirty(uri, true);
@@ -344,6 +337,27 @@ export class WorkingCopies {
         this.#store(space);
       }, PERSIST_AFTER_MS),
     );
+  }
+
+  /**
+   * Takes up the copies a space's state holds, once, whenever the space
+   * appears and before the first copy is made in it: a space missing from the
+   * list when the app started would otherwise have its backup overwritten by
+   * the first edit made in it.
+   */
+  #load(space: string): void {
+    if (this.#loaded.has(space)) return;
+    this.#loaded.add(space);
+    const stored = this.state.get(space, KEY, COPIES, {});
+    for (const [uri, { base, lock, locked, target, text }] of Object.entries(
+      stored,
+    )) {
+      if (this.#copies.has(uri)) continue;
+      this.#copies.set(uri, { space, base, lock, locked, target, text });
+      this.editors.setDirty(uri, true);
+      this.#manifests = Math.max(this.#manifests, parseUntitledUri(uri) ?? 0);
+    }
+    if (Object.keys(stored).length > 0) this.changes.emit();
   }
 
   #store(space: string): void {

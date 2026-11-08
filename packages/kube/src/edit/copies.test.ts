@@ -1,7 +1,7 @@
-import { expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Backend } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
-import { StateStore } from "@twigo/workbench";
+import { Changes, StateStore } from "@twigo/workbench";
 import { mayHoldSecret, WorkingCopies, type EditorBuffer } from "./copies";
 import { yamlOfJson } from "./object";
 
@@ -17,9 +17,24 @@ const base = JSON.stringify({
 });
 const opened = { space: "prod-eu", base, lock: "10" };
 
-async function services(backend = createMockBackend("ready")) {
-  const state = await StateStore.load(backend, () => undefined);
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+async function services(
+  backend = createMockBackend("ready"),
+  ids: readonly string[] = ["prod-eu"],
+) {
+  const loading = StateStore.load(backend, () => undefined);
+  await vi.advanceTimersByTimeAsync(0);
+  const state = await loading;
   const dirty = new Map<string, boolean>();
+  const changes = new Changes();
+  const spaces = { list: ids.map((id) => ({ id })), changes };
   const copies = new WorkingCopies(
     state,
     {
@@ -27,9 +42,30 @@ async function services(backend = createMockBackend("ready")) {
         dirty.set(uri, is);
       },
     },
-    ["prod-eu"],
+    spaces,
   );
-  return { backend, state, copies, dirty };
+  return {
+    backend,
+    state,
+    copies,
+    dirty,
+    appear: (id: string) => {
+      spaces.list = [...spaces.list, { id }];
+      changes.emit();
+    },
+  };
+}
+
+/** The pause after the last change ends, and the backup reaches the state. */
+async function backedUp(state: StateStore) {
+  await vi.runAllTimersAsync();
+  await state.settled();
+}
+
+async function stateOf(backend: Backend) {
+  const loading = backend.invoke("state_load", null);
+  await vi.advanceTimersByTimeAsync(0);
+  return loading;
 }
 
 test("the first change makes a copy based on the opened object, and the object's own text ends it", async () => {
@@ -110,8 +146,7 @@ test("copies survive a restart in their space, and mark their editors again", as
   const first = await services();
   first.copies.edit(DEPLOYMENT, "replicas: 2\n", opened);
   first.copies.write("untitled://manifest-1", "prod-eu", "kind: ConfigMap\n");
-  first.copies.flush();
-  await first.state.settled();
+  await backedUp(first.state);
 
   const next = await services(first.backend);
   expect(next.copies.get(DEPLOYMENT)).toEqual({
@@ -127,11 +162,37 @@ test("copies survive a restart in their space, and mark their editors again", as
     text: "kind: ConfigMap\n",
   });
   next.copies.drop(DEPLOYMENT);
-  next.copies.flush();
-  await next.state.settled();
+  await backedUp(next.state);
   const last = await services(first.backend);
   expect(last.copies.get(DEPLOYMENT)).toBeUndefined();
   expect(last.copies.get("untitled://manifest-1")).toBeDefined();
+});
+
+test("a space missing from the list at the start has its copies taken up when it appears, before its first edit stores anything", async () => {
+  const web = "k8s://staging/apps/v1/deployments/default/web";
+  const api = "k8s://staging/apps/v1/deployments/default/api";
+  const opened = {
+    space: "staging",
+    base: JSON.stringify({ kind: "Deployment", metadata: { name: "web" } }),
+    lock: "1",
+  };
+  const first = await services(undefined, ["staging"]);
+  first.copies.edit(web, "typed in web\n", opened);
+  await backedUp(first.state);
+
+  const second = await services(first.backend, ["prod-eu"]);
+  expect(second.copies.get(web)).toBeUndefined();
+  second.copies.edit(api, "typed in api\n", opened);
+  await backedUp(second.state);
+
+  const third = await services(first.backend, ["staging"]);
+  expect(third.copies.get(web)?.text).toBe("typed in web\n");
+  expect(third.copies.get(api)?.text).toBe("typed in api\n");
+
+  const late = await services(first.backend, ["prod-eu"]);
+  late.appear("staging");
+  expect(late.copies.get(web)?.text).toBe("typed in web\n");
+  expect(late.dirty.get(web)).toBe(true);
 });
 
 test("what the person typed into a Secret never reaches the state", async () => {
@@ -163,12 +224,11 @@ test("what the person typed into a Secret never reaches the state", async () => 
   copies.write("untitled://manifest-1", "prod-eu", `${typed}\nkind: Secret\n`);
   copies.write("untitled://manifest-2", "prod-eu", `${typed}\n`);
   copies.write("untitled://manifest-3", "prod-eu", "kind: ConfigMap\n");
-  copies.flush();
-  await state.settled();
+  await backedUp(state);
 
   expect(copies.get(SECRET)?.text).toBe(typed);
   expect(sent.join("")).not.toContain("hunter2");
-  const stored = await backend.invoke("state_load", null);
+  const stored = await stateOf(backend);
   const edits = JSON.parse(stored.spaces["prod-eu"]?.edits ?? "{}") as Record<
     string,
     unknown
@@ -210,8 +270,7 @@ test("a Secret's manifest typed into another object's editor never reaches the s
     base,
     lock: "10",
   });
-  copies.flush();
-  await state.settled();
+  await backedUp(state);
 
   expect(sent.join("")).not.toContain("hunter2");
   expect(sent.join("")).toContain("unfinished");
@@ -254,13 +313,11 @@ test("a manifest typed in the order values then kind never sends the values whil
       "prod-eu",
       `${values}kind: ${kind}\n`,
     );
-    copies.flush();
-    await state.settled();
+    await backedUp(state);
   }
   expect(sent.join("")).not.toContain("aHVudGVyMg");
   copies.write("untitled://manifest-1", "prod-eu", `${values}kind: Con\n`);
-  copies.flush();
-  await state.settled();
+  await backedUp(state);
   expect(sent.join("")).toContain("aHVudGVyMg");
 });
 
@@ -272,11 +329,8 @@ test("a manifest that cannot be read is left out of the backup and does not stop
     "prod-eu",
     "spec:\n  rules:\n    - host: *.example.com\n",
   );
-  expect(() => {
-    copies.flush();
-  }).not.toThrow();
-  await state.settled();
-  const stored = await backend.invoke("state_load", null);
+  await backedUp(state);
+  const stored = await stateOf(backend);
   const edits = JSON.parse(stored.spaces["prod-eu"]?.edits ?? "{}") as Record<
     string,
     unknown
@@ -453,8 +507,7 @@ test("a hold is told to those who follow the copies, and is never written to the
   told.mockClear();
   copies.see(DEPLOYMENT, applied(2, "12"), true);
   expect(told).toHaveBeenCalledTimes(1);
-  copies.flush();
-  await state.settled();
-  const stored = await backend.invoke("state_load", null);
+  await backedUp(state);
+  const stored = await stateOf(backend);
   expect(stored.spaces["prod-eu"]?.edits ?? "{}").toBe("{}");
 });
