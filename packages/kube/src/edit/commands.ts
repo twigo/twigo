@@ -342,7 +342,7 @@ export function registerEdits(
       id: "k8s.edit.compareServer",
       title: "Compare",
       icon: GitCompare,
-      enablement: "edit.dirty",
+      enablement: "edit.object && edit.dirty",
       menus: [["edit/changed", "navigation"]],
       run: (uri) => {
         editors.open(diffUri({ kind: "server", editor: uri }));
@@ -352,7 +352,7 @@ export function registerEdits(
       id: "k8s.edit.reload",
       title: "Reload",
       icon: RefreshCw,
-      enablement: "edit.dirty",
+      enablement: "edit.object && edit.dirty",
       menus: [["edit/changed", "navigation"]],
       run: (uri) => {
         copies.drop(uri);
@@ -364,7 +364,7 @@ export function registerEdits(
       id: "k8s.edit.keepMine",
       title: "Keep mine",
       icon: GitMerge,
-      enablement: "edit.dirty && edit.keepable",
+      enablement: "edit.object && edit.dirty && edit.keepable",
       menus: [["edit/changed", "navigation", "edit.keepable"]],
       run: async (uri) => {
         const stale = answered(uri)?.answer.state === "stale";

@@ -322,6 +322,34 @@ test("an empty manifest has no target context to change, a manifest with text ha
   expect(offered()).toContain("k8s.manifest.target");
 });
 
+test("a new manifest has no object on the server to compare with, reload or keep its text against", async () => {
+  const { workbench, edits, uri } = await setupEdit("live", "dev");
+  const manifest = "untitled://manifest-9";
+  edits.copies.write(manifest, "dev", "kind: ConfigMap\n");
+  const lookup = (editor: string) =>
+    editLookup(edits, editor, workbench.keys.lookup(null));
+  const offered = (editor: string) =>
+    workbench
+      .actions("commandPalette", lookup(editor))
+      .flat()
+      .map(({ id }) => id);
+  for (const id of [
+    "k8s.edit.compareServer",
+    "k8s.edit.reload",
+    "k8s.edit.keepMine",
+  ]) {
+    expect(offered(manifest), id).not.toContain(id);
+    expect(offered(uri), id).toContain(id);
+    expect(
+      await workbench.commands.execute(id, lookup(manifest), {
+        uri: manifest,
+      }),
+      id,
+    ).toBe(false);
+  }
+  expect(edits.copies.get(manifest)?.text).toBe("kind: ConfigMap\n");
+});
+
 test("a preview that a newer one or a clear replaced while it was asked opens nothing", async () => {
   let release: () => void = () => undefined;
   const gate = new Promise<void>((resolve) => {
