@@ -3,6 +3,8 @@
 //!
 //! [`ExtractInto`]: https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apimachinery/pkg/util/managedfields/extract.go#L52-L88
 
+use std::collections::HashMap;
+
 use serde_json::{Map, Value, json};
 
 use super::FIELD_MANAGER;
@@ -58,6 +60,14 @@ impl Ownership {
                 .all(|other| !other.fields.contains(elements))
     }
 
+    /// Whether another manager holds the path, as a member or by anything
+    /// under it: the path then stays after an apply that leaves it out.
+    pub fn others_hold(&self, path: &Path) -> bool {
+        self.others
+            .iter()
+            .any(|other| other.fields.holds(path.elements()))
+    }
+
     /// Whether every entry is at `api_version`, so that the paths compare.
     pub fn at_version(&self, api_version: &str) -> bool {
         self.ours
@@ -68,11 +78,17 @@ impl Ownership {
 }
 
 /// What `fields` covers of `value`; `None` when nothing is left of it.
-/// Takes [`removeItemsWithSchema`]'s path with one exception: an element
+/// Takes [`removeItemsWithSchema`]'s path with two exceptions: an element
 /// owned with none of its fields gives its keys alone, as its other fields
-/// are not Twigo's, where the walker extracts it whole.
+/// are not Twigo's, where the walker extracts it whole; and an element of a
+/// key the live object duplicates is left out, as naming that key replaces
+/// every element of it and an apply refuses it twice ([`visitListItems`]).
+/// Nothing is lost by leaving it out: whoever wrote the duplicate holds the
+/// key, and that write took it from every other manager ([`Updater::update`]).
 ///
 /// [`removeItemsWithSchema`]: https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/typed/remove.go#L36-L46
+/// [`visitListItems`]: https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/typed/merge.go#L285-L316
+/// [`Updater::update`]: https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/merge/update.go#L131-L151
 pub(super) fn extract(value: &Value, fields: &FieldSet, node: Option<Node<'_>>) -> Option<Value> {
     match value {
         Value::Object(map) => {
@@ -82,22 +98,36 @@ pub(super) fn extract(value: &Value, fields: &FieldSet, node: Option<Node<'_>>) 
         Value::Array(items) => {
             let list = node.map_or(ListType::Atomic, |node| node.list());
             let of_items = node.and_then(|node| node.items());
+            let elements: Vec<Option<Element>> = items
+                .iter()
+                .map(|item| Element::of_item(item, &list, of_items))
+                .collect();
+            let mut counted: HashMap<&Element, usize> = HashMap::new();
+            for element in elements.iter().flatten() {
+                *counted.entry(element).or_default() += 1;
+            }
             let mut taken = Vec::new();
-            for item in items {
-                let Some(element) = Element::of_item(item, &list, of_items) else {
+            for (item, element) in items.iter().zip(&elements) {
+                let Some(element) = element.as_ref().filter(|element| counted[*element] == 1)
+                else {
                     continue;
                 };
-                if let Some(child) = fields.children.get(&element) {
-                    let Value::Object(map) = item else { continue };
-                    let mut picked = extract_map(map, child, of_items);
-                    picked.extend(element.key_fields());
-                    taken.push(Value::Object(picked));
-                } else if fields.members.contains(&element) {
-                    taken.push(match &element {
-                        Element::Key(_) => Value::Object(element.key_fields()),
-                        _ => item.clone(),
-                    });
+                let child = fields.children.get(element);
+                if child.is_none() && !fields.members.contains(element) {
+                    continue;
                 }
+                if is_whole(item, of_items) {
+                    taken.push(item.clone());
+                    continue;
+                }
+                let Some(child) = child else {
+                    taken.push(Value::Object(element.key_fields()));
+                    continue;
+                };
+                let Value::Object(map) = item else { continue };
+                let mut picked = extract_map(map, child, of_items);
+                picked.extend(element.key_fields());
+                taken.push(Value::Object(picked));
             }
             (!taken.is_empty()).then_some(Value::Array(taken))
         }
@@ -114,31 +144,46 @@ fn extract_map(
     for (name, value) in map {
         let element = Element::Field(name.clone());
         let field = node.and_then(|node| node.field(name));
-        if let Some(child) = fields.children.get(&element) {
-            if let Some(picked) = extract(value, child, field) {
-                taken.insert(name.clone(), picked);
-            }
-        } else if fields.members.contains(&element) {
-            taken.insert(name.clone(), leaf(value, field));
+        let child = fields.children.get(&element);
+        if child.is_none() && !fields.members.contains(&element) {
+            continue;
+        }
+        if is_whole(value, field) {
+            taken.insert(name.clone(), value.clone());
+            continue;
+        }
+        let picked = match child {
+            Some(child) => extract(value, child, field),
+            None => Some(claim(value)),
+        };
+        if let Some(picked) = picked {
+            taken.insert(name.clone(), picked);
         }
     }
     taken
 }
 
-/// A path owned without its children: an atomic value whole, and for a
-/// granular map or list that others have since filled only the claim on
-/// it, as what is in it is not Twigo's.
-fn leaf(value: &Value, node: Option<Node<'_>>) -> Value {
+/// Whether the schema takes this value as one, so that it is extracted
+/// whole, whatever the set names under it, as [`removeItemsWithSchema`]
+/// does: a field that was granular when Twigo applied it and is atomic now
+/// names its old parts. A value the schema does not know counts too.
+///
+/// [`removeItemsWithSchema`]: https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/typed/remove.go#L70-L75
+fn is_whole(value: &Value, node: Option<Node<'_>>) -> bool {
     match value {
-        Value::Object(map) if !map.is_empty() && node.is_some_and(|node| !node.atomic_map()) => {
-            json!({})
-        }
-        Value::Array(items)
-            if !items.is_empty() && node.is_some_and(|node| node.list() != ListType::Atomic) =>
-        {
-            json!([])
-        }
-        _ => value.clone(),
+        Value::Object(_) => node.is_none_or(|node| node.atomic_map()),
+        Value::Array(_) => node.is_none_or(|node| node.list() == ListType::Atomic),
+        _ => true,
+    }
+}
+
+/// A granular map or list owned without its children: only the claim on it,
+/// as what others have since filled in it is not Twigo's.
+fn claim(value: &Value) -> Value {
+    if value.is_object() {
+        json!({})
+    } else {
+        json!([])
     }
 }
 

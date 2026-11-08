@@ -488,8 +488,8 @@ pub(crate) async fn preview(
             (built.config, built.removals, built.ignored)
         }
         _ => {
-            let (config, ignored) = apply::manifest(&edited, status_subresource);
-            (Some(config), Vec::new(), ignored)
+            let (config, ignored) = apply::manifest(&edited, status_subresource, None, &dropped);
+            (config, Vec::new(), ignored)
         }
     };
 

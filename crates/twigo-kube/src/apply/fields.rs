@@ -63,12 +63,11 @@ impl Element {
                 let mut fields: Vec<(String, String)> = keys
                     .iter()
                     .filter_map(|key| {
-                        let value =
-                            item.get(key).filter(|value| !value.is_null()).or_else(|| {
-                                items
-                                    .and_then(|items| items.field(key))
-                                    .and_then(|field| field.default())
-                            })?;
+                        let value = item.get(key).or_else(|| {
+                            items
+                                .and_then(|items| items.field(key))
+                                .and_then(|field| field.default())
+                        })?;
                         Some((key.clone(), text(value)))
                     })
                     .collect();
@@ -181,6 +180,18 @@ impl FieldSet {
                 .children
                 .get(first)
                 .is_some_and(|child| child.contains(rest)),
+        }
+    }
+
+    /// Whether the path or anything under it is owned.
+    pub(super) fn holds(&self, path: &[Element]) -> bool {
+        match path {
+            [] => !self.members.is_empty() || !self.children.is_empty(),
+            [last] => self.members.contains(last) || self.children.contains_key(last),
+            [first, rest @ ..] => self
+                .children
+                .get(first)
+                .is_some_and(|child| child.holds(rest)),
         }
     }
 }

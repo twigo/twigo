@@ -24,11 +24,21 @@
 //! A field left out goes only when Twigo's Apply entry is its only owner.
 //! One that another manager owns too, or that nobody does, stays after an
 //! apply, so it needs a JSON merge patch ([`merge_patch`]). Which fields are
-//! those is worked out per path, for every leaf under a removed subtree.
-//! [`Updater::prune`] removes the whole of a struct or a list element whose
-//! member Twigo was the only one to hold, along with what nobody owns in it
-//! (defaults): the classification counts such a leaf as staying, and the
-//! dry-run's answer settles it, since what it no longer holds needs no patch.
+//! those is worked out per path: another manager that holds the path, as a
+//! member or by anything under it, a list element by its key or a deduced
+//! map included, keeps it, and so does a leaf under a removed subtree that
+//! is not Twigo's alone. [`Updater::prune`] removes the whole of a struct or
+//! a list element whose member Twigo was the only one to hold, along with
+//! what nobody owns in it (defaults): the classification counts such a leaf
+//! as staying, and the dry-run's answer settles it, since what it no longer
+//! holds needs no patch.
+//!
+//! Some edits no apply can express: a list map reordered, an element of a
+//! key the server holds twice, changed or removed, or a change an apply
+//! cannot validate with the old field still there (`strategy: Recreate`
+//! over another manager's `rollingUpdate`). They go by one JSON merge patch
+//! that carries the changes and the removals together ([`Combined`]), as
+//! `kubectl edit` does.
 //!
 //! [`ExtractInto`]: https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apimachinery/pkg/util/managedfields/extract.go#L52-L88
 //! [`Updater::prune`]: https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/merge/update.go#L256-L280
@@ -46,6 +56,7 @@ use std::collections::HashSet;
 use serde_json::{Map, Value, json};
 
 use crate::openapi::{ListType, Node};
+use changes::Found;
 use fields::Element;
 use owned::Ownership;
 
@@ -54,6 +65,10 @@ pub use merge::{merge_patch, still_has, without};
 
 /// The field manager Twigo applies as.
 pub const FIELD_MANAGER: &str = "twigo";
+
+/// The field manager of the one merge patch that carries an edit no apply
+/// can express, as `kubectl edit` names its own.
+pub const EDIT_FIELD_MANAGER: &str = "twigo-edit";
 
 /// What the server sets on an object, which no apply configuration may
 /// carry.
@@ -86,6 +101,19 @@ pub struct Edit<'a> {
     pub dropped: &'a [String],
 }
 
+/// The one JSON merge patch of an edit, carrying its changes and its
+/// removals together.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Combined {
+    /// No such patch is needed.
+    None,
+    /// Tried when the apply's dry-run answers `422`, and there are removals
+    /// that go by patch.
+    Fallback(Value),
+    /// Only this can express the edit; no apply is sent.
+    Only(Value),
+}
+
 /// What Twigo will send for an edit.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Built {
@@ -96,12 +124,13 @@ pub struct Built {
     pub removals: Vec<Path>,
     /// What the edit said that no configuration may carry, by path.
     pub ignored: Vec<String>,
+    pub combined: Combined,
 }
 
 impl Built {
     /// Whether the edit sends nothing at all.
     pub fn unchanged(&self) -> bool {
-        self.config.is_none() && self.removals.is_empty()
+        self.config.is_none() && self.removals.is_empty() && self.combined == Combined::None
     }
 }
 
@@ -113,7 +142,10 @@ pub struct ForeignVersion {
     pub paths: Vec<String>,
 }
 
-/// Builds what an edit sends.
+/// Builds what an edit sends. Every null in the objects leaves first, so
+/// nothing downstream reads one as a value: a null a person left means no
+/// value, and the server's own (`creationTimestamp: null` in a template) is
+/// not a field of the object.
 pub fn build(edit: Edit<'_>) -> Result<Built, ForeignVersion> {
     let Edit {
         live,
@@ -124,7 +156,49 @@ pub fn build(edit: Edit<'_>) -> Result<Built, ForeignVersion> {
         lock,
         dropped,
     } = edit;
+    let (live, base, edited) = (&normalized(live), &normalized(base), &normalized(edited));
     let ignored = ignored(Some(base), edited, status_subresource);
+
+    let mut found = Found::default();
+    let changed = changes::of_map(
+        &editable(base, status_subresource),
+        &editable(edited, status_subresource),
+        Some(root),
+        &[],
+        &mut Path::default(),
+        &mut found,
+    );
+    let mut changed = Value::Object(changed);
+    let dropped: HashSet<String> = dropped.iter().cloned().collect();
+    merge::retain(
+        &mut changed,
+        Some(root),
+        &dropped,
+        true,
+        &mut Path::default(),
+    );
+    let Found {
+        mut removals,
+        rewritten,
+    } = found;
+    removals.retain(|removal| still_has(live, removal));
+    let object = Value::Object(editable(live, status_subresource));
+
+    if !rewritten.is_empty() {
+        let patch = merge::combined(&object, changed, &removals, &rewritten, Some(root));
+        let combined = if patch.is_empty() {
+            Combined::None
+        } else {
+            Combined::Only(Value::Object(patch))
+        };
+        return Ok(Built {
+            config: None,
+            removals,
+            ignored,
+            combined,
+        });
+    }
+
     let ownership = Ownership::of(live);
     let api_version = live["apiVersion"].as_str().unwrap_or_default();
     let mut config = match &ownership.ours {
@@ -143,29 +217,8 @@ pub fn build(edit: Edit<'_>) -> Result<Built, ForeignVersion> {
         }
         None => json!({}),
     };
-
-    let mut removals = Vec::new();
-    let changed = changes::of_map(
-        &editable(base, status_subresource),
-        &editable(edited, status_subresource),
-        Some(root),
-        &[],
-        &mut Path::default(),
-        &mut removals,
-    );
-    let mut changed = Value::Object(changed);
-    let dropped: HashSet<String> = dropped.iter().cloned().collect();
-    merge::retain(
-        &mut changed,
-        Some(root),
-        &dropped,
-        true,
-        &mut Path::default(),
-    );
     let has_changes = !changed.as_object().is_some_and(Map::is_empty);
-    merge::merge(&mut config, changed, Some(root));
-
-    removals.retain(|removal| still_has(live, removal));
+    merge::merge(&mut config, changed.clone(), Some(root));
     for removal in &removals {
         merge::remove(&mut config, removal.elements(), true);
     }
@@ -181,6 +234,18 @@ pub fn build(edit: Edit<'_>) -> Result<Built, ForeignVersion> {
     let (by_patch, by_apply): (Vec<Path>, Vec<Path>) = removals.into_iter().partition(|removal| {
         !comparable || stays_after_apply(live, removal, Some(root), &ownership)
     });
+    let combined = if by_patch.is_empty() {
+        Combined::None
+    } else {
+        let every: Vec<Path> = by_patch.iter().chain(&by_apply).cloned().collect();
+        Combined::Fallback(Value::Object(merge::combined(
+            &object,
+            changed,
+            &every,
+            &[],
+            Some(root),
+        )))
+    };
 
     let config = (has_changes || !by_apply.is_empty()).then(|| {
         finish(
@@ -195,22 +260,76 @@ pub fn build(edit: Edit<'_>) -> Result<Built, ForeignVersion> {
         config,
         removals: by_patch,
         ignored,
+        combined,
     })
 }
 
 /// The configuration of a manifest with no object behind it: all of it, but
-/// what no configuration may carry, reported by path.
-pub fn manifest(edited: &Value, status_subresource: bool) -> (Value, Vec<String>) {
+/// what no configuration may carry, reported by path, and the conflicting
+/// paths the person gave up, which `root` finds. `None` when giving those
+/// up leaves it nothing to set.
+pub fn manifest(
+    edited: &Value,
+    status_subresource: bool,
+    root: Option<Node<'_>>,
+    dropped: &[String],
+) -> (Option<Value>, Vec<String>) {
+    let edited = &normalized(edited);
     let ignored = ignored(None, edited, status_subresource);
-    let config = Value::Object(editable(edited, status_subresource));
+    let mut fields = Value::Object(editable(edited, status_subresource));
+    if !dropped.is_empty() {
+        let dropped: HashSet<String> = dropped.iter().cloned().collect();
+        merge::retain(&mut fields, root, &dropped, true, &mut Path::default());
+        let sets_something = fields.as_object().is_some_and(|fields| {
+            fields.iter().any(|(name, value)| {
+                name != "metadata" || value.as_object().is_none_or(|map| !map.is_empty())
+            })
+        });
+        if !sets_something {
+            return (None, ignored);
+        }
+    }
     let config = finish(
-        config,
+        fields,
         edited["apiVersion"].as_str().unwrap_or_default(),
         edited["kind"].as_str().unwrap_or_default(),
         &edited["metadata"],
         None,
     );
-    (config, ignored)
+    (Some(config), ignored)
+}
+
+/// `object` without a null map value at any depth.
+fn normalized(object: &Value) -> Value {
+    fn strip(value: &mut Value) {
+        match value {
+            Value::Object(map) => {
+                map.retain(|_, value| !value.is_null());
+                map.values_mut().for_each(strip);
+            }
+            Value::Array(items) => items.iter_mut().for_each(strip),
+            _ => {}
+        }
+    }
+    let mut object = object.clone();
+    strip(&mut object);
+    object
+}
+
+/// What says whether an object changed, for a resource with a `status`
+/// subresource: its `resourceVersion` and `generation` move on every status
+/// write, which changes nothing a person edits.
+pub fn comparable(object: &Value) -> Value {
+    let mut object = normalized(object);
+    if let Some(root) = object.as_object_mut() {
+        root.remove("status");
+        if let Some(metadata) = root.get_mut("metadata").and_then(Value::as_object_mut) {
+            for field in ["resourceVersion", "generation", "managedFields"] {
+                metadata.remove(field);
+            }
+        }
+    }
+    object
 }
 
 /// `edited` without its server fields, for a create: `status`, the server's
@@ -220,7 +339,7 @@ pub fn manifest(edited: &Value, status_subresource: bool) -> (Value, Vec<String>
 ///
 /// [`generateSelector`]: https://github.com/kubernetes/kubernetes/blob/v1.37.0/pkg/registry/batch/job/strategy.go#L209-L255
 pub fn for_create(edited: &Value, job: bool) -> Value {
-    let mut object = edited.clone();
+    let mut object = normalized(edited);
     let Some(root) = object.as_object_mut() else {
         return object;
     };
@@ -269,13 +388,9 @@ fn editable(object: &Value, status_subresource: bool) -> Map<String, Value> {
             metadata.remove(field);
         }
     }
-    if fields
-        .get("metadata")
-        .and_then(Value::as_object)
-        .is_some_and(Map::is_empty)
-    {
-        fields.remove("metadata");
-    }
+    fields
+        .entry("metadata")
+        .or_insert_with(|| Value::Object(Map::new()));
     fields
 }
 
@@ -335,6 +450,9 @@ fn stays_after_apply(
     root: Option<Node<'_>>,
     ownership: &Ownership,
 ) -> bool {
+    if ownership.others_hold(path) {
+        return true;
+    }
     let Some(value) = merge::value_at(live, path.elements()) else {
         return false;
     };

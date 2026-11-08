@@ -1,6 +1,6 @@
 //! What is done with a configuration and an object: joining what Twigo owns
-//! with what changed, taking paths out, and the merge patch that removes
-//! what an apply cannot.
+//! with what changed, taking paths out, and the merge patches that remove
+//! what an apply cannot, or carry an edit an apply cannot express at all.
 
 use std::collections::HashSet;
 
@@ -55,8 +55,8 @@ fn is_empty_container(value: &Value) -> bool {
 }
 
 /// Takes `path` out of `value`, and says whether it was there. With `prune`,
-/// a map or list the removal emptied goes too, so a claim on it does not
-/// stay behind.
+/// a map or list the removal emptied and an element it left with only its
+/// keys go too, so a claim on them does not stay behind.
 pub(super) fn remove(value: &mut Value, path: &[Element], prune: bool) -> bool {
     let Some((first, rest)) = path.split_first() else {
         return false;
@@ -89,7 +89,11 @@ pub(super) fn remove(value: &mut Value, path: &[Element], prune: bool) -> bool {
                 items.remove(index);
                 return true;
             }
-            remove(&mut items[index], rest, prune)
+            let removed = remove(&mut items[index], rest, prune);
+            if removed && prune && !beyond_keys(&items[index], element) {
+                items.remove(index);
+            }
+            removed
         }
     }
 }
@@ -227,6 +231,83 @@ pub fn merge_patch(object: &Value, removals: &[Path]) -> Option<Value> {
         }
     }
     sent.then_some(patch)
+}
+
+/// One JSON merge patch that carries `changed`, `removals` and the
+/// `rewritten` lists together, as `kubectl edit` sends an edit: laid over
+/// `object`, so that what it does not change stays as the server has it, and
+/// made into a patch, in which a list that differs goes whole.
+pub(super) fn combined(
+    object: &Value,
+    changed: Value,
+    removals: &[Path],
+    rewritten: &[(Path, Vec<Value>)],
+    node: Option<Node<'_>>,
+) -> Map<String, Value> {
+    let mut after = object.clone();
+    merge(&mut after, changed, node);
+    for removal in removals {
+        remove(&mut after, removal.elements(), false);
+    }
+    for (path, list) in rewritten {
+        place(&mut after, path.elements(), Value::Array(list.clone()));
+    }
+    let (Value::Object(from), Value::Object(to)) = (object, &after) else {
+        return Map::new();
+    };
+    difference(from, to)
+}
+
+/// The JSON merge patch that turns `from` into `to`.
+fn difference(from: &Map<String, Value>, to: &Map<String, Value>) -> Map<String, Value> {
+    let mut patch = Map::new();
+    for name in from.keys().filter(|name| !to.contains_key(*name)) {
+        patch.insert(name.clone(), Value::Null);
+    }
+    for (name, value) in to {
+        match (from.get(name), value) {
+            (Some(old), value) if old == value => {}
+            (Some(Value::Object(old)), Value::Object(new)) => {
+                patch.insert(name.clone(), Value::Object(difference(old, new)));
+            }
+            _ => {
+                patch.insert(name.clone(), value.clone());
+            }
+        }
+    }
+    patch
+}
+
+/// Puts `new` at `path`, making what is missing on the way.
+fn place(value: &mut Value, path: &[Element], new: Value) {
+    let Some((first, rest)) = path.split_first() else {
+        *value = new;
+        return;
+    };
+    match first {
+        Element::Field(name) => {
+            let Value::Object(map) = value else {
+                return;
+            };
+            let child = map
+                .entry(name.clone())
+                .or_insert_with(|| Value::Object(Map::new()));
+            place(child, rest, new);
+        }
+        element => {
+            let Value::Array(items) = value else {
+                return;
+            };
+            match items.iter().position(|item| element.matches(item)) {
+                Some(index) => place(&mut items[index], rest, new),
+                None => {
+                    let mut item = Value::Object(element.key_fields());
+                    place(&mut item, rest, new);
+                    items.push(item);
+                }
+            }
+        }
+    }
 }
 
 /// Sets a path of fields in `patch`, making the maps on the way.

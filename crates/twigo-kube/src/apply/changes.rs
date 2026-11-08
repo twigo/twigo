@@ -2,46 +2,55 @@
 //! object was opened as, walked with the [`Node`] of each place so that each
 //! is taken as the server merges it, and what is gone from the edit.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::{Map, Value};
 
 use super::fields::{Element, Path};
 use crate::openapi::{ListType, Node};
 
+/// What the walk found besides the fields that changed.
+#[derive(Debug, Default)]
+pub(super) struct Found {
+    /// What was in the object and is gone from the edit.
+    pub removals: Vec<Path>,
+    /// Lists an apply cannot express, each as the edit left it: one whose
+    /// elements changed order, or whose duplicated key is touched.
+    pub rewritten: Vec<(Path, Vec<Value>)>,
+}
+
 /// The changes between two maps; a key in `skip` is a list map's key, which
-/// identifies the element and is never a change. An explicit null reads as
-/// absent, as a YAML key left empty.
+/// identifies the element and is never a change.
 pub(super) fn of_map(
     before: &Map<String, Value>,
     after: &Map<String, Value>,
     node: Option<Node<'_>>,
     skip: &[String],
     at: &mut Path,
-    removals: &mut Vec<Path>,
+    found: &mut Found,
 ) -> Map<String, Value> {
     let mut changes = Map::new();
     for (name, edited) in after {
-        if skip.contains(name) || edited.is_null() {
+        if skip.contains(name) {
             continue;
         }
         at.push(Element::Field(name.clone()));
-        match before.get(name).filter(|value| !value.is_null()) {
+        match before.get(name) {
             None => {
                 changes.insert(name.clone(), edited.clone());
             }
             Some(value) => {
                 let field = node.and_then(|node| node.field(name));
-                if let Some(change) = of_value(value, edited, field, at, removals) {
+                if let Some(change) = of_value(value, edited, field, at, found) {
                     changes.insert(name.clone(), change);
                 }
             }
         }
         at.pop();
     }
-    for (name, value) in before {
-        if !skip.contains(name) && !value.is_null() && after.get(name).is_none_or(Value::is_null) {
-            removals.push(at.with(Element::Field(name.clone())));
+    for name in before.keys() {
+        if !skip.contains(name) && !after.contains_key(name) {
+            found.removals.push(at.with(Element::Field(name.clone())));
         }
     }
     changes
@@ -54,32 +63,32 @@ fn of_value(
     after: &Value,
     node: Option<Node<'_>>,
     at: &mut Path,
-    removals: &mut Vec<Path>,
+    found: &mut Found,
 ) -> Option<Value> {
     if before == after {
         return None;
     }
     match (before, after, node) {
         (Value::Object(before), Value::Object(after), Some(node)) if !node.atomic_map() => {
-            let changes = of_map(before, after, Some(node), &[], at, removals);
+            let changes = of_map(before, after, Some(node), &[], at, found);
             (!changes.is_empty()).then_some(Value::Object(changes))
         }
         (Value::Array(before), Value::Array(after), Some(node)) => match node.list() {
             ListType::Atomic => Some(Value::Array(after.clone())),
-            ListType::Set => of_set(before, after, at, removals),
-            ListType::Map { keys } => of_list_map(before, after, &keys, node, at, removals),
+            ListType::Set => of_set(before, after, at, found),
+            ListType::Map { keys } => of_list_map(before, after, &keys, node, at, found),
         },
         _ => Some(after.clone()),
     }
 }
 
 /// What a set gained; what it lost is removed by value.
-fn of_set(before: &[Value], after: &[Value], at: &Path, removals: &mut Vec<Path>) -> Option<Value> {
+fn of_set(before: &[Value], after: &[Value], at: &Path, found: &mut Found) -> Option<Value> {
     let element =
         |item: &Value| Element::of_item(item, &ListType::Set, None).expect("sets name their items");
     for item in before {
         if !after.contains(item) {
-            removals.push(at.with(element(item)));
+            found.removals.push(at.with(element(item)));
         }
     }
     let added: Vec<Value> = after
@@ -90,39 +99,97 @@ fn of_set(before: &[Value], after: &[Value], at: &Path, removals: &mut Vec<Path>
     (!added.is_empty()).then_some(Value::Array(added))
 }
 
-/// A list map's changes: an element paired by its keys carries them and its
-/// changes, a new one goes whole, and one gone is removed by its keys.
+/// An element by its key and which of the elements of that key it is, as the
+/// server allows the same key twice in what it stores (`env`, `ports`).
+type Occurrence = (Element, usize);
+
+fn occurrences(
+    list: &[Value],
+    keys: &ListType,
+    items: Option<Node<'_>>,
+) -> Vec<Option<Occurrence>> {
+    let mut counted: HashMap<Element, usize> = HashMap::new();
+    list.iter()
+        .map(|item| {
+            let element = Element::of_item(item, keys, items)?;
+            let count = counted.entry(element.clone()).or_default();
+            *count += 1;
+            Some((element, *count - 1))
+        })
+        .collect()
+}
+
+/// A list map's changes, its elements paired by key and occurrence: a pair
+/// carries its keys and its changes, a new element goes whole, and one gone
+/// is removed by its keys. An apply can neither reorder a list nor address
+/// one of two elements with a key, so such a list is left to a merge patch;
+/// a duplicate nobody touched sends nothing, as an apply that names its key
+/// replaces every element of it ([`visitListItems`]).
+///
+/// [`visitListItems`]: https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/typed/merge.go#L168-L283
 fn of_list_map(
     before: &[Value],
     after: &[Value],
     keys: &[String],
     node: Node<'_>,
     at: &mut Path,
-    removals: &mut Vec<Path>,
+    found: &mut Found,
 ) -> Option<Value> {
     let list = ListType::Map {
         keys: keys.to_vec(),
     };
     let items = node.items();
-    let element = |item: &Value| Element::of_item(item, &list, items);
-    let mut old: HashMap<Element, &Value> = HashMap::new();
-    for item in before {
-        if let Some(found) = element(item) {
-            old.entry(found).or_insert(item);
-        }
+    let was = occurrences(before, &list, items);
+    let now = occurrences(after, &list, items);
+    let old: HashMap<&Occurrence, &Value> = was
+        .iter()
+        .zip(before)
+        .filter_map(|(occurrence, item)| Some((occurrence.as_ref()?, item)))
+        .collect();
+    let new: HashMap<&Occurrence, &Value> = now
+        .iter()
+        .zip(after)
+        .filter_map(|(occurrence, item)| Some((occurrence.as_ref()?, item)))
+        .collect();
+    let duplicated: HashSet<&Element> = was
+        .iter()
+        .flatten()
+        .filter(|(_, count)| *count > 0)
+        .map(|(element, _)| element)
+        .collect();
+
+    let order_of = |list: &[Option<Occurrence>], kept: &HashMap<&Occurrence, &Value>| {
+        list.iter()
+            .flatten()
+            .filter(|occurrence| kept.contains_key(occurrence))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let reordered = order_of(&was, &new) != order_of(&now, &old);
+    let duplicate_touched = was
+        .iter()
+        .chain(&now)
+        .flatten()
+        .filter(|occurrence| duplicated.contains(&occurrence.0))
+        .any(|occurrence| old.get(occurrence) != new.get(occurrence));
+    if reordered || duplicate_touched {
+        found.rewritten.push((at.clone(), after.to_vec()));
+        return None;
     }
-    let mut seen = Vec::new();
+
     let mut changes = Vec::new();
-    for item in after {
-        let Some(found) = element(item) else {
+    for (item, occurrence) in after.iter().zip(&now) {
+        let Some(occurrence) = occurrence else {
             changes.push(item.clone());
             continue;
         };
-        seen.push(found.clone());
-        match (old.get(&found), item) {
+        if duplicated.contains(&occurrence.0) {
+            continue;
+        }
+        match (old.get(occurrence), item) {
             (Some(Value::Object(old_item)), Value::Object(new_item)) => {
-                at.push(found);
-                let changed = of_map(old_item, new_item, items, keys, at, removals);
+                at.push(occurrence.0.clone());
+                let changed = of_map(old_item, new_item, items, keys, at, found);
                 at.pop();
                 if !changed.is_empty() {
                     let mut carried: Map<String, Value> = keys
@@ -136,11 +203,9 @@ fn of_list_map(
             _ => changes.push(item.clone()),
         }
     }
-    for item in before {
-        if let Some(found) = element(item)
-            && !seen.contains(&found)
-        {
-            removals.push(at.with(found));
+    for occurrence in was.iter().flatten() {
+        if !new.contains_key(occurrence) {
+            found.removals.push(at.with(occurrence.0.clone()));
         }
     }
     (!changes.is_empty()).then_some(Value::Array(changes))
