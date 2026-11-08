@@ -91,6 +91,8 @@ pub struct Plan {
     pub question: String,
     /// What the confirming button says: `Delete pod`.
     pub confirm: String,
+    /// Whether it takes something away for good, which its button shows.
+    pub destructive: bool,
     /// What follows, a sentence each.
     pub consequences: Vec<String>,
     /// The exact objects it acts on and those that follow, by what happens

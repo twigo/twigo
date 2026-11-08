@@ -45,7 +45,6 @@ where
         .unwrap()
 }
 
-/// A Deployment whose pods kwok runs on `node`, labelled `app=<name>`.
 fn deployment(name: &str, replicas: u32, node: &str) -> Value {
     json!({
         "metadata": { "name": name },
@@ -63,7 +62,6 @@ fn deployment(name: &str, replicas: u32, node: &str) -> Value {
     })
 }
 
-/// A CronJob that its schedule never runs, so only a trigger does.
 fn cronjob(name: &str, suspend: bool) -> Value {
     json!({
         "metadata": { "name": name },
@@ -82,8 +80,6 @@ fn cronjob(name: &str, suspend: bool) -> Value {
     })
 }
 
-/// The names of the pods labelled `app=<app>` that are not going, once
-/// there are `count`.
 async fn pods_of(pods: &Api<Pod>, app: &str, count: usize) -> Vec<String> {
     let listed = ListParams::default().labels(&format!("app={app}"));
     let names = tokio::time::timeout(WAIT, async {
@@ -126,8 +122,6 @@ fn names(plan: &Plan, title: &str) -> Vec<String> {
     named(plan, title, |_| true)
 }
 
-/// The names under `title` of the objects in `namespace`, as a node may
-/// hold pods a failed run left in namespaces of its own.
 fn names_in(plan: &Plan, title: &str, namespace: &str) -> Vec<String> {
     named(plan, title, |object| {
         object.namespace.as_deref() == Some(namespace)
@@ -626,7 +620,6 @@ async fn suspend_and_resume_run_at_once_and_their_undo_holds_to_the_generation()
     cluster.delete(&namespace).await;
 }
 
-/// The node's `spec.unschedulable`.
 async fn cordoned(nodes: &Api<Node>, name: &str) -> bool {
     nodes
         .get(name)
@@ -642,7 +635,6 @@ async fn uncordon(nodes: &Api<Node>, name: &str) {
     merge(nodes, name, json!({ "spec": { "unschedulable": null } })).await;
 }
 
-/// A budget that keeps `min` pods of `app` available.
 fn budget(app: &str, min: u32) -> Value {
     json!({
         "metadata": { "name": app },
@@ -650,7 +642,6 @@ fn budget(app: &str, min: u32) -> Value {
     })
 }
 
-/// Waits until the budget's controller has seen `expected` pods of it.
 async fn observed(budgets: &Api<PodDisruptionBudget>, name: &str, expected: i32) {
     eventually(&format!("the budget {name} sees its pods"), || async {
         budgets
@@ -665,11 +656,8 @@ async fn observed(budgets: &Api<PodDisruptionBudget>, name: &str, expected: i32)
     .await;
 }
 
-/// How a drain says a disruption budget holds a pod back.
 const HELD: &str = "A disruption budget holds pod";
 
-/// Runs a plan and gathers its events until the last, calling `then` the
-/// first time a running event starts with `when`.
 async fn running_until<Then, Done>(
     core: &Core,
     plan: &Plan,
@@ -985,6 +973,51 @@ async fn a_drain_that_meets_pods_kubectl_refuses_asks_for_the_node_s_name_and_ta
     core.command_cancel("main", by_kubectl.id);
     kubectl(&by_kubectl, &kubeconfig);
     assert!(cordoned(&nodes, plain).await);
+
+    uncordon(&nodes, plain).await;
+    create(
+        &Api::<StatefulSet>::namespaced(cluster.admin.clone(), &namespace),
+        json!({
+            "metadata": { "name": "pinned" },
+            "spec": {
+                "replicas": 1,
+                "serviceName": "pinned",
+                "selector": { "matchLabels": { "app": "pinned" } },
+                "template": {
+                    "metadata": { "labels": { "app": "pinned" } },
+                    "spec": {
+                        "nodeName": plain,
+                        "containers": [{ "name": "app", "image": "fake" }],
+                    },
+                },
+            },
+        }),
+    )
+    .await;
+    create(&budgets, budget("pinned", 1)).await;
+    pods_of(&pods, "pinned", 1).await;
+    observed(&budgets, "pinned", 1).await;
+    let first = pods.get("pinned-0").await.unwrap().metadata.uid;
+    let planned = plan(&core, drain(plain)).await.unwrap();
+    let told = running_until(&core, &planned, None, HELD, || async {
+        pods.delete(
+            "pinned-0",
+            &kube::api::DeleteParams {
+                grace_period_seconds: Some(0),
+                ..kube::api::DeleteParams::default()
+            },
+        )
+        .await
+        .unwrap();
+    })
+    .await;
+    assert_eq!(done(&told).0, format!("Drained node {plain}"));
+    let again = pods.get("pinned-0").await.unwrap();
+    assert_ne!(again.metadata.uid, first);
+    assert!(
+        again.metadata.deletion_timestamp.is_none(),
+        "the new pod stays"
+    );
     cluster.delete(&namespace).await;
     uncordon(&nodes, forced).await;
     uncordon(&nodes, plain).await;
@@ -1086,25 +1119,28 @@ async fn a_read_only_context_sends_none_of_the_actions() {
     cluster.delete(&namespace).await;
 }
 
-#[tokio::test]
-#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
-async fn a_person_without_rights_is_told_so_before_they_try() {
-    let cluster = Cluster::connect().await;
-    let namespace = cluster.namespace("viewer").await;
-    let accounts = Api::<ServiceAccount>::namespaced(cluster.admin.clone(), &namespace);
-    create(&accounts, json!({ "metadata": { "name": "viewer" } })).await;
+async fn as_account(
+    cluster: &Cluster,
+    namespace: &str,
+    name: &str,
+    role: Value,
+) -> (tempfile::TempDir, std::sync::Arc<Core>, String) {
+    let accounts = Api::<ServiceAccount>::namespaced(cluster.admin.clone(), namespace);
+    create(&accounts, json!({ "metadata": { "name": name } })).await;
+    let mut role_ref = role;
+    role_ref["apiGroup"] = json!("rbac.authorization.k8s.io");
     create(
-        &Api::<RoleBinding>::namespaced(cluster.admin.clone(), &namespace),
+        &Api::<RoleBinding>::namespaced(cluster.admin.clone(), namespace),
         json!({
-            "metadata": { "name": "viewer" },
-            "roleRef": { "apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": "view" },
-            "subjects": [{ "kind": "ServiceAccount", "name": "viewer", "namespace": namespace }],
+            "metadata": { "name": name },
+            "roleRef": role_ref,
+            "subjects": [{ "kind": "ServiceAccount", "name": name, "namespace": namespace }],
         }),
     )
     .await;
     let token = accounts
         .create_token_request(
-            "viewer",
+            name,
             &PostParams::default(),
             &serde_json::from_value(json!({ "spec": { "expirationSeconds": 600 } })).unwrap(),
         )
@@ -1113,33 +1149,42 @@ async fn a_person_without_rights_is_told_so_before_they_try() {
         .status
         .and_then(|status| status.token)
         .expect("a token for the ServiceAccount");
-
     let mut kubeconfig = Kubeconfig::read_from(&cluster.path).unwrap();
-    let viewer = format!("{}-viewer", cluster.context);
+    let context = format!("{}-{name}", cluster.context);
     let mut named = kubeconfig
         .contexts
         .iter()
         .find(|named| named.name == cluster.context)
         .unwrap()
         .clone();
-    named.name = viewer.clone();
-    if let Some(context) = named.context.as_mut() {
-        context.user = Some("viewer".to_owned());
+    named.name = context.clone();
+    if let Some(entry) = named.context.as_mut() {
+        entry.user = Some(name.to_owned());
     }
     kubeconfig.contexts = vec![named];
     kubeconfig.auth_infos = vec![NamedAuthInfo {
-        name: "viewer".to_owned(),
+        name: name.to_owned(),
         auth_info: Some(AuthInfo {
             token: Some(token.into()),
             ..AuthInfo::default()
         }),
         ..NamedAuthInfo::default()
     }];
-    kubeconfig.current_context = Some(viewer.clone());
+    kubeconfig.current_context = Some(context.clone());
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config");
     std::fs::write(&path, serde_json::to_string(&kubeconfig).unwrap()).unwrap();
-    let viewing = core_over(dir.path(), &path, &viewer).await;
+    let core = core_over(dir.path(), &path, &context).await;
+    (dir, core, context)
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_person_without_rights_is_told_so_before_they_try() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("viewer").await;
+    let role = json!({ "kind": "ClusterRole", "name": "view" });
+    let (_dir, viewing, viewer) = as_account(&cluster, &namespace, "viewer", role).await;
 
     let access = |verb: &str, group: &str, resource: &str, subresource: Option<&str>| Access {
         verb: verb.to_owned(),
@@ -1217,8 +1262,12 @@ async fn a_stateful_set_that_deletes_its_claims_on_scale_down_asks_and_lists_the
     };
     create(&sets, set("db", "Delete")).await;
     create(&sets, set("kept", "Retain")).await;
+    let mut late = set("late", "Delete");
+    late["spec"]["ordinals"] = json!({ "start": 5 });
+    create(&sets, late).await;
     pods_of(&pods, "db", 2).await;
     pods_of(&pods, "kept", 2).await;
+    pods_of(&pods, "late", 2).await;
     let scale = |name: &str, replicas| PlanRequest::Scale {
         space: context.clone(),
         target: reference("apps", "v1", "statefulsets", Some(&namespace), name),
@@ -1238,5 +1287,55 @@ async fn a_stateful_set_that_deletes_its_claims_on_scale_down_asks_and_lists_the
     let kept = plan(&core, scale("kept", 1)).await.unwrap();
     assert_eq!(kept.friction, Friction::AtOnce);
     assert!(kept.affected.is_empty(), "{:?}", kept.affected);
+
+    let late = plan(&core, scale("late", 1)).await.unwrap();
+    assert_eq!(names(&late, "Their claims go"), ["data-late-6"]);
+    core.command_cancel("main", late.id);
+
+    let grow = plan(&core, scale("db", 2)).await.unwrap();
+    assert_eq!(grow.friction, Friction::AtOnce);
+    run(&core, &grow, None).await.unwrap();
+    eventually("the new pod's claim is made", || async {
+        claims.get_opt("data-db-1").await.unwrap().is_some()
+    })
+    .await;
+    let back = plan(&core, undo(&cluster)).await.unwrap();
+    assert_eq!(back.friction, Friction::Confirm);
+    assert!(back.destructive);
+    assert_eq!(names(&back, "Their claims go"), ["data-db-1"]);
+    core.command_cancel("main", back.id);
+
+    create(
+        &Api::<k8s_openapi::api::rbac::v1::Role>::namespaced(cluster.admin.clone(), &namespace),
+        json!({
+            "metadata": { "name": "scaler" },
+            "rules": [{
+                "apiGroups": ["apps"],
+                "resources": ["statefulsets", "statefulsets/scale"],
+                "verbs": ["get", "patch"],
+            }],
+        }),
+    )
+    .await;
+    let role = json!({ "kind": "Role", "name": "scaler" });
+    let (_dir, scaler, context) = as_account(&cluster, &namespace, "scaler", role).await;
+    let blind = plan(
+        &scaler,
+        PlanRequest::Scale {
+            space: context,
+            target: reference("apps", "v1", "statefulsets", Some(&namespace), "db"),
+            replicas: 1,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(blind.friction, Friction::Confirm);
+    assert!(
+        blind.consequences.contains(
+            &"Twigo cannot read claim data-db-1, so it cannot say whether it is there.".to_owned()
+        ),
+        "{:?}",
+        blind.consequences
+    );
     cluster.delete(&namespace).await;
 }

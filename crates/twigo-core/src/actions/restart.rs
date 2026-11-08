@@ -84,6 +84,7 @@ pub(crate) async fn restart(
     Ok(Planned {
         question: format!("Restart {what}{place} on {context}?"),
         confirm: format!("Restart {kind}"),
+        destructive: false,
         doing: format!("Restarting {what}"),
         consequences,
         affected,

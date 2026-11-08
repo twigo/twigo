@@ -183,6 +183,7 @@ pub(crate) async fn drain(core: &Core, space: &str, name: String) -> Result<Plan
             "Drain node".to_owned()
         },
         doing: format!("Draining node {name}"),
+        destructive: true,
         consequences,
         affected,
         kubectl,
@@ -532,19 +533,19 @@ async fn evict(clients: &Clients, pod: &Pod, progress: &Progress) -> Result<bool
         if progress.stopping() {
             return Ok(false);
         }
-        match clients
+        let waiting = match clients
             .api
             .request_text(write(Method::POST, &path, "application/json", &eviction))
             .await
         {
             Ok(_) => return Ok(true),
-            // Gone, or another pod of its name: the one it listed went.
-            Err(kube::Error::Api(status)) if matches!(status.code, 404 | 409) => return Ok(true),
+            Err(kube::Error::Api(status)) if status.code == 404 => return Ok(true),
+            // Another pod of its name, or the budget's status lost a race.
+            Err(kube::Error::Api(status)) if status.code == 409 => {
+                format!("The budget of pod {namespace}/{name} changed meanwhile")
+            }
             Err(kube::Error::Api(status)) if status.code == 429 => {
-                progress.running(format!(
-                    "A disruption budget holds pod {namespace}/{name} back; asking again in {} s",
-                    RETRY.as_secs()
-                ));
+                format!("A disruption budget holds pod {namespace}/{name} back")
             }
             Err(kube::Error::Api(status))
                 if status.code == 403 && namespace_terminating(status.details.as_ref()) =>
@@ -552,10 +553,7 @@ async fn evict(clients: &Clients, pod: &Pod, progress: &Progress) -> Result<bool
                 if terminating {
                     return Ok(true);
                 }
-                progress.running(format!(
-                    "Namespace {namespace} is going; asking again for pod {name} in {} s",
-                    RETRY.as_secs()
-                ));
+                format!("Namespace {namespace} is going, and with it pod {name}")
             }
             Err(error) => {
                 let error = twigo_kube::errors::request(&error);
@@ -564,11 +562,33 @@ async fn evict(clients: &Clients, pod: &Pod, progress: &Progress) -> Result<bool
                     format!("evicting pod {namespace}/{name} failed: {}", error.message),
                 ));
             }
+        };
+        // The budget is checked before the uid, so a new pod of its name
+        // holds the eviction back while the pod the drain listed is gone.
+        if went(clients, pod).await {
+            return Ok(true);
         }
+        progress.running(format!("{waiting}; asking again in {} s", RETRY.as_secs()));
         tokio::select! {
             () = tokio::time::sleep(RETRY) => {}
             () = progress.stopped() => return Ok(false),
         }
+    }
+}
+
+/// Whether the pod the drain listed is gone: none of its name, or one of
+/// another uid.
+async fn went(clients: &Clients, pod: &Pod) -> bool {
+    let namespace = pod.metadata.namespace.as_deref().unwrap_or_default();
+    let name = pod.metadata.name.as_deref().unwrap_or_default();
+    match get(
+        clients,
+        &format!("/api/v1/namespaces/{namespace}/pods/{name}"),
+    )
+    .await
+    {
+        Ok(now) => now["metadata"]["uid"].as_str() != pod.metadata.uid.as_deref(),
+        Err(error) => error.kind == ErrorKind::NotFound,
     }
 }
 

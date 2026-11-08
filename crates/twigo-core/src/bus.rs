@@ -42,6 +42,8 @@ pub(crate) struct Planned {
     pub target: String,
     pub question: String,
     pub confirm: String,
+    /// Whether it takes something away for good.
+    pub destructive: bool,
     pub consequences: Vec<String>,
     pub affected: Vec<Affected>,
     pub kubectl: String,
@@ -235,6 +237,7 @@ impl Bus {
             friction: friction.clone(),
             question: planned.question.clone(),
             confirm: planned.confirm.clone(),
+            destructive: planned.destructive,
             consequences: planned.consequences.clone(),
             affected: planned.affected.clone(),
             kubectl: planned.kubectl.clone(),

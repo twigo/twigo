@@ -117,7 +117,6 @@ pub async fn core(dir: &Path, cluster: &Cluster) -> (Arc<Core>, PathBuf) {
     )
 }
 
-/// A core that reads only `kubeconfig`, with a space for `context`.
 pub async fn core_over(dir: &Path, kubeconfig: &Path, context: &str) -> Arc<Core> {
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
     core.state.open_space(context);
@@ -136,7 +135,6 @@ pub async fn core_over(dir: &Path, kubeconfig: &Path, context: &str) -> Arc<Core
     core
 }
 
-/// Waits until `check` holds, asking again every 200 ms.
 pub async fn eventually<F, Done>(what: &str, mut check: F)
 where
     F: FnMut() -> Done,
@@ -150,7 +148,6 @@ where
     assert!(waited.await.is_ok(), "{what} within 60 s");
 }
 
-/// An object of a resource by its group, version and plural.
 pub fn reference(
     group: &str,
     version: &str,
@@ -170,12 +167,10 @@ pub fn reference(
     }
 }
 
-/// Plans a command for the window `main`.
 pub async fn plan(core: &Core, request: PlanRequest) -> Result<Plan, IpcError> {
     core.command_plan("main", request).await
 }
 
-/// An object of a core resource.
 pub fn target(resource: &str, namespace: Option<&str>, name: &str) -> ResourceRef {
     reference("", "v1", resource, namespace, name)
 }

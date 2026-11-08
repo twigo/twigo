@@ -853,6 +853,10 @@ question: string,
  */
 confirm: string, 
 /**
+ * Whether it takes something away for good, which its button shows.
+ */
+destructive: boolean, 
+/**
  * What follows, a sentence each.
  */
 consequences: Array<string>, 

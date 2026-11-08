@@ -64,6 +64,7 @@ pub(crate) async fn trigger(
     Ok(Planned {
         question: format!("Trigger cron job {cronjob_name} in {namespace} on {context} now?"),
         confirm: "Trigger cron job".to_owned(),
+        destructive: false,
         doing: format!("Triggering cron job {cronjob_name}"),
         consequences: vec![format!(
             "Job {job} runs once from its template, beside its schedule."

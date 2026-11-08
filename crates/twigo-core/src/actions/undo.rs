@@ -225,6 +225,7 @@ pub(crate) async fn undo(core: &Core, space: &str) -> Result<Planned, IpcError> 
         }
     };
     let (this, space) = (core.this.clone(), space.to_owned());
+    let destructive = risk == Risk::Lasting;
     Ok(Planned {
         context: revert.target.context.clone(),
         connection,
@@ -236,6 +237,7 @@ pub(crate) async fn undo(core: &Core, space: &str) -> Result<Planned, IpcError> 
         command: "undo",
         question: revert.question.clone(),
         confirm: "Undo".to_owned(),
+        destructive,
         consequences,
         affected,
         kubectl: revert.kubectl.clone(),
@@ -252,13 +254,18 @@ async fn run(
     revert: Revert,
 ) -> Result<Finished, IpcError> {
     let context = &revert.target.context;
-    let (core, clients) = clients_for(&core, context, connection, "put nothing back").await?;
-    if !core.undos.take(&space, id) {
+    // Taken as its run starts, as the webview takes it once the run was
+    // accepted, so a run that cannot reach the cluster leaves none behind.
+    let taken = core
+        .upgrade()
+        .is_some_and(|core| core.undos.take(&space, id));
+    if !taken {
         return Err(IpcError::new(
             ErrorKind::Conflict,
             "the undo ended before it ran, so Twigo put nothing back",
         ));
     }
+    let (_, clients) = clients_for(&core, context, connection, "put nothing back").await?;
     let (what, past) = (sentence(&revert.what), revert.past);
     let left = |why: String| IpcError::new(ErrorKind::Conflict, format!("{why}, so Twigo left it"));
     for _ in 0..ATTEMPTS {

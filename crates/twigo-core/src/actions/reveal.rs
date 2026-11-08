@@ -47,6 +47,7 @@ pub(crate) fn reveal(
     Ok(Planned {
         question: format!("Reveal {key} of secret {name} in {namespace} from {context}?"),
         confirm: "Reveal value".to_owned(),
+        destructive: false,
         consequences: vec![format!(
             "It shows until you hide it or close the secret{}.",
             if binary { ", as base64" } else { "" }

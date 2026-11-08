@@ -56,6 +56,7 @@ fn planned(core: &Core, risk: Risk, runs: &Runs) -> Planned {
         target: "configmaps/m in a".to_owned(),
         question: "Delete config map m in a from kind-a?".to_owned(),
         confirm: "Delete config map".to_owned(),
+        destructive: true,
         consequences: Vec::new(),
         affected: Vec::new(),
         kubectl: "kubectl --context kind-a delete configmaps m -n a".to_owned(),

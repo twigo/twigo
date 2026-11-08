@@ -1,6 +1,8 @@
 //! Suspends a Job or a CronJob, or resumes it: a merge patch of
 //! `spec.suspend`, as `kubectl patch` sends it, since kubectl has no verb
-//! for it. Either runs at once with an undo (decision 1 of M2).
+//! for it. Either runs at once with an undo (decision 1 of M2), but for
+//! suspending a Job that runs pods, whose work an undo cannot bring back:
+//! that asks first and lists them.
 
 use std::sync::Weak;
 
@@ -86,6 +88,7 @@ pub(crate) async fn suspend(
     Ok(Planned {
         question: format!("{} {what}{place} on {context}?", words.verb),
         confirm: format!("{} {kind}", words.verb),
+        destructive: risk == Risk::Lasting,
         doing: format!("{} {what}", words.doing),
         consequences,
         affected,
@@ -122,12 +125,18 @@ pub(crate) async fn stopping(
     }
     let uid = object["metadata"]["uid"].as_str().unwrap_or_default();
     let namespace = target.namespace.as_deref().unwrap_or_default();
-    let query = form_urlencoded::Serializer::new(String::new())
-        .append_pair(
-            "labelSelector",
-            &format!("batch.kubernetes.io/controller-uid={uid}"),
-        )
-        .finish();
+    // The API server labels a Job's pods with its uid unless its selector
+    // is the person's own (`manualSelector`); its pods are those it owns.
+    let query = {
+        let mut query = form_urlencoded::Serializer::new(String::new());
+        if object["spec"]["manualSelector"] != true {
+            query.append_pair(
+                "labelSelector",
+                &format!("batch.kubernetes.io/controller-uid={uid}"),
+            );
+        }
+        query.finish()
+    };
     let pods: Vec<ObjectRef> = match get(
         clients,
         &format!("/api/v1/namespaces/{namespace}/pods?{query}"),
@@ -139,10 +148,17 @@ pub(crate) async fn stopping(
             .into_iter()
             .flatten()
             .filter(|pod| {
-                !matches!(
-                    pod["status"]["phase"].as_str(),
-                    Some("Succeeded" | "Failed")
-                ) && pod["metadata"]["deletionTimestamp"].is_null()
+                let owned = pod["metadata"]["ownerReferences"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|owner| owner["uid"] == uid && owner["controller"] == true);
+                owned
+                    && !matches!(
+                        pod["status"]["phase"].as_str(),
+                        Some("Succeeded" | "Failed")
+                    )
+                    && pod["metadata"]["deletionTimestamp"].is_null()
             })
             .map(|pod| ObjectRef {
                 group: String::new(),

@@ -171,6 +171,7 @@ pub(crate) async fn delete(
             format!("Delete {kind}")
         },
         doing: format!("Deleting {what}"),
+        destructive: true,
         consequences,
         affected,
         kubectl: line,

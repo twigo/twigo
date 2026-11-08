@@ -1,7 +1,9 @@
 //! Sets the replicas of an object with a `scale` subresource as `kubectl
 //! scale` does (kubectl v0.37.1, `pkg/scale`): a merge patch of the
-//! subresource's `spec.replicas`. To zero it asks first and lists the pods
-//! that go; any other count runs at once with an undo (decision 1 of M2).
+//! subresource's `spec.replicas`. Any count runs at once with an undo
+//! (decision 1 of M2), but for what an undo cannot bring back: to zero it
+//! asks first and lists the pods that go, and fewer pods of a StatefulSet
+//! that deletes their claims ask and list the claims.
 
 use std::sync::Weak;
 
@@ -61,6 +63,7 @@ pub(crate) async fn scale(
     Ok(Planned {
         question: format!("Scale {what}{place} to {replicas} on {context}?"),
         confirm: format!("Scale to {replicas}"),
+        destructive: risk == Risk::Lasting,
         doing: format!("Scaling {what} to {replicas}"),
         consequences,
         affected,
@@ -98,22 +101,36 @@ pub(crate) async fn shrinking(
         affected.extend(listed);
     }
     let deletes = object["spec"]["persistentVolumeClaimRetentionPolicy"]["whenScaled"] == "Delete";
-    let claims = if target.is("apps", &["statefulsets"]) && deletes && to < from {
+    let (claims, unread) = if target.is("apps", &["statefulsets"]) && deletes && to < from {
         claims(clients, target, object, from, to).await
     } else {
-        Vec::new()
+        (Vec::new(), Vec::new())
     };
-    if !claims.is_empty() {
+    if !claims.is_empty() || !unread.is_empty() {
         consequences.push(
             "The claims of the pods that go are deleted with them, and their data with them."
                 .to_owned(),
         );
+    }
+    if !unread.is_empty() {
+        consequences.push(format!(
+            "Twigo cannot read {}, so it cannot say whether {} there.",
+            unread.join(", "),
+            if unread.len() == 1 {
+                "it is"
+            } else {
+                "they are"
+            }
+        ));
+    }
+    let lasting = to == 0 || !claims.is_empty() || !unread.is_empty();
+    if !claims.is_empty() {
         affected.push(Affected {
             title: "Their claims go".to_owned(),
             objects: claims,
         });
     }
-    let risk = if to == 0 || !affected.is_empty() {
+    let risk = if lasting {
         Risk::Lasting
     } else {
         Risk::Reversible
@@ -123,14 +140,14 @@ pub(crate) async fn shrinking(
 
 /// The claims that exist of a StatefulSet's pods from ordinal `to` to
 /// `from`, past its first ordinal: `<template>-<set>-<ordinal>`, as its
-/// controller names them.
+/// controller names them; and the names of those Twigo could not read.
 async fn claims(
     clients: &Clients,
     target: &Target,
     object: &serde_json::Value,
     from: u64,
     to: u64,
-) -> Vec<ObjectRef> {
+) -> (Vec<ObjectRef>, Vec<String>) {
     let start = object["spec"]["ordinals"]["start"].as_u64().unwrap_or(0);
     let namespace = target.namespace.clone().unwrap_or_default();
     let templates: Vec<&str> = object["spec"]["volumeClaimTemplates"]
@@ -139,23 +156,25 @@ async fn claims(
         .flatten()
         .filter_map(|template| template["metadata"]["name"].as_str())
         .collect();
-    let mut claims = Vec::new();
+    let (mut claims, mut unread) = (Vec::new(), Vec::new());
     for ordinal in start + to..start + from {
         for template in &templates {
             let name = format!("{template}-{}-{ordinal}", target.name);
             let path = format!("/api/v1/namespaces/{namespace}/persistentvolumeclaims/{name}");
-            if get(clients, &path).await.is_ok() {
-                claims.push(ObjectRef {
+            match get(clients, &path).await {
+                Ok(_) => claims.push(ObjectRef {
                     group: String::new(),
                     version: "v1".to_owned(),
                     kind: "PersistentVolumeClaim".to_owned(),
                     namespace: Some(namespace.clone()),
                     name,
-                });
+                }),
+                Err(error) if error.kind == ErrorKind::NotFound => {}
+                Err(_) => unread.push(format!("claim {name}")),
             }
         }
     }
-    claims
+    (claims, unread)
 }
 
 /// What scaling `target` of `uid` to zero asks about: its pods go, and

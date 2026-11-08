@@ -105,6 +105,7 @@ pub(crate) async fn cordon(
     Ok(Planned {
         question,
         confirm: format!("{} node", super::sentence(verb)),
+        destructive: false,
         doing: format!("{doing} node {name}"),
         consequences: vec![consequence.to_owned()],
         affected: Vec::new(),
