@@ -4,6 +4,7 @@ import { inWorkbench, testWorkbench } from "@twigo/workbench/testing";
 import { Discovery } from "../discovery";
 import { diffUri } from "../uri";
 import { DiffEditor } from "./DiffEditors";
+import { resourceVersionOf, yamlOfJson } from "./object";
 import { createEdits } from "./services";
 
 vi.mock("./DiffView", () => ({
@@ -61,7 +62,43 @@ test("the diff against the server follows the object itself, which nothing else 
   expect(diff).toContain("as-opened");
   expect(diff).toContain("name: auth-api-1a4uyl1-r2bkk");
   expect(diff.split("---\n")[1]).not.toContain("as-opened");
-  expect(edits.copies.live(POD)).toBeUndefined();
+});
+
+test("the diff against the server tells the working copy what it read, so that Keep mine locks to what the diff shows", async () => {
+  const workbench = await testWorkbench("ready");
+  const edits = createEdits(workbench);
+  const discovery = new Discovery(workbench);
+  const older = JSON.stringify({
+    apiVersion: "v1",
+    kind: "Pod",
+    metadata: { name: "auth-api-1a4uyl1-r2bkk", resourceVersion: "1" },
+  });
+  edits.copies.edit(POD, "kind: Pod\n", {
+    space: "prod-eu",
+    base: older,
+    lock: "1",
+  });
+  edits.copies.see(POD, older, false);
+  render(
+    <DiffEditor
+      uri={diffUri({ kind: "server", editor: POD })}
+      edits={edits}
+      discovery={discovery}
+    />,
+    { wrapper: inWorkbench(workbench) },
+  );
+  const diff = (await screen.findByTestId("diff")).textContent;
+  const seen = edits.copies.live(POD);
+  expect(seen).not.toBe(older);
+  expect(diff.split("---\n")[1]).toBe(yamlOfJson(seen ?? ""));
+  expect(edits.copies.serverChanged(POD)).toBe(true);
+
+  edits.copies.keepMine(POD);
+  expect(edits.copies.get(POD)).toMatchObject({
+    lock: resourceVersionOf(seen ?? ""),
+    locked: seen,
+  });
+  expect(edits.copies.serverChanged(POD)).toBe(false);
 });
 
 test("comparing objects says when one cannot be read, and that a Secret's values are hidden", async () => {

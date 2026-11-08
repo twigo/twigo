@@ -1,8 +1,12 @@
-import { lazy, Suspense, useMemo } from "react";
+import { lazy, Suspense, useEffect, useMemo } from "react";
 import { GitCompare } from "lucide-react";
 import { EmptyState, Banner, Skeleton } from "@twigo/ui";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
-import { useResources, type Discovery } from "../discovery";
+import {
+  hasStatusSubresource,
+  useResources,
+  type Discovery,
+} from "../discovery";
 import { objectQuery, useObject } from "../object/useObject";
 import { parseDiffUri, parseObjectUri } from "../uri";
 import { objectProblem } from "../viewProblem";
@@ -75,7 +79,11 @@ function useManifest(discovery: Discovery, space: string, uri: string) {
     input && objectQuery(input, resources),
     { overview: false, manifest: true, events: false, related: false },
   );
-  return { manifest: snapshot.manifest, problem: objectProblem(snapshot) };
+  return {
+    manifest: snapshot.manifest,
+    problem: objectProblem(snapshot),
+    statusSubresource: hasStatusSubresource(resources, input?.gvr),
+  };
 }
 
 function ServerDiff({
@@ -89,11 +97,17 @@ function ServerDiff({
 }) {
   useChanges(edits.copies.changes);
   const base = edits.copies.get(editor)?.base;
-  const { manifest: live, problem } = useManifest(
-    discovery,
-    parseObjectUri(editor)?.space ?? "",
-    editor,
-  );
+  const {
+    manifest: live,
+    problem,
+    statusSubresource,
+  } = useManifest(discovery, parseObjectUri(editor)?.space ?? "", editor);
+  // Keep mine locks to what the working copy last saw, which is what this shows.
+  useEffect(() => {
+    if (live !== undefined) {
+      edits.copies.see(editor, live, statusSubresource);
+    }
+  }, [edits.copies, editor, live, statusSubresource]);
   const original = useMemo(
     () => (base === undefined ? undefined : yamlOfJson(base)),
     [base],

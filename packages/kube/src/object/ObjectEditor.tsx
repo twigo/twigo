@@ -2,7 +2,11 @@ import { useEffect, useMemo } from "react";
 import type { ObjectRef } from "@twigo/protocol";
 import { EmptyState, InlineActions, Segmented } from "@twigo/ui";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
-import { sameGvr, useResources, type Discovery } from "../discovery";
+import {
+  hasStatusSubresource,
+  useResources,
+  type Discovery,
+} from "../discovery";
 import type { EditServices } from "../edit/services";
 import { YamlTab } from "../edit/YamlTab";
 import { logsKind } from "../logs/entries";
@@ -36,10 +40,6 @@ export function ObjectEditor({
   useChanges(tabs.changes);
   useChanges(edits.copies.changes);
   const tab = tabs.get(uri);
-  const known =
-    input && resources.state === "ready"
-      ? resources.value.find((resource) => sameGvr(resource.gvr, input.gvr))
-      : undefined;
   const query = input && objectQuery(input, resources);
   // An edit holds the object's text until it is applied, and an applied one
   // until the object shows it, so the object is followed for what changes
@@ -53,7 +53,7 @@ export function ObjectEditor({
     related: tab === "related",
   });
   const reveal = useReveal(id);
-  const statusLocked = known?.subresources.includes("status") ?? false;
+  const statusLocked = hasStatusSubresource(resources, input?.gvr);
   const manifest = snapshot.manifest;
   useEffect(() => {
     if (manifest !== undefined) edits.copies.see(uri, manifest, statusLocked);
