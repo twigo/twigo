@@ -110,7 +110,12 @@ export class WorkingCopies {
   readonly #buffers = new Map<string, EditorBuffer>();
   readonly #held = new Map<
     string,
-    { readonly text: string; readonly since: string }
+    {
+      readonly text: string;
+      readonly since: string;
+      /** The object the preview said the apply would leave, as JSON. */
+      readonly result: string | undefined;
+    }
   >();
   #manifests = 0;
   readonly #seen = new Map<
@@ -207,7 +212,10 @@ export class WorkingCopies {
     this.#seen.set(uri, { live, statusSubresource });
     const held = this.#held.get(uri);
     const shown =
-      held !== undefined && differs(live, held.since, statusSubresource);
+      held !== undefined &&
+      (differs(live, held.since, statusSubresource) ||
+        (held.result !== undefined &&
+          !differs(live, held.result, statusSubresource)));
     if (shown) this.#held.delete(uri);
     if (shown || this.serverChanged(uri) !== before) this.changes.emit();
   }
@@ -226,18 +234,29 @@ export class WorkingCopies {
    * change yet if it still equals what the copy was based on, or locked to,
    * and its text is held until `see` finds it different: a status write moves
    * the `resourceVersion` without that, so the lock alone would let the old
-   * object show.
+   * object show. The hold ends too when the object equals `result`, what the
+   * preview said the apply leaves, since an apply that changes nothing in the
+   * object would otherwise hold for good. A Secret's never holds, as its
+   * masked view does not differ for a value of the same size, and the text
+   * typed would stay.
    */
-  applied(uri: string): void {
+  applied(uri: string, result?: unknown): void {
     const copy = this.#copies.get(uri);
     const seen = this.#seen.get(uri);
     const since = copy?.locked ?? copy?.base;
+    const left = result === undefined ? undefined : JSON.stringify(result);
     if (
       copy &&
       since !== undefined &&
-      !(seen && differs(seen.live, since, seen.statusSubresource))
+      !isSecretUri(uri) &&
+      !(seen && differs(seen.live, since, seen.statusSubresource)) &&
+      !(
+        seen &&
+        left !== undefined &&
+        !differs(seen.live, left, seen.statusSubresource)
+      )
     ) {
-      this.#held.set(uri, { text: copy.text, since });
+      this.#held.set(uri, { text: copy.text, since, result: left });
     }
     this.drop(uri);
   }

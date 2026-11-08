@@ -321,6 +321,44 @@ test("an edit applied on top of Keep mine waits for the object to differ from th
   expect(copies.held(DEPLOYMENT)).toBeUndefined();
 });
 
+test("an applied Secret holds nothing, since its masked view cannot tell a rotated value of the same size, and the text typed would stay for good", async () => {
+  const { copies } = await services();
+  const secret = {
+    apiVersion: "v1",
+    kind: "Secret",
+    metadata: {
+      name: "credentials",
+      namespace: "default",
+      resourceVersion: "7",
+    },
+    data: { password: "<12 bytes>" },
+  };
+  const json = JSON.stringify(secret);
+  copies.see(SECRET, json, false);
+  copies.edit(SECRET, "data:\n  password: c2VjcmV0dmFsdWU=\n", {
+    space: "prod-eu",
+    base: json,
+    lock: "7",
+  });
+  copies.applied(SECRET, secret);
+  expect(copies.held(SECRET)).toBeUndefined();
+});
+
+test("an applied edit that changes nothing in the object holds nothing, or only until the object is seen to equal its preview's result", async () => {
+  const { copies } = await services();
+  copies.edit(DEPLOYMENT, "replicas: 2\n", opened);
+  copies.see(DEPLOYMENT, base, true);
+  copies.applied(DEPLOYMENT, JSON.parse(base));
+  expect(copies.held(DEPLOYMENT)).toBeUndefined();
+
+  const other = "k8s://prod-eu/apps/v1/deployments/default/other";
+  copies.edit(other, "replicas: 2\n", opened);
+  copies.applied(other, JSON.parse(base));
+  expect(copies.held(other)).toBe("replicas: 2\n");
+  copies.see(other, base.replace('"10"', '"11"'), true);
+  expect(copies.held(other)).toBeUndefined();
+});
+
 test("typing into the held text, or closing its editor, ends the hold", async () => {
   const { copies } = await services();
   copies.edit(DEPLOYMENT, "replicas: 2\n", opened);

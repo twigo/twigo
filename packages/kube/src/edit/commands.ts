@@ -164,7 +164,12 @@ export function registerEdits(
   const finish = (uri: string) => {
     const copy = copies.get(uri);
     const last = previews.get(uri);
-    copies.applied(uri);
+    copies.applied(
+      uri,
+      last?.state === "answered" && last.answer.state === "ready"
+        ? last.answer.result
+        : undefined,
+    );
     previews.clear(uri);
     closeDiffs(uri);
     if (copy?.base === undefined && copy && last?.state === "answered") {

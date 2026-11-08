@@ -711,7 +711,8 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
     A key named `<<` is written quoted, so that it reads back as that key and not as a merge.
     `packages/kube/test/k8s-yaml/` records what kubectl made of 139 texts (`go run .` there), and a test holds the webview to it: what differs is a duplicate key, which kubectl takes the last of and the webview refuses, and the refusals above.
   - When the plan of an apply is done the copy ends, but its text stays the editor's until the live object differs from the one the copy was based on, or locked to, compared as "changed on server" is, so that the editor never shows the object as it was while the new one comes by its watch.
-    A status write does not end it, as it moves the `resourceVersion` without changing the object; typing or closing the editor does, and it is never written to the state.
+    A status write does not end it, as it moves the `resourceVersion` without changing the object; the object equal to the `result` of the preview that was applied does, so that an apply that changes nothing in the object holds nothing for good; typing or closing the editor does, and it is never written to the state.
+    A Secret's text is not held at all: its values are masked to their sizes, so a value rotated to one of the same size would leave the object looking as it was, and the typed plaintext on show.
   - Unsaved working copies survive a restart (backups per space, the `edits` key of the space's state), written a pause of 300 ms after the last change.
     A Secret's never is: not an object of the `secrets` resource, not the text of any editor that mentions a Secret, since a Secret's manifest can be pasted into another object's editor, and not a new manifest that does not parse or names no kind yet, since the values may be typed before the kind.
   - Closing an editor keeps its copy, which the tab shows again when the object opens anew.
