@@ -11,7 +11,7 @@ import {
   type IWatermarkPanelProps,
 } from "dockview-react";
 import { FileQuestion, X } from "lucide-react";
-import { cn, EmptyState, KeyHints } from "@twigo/ui";
+import { cn, EmptyState, KeyHints, UnsavedMark } from "@twigo/ui";
 import {
   EDITOR_COMPONENT,
   EDITOR_TAB,
@@ -195,8 +195,10 @@ export function GroupActions({ activePanel }: IDockviewHeaderActionsProps) {
 
 function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
   const { editors } = useWorkbench();
+  useChanges(editors.changes);
   const params = readParams(raw);
   const provider = params && editors.resolve(params.uri);
+  const dirty = params !== undefined && editors.isDirty(params.uri);
   return (
     <div
       className="flex h-full items-center gap-1.5 pr-[3px] pl-2 text-[13px]"
@@ -219,6 +221,7 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
       <button
         type="button"
         aria-label={`Close ${api.title ?? ""}`}
+        data-dirty={dirty}
         onClick={(event) => {
           event.stopPropagation();
           api.close();
@@ -228,7 +231,8 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
           "hover:bg-row-hover",
         )}
       >
-        <X className="size-3.5" />
+        {dirty && <UnsavedMark className="twigo-tab-unsaved" />}
+        <X className="twigo-tab-x size-3.5" />
       </button>
     </div>
   );

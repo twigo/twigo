@@ -56,6 +56,7 @@ export class Editors {
   readonly #providers = new Set<EditorProvider>();
   readonly #symbols = new Map<string, readonly EditorSymbol[]>();
   readonly #closed = new Set<(uri: string) => void>();
+  readonly #dirty = new Set<string>();
   readonly #apis = new Map<Area, DockviewApi>();
   #active: string | undefined;
 
@@ -163,11 +164,13 @@ export class Editors {
     if (!api) throw new Error(`no ${target} area is mounted`);
     this.reveal(target);
     const group = api.activeGroup;
+    // Changes of its own pin an editor that opens again.
+    const previewed = preview && !this.#dirty.has(uri);
     const replaced =
-      preview && !side
+      previewed && !side
         ? group?.panels.find((panel) => paramsOf(panel)?.preview)
         : undefined;
-    const params: EditorParams = { uri, preview };
+    const params: EditorParams = { uri, preview: previewed };
     api.addPanel({
       id: uri,
       component: EDITOR_COMPONENT,
@@ -192,6 +195,27 @@ export class Editors {
     const params = panel && paramsOf(panel);
     if (!panel || !params?.preview) return;
     panel.api.updateParameters({ ...params, preview: false });
+  }
+
+  /** Whether the editor holds changes that nothing has applied yet; its tab says so. */
+  isDirty(uri: string): boolean {
+    return this.#dirty.has(uri);
+  }
+
+  /**
+   * An editor with changes of its own marks its tab and pins it, so the next
+   * preview does not replace it. The mark outlives the tab, as the changes
+   * do: a tab that opens again for the URI shows it.
+   */
+  setDirty(uri: string, dirty: boolean): void {
+    if (this.#dirty.has(uri) === dirty) return;
+    if (dirty) {
+      this.#dirty.add(uri);
+      this.pin(uri);
+    } else {
+      this.#dirty.delete(uri);
+    }
+    this.changes.emit();
   }
 
   /** An editor publishes its symbols while it shows them. */

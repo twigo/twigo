@@ -116,6 +116,19 @@
   opacity: 1;
 }
 
+/* A tab with changes not applied wears a dot where Close is, and shows Close
+   under the pointer. */
+.twigo-dockview .dv-tab .twigo-tab-close[data-dirty="true"] {
+  opacity: 1;
+}
+.twigo-dockview .twigo-tab-close[data-dirty="true"] .twigo-tab-x,
+.twigo-dockview .twigo-tab-close[data-dirty="true"]:hover .twigo-tab-unsaved {
+  display: none;
+}
+.twigo-dockview .twigo-tab-close[data-dirty="true"]:hover .twigo-tab-x {
+  display: block;
+}
+
 /* A preview tab's title is italic until the tab is pinned (ARCHITECTURE 4.3). */
 .twigo-dockview .dv-tab [data-preview="true"] {
   font-style: italic;

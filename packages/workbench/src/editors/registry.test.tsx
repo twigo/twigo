@@ -77,6 +77,41 @@ test("opening an open URI focuses it; opening it for good pins it", async () => 
   ]);
 });
 
+test("an editor with changes of its own is pinned and marked, also when it opens again", async () => {
+  const { editors, tabs } = await mounted();
+  const marks = () =>
+    document.querySelectorAll('[role="img"][aria-label="Unsaved changes"]')
+      .length;
+  act(() => {
+    editors.open("note://a", { preview: true });
+  });
+  act(() => {
+    editors.setDirty("note://a", true);
+  });
+  expect(tabs()).toEqual([{ title: "a", preview: "false" }]);
+  expect(marks()).toBe(1);
+  act(() => {
+    editors.open("note://b", { preview: true });
+  });
+  expect(tabs().map(({ title }) => title)).toEqual(["a", "b"]);
+  act(() => {
+    editors.close("note://a");
+  });
+  expect(marks()).toBe(0);
+  act(() => {
+    editors.open("note://a", { preview: true });
+  });
+  expect(tabs()).toEqual([
+    { title: "b", preview: "true" },
+    { title: "a", preview: "false" },
+  ]);
+  expect(marks()).toBe(1);
+  act(() => {
+    editors.setDirty("note://a", false);
+  });
+  expect(marks()).toBe(0);
+});
+
 test("each space keeps its own editors", async () => {
   const { workbench, editors, tabs } = await mounted();
   act(() => {
