@@ -16,21 +16,25 @@ export function YamlTab({
   space,
   json,
   statusLocked,
+  gone,
 }: {
   edits: EditServices;
   uri: string;
   space: string;
   json: string;
   statusLocked: boolean;
+  /** Why the object is not there to follow: `json` is then the one the edit was based on. */
+  gone?: { readonly title: string; readonly body: string };
 }) {
   const { copies, previews } = edits;
   useChanges(copies.changes);
   const live = useMemo(() => yamlOfJson(json), [json]);
   const kind = useMemo(() => kindOf(JSON.parse(json)), [json]);
   const text = copies.get(uri)?.text ?? copies.held(uri) ?? live;
+  const away = gone !== undefined;
   useEffect(() => {
-    copies.see(uri, json, statusLocked);
-  }, [copies, uri, json, statusLocked]);
+    if (!away) copies.see(uri, json, statusLocked);
+  }, [copies, uri, json, statusLocked, away]);
 
   return (
     <YamlSurface
@@ -48,6 +52,7 @@ export function YamlTab({
       }}
       statusLocked={statusLocked}
       schemaKind={kind}
+      {...(gone && { gone })}
       note={
         copies.get(uri)
           ? "Edited, not applied"

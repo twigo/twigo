@@ -59,6 +59,7 @@ export function ObjectEditor({
     if (manifest !== undefined) edits.copies.see(uri, manifest, statusLocked);
   }, [edits.copies, uri, manifest, statusLocked]);
   if (!input) return <EmptyState title="Not an object">{uri}</EmptyState>;
+  const opened = edits.copies.get(uri)?.base;
   const open = (target: ObjectRef) => {
     if (resources.state !== "ready") return;
     const next = refUri(input.space, resources.value, target);
@@ -85,6 +86,18 @@ export function ObjectEditor({
           statusLocked={statusLocked}
         />
       )}
+      {...(opened !== undefined && {
+        kept: (problem: { title: string; body: string }) => (
+          <YamlTab
+            edits={edits}
+            uri={uri}
+            space={input.space}
+            json={opened}
+            statusLocked={statusLocked}
+            gone={problem}
+          />
+        ),
+      })}
       {...(input.namespace !== undefined && {
         onLogs: (choice) => {
           void commands.execute("k8s.logs.open", keys.lookup(null), {

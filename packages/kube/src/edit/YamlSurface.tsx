@@ -25,6 +25,7 @@ export function YamlSurface({
   statusLocked,
   schemaKind,
   note,
+  gone,
 }: {
   edits: EditServices;
   uri: string;
@@ -34,6 +35,8 @@ export function YamlSurface({
   statusLocked: boolean;
   schemaKind: Omit<SchemaKind, "space"> | undefined;
   note: string;
+  /** Why the object this edits is not there, which the edit outlives. */
+  gone?: { readonly title: string; readonly body: string };
 }) {
   useChanges(edits.copies.changes);
   useChanges(edits.previews.changes);
@@ -87,6 +90,11 @@ export function YamlSurface({
         </span>
         <EditActions edits={edits} uri={uri} menus={["edit/toolbar"]} />
       </div>
+      {gone && (
+        <Banner tone="warn" icon={TriangleAlert} title={gone.title}>
+          {gone.body} Your edit is kept until you discard it.
+        </Banner>
+      )}
       {changed && (
         <Banner
           tone="warn"
