@@ -8,11 +8,12 @@
 //! `GET /openapi/v3` lists each group/version with a `serverRelativeURL` that
 //! ends in `?hash=`. The hash is the document's ETag: the upper-case hex
 //! SHA-512 of the JSON the server serves for it ([`computeETag`], over the
-//! bytes `jsonCache` marshals, [`newOpenAPIV3Group`]), and it is the same
-//! JSON that the protobuf form is served from, so it covers nothing else. A
-//! request that carries another hash is redirected to the current one, and
-//! only a request that carries the current one is answered with
-//! `Cache-Control: public, immutable` ([`HandleGroupVersion`]).
+//! bytes `jsonCache` marshals, [`newOpenAPIV3Group`]). The protobuf form is
+//! made from that JSON and carries its ETag, so the hash names the JSON
+//! whichever form is asked for. A request that carries another hash is
+//! redirected to the current one, and only a request that carries the
+//! current one is answered with `Cache-Control: public, immutable`
+//! ([`HandleGroupVersion`]).
 //!
 //! So the bytes under a URL with its hash are the one document that hash
 //! names, however long ago they were stored and from whichever cluster: a
@@ -30,7 +31,7 @@
 //! when they still do, so a server that answers something else under a hash,
 //! or a file that was damaged, is never used.
 //!
-//! The index itself changes with every document, so it is asked for on each
+//! The index changes whenever a document does, so it is asked for on each
 //! [`Document::load`] and never kept: a CRD's change gives its group a new
 //! hash, and the next load sees it.
 //!
@@ -43,10 +44,11 @@
 //!
 //! # Memory
 //!
-//! A [`Document`] keeps only the schemas of its `components`, not the paths
-//! that make most of the bytes, and whoever loads one drops it when its
-//! answer is made: the core's memory budget (ARCHITECTURE 3.8) has no room
-//! for the documents of every group/version a person has edited.
+//! A [`Document`] keeps only the schemas of its `components`, not the paths,
+//! which make 58 % of the bytes of `apis/apps/v1` and 72 % of `api/v1` (kind
+//! 1.37, 2026-11-08), and whoever loads one drops it when its answer is made:
+//! the core's memory budget (ARCHITECTURE 3.8) has no room for the documents
+//! of every group/version a person has edited.
 
 mod cache;
 mod schema;
@@ -86,9 +88,7 @@ pub enum Error {
     Request(#[from] kube::Error),
     #[error("the server serves no OpenAPI document for {0}")]
     NotListed(String),
-    #[error(
-        "the server lists {0:?} as an OpenAPI document, which is no address of one with a hash"
-    )]
+    #[error("the server lists {0:?} as the address of an OpenAPI document, which has no hash")]
     Address(String),
     #[error("the server answered {0} with something other than the document its hash names")]
     Unverified(String),
