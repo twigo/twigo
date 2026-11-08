@@ -488,3 +488,33 @@ fn the_types_whose_zero_value_is_null_take_null() {
     }
     assert_eq!(schema["properties"]["text"]["type"], "string");
 }
+
+#[test]
+fn a_value_validation_constrains_fields_and_never_closes_the_object() {
+    let member = json!({ "properties": { "a": { "minLength": 1 } } });
+    let document = document(
+        json!({
+            "spec": {
+                "type": "object",
+                "properties": { "a": { "type": "string" }, "b": { "type": "string" } },
+                "allOf": [member],
+                "anyOf": [member],
+                "oneOf": [member],
+                "not": member,
+            },
+        }),
+        json!({}),
+    );
+    let schema = json_schema(&document);
+    let spec = &schema["properties"]["spec"];
+    assert_eq!(spec["additionalProperties"], false);
+    for validation in [
+        &spec["allOf"][0],
+        &spec["anyOf"][0],
+        &spec["oneOf"][0],
+        &spec["not"],
+    ] {
+        assert_eq!(validation["properties"]["a"]["minLength"], 1);
+        assert_eq!(validation.get("additionalProperties"), None);
+    }
+}

@@ -29,7 +29,9 @@
 //! schema does not declare, so a typed object does the same here:
 //! `additionalProperties: false` unless it preserves unknown fields, as the
 //! server's conversion reads it (`shape`), or declares its own. An object with
-//! no properties is free-form and takes any field.
+//! no properties is free-form and takes any field. A member of `allOf`,
+//! `anyOf`, `oneOf` or `not`, which a CRD's served document keeps, only
+//! constrains fields declared beside it, so it never closes the object.
 //!
 //! `x-kubernetes-*` keywords are the server's to read and go; a property of
 //! that name stays, as `JSONSchemaProps` has some.
@@ -145,14 +147,17 @@ impl Converter<'_> {
                         Value::Object(properties.unwrap_or_default()),
                     );
                 }
-                "items" | "additionalProperties" | "not" => {
+                "items" | "additionalProperties" => {
                     converted.insert(keyword.clone(), self.schema(value, preserves));
+                }
+                "not" => {
+                    converted.insert(keyword.clone(), self.schema(value, true));
                 }
                 "allOf" | "anyOf" | "oneOf" => {
                     let members = value.as_array().map(|members| {
                         members
                             .iter()
-                            .map(|member| self.schema(member, preserves))
+                            .map(|member| self.schema(member, true))
                             .collect()
                     });
                     converted.insert(keyword.clone(), Value::Array(members.unwrap_or_default()));
