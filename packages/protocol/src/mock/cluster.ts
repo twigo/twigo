@@ -56,6 +56,44 @@ export interface Node {
   ip: string;
 }
 
+/** Whether a node is cordoned, as its status says. */
+export function cordoned(node: Node): boolean {
+  return node.status.endsWith(",SchedulingDisabled");
+}
+
+export interface CronJob {
+  id: RowId;
+  uid: string;
+  namespace: string;
+  name: string;
+  schedule: string;
+  suspend: boolean;
+  lastSchedule: number;
+  created: number;
+}
+
+export interface Job {
+  id: RowId;
+  namespace: string;
+  name: string;
+  /** The CronJob that made it. */
+  owner: string | null;
+  suspend: boolean;
+  /** When it ran to completion; none while it runs. */
+  completed: number | null;
+  created: number;
+}
+
+/** What each CronJob of the mock does, by the namespaces it runs in. */
+const CRON_JOBS: readonly (readonly [string, string, string])[] = [
+  ["payments", "nightly-settlement", "0 2 * * *"],
+  ["ledger", "reconcile", "*/30 * * * *"],
+  ["notify", "digest", "0 8 * * 1-5"],
+  ["batch", "report", "0 * * * *"],
+  ["batch", "cleanup", "15 3 * * *"],
+  ["monitoring", "prune-metrics", "0 4 * * 0"],
+];
+
 const DAY = 86_400_000;
 
 /** The nodes of a cluster with pods, which the pods spread over. */
@@ -65,6 +103,14 @@ const NODES = 40;
 export class Cluster {
   readonly pods: Pod[] = [];
   readonly nodes: Node[] = [];
+  readonly cronJobs: CronJob[] = [];
+  readonly jobs: Job[] = [];
+  /**
+   * Deployments scaled to zero, by `namespace/name`, each with a pod of its
+   * template: the mock's Deployments are what their pods say, so these
+   * keep their rows.
+   */
+  readonly emptied = new Map<string, Pod>();
   /** Bumped on every change, so query results can be cached. */
   version = 0;
   /** When the cluster last changed, which the times its events print count from. */
@@ -101,6 +147,31 @@ export class Cluster {
               : "Ready",
         created: now - Math.floor((30 + random() * 60) * DAY),
         ip: `10.0.${Math.floor(i / 200)}.${10 + (i % 200)}`,
+      });
+    }
+    if (count === 0) return;
+    for (const [namespace, name, schedule] of CRON_JOBS) {
+      const created = now - Math.floor((10 + random() * 80) * DAY);
+      const lastSchedule = now - Math.floor(random() * 3_600_000);
+      this.cronJobs.push({
+        id: `${context}/${namespace}/${name}`,
+        uid: `${context}/${namespace}/${name}`,
+        namespace,
+        name,
+        schedule,
+        suspend: false,
+        lastSchedule,
+        created,
+      });
+      const job = `${name}-${String(Math.floor(lastSchedule / 60_000))}`;
+      this.jobs.push({
+        id: `${context}/${namespace}/${job}`,
+        namespace,
+        name: job,
+        owner: name,
+        suspend: false,
+        completed: lastSchedule + Math.floor(5_000 + random() * 60_000),
+        created: lastSchedule,
       });
     }
   }
@@ -188,6 +259,106 @@ export class Cluster {
       (pod) => pod.namespace !== namespace || deploymentOf(pod) !== name,
     );
     this.pods.splice(0, this.pods.length, ...kept);
+    this.version++;
+  }
+
+  /** The pods of a Deployment, as their names say. */
+  podsOf(namespace: string, deployment: string): Pod[] {
+    return this.pods.filter(
+      (pod) => pod.namespace === namespace && deploymentOf(pod) === deployment,
+    );
+  }
+
+  /** Sets a Deployment's replicas: new pods start, or the newest go. */
+  scale(
+    namespace: string,
+    deployment: string,
+    replicas: number,
+    now: number,
+  ): void {
+    const key = `${namespace}/${deployment}`;
+    const pods = this.podsOf(namespace, deployment);
+    const template = pods[0] ?? this.emptied.get(key);
+    if (!template) return;
+    for (let i = pods.length; i < replicas; i++) {
+      const suffix = Math.floor(this.#rollouts() * 36 ** 5)
+        .toString(36)
+        .padStart(5, "0");
+      const name = `${template.generateName}${suffix}`;
+      this.pods.push({
+        ...template,
+        id: `${this.context}/${namespace}/${name}`,
+        name,
+        status: "ContainerCreating",
+        ready: 0,
+        restarts: "0",
+        created: now,
+        node: `${this.context}-node-${Math.floor(this.#rollouts() * this.nodes.length)}`,
+        version: 0,
+      });
+    }
+    const going = [...pods]
+      .sort((a, b) => b.created - a.created)
+      .slice(0, Math.max(0, pods.length - replicas));
+    for (const pod of going) this.pods.splice(this.pods.indexOf(pod), 1);
+    if (replicas === 0) this.emptied.set(key, template);
+    else this.emptied.delete(key);
+    this.now = now;
+    this.version++;
+  }
+
+  /** Replaces each of a Deployment's pods, as a rollout of a new template does. */
+  restart(namespace: string, deployment: string, now: number): void {
+    for (const pod of this.podsOf(namespace, deployment))
+      this.rollOut(pod, now);
+  }
+
+  /** Marks a node unschedulable, or schedulable again. */
+  cordon(name: string, unschedulable: boolean): void {
+    const node = this.nodes.find((candidate) => candidate.name === name);
+    if (!node) return;
+    const status = node.status.replace(",SchedulingDisabled", "");
+    node.status = unschedulable ? `${status},SchedulingDisabled` : status;
+    this.version++;
+  }
+
+  /** Cordons a node and moves its pods to others, as their controllers replace them. */
+  drain(name: string, now: number): void {
+    this.cordon(name, true);
+    const others = this.nodes.filter(
+      (node) => node.name !== name && !cordoned(node),
+    );
+    for (const pod of this.pods.filter(
+      (candidate) => candidate.node === name,
+    )) {
+      const node = others[Math.floor(this.#rollouts() * others.length)];
+      const index = this.pods.indexOf(pod);
+      this.deletePod(pod, now);
+      const next = this.pods[index];
+      if (next && node) next.node = node.name;
+    }
+    this.now = now;
+    this.version++;
+  }
+
+  /** Runs a CronJob's template now as a Job of `name`. */
+  trigger(namespace: string, cronJob: string, name: string, now: number): void {
+    this.jobs.push({
+      id: `${this.context}/${namespace}/${name}`,
+      namespace,
+      name,
+      owner: cronJob,
+      suspend: false,
+      completed: null,
+      created: now,
+    });
+    this.now = now;
+    this.version++;
+  }
+
+  /** Suspends a Job or a CronJob, or resumes it. */
+  suspend(of: CronJob | Job, suspend: boolean): void {
+    of.suspend = suspend;
     this.version++;
   }
 

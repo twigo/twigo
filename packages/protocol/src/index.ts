@@ -9,6 +9,9 @@ export type {
 } from "./backend";
 export { IpcError, toIpcError } from "./error";
 export type {
+  Access,
+  AccessQuery,
+  Affected,
   BlockReason,
   Blocked,
   ContextAccess,

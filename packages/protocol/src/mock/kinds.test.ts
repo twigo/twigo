@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import cronjobsList from "../../../../crates/twigo-cache/tests/fixtures/cronjobs-list.json";
 import deploymentsList from "../../../../crates/twigo-cache/tests/fixtures/deployments-list.json";
 import eventsList from "../../../../crates/twigo-cache/tests/fixtures/events-list.json";
 import jobsList from "../../../../crates/twigo-cache/tests/fixtures/jobs-list.json";
@@ -29,6 +30,7 @@ test("each kind's columns are those kube-apiserver sent, by name and priority", 
     "/v1/nodes": nodesList,
     "apps/v1/deployments": deploymentsList,
     "batch/v1/jobs": jobsList,
+    "batch/v1/cronjobs": cronjobsList,
     "/v1/events": eventsList,
   };
   expect(Object.keys(KINDS).sort()).toEqual(Object.keys(recorded).sort());

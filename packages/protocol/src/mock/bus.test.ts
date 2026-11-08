@@ -25,12 +25,14 @@ function deletePod(space: string): PlanRequest {
   return {
     action: "delete",
     space,
-    target: {
-      gvr: { group: "", version: "v1", resource: "pods" },
-      namespaced: true,
-      namespace,
-      name,
-    },
+    targets: [
+      {
+        gvr: { group: "", version: "v1", resource: "pods" },
+        namespaced: true,
+        namespace,
+        name,
+      },
+    ],
   };
 }
 
@@ -88,7 +90,7 @@ test("a pod its replica set replaces counts down, and runs only once the countdo
   await vi.advanceTimersByTimeAsync(5000);
   expect(await run(backend, again.id)).toEqual([
     { state: "running", text: `Waiting for pod ${name} to go` },
-    { state: "done", text: `Deleted pod ${name}` },
+    { state: "done", text: `Deleted pod ${name}`, undoUntil: null },
   ]);
 });
 
@@ -139,12 +141,14 @@ test("a node asks for its name typed and a deployment in a dialog", async () => 
     backend.invoke("command_plan", {
       action: "delete",
       space: "qa",
-      target: {
-        gvr: { group: "", version: "v1", resource: "nodes" },
-        namespaced: false,
-        namespace: null,
-        name: "qa-node-3",
-      },
+      targets: [
+        {
+          gvr: { group: "", version: "v1", resource: "nodes" },
+          namespaced: false,
+          namespace: null,
+          name: "qa-node-3",
+        },
+      ],
     }),
   );
   expect(node.friction).toEqual({ kind: "typed", text: "qa-node-3" });
@@ -155,12 +159,14 @@ test("a node asks for its name typed and a deployment in a dialog", async () => 
     backend.invoke("command_plan", {
       action: "delete",
       space: "qa",
-      target: {
-        gvr: { group: "apps", version: "v1", resource: "deployments" },
-        namespaced: true,
-        namespace: first.namespace,
-        name: deploymentOf(first),
-      },
+      targets: [
+        {
+          gvr: { group: "apps", version: "v1", resource: "deployments" },
+          namespaced: true,
+          namespace: first.namespace,
+          name: deploymentOf(first),
+        },
+      ],
     }),
   );
   expect(deployment.friction).toEqual({ kind: "confirm" });
@@ -176,12 +182,14 @@ test("read-only refuses before the object is looked up, as Rust does", async () 
     backend.invoke("command_plan", {
       action: "delete",
       space: "prod-eu",
-      target: {
-        gvr: { group: "", version: "v1", resource: "configmaps" },
-        namespaced: true,
-        namespace: "payments",
-        name: "no-such-map",
-      },
+      targets: [
+        {
+          gvr: { group: "", version: "v1", resource: "configmaps" },
+          namespaced: true,
+          namespace: "payments",
+          name: "no-such-map",
+        },
+      ],
     }),
   );
   expect(missing.kind).toBe("permissions");
@@ -230,4 +238,227 @@ test("a Reveal whose Secret closed before it ran fails, and says so", async () =
       },
     },
   ]);
+});
+
+/** The first pod's Deployment in qa, and how many pods it has. */
+function deployment() {
+  const first = pod("qa");
+  const name = deploymentOf(first);
+  const count = new Cluster("qa", POD_COUNT.qa ?? 0, 0).pods.filter(
+    (other) =>
+      other.namespace === first.namespace && deploymentOf(other) === name,
+  ).length;
+  return {
+    target: {
+      gvr: { group: "apps", version: "v1", resource: "deployments" },
+      namespaced: true,
+      namespace: first.namespace,
+      name,
+    },
+    name,
+    namespace: first.namespace,
+    count,
+  };
+}
+
+test("a scale runs at once, and its undo puts it back for 30 s", async () => {
+  const backend = createMockBackend("live");
+  await answered(backend.invoke("space_open", "qa"));
+  const { target, name, namespace, count } = deployment();
+  const scale = (replicas: number): PlanRequest => ({
+    action: "scale",
+    space: "qa",
+    target,
+    replicas,
+  });
+  const up = await answered(backend.invoke("command_plan", scale(count + 2)));
+  expect(up.friction).toEqual({ kind: "atOnce" });
+  expect(up.kubectl).toBe(
+    `kubectl --context qa scale deployments.apps ${name} --replicas ${String(count + 2)} -n ${namespace}`,
+  );
+  const started = Date.now();
+  const [done] = await run(backend, up.id);
+  expect(done).toMatchObject({
+    state: "done",
+    text: `Scaled deployment ${name} to ${String(count + 2)}`,
+  });
+  const until = done?.state === "done" ? done.undoUntil : null;
+  expect(until).toBeGreaterThanOrEqual(started + 30_000);
+  expect(until).toBeLessThan(started + 31_000);
+
+  const back = await answered(
+    backend.invoke("command_plan", { action: "undo", space: "qa" }),
+  );
+  expect(back.kubectl).toBe(
+    `kubectl --context qa scale deployments.apps ${name} --current-replicas ${String(count + 2)} --replicas ${String(count)} -n ${namespace}`,
+  );
+  expect(await run(backend, back.id)).toEqual([
+    {
+      state: "done",
+      text: `Scaled deployment ${name} back to ${String(count)}`,
+      undoUntil: null,
+    },
+  ]);
+  const nothing = await refused(
+    backend.invoke("command_plan", { action: "undo", space: "qa" }),
+  );
+  expect(nothing.kind).toBe("notFound");
+
+  const same = await refused(backend.invoke("command_plan", scale(count)));
+  expect(same.kind).toBe("invalidInput");
+  await run(
+    backend,
+    (await answered(backend.invoke("command_plan", scale(count + 1)))).id,
+  );
+  await vi.advanceTimersByTimeAsync(30_000);
+  const late = await refused(
+    backend.invoke("command_plan", { action: "undo", space: "qa" }),
+  );
+  expect(late.kind).toBe("notFound");
+
+  const down = await answered(backend.invoke("command_plan", scale(0)));
+  expect(down.friction).toEqual({ kind: "confirm" });
+  expect(down.affected[0]?.title).toBe("Its pods go");
+  expect(down.affected[0]?.objects).toHaveLength(count + 1);
+});
+
+test("an undo puts back the space's last action only", async () => {
+  const backend = createMockBackend("live");
+  await answered(backend.invoke("space_open", "qa"));
+  const suspend = (on: boolean): PlanRequest => ({
+    action: "suspend",
+    space: "qa",
+    target: {
+      gvr: { group: "batch", version: "v1", resource: "cronjobs" },
+      namespaced: true,
+      namespace: "batch",
+      name: "report",
+    },
+    suspend: on,
+  });
+  const plan = await answered(backend.invoke("command_plan", suspend(true)));
+  expect(plan.friction).toEqual({ kind: "atOnce" });
+  await run(backend, plan.id);
+  await run(
+    backend,
+    (await answered(backend.invoke("command_plan", suspend(false)))).id,
+  );
+  await run(
+    backend,
+    (await answered(backend.invoke("command_plan", suspend(true)))).id,
+  );
+  const undo = await answered(
+    backend.invoke("command_plan", { action: "undo", space: "qa" }),
+  );
+  expect(await run(backend, undo.id)).toEqual([
+    {
+      state: "done",
+      text: "Resumed cron job report",
+      undoUntil: null,
+    },
+  ]);
+});
+
+test("a drain cordons the node and lists the pods it evicts", async () => {
+  const backend = createMockBackend("live");
+  await answered(backend.invoke("space_open", "qa"));
+  const node = pod("qa").node;
+  const plan = await answered(
+    backend.invoke("command_plan", { action: "drain", space: "qa", node }),
+  );
+  expect(plan.friction).toEqual({ kind: "confirm" });
+  expect(plan.kubectl).toBe(
+    `kubectl --context qa drain ${node} --ignore-daemonsets`,
+  );
+  expect(plan.affected[0]?.objects.map((object) => object.name)).toContain(
+    pod("qa").name,
+  );
+  const events = await run(backend, plan.id);
+  expect(events[events.length - 1]).toEqual({
+    state: "done",
+    text: `Drained node ${node}`,
+    undoUntil: null,
+  });
+  const again = await refused(
+    backend.invoke("command_plan", {
+      action: "cordon",
+      space: "qa",
+      node,
+      unschedulable: true,
+    }),
+  );
+  expect(again.message).toBe(`Node ${node} is cordoned already`);
+});
+
+test("a trigger asks in a dialog and names the job it makes", async () => {
+  const backend = createMockBackend("live");
+  await answered(backend.invoke("space_open", "qa"));
+  const plan = await answered(
+    backend.invoke("command_plan", {
+      action: "trigger",
+      space: "qa",
+      namespace: "batch",
+      name: "report",
+    }),
+  );
+  expect(plan.friction).toEqual({ kind: "confirm" });
+  const job = /^Job (\S+) runs once/.exec(plan.consequences[0] ?? "")?.[1];
+  expect(job).toMatch(/^report-manual-[bcdfghjklmnpqrstvwxz2456789]{5}$/);
+  expect(plan.kubectl).toBe(
+    `kubectl --context qa create job ${job ?? ""} --from cronjob/report -n batch`,
+  );
+  expect(await run(backend, plan.id)).toEqual([
+    { state: "done", text: `Created job ${job ?? ""}`, undoUntil: null },
+  ]);
+});
+
+test("a delete of several asks for their count typed and lists them", async () => {
+  const backend = createMockBackend("live");
+  await answered(backend.invoke("space_open", "qa"));
+  const pods = new Cluster("qa", POD_COUNT.qa ?? 0, 0).pods.slice(0, 3);
+  const plan = await answered(
+    backend.invoke("command_plan", {
+      action: "delete",
+      space: "qa",
+      targets: pods.map((each) => ({
+        gvr: { group: "", version: "v1", resource: "pods" },
+        namespaced: true,
+        namespace: each.namespace,
+        name: each.name,
+      })),
+    }),
+  );
+  expect(plan.friction).toEqual({ kind: "typed", text: "3" });
+  expect(plan.confirm).toBe("Delete 3 pods");
+  expect(plan.affected[0]).toEqual({
+    title: "Deletes",
+    objects: pods.map((each) => ({
+      group: "",
+      version: "v1",
+      kind: "Pod",
+      namespace: each.namespace,
+      name: each.name,
+    })),
+  });
+});
+
+test("a viewer may read and nothing else", async () => {
+  const checks = ["list", "delete", "patch"].map((verb) => ({
+    verb,
+    group: "",
+    resource: "pods",
+    subresource: null,
+  }));
+  const viewer = createMockBackend("viewer");
+  expect(
+    await answered(
+      viewer.invoke("access_review", { space: "qa", namespace: null, checks }),
+    ),
+  ).toEqual([true, false, false]);
+  const admin = createMockBackend("live");
+  expect(
+    await answered(
+      admin.invoke("access_review", { space: "qa", namespace: null, checks }),
+    ),
+  ).toEqual([true, true, true]);
 });

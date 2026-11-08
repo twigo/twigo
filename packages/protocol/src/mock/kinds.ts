@@ -10,6 +10,7 @@ import {
   type Pod,
 } from "./cluster";
 import {
+  CRONJOB_COLUMNS,
   DEPLOYMENT_COLUMNS,
   EVENT_COLUMNS,
   JOB_COLUMNS,
@@ -144,7 +145,79 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
   "batch/v1/jobs": {
     columns: JOB_COLUMNS,
     fields: ["metadata.name", "metadata.namespace"],
-    rows: () => [],
+    rows: (cluster, withNamespace) =>
+      cluster.jobs.map((job) => {
+        const status = job.suspend
+          ? "Suspended"
+          : job.completed === null
+            ? "Running"
+            : "Complete";
+        return {
+          id: job.id,
+          namespace: job.namespace,
+          created: job.created,
+          labels: {},
+          controller:
+            job.owner && `${cluster.context}/${job.namespace}/${job.owner}`,
+          cells: namespaced(
+            [
+              job.name,
+              status,
+              job.completed === null ? "0/1" : "1/1",
+              humanDuration((job.completed ?? cluster.now) - job.created),
+              null,
+              "app",
+              "registry.example.com/jobs/app:1.42.0",
+              `batch.kubernetes.io/controller-uid=${job.id}`,
+            ],
+            job.namespace,
+            withNamespace,
+          ),
+          generated: null,
+          fields: {
+            "metadata.name": job.name,
+            "metadata.namespace": job.namespace,
+          },
+        };
+      }),
+  },
+  "batch/v1/cronjobs": {
+    columns: CRONJOB_COLUMNS,
+    fields: ["metadata.name", "metadata.namespace"],
+    rows: (cluster, withNamespace) =>
+      cluster.cronJobs.map((cronJob) => ({
+        id: cronJob.id,
+        namespace: cronJob.namespace,
+        created: cronJob.created,
+        labels: {},
+        controller: null,
+        cells: namespaced(
+          [
+            cronJob.name,
+            cronJob.schedule,
+            "<none>",
+            cronJob.suspend,
+            cluster.jobs.filter(
+              (job) =>
+                job.namespace === cronJob.namespace &&
+                job.owner === cronJob.name &&
+                job.completed === null,
+            ).length,
+            humanDuration(cluster.now - cronJob.lastSchedule),
+            null,
+            "app",
+            "registry.example.com/jobs/app:1.42.0",
+            "<none>",
+          ],
+          cronJob.namespace,
+          withNamespace,
+        ),
+        generated: null,
+        fields: {
+          "metadata.name": cronJob.name,
+          "metadata.namespace": cronJob.namespace,
+        },
+      })),
   },
   "/v1/events": {
     columns: EVENT_COLUMNS,
@@ -271,7 +344,7 @@ function deployments(cluster: Cluster): Deployment[] {
     if (pods) pods.push(pod);
     else owned.set(key, [pod]);
   }
-  return [...owned.values()].flatMap(([first, ...more]) => {
+  const scaled = [...owned.values()].flatMap(([first, ...more]) => {
     if (!first) return [];
     const pods = [first, ...more];
     return [
@@ -286,6 +359,16 @@ function deployments(cluster: Cluster): Deployment[] {
       },
     ];
   });
+  const emptied = [...cluster.emptied.values()].map((template) => ({
+    namespace: template.namespace,
+    name: deploymentOf(template),
+    replicas: 0,
+    ready: 0,
+    created: template.created,
+    container: containerOf(template),
+    image: imageOf(template),
+  }));
+  return [...scaled, ...emptied];
 }
 
 interface Event {
