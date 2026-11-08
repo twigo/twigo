@@ -1,15 +1,29 @@
-import { editor, languages, MarkerSeverity, Uri } from "monaco-editor/editor";
+import {
+  editor,
+  KeyCode,
+  languages,
+  MarkerSeverity,
+  Uri,
+} from "monaco-editor/editor";
 import "monaco-editor/languages/definitions/yaml/register";
 import "monaco-editor/features/clipboard/register";
 import "monaco-editor/features/codeAction/register";
+import "monaco-editor/features/comment/register";
 import "monaco-editor/features/contextmenu/register";
 import "monaco-editor/features/diffEditor/register";
 import "monaco-editor/features/find/register";
 import "monaco-editor/features/folding/register";
 import "monaco-editor/features/gotoError/register";
 import "monaco-editor/features/hover/register";
+import "monaco-editor/features/linesOperations/register";
+import "monaco-editor/features/multicursor/register";
 import "monaco-editor/features/readOnlyMessage/register";
 import "monaco-editor/features/suggest/register";
+// @todo: drop this import once `features/suggest/register` imports it: 0.57's
+// registers only the inline completions, so `editor.action.triggerSuggest`
+// and the suggest widget do not exist without the controller.
+import "monaco-editor/editor/contrib/suggest/browser/suggestController";
+import "monaco-editor/features/wordOperations/register";
 import { configureMonacoYaml, type SchemasSettings } from "monaco-yaml";
 import EditorWorker from "monaco-editor/editor/editor.worker?worker";
 import YamlWorker from "monaco-yaml/yaml.worker?worker";
@@ -69,7 +83,7 @@ export function setSchema(
   return yaml.update({ schemas: [...schemas.values()] });
 }
 
-export { editor, MarkerSeverity, Uri };
+export { editor, KeyCode, MarkerSeverity, Uri };
 
 function theme(): string {
   return document.documentElement.classList.contains("dark") ? "vs-dark" : "vs";
