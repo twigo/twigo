@@ -114,7 +114,17 @@ interface Asked {
   readonly risk: Risk;
   readonly consequences: string[];
   readonly affected: Affected[];
+  /** False for a CronJob's resume, which asks for the run it may start and takes nothing away. */
+  readonly destructive?: false;
 }
+
+/** A CronJob's resume, as Rust's `Asks::Resume`. */
+const RESUMES: Asked = {
+  risk: { kind: "lasting" },
+  consequences: [RESUMED],
+  affected: [],
+  destructive: false,
+};
 
 const AT_ONCE: Asked = {
   risk: { kind: "reversible" },
@@ -1034,14 +1044,14 @@ export class MockBus {
           };
     const asked: Asked =
       resource === "cronjobs"
-        ? {
-            ...AT_ONCE,
-            consequences: [
-              suspend
-                ? "No new jobs start on its schedule until it resumes; those running go on."
-                : RESUMED,
-            ],
-          }
+        ? suspend
+          ? {
+              ...AT_ONCE,
+              consequences: [
+                "No new jobs start on its schedule until it resumes; those running go on.",
+              ],
+            }
+          : RESUMES
         : suspend
           ? stopping()
           : { ...AT_ONCE, consequences: ["It starts its pods again."] };
@@ -1050,7 +1060,7 @@ export class MockBus {
         context,
         question: `${verb} ${what} in ${namespace ?? ""} on ${context}?`,
         confirm: `${verb} ${kind}`,
-        destructive: asked.risk.kind === "lasting",
+        destructive: asked.destructive ?? asked.risk.kind === "lasting",
         consequences: asked.consequences,
         affected: asked.affected,
         kubectl: line(suspend),
@@ -1080,9 +1090,7 @@ export class MockBus {
             context,
             write,
             asks: () => {
-              if (suspend && resource === "cronjobs") {
-                return { ...AT_ONCE, consequences: [RESUMED] };
-              }
+              if (suspend && resource === "cronjobs") return RESUMES;
               if (suspend || resource !== "jobs") return AT_ONCE;
               const why = left();
               if (why) throw new IpcError("conflict", why);
@@ -1139,7 +1147,7 @@ export class MockBus {
         context: revert.context,
         question: revert.question,
         confirm: "Undo",
-        destructive: asked.risk.kind === "lasting",
+        destructive: asked.destructive ?? asked.risk.kind === "lasting",
         consequences: asked.consequences,
         affected: asked.affected,
         kubectl: revert.kubectl,

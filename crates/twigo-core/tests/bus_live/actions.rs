@@ -699,7 +699,7 @@ async fn a_trigger_makes_a_job_of_the_cron_job_s_template_as_kubectl_does() {
 
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
-async fn suspend_and_resume_run_at_once_and_their_undo_holds_to_the_generation() {
+async fn suspend_runs_at_once_a_cron_jobs_resume_asks_and_each_undo_holds_to_the_generation() {
     let cluster = Cluster::connect().await;
     let namespace = cluster.namespace("suspend").await;
     let dir = tempfile::tempdir().unwrap();
@@ -747,6 +747,8 @@ async fn suspend_and_resume_run_at_once_and_their_undo_holds_to_the_generation()
     assert_eq!(done(&told).0, "Suspended cron job nightly");
     assert!(cronjob_suspended().await);
     let back = plan(&core, undo(&cluster)).await.unwrap();
+    assert_eq!(back.friction, Friction::Confirm);
+    assert!(!back.destructive);
     run(&core, &back, None).await.unwrap();
     assert!(!cronjob_suspended().await);
 
@@ -773,7 +775,8 @@ async fn suspend_and_resume_run_at_once_and_their_undo_holds_to_the_generation()
     let resume = plan(&core, suspend("cronjobs", "nightly", false))
         .await
         .unwrap();
-    assert_eq!(resume.friction, Friction::AtOnce);
+    assert_eq!(resume.friction, Friction::Confirm);
+    assert!(!resume.destructive);
     assert_eq!(resume.consequences, [RESUMED]);
     core.command_cancel("main", resume.id);
 

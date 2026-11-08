@@ -2,7 +2,8 @@
 //! `spec.suspend`, as `kubectl patch` sends it, since kubectl has no verb
 //! for it. Either runs at once with an undo (decision 1 of M2), but for
 //! suspending a Job that runs pods, whose work an undo cannot bring back:
-//! that asks first and lists them. A Job that ended or is ending is
+//! that asks first and lists them. A CronJob's resume asks too, as its
+//! trigger does, since the run it may start at once no undo stops. A Job that ended or is ending is
 //! neither suspended nor resumed, since its controller leaves it be. The run reads the object first and writes as of
 //! that read, so its undo puts back only what its own write changed.
 
@@ -69,7 +70,7 @@ pub(crate) async fn suspend(
             ],
             Vec::new(),
         ),
-        (true, false) => (Risk::Reversible, vec![RESUMED.to_owned()], Vec::new()),
+        (true, false) => (Risk::Lasting, vec![RESUMED.to_owned()], Vec::new()),
     };
     let words = Words::of(suspend);
     let kubectl = line(&target, suspend)?;
@@ -90,7 +91,8 @@ pub(crate) async fn suspend(
     Ok(Planned {
         question: format!("{} {what}{place} on {context}?", words.verb),
         confirm: format!("{} {kind}", words.verb),
-        destructive: risk == Risk::Lasting,
+        // A resume asks for the run it may start, and takes nothing away.
+        destructive: suspend && risk == Risk::Lasting,
         doing: format!("{} {what}", words.doing),
         consequences,
         affected,
@@ -357,10 +359,10 @@ impl Run {
             } else {
                 Vec::new()
             },
-            asks: if self.suspend || target.resource.resource != "jobs" {
-                Asks::Nothing
-            } else {
-                Asks::Suspend
+            asks: match (self.suspend, target.resource.resource.as_str()) {
+                (true, "cronjobs") => Asks::Resume,
+                (false, "jobs") => Asks::Suspend,
+                _ => Asks::Nothing,
             },
             what: what.clone(),
             past: words.past,

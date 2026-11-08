@@ -845,7 +845,7 @@ test("a Job that completes before its suspend runs is not suspended, nor its res
   );
 });
 
-test("a delete of marked rows leaves out one gone since, and a cron job's resume says what it starts", async () => {
+test("a delete of marked rows leaves out one gone since, and a cron job's resume says what it starts and asks", async () => {
   const backend = createMockBackend("live");
   await answered(backend.invoke("space_open", "qa"));
   const { namespace, name } = pod("qa");
@@ -896,6 +896,12 @@ test("a delete of marked rows leaves out one gone since, and a cron job's resume
   expect(back.consequences).toEqual([
     "Its schedule starts jobs again, and the latest run it missed while suspended starts at once, unless its starting deadline has passed.",
   ]);
+  expect(back.friction).toEqual({ kind: "confirm" });
+  expect(back.destructive).toBe(false);
+  const resume = await answered(backend.invoke("command_plan", cron(false)));
+  expect(resume.consequences).toEqual(back.consequences);
+  expect(resume.friction).toEqual({ kind: "confirm" });
+  expect(resume.destructive).toBe(false);
 });
 
 test("a run whose object went since its plan fails, as Rust's read of it does", async () => {

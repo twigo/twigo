@@ -33,6 +33,8 @@ pub(crate) enum Asks {
     Scale(u64),
     /// It suspends a Job, which asks as a suspend does.
     Suspend,
+    /// It resumes a CronJob, which asks as a resume does.
+    Resume,
 }
 
 /// How an undo knows that nobody else changed the object since.
@@ -195,6 +197,7 @@ pub(crate) async fn undo(core: &Core, space: &str) -> Result<Planned, IpcError> 
     let attributes = revert.target.attributes(Method::PATCH, revert.subresource);
     let (risk, consequences, affected) = match revert.asks {
         Asks::Nothing => (Risk::Reversible, revert.said.clone(), Vec::new()),
+        Asks::Resume => (Risk::Lasting, revert.said.clone(), Vec::new()),
         asks => {
             let target = &revert.target;
             core.authorize(&target.context, std::slice::from_ref(&attributes))?;
@@ -226,7 +229,7 @@ pub(crate) async fn undo(core: &Core, space: &str) -> Result<Planned, IpcError> 
         }
     };
     let (this, space) = (core.this.clone(), space.to_owned());
-    let destructive = risk == Risk::Lasting;
+    let destructive = risk == Risk::Lasting && revert.asks != Asks::Resume;
     Ok(Planned {
         context: revert.target.context.clone(),
         connection,
