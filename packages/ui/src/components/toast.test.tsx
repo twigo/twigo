@@ -99,7 +99,7 @@ test("a countdown's toast cannot be swiped away, and dismissing it cancels it", 
   vi.useRealTimers();
 });
 
-test("an undo's toast runs it once and goes, and lasts only as long as the undo", async () => {
+test("an undo's toast runs it and stays for its owner to end, as long as the undo lasts", async () => {
   vi.useFakeTimers();
   render(<Toaster />);
   const custom = vi.spyOn(toast, "custom");
@@ -124,6 +124,6 @@ test("an undo's toast runs it once and goes, and lasts only as long as the undo"
   );
   fireEvent.click(screen.getByRole("button", { name: /Undo/ }));
   expect(run).toHaveBeenCalledOnce();
-  expect(dismiss).toHaveBeenCalledWith(custom.mock.results[0]?.value);
+  expect(dismiss).not.toHaveBeenCalled();
   vi.useRealTimers();
 });

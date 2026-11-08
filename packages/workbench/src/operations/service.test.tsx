@@ -515,3 +515,43 @@ test("an undo Rust refused leaves the undo to try again", async () => {
   await expect(operations.undo("dev")).resolves.toEqual({ state: "failed" });
   expect(keys.lookup(null)(UNDOABLE)).toEqual(["dev"]);
 });
+
+test("an undo that asks draws a button that takes something away", async () => {
+  vi.spyOn(notify, "undoable").mockReturnValue({ dismiss: vi.fn() });
+  const until = Date.now() + 30_000;
+  const scaled = await started(plan({ kind: "atOnce" }), [
+    { state: "done", text: "Scaled deployment web to 2", undoUntil: until },
+  ]);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await scaled.outcome;
+  const { operations, backend } = scaled.workbench;
+  const asks: Plan = {
+    ...plan({ kind: "confirm" }),
+    id: 9,
+    consequences: ["Its pods go, and none take their place."],
+  };
+  vi.spyOn(backend, "invoke").mockResolvedValueOnce(asks);
+  void operations.undo("dev");
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  expect(operations.asking?.plan.id).toBe(9);
+  expect(operations.asking?.look).toEqual({
+    icon: LOOK.icon,
+    destructive: true,
+  });
+});
+
+test("a done run whose undo is not offered still says so", async () => {
+  const success = vi.spyOn(notify, "success");
+  vi.spyOn(notify, "undoable").mockReturnValue({ dismiss: vi.fn() });
+  const until = Date.now() + 30_000;
+  const scaled = await started(plan({ kind: "atOnce" }), [
+    { state: "done", text: "Scaled deployment web to 5", undoUntil: until },
+  ]);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await scaled.outcome;
+  expect(success).not.toHaveBeenCalled();
+  const undone = scaled.workbench.operations.undo("dev");
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await undone;
+  expect(success).toHaveBeenCalledWith("Scaled deployment web to 5");
+});

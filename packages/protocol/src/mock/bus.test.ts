@@ -519,6 +519,68 @@ test("a stopped drain evicts nothing more and leaves the node cordoned", async (
   expect(uncordon.question).toBe(`Uncordon node ${node} on qa?`);
 });
 
+test("suspending a job that runs asks, and so does undoing its resume", async () => {
+  const backend = createMockBackend("live");
+  await answered(backend.invoke("space_open", "qa"));
+  const trigger = await answered(
+    backend.invoke("command_plan", {
+      action: "trigger",
+      space: "qa",
+      namespace: "batch",
+      name: "cleanup",
+    }),
+  );
+  await answered(
+    backend.subscribe(
+      "command_execute",
+      { plan: trigger.id, typed: null },
+      () => undefined,
+    ),
+  );
+  await vi.advanceTimersByTimeAsync(10);
+  const job = /^Job (\S+) runs once/.exec(trigger.consequences[0] ?? "")?.[1];
+  const suspend = (on: boolean): PlanRequest => ({
+    action: "suspend",
+    space: "qa",
+    target: {
+      gvr: { group: "batch", version: "v1", resource: "jobs" },
+      namespaced: true,
+      namespace: "batch",
+      name: job ?? "",
+    },
+    suspend: on,
+  });
+  const stopping = await answered(
+    backend.invoke("command_plan", suspend(true)),
+  );
+  expect(stopping.friction).toEqual({ kind: "confirm" });
+  expect(stopping.consequences).toEqual([
+    "Its running pods stop and their work is lost; when it resumes, new ones start.",
+  ]);
+  await answered(
+    backend.subscribe(
+      "command_execute",
+      { plan: stopping.id, typed: null },
+      () => undefined,
+    ),
+  );
+  await vi.advanceTimersByTimeAsync(10);
+  const resume = await answered(backend.invoke("command_plan", suspend(false)));
+  expect(resume.friction).toEqual({ kind: "atOnce" });
+  await answered(
+    backend.subscribe(
+      "command_execute",
+      { plan: resume.id, typed: null },
+      () => undefined,
+    ),
+  );
+  await vi.advanceTimersByTimeAsync(10);
+  const back = await answered(
+    backend.invoke("command_plan", { action: "undo", space: "qa" }),
+  );
+  expect(back.friction).toEqual({ kind: "confirm" });
+});
+
 test("a trigger asks in a dialog and names the job it makes", async () => {
   const backend = createMockBackend("live");
   await answered(backend.invoke("space_open", "qa"));

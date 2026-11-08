@@ -103,13 +103,13 @@ export class Operations {
 
   /** Plans `request`, asks as its friction says, and runs it once the person agrees. */
   run(request: PlanRequest, look: Look): Promise<Outcome> {
-    return this.#run(request, look, undefined);
+    return this.#run(request, () => look, undefined);
   }
 
   /** As `run`, telling `taken` once Rust took the run, which a refused one it did not. */
   async #run(
     request: PlanRequest,
-    look: Look,
+    looks: (plan: Plan) => Look,
     taken: (() => void) | undefined,
   ): Promise<Outcome> {
     let plan: Plan;
@@ -119,6 +119,7 @@ export class Operations {
       this.#refused(error);
       return { state: "failed" };
     }
+    const look = looks(plan);
     const agreed = await this.#ask(plan, look, JSON.stringify(request));
     if (!agreed) {
       this.backend.invoke("command_cancel", plan.id).catch(this.report);
@@ -137,10 +138,14 @@ export class Operations {
     const undo = this.#undos.get(space);
     if (!undo || undo.undoing) return { state: "cancelled" };
     undo.undoing = true;
-    // Rust takes the undo as its run starts; a refused one leaves it.
+    // Rust takes the undo as its run starts; a refused one leaves it. One
+    // that asks, as back to zero, takes something away.
     const outcome = await this.#run(
       { action: "undo", space },
-      undo.look,
+      (plan) => ({
+        icon: undo.look.icon,
+        destructive: plan.consequences.length > 0,
+      }),
       () => {
         if (this.#undos.get(space) === undo) this.#drop(space);
       },

@@ -111,11 +111,24 @@ function setBy(source: ModeSource): string {
  * undo, so no object changes under one: Rust's check that nobody changed
  * it has nothing to find here.
  */
+/** What a plan risks, says follows and lists, beside its words. */
+interface Asked {
+  readonly risk: Risk;
+  readonly consequences: string[];
+  readonly affected: Affected[];
+}
+
+const AT_ONCE: Asked = {
+  risk: { kind: "reversible" },
+  consequences: [],
+  affected: [],
+};
+
 interface Revert {
   readonly context: string;
   readonly write: { readonly verb: string; readonly target: string };
-  /** What a scale back to zero asks about, as Rust's `empties`; none for any other. */
-  readonly emptied?: () => Affected[];
+  /** What the undo asks as it is planned, as Rust's `Asks`. */
+  readonly asks: () => Asked;
   readonly question: string;
   readonly doing: string;
   readonly done: string;
@@ -633,14 +646,18 @@ export class MockBus {
           revert: {
             context,
             write,
-            ...(from === 0 && {
-              emptied: () => {
-                const going = cluster.podsOf(ns, name);
-                return going.length > 0
-                  ? [{ title: "Its pods go", objects: going.map(podRef) }]
-                  : [];
-              },
-            }),
+            asks: () => {
+              if (from > 0) return AT_ONCE;
+              const going = cluster.podsOf(ns, name);
+              return {
+                risk: { kind: "lasting" },
+                consequences: ["Its pods go, and none take their place."],
+                affected:
+                  going.length > 0
+                    ? [{ title: "Its pods go", objects: going.map(podRef) }]
+                    : [],
+              };
+            },
             question: `Scale ${what} in ${ns} back to ${String(from)} on ${context}?`,
             doing: `Scaling ${what} back to ${String(from)}`,
             done: `Scaled ${what} back to ${String(from)}`,
@@ -742,6 +759,7 @@ export class MockBus {
           revert: {
             context,
             write,
+            asks: () => AT_ONCE,
             question: `${capital(back.verb)} node ${name} on ${context}?`,
             doing: `${back.doing} node ${name}`,
             done: `${back.done} node ${name}`,
@@ -892,25 +910,47 @@ export class MockBus {
     const back = words(!suspend);
     const line = (on: boolean) =>
       `kubectl --context ${context} patch ${resource}.batch ${name} --type merge -p '{"spec":{"suspend":${String(on)}}}'${inNamespace(namespace)}`;
-    const consequence =
+    // As Rust's `suspend::stopping`: the mock's Jobs run no pods it lists.
+    const stopping = (): Asked =>
+      "completed" in found && found.completed === null && !found.suspend
+        ? {
+            risk: { kind: "lasting" },
+            consequences: [
+              "Its running pods stop and their work is lost; when it resumes, new ones start.",
+            ],
+            affected: [],
+          }
+        : {
+            risk: { kind: "reversible" },
+            consequences: [
+              "Its running pods stop, and none start until it resumes.",
+            ],
+            affected: [],
+          };
+    const asked: Asked =
       resource === "cronjobs"
-        ? suspend
-          ? "No new jobs start on its schedule until it resumes; those running go on."
-          : "Its schedule starts jobs again."
+        ? {
+            ...AT_ONCE,
+            consequences: [
+              suspend
+                ? "No new jobs start on its schedule until it resumes; those running go on."
+                : "Its schedule starts jobs again.",
+            ],
+          }
         : suspend
-          ? "Its running pods stop, and none start until it resumes."
-          : "It starts its pods again.";
+          ? stopping()
+          : { ...AT_ONCE, consequences: ["It starts its pods again."] };
     return {
       plan: {
         context,
         question: `${verb} ${what} in ${namespace ?? ""} on ${context}?`,
         confirm: `${verb} ${kind}`,
-        consequences: [consequence],
-        affected: [],
+        consequences: asked.consequences,
+        affected: asked.affected,
         kubectl: line(suspend),
         doing: `${doing} ${what}`,
       },
-      risk: { kind: "reversible" },
+      risk: asked.risk,
       write,
       space,
       run: (tell) => {
@@ -922,6 +962,8 @@ export class MockBus {
           revert: {
             context,
             write,
+            asks: () =>
+              !suspend && resource === "jobs" ? stopping() : AT_ONCE,
             question: `${back.verb} ${what} in ${namespace ?? ""} on ${context}?`,
             doing: `${back.doing} ${what}`,
             done: `${back.done} ${what}`,
@@ -941,19 +983,18 @@ export class MockBus {
       throw new IpcError("notFound", "nothing in this space can be undone now");
     }
     const { id, revert } = slot;
+    const asked = revert.asks();
     return {
       plan: {
         context: revert.context,
         question: revert.question,
         confirm: "Undo",
-        consequences: revert.emptied
-          ? ["Its pods go, and none take their place."]
-          : [],
-        affected: revert.emptied?.() ?? [],
+        consequences: asked.consequences,
+        affected: asked.affected,
         kubectl: revert.kubectl,
         doing: revert.doing,
       },
-      risk: revert.emptied ? { kind: "lasting" } : { kind: "reversible" },
+      risk: asked.risk,
       write: revert.write,
       run: (tell) => {
         const live = this.#undos.get(space);

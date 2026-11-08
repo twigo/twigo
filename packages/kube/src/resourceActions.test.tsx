@@ -188,3 +188,23 @@ test("⌘⌫ with marked rows deletes those rows", async () => {
   expect(request).toMatchObject({ action: "delete", space: "staging" });
   expect(request?.action === "delete" && request.targets).toHaveLength(2);
 });
+
+test("a list asks for its capability keys again when the catalog lists the contexts anew", async () => {
+  const workbench = await openInStaging(
+    "ready",
+    "k8s-list://staging/apps/v1/deployments",
+  );
+  const invoke = vi.spyOn(workbench.backend, "invoke");
+  await selectFirst();
+  const reviews = () =>
+    invoke.mock.calls.filter(([command]) => command === "access_review").length;
+  const before = reviews();
+  const marked = workbench.backend.invoke("context_environment_set", {
+    context: "staging",
+    environment: "development",
+  });
+  await settle(4);
+  await marked;
+  await settle(4);
+  expect(reviews()).toBeGreaterThan(before);
+});
