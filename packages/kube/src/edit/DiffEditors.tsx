@@ -5,9 +5,10 @@ import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { useResources, type Discovery } from "../discovery";
 import { objectQuery, useObject } from "../object/useObject";
 import { parseDiffUri, parseObjectUri } from "../uri";
+import { objectProblem } from "../viewProblem";
 import { EditActions } from "./actions";
 import { PreviewPage } from "./answers";
-import { yamlOfJson } from "./object";
+import { kindOf, yamlOfJson } from "./object";
 import type { EditServices } from "./services";
 
 const DiffView = lazy(() => import("./DiffView"));
@@ -25,7 +26,9 @@ export function DiffEditor({
     case "apply":
       return <ApplyDiff edits={edits} editor={input.editor} />;
     case "server":
-      return <ServerDiff edits={edits} editor={input.editor} />;
+      return (
+        <ServerDiff edits={edits} discovery={discovery} editor={input.editor} />
+      );
     case "objects":
       return (
         <ObjectsDiff
@@ -53,16 +56,45 @@ function ApplyDiff({ edits, editor }: { edits: EditServices; editor: string }) {
   );
 }
 
+/** What a diff says of Secrets, whose values the webview only has as their sizes. */
+const SECRET_NOTE =
+  "A Secret's values are hidden, as their sizes: values of the same size may still differ.";
+
+function isSecret(manifest: string | undefined): boolean {
+  return (
+    manifest !== undefined && kindOf(JSON.parse(manifest))?.kind === "Secret"
+  );
+}
+
+/** The object as it is on the server, followed for as long as the diff is open, and why not when it cannot be. */
+function useManifest(discovery: Discovery, space: string, uri: string) {
+  const { backend } = useWorkbench();
+  const resources = useResources(discovery, space);
+  const input = parseObjectUri(uri);
+  const { snapshot } = useObject(
+    backend,
+    input && objectQuery(input, resources),
+    { overview: false, manifest: true, events: false, related: false },
+  );
+  return { manifest: snapshot.manifest, problem: objectProblem(snapshot) };
+}
+
 function ServerDiff({
   edits,
+  discovery,
   editor,
 }: {
   edits: EditServices;
+  discovery: Discovery;
   editor: string;
 }) {
   useChanges(edits.copies.changes);
   const base = edits.copies.get(editor)?.base;
-  const live = edits.copies.live(editor);
+  const { manifest: live, problem } = useManifest(
+    discovery,
+    parseObjectUri(editor)?.space ?? "",
+    editor,
+  );
   const original = useMemo(
     () => (base === undefined ? undefined : yamlOfJson(base)),
     [base],
@@ -71,12 +103,21 @@ function ServerDiff({
     () => (live === undefined ? undefined : yamlOfJson(live)),
     [live],
   );
-  if (original === undefined || modified === undefined) {
+  if (original === undefined) {
     return (
       <EmptyState icon={GitCompare} title="Nothing to compare">
         The edit ended, so the object is no longer measured against what it was
         opened as.
       </EmptyState>
+    );
+  }
+  if (modified === undefined) {
+    return problem ? (
+      <EmptyState icon={problem.icon} title={problem.title}>
+        {problem.body}
+      </EmptyState>
+    ) : (
+      <Skeleton className="m-3 h-4 w-1/2" />
     );
   }
   return (
@@ -88,7 +129,9 @@ function ServerDiff({
         action={
           <EditActions edits={edits} uri={editor} menus={["edit/changed"]} />
         }
-      />
+      >
+        {isSecret(base) && SECRET_NOTE}
+      </Banner>
       <div className="min-h-0 flex-1">
         <Suspense fallback={<Skeleton className="m-3 h-4 w-1/2" />}>
           <DiffView original={original} modified={modified} />
@@ -96,22 +139,6 @@ function ServerDiff({
       </div>
     </div>
   );
-}
-
-function useManifest(
-  discovery: Discovery,
-  space: string,
-  uri: string,
-): string | undefined {
-  const { backend } = useWorkbench();
-  const resources = useResources(discovery, space);
-  const input = parseObjectUri(uri);
-  const { snapshot } = useObject(
-    backend,
-    input && objectQuery(input, resources),
-    { overview: false, manifest: true, events: false, related: false },
-  );
-  return snapshot.manifest;
 }
 
 function ObjectsDiff({
@@ -135,21 +162,38 @@ function ObjectsDiff({
   });
   const texts = useMemo(
     () =>
-      original === undefined || modified === undefined
+      original.manifest === undefined || modified.manifest === undefined
         ? undefined
-        : { original: yamlOfJson(original), modified: yamlOfJson(modified) },
-    [original, modified],
+        : {
+            original: yamlOfJson(original.manifest),
+            modified: yamlOfJson(modified.manifest),
+          },
+    [original.manifest, modified.manifest],
+  );
+  const missing = [original.problem, modified.problem].flatMap(
+    (problem, side) =>
+      problem && names[side] !== undefined
+        ? [`${names[side]}: ${problem.title}. ${problem.body}`]
+        : [],
   );
   return (
     <div className="flex h-full min-h-0 flex-col bg-editor">
       <Banner tone="info" icon={GitCompare} title={names.join(" and ")}>
         Both as they are on the server, followed while this is open.
+        {(isSecret(original.manifest) || isSecret(modified.manifest)) &&
+          ` ${SECRET_NOTE}`}
       </Banner>
       <div className="min-h-0 flex-1">
         {texts ? (
           <Suspense fallback={<Skeleton className="m-3 h-4 w-1/2" />}>
             <DiffView original={texts.original} modified={texts.modified} />
           </Suspense>
+        ) : missing.length > 0 ? (
+          <EmptyState icon={GitCompare} title="Nothing to compare">
+            {missing.map((line) => (
+              <p key={line}>{line}</p>
+            ))}
+          </EmptyState>
         ) : (
           <Skeleton className="m-3 h-4 w-1/2" />
         )}
