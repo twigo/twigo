@@ -160,6 +160,7 @@ async fn send(
         content_type: STRATEGIC_MERGE_PATCH,
         patch: patch(!unschedulable),
         uid: uid.to_owned(),
+        empties: false,
         unchanged: Unchanged::Flag {
             pointer: "/spec/unschedulable",
             set: unschedulable,

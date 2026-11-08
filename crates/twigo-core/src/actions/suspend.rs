@@ -168,6 +168,7 @@ impl Run {
             patch: json!({ "spec": { "suspend": !self.suspend } }),
             uid: uid.to_owned(),
             unchanged: Unchanged::Generation(generation),
+            empties: false,
             what: what.clone(),
             past: words.past,
             question: format!("{} {what}{place} on {}?", back.verb, target.context),

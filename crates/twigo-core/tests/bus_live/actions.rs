@@ -232,10 +232,19 @@ async fn scale_runs_at_once_and_its_undo_puts_it_back_unless_someone_else_change
     run(&core, &plan(&core, scale(2)).await.unwrap(), None)
         .await
         .unwrap();
+    let running = pods_of(&pods, "web", 2).await;
     let back = plan(&core, undo(&cluster)).await.unwrap();
+    assert_eq!(back.friction, Friction::Confirm);
+    let mut going = names(&back, "Its pods go");
+    going.sort();
+    let mut expected = running;
+    expected.sort();
+    assert_eq!(going, expected);
     core.command_cancel("main", back.id);
     kubectl(&back, &kubeconfig);
     assert_eq!(replicas().await, Some(0));
+    let same = plan(&core, scale(0)).await.unwrap_err();
+    assert_eq!(same.kind, ErrorKind::InvalidInput);
 
     core.set_context_mode(SetContextMode {
         context: context.clone(),
@@ -771,7 +780,13 @@ async fn a_stopped_drain_leaves_the_node_cordoned_and_says_so() {
     )
     .await;
     create(&budgets, budget("stuck", 1)).await;
+    create(
+        &Api::<Deployment>::namespaced(cluster.admin.clone(), &namespace),
+        deployment("loose", 1, node),
+    )
+    .await;
     let stuck = pods_of(&pods, "stuck", 1).await;
+    let loose = pods_of(&pods, "loose", 1).await;
     observed(&budgets, "stuck", 1).await;
 
     let planned = plan(
@@ -792,12 +807,16 @@ async fn a_stopped_drain_leaves_the_node_cordoned_and_says_so() {
         last,
         OperationEvent::Stopped {
             text: format!(
-                "Stopped draining node {node}, which stays cordoned; it evicted 0 of 1 pod"
+                "Stopped draining node {node}, which stays cordoned; it evicted 1 of 2 pods"
             )
         }
     );
     assert!(cordoned(&nodes, node).await);
     assert_eq!(pods_of(&pods, "stuck", 1).await, stuck);
+    eventually("the evicted pod goes", || async {
+        pods.get_opt(&loose[0]).await.unwrap().is_none()
+    })
+    .await;
     cluster.delete(&namespace).await;
     uncordon(&nodes, node).await;
 }

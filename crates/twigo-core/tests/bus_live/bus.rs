@@ -611,6 +611,24 @@ async fn a_delete_lists_what_goes_with_it_and_several_ask_for_the_context_s_name
         Cluster::uid(&config_maps(&first), "g").await,
         Some(replacement)
     );
+
+    let two = [(&first, "h"), (&first, "i")];
+    for (namespace, name) in two {
+        cluster.config_map(namespace, name).await;
+    }
+    let plan = core.command_plan("main", several(&two)).await.unwrap();
+    for (namespace, name) in two {
+        config_maps(namespace)
+            .delete(name, &DeleteParams::default())
+            .await
+            .unwrap();
+        cluster.config_map(namespace, name).await;
+    }
+    let told = run(&core, &plan, Some(context)).await.unwrap();
+    let [OperationEvent::Failed { error }] = told.as_slice() else {
+        panic!("{told:?}");
+    };
+    assert_eq!(error.kind, ErrorKind::Conflict, "{}", error.message);
     cluster.delete(&first).await;
     cluster.delete(&second).await;
 }

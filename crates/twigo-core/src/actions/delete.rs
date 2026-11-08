@@ -360,6 +360,7 @@ impl Run {
         if waiting.is_empty() {
             return match failed.first() {
                 Some((_, error)) => Err(IpcError::new(error.kind, deleted)),
+                None if !replaced.is_empty() => Err(IpcError::new(ErrorKind::Conflict, deleted)),
                 None => Ok(Finished::Done(deleted)),
             };
         }

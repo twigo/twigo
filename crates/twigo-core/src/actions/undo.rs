@@ -70,6 +70,8 @@ pub(crate) struct Revert {
     /// left alone.
     pub uid: String,
     pub unchanged: Unchanged,
+    /// Whether it scales to zero, which asks as a scale to zero does.
+    pub empties: bool,
     /// `deployment web`.
     pub what: String,
     /// What the action did, as `changed since you … it` reads: `scaled`.
@@ -176,7 +178,7 @@ impl Undos {
     }
 }
 
-pub(crate) fn undo(core: &Core, space: &str) -> Result<Planned, IpcError> {
+pub(crate) async fn undo(core: &Core, space: &str) -> Result<Planned, IpcError> {
     let (id, connection, revert) = core.undos.get(space).ok_or_else(|| {
         IpcError::new(
             ErrorKind::NotFound,
@@ -184,20 +186,32 @@ pub(crate) fn undo(core: &Core, space: &str) -> Result<Planned, IpcError> {
         )
     })?;
     let attributes = revert.target.attributes(Method::PATCH, revert.subresource);
+    let (risk, consequences, affected) = if revert.empties {
+        core.authorize(&revert.target.context, std::slice::from_ref(&attributes))?;
+        let clients = core
+            .clients(&revert.target.context)
+            .await
+            .map_err(|error| IpcError::from(&error))?;
+        let (consequences, affected) =
+            super::scale::emptied(&clients, &revert.target, &revert.uid).await;
+        (Risk::Lasting, consequences, affected)
+    } else {
+        (Risk::Reversible, Vec::new(), Vec::new())
+    };
     let (this, space) = (core.this.clone(), space.to_owned());
     Ok(Planned {
         context: revert.target.context.clone(),
         connection,
         // It takes its own undo as it runs, and leaves a later one standing.
         space: None,
-        risk: Risk::Reversible,
+        risk,
         target: attributes.target(),
         writes: vec![attributes],
         command: "undo",
         question: revert.question.clone(),
         confirm: "Undo".to_owned(),
-        consequences: Vec::new(),
-        affected: Vec::new(),
+        consequences,
+        affected,
         kubectl: revert.kubectl.clone(),
         doing: revert.doing.clone(),
         run: Box::new(move |_| Box::pin(run(this, space, id, connection, revert))),
@@ -267,6 +281,7 @@ mod tests {
             content_type: super::super::STRATEGIC_MERGE_PATCH,
             patch: json!({ "spec": { "unschedulable": null } }),
             uid: "u-1".to_owned(),
+            empties: false,
             unchanged: Unchanged::Flag {
                 pointer: "/spec/unschedulable",
                 set: true,

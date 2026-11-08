@@ -316,7 +316,7 @@ impl Core {
                 target,
                 suspend,
             } => actions::suspend(self, &space, target, suspend).await?,
-            PlanRequest::Undo { space } => actions::undo(self, &space)?,
+            PlanRequest::Undo { space } => actions::undo(self, &space).await?,
             PlanRequest::Reveal { object, key } => actions::reveal(self, window, object, key)?,
         };
         self.authorize(&planned.context, &planned.writes)?;

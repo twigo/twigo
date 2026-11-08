@@ -15,6 +15,7 @@ use super::undo::{Revert, Unchanged};
 use super::{MERGE_PATCH, Target, clients_for, get, kind_words, sentence, write};
 use crate::Core;
 use crate::bus::{Finished, Planned};
+use twigo_kube::client::Clients;
 
 pub(crate) async fn scale(
     core: &Core,
@@ -33,7 +34,8 @@ pub(crate) async fn scale(
     let current = get(&clients, &target.subpath(Some("scale"))).await?;
     let kind = kind_words(object["kind"].as_str().unwrap_or(&target.resource.resource));
     let what = format!("{kind} {}", target.name);
-    if current["spec"]["replicas"].as_u64() == Some(replicas.into()) {
+    // autoscaling/v1 omits replicas at zero.
+    if current["spec"]["replicas"].as_u64().unwrap_or(0) == u64::from(replicas) {
         return Err(IpcError::new(
             ErrorKind::InvalidInput,
             format!("{} has {replicas} replicas already", sentence(&what)),
@@ -41,33 +43,7 @@ pub(crate) async fn scale(
     }
     let (risk, consequences, affected) = if replicas == 0 {
         let uid = object["metadata"]["uid"].as_str().unwrap_or_default();
-        let deleted: Vec<Deleted<'_>> = target
-            .namespace
-            .as_deref()
-            .map(|namespace| Deleted {
-                group: &target.resource.group,
-                resource: &target.resource.resource,
-                namespace,
-                uid,
-            })
-            .into_iter()
-            .collect();
-        let following = dependents(&clients, &deleted).await;
-        let pods: Vec<_> = following
-            .objects
-            .into_iter()
-            .filter(|object| object.group.is_empty() && object.kind == "Pod")
-            .collect();
-        let mut consequences = vec!["Its pods go, and none take their place.".to_owned()];
-        consequences.extend(following.unknown);
-        let affected = if pods.is_empty() {
-            Vec::new()
-        } else {
-            vec![Affected {
-                title: "Its pods go".to_owned(),
-                objects: pods,
-            }]
-        };
+        let (consequences, affected) = emptied(&clients, &target, uid).await;
         (Risk::Lasting, consequences, affected)
     } else {
         (Risk::Reversible, Vec::new(), Vec::new())
@@ -102,6 +78,43 @@ pub(crate) async fn scale(
         risk,
         run: Box::new(move |_| Box::pin(run.run())),
     })
+}
+
+/// What scaling `target` of `uid` to zero asks about: its pods go, and
+/// which.
+pub(crate) async fn emptied(
+    clients: &Clients,
+    target: &Target,
+    uid: &str,
+) -> (Vec<String>, Vec<Affected>) {
+    let deleted: Vec<Deleted<'_>> = target
+        .namespace
+        .as_deref()
+        .map(|namespace| Deleted {
+            group: &target.resource.group,
+            resource: &target.resource.resource,
+            namespace,
+            uid,
+        })
+        .into_iter()
+        .collect();
+    let following = dependents(clients, &deleted).await;
+    let pods: Vec<_> = following
+        .objects
+        .into_iter()
+        .filter(|object| object.group.is_empty() && object.kind == "Pod")
+        .collect();
+    let mut consequences = vec!["Its pods go, and none take their place.".to_owned()];
+    consequences.extend(following.unknown);
+    let affected = if pods.is_empty() {
+        Vec::new()
+    } else {
+        vec![Affected {
+            title: "Its pods go".to_owned(),
+            objects: pods,
+        }]
+    };
+    (consequences, affected)
 }
 
 struct Run {
@@ -168,6 +181,7 @@ impl Run {
             patch: json!({ "spec": { "replicas": from } }),
             uid: uid.to_owned(),
             unchanged: Unchanged::Generation(generation),
+            empties: from == 0,
             what: what.clone(),
             past: "scaled",
             question: format!("Scale {what}{place} back to {from} on {context}?"),

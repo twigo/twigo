@@ -130,6 +130,11 @@ impl Progress {
         (self.send.lock().expect("progress lock"))(event);
     }
 
+    /// Whether it was asked to stop.
+    pub(crate) fn stopping(&self) -> bool {
+        *self.stop.borrow()
+    }
+
     /// Ends once it is asked to stop: a run awaits it only where stopping
     /// leaves what it sent standing.
     pub(crate) async fn stopped(&self) {

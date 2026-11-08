@@ -12,7 +12,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Weak;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use futures::future::join_all;
@@ -398,13 +397,6 @@ impl Run {
             .map(|(pod, _)| pod)
             .collect();
         let total = evicted.len();
-        let accepted = AtomicUsize::new(0);
-        let stopped = |accepted: usize| {
-            Finished::Stopped(format!(
-                "Stopped draining node {name}, which stays cordoned; it evicted {accepted} of {}",
-                counted(total, "pod")
-            ))
-        };
         // Listed while the evictions go, so none that goes is missed.
         let mut followed = core
             .hub
@@ -427,42 +419,52 @@ impl Run {
             counted(total, "pod")
         ));
         // As kubectl's evictPods: one pod's failure stops none of the others,
-        // and the failures are told once the rest have gone.
-        let evictions = join_all(evicted.iter().map(|pod| {
-            let (clients, progress, accepted) = (&clients, &progress, &accepted);
+        // and the failures are told once the rest have gone. A stop sends no
+        // more and lets those in flight answer, so it knows what went.
+        let results = join_all(evicted.iter().map(|pod| {
+            let (clients, progress) = (&clients, &progress);
             async move {
-                let evicted = evict(clients, pod, progress).await;
-                if evicted.is_ok() {
-                    accepted.fetch_add(1, Ordering::Relaxed);
-                }
-                (pod.metadata.uid.clone(), evicted)
+                (
+                    pod.metadata.uid.clone(),
+                    evict(clients, pod, progress).await,
+                )
             }
-        }));
-        let results = tokio::select! {
-            results = evictions => results,
-            () = progress.stopped() => return Ok(stopped(accepted.load(Ordering::Relaxed))),
-        };
+        }))
+        .await;
         let uids: HashSet<String> = results
             .iter()
-            .filter(|(_, evicted)| evicted.is_ok())
+            .filter(|(_, evicted)| matches!(evicted, Ok(true)))
             .filter_map(|(uid, _)| uid.clone())
             .collect();
         let failed: Vec<&IpcError> = results
             .iter()
             .filter_map(|(_, evicted)| evicted.as_ref().err())
             .collect();
+        let failures = failed
+            .iter()
+            .map(|error| error.message.as_str())
+            .collect::<Vec<_>>()
+            .join("; ");
+        let stopped = || {
+            let mut told = format!(
+                "Stopped draining node {name}, which stays cordoned; it evicted {} of {}",
+                uids.len(),
+                counted(total, "pod")
+            );
+            if !failed.is_empty() {
+                told.push_str("; ");
+                told.push_str(&failures);
+            }
+            Finished::Stopped(told)
+        };
+        if progress.stopping() {
+            return Ok(stopped());
+        }
         let finish = |done: String| match failed.first() {
             None => Ok(Finished::Done(done)),
             Some(first) => Err(IpcError::new(
                 first.kind,
-                format!(
-                    "Node {name} stays cordoned: {}",
-                    failed
-                        .iter()
-                        .map(|error| error.message.as_str())
-                        .collect::<Vec<_>>()
-                        .join("; ")
-                ),
+                format!("Node {name} stays cordoned: {failures}"),
             )),
         };
         tokio::select! {
@@ -472,7 +474,7 @@ impl Run {
                     counted(uids.len(), "pod")
                 ));
             },
-            () = progress.stopped() => return Ok(stopped(uids.len())),
+            () = progress.stopped() => return Ok(stopped()),
         }
         let mut told = None;
         loop {
@@ -498,7 +500,7 @@ impl Run {
             }
             tokio::select! {
                 () = followed.changed() => {}
-                () = progress.stopped() => return Ok(stopped(uids.len())),
+                () = progress.stopped() => return Ok(stopped()),
             }
         }
     }
@@ -513,8 +515,9 @@ fn pod_name(pod: &Pod) -> String {
 }
 
 /// Evicts a pod as kubectl does, asking again while a budget holds it
-/// back; a pod gone already is done.
-async fn evict(clients: &Clients, pod: &Pod, progress: &Progress) -> Result<(), IpcError> {
+/// back: whether it went, a pod gone already among them, or the drain
+/// stopped first.
+async fn evict(clients: &Clients, pod: &Pod, progress: &Progress) -> Result<bool, IpcError> {
     let namespace = pod.metadata.namespace.as_deref().unwrap_or_default();
     let name = pod.metadata.name.as_deref().unwrap_or_default();
     let path = format!("/api/v1/namespaces/{namespace}/pods/{name}/eviction");
@@ -526,13 +529,16 @@ async fn evict(clients: &Clients, pod: &Pod, progress: &Progress) -> Result<(), 
     });
     let terminating = pod.metadata.deletion_timestamp.is_some();
     loop {
+        if progress.stopping() {
+            return Ok(false);
+        }
         match clients
             .api
             .request_text(write(Method::POST, &path, "application/json", &eviction))
             .await
         {
-            Ok(_) => return Ok(()),
-            Err(kube::Error::Api(status)) if status.code == 404 => return Ok(()),
+            Ok(_) => return Ok(true),
+            Err(kube::Error::Api(status)) if status.code == 404 => return Ok(true),
             Err(kube::Error::Api(status)) if status.code == 429 => {
                 progress.running(format!(
                     "A disruption budget holds pod {namespace}/{name} back; asking again in {} s",
@@ -543,7 +549,7 @@ async fn evict(clients: &Clients, pod: &Pod, progress: &Progress) -> Result<(), 
                 if status.code == 403 && namespace_terminating(status.details.as_ref()) =>
             {
                 if terminating {
-                    return Ok(());
+                    return Ok(true);
                 }
                 progress.running(format!(
                     "Namespace {namespace} is going; asking again for pod {name} in {} s",
@@ -558,7 +564,10 @@ async fn evict(clients: &Clients, pod: &Pod, progress: &Progress) -> Result<(), 
                 ));
             }
         }
-        tokio::time::sleep(RETRY).await;
+        tokio::select! {
+            () = tokio::time::sleep(RETRY) => {}
+            () = progress.stopped() => return Ok(false),
+        }
     }
 }
 
