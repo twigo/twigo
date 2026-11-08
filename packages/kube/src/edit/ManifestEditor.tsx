@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
+import { useResources, type Discovery } from "../discovery";
 import { kindOf, parseManifest } from "./object";
 import type { EditServices } from "./services";
 import { YamlSurface } from "./YamlSurface";
@@ -11,7 +12,8 @@ import { YamlSurface } from "./YamlSurface";
 export function ManifestEditor({
   uri,
   edits,
-}: EditorProps & { edits: EditServices }) {
+  discovery,
+}: EditorProps & { edits: EditServices; discovery: Discovery }) {
   const { spaces } = useWorkbench();
   const { copies, previews } = edits;
   useChanges(copies.changes);
@@ -19,11 +21,22 @@ export function ManifestEditor({
   const copy = copies.get(uri);
   const text = copy?.text ?? "";
   const home = copy?.space ?? spaces.active?.id;
+  const target = copy?.target;
+  const resources = useResources(discovery, target ?? home ?? "");
+  // The schema is asked of a kind the cluster serves, not of each prefix of one being typed.
   const kind = useMemo(() => {
     const parsed = parseManifest(text);
-    return parsed.ok ? kindOf(parsed.object) : undefined;
-  }, [text]);
-  const target = copy?.target;
+    const named = parsed.ok ? kindOf(parsed.object) : undefined;
+    return resources.state === "ready" &&
+      resources.value.some(
+        ({ gvr, kind }) =>
+          gvr.group === named?.group &&
+          gvr.version === named.version &&
+          kind === named.kind,
+      )
+      ? named
+      : undefined;
+  }, [text, resources]);
   const targetName = spaces.list.find(({ id }) => id === target)?.name;
 
   return (

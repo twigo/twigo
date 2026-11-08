@@ -158,7 +158,13 @@ export function registerKube(workbench: Workbench): void {
     space: (uri) => services.edits.copies.get(uri.href)?.space,
     title: (uri) => `Manifest ${String(parseUntitledUri(uri.href) ?? "")}`,
     icon: ({ className }) => <FileCode className={className} />,
-    component: ({ uri }) => <ManifestEditor uri={uri} edits={services.edits} />,
+    component: ({ uri }) => (
+      <ManifestEditor
+        uri={uri}
+        edits={services.edits}
+        discovery={services.discovery}
+      />
+    ),
   });
 
   commands.register({

@@ -722,6 +722,8 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   - Unsaved working copies survive a restart (backups per space, the `edits` key of the space's state), written a pause of 300 ms after the last change.
     A Secret's never is: not an object of the `secrets` resource, not the text of any editor that mentions a Secret, since a Secret's manifest can be pasted into another object's editor, and not a new manifest that does not parse or names no kind yet, since the values may be typed before the kind.
   - Closing an editor keeps its copy, which the tab shows again when the object opens anew.
+  - An object that is deleted, or that the cluster cannot be asked for, leaves the YAML tab its editor while a copy exists, on the object the copy was based on, with a bar that says why the object is not there.
+  - The diff against the server, like the diff of two objects, follows the object itself rather than what its editor last saw, so it holds after a restart and when the editor's tab is closed; a diff of two objects says which of them it cannot read, and that a Secret's values are hidden as their sizes.
   - The service also keeps each shown YAML editor's Monaco model, which holds its undo stack, and the cursor and scroll of its view, so they survive a switch between Overview and YAML.
     They go when the editor closes, the copy staying as text; a text that comes from outside, the live object once a copy has ended, replaces the model's and leaves the cursor and scroll where they were, and clears the undo stack.
 - **Overview.**
@@ -902,7 +904,7 @@ Extensions add commands, not prefixes.
   - Monaco is bundled locally (no CDN loader) and loaded lazily on the first YAML or diff editor.
     It is built from the tree-shakeable entry points of monaco-editor 0.57 (`monaco-editor/editor`, then each language and feature it needs), and its editor worker is a Vite `?worker` module served from the app.
   - monaco-yaml 5.5.1 runs on those entry points, since it takes the Monaco namespace as an argument, with `yamlVersion: "1.1"`; its worker is a Vite `?worker` too, whose build has no `eval` and no `new Function`, so `script-src 'self'` should cover it; it was not run under Tauri's CSP yet.
-    A model's schema comes from `schema_get` once its editor holds a copy, and the editor works without one when that fails.
+    A model's schema comes from `schema_get` once its editor holds a copy, for a kind the cluster's discovery serves, so the kind of a new manifest is not asked for as it is typed, and its id names the space, since two clusters serve different ones for a kind; the editor works without one when that fails.
   - monaco-yaml asks monaco-worker-manager 2.0.1, the latest and from 2022, for its worker, and that does not fit Monaco 0.56 and later in two ways: it imports `monaco-editor/esm/vs/editor/editor.worker.js`, which the `exports` of 0.57 no longer map (`./*.js` is `./esm/vs/*.js`), and it calls `editor.createWebWorker({ moduleId, label, createData })`, which takes a `worker` now.
     The desktop's Vite config aliases the first path to `monaco-editor/editor/editor.worker`, and `packages/kube/src/edit/monaco.ts` hands monaco-yaml an `editor` whose `createWebWorker` makes the YAML worker and sends it `createData` as Monaco's own workers are sent theirs; both are marked `@todo` for the day monaco-worker-manager follows Monaco.
     The dev server also pre-bundles `path-browserify`, which only the YAML worker imports.

@@ -61,7 +61,7 @@ export function YamlSurface({
     () =>
       loaded?.state === "ready" && asked
         ? {
-            source: `twigo://schema/${asked.group}/${asked.version}/${asked.kind}`,
+            source: `twigo://schema/${encodeURIComponent(asked.space)}/${asked.group}/${asked.version}/${asked.kind}`,
             schema: loaded.schema,
           }
         : undefined,
