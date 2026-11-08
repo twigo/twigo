@@ -5,3 +5,4 @@ packages/protocol/src/mock/objects.json
 packages/protocol/src/mock/resources.json
 packages/protocol/src/mock/schemas.json
 packages/protocol/src/mock/layouts
+packages/kube/test/k8s-yaml/read.json

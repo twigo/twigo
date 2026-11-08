@@ -704,7 +704,12 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   - When the live object changes underneath, the editor shows "changed on server" with Compare, Reload and Keep mine.
     It compares the live object with `locked`, else `base`, without `resourceVersion` and `generation`, and without `status` where the resource has the `status` subresource, so a controller's status write raises nothing.
   - Keep mine sends the old `base`, the new `lock` and `locked` (`OpenedEdit`), since diffing against the new live object would revert the other writer's change.
-  - Save runs the apply flow (6.5): the text is parsed with the `yaml` package at version 1.1, which is the one dialect, and a text of several documents is refused, since the engine previews one object at a time.
+  - Save runs the apply flow (6.5): the text is parsed with the `yaml` package at version 1.1, set to read what kubectl reads, which is the one dialect, and a text of several documents is refused, since the engine previews one object at a time.
+    kubectl reads a manifest with sigs.k8s.io/yaml v1.6.0 over go.yaml.in/yaml/v2 v2.4.4, which Kubernetes v1.37.0 pins ([go.mod](https://github.com/kubernetes/kubernetes/blob/v1.37.0/go.mod)).
+    Dates, sexagesimal numbers (`22:22`), sets, ordered maps and binary are no types there, so `2024-01-01` and `22:22` stay strings, as keys too, and `0o777` is `511`.
+    What JSON cannot carry through the IPC is a parse error at its line instead of a changed value: `.inf` and `.nan`, an integer past 2^53, a key that is empty or not a single value, a tag Twigo does not read (`!!set`, `!!omap`, `!!binary`, `!!float 1`, `!!timestamp`, a local tag), an alias with no anchor and a merge of something else than maps.
+    A key named `<<` is written quoted, so that it reads back as that key and not as a merge.
+    `packages/kube/test/k8s-yaml/` records what kubectl made of 139 texts (`go run .` there), and a test holds the webview to it: what differs is a duplicate key, which kubectl takes the last of and the webview refuses, and the refusals above.
   - When the plan of an apply is done the copy ends, but its text stays the editor's until the live object differs from the one the copy was based on, or locked to, compared as "changed on server" is, so that the editor never shows the object as it was while the new one comes by its watch.
     A status write does not end it, as it moves the `resourceVersion` without changing the object; typing or closing the editor does, and it is never written to the state.
   - Unsaved working copies survive a restart (backups per space, the `edits` key of the space's state), written a pause of 300 ms after the last change.

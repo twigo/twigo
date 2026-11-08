@@ -1,24 +1,46 @@
 import {
+  Document,
   isAlias,
+  isCollection,
   isMap,
   isNode,
   isScalar,
   isSeq,
   LineCounter,
   parseAllDocuments,
-  stringify,
+  Scalar,
   visit,
-  type Document,
+  type DocumentOptions,
+  type ParseOptions,
+  type ScalarTag,
+  type SchemaOptions,
+  type Tags,
+  type YAMLError,
 } from "yaml";
 
 export type KubeObject = Record<string, unknown>;
 
 /**
  * An object as YAML. It is YAML 1.1, which kubectl reads, so strings that
- * 1.1 would read as booleans, such as `"yes"` and `"on"`, stay quoted.
+ * 1.1 would read as booleans, such as `"yes"` and `"on"`, and as dates or
+ * sexagesimal numbers, stay quoted, as does a key named `<<`, which would
+ * merge.
  */
 export function yamlOfObject(value: unknown): string {
-  return stringify(value, { version: "1.1" });
+  const document = new Document(value, {
+    version: "1.1",
+    // The merge tag would write the key `<<` as it is, whatever its type.
+    customTags: (tags) =>
+      kubectlIntegers(
+        tags.filter((tag) => typeof tag === "string" || tag.tag !== MERGE_TAG),
+      ),
+  });
+  visit(document, {
+    Pair: (_, { key }) => {
+      if (isScalar(key) && key.value === "<<") key.type = Scalar.QUOTE_DOUBLE;
+    },
+  });
+  return document.toString();
 }
 
 export function yamlOfJson(json: string): string {
@@ -35,6 +57,83 @@ export type Parsed =
       readonly column: number;
     };
 
+const MERGE_TAG = "tag:yaml.org,2002:merge";
+
+const UNREAD_TAGS: ReadonlySet<string> = new Set([
+  "tag:yaml.org,2002:binary",
+  "tag:yaml.org,2002:omap",
+  "tag:yaml.org,2002:pairs",
+  "tag:yaml.org,2002:set",
+  "tag:yaml.org,2002:timestamp",
+]);
+
+/** Go reads the prefixes of binary, octal and hex integers in either case; the package's 1.1 schema reads them in lower case only. */
+const PREFIXED: Readonly<Record<string, RegExp>> = {
+  BIN: /^[-+]?0[bB][01_]+$/,
+  HEX: /^[-+]?0[xX][0-9a-fA-F_]+$/,
+};
+
+/** `0o777`, which go.yaml.in/yaml/v2 reads as an integer and the package's 1.1 schema does not. */
+const OCTAL: ScalarTag = {
+  tag: "tag:yaml.org,2002:int",
+  default: true,
+  format: "OCT",
+  test: /^[-+]?0[oO][0-7_]+$/,
+  resolve: (text) => {
+    const number = BigInt(
+      `0o${text.replace(/^[-+]?0[oO]/, "").replace(/_/g, "")}`,
+    );
+    return text.startsWith("-") ? -number : number;
+  },
+};
+
+function read(tag: Tags[number]): Tags[number] {
+  if (typeof tag === "string" || tag.collection !== undefined) return tag;
+  const prefixed = tag.format === undefined ? undefined : PREFIXED[tag.format];
+  if (prefixed) return { ...tag, test: prefixed };
+  // A float too large for a double is a string to kubectl, not infinity.
+  if (tag.tag !== "tag:yaml.org,2002:float" || tag.format !== "EXP") return tag;
+  const bounded: ScalarTag = {
+    ...tag,
+    resolve: (text, onError, options) => {
+      const value = tag.resolve(text, onError, options);
+      return typeof value === "number" && !Number.isFinite(value)
+        ? text
+        : value;
+    },
+  };
+  return bounded;
+}
+
+/** The package's tags with the integers and floats kubectl reads that it does not. */
+function kubectlIntegers(tags: Tags): Tags {
+  return [...tags.map(read), OCTAL];
+}
+
+/**
+ * YAML as kubectl reads it (ARCHITECTURE 4.3): 1.1, as sigs.k8s.io/yaml
+ * v1.6.0 over go.yaml.in/yaml/v2 v2.4.4 read it, which Kubernetes v1.37.0
+ * pins. Dates, sexagesimal numbers, sets, ordered maps and binary are not
+ * types there, so the package's tags for them go, and a tag that names one
+ * is a warning that `parseManifest` refuses. Integers come as `bigint`, to
+ * tell the ones JSON cannot carry exactly.
+ */
+const READING: ParseOptions & DocumentOptions & SchemaOptions = {
+  version: "1.1",
+  intAsBigInt: true,
+  customTags: (tags) =>
+    kubectlIntegers(
+      tags.filter(
+        (tag) =>
+          typeof tag === "string" ||
+          (!UNREAD_TAGS.has(tag.tag) && tag.format !== "TIME"),
+      ),
+    ),
+};
+
+/** The largest integer a double holds exactly, and so JSON carries through the IPC. */
+const EXACT = 2n ** 53n;
+
 interface Problem {
   readonly message: string;
   /** Where in the text, from its start. */
@@ -42,24 +141,26 @@ interface Problem {
 }
 
 /**
- * What the package's `toJS` throws on, found where it stands: an alias with
- * no anchor before it and a merge key that takes something else than maps.
+ * What kubectl reads and JSON, or the package's `toJS`, cannot say, found
+ * where it stands. Integers within reach become numbers.
  */
-function unresolved(document: Document.Parsed): Problem | undefined {
+function unreadable(document: Document.Parsed): Problem | undefined {
   let found: Problem | undefined;
-  const refuse = (node: unknown, message: string) => {
-    found = {
-      message,
-      offset: (isNode(node) ? node.range?.[0] : undefined) ?? 0,
-    };
+  const refuse = (offset: number | undefined, message: string) => {
+    found = { message, offset: offset ?? 0 };
     return visit.BREAK;
   };
+  const start = (node: unknown) => (isNode(node) ? node.range?.[0] : undefined);
   visit(document, {
     Alias: (_, alias) =>
       alias.resolve(document) === undefined
-        ? refuse(alias, `The alias *${alias.source} has no anchor.`)
+        ? refuse(start(alias), `The alias *${alias.source} has no anchor.`)
         : undefined,
     Pair: (_, { key, value }) => {
+      if (isCollection(key))
+        return refuse(start(key), "A key must be a single value.");
+      if (key === null || (isScalar(key) && key.value === null))
+        return refuse(start(key), "A key cannot be empty.");
       if (
         !isScalar(key) ||
         typeof key.value !== "symbol" ||
@@ -70,10 +171,28 @@ function unresolved(document: Document.Parsed): Problem | undefined {
         const merged = isAlias(source) ? source.resolve(document) : source;
         if (merged !== undefined && !isMap(merged)) {
           return refuse(
-            isNode(source) ? source : key,
+            start(source) ?? start(key),
             "A merge key takes a map or a list of maps.",
           );
         }
+      }
+      return undefined;
+    },
+    Scalar: (_, scalar) => {
+      const { value } = scalar;
+      if (typeof value === "bigint") {
+        if (value > EXACT || value < -EXACT) {
+          return refuse(
+            start(scalar),
+            `The integer ${String(value)} is past 2^53, which JSON cannot carry exactly.`,
+          );
+        }
+        scalar.value = Number(value);
+      } else if (typeof value === "number" && !Number.isFinite(value)) {
+        return refuse(
+          start(scalar),
+          `${scalar.source ?? String(value)} is a number JSON cannot say.`,
+        );
       }
       return undefined;
     },
@@ -81,17 +200,29 @@ function unresolved(document: Document.Parsed): Problem | undefined {
   return found;
 }
 
+/** What the package says of a problem, without the position it appends. */
+function describe({ message }: YAMLError): string {
+  const first = (message.split("\n")[0] ?? message).replace(
+    / at line \d+, column \d+:?$/,
+    "",
+  );
+  const tag = /^Unresolved tag: (.*)$/.exec(first)?.[1];
+  return tag === undefined
+    ? first
+    : `Twigo does not read the tag ${tag.replace("tag:yaml.org,2002:", "!!")}`;
+}
+
 /**
- * The manifest as the one object it names. It reads YAML 1.1 like
- * `yamlOfObject` writes it, so there is one dialect, and Twigo previews one
- * object at a time: a second document is an error, not something left out.
- * Nothing here throws on the text; what cannot be read is an error at its
- * line.
+ * The manifest as the one object it names. It reads YAML as kubectl does,
+ * and `yamlOfObject` writes what it reads back, so there is one dialect.
+ * Twigo previews one object at a time: a second document is an error, not
+ * something left out. Nothing here throws on the text; what cannot be read
+ * is an error at its line.
  */
 export function parseManifest(text: string): Parsed {
   const lines = new LineCounter();
   const documents = parseAllDocuments(text, {
-    version: "1.1",
+    ...READING,
     lineCounter: lines,
   });
   const failed = (message: string, offset: number): Parsed => {
@@ -99,16 +230,8 @@ export function parseManifest(text: string): Parsed {
     return { ok: false, message, line, column: col };
   };
   for (const document of documents) {
-    const [error] = document.errors;
-    if (error) {
-      const [start] = error.pos;
-      // The position goes beside the message, not in it.
-      const message = (error.message.split("\n")[0] ?? error.message).replace(
-        / at line \d+, column \d+:?$/,
-        "",
-      );
-      return failed(message, start);
-    }
+    const [problem] = [...document.errors, ...document.warnings];
+    if (problem) return failed(describe(problem), problem.pos[0]);
   }
   const filled = documents.filter(
     ({ contents }) =>
@@ -122,7 +245,7 @@ export function parseManifest(text: string): Parsed {
       second.range[0],
     );
   }
-  const refused = unresolved(first);
+  const refused = unreadable(first);
   if (refused) return failed(refused.message, refused.offset);
   let object: unknown;
   try {
@@ -140,7 +263,6 @@ export function parseManifest(text: string): Parsed {
       first.range[0],
     );
   }
-  // Through JSON, as the engine takes it: no dates or sets.
   return { ok: true, object: JSON.parse(JSON.stringify(object)) as KubeObject };
 }
 
@@ -150,7 +272,7 @@ export function statusLines(
 ): { readonly from: number; readonly to: number } | undefined {
   const lines = new LineCounter();
   const [document] = parseAllDocuments(text, {
-    version: "1.1",
+    ...READING,
     lineCounter: lines,
   });
   const root = document?.contents;
