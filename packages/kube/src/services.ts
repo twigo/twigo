@@ -1,4 +1,5 @@
 import type { Workbench } from "@twigo/workbench";
+import { Capabilities } from "./capabilities";
 import { Discovery } from "./discovery";
 import { ListStatuses } from "./list/listStatus";
 import { ListStates } from "./listState";
@@ -22,12 +23,18 @@ export interface ListServices {
   readonly pinned: PinnedLists;
   /** What the person chose in each kind's Overviews. */
   readonly overviews: OverviewStates;
+  /** What RBAC lets the person do, for the `capability.*` keys. */
+  readonly capabilities: Capabilities;
 }
 
 export function createServices(workbench: Workbench): ListServices {
   const states = new ListStates();
+  const capabilities = new Capabilities(workbench.backend, (error) => {
+    workbench.report(error);
+  });
   workbench.editors.onClose((uri) => {
     states.closed(uri);
+    capabilities.closed(uri);
   });
   return {
     discovery: new Discovery(workbench),
@@ -37,5 +44,6 @@ export function createServices(workbench: Workbench): ListServices {
     statuses: new ListStatuses(),
     pinned: new PinnedLists(workbench.spaces),
     overviews: new OverviewStates(),
+    capabilities,
   };
 }

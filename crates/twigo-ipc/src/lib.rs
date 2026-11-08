@@ -17,10 +17,12 @@ mod state;
 mod typescript;
 
 pub use access::{
-    BlockReason, Blocked, ContextAccess, Environment, Mode, ModeSource, RequestClass,
-    SetContextEnvironment, SetContextMode,
+    Access, AccessQuery, BlockReason, Blocked, ContextAccess, Environment, Mode, ModeSource,
+    RequestClass, SetContextEnvironment, SetContextMode,
 };
-pub use action::{Execute, Friction, OperationEvent, Plan, PlanId, PlanRequest, ResourceRef};
+pub use action::{
+    Affected, Execute, Friction, OperationEvent, Plan, PlanId, PlanRequest, ResourceRef,
+};
 pub use credentials::{ContextAuth, EnvVar, ExecPlugin, ExecReview, PluginStatus, ReviewedPlugin};
 pub use discovery::{ClusterVersion, Discovered, Resource};
 pub use environment::ShellEnvironment;

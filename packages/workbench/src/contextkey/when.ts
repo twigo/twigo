@@ -232,6 +232,24 @@ export function parseWhen(source: string): When {
   return expression;
 }
 
+/** The keys an expression reads. */
+export function keysOf(when: When): string[] {
+  switch (when.op) {
+    case "true":
+    case "false":
+      return [];
+    case "not":
+      return keysOf(when.term);
+    case "in":
+      return [when.key, when.list];
+    case "&&":
+    case "||":
+      return when.terms.flatMap(keysOf);
+    default:
+      return [when.key];
+  }
+}
+
 export function evaluate(when: When, lookup: Lookup): boolean {
   switch (when.op) {
     case "true":

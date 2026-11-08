@@ -61,15 +61,17 @@ type ListScenario = "live" | ViewState["state"];
 /**
  * A list scenario, `shellTimeout`: live lists while the login shell's
  * environment timed out, `policyFile`: live lists with an admin's policy
- * file over `prod-*`, or a pinned state of prod-eu's credentials.
+ * file over `prod-*`, `viewer`: live lists for a person who may only read,
+ * or a pinned state of prod-eu's credentials.
  */
 export type MockScenario =
-  ListScenario | "shellTimeout" | "policyFile" | AuthScenario;
+  ListScenario | "shellTimeout" | "policyFile" | "viewer" | AuthScenario;
 
 export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "live",
   "shellTimeout",
   "policyFile",
+  "viewer",
   ...AUTH_SCENARIOS,
   "queued",
   "connecting",
@@ -134,6 +136,7 @@ export function createMockBackend(
   const lists: ListScenario =
     scenario === "shellTimeout" ||
     scenario === "policyFile" ||
+    scenario === "viewer" ||
     isAuthScenario(scenario)
       ? "live"
       : scenario;
@@ -239,6 +242,11 @@ export function createMockBackend(
     },
     command_plan: (request) => bus.plan(request),
     command_cancel: (id) => bus.cancel(id),
+    access_review: ({ checks }) =>
+      checks.map(
+        ({ verb }) =>
+          scenario !== "viewer" || ["get", "list", "watch"].includes(verb),
+      ),
     space_open: (name) => {
       if (!CONTEXTS.some((context) => context.name === name)) {
         throw new IpcError("notFound", `no source lists the context ${name}`);

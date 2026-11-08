@@ -47,10 +47,12 @@ pub(crate) fn reveal(
     Ok(Planned {
         question: format!("Reveal {key} of secret {name} in {namespace} from {context}?"),
         confirm: "Reveal value".to_owned(),
+        destructive: false,
         consequences: vec![format!(
             "It shows until you hide it or close the secret{}.",
             if binary { ", as base64" } else { "" }
         )],
+        affected: Vec::new(),
         kubectl: line,
         doing: format!("Revealing {key}"),
         command: "reveal",
@@ -58,6 +60,7 @@ pub(crate) fn reveal(
         writes: Vec::new(),
         context,
         connection,
+        space: None,
         risk: Risk::Reveal,
         run: Box::new(move |_| {
             Box::pin(async move {

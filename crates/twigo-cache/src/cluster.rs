@@ -1,12 +1,19 @@
 //! What the hub learns about a context's cluster over its clients: whether
-//! it streams lists, and whether the person may list a resource
-//! cluster-wide. A rebuild of the clients may point them at another
+//! it streams lists, and what RBAC lets the person do. A rebuild of the clients may point them at another
 //! server, so the facts go with the clients they were learnt over.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::time::Duration;
 
+use tokio::time::Instant;
+
+use twigo_ipc::Access;
 use twigo_kube::client::Clients;
+
+/// How long RBAC's no holds before it is asked again, so a RoleBinding
+/// granted since counts; a yes holds, as the server still decides.
+pub(crate) const REFUSED_FOR: Duration = Duration::from_secs(30);
 
 #[derive(Default)]
 pub(crate) struct Cluster {
@@ -17,8 +24,9 @@ pub(crate) struct Cluster {
 struct Facts {
     clients: Weak<Clients>,
     streaming: Option<bool>,
-    /// By group and resource.
-    may_list: HashMap<(String, String), bool>,
+    /// By namespace, none for all of them, and what is asked: the answer,
+    /// and when it came.
+    may: HashMap<(Option<String>, Access), (bool, Instant)>,
 }
 
 impl Cluster {
@@ -32,17 +40,30 @@ impl Cluster {
         self.facts(clients).streaming = Some(streaming);
     }
 
-    pub fn may_list(&self, clients: &Arc<Clients>, group: &str, resource: &str) -> Option<bool> {
-        self.facts(clients)
-            .may_list
-            .get(&(group.to_owned(), resource.to_owned()))
-            .copied()
+    pub fn may(
+        &self,
+        clients: &Arc<Clients>,
+        namespace: Option<&str>,
+        access: &Access,
+    ) -> Option<bool> {
+        let &(may, at) = self
+            .facts(clients)
+            .may
+            .get(&(namespace.map(str::to_owned), access.clone()))?;
+        (may || at.elapsed() < REFUSED_FOR).then_some(may)
     }
 
-    pub fn set_may_list(&self, clients: &Arc<Clients>, group: &str, resource: &str, may: bool) {
-        self.facts(clients)
-            .may_list
-            .insert((group.to_owned(), resource.to_owned()), may);
+    pub fn set_may(
+        &self,
+        clients: &Arc<Clients>,
+        namespace: Option<&str>,
+        access: &Access,
+        may: bool,
+    ) {
+        self.facts(clients).may.insert(
+            (namespace.map(str::to_owned), access.clone()),
+            (may, Instant::now()),
+        );
     }
 
     fn facts(&self, clients: &Arc<Clients>) -> MutexGuard<'_, Facts> {

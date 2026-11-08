@@ -22,7 +22,15 @@ export function objectOf({ row, namespaced }: Selected): {
   namespace?: string;
   name: string;
 } {
-  const parts = row.id.split("/");
+  return objectOfRow(row.id, namespaced);
+}
+
+/** A row's object by its ID alone, as `objectOf` reads it. */
+export function objectOfRow(
+  id: RowId,
+  namespaced: boolean,
+): { namespace?: string; name: string } {
+  const parts = id.split("/");
   const name = parts.pop() ?? "";
   const namespace = namespaced ? parts.pop() : undefined;
   return namespace === undefined ? { name } : { namespace, name };

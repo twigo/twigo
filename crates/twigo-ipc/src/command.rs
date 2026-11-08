@@ -5,11 +5,11 @@
 use ts_rs::TS;
 
 use crate::{
-    Ack, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ExecReview, Execute,
-    GetValues, KeyboardLayout, ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject,
-    OperationEvent, Plan, PlanId, PlanRequest, SetContextEnvironment, SetContextMode, SetLogSource,
-    SetLogView, SetLogWindow, SetParts, SetWindow, ShellEnvironment, Space, StateEntry,
-    StateSnapshot, SubscriptionId,
+    AccessQuery, Ack, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ExecReview,
+    Execute, GetValues, KeyboardLayout, ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs,
+    OpenObject, OperationEvent, Plan, PlanId, PlanRequest, SetContextEnvironment, SetContextMode,
+    SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellEnvironment, Space,
+    StateEntry, StateSnapshot, SubscriptionId,
 };
 
 pub trait Command {
@@ -117,6 +117,20 @@ impl Command for CommandCancel {
     const NAME: &'static str = "command_cancel";
     type Request = PlanId;
     type Response = ();
+    type Message = ();
+}
+
+/// Whether the person may do each check, by SelfSubjectAccessReviews kept
+/// with the context's clients, a no for 30 s (ARCHITECTURE 5.1): the
+/// `capability.*` context keys. A check of one object asks for its whole
+/// resource first, and by name only when that says no. A check the cluster
+/// cannot answer counts as allowed, so the server decides.
+pub struct AccessReview;
+
+impl Command for AccessReview {
+    const NAME: &'static str = "access_review";
+    type Request = AccessQuery;
+    type Response = Vec<bool>;
     type Message = ();
 }
 

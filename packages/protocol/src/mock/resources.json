@@ -10,7 +10,8 @@
     "shortNames": [
       "cs"
     ],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": []
   },
   {
     "gvr": {
@@ -23,7 +24,8 @@
     "shortNames": [
       "cm"
     ],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": []
   },
   {
     "gvr": {
@@ -36,7 +38,8 @@
     "shortNames": [
       "ep"
     ],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": []
   },
   {
     "gvr": {
@@ -49,7 +52,8 @@
     "shortNames": [
       "ev"
     ],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": []
   },
   {
     "gvr": {
@@ -62,7 +66,8 @@
     "shortNames": [
       "limits"
     ],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": []
   },
   {
     "gvr": {
@@ -75,7 +80,11 @@
     "shortNames": [
       "ns"
     ],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": [
+      "finalize",
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -88,7 +97,11 @@
     "shortNames": [
       "no"
     ],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": [
+      "proxy",
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -101,7 +114,10 @@
     "shortNames": [
       "pvc"
     ],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -114,7 +130,10 @@
     "shortNames": [
       "pv"
     ],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -127,7 +146,19 @@
     "shortNames": [
       "po"
     ],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "attach",
+      "binding",
+      "ephemeralcontainers",
+      "eviction",
+      "exec",
+      "log",
+      "portforward",
+      "proxy",
+      "resize",
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -138,7 +169,8 @@
     "kind": "PodTemplate",
     "singular": "podtemplate",
     "shortNames": [],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": []
   },
   {
     "gvr": {
@@ -151,7 +183,11 @@
     "shortNames": [
       "rc"
     ],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "scale",
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -164,7 +200,10 @@
     "shortNames": [
       "quota"
     ],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -175,7 +214,8 @@
     "kind": "Secret",
     "singular": "secret",
     "shortNames": [],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": []
   },
   {
     "gvr": {
@@ -188,7 +228,10 @@
     "shortNames": [
       "sa"
     ],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "token"
+    ]
   },
   {
     "gvr": {
@@ -201,7 +244,11 @@
     "shortNames": [
       "svc"
     ],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "proxy",
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -212,7 +259,10 @@
     "kind": "APIService",
     "singular": "apiservice",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -223,7 +273,8 @@
     "kind": "ControllerRevision",
     "singular": "controllerrevision",
     "shortNames": [],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": []
   },
   {
     "gvr": {
@@ -236,7 +287,10 @@
     "shortNames": [
       "ds"
     ],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -249,7 +303,11 @@
     "shortNames": [
       "deploy"
     ],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "scale",
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -262,7 +320,11 @@
     "shortNames": [
       "rs"
     ],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "scale",
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -275,7 +337,11 @@
     "shortNames": [
       "sts"
     ],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "scale",
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -288,7 +354,8 @@
     "shortNames": [
       "ev"
     ],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": []
   },
   {
     "gvr": {
@@ -301,7 +368,10 @@
     "shortNames": [
       "hpa"
     ],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -314,7 +384,10 @@
     "shortNames": [
       "cj"
     ],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -325,7 +398,10 @@
     "kind": "Job",
     "singular": "job",
     "shortNames": [],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -338,7 +414,11 @@
     "shortNames": [
       "csr"
     ],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": [
+      "approval",
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -349,7 +429,8 @@
     "kind": "ClusterTrustBundle",
     "singular": "clustertrustbundle",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": []
   },
   {
     "gvr": {
@@ -360,7 +441,10 @@
     "kind": "PodCertificateRequest",
     "singular": "podcertificaterequest",
     "shortNames": [],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -371,7 +455,8 @@
     "kind": "IngressClass",
     "singular": "ingressclass",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": []
   },
   {
     "gvr": {
@@ -384,7 +469,10 @@
     "shortNames": [
       "ing"
     ],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -397,7 +485,8 @@
     "shortNames": [
       "ip"
     ],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": []
   },
   {
     "gvr": {
@@ -410,7 +499,8 @@
     "shortNames": [
       "netpol"
     ],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": []
   },
   {
     "gvr": {
@@ -421,7 +511,10 @@
     "kind": "ServiceCIDR",
     "singular": "servicecidr",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -434,7 +527,10 @@
     "shortNames": [
       "pdb"
     ],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -445,7 +541,8 @@
     "kind": "ClusterRoleBinding",
     "singular": "clusterrolebinding",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": []
   },
   {
     "gvr": {
@@ -456,7 +553,8 @@
     "kind": "ClusterRole",
     "singular": "clusterrole",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": []
   },
   {
     "gvr": {
@@ -467,7 +565,8 @@
     "kind": "RoleBinding",
     "singular": "rolebinding",
     "shortNames": [],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": []
   },
   {
     "gvr": {
@@ -478,7 +577,8 @@
     "kind": "Role",
     "singular": "role",
     "shortNames": [],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": []
   },
   {
     "gvr": {
@@ -489,7 +589,8 @@
     "kind": "CSIDriver",
     "singular": "csidriver",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": []
   },
   {
     "gvr": {
@@ -500,7 +601,10 @@
     "kind": "CSINode",
     "singular": "csinode",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -511,7 +615,8 @@
     "kind": "CSIStorageCapacity",
     "singular": "csistoragecapacity",
     "shortNames": [],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": []
   },
   {
     "gvr": {
@@ -524,7 +629,8 @@
     "shortNames": [
       "sc"
     ],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": []
   },
   {
     "gvr": {
@@ -535,7 +641,10 @@
     "kind": "VolumeAttachment",
     "singular": "volumeattachment",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -548,7 +657,8 @@
     "shortNames": [
       "vac"
     ],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": []
   },
   {
     "gvr": {
@@ -559,7 +669,8 @@
     "kind": "MutatingAdmissionPolicy",
     "singular": "mutatingadmissionpolicy",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": []
   },
   {
     "gvr": {
@@ -570,7 +681,8 @@
     "kind": "MutatingAdmissionPolicyBinding",
     "singular": "mutatingadmissionpolicybinding",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": []
   },
   {
     "gvr": {
@@ -581,7 +693,8 @@
     "kind": "MutatingWebhookConfiguration",
     "singular": "mutatingwebhookconfiguration",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": []
   },
   {
     "gvr": {
@@ -592,7 +705,10 @@
     "kind": "ValidatingAdmissionPolicy",
     "singular": "validatingadmissionpolicy",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -603,7 +719,8 @@
     "kind": "ValidatingAdmissionPolicyBinding",
     "singular": "validatingadmissionpolicybinding",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": []
   },
   {
     "gvr": {
@@ -614,7 +731,8 @@
     "kind": "ValidatingWebhookConfiguration",
     "singular": "validatingwebhookconfiguration",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": []
   },
   {
     "gvr": {
@@ -628,7 +746,10 @@
       "crd",
       "crds"
     ],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -641,7 +762,8 @@
     "shortNames": [
       "pc"
     ],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": []
   },
   {
     "gvr": {
@@ -652,7 +774,8 @@
     "kind": "Lease",
     "singular": "lease",
     "shortNames": [],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": []
   },
   {
     "gvr": {
@@ -663,7 +786,8 @@
     "kind": "RuntimeClass",
     "singular": "runtimeclass",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": []
   },
   {
     "gvr": {
@@ -674,7 +798,8 @@
     "kind": "EndpointSlice",
     "singular": "endpointslice",
     "shortNames": [],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": []
   },
   {
     "gvr": {
@@ -685,7 +810,8 @@
     "kind": "DeviceClass",
     "singular": "deviceclass",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": []
   },
   {
     "gvr": {
@@ -696,7 +822,10 @@
     "kind": "DeviceTaintRule",
     "singular": "devicetaintrule",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -707,7 +836,10 @@
     "kind": "ResourceClaim",
     "singular": "resourceclaim",
     "shortNames": [],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -718,7 +850,8 @@
     "kind": "ResourceClaimTemplate",
     "singular": "resourceclaimtemplate",
     "shortNames": [],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": []
   },
   {
     "gvr": {
@@ -729,7 +862,8 @@
     "kind": "ResourceSlice",
     "singular": "resourceslice",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": []
   },
   {
     "gvr": {
@@ -740,7 +874,10 @@
     "kind": "FlowSchema",
     "singular": "flowschema",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -751,7 +888,10 @@
     "kind": "PriorityLevelConfiguration",
     "singular": "prioritylevelconfiguration",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -762,7 +902,10 @@
     "kind": "StorageVersionMigration",
     "singular": "storageversionmigration",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -773,7 +916,10 @@
     "kind": "Attach",
     "singular": "attach",
     "shortNames": [],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -784,7 +930,10 @@
     "kind": "ClusterAttach",
     "singular": "clusterattach",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -795,7 +944,10 @@
     "kind": "ClusterExec",
     "singular": "clusterexec",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -806,7 +958,10 @@
     "kind": "ClusterLogs",
     "singular": "clusterlogs",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -817,7 +972,10 @@
     "kind": "ClusterPortForward",
     "singular": "clusterportforward",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -828,7 +986,10 @@
     "kind": "ClusterResourceUsage",
     "singular": "clusterresourceusage",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -839,7 +1000,10 @@
     "kind": "Exec",
     "singular": "exec",
     "shortNames": [],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -850,7 +1014,10 @@
     "kind": "Logs",
     "singular": "logs",
     "shortNames": [],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -861,7 +1028,10 @@
     "kind": "Metric",
     "singular": "metric",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -872,7 +1042,10 @@
     "kind": "PortForward",
     "singular": "portforward",
     "shortNames": [],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -883,7 +1056,10 @@
     "kind": "ResourceUsage",
     "singular": "resourceusage",
     "shortNames": [],
-    "namespaced": true
+    "namespaced": true,
+    "subresources": [
+      "status"
+    ]
   },
   {
     "gvr": {
@@ -894,6 +1070,9 @@
     "kind": "Stage",
     "singular": "stage",
     "shortNames": [],
-    "namespaced": false
+    "namespaced": false,
+    "subresources": [
+      "status"
+    ]
   }
 ]

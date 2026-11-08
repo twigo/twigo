@@ -32,7 +32,7 @@ export function useReveal(
         }
         const outcome = await operations.run(
           { action: "reveal", object, key },
-          { icon: Eye, destructive: false },
+          { icon: Eye },
         );
         return outcome.state === "revealed"
           ? { value: outcome.value, binary: outcome.binary }

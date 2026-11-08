@@ -4,7 +4,14 @@ import type { Resource } from "@twigo/protocol";
 import { ActionBar, EmptyState, GridSkeleton } from "@twigo/ui";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { Details } from "../Details";
+import {
+  CAPABILITY_PREFIXES,
+  MARKED_DELETE,
+  type Asked,
+} from "../capabilities";
 import { logsKind } from "../logs/entries";
+import { rowState } from "../rowState";
+import { objectOf, objectOfRow } from "../selection";
 import { sameGvr, useResources } from "../discovery";
 import { pluralTitle } from "../kinds";
 import type { ListServices } from "../services";
@@ -105,13 +112,53 @@ function Loaded({
   services: ListServices;
 }) {
   const workbench = useWorkbench();
-  const { keys, lists, editors, menus } = workbench;
-  const { selection, states } = services;
+  const { keys, lists, editors, menus, commands, catalog } = workbench;
+  const { selection, states, capabilities } = services;
   useChanges(selection.changes);
   useChanges(menus.changes);
   useChanges(keys.changes);
+  useChanges(capabilities.changes);
+  useChanges(commands.changes);
+  useChanges(catalog.changes);
   const selected = selection.get(uri);
+  const object = JSON.stringify(selected ? objectOf(selected) : {});
+  const referenced = CAPABILITY_PREFIXES.flatMap((prefix) =>
+    commands.referenced(prefix),
+  );
+  const capabilityKeys = JSON.stringify(referenced);
+  const contexts = catalog.list;
+  useEffect(() => {
+    capabilities.ask(
+      uri,
+      input.space,
+      resource.gvr,
+      JSON.parse(object) as Asked,
+      JSON.parse(capabilityKeys) as string[],
+      contexts,
+    );
+  }, [
+    capabilities,
+    uri,
+    input.space,
+    resource.gvr,
+    object,
+    capabilityKeys,
+    contexts,
+  ]);
   const marks = selection.marks(uri);
+  const marked = JSON.stringify(
+    [...marks].map((id) => objectOfRow(id, resource.namespaced)),
+  );
+  useEffect(() => {
+    const objects = JSON.parse(marked) as Asked[];
+    capabilities.askMarked(uri, input.space, resource.gvr, objects, contexts);
+  }, [capabilities, uri, input.space, resource.gvr, marked, contexts]);
+  const allowed = capabilities.values(uri, referenced);
+  const scoped = JSON.stringify({
+    ...allowed,
+    ...rowState(resource, selected),
+    [MARKED_DELETE]: capabilities.marked(uri),
+  });
   const [open, setOpen] = useState(selected?.reveal === true);
   const [revealed, setRevealed] = useState(selected);
   if (selected !== revealed) {
@@ -129,6 +176,14 @@ function Loaded({
     scope.set("listMarked", marks.size > 0);
     scope.set("resource.selected", selected !== undefined);
     scope.set("resource.logs", logsKind(input.gvr) !== undefined);
+    scope.set("resource.group", resource.gvr.group);
+    scope.set("resource.kind", resource.kind);
+    scope.set("resource.namespaced", resource.namespaced);
+    scope.set("resource.scalable", resource.subresources.includes("scale"));
+    for (const [key, value] of Object.entries(
+      JSON.parse(scoped) as Record<string, boolean>,
+    ))
+      scope.set(key, value);
     const unregister = lists.register(wrapper, {
       filter: () => {
         states.focus(uri);
@@ -154,6 +209,8 @@ function Loaded({
     marks.size,
     selected,
     input.gvr,
+    resource,
+    scoped,
   ]);
 
   return (

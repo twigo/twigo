@@ -1,216 +1,22 @@
-//! The command bus against a kind cluster with kwok: each friction a plan
-//! names, a countdown's cancel that sends nothing, a plan that never runs on
-//! another cluster than it was planned on, a read-only context whose write
-//! never reaches the server, a Reveal that shows a value only as it runs, and
-//! the kubectl line of each plan, run here, doing what the plan does.
-//!
-//! TWIGO_TEST_KUBECONFIG=… cargo test -p twigo-core --test bus_live -- --ignored
+//! The bus with deletes and Reveals: each friction a plan names, a
+//! countdown's cancel that sends nothing, a plan that never runs on another
+//! cluster than it was planned on, a read-only context whose write never
+//! reaches the server, and a Reveal that shows a value only as it runs.
 
-use std::ffi::OsString;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
-use k8s_openapi::api::apps::v1::ReplicaSet;
+use k8s_openapi::api::apps::v1::{Deployment, ReplicaSet};
 use k8s_openapi::api::core::v1::{ConfigMap, Namespace, Pod, Secret};
+use kube::Api;
 use kube::api::{DeleteParams, ListParams, PostParams};
-use kube::config::Kubeconfig;
-use kube::{Api, Config};
 use serde_json::json;
-use tokio::sync::{mpsc, watch};
-use twigo_core::Core;
-use twigo_env::{ShellEnv, Status};
+use tokio::sync::mpsc;
 use twigo_ipc::{
-    ErrorKind, Execute, Friction, Gvr, IpcError, Mode, ObjectParts, ObjectQuery, OpenObject,
-    OperationEvent, Plan, PlanRequest, ResourceRef, SetContextMode,
+    ErrorKind, Friction, Gvr, Mode, ObjectParts, ObjectQuery, OpenObject, OperationEvent,
+    PlanRequest, SetContextMode,
 };
 
-const WAIT: Duration = Duration::from_secs(60);
-
-/// The test cluster: its context and an admin client.
-struct Cluster {
-    path: PathBuf,
-    context: String,
-    admin: kube::Client,
-}
-
-impl Cluster {
-    async fn connect() -> Self {
-        let path: PathBuf = std::env::var_os("TWIGO_TEST_KUBECONFIG")
-            .expect("TWIGO_TEST_KUBECONFIG")
-            .into();
-        let kubeconfig = Kubeconfig::read_from(&path).unwrap();
-        let context = kubeconfig.current_context.clone().unwrap_or_default();
-        assert!(
-            context.starts_with("kind-") || context.starts_with("kwok-"),
-            "refusing context {context:?}: only kind and kwok clusters"
-        );
-        let config = Config::from_custom_kubeconfig(kubeconfig, &Default::default())
-            .await
-            .unwrap();
-        Cluster {
-            path,
-            context,
-            admin: kube::Client::try_from(config).unwrap(),
-        }
-    }
-
-    async fn namespace(&self, prefix: &str) -> String {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .subsec_nanos();
-        let namespace = format!("core-bus-{prefix}-{nanos}");
-        Api::<Namespace>::all(self.admin.clone())
-            .create(
-                &PostParams::default(),
-                &serde_json::from_value(json!({ "metadata": { "name": namespace } })).unwrap(),
-            )
-            .await
-            .unwrap();
-        namespace
-    }
-
-    async fn delete(&self, namespace: &str) {
-        let deleted = Api::<Namespace>::all(self.admin.clone())
-            .delete(namespace, &DeleteParams::default())
-            .await;
-        if let Err(kube::Error::Api(status)) = &deleted
-            && status.code == 404
-        {
-            return;
-        }
-        deleted.unwrap();
-    }
-
-    async fn config_map(&self, namespace: &str, name: &str) -> String {
-        Api::<ConfigMap>::namespaced(self.admin.clone(), namespace)
-            .create(
-                &PostParams::default(),
-                &serde_json::from_value(json!({ "metadata": { "name": name } })).unwrap(),
-            )
-            .await
-            .unwrap()
-            .metadata
-            .uid
-            .unwrap()
-    }
-
-    /// The uid of the object `name` of `api`, none once it is gone.
-    async fn uid<K>(api: &Api<K>, name: &str) -> Option<String>
-    where
-        K: kube::Resource + Clone + serde::de::DeserializeOwned + std::fmt::Debug,
-    {
-        api.get_opt(name)
-            .await
-            .unwrap()
-            .and_then(|object| object.meta().uid.clone())
-    }
-}
-
-/// A core that reads only a copy of the test's kubeconfig, which a test may
-/// rewrite, with a space for its context.
-async fn core(dir: &Path, cluster: &Cluster) -> (Arc<Core>, PathBuf) {
-    let kubeconfig = dir.join("config");
-    std::fs::copy(&cluster.path, &kubeconfig).unwrap();
-    let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
-    core.state.open_space(&cluster.context);
-    let (status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
-        std::iter::empty::<(OsString, OsString)>(),
-    ))));
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        let kubeconfig = kubeconfig.clone();
-        async move {
-            let _status = status;
-            core.run(followed, Some(kubeconfig)).await;
-        }
-    });
-    core.catalog.contexts().await;
-    (core, kubeconfig)
-}
-
-fn target(resource: &str, namespace: Option<&str>, name: &str) -> ResourceRef {
-    ResourceRef {
-        gvr: Gvr {
-            group: String::new(),
-            version: "v1".to_owned(),
-            resource: resource.to_owned(),
-        },
-        namespaced: namespace.is_some(),
-        namespace: namespace.map(str::to_owned),
-        name: name.to_owned(),
-    }
-}
-
-async fn plan_delete(
-    core: &Core,
-    cluster: &Cluster,
-    target: ResourceRef,
-) -> Result<Plan, IpcError> {
-    let request = PlanRequest::Delete {
-        space: cluster.context.clone(),
-        target,
-    };
-    core.command_plan("main", request).await
-}
-
-/// Runs a plan and gathers its events until the last.
-async fn run(
-    core: &Core,
-    plan: &Plan,
-    typed: Option<&str>,
-) -> Result<Vec<OperationEvent>, IpcError> {
-    let (sender, mut events) = mpsc::unbounded_channel();
-    core.command_execute(
-        "main",
-        Execute {
-            plan: plan.id,
-            typed: typed.map(str::to_owned),
-        },
-        move |event| sender.send(event).is_ok(),
-    )
-    .await?;
-    let mut told = Vec::new();
-    tokio::time::timeout(WAIT, async {
-        while let Some(event) = events.recv().await {
-            let last = !matches!(event, OperationEvent::Running { .. });
-            told.push(event);
-            if last {
-                return;
-            }
-        }
-    })
-    .await
-    .expect("the run ends within 60 s");
-    Ok(told)
-}
-
-/// The plan's kubectl line, run by a shell over `kubeconfig` only.
-fn kubectl(plan: &Plan, kubeconfig: &Path) -> String {
-    let output = Command::new("sh")
-        .arg("-c")
-        .arg(&plan.kubectl)
-        .env("KUBECONFIG", kubeconfig)
-        .output()
-        .expect("kubectl runs");
-    assert!(
-        output.status.success(),
-        "{}: {}",
-        plan.kubectl,
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout).unwrap()
-}
-
-fn audit(dir: &Path) -> Vec<serde_json::Value> {
-    std::fs::read_to_string(dir.join("audit.jsonl"))
-        .unwrap_or_default()
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect()
-}
+use super::{Cluster, WAIT, audit, core, kubectl, plan_delete, reference, run, target};
 
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
@@ -282,7 +88,8 @@ async fn a_pod_its_replica_set_replaces_counts_down_and_a_cancel_sends_nothing()
     assert_eq!(
         told.last(),
         Some(&OperationEvent::Done {
-            text: format!("Deleted pod {name}")
+            text: format!("Deleted pod {name}"),
+            undo_until: None,
         })
     );
     assert_ne!(Cluster::uid(&pods, &name).await, Some(uid));
@@ -355,7 +162,8 @@ async fn each_friction_holds_its_plan_and_each_kubectl_line_does_the_same() {
                 text: format!("Waiting for namespace {typed} to go")
             },
             OperationEvent::Done {
-                text: format!("Deleted namespace {typed}")
+                text: format!("Deleted namespace {typed}"),
+                undo_until: None,
             },
         ]
     );
@@ -634,4 +442,263 @@ async fn an_object_replaced_since_the_plan_is_left_standing() {
         Some(replacement)
     );
     cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_delete_lists_what_goes_with_it_and_several_ask_for_the_context_s_name() {
+    let cluster = Cluster::connect().await;
+    let first = cluster.namespace("several").await;
+    let second = cluster.namespace("several").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, kubeconfig) = core(dir.path(), &cluster).await;
+    let context = &cluster.context;
+    let space = || context.clone();
+
+    Api::<Deployment>::namespaced(cluster.admin.clone(), &first)
+        .create(
+            &PostParams::default(),
+            &serde_json::from_value(json!({
+                "metadata": { "name": "web" },
+                "spec": {
+                    "replicas": 2,
+                    "selector": { "matchLabels": { "app": "web" } },
+                    "template": {
+                        "metadata": { "labels": { "app": "web" } },
+                        "spec": {
+                            "nodeName": "kwok-node-4",
+                            "containers": [{ "name": "app", "image": "fake" }],
+                        },
+                    },
+                },
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let pods = Api::<Pod>::namespaced(cluster.admin.clone(), &first);
+    let replica_sets = Api::<ReplicaSet>::namespaced(cluster.admin.clone(), &first);
+    let listed = ListParams::default().labels("app=web");
+    let made = tokio::time::timeout(WAIT, async {
+        loop {
+            let pods = pods.list(&listed).await.unwrap().items;
+            let sets = replica_sets.list(&listed).await.unwrap().items;
+            if pods.len() == 2 && sets.len() == 1 {
+                let mut made: Vec<(String, String)> = pods
+                    .into_iter()
+                    .filter_map(|pod| Some(("Pod".to_owned(), pod.metadata.name?)))
+                    .collect();
+                made.push((
+                    "ReplicaSet".to_owned(),
+                    sets[0].metadata.name.clone().unwrap(),
+                ));
+                made.sort();
+                return made;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("the deployment makes its replica set and pods");
+    let request = PlanRequest::Delete {
+        space: space(),
+        targets: vec![reference("apps", "v1", "deployments", Some(&first), "web")],
+    };
+    let plan = core.command_plan("main", request).await.unwrap();
+    assert_eq!(plan.friction, Friction::Confirm);
+    let [going] = plan.affected.as_slice() else {
+        panic!("{:?}", plan.affected);
+    };
+    assert_eq!(going.title, "With it go");
+    let mut listed: Vec<(String, String)> = going
+        .objects
+        .iter()
+        .map(|object| (object.kind.clone(), object.name.clone()))
+        .collect();
+    listed.sort();
+    assert_eq!(listed, made);
+    let told = run(&core, &plan, None).await.unwrap();
+    assert!(
+        matches!(told.last(), Some(OperationEvent::Done { .. })),
+        "{told:?}"
+    );
+
+    let config_maps =
+        |namespace: &str| Api::<ConfigMap>::namespaced(cluster.admin.clone(), namespace);
+    let several = |names: &[(&String, &str)]| PlanRequest::Delete {
+        space: space(),
+        targets: names
+            .iter()
+            .map(|(namespace, name)| target("configmaps", Some(namespace), name))
+            .collect(),
+    };
+    let three = [(&first, "a"), (&first, "b"), (&second, "c")];
+    for (namespace, name) in three {
+        cluster.config_map(namespace, name).await;
+    }
+    let plan = core.command_plan("main", several(&three)).await.unwrap();
+    assert_eq!(
+        plan.friction,
+        Friction::Typed {
+            text: context.clone()
+        }
+    );
+    assert_eq!(
+        plan.question,
+        format!("Delete 3 config maps in 2 namespaces from {context}?")
+    );
+    assert_eq!(plan.confirm, "Delete 3 config maps");
+    assert_eq!(plan.affected[0].title, "Deletes");
+    assert_eq!(plan.affected[0].objects.len(), 3);
+    let mut namespaces = [&first, &second];
+    namespaces.sort();
+    let lines: Vec<String> = namespaces
+        .iter()
+        .map(|namespace| {
+            let names = if *namespace == &first { "a b" } else { "c" };
+            format!("kubectl --context {context} delete configmaps {names} -n {namespace}")
+        })
+        .collect();
+    assert_eq!(plan.kubectl, lines.join("; "));
+    let refused = run(&core, &plan, Some("3")).await.unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::InvalidInput);
+    let plan = core.command_plan("main", several(&three)).await.unwrap();
+    let told = run(&core, &plan, Some(context)).await.unwrap();
+    assert_eq!(
+        told.last(),
+        Some(&OperationEvent::Done {
+            text: "Deleted 3 config maps".to_owned(),
+            undo_until: None,
+        }),
+        "{told:?}"
+    );
+    for (namespace, name) in three {
+        assert_eq!(Cluster::uid(&config_maps(namespace), name).await, None);
+    }
+
+    let two = [(&first, "d"), (&second, "e")];
+    for (namespace, name) in two {
+        cluster.config_map(namespace, name).await;
+    }
+    let plan = core.command_plan("main", several(&two)).await.unwrap();
+    core.command_cancel("main", plan.id);
+    kubectl(&plan, &kubeconfig);
+    for (namespace, name) in two {
+        assert_eq!(Cluster::uid(&config_maps(namespace), name).await, None);
+    }
+
+    let two = [(&first, "f"), (&first, "g")];
+    for (namespace, name) in two {
+        cluster.config_map(namespace, name).await;
+    }
+    let plan = core.command_plan("main", several(&two)).await.unwrap();
+    config_maps(&first)
+        .delete("g", &DeleteParams::default())
+        .await
+        .unwrap();
+    let replacement = cluster.config_map(&first, "g").await;
+    let told = run(&core, &plan, Some(context)).await.unwrap();
+    assert_eq!(
+        told.last(),
+        Some(&OperationEvent::Done {
+            text: "Deleted 1 config map; config map g was replaced since you confirmed, so Twigo left it"
+                .to_owned(),
+            undo_until: None,
+        }),
+        "{told:?}"
+    );
+    assert_eq!(
+        Cluster::uid(&config_maps(&first), "g").await,
+        Some(replacement)
+    );
+
+    let marked = [(&first, "j"), (&first, "k"), (&first, "ghost")];
+    for (namespace, name) in &marked[..2] {
+        cluster.config_map(namespace, name).await;
+    }
+    let plan = core.command_plan("main", several(&marked)).await.unwrap();
+    assert_eq!(
+        plan.question,
+        format!("Delete 2 config maps in {first} from {context}?")
+    );
+    assert!(
+        plan.consequences
+            .contains(&"Gone already, so not in this delete: ghost.".to_owned()),
+        "{:?}",
+        plan.consequences
+    );
+    core.command_cancel("main", plan.id);
+
+    let two = [(&first, "h"), (&first, "i")];
+    for (namespace, name) in two {
+        cluster.config_map(namespace, name).await;
+    }
+    let plan = core.command_plan("main", several(&two)).await.unwrap();
+    for (namespace, name) in two {
+        config_maps(namespace)
+            .delete(name, &DeleteParams::default())
+            .await
+            .unwrap();
+        cluster.config_map(namespace, name).await;
+    }
+    let told = run(&core, &plan, Some(context)).await.unwrap();
+    let [OperationEvent::Failed { error }] = told.as_slice() else {
+        panic!("{told:?}");
+    };
+    assert_eq!(error.kind, ErrorKind::Conflict, "{}", error.message);
+
+    let slow = Api::<ConfigMap>::namespaced(cluster.admin.clone(), &first);
+    slow.create(
+        &PostParams::default(),
+        &serde_json::from_value(json!({
+            "metadata": { "name": "slow", "finalizers": ["twigo.io/hold"] },
+        }))
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+    cluster.config_map(&first, "swapped").await;
+    let two = [(&first, "slow"), (&first, "swapped")];
+    let plan = core.command_plan("main", several(&two)).await.unwrap();
+    slow.delete("swapped", &DeleteParams::default())
+        .await
+        .unwrap();
+    cluster.config_map(&first, "swapped").await;
+    let (sender, mut events) = mpsc::unbounded_channel();
+    core.command_execute(
+        "main",
+        twigo_ipc::Execute {
+            plan: plan.id,
+            typed: Some(context.clone()),
+        },
+        move |event| sender.send(event).is_ok(),
+    )
+    .await
+    .unwrap();
+    let last = tokio::time::timeout(WAIT, async {
+        while let Some(event) = events.recv().await {
+            match event {
+                OperationEvent::Running { .. } => core.command_cancel("main", plan.id),
+                last => return last,
+            }
+        }
+        panic!("the run's channel closed");
+    })
+    .await
+    .expect("the stop ends the run");
+    assert_eq!(
+        last,
+        OperationEvent::Stopped {
+            text: "Stopped waiting for 1 config map, which is still being deleted; config map swapped was replaced since you confirmed, so Twigo left it".to_owned()
+        }
+    );
+    slow.patch(
+        "slow",
+        &kube::api::PatchParams::default(),
+        &kube::api::Patch::Merge(json!({ "metadata": { "finalizers": null } })),
+    )
+    .await
+    .unwrap();
+    cluster.delete(&first).await;
+    cluster.delete(&second).await;
 }

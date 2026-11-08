@@ -59,14 +59,15 @@ const BOUND_KEYS = new Set(["ArrowUp", "ArrowDown", "Enter"]);
 function Open({ session }: { session: Session }) {
   const workbench = useWorkbench();
   const { quickAccess, keybindings, keys } = workbench;
-  const { value, pick, context } = session;
-  const provider = pick ? undefined : quickAccess.resolve(value)?.provider;
+  const { value, pick, ask, context } = session;
+  const provider =
+    pick || ask ? undefined : quickAccess.resolve(value)?.provider;
   const [loaded, setLoaded] = useState<{ value: string; result: Loaded }>();
   const [selected, setSelected] = useState("");
   const root = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (pick) return;
+    if (pick || ask) return;
     let live = true;
     const target = quickAccess.resolve(value);
     if (!target) return;
@@ -86,13 +87,15 @@ function Open({ session }: { session: Session }) {
     return () => {
       live = false;
     };
-  }, [quickAccess, value, pick, context]);
+  }, [quickAccess, value, pick, ask, context]);
 
-  const result: Loaded = pick
-    ? { state: "ready", items: filtered(pick.items, value) }
-    : loaded?.value === value
-      ? loaded.result
-      : { state: "loading" };
+  const result: Loaded = ask
+    ? { state: "ready", items: [] }
+    : pick
+      ? { state: "ready", items: filtered(pick.items, value) }
+      : loaded?.value === value
+        ? loaded.result
+        : { state: "loading" };
   const items = result.state === "ready" ? result.items : [];
   const groups = [...new Set(items.map((item) => item.group))];
   const ordered = groups.flatMap((group) =>
@@ -131,7 +134,8 @@ function Open({ session }: { session: Session }) {
           setSelected(ordered[next]?.id ?? "");
         },
         accept: (options) => {
-          if (active) accept(active, options);
+          if (ask) quickAccess.submit();
+          else if (active) accept(active, options);
         },
       }),
     // `ordered` and `active` come anew with every render, as does `accept`.
@@ -175,14 +179,24 @@ function Open({ session }: { session: Session }) {
       >
         <CommandInput
           autoFocus
+          // An input starts with all its value selected, as VS Code's.
+          {...(ask && {
+            onFocus: (event) => {
+              event.currentTarget.select();
+            },
+          })}
           value={value}
           onValueChange={(next) => {
             quickAccess.setValue(next);
           }}
-          placeholder={pick?.placeholder ?? provider?.placeholder}
+          placeholder={
+            ask?.placeholder ?? pick?.placeholder ?? provider?.placeholder
+          }
         />
         <CommandList>
-          {result.state === "failed" ? (
+          {ask ? (
+            <Asked message={ask.validate(value)} prompt={ask.prompt} />
+          ) : result.state === "failed" ? (
             <p className="px-3 py-3 text-xs text-error">{result.message}</p>
           ) : (
             result.state === "ready" && <CommandEmpty>No results</CommandEmpty>
@@ -203,9 +217,32 @@ function Open({ session }: { session: Session }) {
             </CommandGroup>
           ))}
         </CommandList>
-        <Footer provider={provider} picking={pick !== undefined} />
+        <Footer
+          provider={provider}
+          moves={!ask}
+          acceptLabel={
+            ask?.acceptLabel ?? (pick ? "Select" : provider?.acceptLabel)
+          }
+        />
       </Command>
     </div>
+  );
+}
+
+/** Under an input: what Enter does, or why it cannot. */
+function Asked({
+  prompt,
+  message,
+}: {
+  prompt: string;
+  message: string | undefined;
+}) {
+  return message === undefined ? (
+    <p className="px-3 py-2.5 text-xs text-muted-foreground">{prompt}</p>
+  ) : (
+    <p role="alert" className="px-3 py-2.5 text-xs text-error">
+      {message}
+    </p>
   );
 }
 
@@ -269,10 +306,14 @@ function Row({
  */
 function Footer({
   provider,
-  picking,
+  moves,
+  acceptLabel,
 }: {
   provider: QuickAccessProvider | undefined;
-  picking: boolean;
+  /** Whether it shows rows to move through; an input does not. */
+  moves: boolean;
+  /** What Enter does: `Open` unless it says. */
+  acceptLabel: string | undefined;
 }) {
   const { keybindings, quickAccess } = useWorkbench();
   useChanges(keybindings.changes);
@@ -294,12 +335,8 @@ function Footer({
       aria-label="Keys"
       className="flex h-[30px] shrink-0 items-center gap-3.5 border-t border-border px-3 text-[11px] whitespace-nowrap text-muted-foreground"
     >
-      {move.length > 0 && <Hint keys={move}>Move</Hint>}
-      {accept.length > 0 && (
-        <Hint keys={accept}>
-          {picking ? "Select" : (provider?.acceptLabel ?? "Open")}
-        </Hint>
-      )}
+      {moves && move.length > 0 && <Hint keys={move}>Move</Hint>}
+      {accept.length > 0 && <Hint keys={accept}>{acceptLabel ?? "Open"}</Hint>}
       {side.length > 0 && <Hint keys={side}>Open to the side</Hint>}
       <span className="flex-1" />
       {prefixes.map((other) => (

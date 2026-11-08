@@ -91,11 +91,30 @@ interface Pick {
   readonly resolve: (item: QuickPickItem | undefined) => void;
 }
 
+/** What a command asks the user to type, as VS Code's input box. */
+export interface InputOptions {
+  readonly placeholder: string;
+  /** What Enter does with the value, under the field: `Scale deployment web, now at 3`. */
+  readonly prompt: string;
+  /** What Enter says in the footer: `Scale`. */
+  readonly acceptLabel: string;
+  /** What it starts with, all selected. */
+  readonly value: string;
+  /** Why Enter cannot take a value, none when it can. */
+  readonly validate: (value: string) => string | undefined;
+}
+
+interface Ask extends InputOptions {
+  readonly resolve: (value: string | undefined) => void;
+}
+
 export interface Session {
   readonly value: string;
   readonly context: QuickAccessContext;
   /** Set while a command waits for the user to pick one of its items. */
   readonly pick: Pick | undefined;
+  /** Set while a command waits for the user to type a value. */
+  readonly ask: Ask | undefined;
 }
 
 export class QuickAccess {
@@ -143,7 +162,7 @@ export class QuickAccess {
 
   show(value = ""): void {
     this.#settle(undefined);
-    this.#open({ value, pick: undefined });
+    this.#open({ value, pick: undefined, ask: undefined });
   }
 
   /** Lets the user pick one item; undefined if they dismiss quick access. */
@@ -153,8 +172,34 @@ export class QuickAccess {
   ): Promise<QuickPickItem | undefined> {
     this.#settle(undefined);
     return new Promise((resolve) => {
-      this.#open({ value: "", pick: { placeholder, items, resolve } });
+      this.#open({
+        value: "",
+        pick: { placeholder, items, resolve },
+        ask: undefined,
+      });
     });
+  }
+
+  /** Lets the user type a value; undefined if they dismiss quick access. */
+  input(options: InputOptions): Promise<string | undefined> {
+    this.#settle(undefined);
+    return new Promise((resolve) => {
+      this.#open({
+        value: options.value,
+        pick: undefined,
+        ask: { ...options, resolve },
+      });
+    });
+  }
+
+  /** Takes the typed value, unless it is not one the command can take. */
+  submit(): void {
+    const session = this.#session;
+    if (!session?.ask) return;
+    if (session.ask.validate(session.value) !== undefined) return;
+    this.#session = { ...session, ask: undefined };
+    session.ask.resolve(session.value);
+    this.#close();
   }
 
   setValue(value: string): void {
@@ -201,7 +246,15 @@ export class QuickAccess {
     };
   }
 
-  #open({ value, pick }: { value: string; pick: Pick | undefined }) {
+  #open({
+    value,
+    pick,
+    ask,
+  }: {
+    value: string;
+    pick: Pick | undefined;
+    ask: Ask | undefined;
+  }) {
     const focused = document.activeElement;
     if (!this.#session) {
       this.#restore = focused instanceof HTMLElement ? focused : undefined;
@@ -209,7 +262,7 @@ export class QuickAccess {
     const context = this.#session?.context ?? {
       lookup: this.keys.lookup(focused),
     };
-    this.#session = { value, context, pick };
+    this.#session = { value, context, pick, ask };
     this.changes.emit();
   }
 
@@ -223,6 +276,11 @@ export class QuickAccess {
 
   #settle(item: QuickPickItem | undefined) {
     const session = this.#session;
+    if (session?.ask) {
+      this.#session = { ...session, ask: undefined };
+      session.ask.resolve(undefined);
+      return;
+    }
     if (!session?.pick) return;
     this.#session = { ...session, pick: undefined };
     session.pick.resolve(item);

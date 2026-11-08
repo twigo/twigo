@@ -30,7 +30,7 @@ use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use twigo_ipc::{ErrorKind, IpcError, ViewState};
+use twigo_ipc::{Access, ErrorKind, IpcError, ViewState};
 use twigo_kube::client::Clients;
 
 use crate::cluster::Cluster;
@@ -524,23 +524,74 @@ impl Hub {
         })
     }
 
-    /// Whether the person may list the query's resource cluster-wide: one
-    /// SelfSubjectAccessReview, kept with the context's clients.
+    /// Whether the person may list the query's resource cluster-wide.
     async fn may_list(&self, query: &Query) -> bool {
-        let Ok(clients) = (self.inner.connect)(query.context.clone()).await else {
-            return false;
+        let access = Access {
+            verb: "list".to_owned(),
+            group: query.resource.group.clone(),
+            resource: query.resource.resource.clone(),
+            subresource: None,
+            name: None,
         };
-        let cluster = self.inner.cluster(&query.context);
-        let resource = &query.resource;
-        if let Some(may) = cluster.may_list(&clients, &resource.group, &resource.resource) {
-            return may;
+        self.may(&query.context, None, &access)
+            .await
+            .unwrap_or(false)
+    }
+
+    /// Whether RBAC lets the person do `access` in `namespace`, or with
+    /// none in every namespace: a SelfSubjectAccessReview, kept with the
+    /// context's clients; none when the cluster cannot answer. An access to
+    /// one object asks for the whole resource first, which a rule without
+    /// `resourceNames` grants, and for the object by name only when that
+    /// says no, since a rule that lists names grants only them.
+    pub async fn may(
+        &self,
+        context: &str,
+        namespace: Option<&str>,
+        access: &Access,
+    ) -> Option<bool> {
+        if access.name.is_some() {
+            let whole = Access {
+                name: None,
+                ..access.clone()
+            };
+            if self.review(context, namespace, &whole).await == Some(true) {
+                return Some(true);
+            }
+        }
+        self.review(context, namespace, access).await
+    }
+
+    async fn review(
+        &self,
+        context: &str,
+        namespace: Option<&str>,
+        access: &Access,
+    ) -> Option<bool> {
+        // kube-apiserver authorizes a request on a namespace in that
+        // namespace (apiserver v0.37.1, `endpoints/request/requestinfo.go`).
+        let namespace = match (
+            &access.name,
+            access.group.as_str(),
+            access.resource.as_str(),
+        ) {
+            (Some(name), "", "namespaces") => Some(name.as_str()),
+            _ => namespace,
+        };
+        let clients = (self.inner.connect)(context.to_owned()).await.ok()?;
+        let cluster = self.inner.cluster(context);
+        if let Some(may) = cluster.may(&clients, namespace, access) {
+            return Some(may);
         }
         let review = SelfSubjectAccessReview {
             spec: SelfSubjectAccessReviewSpec {
                 resource_attributes: Some(ResourceAttributes {
-                    verb: Some("list".to_owned()),
-                    group: Some(resource.group.clone()),
-                    resource: Some(resource.resource.clone()),
+                    verb: Some(access.verb.clone()),
+                    group: Some(access.group.clone()),
+                    resource: Some(access.resource.clone()),
+                    subresource: access.subresource.clone(),
+                    namespace: namespace.map(str::to_owned),
+                    name: access.name.clone(),
                     ..ResourceAttributes::default()
                 }),
                 ..SelfSubjectAccessReviewSpec::default()
@@ -548,14 +599,10 @@ impl Hub {
             ..SelfSubjectAccessReview::default()
         };
         let reviews = Api::<SelfSubjectAccessReview>::all(clients.api.clone());
-        match reviews.create(&PostParams::default(), &review).await {
-            Ok(answer) => {
-                let may = answer.status.is_some_and(|status| status.allowed);
-                cluster.set_may_list(&clients, &resource.group, &resource.resource, may);
-                may
-            }
-            Err(_) => false,
-        }
+        let answer = reviews.create(&PostParams::default(), &review).await.ok()?;
+        let may = answer.status.is_some_and(|status| status.allowed);
+        cluster.set_may(&clients, namespace, access, may);
+        Some(may)
     }
 }
 

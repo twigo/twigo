@@ -14,9 +14,13 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::watch;
 use tokio::time::Instant;
-use twigo_ipc::{ContextAccess, ErrorKind, Friction, IpcError, OperationEvent, Plan, PlanId};
+use twigo_ipc::{
+    Affected, ContextAccess, ErrorKind, Friction, IpcError, OperationEvent, Plan, PlanId,
+};
 use twigo_policy::Attributes;
 use twigo_policy::friction::Risk;
+
+use crate::actions::undo::Revert;
 
 /// What a command will do, as its action planned it.
 pub(crate) struct Planned {
@@ -25,6 +29,10 @@ pub(crate) struct Planned {
     /// delete's, that of the clients it read the object with; a Reveal's,
     /// the context's as it planned.
     pub connection: Option<u64>,
+    /// The space whose last action it is once it starts, which holds its
+    /// undo; none for a Reveal, which changes nothing, and for an undo,
+    /// which takes its own.
+    pub space: Option<String>,
     pub risk: Risk,
     /// The requests it sends that change the cluster, as they go out, for
     /// the policy to decide on before anything is asked.
@@ -34,7 +42,10 @@ pub(crate) struct Planned {
     pub target: String,
     pub question: String,
     pub confirm: String,
+    /// Whether it takes something away for good.
+    pub destructive: bool,
     pub consequences: Vec<String>,
+    pub affected: Vec<Affected>,
     pub kubectl: String,
     pub doing: String,
     pub run: Run,
@@ -47,16 +58,39 @@ pub(crate) type Run = Box<
 /// How a run ended.
 pub(crate) enum Finished {
     Done(String),
+    /// Done, and `revert` puts it back while its undo lasts.
+    Undoable {
+        text: String,
+        revert: Box<Revert>,
+    },
     Stopped(String),
-    Revealed { value: String, binary: bool },
+    Revealed {
+        value: String,
+        binary: bool,
+    },
 }
 
 impl Finished {
-    /// The event that tells it, and what the audit log says of it, which
-    /// never holds a value.
-    pub(crate) fn told(self) -> (OperationEvent, &'static str, String) {
+    /// What puts it back, if it can be undone.
+    pub(crate) fn revert(&self) -> Option<Revert> {
         match self {
-            Finished::Done(text) => (OperationEvent::Done { text: text.clone() }, "done", text),
+            Finished::Undoable { revert, .. } => Some(Revert::clone(revert)),
+            _ => None,
+        }
+    }
+
+    /// The event that tells it, with when its undo ends, and what the
+    /// audit log says of it, which never holds a value.
+    pub(crate) fn told(self, undo_until: Option<i64>) -> (OperationEvent, &'static str, String) {
+        match self {
+            Finished::Done(text) | Finished::Undoable { text, .. } => (
+                OperationEvent::Done {
+                    text: text.clone(),
+                    undo_until,
+                },
+                "done",
+                text,
+            ),
             Finished::Stopped(text) => (
                 OperationEvent::Stopped { text: text.clone() },
                 "stopped",
@@ -96,6 +130,11 @@ impl Progress {
 
     pub(crate) fn tell(&self, event: OperationEvent) {
         (self.send.lock().expect("progress lock"))(event);
+    }
+
+    /// Whether it was asked to stop.
+    pub(crate) fn stopping(&self) -> bool {
+        *self.stop.borrow()
     }
 
     /// Ends once it is asked to stop: a run awaits it only where stopping
@@ -198,7 +237,9 @@ impl Bus {
             friction: friction.clone(),
             question: planned.question.clone(),
             confirm: planned.confirm.clone(),
+            destructive: planned.destructive,
             consequences: planned.consequences.clone(),
+            affected: planned.affected.clone(),
             kubectl: planned.kubectl.clone(),
             doing: planned.doing.clone(),
         };

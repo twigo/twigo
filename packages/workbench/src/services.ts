@@ -13,7 +13,7 @@ import { Credentials } from "./credentials";
 import type { Lookup } from "./contextkey/when";
 import { Keybindings } from "./keybindings/service";
 import { Lists } from "./lists/service";
-import { CANCEL_COUNTDOWN, Operations } from "./operations/service";
+import { CANCEL_COUNTDOWN, Operations, UNDO } from "./operations/service";
 import { PartSizes } from "./parts/sizes";
 import { QuickAccess } from "./quickaccess/registry";
 import { Catalog } from "./spaces/catalog";
@@ -94,6 +94,10 @@ export class Workbench {
       this.keys,
       () => {
         const binding = this.keybindings.primary(CANCEL_COUNTDOWN);
+        return binding && this.keybindings.label(binding.presses);
+      },
+      () => {
+        const binding = this.keybindings.primary(UNDO);
         return binding && this.keybindings.label(binding.presses);
       },
       (error) => {

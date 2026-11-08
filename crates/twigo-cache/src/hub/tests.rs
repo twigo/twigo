@@ -888,3 +888,29 @@ fn parts_combine_into_their_least_ready_state() {
     );
     assert_eq!(combine(std::iter::empty()), ViewState::Ready);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_no_from_rbac_is_asked_again_after_30_s_and_a_yes_holds() {
+    let fake = Fake::default();
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let access = twigo_ipc::Access {
+        verb: "delete".to_owned(),
+        group: String::new(),
+        resource: "pods".to_owned(),
+        subresource: None,
+        name: None,
+    };
+    let may = || hub.may("kind-test", Some("a"), &access);
+    assert_eq!(may().await, Some(false));
+    sleep(crate::cluster::REFUSED_FOR - Duration::from_secs(1)).await;
+    assert_eq!(may().await, Some(false));
+    assert_eq!(fake.count("selfsubjectaccessreviews"), 1);
+    fake.state().may_list = true;
+    sleep(Duration::from_secs(2)).await;
+    assert_eq!(may().await, Some(true));
+    assert_eq!(fake.count("selfsubjectaccessreviews"), 2);
+    fake.state().may_list = false;
+    sleep(crate::cluster::REFUSED_FOR * 2).await;
+    assert_eq!(may().await, Some(true));
+    assert_eq!(fake.count("selfsubjectaccessreviews"), 2);
+}

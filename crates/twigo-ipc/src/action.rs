@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{Environment, Gvr, IpcError, Mode, SubscriptionId};
+use crate::{Environment, Gvr, IpcError, Mode, ObjectRef, SubscriptionId};
 
 /// An object of a space, by its resource as discovery names it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -26,9 +26,49 @@ pub struct ResourceRef {
     rename_all_fields = "camelCase"
 )]
 pub enum PlanRequest {
-    /// Deletes an object as `kubectl delete` does: its dependents in the
-    /// background, then waits until it is gone.
-    Delete { space: String, target: ResourceRef },
+    /// Deletes objects of one resource as `kubectl delete` does: their
+    /// dependents in the background, then waits until they are gone.
+    Delete {
+        space: String,
+        targets: Vec<ResourceRef>,
+    },
+    /// Sets the replicas of an object with a `scale` subresource, as
+    /// `kubectl scale` does.
+    Scale {
+        space: String,
+        target: ResourceRef,
+        replicas: u32,
+    },
+    /// Replaces a Deployment's, StatefulSet's or DaemonSet's pods, as
+    /// `kubectl rollout restart` does.
+    Restart { space: String, target: ResourceRef },
+    /// Marks a node unschedulable, or schedulable again, as `kubectl cordon`
+    /// and `kubectl uncordon` do.
+    Cordon {
+        space: String,
+        node: String,
+        unschedulable: bool,
+    },
+    /// Cordons a node and evicts its pods as `kubectl drain
+    /// --ignore-daemonsets` does; a plan that finds pods kubectl would
+    /// refuse evicts them too, as `--force` and `--delete-emptydir-data` do,
+    /// and asks for more.
+    Drain { space: String, node: String },
+    /// Creates a Job from a CronJob's template now, as `kubectl create job
+    /// --from=cronjob/…` does.
+    Trigger {
+        space: String,
+        namespace: String,
+        name: String,
+    },
+    /// Suspends a Job or a CronJob, or resumes it.
+    Suspend {
+        space: String,
+        target: ResourceRef,
+        suspend: bool,
+    },
+    /// Puts back what the space's last action did, while its undo lasts.
+    Undo { space: String },
     /// Shows a value of an open Secret.
     Reveal { object: SubscriptionId, key: String },
 }
@@ -51,13 +91,26 @@ pub struct Plan {
     pub question: String,
     /// What the confirming button says: `Delete pod`.
     pub confirm: String,
+    /// Whether it takes something away for good, which its button shows.
+    pub destructive: bool,
     /// What follows, a sentence each.
     pub consequences: Vec<String>,
+    /// The exact objects it acts on and those that follow, by what happens
+    /// to them.
+    pub affected: Vec<Affected>,
     /// The kubectl command that does the same.
     pub kubectl: String,
     /// What a toast or the status bar says while it counts down or runs:
     /// `Deleting pod web-1`.
     pub doing: String,
+}
+
+/// Objects that one thing happens to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct Affected {
+    /// What happens to them: `With it go`, `Evicts`.
+    pub title: String,
+    pub objects: Vec<ObjectRef>,
 }
 
 /// What a person goes through before a plan runs, by what it risks and the
@@ -96,9 +149,11 @@ pub enum OperationEvent {
     Running {
         text: String,
     },
-    /// Done, as it says: `Deleted pod web-1`.
+    /// Done, as it says: `Deleted pod web-1`; `undo_until` is when its undo
+    /// ends, in milliseconds since the epoch, for an action that has one.
     Done {
         text: String,
+        undo_until: Option<i64>,
     },
     /// Stopped on request, as it says, with what it sent standing.
     Stopped {

@@ -261,6 +261,7 @@ export class Spaces {
 
   #setKeys(space: Space | undefined): void {
     const contexts = space?.contexts ?? [];
+    this.keys.set("space.id", space?.id);
     this.keys.set("space.contexts", contexts);
     this.keys.set("space.multiContext", contexts.length > 1);
     const only = contexts.length === 1 ? contexts[0] : undefined;

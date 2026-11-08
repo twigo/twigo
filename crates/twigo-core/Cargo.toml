@@ -10,8 +10,12 @@ publish.workspace = true
 
 [dependencies]
 atomic-write-file.workspace = true
+fastrand.workspace = true
+form_urlencoded.workspace = true
+futures.workspace = true
 http.workspace = true
 jiff = { workspace = true, features = ["serde"] }
+k8s-openapi.workspace = true
 kube.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -29,7 +33,6 @@ twigo-sessions.workspace = true
 
 [dev-dependencies]
 twigo-cache = { workspace = true, features = ["test-util"] }
-k8s-openapi.workspace = true
 rcgen.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "test-util", "time"] }

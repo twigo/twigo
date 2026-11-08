@@ -18,7 +18,7 @@ Findings that belong to no step yet.
   - kube's loader turns an empty `tokenFile`, `client-certificate` or `client-key` into the kubeconfig's directory, so such a context fails where client-go skips the empty path.
   - A CA file the kubeconfig names, the cluster's or the IdP's, is read again only when a kubeconfig changes: the watcher follows the kubeconfig files, not the files they name.
 - The watch hub (`twigo_cache::hub`, ARCHITECTURE 3.2):
-  - The access review that lets more than four namespaces share a cluster-wide upstream is kept with the context's clients, so a RoleBinding granted later counts only once they are rebuilt or Twigo restarts.
+  - The access review that lets more than four namespaces share a cluster-wide upstream is kept with the context's clients, a no for 30 s, so a RoleBinding granted later counts for the lists opened after; those open keep their watch of each namespace.
   - A resumed watch reports `ready` on its `200`, before a `410 Gone` in its body turns it to `relisting`, so a view can flash ready for a moment.
   - When a watch reconnects with other column definitions, as a CRD's edited printer columns might bring (not verified that the API server sends them on a re-watch), the rows stored before keep their old cells, which the query view reads by the new columns until each row changes or a relist; the per-namespace upstreams of one list may disagree on columns meanwhile.
   - Listing and storing 5,000 pods by a streaming list allocates 44.2 MiB in all, HTTP/2 reads and body chunks included, to keep 4.0 MiB (`examples/hub_memory.rs`, kind 1.37 with `bench/pods.sh` at 5,000, 2026-11-02); a paged list of the same pods was not measured the same way, and step 11's budgets say whether it matters.
@@ -35,6 +35,7 @@ Findings that belong to no step yet.
   - The policy file is read once, as the app starts, so an admin's change takes a restart.
   - A type a person marks stays over the kubeconfig's, with no way back to it but marking the same type, which hides a later change of the kubeconfig's: the settings files of M3 can say which is which.
   - The accepted mockup also shows the type in the context picker and on the cluster's home; so far only the title bar shows it.
+  - A CronJob's resume asks even when it missed no run while suspended: telling which needs its schedule read in its time zone, as its next run does.
 - A countdown's toast behind three newer ones is hidden by sonner (`visibleToasts`), so only ⌘Z cancels it until they go: keep a waiting countdown in front.
 - The audit log (`twigo_policy::Audit`) grows without bound: a person's writes add a few lines each, so rotate it once actors other than the UI write (M3).
 - The bench:

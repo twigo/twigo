@@ -13,6 +13,8 @@ pub struct Resource {
     pub singular: String,
     pub short_names: Vec<String>,
     pub namespaced: bool,
+    /// Its subresources as discovery names them: `status`, `scale`.
+    pub subresources: Vec<String>,
 }
 
 /// A context's resources as discovery last answered, or why it did not.

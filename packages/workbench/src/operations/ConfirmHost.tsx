@@ -51,11 +51,20 @@ export function ConfirmHost() {
       {...(plan.environment === "production" && { accent })}
       question={plan.question}
       consequences={plan.consequences}
+      lists={plan.affected.map(({ title, objects }) => ({
+        title,
+        items: objects.map((object) => ({
+          key: `${object.group}/${object.kind}/${object.namespace ?? ""}/${object.name}`,
+          kind: object.kind,
+          name: object.name,
+          ...(object.namespace !== null && { detail: object.namespace }),
+        })),
+      }))}
       command={plan.kubectl}
       {...(plan.friction.kind === "typed" && { typed: plan.friction.text })}
       confirm={plan.confirm}
       icon={look.icon}
-      destructive={look.destructive}
+      destructive={plan.destructive}
       onConfirm={asking.confirm}
       onCancel={asking.cancel}
     />

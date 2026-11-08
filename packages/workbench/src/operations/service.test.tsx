@@ -1,4 +1,4 @@
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { Trash2 } from "lucide-react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
@@ -12,7 +12,8 @@ import {
 import { createMockBackend } from "@twigo/protocol/mock";
 import { notify, Toaster } from "@twigo/ui";
 import { testWorkbench } from "../testing";
-import { COUNTING_DOWN, type Outcome } from "./service";
+import { WorkbenchView } from "../WorkbenchView";
+import { COUNTING_DOWN, UNDOABLE, type Outcome } from "./service";
 
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -24,17 +25,19 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const LOOK = { icon: Trash2, destructive: true };
+const LOOK = { icon: Trash2 };
 
 const REQUEST: PlanRequest = {
   action: "delete",
   space: "dev",
-  target: {
-    gvr: { group: "", version: "v1", resource: "pods" },
-    namespaced: true,
-    namespace: "default",
-    name: "web-1",
-  },
+  targets: [
+    {
+      gvr: { group: "", version: "v1", resource: "pods" },
+      namespaced: true,
+      namespace: "default",
+      name: "web-1",
+    },
+  ],
 };
 
 function plan(friction: Plan["friction"]): Plan {
@@ -46,7 +49,9 @@ function plan(friction: Plan["friction"]): Plan {
     friction,
     question: "Delete pod web-1 in default from dev?",
     confirm: "Delete pod",
+    destructive: true,
     consequences: ["Its replica set web-5d4f replaces it."],
+    affected: [],
     kubectl: "kubectl --context dev delete pods web-1 -n default",
     doing: "Deleting pod web-1",
   };
@@ -112,7 +117,7 @@ test("a cancel in the countdown sends nothing, and the countdown's end runs the 
 
   const done = await started(plan({ kind: "countdown", seconds: 5 }), [
     { state: "running", text: "Waiting for pod web-1 to go" },
-    { state: "done", text: "Deleted pod web-1" },
+    { state: "done", text: "Deleted pod web-1", undoUntil: null },
   ]);
   await act(() => vi.advanceTimersByTimeAsync(4900));
   expect(commands(done.sent)).toEqual(["command_plan"]);
@@ -128,7 +133,7 @@ test("a cancel in the countdown sends nothing, and the countdown's end runs the 
 
 test("a dialog runs the plan with what was typed, and its cancel drops it", async () => {
   const typed = await started(plan({ kind: "typed", text: "dev" }), [
-    { state: "done", text: "Deleted pod web-1" },
+    { state: "done", text: "Deleted pod web-1", undoUntil: null },
   ]);
   const asking = typed.workbench.operations.asking;
   expect(asking?.plan.id).toBe(7);
@@ -283,10 +288,324 @@ test("a countdown that runs out runs its plan, though its toast's dismissal canc
   render(<Toaster />);
   const { sent, outcome } = await started(
     plan({ kind: "countdown", seconds: 5 }),
-    [{ state: "done", text: "Deleted pod web-1" }],
+    [{ state: "done", text: "Deleted pod web-1", undoUntil: null }],
   );
   await act(() => vi.advanceTimersByTimeAsync(5000));
   await act(() => vi.advanceTimersByTimeAsync(1000));
   await expect(outcome).resolves.toEqual({ state: "done" });
   expect(commands(sent)).toEqual(["command_plan", "command_execute"]);
+});
+
+test("an action's undo is offered in its space while it lasts, and a later action ends it", async () => {
+  render(<Toaster />);
+  const until = Date.now() + 30_000;
+  const scaled = await started(plan({ kind: "atOnce" }), [
+    { state: "done", text: "Scaled deployment web to 5", undoUntil: until },
+  ]);
+  const { keys, operations } = scaled.workbench;
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await expect(scaled.outcome).resolves.toEqual({ state: "done" });
+  expect(keys.lookup(null)(UNDOABLE)).toEqual(["dev"]);
+  expect(document.body.textContent).toContain("Scaled deployment web to 5");
+  expect(document.body.textContent).toContain("Undo");
+
+  const undone = operations.undo("dev");
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await expect(undone).resolves.toEqual({ state: "done" });
+  expect(scaled.sent.map(({ request }) => request)).toContainEqual({
+    action: "undo",
+    space: "dev",
+  });
+  expect(keys.lookup(null)(UNDOABLE)).toEqual([]);
+  await expect(operations.undo("dev")).resolves.toEqual({ state: "cancelled" });
+});
+
+test("an undo nobody takes lasts its 30 s", async () => {
+  vi.spyOn(notify, "undoable").mockReturnValue({ dismiss: vi.fn() });
+  const until = Date.now() + 30_000;
+  const scaled = await started(plan({ kind: "atOnce" }), [
+    { state: "done", text: "Scaled deployment web to 5", undoUntil: until },
+  ]);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await scaled.outcome;
+  const { keys, operations } = scaled.workbench;
+  await act(() => vi.advanceTimersByTimeAsync(29_000));
+  expect(keys.lookup(null)(UNDOABLE)).toEqual(["dev"]);
+  await act(() => vi.advanceTimersByTimeAsync(1_000));
+  expect(keys.lookup(null)(UNDOABLE)).toEqual([]);
+  await expect(operations.undo("dev")).resolves.toEqual({ state: "cancelled" });
+});
+
+test("an action without an undo ends the one before it in its space", async () => {
+  const events: OperationEvent[] = [
+    {
+      state: "done",
+      text: "Scaled deployment web to 5",
+      undoUntil: Date.now() + 30_000,
+    },
+  ];
+  const { backend } = bus(plan({ kind: "atOnce" }), events);
+  const workbench = await testWorkbench("ready", backend);
+  const scaled = workbench.operations.run(REQUEST, LOOK);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await scaled;
+  expect(workbench.keys.lookup(null)(UNDOABLE)).toEqual(["dev"]);
+
+  events.splice(0, events.length, {
+    state: "done",
+    text: "Restarted deployment web",
+    undoUntil: null,
+  });
+  const restarted = workbench.operations.run(REQUEST, LOOK);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await restarted;
+  expect(workbench.keys.lookup(null)(UNDOABLE)).toEqual([]);
+});
+
+test("an undo's toast goes when it ends, and a refused run leaves it", async () => {
+  const dismiss = vi.fn();
+  vi.spyOn(notify, "undoable").mockReturnValue({ dismiss });
+  const events: OperationEvent[] = [
+    {
+      state: "done",
+      text: "Scaled deployment web to 5",
+      undoUntil: Date.now() + 30_000,
+    },
+  ];
+  const { backend } = bus(plan({ kind: "atOnce" }), events);
+  const workbench = await testWorkbench("ready", backend);
+  const scaled = workbench.operations.run(REQUEST, LOOK);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await scaled;
+
+  vi.spyOn(backend, "subscribe").mockRejectedValueOnce(
+    new IpcError("conflict", "dev is guarded now"),
+  );
+  const refused = workbench.operations.run(REQUEST, LOOK);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await expect(refused).resolves.toEqual({ state: "failed" });
+  expect(workbench.keys.lookup(null)(UNDOABLE)).toEqual(["dev"]);
+  expect(dismiss).not.toHaveBeenCalled();
+
+  await act(() => vi.advanceTimersByTimeAsync(30_000));
+  expect(dismiss).toHaveBeenCalledOnce();
+  expect(workbench.keys.lookup(null)(UNDOABLE)).toEqual([]);
+});
+
+test("a second ⌘Z while the undo goes does nothing", async () => {
+  vi.spyOn(notify, "undoable").mockReturnValue({ dismiss: vi.fn() });
+  const until = Date.now() + 30_000;
+  const scaled = await started(plan({ kind: "atOnce" }), [
+    { state: "done", text: "Scaled deployment web to 5", undoUntil: until },
+  ]);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await scaled.outcome;
+  const { operations, keys, backend } = scaled.workbench;
+  const invoke = vi
+    .spyOn(backend, "invoke")
+    .mockImplementationOnce(() => new Promise(() => undefined));
+  void operations.undo("dev");
+  await expect(operations.undo("dev")).resolves.toEqual({
+    state: "cancelled",
+  });
+  expect(invoke).toHaveBeenCalledOnce();
+  expect(keys.lookup(null)(UNDOABLE)).toEqual(["dev"]);
+});
+
+test("⌘Z cancels a countdown before it undoes, and undoes in a list otherwise", async () => {
+  const workbench = await testWorkbench();
+  const execute = vi
+    .spyOn(workbench.commands, "execute")
+    .mockResolvedValue(true);
+  workbench.keys.set("listFocus", true);
+  workbench.keys.set("space.id", "dev");
+  workbench.keys.set(UNDOABLE, ["dev"]);
+  const press = () =>
+    workbench.keybindings.dispatch(
+      new KeyboardEvent("keydown", { code: "KeyZ", metaKey: true }),
+    );
+  press();
+  expect(execute).toHaveBeenLastCalledWith(
+    "workbench.action.undo",
+    expect.any(Function),
+    undefined,
+  );
+  workbench.keys.set(COUNTING_DOWN, true);
+  press();
+  expect(execute).toHaveBeenLastCalledWith(
+    "workbench.action.cancelCountdown",
+    expect.any(Function),
+    undefined,
+  );
+});
+
+/**
+ * A backend whose plans answer in turn with ids from 1, and whose runs tell
+ * what `told` gives for their plan, after `after` ms.
+ */
+function scripted(
+  told: Record<number, { after: number; events: OperationEvent[] }>,
+) {
+  const mock = createMockBackend("ready");
+  let next = 0;
+  const backend: Backend = {
+    invoke(command, request) {
+      if (command === "command_plan") {
+        return Promise.resolve({
+          ...plan({ kind: "atOnce" }),
+          id: ++next,
+        } as never);
+      }
+      if (command === "command_cancel") return Promise.resolve(null as never);
+      return mock.invoke(command, request);
+    },
+    subscribe(command, request, onMessage) {
+      if (command !== "command_execute") {
+        return mock.subscribe(command, request, onMessage);
+      }
+      const { plan: id } = request as { plan: number };
+      const run = told[id];
+      setTimeout(() => {
+        for (const event of run?.events ?? []) onMessage(event);
+      }, run?.after ?? 0);
+      return Promise.resolve(null as never);
+    },
+  };
+  return backend;
+}
+
+test("the last action is the one that started last, whichever ends first", async () => {
+  const offered = vi
+    .spyOn(notify, "undoable")
+    .mockReturnValue({ dismiss: vi.fn() });
+  const until = Date.now() + 30_000;
+  const done = (text: string) => ({
+    state: "done" as const,
+    text,
+    undoUntil: until,
+  });
+  const workbench = await testWorkbench(
+    "ready",
+    scripted({
+      1: { after: 100, events: [done("Scaled deployment web to 5")] },
+      2: { after: 10, events: [done("Cordoned node n")] },
+    }),
+  );
+  const first = workbench.operations.run(REQUEST, LOOK);
+  await act(() => vi.advanceTimersByTimeAsync(1));
+  const second = workbench.operations.run(REQUEST, LOOK);
+  await act(() => vi.advanceTimersByTimeAsync(200));
+  await Promise.all([first, second]);
+  expect(offered.mock.calls.map(([props]) => props.message)).toEqual([
+    "Cordoned node n",
+  ]);
+  expect(workbench.keys.lookup(null)(UNDOABLE)).toEqual(["dev"]);
+});
+
+test("an undo Rust refused leaves the undo to try again", async () => {
+  vi.spyOn(notify, "undoable").mockReturnValue({ dismiss: vi.fn() });
+  const until = Date.now() + 30_000;
+  const scaled = await started(plan({ kind: "atOnce" }), [
+    { state: "done", text: "Scaled deployment web to 5", undoUntil: until },
+  ]);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await scaled.outcome;
+  const { operations, keys, backend } = scaled.workbench;
+  vi.spyOn(backend, "invoke").mockRejectedValueOnce(
+    new IpcError("conflict", "prod-eu is read-only now"),
+  );
+  await expect(operations.undo("dev")).resolves.toEqual({ state: "failed" });
+  expect(keys.lookup(null)(UNDOABLE)).toEqual(["dev"]);
+});
+
+test("an undo's button takes something away only when its plan says so, and a cancel keeps the undo", async () => {
+  vi.spyOn(notify, "undoable").mockReturnValue({ dismiss: vi.fn() });
+  const until = Date.now() + 30_000;
+  const scaled = await started(plan({ kind: "atOnce" }), [
+    { state: "done", text: "Scaled deployment web to 2", undoUntil: until },
+  ]);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await scaled.outcome;
+  const { workbench } = scaled;
+  render(<WorkbenchView workbench={workbench} />);
+  const button = () => screen.getByRole("button", { name: /^Undo/ });
+  for (const destructive of [true, false]) {
+    vi.spyOn(workbench.backend, "invoke").mockResolvedValueOnce({
+      ...plan({ kind: "confirm" }),
+      id: destructive ? 9 : 10,
+      confirm: "Undo",
+      destructive,
+    });
+    const undone = workbench.operations.undo("dev");
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(button().className.includes("bg-destructive")).toBe(destructive);
+    act(() => {
+      workbench.operations.asking?.cancel();
+    });
+    await expect(undone).resolves.toEqual({ state: "cancelled" });
+    expect(workbench.keys.lookup(null)(UNDOABLE)).toEqual(["dev"]);
+  }
+});
+
+test("an undo's dialog closes when the undo ends", async () => {
+  vi.spyOn(notify, "undoable").mockReturnValue({ dismiss: vi.fn() });
+  const until = Date.now() + 30_000;
+  const scaled = await started(plan({ kind: "atOnce" }), [
+    { state: "done", text: "Scaled deployment web to 2", undoUntil: until },
+  ]);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await scaled.outcome;
+  const { operations, backend } = scaled.workbench;
+  vi.spyOn(backend, "invoke").mockResolvedValueOnce({
+    ...plan({ kind: "confirm" }),
+    id: 9,
+  });
+  const undone = operations.undo("dev");
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  expect(operations.asking?.plan.id).toBe(9);
+  await act(() => vi.advanceTimersByTimeAsync(30_000));
+  expect(operations.asking).toBeUndefined();
+  await expect(undone).resolves.toEqual({ state: "cancelled" });
+});
+
+test("an undo whose plan comes back after the undo ended asks nothing", async () => {
+  vi.spyOn(notify, "undoable").mockReturnValue({ dismiss: vi.fn() });
+  const until = Date.now() + 30_000;
+  const scaled = await started(plan({ kind: "atOnce" }), [
+    { state: "done", text: "Scaled deployment web to 2", undoUntil: until },
+  ]);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await scaled.outcome;
+  const { operations, backend } = scaled.workbench;
+  let answer: (planned: Plan) => void = () => undefined;
+  const invoke = vi.spyOn(backend, "invoke");
+  invoke.mockImplementationOnce(
+    () =>
+      new Promise<Plan>((resolve) => {
+        answer = resolve;
+      }),
+  );
+  const undone = operations.undo("dev");
+  await act(() => vi.advanceTimersByTimeAsync(30_000));
+  answer({ ...plan({ kind: "confirm" }), id: 9 });
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  expect(operations.asking).toBeUndefined();
+  await expect(undone).resolves.toEqual({ state: "cancelled" });
+  expect(invoke).toHaveBeenCalledWith("command_cancel", 9);
+});
+
+test("a done run whose undo is not offered still says so", async () => {
+  const success = vi.spyOn(notify, "success");
+  vi.spyOn(notify, "undoable").mockReturnValue({ dismiss: vi.fn() });
+  const until = Date.now() + 30_000;
+  const scaled = await started(plan({ kind: "atOnce" }), [
+    { state: "done", text: "Scaled deployment web to 5", undoUntil: until },
+  ]);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await scaled.outcome;
+  expect(success).not.toHaveBeenCalled();
+  const undone = scaled.workbench.operations.undo("dev");
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await undone;
+  expect(success).toHaveBeenCalledWith("Scaled deployment web to 5");
 });
