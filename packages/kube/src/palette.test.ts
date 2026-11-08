@@ -56,12 +56,16 @@ test("every registered command appears in the palette", async () => {
   const resolved = workbench.quickAccess.resolve(">");
   const shown = new Set<string>();
   for (const { group, kind } of KINDS) {
-    workbench.keys.set("resource.group", group);
-    workbench.keys.set("resource.kind", kind);
-    const items = await resolved?.provider.items("", {
-      lookup: workbench.keys.lookup(document.body),
-    });
-    for (const item of items ?? []) shown.add(item.id);
+    for (const state of [false, true]) {
+      workbench.keys.set("resource.group", group);
+      workbench.keys.set("resource.kind", kind);
+      workbench.keys.set("resource.cordoned", state);
+      workbench.keys.set("resource.suspended", state);
+      const items = await resolved?.provider.items("", {
+        lookup: workbench.keys.lookup(document.body),
+      });
+      for (const item of items ?? []) shown.add(item.id);
+    }
   }
   const ids = workbench.commands
     .all()
@@ -74,7 +78,6 @@ test("every registered command appears in the palette", async () => {
 test("every registered command runs from a key the user binds to it", async () => {
   const workbench = await withEveryEnablement();
   const ids = workbench.commands.all().map((command) => command.id);
-  // Two chords, each with a key and a shifted key for every letter and digit.
   const keys = ["k", "j"].flatMap((chord) =>
     ["", "shift+"].flatMap((modifier) =>
       Array.from({ length: 36 }, (_, index) => ({
@@ -103,6 +106,9 @@ test("every registered command runs from a key the user binds to it", async () =
       KINDS.find(({ commands }) => commands.test(id)) ?? KINDS[1];
     workbench.keys.set("resource.group", group);
     workbench.keys.set("resource.kind", kind);
+    const undoing = /\.(uncordon|resume)$/.test(id);
+    workbench.keys.set("resource.cordoned", undoing);
+    workbench.keys.set("resource.suspended", undoing);
     const { chord, key } = keys[index] ?? { chord: "", key: "" };
     const char = key.slice(-1);
     const code = /\d/.test(char) ? `Digit${char}` : `Key${char.toUpperCase()}`;

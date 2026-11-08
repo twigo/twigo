@@ -6,6 +6,7 @@ import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { Details } from "../Details";
 import { CAPABILITY_PREFIXES } from "../capabilities";
 import { logsKind } from "../logs/entries";
+import { rowState } from "../rowState";
 import { objectOf } from "../selection";
 import { sameGvr, useResources } from "../discovery";
 import { pluralTitle } from "../kinds";
@@ -122,7 +123,10 @@ function Loaded({
     namespace,
     CAPABILITY_PREFIXES.flatMap((prefix) => commands.referenced(prefix)),
   );
-  const scoped = JSON.stringify(allowed);
+  const scoped = JSON.stringify({
+    ...allowed,
+    ...rowState(resource, selected),
+  });
   const marks = selection.marks(uri);
   const [open, setOpen] = useState(selected?.reveal === true);
   const [revealed, setRevealed] = useState(selected);

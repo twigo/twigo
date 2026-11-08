@@ -196,7 +196,7 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
             cronJob.name,
             cronJob.schedule,
             "<none>",
-            cronJob.suspend,
+            cronJob.suspend ? "True" : "False",
             cluster.jobs.filter(
               (job) =>
                 job.namespace === cronJob.namespace &&
