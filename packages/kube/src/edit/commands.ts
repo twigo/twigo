@@ -12,7 +12,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import type { ObjectRef, ResourceRef } from "@twigo/protocol";
+import { toIpcError, type ObjectRef, type ResourceRef } from "@twigo/protocol";
 import { notify } from "@twigo/ui";
 import type { ContextValue, MenuId, Workbench } from "@twigo/workbench";
 import { sameGvr, type Discovery } from "../discovery";
@@ -30,6 +30,12 @@ import {
   sourceOf,
   type EditServices,
 } from "./services";
+
+/** The object a manifest names: the reference to find it by and the words for the person. */
+interface Made {
+  readonly ref: ObjectRef;
+  readonly what: string;
+}
 
 export interface EditContext {
   readonly discovery: Discovery;
@@ -176,13 +182,9 @@ export function registerEdits(
     present(uri, await previews.run(uri, subject, choices));
   };
 
-  const createdBy = (
-    space: string,
-    text: string,
-  ): { readonly uri: string; readonly what: string } | undefined => {
+  const madeBy = (text: string): Made | undefined => {
     const parsed = parseManifest(text);
-    const resources = discovery.get(space);
-    if (!parsed.ok || resources.state !== "ready") return undefined;
+    if (!parsed.ok) return undefined;
     const { apiVersion, kind, metadata } = parsed.object as {
       apiVersion?: string;
       kind?: string;
@@ -190,20 +192,41 @@ export function registerEdits(
     };
     if (!apiVersion || !kind || !metadata?.name) return undefined;
     const slash = apiVersion.lastIndexOf("/");
-    const created: ObjectRef = {
-      group: slash < 0 ? "" : apiVersion.slice(0, slash),
-      version: apiVersion.slice(slash + 1),
-      kind,
-      namespace: metadata.namespace ?? "default",
-      name: metadata.name,
+    return {
+      ref: {
+        group: slash < 0 ? "" : apiVersion.slice(0, slash),
+        version: apiVersion.slice(slash + 1),
+        kind,
+        namespace: metadata.namespace ?? "default",
+        name: metadata.name,
+      },
+      what: `${kind} ${metadata.namespace === undefined ? "" : `${metadata.namespace}/`}${metadata.name}`,
     };
-    const uri = refUri(space, resources.value, created);
-    return uri === undefined
-      ? undefined
-      : {
-          uri,
-          what: `${kind} ${metadata.namespace === undefined ? "" : `${metadata.namespace}/`}${metadata.name}`,
-        };
+  };
+
+  const nameOf = (space: string): string =>
+    spaces.list.find(({ id }) => id === space)?.name ?? space;
+
+  /**
+   * Opens the object a manifest made once the space's discovery says where its
+   * kind lives, which discovery follows for the space shown only, and says
+   * what keeps it from opening.
+   */
+  const openMade = async (space: string, made: Made): Promise<boolean> => {
+    try {
+      const uri = refUri(space, await discovery.resources(space), made.ref);
+      if (uri === undefined) {
+        notify.warning(`${nameOf(space)} does not serve ${made.ref.kind}`);
+        return false;
+      }
+      editors.open(uri);
+      return true;
+    } catch (error) {
+      notify.error(
+        `Cannot open ${made.what} in ${nameOf(space)}: ${toIpcError(error).message}`,
+      );
+      return false;
+    }
   };
 
   /**
@@ -229,17 +252,23 @@ export function registerEdits(
       return;
     }
     const target = last.subject.space;
-    const created = createdBy(target, copy.text);
+    const made = madeBy(copy.text);
     if (target !== copy.space) {
-      const name = spaces.list.find(({ id }) => id === target)?.name ?? target;
+      const name = nameOf(target);
+      const verb =
+        last.answer.state !== "ready"
+          ? "Recreated"
+          : last.answer.live === null
+            ? "Created"
+            : "Updated";
       notify.success(
-        created ? `Created ${created.what} in ${name}` : `Applied to ${name}`,
-        created && {
+        made ? `${verb} ${made.what} in ${name}` : `Applied to ${name}`,
+        made && {
           action: {
             label: `Open in ${name}`,
             run: () => {
               spaces.select(target);
-              editors.open(created.uri);
+              void openMade(target, made);
             },
           },
         },
@@ -248,9 +277,10 @@ export function registerEdits(
       return;
     }
     copies.applied(uri);
-    if (created && inView(uri)) {
-      editors.open(created.uri);
-      editors.close(uri);
+    if (made) {
+      void openMade(target, made).then((opened) => {
+        if (opened) editors.close(uri);
+      });
     }
   };
 

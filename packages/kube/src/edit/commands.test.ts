@@ -453,14 +453,8 @@ test("a plan done in another space than its editor's ends the copy and opens not
 const MANIFEST =
   "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: fresh\n  namespace: default\ndata:\n  a: '1'\n";
 
-test("a manifest applied to another context stays, and a toast says what was made where and goes there", async () => {
-  const { workbench, edits, discovery, open, close } = await setupEdit(
-    "live",
-    "dev",
-  );
-  workbench.spaces.select("staging");
-  await discovery.resources("staging");
-  workbench.spaces.select("dev");
+test("a manifest applied to another context stays, and a toast says what was made where and goes there, though the context was not visited", async () => {
+  const { workbench, edits, open, close } = await setupEdit("live", "dev");
   const manifest = "untitled://dev/manifest-3";
   edits.copies.write(manifest, "dev", MANIFEST);
   vi.spyOn(workbench.quickAccess, "pick").mockResolvedValue({
@@ -495,9 +489,92 @@ test("a manifest applied to another context stays, and a toast says what was mad
 
   options?.action?.run();
   expect(workbench.spaces.active?.id).toBe("staging");
-  expect(open).toHaveBeenCalledWith(
-    "k8s://staging//v1/configmaps/default/fresh",
+  await vi.waitFor(() => {
+    expect(open).toHaveBeenCalledWith(
+      "k8s://staging//v1/configmaps/default/fresh",
+    );
+  });
+});
+
+test("the toast of a manifest says it updated an object that existed, and names a kind the context does not serve instead of opening it", async () => {
+  const { workbench, edits, open } = await setupEdit("live", "staging");
+  const manifest = "untitled://staging/manifest-5";
+  edits.copies.write(manifest, "staging", MANIFEST);
+  vi.spyOn(workbench.quickAccess, "pick").mockResolvedValue({
+    id: "dev",
+    label: "dev",
+  });
+  const toast = vi.spyOn(notify, "success");
+  const execute = (id: string) =>
+    workbench.commands.execute(
+      id,
+      editLookup(edits, manifest, workbench.keys.lookup(null)),
+      { uri: manifest },
+    );
+  const said = () => toast.mock.calls[toast.mock.calls.length - 1]?.[0];
+  await execute("k8s.edit.apply");
+  await execute("k8s.edit.confirm");
+  expect(said()).toBe("Created ConfigMap default/fresh in dev");
+  await execute("k8s.edit.apply");
+  expect(edits.previews.get(manifest)).toMatchObject({
+    answer: { state: "ready", live: { data: { a: "1" } } },
+  });
+  await execute("k8s.edit.confirm");
+  expect(said()).toBe("Updated ConfigMap default/fresh in dev");
+  expect(edits.copies.get(manifest)?.text).toBe(MANIFEST);
+
+  const widget =
+    "apiVersion: example.com/v1\nkind: Widget\nmetadata:\n  name: w\n  namespace: default\n";
+  edits.copies.write(manifest, "staging", widget);
+  await execute("k8s.edit.apply");
+  await execute("k8s.edit.confirm");
+  const [message, options] =
+    toast.mock.calls[toast.mock.calls.length - 1] ?? [];
+  expect(message).toBe("Created Widget default/w in dev");
+  const warning = vi.spyOn(notify, "warning");
+  open.mockClear();
+  options?.action?.run();
+  await vi.waitFor(() => {
+    expect(warning).toHaveBeenCalledWith("dev does not serve Widget");
+  });
+  expect(open).not.toHaveBeenCalled();
+});
+
+test("a manifest whose plan ended after the person left its space opens the object it made there, and closes its tabs for that space", async () => {
+  const { workbench, edits, discovery, open, close } = await setupEdit(
+    "live",
+    "dev",
   );
+  await discovery.resources("dev");
+  const manifest = "untitled://dev/manifest-6";
+  edits.copies.write(manifest, "dev", MANIFEST);
+  vi.spyOn(workbench.quickAccess, "pick").mockResolvedValue({
+    id: "dev",
+    label: "dev",
+  });
+  const execute = (id: string) =>
+    workbench.commands.execute(
+      id,
+      editLookup(edits, manifest, workbench.keys.lookup(null)),
+      { uri: manifest },
+    );
+  await execute("k8s.edit.apply");
+  open.mockClear();
+  close.mockClear();
+  vi.spyOn(workbench.operations, "run").mockImplementationOnce(() => {
+    workbench.spaces.select("staging");
+    return Promise.resolve({ state: "done" });
+  });
+  await execute("k8s.edit.confirm");
+
+  expect(edits.copies.get(manifest)).toBeUndefined();
+  expect(close).toHaveBeenCalledWith(
+    diffUri({ kind: "apply", editor: manifest }),
+  );
+  await vi.waitFor(() => {
+    expect(open).toHaveBeenCalledWith("k8s://dev//v1/configmaps/default/fresh");
+  });
+  expect(close).toHaveBeenCalledWith(manifest);
 });
 
 test("a manifest applied to its own context opens the object it made and ends", async () => {
@@ -521,7 +598,9 @@ test("a manifest applied to its own context opens the object it made and ends", 
   await execute("k8s.edit.apply");
   await execute("k8s.edit.confirm");
   expect(edits.copies.get(manifest)).toBeUndefined();
-  expect(open).toHaveBeenCalledWith("k8s://dev//v1/configmaps/default/fresh");
+  await vi.waitFor(() => {
+    expect(open).toHaveBeenCalledWith("k8s://dev//v1/configmaps/default/fresh");
+  });
   expect(close).toHaveBeenCalledWith(manifest);
 });
 

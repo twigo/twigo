@@ -1609,7 +1609,9 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
    The plan takes the preview when it is made, once the gate has allowed it: a cancelled confirmation, a failed run and a stopped one end the preview and close its diff, while a plan the gate refuses, as in `read-only`, leaves it for an Apply after an unlock.
    The edit ends only if its text is still what the plan sent, so what was typed while it ran stays.
    An answer that arrives after the person went to another space, or that a newer preview or a clear replaced, opens no tab; the first stays with its editor, which offers to show it.
-   A new manifest applied to another context than its own space's stays, as the person may apply it elsewhere too, and a toast says what was made where and goes there.
+   A new manifest applied to another context than its own space's stays, as the person may apply it elsewhere too, and a toast names the kind and the name from the manifest, says whether the object was created or updated (the preview's `live` tells), and where.
+   Its action selects that space, waits for its discovery, which follows the space shown only, and opens the object, or says that the context does not serve the kind.
+   A manifest applied to its own space opens the object it made and closes its own tab, and the tabs of a plan that ended while the person was in another space close when that space is shown again.
 7. A field the user deleted goes by the apply only when Twigo's Apply entry is its only owner.
    Another manager's or nobody's stays after an apply, so it needs a separate merge patch with `null`, shown as its own step in the diff.
    The patch is sent after the apply, on the `resourceVersion` the apply returned; a merge patch cannot address a list element, so a removal inside a list sends the outermost list whole, as it stands after the apply minus the removal, and nothing is sent when the dry-run already shows it gone.
