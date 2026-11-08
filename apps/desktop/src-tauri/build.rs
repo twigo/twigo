@@ -11,6 +11,7 @@ fn main() {
         "command_plan",
         "command_execute",
         "command_cancel",
+        "apply_preview",
         "access_review",
         "spaces_list",
         "space_open",

@@ -34,6 +34,57 @@ title: string, objects: Array<ObjectRef>, };
 
 export type AnsiColor = "black" | "red" | "green" | "yellow" | "blue" | "magenta" | "cyan" | "white" | "brightBlack" | "brightRed" | "brightGreen" | "brightYellow" | "brightBlue" | "brightMagenta" | "brightCyan" | "brightWhite";
 
+/**
+ * A field another manager owns that an apply would change.
+ */
+export type ApplyConflict = { 
+/**
+ * As the server names it: `.spec.replicas`.
+ */
+path: string, manager: string, };
+
+/**
+ * What a dry-run found; a closed set, so the webview cannot miss a case.
+ */
+export type ApplyPreviewed = { "state": "unchanged", 
+/**
+ * What the edit said that Twigo leaves out: `status`, the
+ * server's metadata.
+ */
+ignored: Array<string>, } | { "state": "ready", id: PreviewId, 
+/**
+ * Null for a manifest of a new object.
+ */
+live: unknown, result: unknown, warnings: Array<string>, 
+/**
+ * The paths that go by a separate merge patch, as their own step.
+ */
+removals: Array<string>, ignored: Array<string>, } | { "state": "conflicts", conflicts: Array<ApplyConflict>, } | { "state": "stale", message: string, } | { "state": "immutable", message: string, recreate: PreviewId | null, };
+
+/**
+ * An edit to preview, parsed by the webview's YAML parser, so there is one
+ * YAML dialect.
+ */
+export type ApplyRequest = { space: string, 
+/**
+ * The object it edits; none for a new manifest, whose object is its
+ * whole configuration and whose resource comes from discovery.
+ */
+opened: OpenedEdit | null, 
+/**
+ * The object as the person left it.
+ */
+edited: unknown, 
+/**
+ * Answer conflicts by taking the fields.
+ */
+force: boolean, 
+/**
+ * The conflicting paths the person gave up, as [`ApplyConflict`] names
+ * them, which leave the configuration.
+ */
+drop: Array<string>, };
+
 export type Block = { "type": "fields", fields: Array<Field>, } | { "type": "conditions", conditions: Array<Condition>, } | { "type": "data", entries: Array<DataEntry>, 
 /**
  * Whether [`GetValues`] sends their values: a ConfigMap's text
@@ -832,6 +883,23 @@ export type OpenLogs = { target: LogTarget, source: LogSource, view: LogView, };
 export type OpenObject = { object: ObjectQuery, parts: ObjectParts, };
 
 /**
+ * The object as it was opened, which an edit is measured against. Its
+ * `lock` is apart from `base`: "Keep mine" after a change on the server
+ * diffs against the old base and locks to the new version, since diffing
+ * against the new live object would revert the other writer's change.
+ */
+export type OpenedEdit = { target: ResourceRef, 
+/**
+ * The object as the webview received it: without managedFields, a
+ * Secret's values masked.
+ */
+base: unknown, 
+/**
+ * The `resourceVersion` to hold the apply to.
+ */
+lock: string, };
+
+/**
  * How a running plan goes, over its channel; every kind but `running` is
  * the last.
  */
@@ -885,7 +953,7 @@ export type PlanId = number;
 /**
  * What a person asks a command to do.
  */
-export type PlanRequest = { "action": "delete", space: string, targets: Array<ResourceRef>, } | { "action": "scale", space: string, target: ResourceRef, replicas: number, } | { "action": "restart", space: string, target: ResourceRef, } | { "action": "cordon", space: string, node: string, unschedulable: boolean, } | { "action": "drain", space: string, node: string, } | { "action": "trigger", space: string, namespace: string, name: string, } | { "action": "suspend", space: string, target: ResourceRef, suspend: boolean, } | { "action": "undo", space: string, } | { "action": "reveal", object: SubscriptionId, key: string, };
+export type PlanRequest = { "action": "delete", space: string, targets: Array<ResourceRef>, } | { "action": "scale", space: string, target: ResourceRef, replicas: number, } | { "action": "restart", space: string, target: ResourceRef, } | { "action": "cordon", space: string, node: string, unschedulable: boolean, } | { "action": "drain", space: string, node: string, } | { "action": "trigger", space: string, namespace: string, name: string, } | { "action": "suspend", space: string, target: ResourceRef, suspend: boolean, } | { "action": "undo", space: string, } | { "action": "reveal", object: SubscriptionId, key: string, } | { "action": "apply", preview: PreviewId, };
 
 export type PluginStatus = { "state": "idle" } | { "state": "waiting" } | { "state": "running", 
 /**
@@ -901,6 +969,12 @@ expires: string | null, } | { "state": "failed", error: string, output: string,
  * The kubeconfig's `installHint`, when the command was not found.
  */
 installHint: string | null, };
+
+/**
+ * What a preview prepared, kept in Rust for the window that asked until a
+ * plan takes it (`PlanRequest::Apply`) or the window goes.
+ */
+export type PreviewId = number;
 
 export type Related = { owners: Array<RelatedObject>, owned: Array<RelatedObject>, 
 /**
@@ -1149,6 +1223,7 @@ export type Commands = {
   command_execute: { request: Execute; response: null; message: OperationEvent };
   command_cancel: { request: PlanId; response: null; message: null };
   access_review: { request: AccessQuery; response: Array<boolean>; message: null };
+  apply_preview: { request: ApplyRequest; response: ApplyPreviewed; message: null };
   space_open: { request: string; response: Space; message: null };
   resources_watch: { request: string; response: null; message: Discovered };
   namespaces_list: { request: string; response: Array<string>; message: null };

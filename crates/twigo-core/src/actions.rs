@@ -2,6 +2,7 @@
 //! what it acts on, says what it will do and what it risks, and holds its
 //! run.
 
+mod apply;
 mod cordon;
 mod delete;
 mod dependents;
@@ -15,6 +16,7 @@ pub(crate) mod undo;
 
 use std::sync::{Arc, Weak};
 
+pub(crate) use apply::{Prepared, apply, preview};
 pub(crate) use cordon::cordon;
 pub(crate) use delete::delete;
 pub(crate) use drain::drain;

@@ -242,6 +242,7 @@ export function createMockBackend(
       return null;
     },
     command_plan: (request) => bus.plan(request),
+    apply_preview: (request) => bus.applyPreview(request),
     command_cancel: (id) => bus.cancel(id),
     access_review: ({ checks }) =>
       checks.map(

@@ -5,11 +5,11 @@
 use ts_rs::TS;
 
 use crate::{
-    AccessQuery, Ack, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ExecReview,
-    Execute, GetValues, KeyboardLayout, ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs,
-    OpenObject, OperationEvent, Plan, PlanId, PlanRequest, SchemaQuery, SetContextEnvironment,
-    SetContextMode, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellEnvironment,
-    Space, StateEntry, StateSnapshot, SubscriptionId,
+    AccessQuery, Ack, ApplyPreviewed, ApplyRequest, ClusterVersion, Context, ContextAuth,
+    Discovered, DownloadLogs, ExecReview, Execute, GetValues, KeyboardLayout, ListBatch, ListQuery,
+    LogBatch, ObjectBatch, OpenLogs, OpenObject, OperationEvent, Plan, PlanId, PlanRequest,
+    SchemaQuery, SetContextEnvironment, SetContextMode, SetLogSource, SetLogView, SetLogWindow,
+    SetParts, SetWindow, ShellEnvironment, Space, StateEntry, StateSnapshot, SubscriptionId,
 };
 
 pub trait Command {
@@ -131,6 +131,18 @@ impl Command for AccessReview {
     const NAME: &'static str = "access_review";
     type Request = AccessQuery;
     type Response = Vec<bool>;
+    type Message = ();
+}
+
+/// Builds the apply configuration of an edit and dry-runs it (ARCHITECTURE
+/// 6.5): it writes nothing, and a plan asked for by the answer's id sends
+/// what it prepared.
+pub struct ApplyPreview;
+
+impl Command for ApplyPreview {
+    const NAME: &'static str = "apply_preview";
+    type Request = ApplyRequest;
+    type Response = ApplyPreviewed;
     type Message = ();
 }
 

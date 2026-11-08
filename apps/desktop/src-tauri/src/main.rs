@@ -18,11 +18,12 @@ use tauri_plugin_opener::OpenerExt;
 use twigo_core::{Core, PolicyFile};
 use twigo_env::Environment;
 use twigo_ipc::{
-    AccessQuery, Ack, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ErrorKind,
-    ExecReview, Execute, GetValues, IpcError, KeyboardLayout, ListBatch, ListQuery, LogBatch,
-    ObjectBatch, OpenLogs, OpenObject, OperationEvent, Plan, PlanId, PlanRequest, SchemaQuery,
-    SetContextEnvironment, SetContextMode, SetLogSource, SetLogView, SetLogWindow, SetParts,
-    SetWindow, ShellEnvironment, Space, StateEntry, StateSnapshot, SubscriptionId,
+    AccessQuery, Ack, ApplyPreviewed, ApplyRequest, ClusterVersion, Context, ContextAuth,
+    Discovered, DownloadLogs, ErrorKind, ExecReview, Execute, GetValues, IpcError, KeyboardLayout,
+    ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject, OperationEvent, Plan,
+    PlanId, PlanRequest, SchemaQuery, SetContextEnvironment, SetContextMode, SetLogSource,
+    SetLogView, SetLogWindow, SetParts, SetWindow, ShellEnvironment, Space, StateEntry,
+    StateSnapshot, SubscriptionId,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
 
@@ -217,6 +218,15 @@ async fn command_execute(
             }
         })
         .await
+}
+
+#[tauri::command]
+async fn apply_preview(
+    webview: Webview,
+    app: State<'_, App>,
+    request: ApplyRequest,
+) -> Result<ApplyPreviewed, IpcError> {
+    app.core.apply_preview(webview.label(), request).await
 }
 
 #[tauri::command]
@@ -652,6 +662,7 @@ fn main() {
             command_plan,
             command_execute,
             command_cancel,
+            apply_preview,
             access_review,
             spaces_list,
             space_open,

@@ -5,6 +5,7 @@
 //! TWIGO_TEST_KUBECONFIG=… cargo test -p twigo-core --test bus_live -- --ignored
 
 mod actions;
+mod apply;
 mod bus;
 
 use std::ffi::OsString;

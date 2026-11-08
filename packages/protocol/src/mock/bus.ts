@@ -1,6 +1,8 @@
 import { IpcError } from "../error";
 import type {
   Affected,
+  ApplyPreviewed,
+  ApplyRequest,
   Blocked,
   ContextAccess,
   Execute,
@@ -41,7 +43,8 @@ type Risk =
   | { readonly kind: "replaced" }
   | { readonly kind: "lasting" }
   | { readonly kind: "wide"; readonly name: string }
-  | { readonly kind: "reveal" };
+  | { readonly kind: "reveal" }
+  | { readonly kind: "reviewed" };
 
 /** `twigo_policy::friction::friction`. */
 function frictionOf(
@@ -49,7 +52,7 @@ function frictionOf(
   context: string,
   access: ContextAccess,
 ): Friction {
-  if (risk.kind === "reveal") {
+  if (risk.kind === "reveal" || risk.kind === "reviewed") {
     return access.mode === "read-write"
       ? { kind: "atOnce" }
       : { kind: "confirm" };
@@ -182,6 +185,24 @@ interface Waiting {
   readonly since: number;
 }
 
+/** What a preview left for the plan of its id, as Rust's `Prepared`. */
+interface Previewed {
+  readonly recreate: boolean;
+  readonly space: string;
+  readonly context: string;
+  /** `configmaps/settings in default`. */
+  readonly target: string;
+  /** `configmap settings`. */
+  readonly what: string;
+}
+
+/** The annotation a mock edit names the preview's answer by. */
+const ANSWER = "mock.twigo.io/answer";
+
+/** The mock's stand-in for Rust's kubectl line: not run, as the mock sends nothing. */
+const APPLY_KUBECTL =
+  "kubectl apply --server-side --field-manager=twigo -f - < the edit";
+
 /** What the mock backend's bus reaches. */
 export interface BusHost {
   access(context: string): ContextAccess;
@@ -258,8 +279,139 @@ export class MockBus {
   #next = 0;
   #undoId = 0;
   #jobs = 0;
+  readonly #previews = new Map<number, Previewed>();
+  #previewId = 0;
 
   constructor(private readonly host: BusHost) {}
+
+  /**
+   * `apply_preview` over the mock: it merges nothing. An edit's annotation
+   * `mock.twigo.io/answer` names the answer (`unchanged`, `conflicts`, `stale`,
+   * `immutable`, `recreate`, or `removals` for a ready answer with a removal
+   * step); any other edit is ready, an edit equal to its base unchanged.
+   */
+  applyPreview(request: ApplyRequest): ApplyPreviewed {
+    const { space, opened, edited } = request;
+    const context = this.host.context(space);
+    if (context === undefined)
+      throw new IpcError("notFound", `no space ${space}`);
+    const object = edited as {
+      readonly kind?: string;
+      readonly metadata?: {
+        readonly name?: string;
+        readonly namespace?: string;
+        readonly annotations?: Readonly<Record<string, string>>;
+      };
+    };
+    const name = object.metadata?.name ?? opened?.target.name ?? "";
+    const kind = object.kind ?? opened?.target.gvr.resource ?? "object";
+    const namespace = opened?.target.namespace ?? object.metadata?.namespace;
+    const resource = opened?.target.gvr.resource ?? `${kind.toLowerCase()}s`;
+    const target = `${resource}/${name}${namespace === undefined ? "" : ` in ${namespace}`}`;
+    const what = `${kind.toLowerCase()} ${name}`;
+    const prepared = (recreate: boolean): number => {
+      const id = ++this.#previewId;
+      this.#previews.set(id, { recreate, space, context, target, what });
+      return id;
+    };
+    if (
+      opened &&
+      JSON.stringify(opened.base) === JSON.stringify(edited) &&
+      object.metadata?.annotations?.[ANSWER] === undefined
+    ) {
+      return { state: "unchanged", ignored: [] };
+    }
+    switch (object.metadata?.annotations?.[ANSWER]) {
+      case "unchanged":
+        return { state: "unchanged", ignored: [".status"] };
+      case "conflicts":
+        return {
+          state: "conflicts",
+          conflicts: [
+            {
+              path: ".spec.replicas",
+              manager: "kube-controller-manager",
+            },
+            {
+              path: `.metadata.labels.team`,
+              manager: "kubectl-client-side-apply",
+            },
+          ],
+        };
+      case "stale":
+        return {
+          state: "stale",
+          message: `Operation cannot be fulfilled on ${resource} "${name}": the object has been modified; please apply your changes to the latest version and try again`,
+        };
+      case "immutable":
+        return {
+          state: "immutable",
+          message: `${kind} "${name}" is invalid: spec.selector: Invalid value: field is immutable`,
+          recreate: null,
+        };
+      case "recreate":
+        return {
+          state: "immutable",
+          message: `${kind} "${name}" is invalid: spec.template: Invalid value: field is immutable`,
+          recreate: prepared(true),
+        };
+      case "removals":
+        return {
+          state: "ready",
+          id: prepared(false),
+          live: opened?.base ?? null,
+          result: edited,
+          warnings: ["metadata.annotations: this annotation is deprecated"],
+          removals: [".metadata.labels.team"],
+          ignored: [".status"],
+        };
+      default:
+        return {
+          state: "ready",
+          id: prepared(false),
+          live: opened?.base ?? null,
+          result: edited,
+          warnings: [],
+          removals: [],
+          ignored: [],
+        };
+    }
+  }
+
+  #apply(preview: number): Planned {
+    const previewed = this.#previews.get(preview);
+    if (previewed === undefined) {
+      throw new IpcError("notFound", `no preview ${preview} waits to apply`);
+    }
+    const { context, recreate, space, target, what } = previewed;
+    this.#authorize(context, this.host.access(context), {
+      write: { verb: "patch", target },
+    });
+    this.#previews.delete(preview);
+    const words = recreate ? "Recreated" : "Applied";
+    return {
+      plan: {
+        context,
+        question: recreate
+          ? `Delete ${what} on ${context} and create it from your edit?`
+          : `Apply your changes to ${what} on ${context}?`,
+        confirm: recreate ? `Delete and recreate ${what}` : "Apply",
+        destructive: recreate,
+        consequences: recreate
+          ? ["It goes, and a new one with a new uid takes its place."]
+          : [],
+        affected: [],
+        kubectl: APPLY_KUBECTL,
+        doing: `${recreate ? "Recreating" : "Applying"} ${what}`,
+      },
+      risk: recreate ? { kind: "lasting" } : { kind: "reviewed" },
+      write: { verb: "patch", target },
+      space,
+      run: (tell) => {
+        tell({ state: "done", text: `${words} ${what}`, undoUntil: null });
+      },
+    };
+  }
 
   plan(request: PlanRequest): Plan {
     const planned = this.#planned(request);
@@ -298,6 +450,8 @@ export class MockBus {
         return this.#undo(request.space);
       case "reveal":
         return this.#reveal(request.object, request.key);
+      case "apply":
+        return this.#apply(request.preview);
     }
   }
 

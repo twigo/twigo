@@ -1012,3 +1012,131 @@ test("pods that come and go leave each deployment its replicas", () => {
   for (let tick = 0; tick < 20; tick++) cluster.churn(3, [], Date.now());
   expect(count()).toEqual(before);
 });
+
+const EDITED = {
+  apiVersion: "v1",
+  kind: "ConfigMap",
+  metadata: { name: "settings", namespace: "default" },
+  data: { a: "1" },
+};
+
+function applyEdit(annotation: string | null) {
+  const metadata =
+    annotation === null
+      ? EDITED.metadata
+      : {
+          ...EDITED.metadata,
+          annotations: { "mock.twigo.io/answer": annotation },
+        };
+  return {
+    space: "qa",
+    opened: {
+      target: {
+        gvr: { group: "", version: "v1", resource: "configmaps" },
+        namespaced: true,
+        namespace: "default",
+        name: "settings",
+      },
+      base: { ...EDITED, data: { a: "0" } },
+      lock: "1",
+    },
+    edited: { ...EDITED, metadata },
+    force: false,
+    drop: [],
+  };
+}
+
+test("apply_preview answers each case of the enum, and a ready one's plan runs once", async () => {
+  const backend = createMockBackend();
+  await answered(backend.invoke("space_open", "qa"));
+  const unchanged = await answered(
+    backend.invoke("apply_preview", {
+      ...applyEdit(null),
+      edited: applyEdit(null).opened.base,
+    }),
+  );
+  expect(unchanged).toEqual({ state: "unchanged", ignored: [] });
+  for (const [annotation, state] of [
+    ["conflicts", "conflicts"],
+    ["stale", "stale"],
+    ["immutable", "immutable"],
+    ["recreate", "immutable"],
+    ["removals", "ready"],
+    [null, "ready"],
+  ] as const) {
+    const answer = await answered(
+      backend.invoke("apply_preview", applyEdit(annotation)),
+    );
+    expect(answer.state).toBe(state);
+  }
+  const ready = await answered(
+    backend.invoke("apply_preview", applyEdit(null)),
+  );
+  if (ready.state !== "ready") throw new Error("expected ready");
+  expect(ready.live).toEqual({ ...EDITED, data: { a: "0" } });
+  const plan = await answered(
+    backend.invoke("command_plan", { action: "apply", preview: ready.id }),
+  );
+  expect(plan.friction).toEqual({ kind: "atOnce" });
+  expect(plan.confirm).toBe("Apply");
+  const events = await run(backend, plan.id);
+  expect(events).toEqual([
+    { state: "done", text: "Applied configmap settings", undoUntil: null },
+  ]);
+  const again = await refused(
+    backend.invoke("command_plan", { action: "apply", preview: ready.id }),
+  );
+  expect(again.kind).toBe("notFound");
+});
+
+test("a recreate's plan asks and names what it deletes", async () => {
+  const backend = createMockBackend();
+  await answered(backend.invoke("space_open", "qa"));
+  const answer = await answered(
+    backend.invoke("apply_preview", applyEdit("recreate")),
+  );
+  if (answer.state !== "immutable" || answer.recreate === null) {
+    throw new Error("expected a recreate");
+  }
+  const plan = await answered(
+    backend.invoke("command_plan", {
+      action: "apply",
+      preview: answer.recreate,
+    }),
+  );
+  expect(plan.destructive).toBe(true);
+  expect(plan.friction).toEqual({ kind: "confirm" });
+});
+
+test("an apply is at once in read-write, asks in guarded and is blocked in read-only", async () => {
+  const backend = createMockBackend();
+  await answered(backend.invoke("space_open", "qa"));
+  for (const [mode, expected] of [
+    ["guarded", { kind: "confirm" }],
+    ["read-write", { kind: "atOnce" }],
+  ] as const) {
+    await answered(backend.invoke("context_mode_set", { context: "qa", mode }));
+    const answer = await answered(
+      backend.invoke("apply_preview", applyEdit(null)),
+    );
+    if (answer.state !== "ready") throw new Error("expected ready");
+    const plan = await answered(
+      backend.invoke("command_plan", { action: "apply", preview: answer.id }),
+    );
+    expect(plan.friction).toEqual(expected);
+  }
+  await answered(
+    backend.invoke("context_mode_set", {
+      context: "qa",
+      mode: "read-only",
+    }),
+  );
+  const answer = await answered(
+    backend.invoke("apply_preview", applyEdit(null)),
+  );
+  if (answer.state !== "ready") throw new Error("expected ready");
+  const blocked = await refused(
+    backend.invoke("command_plan", { action: "apply", preview: answer.id }),
+  );
+  expect(blocked.kind).toBe("permissions");
+});

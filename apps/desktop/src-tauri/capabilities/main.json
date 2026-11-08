@@ -40,6 +40,7 @@
     "allow-object-values",
     "allow-object-close",
     "allow-schema-get",
+    "allow-apply-preview",
     "allow-logs-open",
     "allow-logs-set-source",
     "allow-logs-set-view",

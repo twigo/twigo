@@ -26,10 +26,11 @@ use twigo_cache::hub::{Connect, Hub, Query, Resource, RowFormat};
 use twigo_cache::view::Spec;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    AccessQuery, Ack, ClusterVersion, Context, DownloadLogs, ErrorKind, Execute, Friction,
-    GetValues, IpcError, ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject,
-    OperationEvent, Plan, PlanId, PlanRequest, SchemaQuery, SetContextEnvironment, SetContextMode,
-    SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, SubscriptionId, ViewState,
+    AccessQuery, Ack, ApplyPreviewed, ApplyRequest, ClusterVersion, Context, DownloadLogs,
+    ErrorKind, Execute, Friction, GetValues, IpcError, ListBatch, ListQuery, LogBatch, ObjectBatch,
+    OpenLogs, OpenObject, OperationEvent, Plan, PlanId, PlanRequest, SchemaQuery,
+    SetContextEnvironment, SetContextMode, SetLogSource, SetLogView, SetLogWindow, SetParts,
+    SetWindow, SubscriptionId, ViewState,
 };
 use twigo_kube::client::{Actor, Clients, ProxyEnv};
 use twigo_kube::credentials::{ExecError, OidcError, Provider, Registry, Source, Timeouts};
@@ -322,6 +323,7 @@ impl Core {
             } => actions::suspend(self, &space, target, suspend).await?,
             PlanRequest::Undo { space } => actions::undo(self, &space).await?,
             PlanRequest::Reveal { object, key } => actions::reveal(self, window, object, key)?,
+            PlanRequest::Apply { preview } => actions::apply(self, window, preview)?,
         };
         self.authorize(&planned.context, &planned.writes)?;
         let access = self.policy.access(&planned.context);
@@ -432,6 +434,20 @@ impl Core {
             bus.ended(&window, request.plan);
         });
         Ok(())
+    }
+
+    /// Builds an edit's apply configuration and dry-runs it (ARCHITECTURE
+    /// 6.5), keeping what it prepared for this window; it writes nothing.
+    pub async fn apply_preview(
+        &self,
+        window: &str,
+        request: ApplyRequest,
+    ) -> Result<ApplyPreviewed, IpcError> {
+        let ticket = self.bus.ticket(window);
+        actions::preview(self, request, |prepared| {
+            self.bus.keep_preview(ticket, prepared)
+        })
+        .await
     }
 
     /// Whether the person may do each check in a space's context, a check

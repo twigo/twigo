@@ -15,11 +15,12 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::watch;
 use tokio::time::Instant;
 use twigo_ipc::{
-    Affected, ContextAccess, ErrorKind, Friction, IpcError, OperationEvent, Plan, PlanId,
+    Affected, ContextAccess, ErrorKind, Friction, IpcError, OperationEvent, Plan, PlanId, PreviewId,
 };
 use twigo_policy::Attributes;
 use twigo_policy::friction::Risk;
 
+use crate::actions::Prepared;
 use crate::actions::undo::Revert;
 
 /// What a command will do, as its action planned it.
@@ -177,6 +178,7 @@ pub(crate) struct Bus {
 #[derive(Default)]
 struct Inner {
     next: u32,
+    next_preview: u32,
     windows: HashMap<String, Window>,
 }
 
@@ -185,6 +187,9 @@ struct Window {
     /// Counts the drops, so a plan a dropped page asked for is not kept.
     generation: u64,
     entries: HashMap<PlanId, Entry>,
+    /// What each preview prepared, until a plan takes it or a newer preview
+    /// of the same object replaces it.
+    previews: HashMap<PreviewId, Prepared>,
 }
 
 /// Where a window stood when it asked for a plan, which may wait on the
@@ -252,6 +257,54 @@ impl Bus {
             })),
         );
         Ok(plan)
+    }
+
+    /// Keeps what a preview prepared, in place of any earlier preview of the
+    /// same object, as a preview is good only for the diff it answers.
+    pub(crate) fn keep_preview(
+        &self,
+        ticket: Ticket,
+        prepared: Prepared,
+    ) -> Result<PreviewId, IpcError> {
+        let mut inner = self.inner();
+        inner.next_preview += 1;
+        let id = PreviewId(inner.next_preview);
+        let window = inner.windows.entry(ticket.window).or_default();
+        if window.generation != ticket.generation {
+            return Err(IpcError::new(
+                ErrorKind::Unavailable,
+                "the page that asked for the preview is gone",
+            ));
+        }
+        window
+            .previews
+            .retain(|_, kept| kept.path != prepared.path || kept.context != prepared.context);
+        window.previews.insert(id, prepared);
+        Ok(id)
+    }
+
+    /// Takes what a preview prepared, so none is applied twice, once
+    /// `allowed` lets it; refused previews stay for their window.
+    pub(crate) fn take_preview(
+        &self,
+        window: &str,
+        id: PreviewId,
+        allowed: impl FnOnce(&Prepared) -> Result<(), IpcError>,
+    ) -> Result<Prepared, IpcError> {
+        let mut inner = self.inner();
+        let held = inner.windows.get_mut(window);
+        let Some(prepared) = held.as_ref().and_then(|held| held.previews.get(&id)) else {
+            return Err(IpcError::new(
+                ErrorKind::NotFound,
+                format!("no preview {} waits to apply", id.0),
+            ));
+        };
+        allowed(prepared)?;
+        Ok(held
+            .expect("found in it")
+            .previews
+            .remove(&id)
+            .expect("found in it"))
     }
 
     /// Takes a plan that waits to run, so none runs twice, and where its
@@ -327,6 +380,7 @@ impl Bus {
             let mut inner = self.inner();
             let window = inner.windows.entry(window.to_owned()).or_default();
             window.generation += 1;
+            window.previews.clear();
             std::mem::take(&mut window.entries)
         };
         for entry in dropped.into_values() {
