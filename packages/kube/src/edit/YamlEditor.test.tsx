@@ -63,6 +63,9 @@ vi.mock("./monaco", () => {
           focus() {
             this.focused = true;
           },
+          hasTextFocus() {
+            return this.focused;
+          },
           saveViewState() {
             return { cursor: this.cursor };
           },
@@ -73,6 +76,9 @@ vi.mock("./monaco", () => {
             this.disposed = true;
           },
           updateOptions: () => undefined,
+          onKeyDown: dispose,
+          onDidCompositionStart: dispose,
+          onDidCompositionEnd: dispose,
         };
         fake.views.push(view);
         return view;
@@ -130,16 +136,22 @@ test("a text that comes from outside replaces the model's and leaves the cursor 
   expect(shown.cursor).toBe(7);
 });
 
-test("a focus asked of the editor goes to its view now, or to the one it gets", async () => {
+test("a focus asked of the editor goes to its view now, or to the one it gets, and a view that goes with the focus hands it on", async () => {
   const copies = await buffers();
   copies.focus(URI);
   const first = render(<YamlEditor uri={URI} text="a: 1" buffers={copies} />);
   expect(fake.views[0]?.focused).toBe(true);
   first.unmount();
 
-  render(<YamlEditor uri={URI} text="a: 1" buffers={copies} />);
-  expect(fake.views[1]?.focused).toBe(false);
+  const second = render(<YamlEditor uri={URI} text="a: 1" buffers={copies} />);
+  expect(fake.views[1]?.focused).toBe(true);
+  (fake.views[1] as { focused: boolean }).focused = false;
   copies.focus(URI);
   expect(fake.views[1]?.focused).toBe(true);
   expect(copies.takeFocus(URI)).toBe(false);
+
+  (fake.views[1] as { focused: boolean }).focused = false;
+  second.unmount();
+  render(<YamlEditor uri={URI} text="a: 1" buffers={copies} />);
+  expect(fake.views[2]?.focused).toBe(false);
 });
