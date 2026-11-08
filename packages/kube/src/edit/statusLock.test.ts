@@ -6,11 +6,6 @@ import {
   type StatusBlock,
 } from "./statusLock";
 
-// 1 kind: Deployment
-// 2 spec: {}
-// 3 status:
-// 4   ready: 1
-// 5 metadata: {}
 const block: StatusBlock = { from: 3, to: 4, endColumn: 12 };
 const at = (line: number, column: number) => ({ line, column });
 const caret = (line: number, column: number): Span => ({

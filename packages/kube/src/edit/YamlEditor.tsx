@@ -50,7 +50,6 @@ const placeOf = ({ lineNumber, column }: IPosition): Place => ({
   column,
 });
 
-/** Undo and redo, ⌘Z and ⌘Y or Ctrl's. */
 function undoes(event: IKeyboardEvent): boolean {
   return (
     (event.metaKey || event.ctrlKey) &&

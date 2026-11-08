@@ -26,7 +26,6 @@ export function AnswerView({
   edits: EditServices;
   uri: string;
   answer: ApplyPreviewed;
-  /** The conflicting fields the person gave up, which the answer was asked without. */
   dropped: readonly string[];
   space: string;
   /** The text changed since the preview, so its plan would send the old one. */

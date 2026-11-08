@@ -210,7 +210,6 @@ interface Previewed {
 /** The annotation a mock edit names the preview's answer by. */
 const ANSWER = "mock.twigo.io/answer";
 
-/** The fields the mock's conflicting answer names. */
 const CONFLICTS = [
   { path: ".spec.replicas", manager: "kube-controller-manager" },
   { path: ".metadata.labels.team", manager: "kubectl-client-side-apply" },

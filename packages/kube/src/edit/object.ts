@@ -136,7 +136,6 @@ const EXACT = 2n ** 53n;
 
 interface Problem {
   readonly message: string;
-  /** Where in the text, from its start. */
   readonly offset: number;
 }
 
@@ -200,7 +199,6 @@ function unreadable(document: Document.Parsed): Problem | undefined {
   return found;
 }
 
-/** What the package says of a problem, without the position it appends. */
 function describe({ message }: YAMLError): string {
   const first = (message.split("\n")[0] ?? message).replace(
     / at line \d+, column \d+:?$/,

@@ -1,20 +1,16 @@
-/** A place in the text, 1-based as Monaco counts. */
 export interface Place {
   readonly line: number;
   readonly column: number;
 }
 
-/** The selection of an editor, its start before its end. */
 export interface Span {
   readonly start: Place;
   readonly end: Place;
 }
 
-/** The top-level `status`: its lines, inclusive, and the end of the last. */
 export interface StatusBlock {
   readonly from: number;
   readonly to: number;
-  /** The column after the last character of line `to`. */
   readonly endColumn: number;
 }
 

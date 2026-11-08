@@ -56,7 +56,6 @@ function ApplyDiff({ edits, editor }: { edits: EditServices; editor: string }) {
   );
 }
 
-/** What a diff says of Secrets, whose values the webview only has as their sizes. */
 const SECRET_NOTE =
   "A Secret's values are hidden, as their sizes: values of the same size may still differ.";
 

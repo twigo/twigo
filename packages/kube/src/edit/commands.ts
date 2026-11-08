@@ -136,13 +136,11 @@ export function registerEdits(
     editors.close(diffUri({ kind: "server", editor: uri }));
   };
 
-  /** What a preview showed goes: its answer, which a bar or a diff drew, and the diff. */
   const dropPreview = (uri: string) => {
     previews.clear(uri);
     closeDiffs(uri);
   };
 
-  /** Shows the editor again and gives it the focus, as the bar or the diff that had it goes. */
   const back = (uri: string) => {
     if (!inView(uri)) return;
     editors.open(uri);
@@ -178,7 +176,6 @@ export function registerEdits(
     present(uri, await previews.run(uri, subject, choices));
   };
 
-  /** The object a new manifest makes, as the editor that shows it and as words. */
   const createdBy = (
     space: string,
     text: string,

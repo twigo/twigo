@@ -16,7 +16,6 @@ export const base = {
 export const EDITED =
   "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: settings\n  namespace: default\ndata:\n  a: '1'\n";
 
-/** `gate` holds each `apply_preview` until it settles. */
 export async function setupEdit(
   scenario: MockScenario,
   space = "dev",

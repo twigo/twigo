@@ -37,7 +37,6 @@ export interface WorkingCopy {
 export interface EditorBuffer {
   readonly model: editor.ITextModel;
   view: editor.ICodeEditorViewState | null;
-  /** Puts the keyboard focus in the view, while the editor has one. */
   focus?: () => void;
 }
 
@@ -115,7 +114,6 @@ export class WorkingCopies {
     {
       readonly text: string;
       readonly since: string;
-      /** The object the preview said the apply would leave, as JSON. */
       readonly result: string | undefined;
     }
   >();

@@ -116,7 +116,6 @@ export class Previews {
       this.clear(editor);
   }
 
-  /** The editor's answer was put in front of the person. */
   shown(editor: string): void {
     const last = this.#previews.get(editor);
     if (last?.state !== "answered" || last.shown) return;

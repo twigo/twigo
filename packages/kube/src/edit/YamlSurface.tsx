@@ -35,7 +35,6 @@ export function YamlSurface({
   statusLocked: boolean;
   schemaKind: Omit<SchemaKind, "space"> | undefined;
   note: string;
-  /** Why the object this edits is not there, which the edit outlives. */
   gone?: { readonly title: string; readonly body: string };
 }) {
   useChanges(edits.copies.changes);
