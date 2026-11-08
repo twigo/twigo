@@ -921,9 +921,12 @@ Extensions add commands, not prefixes.
   Monaco with monaco-yaml (yaml-language-server).
   - The schema per model URI comes from the cluster's OpenAPI (3.6), so validation, completion and hover work for CRDs too.
   - The diff editor is Monaco's DiffEditor.
-  - Monaco has no read-only ranges, so where the resource has a `status` subresource the editor is read-only, with a message, while a selection touches the `status` block: a cursor in it or at either end, a selection that overlaps it or starts at its end, but not one that ends at column 1 of `status:`.
-    The keys that delete at the cursor and would join a text to the block, Delete at the end of the line above `status:` and Backspace at column 1 of the line after it, set the lock for themselves, as do macOS's Ctrl+D, Ctrl+K and Ctrl+H, and undo and redo lift it for themselves, since a read-only editor refuses them.
-    What Find and Replace or a drop can still change, the engine leaves out as `ignored`.
+  - Monaco has no read-only ranges, so where the resource has a `status` subresource the editor is read-only, with a message, while any of its selections touches the `status` block: a cursor in it or at either end, a selection that overlaps it or starts at its end.
+    A selection of whole lines that ends at column 1 of `status:` may be deleted or cut, but typing or pasting over it would put the text onto `status:`, so the lock holds for those; one that starts in the middle of a line touches the block, since deleting it would join the rest of that line to it.
+    The keys that would change the block from outside it set the lock for themselves, for every cursor and not the primary alone: Delete at the end of the line above `status:`, Backspace at column 1 of the line after the block, ⌥↓ on the line above `status:`, ⌥↑ on the line below the block, macOS's Ctrl+J on the line above `status:`, and macOS's Ctrl+D, Ctrl+K and Ctrl+H, which delete.
+    Undo and redo lift the lock for themselves, since a read-only editor refuses them.
+    Lines with nothing on them move, join and delete freely.
+    What the palette can still run, with Find and Replace and a drop, the diff shows and the engine leaves out as `ignored`.
   - Monaco is bundled locally (no CDN loader) and loaded lazily on the first YAML or diff editor.
     It is built from the tree-shakeable entry points of monaco-editor 0.57 (`monaco-editor/editor`, then each language and feature it needs), and its editor worker is a Vite `?worker` module served from the app.
   - monaco-yaml 5.5.1 runs on those entry points, since it takes the Monaco namespace as an argument, with `yamlVersion: "1.1"`; its worker is a Vite `?worker` too, whose build has no `eval` and no `new Function`, so `script-src 'self'` should cover it; it was not run under Tauri's CSP yet.

@@ -1,13 +1,18 @@
 import { useEffect, useRef } from "react";
 import type { EditorBuffer } from "./copies";
-import type { IKeyboardEvent, IPosition } from "monaco-editor/editor";
+import type {
+  IKeyboardEvent,
+  IPosition,
+  Selection,
+} from "monaco-editor/editor";
 import { editor, KeyCode, MarkerSeverity, setSchema, Uri } from "./monaco";
 import { statusLines } from "./object";
 import {
-  joinsStatus,
-  touchesStatus,
+  refusesStatus,
   type Place,
+  type Span,
   type StatusBlock,
+  type StatusKey,
 } from "./statusLock";
 
 /** A place in the text that does not parse, 1-based. */
@@ -50,6 +55,11 @@ const placeOf = ({ lineNumber, column }: IPosition): Place => ({
   column,
 });
 
+const spanOf = (selection: Selection): Span => ({
+  start: placeOf(selection.getStartPosition()),
+  end: placeOf(selection.getEndPosition()),
+});
+
 function undoes(event: IKeyboardEvent): boolean {
   return (
     (event.metaKey || event.ctrlKey) &&
@@ -65,6 +75,34 @@ function deletes(event: IKeyboardEvent): "backwards" | "forwards" | undefined {
   if (event.keyCode === KeyCode.KeyH) return "backwards";
   if (event.keyCode === KeyCode.KeyD || event.keyCode === KeyCode.KeyK)
     return "forwards";
+  return undefined;
+}
+
+/** What Monaco does to the text after it reads a key that does other than type; `undo` stands for undo and redo. */
+function commandOf(event: IKeyboardEvent): StatusKey | "undo" | undefined {
+  if (undoes(event)) return "undo";
+  const deleting = deletes(event);
+  if (deleting) return deleting;
+  const command = event.metaKey || event.ctrlKey;
+  if (
+    command &&
+    !event.altKey &&
+    !event.shiftKey &&
+    event.keyCode === KeyCode.KeyX
+  )
+    return "cut";
+  if (event.altKey && !command && !event.shiftKey) {
+    if (event.keyCode === KeyCode.DownArrow) return "moveDown";
+    if (event.keyCode === KeyCode.UpArrow) return "moveUp";
+  }
+  if (
+    MAC &&
+    event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey &&
+    event.keyCode === KeyCode.KeyJ
+  )
+    return "join";
   return undefined;
 }
 
@@ -175,18 +213,21 @@ export default function YamlEditor({
         range && { ...range, endColumn: current.getLineMaxColumn(range.to) }
       );
     };
-    const lock = () => {
+    const refuses = (key: StatusKey): boolean => {
       const found = block();
-      const touched =
+      return (
         found !== undefined &&
-        (instance.getSelections() ?? []).some((selection) =>
-          touchesStatus(found, {
-            start: placeOf(selection.getStartPosition()),
-            end: placeOf(selection.getEndPosition()),
-          }),
-        );
+        refusesStatus(
+          found,
+          (instance.getSelections() ?? []).map(spanOf),
+          key,
+          (line) => current.getLineMaxColumn(line),
+        )
+      );
+    };
+    const lock = () => {
       instance.updateOptions({
-        readOnly: touched,
+        readOnly: refuses("type"),
         readOnlyMessage: STATUS_IS_THE_SERVERS,
       });
     };
@@ -195,27 +236,12 @@ export default function YamlEditor({
     // undo and redo along with typing, so a key sets the lock for itself,
     // and the cursor's lock comes back once Monaco has acted.
     const keys = instance.onKeyDown((event) => {
-      const found = block();
-      const caret = instance.getPosition();
-      if (undoes(event)) {
-        instance.updateOptions({ readOnly: false });
-      } else {
-        const direction = deletes(event);
-        if (
-          !direction ||
-          !found ||
-          !caret ||
-          !instance.getSelection()?.isEmpty() ||
-          !joinsStatus(found, placeOf(caret), direction, (line) =>
-            current.getLineMaxColumn(line),
-          )
-        )
-          return;
-        instance.updateOptions({
-          readOnly: true,
-          readOnlyMessage: STATUS_IS_THE_SERVERS,
-        });
-      }
+      const command = commandOf(event);
+      if (command === undefined) return;
+      instance.updateOptions({
+        readOnly: command === "undo" ? false : refuses(command),
+        readOnlyMessage: STATUS_IS_THE_SERVERS,
+      });
       setTimeout(lock, 0);
     });
     const selection = instance.onDidChangeCursorSelection(lock);
