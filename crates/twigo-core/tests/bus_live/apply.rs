@@ -131,6 +131,7 @@ fn edit(
             target,
             base: view(live),
             lock: rv(live),
+            locked: None,
         }),
         edited,
         force,
@@ -820,6 +821,7 @@ async fn no_secret_value_reaches_the_webview_by_any_answer() {
             target: target.clone(),
             base: masked_base(&live),
             lock: rv(&live),
+            locked: None,
         }),
         edited,
         force: false,
@@ -859,6 +861,7 @@ async fn no_secret_value_reaches_the_webview_by_any_answer() {
                     target: target.clone(),
                     base: masked_base(&after),
                     lock: rv(&after),
+                    locked: None,
                 }),
                 edited,
                 force: false,
@@ -884,6 +887,7 @@ async fn no_secret_value_reaches_the_webview_by_any_answer() {
                     target,
                     base: masked_base(&after),
                     lock: rv(&after),
+                    locked: None,
                 }),
                 edited,
                 force: false,
@@ -3529,5 +3533,367 @@ async fn keep_mine_with_a_list_sent_whole_is_stale_when_the_server_holds_it_othe
     );
     let after = read(&cluster.admin, &path).await;
     assert_eq!(names(containers(&after)), ["renamed"]);
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_newer_preview_drops_the_plan_of_an_older_one_on_the_cluster() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-waiting").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    post(&cluster.admin, &deployments(&namespace), &deployment("web")).await;
+    let live = settled(&cluster.admin, &path).await;
+    let target = deployment_ref(&namespace, "web");
+    let with_note = |value: &str| {
+        let mut edited = view(&live);
+        edited["metadata"]["annotations"]["note"] = json!(value);
+        edited
+    };
+    let (older, _, _, _) = ready(
+        preview(
+            &core,
+            edit(
+                &cluster,
+                target.clone(),
+                &live,
+                with_note("older"),
+                false,
+                vec![],
+            ),
+        )
+        .await,
+    );
+    let waiting = plan(&core, &cluster, older).await;
+    let (newer, _, _, _) = ready(
+        preview(
+            &core,
+            edit(&cluster, target, &live, with_note("newer"), false, vec![]),
+        )
+        .await,
+    );
+    let refused = run(&core, &waiting, None).await.unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::NotFound, "{refused:?}");
+    applied(&core, &cluster, newer).await;
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(after["metadata"]["annotations"]["note"], "newer");
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_co_owner_arriving_after_the_preview_stops_a_removal_it_would_defeat() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-coowner").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    post(&cluster.admin, &deployments(&namespace), &deployment("web")).await;
+    let target = deployment_ref(&namespace, "web");
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["metadata"]["annotations"]["mine"] = json!("1");
+    let (id, _, _, _) = ready(
+        preview(
+            &core,
+            edit(&cluster, target.clone(), &live, edited, false, vec![]),
+        )
+        .await,
+    );
+    applied(&core, &cluster, id).await;
+
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["metadata"]["annotations"]
+        .as_object_mut()
+        .unwrap()
+        .remove("mine");
+    let (id, _, removals, _) =
+        ready(preview(&core, edit(&cluster, target, &live, edited, false, vec![])).await);
+    assert!(removals.is_empty(), "Twigo alone holds it: {removals:?}");
+    server_apply(
+        &cluster.admin,
+        &path,
+        &json!({
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": { "name": "web", "namespace": namespace, "annotations": { "mine": "1" } },
+        }),
+        "third",
+    )
+    .await;
+    let planned = plan(&core, &cluster, id).await;
+    let events = run(&core, &planned, None).await.unwrap();
+    assert_eq!(failed(&events).kind, ErrorKind::Conflict, "{events:?}");
+    assert!(
+        failed(&events).message.contains("changed since the diff"),
+        "{events:?}"
+    );
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_valid_edit_refused_by_the_patch_s_dry_run_goes_by_the_one_merge_patch() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-volume").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    let mut object = deployment("web");
+    object["spec"]["template"]["spec"]["volumes"] = json!([{ "name": "data", "emptyDir": {} }]);
+    containers_mut(&mut object)[0]["volumeMounts"] = json!([{ "name": "data", "mountPath": "/d" }]);
+    post(&cluster.admin, &deployments(&namespace), &object).await;
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["spec"]["template"]["spec"]["volumes"] = json!([{ "name": "other", "emptyDir": {} }]);
+    containers_mut(&mut edited)[0]["volumeMounts"][0]["name"] = json!("other");
+    let (id, result) = by_patch(
+        preview(
+            &core,
+            edit(
+                &cluster,
+                deployment_ref(&namespace, "web"),
+                &live,
+                edited,
+                true,
+                vec![],
+            ),
+        )
+        .await,
+    );
+    assert_eq!(
+        names(&result["spec"]["template"]["spec"]["volumes"]),
+        ["other"]
+    );
+    applied(&core, &cluster, id).await;
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(
+        names(&after["spec"]["template"]["spec"]["volumes"]),
+        ["other"]
+    );
+    assert_eq!(containers(&after)[0]["volumeMounts"][0]["name"], "other");
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_status_write_during_a_preview_does_not_answer_stale() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-storm").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    post(&cluster.admin, &deployments(&namespace), &deployment("web")).await;
+    settled(&cluster.admin, &path).await;
+    let target = deployment_ref(&namespace, "web");
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let writer = tokio::spawn({
+        let admin = cluster.admin.clone();
+        let path = path.clone();
+        let stop = std::sync::Arc::clone(&stop);
+        async move {
+            let mut value = 1;
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                status_write(&admin, &path, value).await;
+                value += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }
+    });
+    let mut answers = Vec::new();
+    for _ in 0..30 {
+        let live = read(&cluster.admin, &path).await;
+        let mut edited = view(&live);
+        edited["metadata"]["annotations"]["mine"] = json!("1");
+        answers.push(
+            preview(
+                &core,
+                edit(&cluster, target.clone(), &live, edited, false, vec![]),
+            )
+            .await,
+        );
+    }
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    writer.await.unwrap();
+    let stale = answers
+        .iter()
+        .filter(|answer| matches!(answer, ApplyPreviewed::Stale { .. }))
+        .count();
+    assert_eq!(stale, 0, "{answers:?}");
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn keep_mine_holds_through_a_status_write_by_the_view_it_locked_to() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-keepstatus").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    post(&cluster.admin, &deployments(&namespace), &deployment("web")).await;
+    let target = deployment_ref(&namespace, "web");
+    let opened = settled(&cluster.admin, &path).await;
+    merge_patch(
+        &cluster.admin,
+        &path,
+        &json!({ "metadata": { "labels": { "other": "writer" } } }),
+        "other",
+    )
+    .await;
+    let current = settled(&cluster.admin, &path).await;
+    status_write(&cluster.admin, &path, 7).await;
+    let mut edited = view(&opened);
+    edited["metadata"]["annotations"]["mine"] = json!("1");
+    let mut keep_mine = edit(&cluster, target, &opened, edited, false, vec![]);
+    let held = keep_mine.opened.as_mut().unwrap();
+    held.lock = rv(&current);
+    held.locked = Some(view(&current));
+    let (id, result, _, _) = ready(preview(&core, keep_mine).await);
+    assert_eq!(result["metadata"]["labels"]["other"], "writer");
+    applied(&core, &cluster, id).await;
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(after["metadata"]["labels"]["other"], "writer");
+    assert_eq!(after["metadata"]["annotations"]["mine"], "1");
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_full_quota_does_not_refuse_a_recreate_and_the_recreate_goes_through_it() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-quota").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let pods = format!("/api/v1/namespaces/{namespace}/pods");
+    let path = format!("{pods}/only");
+    post(&cluster.admin, &pods, &pod("only", None)).await;
+    let quotas = format!("/api/v1/namespaces/{namespace}/resourcequotas");
+    post(
+        &cluster.admin,
+        &quotas,
+        &json!({
+            "apiVersion": "v1",
+            "kind": "ResourceQuota",
+            "metadata": { "name": "q" },
+            "spec": { "hard": { "pods": "1" } },
+        }),
+    )
+    .await;
+    let quota = format!("{quotas}/q");
+    let admin = cluster.admin.clone();
+    eventually("the quota counts the pod", || {
+        let admin = admin.clone();
+        let quota = quota.clone();
+        async move { read(&admin, &quota).await["status"]["used"]["pods"] == "1" }
+    })
+    .await;
+    let live = read(&cluster.admin, &path).await;
+    let uid = live["metadata"]["uid"].clone();
+    let id = recreate_of(
+        &core,
+        edit(
+            &cluster,
+            reference("", "v1", "pods", Some(&namespace), "only"),
+            &live,
+            changed_pod(&live),
+            false,
+            vec![],
+        ),
+    )
+    .await;
+    applied(&core, &cluster, id).await;
+    let after = read(&cluster.admin, &path).await;
+    assert_ne!(after["metadata"]["uid"], uid);
+    assert_eq!(after["spec"]["containers"][0]["command"], json!(["sh"]));
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn the_one_merge_patch_lists_what_the_apply_alone_would_have_taken_too() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-fallback").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    post(
+        &cluster.admin,
+        &deployments(&namespace),
+        &strategy_deployment("web"),
+    )
+    .await;
+    let target = deployment_ref(&namespace, "web");
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["metadata"]["annotations"]["mine"] = json!("1");
+    let (id, _, _, _) = ready(
+        preview(
+            &core,
+            edit(&cluster, target.clone(), &live, edited, false, vec![]),
+        )
+        .await,
+    );
+    applied(&core, &cluster, id).await;
+
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["spec"]["strategy"] = json!({ "type": "Recreate" });
+    edited["metadata"]["annotations"]
+        .as_object_mut()
+        .unwrap()
+        .remove("mine");
+    let answer = preview(&core, edit(&cluster, target, &live, edited, true, vec![])).await;
+    let ApplyPreviewed::Ready {
+        strategy: ApplyStrategy::MergePatch,
+        removals,
+        ..
+    } = &answer
+    else {
+        panic!("expected the merge patch, got {answer:?}");
+    };
+    assert!(
+        removals.contains(&".spec.strategy.rollingUpdate".to_owned())
+            && removals.contains(&".metadata.annotations.mine".to_owned()),
+        "{removals:?}"
+    );
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_name_with_the_word_immutable_is_no_immutable_field() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-name").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/immutable-web", deployments(&namespace));
+    post(
+        &cluster.admin,
+        &deployments(&namespace),
+        &deployment("immutable-web"),
+    )
+    .await;
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["spec"]["replicas"] = json!(-1);
+    let refused = core
+        .apply_preview(
+            "main",
+            edit(
+                &cluster,
+                deployment_ref(&namespace, "immutable-web"),
+                &live,
+                edited,
+                true,
+                vec![],
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::InvalidInput, "{refused:?}");
     cluster.delete(&namespace).await;
 }

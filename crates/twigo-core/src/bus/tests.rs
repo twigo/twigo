@@ -9,8 +9,9 @@ use twigo_ipc::{ErrorKind, Execute, Friction, Mode, OperationEvent, PlanId, SetC
 use twigo_policy::Attributes;
 use twigo_policy::friction::Risk;
 
-use super::{Finished, Planned, Progress};
+use super::{Finished, Planned, Previewed, Progress};
 use crate::Core;
+use crate::actions::Prepared;
 
 const KUBECONFIG: &str = "
 clusters: [{ name: c, cluster: { server: 'http://127.0.0.1:1' } }]
@@ -62,6 +63,7 @@ fn planned(core: &Core, risk: Risk, runs: &Runs) -> Planned {
         affected: Vec::new(),
         kubectl: "kubectl --context kind-a delete configmaps m -n a".to_owned(),
         doing: "Deleting config map m".to_owned(),
+        previewed: None,
         run: Box::new(move |progress: Progress| {
             Box::pin(async move {
                 *runs.lock().unwrap() += 1;
@@ -868,5 +870,100 @@ async fn a_job_that_ended_since_its_plan_is_neither_suspended_nor_put_back() {
     assert_eq!(
         refused.message,
         "Job r has completed since you resumed it, so Twigo left it"
+    );
+}
+
+fn previewed(name: &str) -> Previewed {
+    Previewed {
+        context: "kind-a".to_owned(),
+        group: String::new(),
+        kind: "ConfigMap".to_owned(),
+        namespace: Some("a".to_owned()),
+        name: name.to_owned(),
+    }
+}
+
+async fn plan_of(core: &Core, window: &str, object: &Previewed, runs: &Runs) -> twigo_ipc::Plan {
+    core.catalog.contexts().await;
+    let ticket = core.bus.ticket(window);
+    let access = core.policy.access("kind-a");
+    let mut planned = planned(core, Risk::Reviewed, runs);
+    planned.previewed = Some(object.clone());
+    core.bus.keep(ticket, planned, &access).unwrap()
+}
+
+#[tokio::test]
+async fn a_newer_preview_drops_a_plan_made_from_an_older_one_and_no_other() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path());
+    let runs = Runs::default();
+    let object = previewed("m");
+    let older = plan_of(&core, "main", &object, &runs).await;
+    let other = plan_of(&core, "main", &previewed("n"), &runs).await;
+    let unrelated = new_plan(&core, "main", Risk::Reviewed, &runs).await;
+    let elsewhere = plan_of(&core, "other", &object, &runs).await;
+
+    core.bus.start_preview("main", &object);
+
+    assert_eq!(
+        execute(&core, "main", older.id, None).await,
+        Err(ErrorKind::NotFound)
+    );
+    assert_eq!(*runs.lock().unwrap(), 0, "the older plan never ran");
+    for (window, plan) in [
+        ("main", &other),
+        ("main", &unrelated),
+        ("other", &elsewhere),
+    ] {
+        core.bus.cancel(window, plan.id);
+    }
+}
+
+#[tokio::test]
+async fn a_manifest_whose_preview_fails_at_discovery_still_ends_the_older_preview_and_its_plan() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path());
+    core.catalog.contexts().await;
+    core.state.open_space("kind-a");
+    let object = previewed("m");
+    let runs = Runs::default();
+    let waiting = plan_of(&core, "main", &object, &runs).await;
+    let started = core.bus.start_preview("main", &object);
+    let ticket = core.bus.ticket("main");
+    let kept = core
+        .bus
+        .keep_preview(&ticket, started, Prepared::of(object.clone()))
+        .unwrap();
+    let waiting_after = plan_of(&core, "main", &object, &runs).await;
+
+    let refused = core
+        .apply_preview(
+            "main",
+            twigo_ipc::ApplyRequest {
+                space: "kind-a".to_owned(),
+                opened: None,
+                edited: json!({
+                    "apiVersion": "v1",
+                    "kind": "ConfigMap",
+                    "metadata": { "name": "m", "namespace": "a" },
+                }),
+                force: false,
+                drop: Vec::new(),
+            },
+        )
+        .await;
+    assert!(refused.is_err(), "{refused:?}");
+
+    assert!(
+        core.bus.take_preview("main", kept, |_| Ok(())).is_err(),
+        "the older preview is gone"
+    );
+    assert_eq!(
+        execute(&core, "main", waiting_after.id, None).await,
+        Err(ErrorKind::NotFound)
+    );
+    assert_eq!(
+        execute(&core, "main", waiting.id, None).await,
+        Err(ErrorKind::NotFound)
     );
 }

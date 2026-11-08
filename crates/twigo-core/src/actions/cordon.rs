@@ -133,6 +133,7 @@ pub(crate) async fn cordon(
         connection,
         space: Some(space.to_owned()),
         risk: Risk::Reversible,
+        previewed: None,
         run: Box::new(move |_| {
             Box::pin(send(
                 this,

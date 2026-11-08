@@ -27,6 +27,12 @@ pub struct OpenedEdit {
     pub base: Value,
     /// The `resourceVersion` to hold the apply to.
     pub lock: String,
+    /// The object as it stood at `lock`, when that is not `base`: "Keep
+    /// mine" locks to a newer version than the one edited, and this is what
+    /// says a later status write changed nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "unknown")]
+    pub locked: Option<Value>,
 }
 
 /// An edit to preview, parsed by the webview's YAML parser, so there is one

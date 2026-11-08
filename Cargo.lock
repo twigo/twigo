@@ -5900,6 +5900,7 @@ version = "0.1.0"
 dependencies = [
  "atomic-write-file",
  "base64 0.23.1",
+ "bytes",
  "fastrand",
  "form_urlencoded",
  "futures",
@@ -5915,6 +5916,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "tower",
  "twigo-cache",
  "twigo-describe",
  "twigo-env",

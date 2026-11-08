@@ -34,7 +34,10 @@ twigo-policy.workspace = true
 twigo-sessions.workspace = true
 
 [dev-dependencies]
+bytes.workspace = true
 twigo-cache = { workspace = true, features = ["test-util"] }
+twigo-kube = { workspace = true, features = ["test-util"] }
 rcgen.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "test-util", "time"] }
+tower.workspace = true

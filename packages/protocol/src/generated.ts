@@ -903,7 +903,13 @@ base: unknown,
 /**
  * The `resourceVersion` to hold the apply to.
  */
-lock: string, };
+lock: string, 
+/**
+ * The object as it stood at `lock`, when that is not `base`: "Keep
+ * mine" locks to a newer version than the one edited, and this is what
+ * says a later status write changed nothing.
+ */
+locked?: unknown, };
 
 /**
  * How a running plan goes, over its channel; every kind but `running` is

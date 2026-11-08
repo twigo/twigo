@@ -23,6 +23,17 @@ use twigo_policy::friction::Risk;
 use crate::actions::Prepared;
 use crate::actions::undo::Revert;
 
+/// The object previews are of, by what a request names, as a manifest's
+/// resource is known only once discovery answers, and that may fail.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct Previewed {
+    pub context: String,
+    pub group: String,
+    pub kind: String,
+    pub namespace: Option<String>,
+    pub name: String,
+}
+
 /// What a command will do, as its action planned it.
 pub(crate) struct Planned {
     pub context: String,
@@ -49,6 +60,9 @@ pub(crate) struct Planned {
     pub affected: Vec<Affected>,
     pub kubectl: String,
     pub doing: String,
+    /// The object of the preview it was made from: a newer preview of it
+    /// drops the plan while it waits.
+    pub previewed: Option<Previewed>,
     pub run: Run,
 }
 
@@ -191,9 +205,9 @@ struct Window {
     /// What each preview prepared, until a plan takes it or a newer preview
     /// of the same object starts.
     previews: HashMap<PreviewId, Prepared>,
-    /// The newest preview started of each object, by its context and path,
-    /// so an older one that finishes later keeps nothing.
-    started: HashMap<(String, String), u64>,
+    /// The newest preview started of each object, so an older one that
+    /// finishes later keeps nothing.
+    started: HashMap<Previewed, u64>,
 }
 
 /// Where a window stood when it asked for a plan, which may wait on the
@@ -264,19 +278,19 @@ impl Bus {
     }
 
     /// Starts a preview of an object: an older one is good only for the
-    /// diff it answered, so it stops being runnable now, whatever this one
-    /// answers. Returns what `keep_preview` asks for.
-    pub(crate) fn start_preview(&self, window: &str, context: &str, path: &str) -> u64 {
+    /// diff it answered, so it stops being runnable now, whether it is kept
+    /// or a plan made from it waits, whatever this one answers. Returns what
+    /// `keep_preview` asks for.
+    pub(crate) fn start_preview(&self, window: &str, object: &Previewed) -> u64 {
         let mut inner = self.inner();
         inner.next_started += 1;
         let started = inner.next_started;
         let window = inner.windows.entry(window.to_owned()).or_default();
-        window
-            .previews
-            .retain(|_, kept| kept.path != path || kept.context != context);
-        window
-            .started
-            .insert((context.to_owned(), path.to_owned()), started);
+        window.previews.retain(|_, kept| kept.object != *object);
+        window.entries.retain(|_, entry| {
+            !matches!(entry, Entry::Waiting(waiting) if waiting.planned.previewed.as_ref() == Some(object))
+        });
+        window.started.insert(object.clone(), started);
         started
     }
 
@@ -284,22 +298,21 @@ impl Bus {
     /// has started since.
     pub(crate) fn keep_preview(
         &self,
-        ticket: Ticket,
+        ticket: &Ticket,
         started: u64,
         prepared: Prepared,
     ) -> Result<PreviewId, IpcError> {
         let mut inner = self.inner();
         inner.next_preview += 1;
         let id = PreviewId(inner.next_preview);
-        let window = inner.windows.entry(ticket.window).or_default();
+        let window = inner.windows.entry(ticket.window.clone()).or_default();
         if window.generation != ticket.generation {
             return Err(IpcError::new(
                 ErrorKind::Unavailable,
                 "the page that asked for the preview is gone",
             ));
         }
-        let key = (prepared.context.clone(), prepared.path.clone());
-        if window.started.get(&key) != Some(&started) {
+        if window.started.get(&prepared.object) != Some(&started) {
             return Err(IpcError::new(
                 ErrorKind::Conflict,
                 "a newer preview of this object replaced this one",
