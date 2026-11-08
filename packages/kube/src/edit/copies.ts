@@ -80,14 +80,17 @@ function isSecretUri(uri: string): boolean {
  * Whether a copy is or may become a Secret's, whose text must never reach the
  * state file: an object of the `secrets` resource, text of any editor that
  * mentions a Secret, since one can be pasted into another object's editor,
- * and a new manifest that does not parse or names no kind yet, which may turn
- * into a Secret once its kind is typed, after the values.
+ * and a new manifest that does not parse, or whose kind is empty or a prefix
+ * of `Secret` in any case, which may turn into a Secret as the kind is typed,
+ * after the values.
  */
 export function mayHoldSecret(uri: string, text: string): boolean {
   if (isSecretUri(uri) || /\bSecret\b/.test(text)) return true;
   if (parseObjectUri(uri)) return false;
   const parsed = parseManifest(text);
-  return !parsed.ok || typeof parsed.object.kind !== "string";
+  if (!parsed.ok) return true;
+  const { kind } = parsed.object;
+  return typeof kind !== "string" || "secret".startsWith(kind.toLowerCase());
 }
 
 /**

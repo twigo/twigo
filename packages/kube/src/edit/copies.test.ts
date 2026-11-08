@@ -2,7 +2,7 @@ import { expect, test, vi } from "vitest";
 import type { Backend } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { StateStore } from "@twigo/workbench";
-import { WorkingCopies, type EditorBuffer } from "./copies";
+import { mayHoldSecret, WorkingCopies, type EditorBuffer } from "./copies";
 import { yamlOfJson } from "./object";
 
 const DEPLOYMENT = "k8s://prod-eu/apps/v1/deployments/default/web";
@@ -215,6 +215,53 @@ test("a Secret's manifest typed into another object's editor never reaches the s
 
   expect(sent.join("")).not.toContain("hunter2");
   expect(sent.join("")).toContain("unfinished");
+});
+
+test("a new manifest whose kind may still become Secret stays out of the state while it is typed, a kind that cannot stays in", () => {
+  const values = "apiVersion: v1\ndata:\n  password: aHVudGVyMg==\n";
+  const manifest = "untitled://manifest-1";
+  for (const kind of ["", "S", "Sec", "Secre", "Secret", "secret", "SECRET"]) {
+    expect(
+      mayHoldSecret(
+        manifest,
+        kind === "" ? values : `${values}kind: ${kind}\n`,
+      ),
+      kind,
+    ).toBe(true);
+  }
+  expect(mayHoldSecret(manifest, `${values}kind: ConfigMap\n`)).toBe(false);
+  expect(mayHoldSecret(manifest, `${values}kind: Sealed\n`)).toBe(false);
+  expect(mayHoldSecret(manifest, `${values}kind: SecretList\n`)).toBe(false);
+  expect(mayHoldSecret(DEPLOYMENT, `${values}kind: Sec\n`)).toBe(false);
+});
+
+test("a manifest typed in the order values then kind never sends the values while the kind is a prefix of Secret", async () => {
+  const sent: string[] = [];
+  const real = createMockBackend("ready");
+  const backend: Backend = {
+    invoke: (command, request) => {
+      if (command === "state_set") sent.push(JSON.stringify(request));
+      return real.invoke(command, request);
+    },
+    subscribe: (command, request, onMessage) =>
+      real.subscribe(command, request, onMessage),
+  };
+  const { copies, state } = await services(backend);
+  const values = "apiVersion: v1\ndata:\n  password: aHVudGVyMg==\n";
+  for (const kind of ["Sec", "secret"]) {
+    copies.write(
+      "untitled://manifest-1",
+      "prod-eu",
+      `${values}kind: ${kind}\n`,
+    );
+    copies.flush();
+    await state.settled();
+  }
+  expect(sent.join("")).not.toContain("aHVudGVyMg");
+  copies.write("untitled://manifest-1", "prod-eu", `${values}kind: Con\n`);
+  copies.flush();
+  await state.settled();
+  expect(sent.join("")).toContain("aHVudGVyMg");
 });
 
 test("a manifest that cannot be read is left out of the backup and does not stop the backup of the others", async () => {
