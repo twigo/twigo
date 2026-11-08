@@ -720,8 +720,11 @@ async fn an_immutable_field_is_caught_at_the_dry_run_and_only_a_pod_or_a_job_off
         recreated["spec"]["template"]["metadata"]["labels"]["tier"],
         "b"
     );
-    let manager = &recreated["metadata"]["managedFields"][0]["manager"];
-    assert_eq!(manager, "twigo");
+    assert!(
+        entry(&recreated, "twigo", "Update").is_some(),
+        "{}",
+        recreated["metadata"]["managedFields"]
+    );
     cluster.delete(&namespace).await;
 }
 
