@@ -291,3 +291,24 @@ test("a no for another object, or an answer that never came, holds nothing back"
     true,
   );
 });
+
+test("a new question that drops an answer tells the list at once", async () => {
+  const invoke = vi
+    .fn()
+    .mockResolvedValueOnce([false])
+    .mockReturnValue(new Promise(() => undefined));
+  const capabilities = new Capabilities({ invoke }, vi.fn());
+  const keys = ["resource.capability.delete"];
+  const told = vi.fn();
+  capabilities.changes.subscribe(told);
+  const BASIS = {};
+  capabilities.ask("pods", "qa", PODS_GVR, { namespace: "a" }, keys, BASIS);
+  expect(told).not.toHaveBeenCalled();
+  await settled();
+  expect(told).toHaveBeenCalledOnce();
+  capabilities.ask("pods", "qa", PODS_GVR, { namespace: "a" }, keys, {});
+  expect(told).toHaveBeenCalledTimes(2);
+  expect(capabilities.values("pods", keys)["resource.capability.delete"]).toBe(
+    true,
+  );
+});
