@@ -55,6 +55,7 @@ test("a scenario pins the answer to an edit that changes something, and an uncha
   for (const [scenario, state] of [
     ["applyConflicts", "conflicts"],
     ["applyStale", "stale"],
+    ["applyListsMoved", "stale"],
     ["applyImmutable", "immutable"],
     ["applyRecreate", "immutable"],
     ["applyRemovals", "ready"],
@@ -305,4 +306,140 @@ test("serverChange has a colleague edit the open object, and statusChange only a
   });
   await vi.advanceTimersByTimeAsync(20_000);
   expect(quiet.manifests()).toHaveLength(1);
+});
+
+const conflicting = (
+  overrides: Partial<Pick<ApplyRequest, "force" | "drop">>,
+): ApplyRequest => ({ ...edit(), ...overrides });
+
+test("Force takes the conflicting fields and giving up all of them leaves nothing to send, as Rust answers", async () => {
+  const backend = await backendOf("applyConflicts");
+  const paths = [".spec.replicas", ".metadata.labels.team"];
+  expect(
+    (await settled(backend.invoke("apply_preview", conflicting({})))).state,
+  ).toBe("conflicts");
+  expect(
+    (
+      await settled(
+        backend.invoke("apply_preview", conflicting({ force: true })),
+      )
+    ).state,
+  ).toBe("ready");
+  expect(
+    await settled(
+      backend.invoke("apply_preview", conflicting({ drop: paths })),
+    ),
+  ).toEqual({ state: "unchanged", ignored: [] });
+  expect(
+    await settled(
+      backend.invoke("apply_preview", conflicting({ drop: [paths[0] ?? ""] })),
+    ),
+  ).toEqual({
+    state: "conflicts",
+    conflicts: [
+      { path: ".metadata.labels.team", manager: "kubectl-client-side-apply" },
+    ],
+  });
+});
+
+test("a stale answer says whether Keep mine can answer it, and Keep mine then gets a ready one", async () => {
+  const stale = await backendOf("applyStale");
+  const first = await settled(stale.invoke("apply_preview", edit()));
+  expect(first).toMatchObject({ state: "stale", keepable: true });
+  const kept = edit();
+  const answer = await settled(
+    stale.invoke("apply_preview", {
+      ...kept,
+      opened: kept.opened && { ...kept.opened, lock: "2", locked: SETTINGS },
+    }),
+  );
+  expect(answer.state).toBe("ready");
+
+  const moved = await backendOf("applyListsMoved");
+  expect(await settled(moved.invoke("apply_preview", edit()))).toMatchObject({
+    state: "stale",
+    keepable: false,
+    message: expect.stringContaining("sends it whole") as unknown,
+  });
+});
+
+test("a lock the object has moved from answers stale, and the new version Keep mine locked to does not", async () => {
+  const backend = await backendOf("live");
+  const object = await opened(backend);
+  const first = object.latest();
+  if (first === undefined) throw new Error("the object did not open");
+  await applyEdit(backend, first, { ...first, data: { changed: "yes" } });
+  const now = object.latest();
+  if (now === undefined) throw new Error("the object did not change");
+
+  const mine = { ...now, data: { changed: "mine" } };
+  const request = (lock: string, locked?: unknown): ApplyRequest => {
+    const base = edit(mine);
+    return {
+      ...base,
+      opened: base.opened && {
+        ...base.opened,
+        base: first,
+        lock,
+        ...(locked !== undefined && { locked }),
+      },
+    };
+  };
+  const old = await settled(
+    backend.invoke("apply_preview", request(first.metadata.resourceVersion)),
+  );
+  expect(old).toMatchObject({ state: "stale", keepable: true });
+  const kept = await settled(
+    backend.invoke("apply_preview", request(now.metadata.resourceVersion, now)),
+  );
+  expect(kept.state).toBe("ready");
+});
+
+test("a refused edit ends the plans of older previews of its object, and a namespaced kind with no namespace is refused", async () => {
+  const backend = await backendOf("live");
+  const ready = await settled(backend.invoke("apply_preview", edit()));
+  if (ready.state !== "ready") throw new Error(ready.state);
+  const refused = await settled(
+    backend
+      .invoke(
+        "apply_preview",
+        edit({
+          ...SETTINGS,
+          metadata: { ...SETTINGS.metadata, name: "other" },
+        }),
+      )
+      .catch((error: unknown) => error),
+  );
+  expect(refused).toBeInstanceOf(IpcError);
+  const planned = await settled(
+    backend
+      .invoke("command_plan", {
+        action: "apply",
+        space: "qa",
+        preview: ready.id,
+      })
+      .catch((error: unknown) => error),
+  );
+  expect(planned).toBeInstanceOf(IpcError);
+  expect((planned as IpcError).message).toBe(
+    `no preview ${String(ready.id)} waits to apply`,
+  );
+
+  const unnamespaced = await settled(
+    backend
+      .invoke("apply_preview", {
+        space: "qa",
+        opened: null,
+        edited: {
+          apiVersion: "v1",
+          kind: "ConfigMap",
+          metadata: { name: "fresh" },
+        },
+        force: false,
+        drop: [],
+      })
+      .catch((error: unknown) => error),
+  );
+  expect(unnamespaced).toBeInstanceOf(IpcError);
+  expect((unnamespaced as IpcError).message).toBe("fresh names no namespace");
 });

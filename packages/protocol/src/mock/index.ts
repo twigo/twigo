@@ -210,6 +210,20 @@ export function createMockBackend(
   const edits = new MockEdits();
   const bus = new MockBus({
     answer: isEditScenario(scenario) ? PINNED_ANSWERS[scenario] : undefined,
+    version: (context, { gvr, namespace, name }) => {
+      const metadata = edits.get(
+        MockEdits.key(context, gvr.group, gvr.resource, namespace, name),
+      )?.metadata as { resourceVersion?: unknown } | undefined;
+      const version = metadata?.resourceVersion;
+      return typeof version === "string" ? version : undefined;
+    },
+    namespaced: (apiVersion, kind) => {
+      const slash = apiVersion.lastIndexOf("/");
+      const group = slash < 0 ? "" : apiVersion.slice(0, slash);
+      return RESOURCES.find(
+        (candidate) => candidate.gvr.group === group && candidate.kind === kind,
+      )?.namespaced;
+    },
     applied: (context, opened, edited) => {
       const { apiVersion, kind, metadata } = edited as {
         apiVersion?: string;

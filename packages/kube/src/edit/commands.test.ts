@@ -104,15 +104,28 @@ test("Keep mine sends the old base, the new lock and the object at that lock", a
   expect(edits.copies.serverChanged(uri)).toBe(false);
 });
 
-test("Force and Drop my change ask for a new preview with their choice, and Dismiss clears the bar", async () => {
+test("Force and Drop my change ask for a new preview with their choice, as the engine answers them, and Dismiss clears the bar", async () => {
   const { edits, sent, uri, run } = await setupEdit("applyConflicts");
   await run("k8s.edit.apply");
   await run("k8s.edit.force");
   expect(sent[1]).toMatchObject({ force: true, drop: [] });
+  expect(edits.previews.get(uri)).toMatchObject({
+    answer: { state: "ready" },
+    forced: true,
+  });
+
+  await run("k8s.edit.apply");
+  expect(edits.previews.get(uri)).toMatchObject({
+    answer: { state: "conflicts" },
+  });
   await run("k8s.edit.dropMine");
-  expect(sent[2]).toMatchObject({
-    force: true,
+  expect(sent[3]).toMatchObject({
+    force: false,
     drop: [".spec.replicas", ".metadata.labels.team"],
+  });
+  expect(edits.previews.get(uri)).toMatchObject({
+    answer: { state: "unchanged" },
+    dropped: [".spec.replicas", ".metadata.labels.team"],
   });
   expect(edits.copies.get(uri)?.text).toBe(EDITED);
   await run("k8s.edit.dismiss");

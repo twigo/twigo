@@ -210,6 +210,12 @@ interface Previewed {
 /** The annotation a mock edit names the preview's answer by. */
 const ANSWER = "mock.twigo.io/answer";
 
+/** The fields the mock's conflicting answer names. */
+const CONFLICTS = [
+  { path: ".spec.replicas", manager: "kube-controller-manager" },
+  { path: ".metadata.labels.team", manager: "kubectl-client-side-apply" },
+] as const;
+
 /** The mock's stand-ins for Rust's kubectl lines: not run, as the mock sends nothing. */
 function applyKubectl({ step, named, removals }: Previewed): string {
   if (step === "mergePatch") {
@@ -278,6 +284,10 @@ export interface BusHost {
   changed(): void;
   /** What `apply_preview` answers to every edit that changes something, unless the edit names an answer. */
   readonly answer: string | undefined;
+  /** The `resourceVersion` of an object that an edit or a change from outside has written, none while it is as recorded. */
+  version(context: string, target: ResourceRef): string | undefined;
+  /** Whether the cluster serves a kind namespaced, none when the mock does not know it. */
+  namespaced(apiVersion: string, kind: string): boolean | undefined;
   /** An edit was applied: the object in `context` is `edited` now. */
   applied(
     context: string,
@@ -352,11 +362,17 @@ export class MockBus {
   /**
    * `apply_preview` over the mock: it merges nothing. An edit's annotation
    * `mock.twigo.io/answer`, or else the scenario, names the answer
-   * (`unchanged`, `conflicts`, `stale`, `immutable`, `recreate`, `removals` for
-   * a ready answer with a removal step, or `merge-patch` for one that goes as
-   * a single merge patch); any other edit is ready, an edit equal to its base
-   * unchanged. An edit that names another object than the one it edits is
-   * refused, as Rust refuses it.
+   * (`unchanged`, `conflicts`, `stale`, `lists-moved` for a stale one that
+   * Keep mine cannot answer, `immutable`, `recreate`, `removals` for a ready
+   * answer with a removal step, or `merge-patch` for one that goes as a
+   * single merge patch); any other edit is ready, an edit equal to its base
+   * unchanged. The choices count as they do in Rust: Force takes the
+   * conflicting fields, so the edit is ready, and giving up every one of
+   * them leaves nothing to send; an edit locked to a version the object has
+   * moved from is stale, and one that Keep mine locked to the new version is
+   * not. An edit that names another object than the one it edits, or a
+   * namespaced kind with no namespace, is refused as Rust refuses it, and
+   * any preview of an object, a refused one too, ends the plans of older ones.
    */
   applyPreview(request: ApplyRequest): ApplyPreviewed {
     const { space, opened, edited } = request;
@@ -364,6 +380,7 @@ export class MockBus {
     if (context === undefined)
       throw new IpcError("notFound", `no space ${space}`);
     const object = edited as {
+      readonly apiVersion?: string;
       readonly kind?: string;
       readonly metadata?: {
         readonly name?: string;
@@ -373,11 +390,21 @@ export class MockBus {
     };
     const name = object.metadata?.name ?? opened?.target.name ?? "";
     const kind = object.kind ?? opened?.target.gvr.resource ?? "object";
+    const namespace = opened?.target.namespace ?? object.metadata?.namespace;
+    const resource = opened?.target.gvr.resource ?? `${kind.toLowerCase()}s`;
+    const target = `${resource}/${opened?.target.name ?? name}${namespace === undefined ? "" : ` in ${namespace}`}`;
+    for (const [id, kept] of this.#previews) {
+      if (kept.context === context && kept.target === target) {
+        this.#previews.delete(id);
+      }
+    }
+    for (const [id, waiting] of this.#waiting) {
+      if (waiting.planned.previewed === `${context}/${target}`) {
+        this.#waiting.delete(id);
+      }
+    }
     const same =
       opened !== null && JSON.stringify(opened.base) === JSON.stringify(edited);
-    const answer =
-      object.metadata?.annotations?.[ANSWER] ??
-      (same ? undefined : this.host.answer);
     const live = opened?.base as
       { kind?: string; apiVersion?: string } | undefined;
     if (opened && live) {
@@ -403,23 +430,15 @@ export class MockBus {
           object.metadata?.namespace,
           opened.target.namespace,
         );
+    } else if (
+      object.metadata?.namespace === undefined &&
+      this.host.namespaced(object.apiVersion ?? "", kind) === true
+    ) {
+      throw new IpcError("invalidInput", `${name} names no namespace`);
     }
-    const namespace = opened?.target.namespace ?? object.metadata?.namespace;
-    const resource = opened?.target.gvr.resource ?? `${kind.toLowerCase()}s`;
-    const target = `${resource}/${name}${namespace === undefined ? "" : ` in ${namespace}`}`;
     const what = `${kind.toLowerCase()} ${name}`;
     const group = opened?.target.gvr.group ?? "";
     const named = `${group === "" ? resource : `${resource}.${group}`} ${name}${inNamespace(namespace ?? null)}`;
-    for (const [id, kept] of this.#previews) {
-      if (kept.context === context && kept.target === target) {
-        this.#previews.delete(id);
-      }
-    }
-    for (const [id, waiting] of this.#waiting) {
-      if (waiting.planned.previewed === `${context}/${target}`) {
-        this.#waiting.delete(id);
-      }
-    }
     const prepared = (
       step: Previewed["step"],
       removals: readonly string[] = [],
@@ -438,32 +457,44 @@ export class MockBus {
       });
       return id;
     };
-    if (same && answer === undefined) {
+    if (same && object.metadata?.annotations?.[ANSWER] === undefined) {
       return { state: "unchanged", ignored: [] };
     }
+    const moved =
+      opened !== null &&
+      opened.locked === undefined &&
+      this.host.version(context, opened.target) !== undefined &&
+      this.host.version(context, opened.target) !== opened.lock;
+    const answer =
+      object.metadata?.annotations?.[ANSWER] ??
+      (moved ? "stale" : same ? undefined : this.host.answer);
+    const stale = (keepable: boolean) =>
+      ({
+        state: "stale",
+        message: keepable
+          ? `Operation cannot be fulfilled on ${resource} "${name}": the object has been modified; please apply your changes to the latest version and try again`
+          : `.spec.template.spec.containers changed on the server since this edit was opened, and the edit sends it whole, so keeping yours would revert that change`,
+        keepable,
+      }) as const;
     switch (answer) {
       case "unchanged":
         return { state: "unchanged", ignored: [".status"] };
-      case "conflicts":
-        return {
-          state: "conflicts",
-          conflicts: [
-            {
-              path: ".spec.replicas",
-              manager: "kube-controller-manager",
-            },
-            {
-              path: `.metadata.labels.team`,
-              manager: "kubectl-client-side-apply",
-            },
-          ],
-        };
+      case "conflicts": {
+        const remaining = CONFLICTS.filter(
+          ({ path }) => !request.drop.includes(path),
+        );
+        if (request.force)
+          return this.#ready(prepared("apply"), opened, edited);
+        if (remaining.length === 0) return { state: "unchanged", ignored: [] };
+        return { state: "conflicts", conflicts: remaining };
+      }
       case "stale":
-        return {
-          state: "stale",
-          message: `Operation cannot be fulfilled on ${resource} "${name}": the object has been modified; please apply your changes to the latest version and try again`,
-          keepable: true,
-        };
+        // Keep mine locks to the new version and sends the object at it.
+        return opened?.locked === undefined
+          ? stale(true)
+          : this.#ready(prepared("apply"), opened, edited);
+      case "lists-moved":
+        return stale(false);
       case "immutable":
         return {
           state: "immutable",
@@ -478,38 +509,42 @@ export class MockBus {
         };
       case "removals":
         return {
-          state: "ready",
-          id: prepared("apply", [".metadata.labels.team"]),
-          live: side(opened?.base ?? null),
-          result: side(edited),
+          ...this.#ready(
+            prepared("apply", [".metadata.labels.team"]),
+            opened,
+            edited,
+          ),
           warnings: ["metadata.annotations: this annotation is deprecated"],
           removals: [".metadata.labels.team"],
           ignored: [".status"],
-          strategy: "serverSideApply",
         };
       case "merge-patch":
         return {
-          state: "ready",
-          id: prepared("mergePatch"),
-          live: side(opened?.base ?? null),
-          result: side(edited),
-          warnings: [],
+          ...this.#ready(prepared("mergePatch"), opened, edited),
           removals: [".spec.strategy.rollingUpdate"],
-          ignored: [],
           strategy: "mergePatch",
         };
       default:
-        return {
-          state: "ready",
-          id: prepared("apply"),
-          live: side(opened?.base ?? null),
-          result: side(edited),
-          warnings: [],
-          removals: [],
-          ignored: [],
-          strategy: "serverSideApply",
-        };
+        return this.#ready(prepared("apply"), opened, edited);
     }
+  }
+
+  /** A ready answer: the object as it was against the edit, with nothing to say besides. */
+  #ready(
+    id: number,
+    opened: ApplyRequest["opened"],
+    edited: unknown,
+  ): Extract<ApplyPreviewed, { state: "ready" }> {
+    return {
+      state: "ready",
+      id,
+      live: side(opened?.base ?? null),
+      result: side(edited),
+      warnings: [],
+      removals: [],
+      ignored: [],
+      strategy: "serverSideApply",
+    };
   }
 
   #apply(space: string, preview: number): Planned {

@@ -8,6 +8,7 @@ export type EditScenario =
   | "applyUnchanged"
   | "applyConflicts"
   | "applyStale"
+  | "applyListsMoved"
   | "applyImmutable"
   | "applyRecreate"
   | "applyRemovals"
@@ -20,6 +21,7 @@ export const EDIT_SCENARIOS: readonly EditScenario[] = [
   "applyUnchanged",
   "applyConflicts",
   "applyStale",
+  "applyListsMoved",
   "applyImmutable",
   "applyRecreate",
   "applyRemovals",
@@ -38,6 +40,7 @@ export const PINNED_ANSWERS: Readonly<Partial<Record<EditScenario, string>>> = {
   applyUnchanged: "unchanged",
   applyConflicts: "conflicts",
   applyStale: "stale",
+  applyListsMoved: "lists-moved",
   applyImmutable: "immutable",
   applyRecreate: "recreate",
   applyRemovals: "removals",
