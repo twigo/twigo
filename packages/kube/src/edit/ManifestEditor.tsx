@@ -41,6 +41,8 @@ export function ManifestEditor({
       : undefined;
   }, [text, resources]);
   const targetName = spaces.list.find(({ id }) => id === target)?.name;
+  // Discovery follows the space shown, so a target not visited has no kinds to ask a schema of.
+  const unknownKinds = target !== undefined && resources.state !== "ready";
   if (home === undefined) {
     return <EmptyState title="Not a manifest">{uri}</EmptyState>;
   }
@@ -60,7 +62,7 @@ export function ManifestEditor({
       note={
         targetName === undefined
           ? "New manifest: write or paste YAML, then Apply… asks which context it goes to"
-          : `New manifest for ${targetName}`
+          : `New manifest for ${targetName}${unknownKinds ? " · No schema for completion" : ""}`
       }
     />
   );

@@ -73,6 +73,28 @@ const prefixes = Array.from({ length: "Deployment".length }, (_, at) =>
   "Deployment".slice(0, at + 1),
 );
 
+test("a target whose kinds are not known says there is no schema, and a shown one does not", async () => {
+  const workbench = await testWorkbench("ready");
+  const edits = createEdits(workbench);
+  const discovery = new Discovery(workbench);
+  await discovery.resources("prod-eu");
+  edits.copies.write(URI, "prod-eu", "kind: ConfigMap\n");
+  edits.copies.retarget(URI, "dev");
+  render(<ManifestEditor uri={URI} edits={edits} discovery={discovery} />, {
+    wrapper: inWorkbench(workbench),
+  });
+  expect(screen.getByText(/No schema for completion/)).toBeTruthy();
+  cleanup();
+
+  act(() => {
+    edits.copies.retarget(URI, "prod-eu");
+  });
+  render(<ManifestEditor uri={URI} edits={edits} discovery={discovery} />, {
+    wrapper: inWorkbench(workbench),
+  });
+  expect(screen.queryByText(/No schema for completion/)).toBeNull();
+});
+
 test("a schema is asked only of a kind the cluster serves, not of each prefix of the kind being typed", async () => {
   const asked = await typing(prefixes);
   await vi.waitFor(() => {
