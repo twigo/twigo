@@ -59,6 +59,26 @@ test("a text that does not parse stays in the editor, with no diff and nothing s
   expect(edits.copies.get(uri)?.text).toBe("data:\n  a: [1, 2\n");
 });
 
+test("a manifest of two documents stays in the editor, with the line of the second and nothing sent", async () => {
+  const { edits, sent, open, uri, run } = await setupEdit("live");
+  const text = `${EDITED}---\n${EDITED}`;
+  edits.copies.edit(uri, text, {
+    space: "dev",
+    base: JSON.stringify(base),
+    lock: "7",
+  });
+  await run("k8s.edit.apply");
+  expect(edits.previews.get(uri)).toMatchObject({
+    state: "failed",
+    at: { line: 8 },
+  });
+  expect(sent).toEqual([]);
+  expect(open).not.toHaveBeenCalledWith(
+    diffUri({ kind: "apply", editor: uri }),
+  );
+  expect(edits.copies.get(uri)?.text).toBe(text);
+});
+
 test("Keep mine sends the old base, the new lock and the object at that lock", async () => {
   const { edits, sent, uri, run } = await setupEdit("applyStale");
   const theirs = {

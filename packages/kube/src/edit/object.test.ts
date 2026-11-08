@@ -43,6 +43,24 @@ test("several documents, none, and a list at the root are errors, not something 
   expect(parseManifest("a: 1\n---\n")).toMatchObject({ ok: true });
 });
 
+test("a second document is named by the line of its ---, wherever the first begins", () => {
+  expect(parseManifest("---\na: 1\n---\nb: 2\n")).toMatchObject({
+    ok: false,
+    line: 3,
+    column: 1,
+  });
+  expect(
+    parseManifest("# one\na: 1\n\n--- # two\nb: 2\n---\nc: 3\n"),
+  ).toMatchObject({
+    ok: false,
+    line: 4,
+    message: expect.stringContaining("3 documents") as unknown,
+  });
+  expect(parseManifest("---\na: 1\n---\n# nothing more\n")).toMatchObject({
+    ok: true,
+  });
+});
+
 test("the lines of status are found, flow style and a missing block included", () => {
   const text =
     "kind: Deployment\nspec:\n  replicas: 1\nstatus:\n  ready: 1\n  items:\n    - a\nmetadata: {}\n";

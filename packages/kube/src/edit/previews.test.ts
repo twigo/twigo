@@ -58,6 +58,23 @@ test("a text that does not parse stays with where it goes wrong, and nothing is 
   );
 });
 
+test("a manifest of two documents stays with the line of the second, and nothing is sent", async () => {
+  const { backend, sent } = recording("live");
+  const previews = new Previews(backend);
+  const editor = "k8s://dev//v1/configmaps/default/settings";
+  const result = await previews.run(
+    editor,
+    subject("kind: ConfigMap\n---\nkind: ConfigMap\n"),
+  );
+  expect(result).toMatchObject({
+    state: "failed",
+    at: { line: 2, column: 1 },
+    message: expect.stringContaining("2 documents") as unknown,
+  });
+  expect(sent).toEqual([]);
+  expect(previews.get(editor)).toBe(result);
+});
+
 test("the engine's answer is kept with what it was asked of, and Force and Drop ask again with their choice", async () => {
   const { backend, sent } = recording("applyConflicts");
   const previews = new Previews(backend);
