@@ -698,3 +698,155 @@ async fn a_scale_that_lost_to_another_write_reads_again_and_its_undo_holds_to_it
         }]
     );
 }
+
+async fn scripted_core(server: &Scripted, dir: &Path) -> (Arc<Core>, String) {
+    let core = running_with(
+        dir,
+        &KUBECONFIG.replace("127.0.0.1:1", &format!("127.0.0.1:{}", server.port)),
+    );
+    core.catalog.contexts().await;
+    let space = core.state.open_space("kind-a").id;
+    (core, space)
+}
+
+fn object(group: &str, resource: &str, name: &str) -> twigo_ipc::ResourceRef {
+    twigo_ipc::ResourceRef {
+        gvr: twigo_ipc::Gvr {
+            group: group.to_owned(),
+            version: "v1".to_owned(),
+            resource: resource.to_owned(),
+        },
+        namespaced: true,
+        namespace: Some("a".to_owned()),
+        name: name.to_owned(),
+    }
+}
+
+async fn ran(core: &Core, plan: PlanId) -> Vec<OperationEvent> {
+    let (told, send) = events();
+    core.command_execute("main", Execute { plan, typed: None }, send)
+        .await
+        .unwrap();
+    until("the run ends", || !told.lock().unwrap().is_empty()).await;
+    told.lock().unwrap().clone()
+}
+
+#[tokio::test]
+async fn a_custom_resource_that_left_its_replicas_unset_is_scaled_without_an_undo() {
+    const OBJECT: &str = "GET /apis/example.com/v1/namespaces/a/widgets/w HTTP/1.1";
+    const SCALE: &str = "GET /apis/example.com/v1/namespaces/a/widgets/w/scale HTTP/1.1";
+    const PATCH: &str = "PATCH /apis/example.com/v1/namespaces/a/widgets/w/scale HTTP/1.1";
+    let server = Scripted::start(|line, _| match line {
+        OBJECT => (
+            200,
+            r#"{"apiVersion":"example.com/v1","kind":"Widget","metadata":{"name":"w","namespace":"a","uid":"u-1","generation":1,"resourceVersion":"1"},"spec":{}}"#,
+        ),
+        SCALE => (
+            200,
+            r#"{"apiVersion":"autoscaling/v1","kind":"Scale","metadata":{"name":"w","namespace":"a","resourceVersion":"1"},"spec":{}}"#,
+        ),
+        PATCH => (
+            200,
+            r#"{"apiVersion":"autoscaling/v1","kind":"Scale","metadata":{"name":"w","namespace":"a","resourceVersion":"2"},"spec":{"replicas":3}}"#,
+        ),
+        _ => (404, r#"{"kind":"Status","apiVersion":"v1","code":404}"#),
+    })
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, space) = scripted_core(&server, dir.path()).await;
+    let request = twigo_ipc::PlanRequest::Scale {
+        space,
+        target: object("example.com", "widgets", "w"),
+        replicas: 3,
+    };
+    let plan = core.command_plan("main", request).await.unwrap();
+    assert_eq!(
+        ran(&core, plan.id).await,
+        [OperationEvent::Done {
+            text: "Scaled widget w to 3".to_owned(),
+            undo_until: None,
+        }]
+    );
+}
+
+#[tokio::test]
+async fn a_job_that_ended_since_its_plan_is_neither_suspended_nor_put_back() {
+    const SUSPENDED: &str = "GET /apis/batch/v1/namespaces/a/jobs/j HTTP/1.1";
+    const RESUMED: &str = "GET /apis/batch/v1/namespaces/a/jobs/r HTTP/1.1";
+    const RESUME: &str = "PATCH /apis/batch/v1/namespaces/a/jobs/r HTTP/1.1";
+    let server = Scripted::start(|line, before| match (line, before) {
+        (SUSPENDED, 0) => (
+            200,
+            r#"{"apiVersion":"batch/v1","kind":"Job","metadata":{"name":"j","namespace":"a","uid":"u-j","generation":1,"resourceVersion":"1"},"spec":{},"status":{}}"#,
+        ),
+        (SUSPENDED, _) => (
+            200,
+            r#"{"apiVersion":"batch/v1","kind":"Job","metadata":{"name":"j","namespace":"a","uid":"u-j","generation":1,"resourceVersion":"2"},"spec":{},"status":{"conditions":[{"type":"Complete","status":"True"}]}}"#,
+        ),
+        (RESUMED, 0 | 1) => (
+            200,
+            r#"{"apiVersion":"batch/v1","kind":"Job","metadata":{"name":"r","namespace":"a","uid":"u-r","generation":1,"resourceVersion":"1"},"spec":{"suspend":true},"status":{}}"#,
+        ),
+        (RESUMED, _) => (
+            200,
+            r#"{"apiVersion":"batch/v1","kind":"Job","metadata":{"name":"r","namespace":"a","uid":"u-r","generation":2,"resourceVersion":"3"},"spec":{"suspend":false},"status":{"conditions":[{"type":"Complete","status":"True"}]}}"#,
+        ),
+        (RESUME, _) => (
+            200,
+            r#"{"apiVersion":"batch/v1","kind":"Job","metadata":{"name":"r","namespace":"a","uid":"u-r","generation":2,"resourceVersion":"2"},"spec":{"suspend":false},"status":{}}"#,
+        ),
+        _ => (404, r#"{"kind":"Status","apiVersion":"v1","code":404}"#),
+    })
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, space) = scripted_core(&server, dir.path()).await;
+    let suspend = |name: &str, suspend| twigo_ipc::PlanRequest::Suspend {
+        space: space.clone(),
+        target: object("batch", "jobs", name),
+        suspend,
+    };
+
+    let plan = core.command_plan("main", suspend("j", true)).await.unwrap();
+    let told = ran(&core, plan.id).await;
+    let [OperationEvent::Failed { error }] = told.as_slice() else {
+        panic!("{told:?}");
+    };
+    assert_eq!(
+        error.message,
+        "Job j has completed, so there is nothing to suspend"
+    );
+    assert!(
+        !server
+            .seen
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(line, _)| line.starts_with("PATCH /apis/batch/v1/namespaces/a/jobs/j ")),
+        "nothing was written to j"
+    );
+
+    let plan = core
+        .command_plan("main", suspend("r", false))
+        .await
+        .unwrap();
+    let told = ran(&core, plan.id).await;
+    assert!(
+        matches!(
+            told.as_slice(),
+            [OperationEvent::Done {
+                undo_until: Some(_),
+                ..
+            }]
+        ),
+        "{told:?}"
+    );
+    let undo = twigo_ipc::PlanRequest::Undo {
+        space: space.clone(),
+    };
+    let refused = core.command_plan("main", undo).await.unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::Conflict);
+    assert_eq!(
+        refused.message,
+        "Job r has completed since you resumed it, so Twigo left it"
+    );
+}

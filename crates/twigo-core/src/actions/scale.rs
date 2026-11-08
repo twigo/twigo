@@ -17,7 +17,9 @@ use twigo_policy::friction::Risk;
 
 use super::dependents::{Deleted, dependents};
 use super::undo::{Asks, Revert, Unchanged};
-use super::{ATTEMPTS, MERGE_PATCH, Target, clients_for, get, kind_words, patch_as_of, sentence};
+use super::{
+    ATTEMPTS, MERGE_PATCH, Target, clients_for, get, kind_words, patch_as_of, same, sentence,
+};
 use crate::Core;
 use crate::bus::{Finished, Planned};
 use twigo_kube::client::Clients;
@@ -51,13 +53,25 @@ pub(crate) async fn scale(
         shrinking(&clients, &target, &object, from, replicas.into()).await;
     let kind_name = target.resource.name();
     let count = replicas.to_string();
-    let kubectl = target.kubectl(&["scale", &kind_name, &target.name, "--replicas", &count])?;
+    let kubectl = target.kubectl(&[
+        "scale",
+        &kind_name,
+        &target.name,
+        "--current-replicas",
+        &from.to_string(),
+        "--replicas",
+        &count,
+    ])?;
     let place = target.place();
     let context = target.context.clone();
     let connection = clients.connection();
     let run = Run {
         core: core.this.clone(),
         connection,
+        uid: object["metadata"]["uid"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned(),
         target,
         from,
         replicas,
@@ -98,11 +112,18 @@ pub(crate) async fn shrinking(
 ) -> (Risk, Vec<String>, Vec<Affected>) {
     let mut consequences = Vec::new();
     let mut affected = Vec::new();
+    let owner = controller(object);
     if to == 0 {
         let uid = object["metadata"]["uid"].as_str().unwrap_or_default();
-        let (said, listed) = emptied(clients, target, uid).await;
+        let (said, listed) = emptied(clients, target, uid, owner.is_some()).await;
         consequences.extend(said);
         affected.extend(listed);
+    }
+    if let Some((kind, name)) = owner {
+        consequences.push(format!(
+            "Its {} {name} controls its replicas and may set them back.",
+            kind_words(&kind)
+        ));
     }
     let deletes = object["spec"]["persistentVolumeClaimRetentionPolicy"]["whenScaled"] == "Delete";
     let (claims, unread) = if target.is("apps", &["statefulsets"]) && deletes && to < from {
@@ -181,9 +202,27 @@ async fn claims(
     (claims, unread)
 }
 
+/// The kind and name of the object's controller, such as a ReplicaSet's
+/// Deployment, which sets its replicas as it sees fit.
+fn controller(object: &serde_json::Value) -> Option<(String, String)> {
+    let owner = object["metadata"]["ownerReferences"]
+        .as_array()?
+        .iter()
+        .find(|owner| owner["controller"] == true)?;
+    Some((
+        owner["kind"].as_str()?.to_owned(),
+        owner["name"].as_str()?.to_owned(),
+    ))
+}
+
 /// What scaling `target` of `uid` to zero asks about: its pods go, and
-/// which.
-async fn emptied(clients: &Clients, target: &Target, uid: &str) -> (Vec<String>, Vec<Affected>) {
+/// which; none take their place unless a controller owns it.
+async fn emptied(
+    clients: &Clients,
+    target: &Target,
+    uid: &str,
+    owned: bool,
+) -> (Vec<String>, Vec<Affected>) {
     let deleted: Vec<Deleted<'_>> = target
         .namespace
         .as_deref()
@@ -201,7 +240,11 @@ async fn emptied(clients: &Clients, target: &Target, uid: &str) -> (Vec<String>,
         .into_iter()
         .filter(|object| object.group.is_empty() && object.kind == "Pod")
         .collect();
-    let mut consequences = vec!["Its pods go, and none take their place.".to_owned()];
+    let mut consequences = vec![if owned {
+        "Its pods go.".to_owned()
+    } else {
+        "Its pods go, and none take their place.".to_owned()
+    }];
     consequences.extend(following.unknown);
     let affected = if pods.is_empty() {
         Vec::new()
@@ -218,6 +261,8 @@ struct Run {
     core: Weak<Core>,
     connection: Option<u64>,
     target: Target,
+    /// The object its plan read.
+    uid: String,
     /// The replicas its plan was made from.
     from: u64,
     replicas: u32,
@@ -246,6 +291,7 @@ impl Run {
             // The scale carries the object's resourceVersion but not its
             // generation, so the write goes as of the object's read.
             let object = get(&clients, &target.path).await?;
+            same(&object, &self.uid, what, "scaled nothing")?;
             let current = get(&clients, &scale).await?;
             let now = current["spec"]["replicas"].as_u64().unwrap_or(0);
             if now == to {
@@ -267,17 +313,24 @@ impl Run {
                 .await?
                 .is_some()
             {
-                written = Some(object);
+                written = Some((object, current));
                 break;
             }
         }
-        let Some(object) = written else {
+        let Some((object, current)) = written else {
             return Err(IpcError::new(
                 ErrorKind::Conflict,
                 format!("{} kept changing, so Twigo scaled nothing", sentence(what)),
             ));
         };
         let done = format!("Scaled {what} to {}", self.replicas);
+        // A custom resource may leave its replicas unset, which its Scale
+        // answers as none (apiextensions-apiserver v0.37.1,
+        // `scaleFromCustomResource`) and an undo could not put back.
+        let builtin = matches!(target.resource.group.as_str(), "" | "apps");
+        if !builtin && current["spec"]["replicas"].is_null() {
+            return Ok(Finished::Done(done));
+        }
         // A change of its replicas moves its generation by one.
         let (Some(generation), Some(uid)) = (
             object["metadata"]["generation"]

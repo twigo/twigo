@@ -210,6 +210,9 @@ pub(crate) async fn undo(core: &Core, space: &str) -> Result<Planned, IpcError> 
                 ));
             }
             let object = get(&clients, &target.path).await?;
+            if let Some(how) = ended_since(&revert, &object) {
+                return Err(how);
+            }
             match asks {
                 Asks::Scale(replicas) => {
                     let current = get(&clients, &target.subpath(Some("scale"))).await?;
@@ -242,6 +245,24 @@ pub(crate) async fn undo(core: &Core, space: &str) -> Result<Planned, IpcError> 
     })
 }
 
+/// Refuses the undo of a Job's suspend or resume once the Job ended, which
+/// its controller then leaves be, whatever `spec.suspend` says; its
+/// generation does not say so, as only its status moved.
+fn ended_since(revert: &Revert, object: &Value) -> Option<IpcError> {
+    if !revert.target.is("batch", &["jobs"]) {
+        return None;
+    }
+    let how = super::suspend::ended(object)?;
+    Some(IpcError::new(
+        ErrorKind::Conflict,
+        format!(
+            "{} {how} since you {} it, so Twigo left it",
+            sentence(&revert.what),
+            revert.past
+        ),
+    ))
+}
+
 async fn run(
     core: Weak<Core>,
     space: String,
@@ -271,6 +292,9 @@ async fn run(
         }
         if !revert.unchanged.holds(&object) {
             return Err(left(format!("{what} changed since you {past} it")));
+        }
+        if let Some(how) = ended_since(&revert, &object) {
+            return Err(how);
         }
         let path = revert.target.subpath(revert.subresource);
         if patch_as_of(&clients, &path, revert.content_type, &revert.patch, &object)

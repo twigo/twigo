@@ -612,6 +612,23 @@ async fn a_delete_lists_what_goes_with_it_and_several_ask_for_the_context_s_name
         Some(replacement)
     );
 
+    let marked = [(&first, "j"), (&first, "k"), (&first, "ghost")];
+    for (namespace, name) in &marked[..2] {
+        cluster.config_map(namespace, name).await;
+    }
+    let plan = core.command_plan("main", several(&marked)).await.unwrap();
+    assert_eq!(
+        plan.question,
+        format!("Delete 2 config maps in {first} from {context}?")
+    );
+    assert!(
+        plan.consequences
+            .contains(&"Gone already, so not in this delete: ghost.".to_owned()),
+        "{:?}",
+        plan.consequences
+    );
+    core.command_cancel("main", plan.id);
+
     let two = [(&first, "h"), (&first, "i")];
     for (namespace, name) in two {
         cluster.config_map(namespace, name).await;

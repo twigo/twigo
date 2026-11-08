@@ -166,6 +166,21 @@ pub(crate) async fn patch_as_of(
     }
 }
 
+/// Refuses a run whose read found another object than its plan's: one of
+/// the same name made since, whose state the plan never showed.
+pub(crate) fn same(object: &Value, uid: &str, what: &str, sent: &str) -> Result<(), IpcError> {
+    if object["metadata"]["uid"].as_str() == Some(uid) {
+        return Ok(());
+    }
+    Err(IpcError::new(
+        ErrorKind::Conflict,
+        format!(
+            "{} was replaced since Twigo asked, so it {sent}",
+            sentence(what)
+        ),
+    ))
+}
+
 /// A request that sends `body` as `content_type`.
 pub(crate) fn write(
     method: Method,

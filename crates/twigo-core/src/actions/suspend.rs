@@ -16,7 +16,9 @@ use twigo_kube::client::Clients;
 use twigo_policy::friction::Risk;
 
 use super::undo::{Asks, Revert, Unchanged};
-use super::{ATTEMPTS, MERGE_PATCH, Target, clients_for, get, kind_words, patch_as_of, sentence};
+use super::{
+    ATTEMPTS, MERGE_PATCH, Target, clients_for, get, kind_words, patch_as_of, same, sentence,
+};
 use crate::Core;
 use crate::bus::{Finished, Planned};
 
@@ -49,11 +51,7 @@ pub(crate) async fn suspend(
         ));
     }
     if let Some(how) = ended(&object) {
-        let verb = if suspend { "suspend" } else { "resume" };
-        return Err(IpcError::new(
-            ErrorKind::InvalidInput,
-            format!("{} {how}, so there is nothing to {verb}", sentence(&what)),
-        ));
+        return Err(nothing(&what, how, suspend));
     }
     let cronjob = target.resource.resource == "cronjobs";
     let (risk, consequences, affected) = match (cronjob, suspend) {
@@ -85,6 +83,10 @@ pub(crate) async fn suspend(
     let run = Run {
         core: core.this.clone(),
         connection,
+        uid: object["metadata"]["uid"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned(),
         target,
         suspend,
         what: what.clone(),
@@ -122,11 +124,19 @@ fn already(what: &str, suspend: bool) -> String {
     format!("{} is {already}", sentence(what))
 }
 
+fn nothing(what: &str, how: &str, suspend: bool) -> IpcError {
+    let verb = if suspend { "suspend" } else { "resume" };
+    IpcError::new(
+        ErrorKind::InvalidInput,
+        format!("{} {how}, so there is nothing to {verb}", sentence(what)),
+    )
+}
+
 /// How a Job ended, or is ending, as `kubectl get` prints it (kubernetes
 /// v1.37.1, `pkg/printers/internalversion/printers.go`): its controller
 /// leaves one that finished be (`pkg/controller/job/job_controller.go`,
 /// `syncJob`) and ends one whose end it has decided. None for a CronJob.
-fn ended(object: &Value) -> Option<&'static str> {
+pub(crate) fn ended(object: &Value) -> Option<&'static str> {
     let holds = |kind: &str| {
         object["status"]["conditions"]
             .as_array()
@@ -283,6 +293,8 @@ struct Run {
     core: Weak<Core>,
     connection: Option<u64>,
     target: Target,
+    /// The object its plan read.
+    uid: String,
     suspend: bool,
     what: String,
 }
@@ -302,8 +314,12 @@ impl Run {
         let mut answer = None;
         for _ in 0..ATTEMPTS {
             let object = get(&clients, &target.path).await?;
+            same(&object, &self.uid, what, "changed nothing")?;
             if is(&object, self.suspend) {
                 return Ok(Finished::Done(already(what, self.suspend)));
+            }
+            if let Some(how) = ended(&object) {
+                return Err(nothing(what, how, self.suspend));
             }
             answer = patch_as_of(&clients, &target.path, MERGE_PATCH, &patch, &object).await?;
             if answer.is_some() {

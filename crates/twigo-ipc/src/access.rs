@@ -114,6 +114,9 @@ pub struct Access {
     pub group: String,
     pub resource: String,
     pub subresource: Option<String>,
+    /// The one object it is for, which a rule that lists `resourceNames`
+    /// needs; none for the resource as a whole.
+    pub name: Option<String>,
 }
 
 /// What the gate takes a request for (ARCHITECTURE 6.4).

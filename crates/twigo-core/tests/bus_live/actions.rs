@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
+use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::core::v1::{Node, PersistentVolumeClaim, Pod, ServiceAccount};
 use k8s_openapi::api::policy::v1::PodDisruptionBudget;
@@ -184,7 +184,7 @@ async fn scale_runs_at_once_and_its_undo_puts_it_back_unless_someone_else_change
     assert_eq!(
         up.kubectl,
         format!(
-            "kubectl --context {context} scale deployments.apps web --replicas 3 -n {namespace}"
+            "kubectl --context {context} scale deployments.apps web --current-replicas 1 --replicas 3 -n {namespace}"
         )
     );
     let told = run(&core, &up, None).await.unwrap();
@@ -289,6 +289,66 @@ async fn scale_runs_at_once_and_its_undo_puts_it_back_unless_someone_else_change
     );
     run(&core, &back, Some(context)).await.unwrap();
     assert_eq!(replicas().await, Some(0));
+
+    core.set_context_mode(SetContextMode {
+        context: context.clone(),
+        mode: None,
+    })
+    .await
+    .unwrap();
+    create(&deployments, deployment("again", 1, "kwok-node-0")).await;
+    pods_of(&pods, "again", 1).await;
+    let sets = Api::<ReplicaSet>::namespaced(cluster.admin.clone(), &namespace);
+    let set = sets
+        .list(&ListParams::default().labels("app=again"))
+        .await
+        .unwrap()
+        .items
+        .remove(0)
+        .metadata
+        .name
+        .unwrap();
+    let owned = plan(
+        &core,
+        PlanRequest::Scale {
+            space: space.clone(),
+            target: reference("apps", "v1", "replicasets", Some(&namespace), &set),
+            replicas: 0,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        owned.consequences,
+        [
+            "Its pods go.",
+            "Its deployment again controls its replicas and may set them back."
+        ]
+    );
+    core.command_cancel("main", owned.id);
+
+    let again = PlanRequest::Scale {
+        space: space.clone(),
+        target: reference("apps", "v1", "deployments", Some(&namespace), "again"),
+        replicas: 2,
+    };
+    let planned = plan(&core, again).await.unwrap();
+    deployments
+        .delete("again", &kube::api::DeleteParams::default())
+        .await
+        .unwrap();
+    eventually("the deployment goes", || async {
+        deployments.get_opt("again").await.unwrap().is_none()
+    })
+    .await;
+    create(&deployments, deployment("again", 1, "kwok-node-0")).await;
+    let told = run(&core, &planned, None).await.unwrap();
+    let error = failed(&told);
+    assert_eq!(error.kind, ErrorKind::Conflict, "{}", error.message);
+    assert_eq!(
+        error.message,
+        "Deployment again was replaced since Twigo asked, so it scaled nothing"
+    );
     cluster.delete(&namespace).await;
 }
 
@@ -485,6 +545,31 @@ async fn a_restart_stamps_the_template_and_lists_the_pods_it_replaces() {
     assert_eq!(rolled().await, (Some(2), Some(3)));
     assert_eq!(uids(&pods, "part").await.get("part-2"), part.get("part-2"));
     assert_eq!(uids(&pods, "kept").await, kept);
+
+    create(&deployments, deployment("renewed", 1, "kwok-node-1")).await;
+    let renewed = plan(
+        &core,
+        PlanRequest::Restart {
+            space: context.clone(),
+            target: reference("apps", "v1", "deployments", Some(&namespace), "renewed"),
+        },
+    )
+    .await
+    .unwrap();
+    deployments
+        .delete("renewed", &kube::api::DeleteParams::default())
+        .await
+        .unwrap();
+    eventually("the deployment goes", || async {
+        deployments.get_opt("renewed").await.unwrap().is_none()
+    })
+    .await;
+    create(&deployments, deployment("renewed", 1, "kwok-node-1")).await;
+    let told = run(&core, &renewed, None).await.unwrap();
+    assert_eq!(
+        failed(&told).message,
+        "Deployment renewed was replaced since Twigo asked, so it restarted nothing"
+    );
 
     merge(&deployments, "web", json!({ "spec": { "paused": true } })).await;
     let paused = plan(&core, restart()).await.unwrap_err();
@@ -1438,6 +1523,7 @@ async fn a_person_without_rights_is_told_so_before_they_try() {
         group: group.to_owned(),
         resource: resource.to_owned(),
         subresource: subresource.map(str::to_owned),
+        name: None,
     };
     let checks = vec![
         access("list", "", "pods", None),
@@ -1468,6 +1554,56 @@ async fn a_person_without_rights_is_told_so_before_they_try() {
         .await
         .unwrap();
     assert_eq!(answers, [true; 6]);
+
+    create(
+        &Api::<k8s_openapi::api::rbac::v1::Role>::namespaced(cluster.admin.clone(), &namespace),
+        json!({
+            "metadata": { "name": "picker" },
+            "rules": [
+                {
+                    "apiGroups": ["apps"],
+                    "resources": ["deployments/scale"],
+                    "verbs": ["patch"],
+                    "resourceNames": ["web"],
+                },
+                { "apiGroups": [""], "resources": ["namespaces"], "verbs": ["delete"] },
+            ],
+        }),
+    )
+    .await;
+    let role = json!({ "kind": "Role", "name": "picker" });
+    let (_dir, picking, picker) = as_account(&cluster, &namespace, "picker", role).await;
+    let named =
+        |verb: &str, group: &str, resource: &str, subresource: Option<&str>, name: &str| Access {
+            name: Some(name.to_owned()),
+            ..access(verb, group, resource, subresource)
+        };
+    let answers = picking
+        .access_review(AccessQuery {
+            space: picker.clone(),
+            namespace: Some(namespace.clone()),
+            checks: vec![
+                access("patch", "apps", "deployments", Some("scale")),
+                named("patch", "apps", "deployments", Some("scale"), "web"),
+                named("patch", "apps", "deployments", Some("scale"), "db"),
+            ],
+        })
+        .await
+        .unwrap();
+    assert_eq!(answers, [false, true, false]);
+    let answers = picking
+        .access_review(AccessQuery {
+            space: picker,
+            namespace: None,
+            checks: vec![
+                access("delete", "", "namespaces", None),
+                named("delete", "", "namespaces", None, &namespace),
+                named("delete", "", "namespaces", None, "default"),
+            ],
+        })
+        .await
+        .unwrap();
+    assert_eq!(answers, [false, true, false]);
     cluster.delete(&namespace).await;
 }
 

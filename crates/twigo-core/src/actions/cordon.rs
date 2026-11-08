@@ -15,7 +15,7 @@ use twigo_ipc::{ErrorKind, IpcError};
 use twigo_policy::friction::Risk;
 
 use super::undo::{Asks, Revert, Unchanged};
-use super::{ATTEMPTS, STRATEGIC_MERGE_PATCH, Target, clients_for, get, patch_as_of};
+use super::{ATTEMPTS, STRATEGIC_MERGE_PATCH, Target, clients_for, get, patch_as_of, same};
 use crate::Core;
 use crate::bus::{Finished, Planned};
 
@@ -113,6 +113,10 @@ pub(crate) async fn cordon(
     };
     let kubectl = target.kubectl(&[verb, name])?;
     let this = core.this.clone();
+    let uid = object["metadata"]["uid"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
     let question = format!("{} node {name} on {context}?", super::sentence(verb));
     Ok(Planned {
         question,
@@ -134,6 +138,7 @@ pub(crate) async fn cordon(
                 this,
                 connection,
                 target,
+                uid,
                 unschedulable,
                 format!("{done} node"),
             ))
@@ -145,6 +150,7 @@ async fn send(
     core: Weak<Core>,
     connection: Option<u64>,
     target: Target,
+    uid: String,
     unschedulable: bool,
     done: String,
 ) -> Result<Finished, IpcError> {
@@ -153,6 +159,7 @@ async fn send(
     let mut answer = None;
     for _ in 0..ATTEMPTS {
         let node = get(&clients, &target.path).await?;
+        same(&node, &uid, &format!("node {name}"), "changed nothing")?;
         if is(&node, unschedulable) {
             return Ok(Finished::Done(already(&name, unschedulable)));
         }

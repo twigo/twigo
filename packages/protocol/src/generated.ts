@@ -7,7 +7,12 @@ export type Access = { verb: string,
 /**
  * Empty for the core group.
  */
-group: string, resource: string, subresource: string | null, };
+group: string, resource: string, subresource: string | null, 
+/**
+ * The one object it is for, which a rule that lists `resourceNames`
+ * needs; none for the resource as a whole.
+ */
+name: string | null, };
 
 /**
  * What the person asks whether they may do in a space, as RBAC names it,

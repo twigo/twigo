@@ -8,7 +8,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Weak;
 
-use futures::future::{join_all, try_join_all};
+use futures::future::join_all;
 use http::Method;
 use kube::api::{DeleteParams, Preconditions, PropagationPolicy};
 use serde_json::Value;
@@ -71,7 +71,26 @@ pub(crate) async fn delete(
         .clients(&context)
         .await
         .map_err(|error| IpcError::from(&error))?;
-    let objects = try_join_all(targets.iter().map(|target| get(&clients, &target.path))).await?;
+    let read = join_all(targets.iter().map(|target| get(&clients, &target.path))).await;
+    let (mut kept, mut gone, mut missing) = (Vec::new(), Vec::new(), None);
+    for (target, read) in targets.into_iter().zip(read) {
+        match read {
+            Ok(object) => kept.push((target, object)),
+            Err(error) if error.kind == ErrorKind::NotFound => {
+                gone.push(target.name.clone());
+                missing.get_or_insert(error);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    if let (true, Some(error)) = (kept.is_empty(), missing) {
+        return Err(error);
+    }
+    let (targets, objects): (Vec<Target>, Vec<Value>) = kept.into_iter().unzip();
+    let writes: Vec<_> = targets
+        .iter()
+        .map(|target| target.attributes(Method::DELETE, None))
+        .collect();
     let uids = objects
         .iter()
         .zip(&targets)
@@ -127,6 +146,12 @@ pub(crate) async fn delete(
         consequences.extend(wide_consequences(&resource, &objects, several));
     }
     consequences.extend(following.unknown);
+    if !gone.is_empty() {
+        consequences.push(format!(
+            "Gone already, so not in this delete: {}.",
+            gone.join(", ")
+        ));
+    }
     let mut affected = Vec::new();
     if several {
         affected.push(Affected {

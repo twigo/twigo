@@ -531,6 +531,7 @@ impl Hub {
             group: query.resource.group.clone(),
             resource: query.resource.resource.clone(),
             subresource: None,
+            name: None,
         };
         self.may(&query.context, None, &access)
             .await
@@ -538,14 +539,45 @@ impl Hub {
     }
 
     /// Whether RBAC lets the person do `access` in `namespace`, or with
-    /// none in every namespace: one SelfSubjectAccessReview, kept with the
-    /// context's clients; none when the cluster cannot answer.
+    /// none in every namespace: a SelfSubjectAccessReview, kept with the
+    /// context's clients; none when the cluster cannot answer. An access to
+    /// one object asks for the whole resource first, which a rule without
+    /// `resourceNames` grants, and for the object by name only when that
+    /// says no, since a rule that lists names grants only them.
     pub async fn may(
         &self,
         context: &str,
         namespace: Option<&str>,
         access: &Access,
     ) -> Option<bool> {
+        if access.name.is_some() {
+            let whole = Access {
+                name: None,
+                ..access.clone()
+            };
+            if self.review(context, namespace, &whole).await == Some(true) {
+                return Some(true);
+            }
+        }
+        self.review(context, namespace, access).await
+    }
+
+    async fn review(
+        &self,
+        context: &str,
+        namespace: Option<&str>,
+        access: &Access,
+    ) -> Option<bool> {
+        // kube-apiserver authorizes a request on a namespace in that
+        // namespace (apiserver v0.37.1, `endpoints/request/requestinfo.go`).
+        let namespace = match (
+            &access.name,
+            access.group.as_str(),
+            access.resource.as_str(),
+        ) {
+            (Some(name), "", "namespaces") => Some(name.as_str()),
+            _ => namespace,
+        };
         let clients = (self.inner.connect)(context.to_owned()).await.ok()?;
         let cluster = self.inner.cluster(context);
         if let Some(may) = cluster.may(&clients, namespace, access) {
@@ -559,6 +591,7 @@ impl Hub {
                     resource: Some(access.resource.clone()),
                     subresource: access.subresource.clone(),
                     namespace: namespace.map(str::to_owned),
+                    name: access.name.clone(),
                     ..ResourceAttributes::default()
                 }),
                 ..SelfSubjectAccessReviewSpec::default()

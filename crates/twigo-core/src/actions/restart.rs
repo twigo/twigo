@@ -15,7 +15,10 @@ use twigo_ipc::{Affected, ErrorKind, IpcError, ObjectRef, ResourceRef};
 use twigo_policy::friction::Risk;
 
 use super::dependents::{Deleted, dependents};
-use super::{STRATEGIC_MERGE_PATCH, Target, clients_for, get, kind_words, write};
+use super::{
+    ATTEMPTS, STRATEGIC_MERGE_PATCH, Target, clients_for, get, kind_words, patch_as_of, same,
+    sentence,
+};
 use crate::Core;
 use crate::bus::{Finished, Planned};
 
@@ -83,6 +86,7 @@ pub(crate) async fn restart(
     let connection = clients.connection();
     let (this, done) = (core.this.clone(), format!("Restarted {what}"));
     let run = target.clone();
+    let uid = uid.to_owned();
     Ok(Planned {
         question: format!("Restart {what}{place} on {context}?"),
         confirm: format!("Restart {kind}"),
@@ -98,7 +102,7 @@ pub(crate) async fn restart(
         connection,
         space: Some(space.to_owned()),
         risk: Risk::Lasting,
-        run: Box::new(move |_| Box::pin(send(this, connection, run, done))),
+        run: Box::new(move |_| Box::pin(send(this, connection, run, uid, what, done))),
     })
 }
 
@@ -160,6 +164,8 @@ async fn send(
     core: Weak<Core>,
     connection: Option<u64>,
     target: Target,
+    uid: String,
+    what: String,
     done: String,
 ) -> Result<Finished, IpcError> {
     let (_, clients) = clients_for(&core, &target.context, connection, "restarted nothing").await?;
@@ -167,15 +173,27 @@ async fn send(
     let patch = json!({
         "spec": { "template": { "metadata": { "annotations": { RESTARTED_AT: now } } } }
     });
-    clients
-        .api
-        .request_text(write(
-            Method::PATCH,
+    for _ in 0..ATTEMPTS {
+        let object = get(&clients, &target.path).await?;
+        same(&object, &uid, &what, "restarted nothing")?;
+        if patch_as_of(
+            &clients,
             &target.path,
             STRATEGIC_MERGE_PATCH,
             &patch,
-        ))
-        .await
-        .map_err(|error| twigo_kube::errors::request(&error))?;
-    Ok(Finished::Done(done))
+            &object,
+        )
+        .await?
+        .is_some()
+        {
+            return Ok(Finished::Done(done));
+        }
+    }
+    Err(IpcError::new(
+        ErrorKind::Conflict,
+        format!(
+            "{} kept changing, so Twigo restarted nothing",
+            sentence(&what)
+        ),
+    ))
 }
