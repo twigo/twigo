@@ -29,6 +29,16 @@ pub(crate) const UNDO_FOR: Duration = Duration::from_secs(30);
 /// status change, before it gives up.
 const ATTEMPTS: usize = 5;
 
+/// What an undo asks before it runs, as a plan of the same write would.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Asks {
+    Nothing,
+    /// It scales to these replicas, which asks as a scale to them does.
+    Scale(u64),
+    /// It suspends a Job, which asks as a suspend does.
+    Suspend,
+}
+
 /// How an undo knows that nobody else changed the object since.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Unchanged {
@@ -70,8 +80,7 @@ pub(crate) struct Revert {
     /// left alone.
     pub uid: String,
     pub unchanged: Unchanged,
-    /// Whether it scales to zero, which asks as a scale to zero does.
-    pub empties: bool,
+    pub asks: Asks,
     /// `deployment web`.
     pub what: String,
     /// What the action did, as `changed since you … it` reads: `scaled`.
@@ -186,17 +195,34 @@ pub(crate) async fn undo(core: &Core, space: &str) -> Result<Planned, IpcError> 
         )
     })?;
     let attributes = revert.target.attributes(Method::PATCH, revert.subresource);
-    let (risk, consequences, affected) = if revert.empties {
-        core.authorize(&revert.target.context, std::slice::from_ref(&attributes))?;
-        let clients = core
-            .clients(&revert.target.context)
-            .await
-            .map_err(|error| IpcError::from(&error))?;
-        let (consequences, affected) =
-            super::scale::emptied(&clients, &revert.target, &revert.uid).await;
-        (Risk::Lasting, consequences, affected)
-    } else {
-        (Risk::Reversible, Vec::new(), Vec::new())
+    let (risk, consequences, affected) = match revert.asks {
+        Asks::Nothing => (Risk::Reversible, Vec::new(), Vec::new()),
+        asks => {
+            let target = &revert.target;
+            core.authorize(&target.context, std::slice::from_ref(&attributes))?;
+            let clients = core
+                .clients(&target.context)
+                .await
+                .map_err(|error| IpcError::from(&error))?;
+            if clients.connection() != connection {
+                return Err(IpcError::new(
+                    ErrorKind::Conflict,
+                    format!(
+                        "{} names another cluster now than the one you changed, so nothing can be undone there",
+                        target.context
+                    ),
+                ));
+            }
+            let object = get(&clients, &target.path).await?;
+            match asks {
+                Asks::Scale(replicas) => {
+                    let current = get(&clients, &target.subpath(Some("scale"))).await?;
+                    let from = current["spec"]["replicas"].as_u64().unwrap_or(0);
+                    super::scale::shrinking(&clients, target, &object, from, replicas).await
+                }
+                _ => super::suspend::stopping(&clients, target, &object).await,
+            }
+        }
     };
     let (this, space) = (core.this.clone(), space.to_owned());
     Ok(Planned {
@@ -281,7 +307,7 @@ mod tests {
             content_type: super::super::STRATEGIC_MERGE_PATCH,
             patch: json!({ "spec": { "unschedulable": null } }),
             uid: "u-1".to_owned(),
-            empties: false,
+            asks: super::Asks::Nothing,
             unchanged: Unchanged::Flag {
                 pointer: "/spec/unschedulable",
                 set: true,

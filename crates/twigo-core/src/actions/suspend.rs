@@ -5,11 +5,13 @@
 use std::sync::Weak;
 
 use http::Method;
+use serde_json::Value;
 use serde_json::json;
-use twigo_ipc::{ErrorKind, IpcError, ResourceRef};
+use twigo_ipc::{Affected, ErrorKind, IpcError, ObjectRef, ResourceRef};
+use twigo_kube::client::Clients;
 use twigo_policy::friction::Risk;
 
-use super::undo::{Revert, Unchanged};
+use super::undo::{Asks, Revert, Unchanged};
 use super::{MERGE_PATCH, Target, clients_for, get, kind_words, sentence, write};
 use crate::Core;
 use crate::bus::{Finished, Planned};
@@ -48,11 +50,26 @@ pub(crate) async fn suspend(
         ));
     }
     let cronjob = target.resource.resource == "cronjobs";
-    let consequence = match (cronjob, suspend) {
-        (false, true) => "Its running pods stop, and none start until it resumes.",
-        (false, false) => "It starts its pods again.",
-        (true, true) => "No new jobs start on its schedule until it resumes; those running go on.",
-        (true, false) => "Its schedule starts jobs again.",
+    let (risk, consequences, affected) = match (cronjob, suspend) {
+        (false, true) => stopping(&clients, &target, &object).await,
+        (false, false) => (
+            Risk::Reversible,
+            vec!["It starts its pods again.".to_owned()],
+            Vec::new(),
+        ),
+        (true, true) => (
+            Risk::Reversible,
+            vec![
+                "No new jobs start on its schedule until it resumes; those running go on."
+                    .to_owned(),
+            ],
+            Vec::new(),
+        ),
+        (true, false) => (
+            Risk::Reversible,
+            vec!["Its schedule starts jobs again.".to_owned()],
+            Vec::new(),
+        ),
     };
     let words = Words::of(suspend);
     let kubectl = line(&target, suspend)?;
@@ -70,8 +87,8 @@ pub(crate) async fn suspend(
         question: format!("{} {what}{place} on {context}?", words.verb),
         confirm: format!("{} {kind}", words.verb),
         doing: format!("{} {what}", words.doing),
-        consequences: vec![consequence.to_owned()],
-        affected: Vec::new(),
+        consequences,
+        affected,
         kubectl,
         command: if suspend { "suspend" } else { "resume" },
         target: attributes.target(),
@@ -79,9 +96,83 @@ pub(crate) async fn suspend(
         context,
         connection,
         space: Some(space.to_owned()),
-        risk: Risk::Reversible,
+        risk,
         run: Box::new(move |_| Box::pin(run.run())),
     })
+}
+
+/// What suspending a Job risks: its job controller deletes the pods it
+/// runs (kubernetes v1.37.1, `pkg/controller/job/job_controller.go`), so
+/// their work is lost and a resume starts new ones; one that runs none an
+/// undo puts back.
+pub(crate) async fn stopping(
+    clients: &Clients,
+    target: &Target,
+    object: &Value,
+) -> (Risk, Vec<String>, Vec<Affected>) {
+    let calm = || {
+        (
+            Risk::Reversible,
+            vec!["Its running pods stop, and none start until it resumes.".to_owned()],
+            Vec::new(),
+        )
+    };
+    if object["status"]["active"].as_u64().unwrap_or(0) == 0 {
+        return calm();
+    }
+    let uid = object["metadata"]["uid"].as_str().unwrap_or_default();
+    let namespace = target.namespace.as_deref().unwrap_or_default();
+    let query = form_urlencoded::Serializer::new(String::new())
+        .append_pair(
+            "labelSelector",
+            &format!("batch.kubernetes.io/controller-uid={uid}"),
+        )
+        .finish();
+    let pods: Vec<ObjectRef> = match get(
+        clients,
+        &format!("/api/v1/namespaces/{namespace}/pods?{query}"),
+    )
+    .await
+    {
+        Ok(list) => list["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|pod| {
+                !matches!(
+                    pod["status"]["phase"].as_str(),
+                    Some("Succeeded" | "Failed")
+                ) && pod["metadata"]["deletionTimestamp"].is_null()
+            })
+            .map(|pod| ObjectRef {
+                group: String::new(),
+                version: "v1".to_owned(),
+                kind: "Pod".to_owned(),
+                namespace: Some(namespace.to_owned()),
+                name: pod["metadata"]["name"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    let affected = if pods.is_empty() {
+        Vec::new()
+    } else {
+        vec![Affected {
+            title: "Its pods stop".to_owned(),
+            objects: pods,
+        }]
+    };
+    (
+        Risk::Lasting,
+        vec![
+            "Its running pods stop and their work is lost; when it resumes, new ones start."
+                .to_owned(),
+        ],
+        affected,
+    )
 }
 
 struct Words {
@@ -168,7 +259,11 @@ impl Run {
             patch: json!({ "spec": { "suspend": !self.suspend } }),
             uid: uid.to_owned(),
             unchanged: Unchanged::Generation(generation),
-            empties: false,
+            asks: if self.suspend || target.resource.resource != "jobs" {
+                Asks::Nothing
+            } else {
+                Asks::Suspend
+            },
             what: what.clone(),
             past: words.past,
             question: format!("{} {what}{place} on {}?", back.verb, target.context),

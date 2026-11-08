@@ -629,6 +629,59 @@ async fn a_delete_lists_what_goes_with_it_and_several_ask_for_the_context_s_name
         panic!("{told:?}");
     };
     assert_eq!(error.kind, ErrorKind::Conflict, "{}", error.message);
+
+    let slow = Api::<ConfigMap>::namespaced(cluster.admin.clone(), &first);
+    slow.create(
+        &PostParams::default(),
+        &serde_json::from_value(json!({
+            "metadata": { "name": "slow", "finalizers": ["twigo.io/hold"] },
+        }))
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+    cluster.config_map(&first, "swapped").await;
+    let two = [(&first, "slow"), (&first, "swapped")];
+    let plan = core.command_plan("main", several(&two)).await.unwrap();
+    slow.delete("swapped", &DeleteParams::default())
+        .await
+        .unwrap();
+    cluster.config_map(&first, "swapped").await;
+    let (sender, mut events) = mpsc::unbounded_channel();
+    core.command_execute(
+        "main",
+        twigo_ipc::Execute {
+            plan: plan.id,
+            typed: Some(context.clone()),
+        },
+        move |event| sender.send(event).is_ok(),
+    )
+    .await
+    .unwrap();
+    let last = tokio::time::timeout(WAIT, async {
+        while let Some(event) = events.recv().await {
+            match event {
+                OperationEvent::Running { .. } => core.command_cancel("main", plan.id),
+                last => return last,
+            }
+        }
+        panic!("the run's channel closed");
+    })
+    .await
+    .expect("the stop ends the run");
+    assert_eq!(
+        last,
+        OperationEvent::Stopped {
+            text: "Stopped waiting for 1 config map, which is still being deleted; config map swapped was replaced since you confirmed, so Twigo left it".to_owned()
+        }
+    );
+    slow.patch(
+        "slow",
+        &kube::api::PatchParams::default(),
+        &kube::api::Patch::Merge(json!({ "metadata": { "finalizers": null } })),
+    )
+    .await
+    .unwrap();
     cluster.delete(&first).await;
     cluster.delete(&second).await;
 }

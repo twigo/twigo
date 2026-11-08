@@ -356,7 +356,12 @@ impl Run {
                 (gone, replaced, failed)
             },
         );
-        let deleted = self.told(waiting.len(), gone, &replaced, &failed);
+        let besides = self.besides(gone, &replaced, &failed);
+        let deleted = format!("{}{besides}", self.told(waiting.len(), failed.len()));
+        let finish = |text: String| match failed.first() {
+            Some((_, error)) => Err(IpcError::new(error.kind, text)),
+            None => Ok(Finished::Done(text)),
+        };
         if waiting.is_empty() {
             return match failed.first() {
                 Some((_, error)) => Err(IpcError::new(error.kind, deleted)),
@@ -394,28 +399,28 @@ impl Run {
             };
             let are = if left == 1 { "is" } else { "are" };
             Finished::Stopped(format!(
-                "Stopped waiting for {still}, which {are} still being deleted"
+                "Stopped waiting for {still}, which {are} still being deleted{besides}"
             ))
         };
         let mut followed = match watched {
             Ok(followed) => followed,
             Err(_) => {
-                return Ok(Finished::Done(format!(
+                return finish(format!(
                     "{deleted}; Twigo cannot watch {} go",
                     if self.targets.len() == 1 {
                         "it"
                     } else {
                         "them"
                     }
-                )));
+                ));
             }
         };
         tokio::select! {
             whole = followed.whole() => if whole.is_err() {
-                return Ok(Finished::Done(format!(
+                return finish(format!(
                     "{deleted}; Twigo cannot watch {} go",
                     if self.targets.len() == 1 { "it" } else { "them" }
-                )));
+                ));
             },
             () = progress.stopped() => return Ok(stopped(waiting.len())),
         }
@@ -432,10 +437,7 @@ impl Run {
                 })
                 .count();
             if left == 0 {
-                return match failed.first() {
-                    Some((_, error)) => Err(IpcError::new(error.kind, deleted)),
-                    None => Ok(Finished::Done(deleted)),
-                };
+                return finish(deleted);
             }
             if told != Some(left) {
                 progress.running(if self.targets.len() == 1 {
@@ -455,25 +457,24 @@ impl Run {
         }
     }
 
-    /// How it went, in a sentence: `Deleted 4 pods; 1 was already gone`.
-    fn told(
-        &self,
-        sent: usize,
-        gone: usize,
-        replaced: &[&str],
-        failed: &[(&str, &IpcError)],
-    ) -> String {
+    /// What it deleted: `Deleted 4 pods`, `Deleted 3 of 5 pods`.
+    fn told(&self, sent: usize, failed: usize) -> String {
         if self.targets.len() == 1 {
-            return format!("Deleted {}", self.what);
-        }
-        let mut told = if failed.is_empty() {
+            format!("Deleted {}", self.what)
+        } else if failed == 0 {
             format!("Deleted {}", counted(sent, &self.kind))
         } else {
             format!(
                 "Deleted {sent} of {}",
                 counted(self.targets.len(), &self.kind)
             )
-        };
+        }
+    }
+
+    /// What else happened to them, each after a semicolon: `; 1 was
+    /// already gone`.
+    fn besides(&self, gone: usize, replaced: &[&str], failed: &[(&str, &IpcError)]) -> String {
+        let mut told = String::new();
         if gone > 0 {
             let was = if gone == 1 { "was" } else { "were" };
             told.push_str(&format!("; {gone} {was} already gone"));

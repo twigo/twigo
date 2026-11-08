@@ -525,7 +525,7 @@ async fn evict(clients: &Clients, pod: &Pod, progress: &Progress) -> Result<bool
         "apiVersion": "policy/v1",
         "kind": "Eviction",
         "metadata": { "name": name, "namespace": namespace },
-        "deleteOptions": {},
+        "deleteOptions": { "preconditions": { "uid": pod.metadata.uid } },
     });
     let terminating = pod.metadata.deletion_timestamp.is_some();
     loop {
@@ -538,7 +538,8 @@ async fn evict(clients: &Clients, pod: &Pod, progress: &Progress) -> Result<bool
             .await
         {
             Ok(_) => return Ok(true),
-            Err(kube::Error::Api(status)) if status.code == 404 => return Ok(true),
+            // Gone, or another pod of its name: the one it listed went.
+            Err(kube::Error::Api(status)) if matches!(status.code, 404 | 409) => return Ok(true),
             Err(kube::Error::Api(status)) if status.code == 429 => {
                 progress.running(format!(
                     "A disruption budget holds pod {namespace}/{name} back; asking again in {} s",

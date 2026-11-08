@@ -11,7 +11,7 @@ use twigo_cache::hub::Resource;
 use twigo_ipc::{ErrorKind, IpcError};
 use twigo_policy::friction::Risk;
 
-use super::undo::{Revert, Unchanged};
+use super::undo::{Asks, Revert, Unchanged};
 use super::{STRATEGIC_MERGE_PATCH, Target, clients_for, get, write};
 use crate::Core;
 use crate::bus::{Finished, Planned};
@@ -160,7 +160,7 @@ async fn send(
         content_type: STRATEGIC_MERGE_PATCH,
         patch: patch(!unschedulable),
         uid: uid.to_owned(),
-        empties: false,
+        asks: Asks::Nothing,
         unchanged: Unchanged::Flag {
             pointer: "/spec/unschedulable",
             set: unschedulable,

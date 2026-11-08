@@ -5,9 +5,9 @@
 
 use std::time::Duration;
 
-use k8s_openapi::api::apps::v1::{DaemonSet, Deployment};
+use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
-use k8s_openapi::api::core::v1::{Node, Pod, ServiceAccount};
+use k8s_openapi::api::core::v1::{Node, PersistentVolumeClaim, Pod, ServiceAccount};
 use k8s_openapi::api::policy::v1::PodDisruptionBudget;
 use k8s_openapi::api::rbac::v1::RoleBinding;
 use kube::Api;
@@ -557,6 +557,60 @@ async fn suspend_and_resume_run_at_once_and_their_undo_holds_to_the_generation()
         "Cron job again was replaced since you suspended it, so Twigo left it"
     );
 
+    let mut waiting = json!({
+        "metadata": { "name": "waiting" },
+        "spec": { "template": { "spec": {
+            "nodeSelector": { "twigo.io/no-such-node": "anywhere" },
+            "restartPolicy": "Never",
+            "containers": [{ "name": "app", "image": "fake" }],
+        } } },
+    });
+    waiting["spec"]["parallelism"] = json!(1);
+    create(&jobs, waiting).await;
+    let pods = Api::<Pod>::namespaced(cluster.admin.clone(), &namespace);
+    let pending = tokio::time::timeout(WAIT, async {
+        loop {
+            let listed = pods
+                .list(&ListParams::default().labels("batch.kubernetes.io/job-name=waiting"))
+                .await
+                .unwrap()
+                .items;
+            let active = jobs
+                .get("waiting")
+                .await
+                .unwrap()
+                .status
+                .and_then(|status| status.active);
+            if let (Some(pod), Some(1)) = (listed.first(), active) {
+                return pod.metadata.name.clone().unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("the job's pod waits for a node");
+    let stopping = plan(&core, suspend("jobs", "waiting", true)).await.unwrap();
+    assert_eq!(stopping.friction, Friction::Confirm);
+    assert_eq!(names(&stopping, "Its pods stop"), [pending]);
+    run(&core, &stopping, None).await.unwrap();
+    let resumed = plan(&core, suspend("jobs", "waiting", false))
+        .await
+        .unwrap();
+    assert_eq!(resumed.friction, Friction::AtOnce);
+    run(&core, &resumed, None).await.unwrap();
+    eventually("the resumed job runs a pod", || async {
+        jobs.get("waiting")
+            .await
+            .unwrap()
+            .status
+            .and_then(|status| status.active)
+            == Some(1)
+    })
+    .await;
+    let back = plan(&core, undo(&cluster)).await.unwrap();
+    assert_eq!(back.friction, Friction::Confirm);
+    core.command_cancel("main", back.id);
+
     let resume = plan(&core, suspend("jobs", "held", false)).await.unwrap();
     let told = run(&core, &resume, None).await.unwrap();
     assert_eq!(done(&told).0, "Resumed job held");
@@ -611,16 +665,20 @@ async fn observed(budgets: &Api<PodDisruptionBudget>, name: &str, expected: i32)
     .await;
 }
 
-/// Runs a plan and gathers its events until the last, calling `held` the
-/// first time a disruption budget holds a pod back.
-async fn drained<Held, Done>(
+/// How a drain says a disruption budget holds a pod back.
+const HELD: &str = "A disruption budget holds pod";
+
+/// Runs a plan and gathers its events until the last, calling `then` the
+/// first time a running event starts with `when`.
+async fn running_until<Then, Done>(
     core: &Core,
     plan: &Plan,
     typed: Option<&str>,
-    held: Held,
+    when: &str,
+    then: Then,
 ) -> Vec<OperationEvent>
 where
-    Held: FnOnce() -> Done,
+    Then: FnOnce() -> Done,
     Done: std::future::Future<Output = ()>,
 {
     let (sender, mut events) = mpsc::unbounded_channel();
@@ -634,16 +692,16 @@ where
     )
     .await
     .unwrap();
-    let mut held = Some(held);
+    let mut then = Some(then);
     let mut told = Vec::new();
     tokio::time::timeout(WAIT, async {
         while let Some(event) = events.recv().await {
             let last = !matches!(event, OperationEvent::Running { .. });
             if let OperationEvent::Running { text } = &event
-                && text.starts_with("A disruption budget holds pod")
-                && let Some(held) = held.take()
+                && text.starts_with(when)
+                && let Some(then) = then.take()
             {
-                held().await;
+                then().await;
             }
             told.push(event);
             if last {
@@ -652,7 +710,7 @@ where
         }
     })
     .await
-    .expect("the drain ends within 60 s");
+    .expect("the run ends within 60 s");
     told
 }
 
@@ -733,7 +791,7 @@ async fn a_drain_waits_on_a_budget_then_finishes_and_leaves_daemon_set_pods() {
     assert!(staying.contains(&agent[0]), "{staying:?}");
 
     let mut held = false;
-    let told = drained(&core, &planned, None, || {
+    let told = running_until(&core, &planned, None, HELD, || {
         held = true;
         async {
             merge(&nodes, elsewhere, label(Some(&namespace))).await;
@@ -780,13 +838,17 @@ async fn a_stopped_drain_leaves_the_node_cordoned_and_says_so() {
     )
     .await;
     create(&budgets, budget("stuck", 1)).await;
-    create(
-        &Api::<Deployment>::namespaced(cluster.admin.clone(), &namespace),
-        deployment("loose", 1, node),
-    )
-    .await;
+    let deployments = Api::<Deployment>::namespaced(cluster.admin.clone(), &namespace);
+    create(&deployments, deployment("loose", 1, node)).await;
+    create(&deployments, deployment("both", 1, node)).await;
+    for name in ["both-a", "both-b"] {
+        let mut twice = budget("both", 0);
+        twice["metadata"]["name"] = json!(name);
+        create(&budgets, twice).await;
+    }
     let stuck = pods_of(&pods, "stuck", 1).await;
     let loose = pods_of(&pods, "loose", 1).await;
+    let both = pods_of(&pods, "both", 1).await;
     observed(&budgets, "stuck", 1).await;
 
     let planned = plan(
@@ -798,18 +860,19 @@ async fn a_stopped_drain_leaves_the_node_cordoned_and_says_so() {
     )
     .await
     .unwrap();
-    let told = drained(&core, &planned, None, || async {
+    let told = running_until(&core, &planned, None, HELD, || async {
         core.command_cancel("main", planned.id);
     })
     .await;
-    let last = told.last().unwrap().clone();
-    assert_eq!(
-        last,
-        OperationEvent::Stopped {
-            text: format!(
-                "Stopped draining node {node}, which stays cordoned; it evicted 1 of 2 pods"
-            )
-        }
+    let Some(OperationEvent::Stopped { text }) = told.last() else {
+        panic!("{told:?}");
+    };
+    assert!(
+        text.starts_with(&format!(
+            "Stopped draining node {node}, which stays cordoned; it evicted 1 of 3 pods; evicting pod {namespace}/{} failed:",
+            both[0]
+        )),
+        "{text}"
     );
     assert!(cordoned(&nodes, node).await);
     assert_eq!(pods_of(&pods, "stuck", 1).await, stuck);
@@ -1113,5 +1176,67 @@ async fn a_person_without_rights_is_told_so_before_they_try() {
         .await
         .unwrap();
     assert_eq!(answers, [true; 6]);
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_stateful_set_that_deletes_its_claims_on_scale_down_asks_and_lists_them() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("claims").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let context = &cluster.context;
+    let sets = Api::<StatefulSet>::namespaced(cluster.admin.clone(), &namespace);
+    let claims = Api::<PersistentVolumeClaim>::namespaced(cluster.admin.clone(), &namespace);
+    let pods = Api::<Pod>::namespaced(cluster.admin.clone(), &namespace);
+    let set = |name: &str, when_scaled: &str| {
+        json!({
+            "metadata": { "name": name },
+            "spec": {
+                "replicas": 2,
+                "serviceName": name,
+                "selector": { "matchLabels": { "app": name } },
+                "persistentVolumeClaimRetentionPolicy": { "whenScaled": when_scaled },
+                "template": {
+                    "metadata": { "labels": { "app": name } },
+                    "spec": {
+                        "nodeName": "kwok-node-0",
+                        "containers": [{ "name": "app", "image": "fake" }],
+                    },
+                },
+                "volumeClaimTemplates": [{
+                    "metadata": { "name": "data" },
+                    "spec": {
+                        "accessModes": ["ReadWriteOnce"],
+                        "resources": { "requests": { "storage": "1Mi" } },
+                    },
+                }],
+            },
+        })
+    };
+    create(&sets, set("db", "Delete")).await;
+    create(&sets, set("kept", "Retain")).await;
+    pods_of(&pods, "db", 2).await;
+    pods_of(&pods, "kept", 2).await;
+    let scale = |name: &str, replicas| PlanRequest::Scale {
+        space: context.clone(),
+        target: reference("apps", "v1", "statefulsets", Some(&namespace), name),
+        replicas,
+    };
+
+    let shrink = plan(&core, scale("db", 1)).await.unwrap();
+    assert_eq!(shrink.friction, Friction::Confirm);
+    assert_eq!(names(&shrink, "Their claims go"), ["data-db-1"]);
+    run(&core, &shrink, None).await.unwrap();
+    eventually("the scaled-away pod's claim goes", || async {
+        claims.get_opt("data-db-1").await.unwrap().is_none()
+    })
+    .await;
+    assert!(claims.get_opt("data-db-0").await.unwrap().is_some());
+
+    let kept = plan(&core, scale("kept", 1)).await.unwrap();
+    assert_eq!(kept.friction, Friction::AtOnce);
+    assert!(kept.affected.is_empty(), "{:?}", kept.affected);
     cluster.delete(&namespace).await;
 }

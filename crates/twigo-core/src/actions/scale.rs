@@ -7,11 +7,11 @@ use std::sync::Weak;
 
 use http::Method;
 use serde_json::json;
-use twigo_ipc::{Affected, ErrorKind, IpcError, ResourceRef};
+use twigo_ipc::{Affected, ErrorKind, IpcError, ObjectRef, ResourceRef};
 use twigo_policy::friction::Risk;
 
 use super::dependents::{Deleted, dependents};
-use super::undo::{Revert, Unchanged};
+use super::undo::{Asks, Revert, Unchanged};
 use super::{MERGE_PATCH, Target, clients_for, get, kind_words, sentence, write};
 use crate::Core;
 use crate::bus::{Finished, Planned};
@@ -41,13 +41,9 @@ pub(crate) async fn scale(
             format!("{} has {replicas} replicas already", sentence(&what)),
         ));
     }
-    let (risk, consequences, affected) = if replicas == 0 {
-        let uid = object["metadata"]["uid"].as_str().unwrap_or_default();
-        let (consequences, affected) = emptied(&clients, &target, uid).await;
-        (Risk::Lasting, consequences, affected)
-    } else {
-        (Risk::Reversible, Vec::new(), Vec::new())
-    };
+    let from = current["spec"]["replicas"].as_u64().unwrap_or(0);
+    let (risk, consequences, affected) =
+        shrinking(&clients, &target, &object, from, replicas.into()).await;
     let kind_name = target.resource.name();
     let count = replicas.to_string();
     let kubectl = target.kubectl(&["scale", &kind_name, &target.name, "--replicas", &count])?;
@@ -80,13 +76,91 @@ pub(crate) async fn scale(
     })
 }
 
-/// What scaling `target` of `uid` to zero asks about: its pods go, and
-/// which.
-pub(crate) async fn emptied(
+/// What setting `target`'s replicas from `from` to `to` risks, and what goes
+/// with it: to zero its pods go; fewer pods of a StatefulSet whose
+/// `whenScaled` is `Delete` take their claims and their data with them, as
+/// its controller makes each pod it scales away its claims' owner
+/// (kubernetes v1.37.1, `pkg/controller/statefulset/stateful_set_utils.go`).
+/// Anything else an undo puts back.
+pub(crate) async fn shrinking(
     clients: &Clients,
     target: &Target,
-    uid: &str,
-) -> (Vec<String>, Vec<Affected>) {
+    object: &serde_json::Value,
+    from: u64,
+    to: u64,
+) -> (Risk, Vec<String>, Vec<Affected>) {
+    let mut consequences = Vec::new();
+    let mut affected = Vec::new();
+    if to == 0 {
+        let uid = object["metadata"]["uid"].as_str().unwrap_or_default();
+        let (said, listed) = emptied(clients, target, uid).await;
+        consequences.extend(said);
+        affected.extend(listed);
+    }
+    let deletes = object["spec"]["persistentVolumeClaimRetentionPolicy"]["whenScaled"] == "Delete";
+    let claims = if target.is("apps", &["statefulsets"]) && deletes && to < from {
+        claims(clients, target, object, from, to).await
+    } else {
+        Vec::new()
+    };
+    if !claims.is_empty() {
+        consequences.push(
+            "The claims of the pods that go are deleted with them, and their data with them."
+                .to_owned(),
+        );
+        affected.push(Affected {
+            title: "Their claims go".to_owned(),
+            objects: claims,
+        });
+    }
+    let risk = if to == 0 || !affected.is_empty() {
+        Risk::Lasting
+    } else {
+        Risk::Reversible
+    };
+    (risk, consequences, affected)
+}
+
+/// The claims that exist of a StatefulSet's pods from ordinal `to` to
+/// `from`, past its first ordinal: `<template>-<set>-<ordinal>`, as its
+/// controller names them.
+async fn claims(
+    clients: &Clients,
+    target: &Target,
+    object: &serde_json::Value,
+    from: u64,
+    to: u64,
+) -> Vec<ObjectRef> {
+    let start = object["spec"]["ordinals"]["start"].as_u64().unwrap_or(0);
+    let namespace = target.namespace.clone().unwrap_or_default();
+    let templates: Vec<&str> = object["spec"]["volumeClaimTemplates"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|template| template["metadata"]["name"].as_str())
+        .collect();
+    let mut claims = Vec::new();
+    for ordinal in start + to..start + from {
+        for template in &templates {
+            let name = format!("{template}-{}-{ordinal}", target.name);
+            let path = format!("/api/v1/namespaces/{namespace}/persistentvolumeclaims/{name}");
+            if get(clients, &path).await.is_ok() {
+                claims.push(ObjectRef {
+                    group: String::new(),
+                    version: "v1".to_owned(),
+                    kind: "PersistentVolumeClaim".to_owned(),
+                    namespace: Some(namespace.clone()),
+                    name,
+                });
+            }
+        }
+    }
+    claims
+}
+
+/// What scaling `target` of `uid` to zero asks about: its pods go, and
+/// which.
+async fn emptied(clients: &Clients, target: &Target, uid: &str) -> (Vec<String>, Vec<Affected>) {
     let deleted: Vec<Deleted<'_>> = target
         .namespace
         .as_deref()
@@ -181,7 +255,7 @@ impl Run {
             patch: json!({ "spec": { "replicas": from } }),
             uid: uid.to_owned(),
             unchanged: Unchanged::Generation(generation),
-            empties: from == 0,
+            asks: Asks::Scale(from),
             what: what.clone(),
             past: "scaled",
             question: format!("Scale {what}{place} back to {from} on {context}?"),
