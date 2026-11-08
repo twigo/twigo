@@ -217,6 +217,12 @@ impl<'a> Node<'a> {
         }
     }
 
+    /// Whether the schema types this place, as against a value the server
+    /// deduces from what it gets, or leaves untyped.
+    pub fn typed(&self) -> bool {
+        matches!(self.kind, Kind::Schema(_))
+    }
+
     /// The `default` of the field this node was reached by, which a key of a
     /// list map may rely on when an element leaves it out.
     pub fn default(&self) -> Option<&'a Value> {

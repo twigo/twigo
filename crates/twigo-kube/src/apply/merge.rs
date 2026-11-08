@@ -2,14 +2,16 @@
 //! with what changed, taking paths out, and the merge patches that remove
 //! what an apply cannot, or carry an edit an apply cannot express at all.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::{Map, Value};
 
 use super::fields::{Element, Path};
 use crate::openapi::{ListType, Node};
 
-/// Lays `change` over `into`, as the server would merge the two.
+/// Lays `change` over `into`, field by field as the server would merge the
+/// two; a new element goes after the others, and where the elements of a
+/// configuration stand is [`in_live_order`]'s to say.
 pub(super) fn merge(into: &mut Value, change: Value, node: Option<Node<'_>>) {
     match (into, change) {
         (Value::Object(into), Value::Object(change)) if node.is_some_and(|n| !n.atomic_map()) => {
@@ -43,6 +45,45 @@ pub(super) fn merge(into: &mut Value, change: Value, node: Option<Node<'_>>) {
             }
         }
         (into, change) => *into = change,
+    }
+}
+
+/// Puts the elements of `config` that `live` holds in the order it holds
+/// them, new ones after, at every depth: the server follows a
+/// configuration's order for the elements the two share
+/// ([`visitListItems`]), so any other order would move them on the object.
+///
+/// [`visitListItems`]: https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/typed/merge.go#L168-L283
+pub(super) fn in_live_order(config: &mut Value, live: &Value, node: Option<Node<'_>>) {
+    let Some(node) = node else { return };
+    match (config, live) {
+        (Value::Object(config), Value::Object(live)) if !node.atomic_map() => {
+            for (name, value) in config {
+                if let Some(held) = live.get(name) {
+                    in_live_order(value, held, node.field(name));
+                }
+            }
+        }
+        (Value::Array(config), Value::Array(live)) => {
+            let list = node.list();
+            let items = node.items();
+            let mut held: HashMap<Element, usize> = HashMap::new();
+            for (index, item) in live.iter().enumerate() {
+                if let Some(element) = Element::of_item(item, &list, items) {
+                    held.entry(element).or_insert(index);
+                }
+            }
+            let at = |item: &Value| {
+                Element::of_item(item, &list, items).and_then(|element| held.get(&element).copied())
+            };
+            config.sort_by_cached_key(|item| at(item).unwrap_or(usize::MAX));
+            for item in config {
+                if let Some(index) = at(item) {
+                    in_live_order(item, &live[index], items);
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -278,35 +319,20 @@ fn difference(from: &Map<String, Value>, to: &Map<String, Value>) -> Map<String,
     patch
 }
 
-/// Puts `new` at `path`, making what is missing on the way.
+/// Puts `new` at `path`, which `value` holds.
 fn place(value: &mut Value, path: &[Element], new: Value) {
     let Some((first, rest)) = path.split_first() else {
         *value = new;
         return;
     };
-    match first {
-        Element::Field(name) => {
-            let Value::Object(map) = value else {
-                return;
-            };
-            let child = map
-                .entry(name.clone())
-                .or_insert_with(|| Value::Object(Map::new()));
-            place(child, rest, new);
-        }
-        element => {
-            let Value::Array(items) = value else {
-                return;
-            };
-            match items.iter().position(|item| element.matches(item)) {
-                Some(index) => place(&mut items[index], rest, new),
-                None => {
-                    let mut item = Value::Object(element.key_fields());
-                    place(&mut item, rest, new);
-                    items.push(item);
-                }
-            }
-        }
+    let child = match first {
+        Element::Field(name) => value.get_mut(name),
+        element => value
+            .as_array_mut()
+            .and_then(|items| items.iter_mut().find(|item| element.matches(item))),
+    };
+    if let Some(child) = child {
+        place(child, rest, new);
     }
 }
 

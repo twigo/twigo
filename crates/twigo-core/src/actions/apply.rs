@@ -46,8 +46,8 @@ use twigo_ipc::{
     OpenedEdit, PreviewId, Resource as Served,
 };
 use twigo_kube::apply::{
-    self, Combined, EDIT_FIELD_MANAGER, Edit, FIELD_MANAGER, Path, comparable, merge_patch,
-    still_has, without,
+    self, Combined, EDIT_FIELD_MANAGER, Edit, FIELD_MANAGER, Path, Refusal, comparable,
+    merge_patch, still_has, without,
 };
 use twigo_kube::client::Clients;
 use twigo_kube::discovery::Discovery;
@@ -520,6 +520,16 @@ fn side(object: Value) -> Value {
     object
 }
 
+/// Whether a value holds a null at any depth.
+fn holds_null(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::Object(map) => map.values().any(holds_null),
+        Value::Array(items) => items.iter().any(holds_null),
+        _ => false,
+    }
+}
+
 /// Builds and dry-runs an edit, and keeps what it prepared with `keep`.
 pub(crate) async fn preview(
     core: &Core,
@@ -595,7 +605,7 @@ pub(crate) async fn preview(
     let group = target.resource.group.clone();
     let version = target.resource.version.clone();
     let kind = edited["kind"].as_str().unwrap_or_default().to_owned();
-    let document = if opened.is_some() || !dropped.is_empty() {
+    let document = if opened.is_some() || !dropped.is_empty() || holds_null(&edited) {
         Some(
             Document::load(&clients.api, &core.openapi, &group, &version)
                 .await
@@ -618,7 +628,7 @@ pub(crate) async fn preview(
     };
     let (config, removals, ignored, combined) = match (&opened, &live) {
         (Some(opened), Some(live)) => {
-            let built = apply::build(Edit {
+            let built = match apply::build(Edit {
                 live,
                 base: &opened.base,
                 edited: &edited,
@@ -626,17 +636,27 @@ pub(crate) async fn preview(
                 status_subresource,
                 lock: lock.as_deref().unwrap_or_default(),
                 dropped: &dropped,
-            })
-            .map_err(|foreign| {
-                IpcError::new(
-                    ErrorKind::Conflict,
-                    format!(
-                        "Twigo applied this object at {}, and {} of what it owns there does not exist at {version}: open it at that version to change it, or nothing Twigo owns is lost",
-                        foreign.version,
-                        foreign.paths.join(", ")
-                    ),
-                )
-            })?;
+            }) {
+                Ok(built) => built,
+                Err(Refusal::ListsMoved(paths)) => {
+                    return Ok(ApplyPreviewed::Stale {
+                        message: format!(
+                            "{} changed on the server since this edit was opened, and the edit sends it whole, so keeping yours would revert that change",
+                            paths.join(", ")
+                        ),
+                    });
+                }
+                Err(Refusal::Foreign(foreign)) => {
+                    return Err(IpcError::new(
+                        ErrorKind::Conflict,
+                        format!(
+                            "Twigo applied this object at {}, and {} of what it owns there does not exist at {version}: open it at that version to change it, or nothing Twigo owns is lost",
+                            foreign.version,
+                            foreign.paths.join(", ")
+                        ),
+                    ));
+                }
+            };
             if built.unchanged() {
                 return Ok(ApplyPreviewed::Unchanged {
                     ignored: built.ignored,
@@ -711,7 +731,7 @@ pub(crate) async fn preview(
                     Some(object)
                 }
                 Err(error) => {
-                    if let (Combined::Fallback(patch), kube::Error::Api(status)) =
+                    if let (Combined::Fallback { patch, .. }, kube::Error::Api(status)) =
                         (&combined, &error)
                         && status.code == 422
                         && let Ok((object, told)) =

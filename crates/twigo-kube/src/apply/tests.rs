@@ -6,8 +6,8 @@ use serde_json::{Value, json};
 use super::fields::{Element, FieldSet, Path};
 use super::owned::{self, Ownership};
 use super::{
-    Built, Combined, Edit, ForeignVersion, build, changes, comparable, for_create, manifest,
-    merge_patch, normalized, still_has, without,
+    Built, Combined, Edit, ForeignVersion, Refusal, build, changes, comparable,
+    comparable_with_owners, for_create, manifest, merge_patch, normalized, still_has, without,
 };
 use crate::openapi::{Document, Node};
 
@@ -227,8 +227,8 @@ fn owned_keeps_only_an_element_s_keys_when_none_of_its_fields_are_twigo_s() {
 fn diff(root: Node<'_>, before: Value, after: Value) -> (Value, Vec<String>) {
     let mut found = changes::Found::default();
     let changed = changes::of_map(
-        normalized(&before).as_object().unwrap(),
-        normalized(&after).as_object().unwrap(),
+        normalized(&before, Some(root)).as_object().unwrap(),
+        normalized(&after, Some(root)).as_object().unwrap(),
         Some(root),
         &[],
         &mut Path::default(),
@@ -572,10 +572,10 @@ fn an_entry_at_another_version_is_refused_when_its_paths_are_lost_and_carried_wh
     });
     assert_eq!(
         refused,
-        Err(ForeignVersion {
+        Err(Refusal::Foreign(ForeignVersion {
             version: "apps/v1beta2".to_owned(),
             paths: vec![".spec.renamed".to_owned()],
-        })
+        }))
     );
 }
 
@@ -839,7 +839,28 @@ fn items_document() -> Document {
         "metadata": { "type": "object", "properties": {
             "name": { "type": "string" },
             "namespace": { "type": "string" },
+            "annotations": { "type": "object", "additionalProperties": { "type": "string" } },
         } },
+        "refs": {
+            "type": "array",
+            "x-kubernetes-list-type": "map",
+            "x-kubernetes-list-map-keys": ["name"],
+            "items": {
+                "type": "object",
+                "required": ["name"],
+                "x-kubernetes-map-type": "atomic",
+                "properties": {
+                    "name": { "type": "string" },
+                    "ns": { "type": "string" },
+                    "kind": { "type": "string" },
+                },
+            },
+        },
+        "tags": {
+            "type": "array",
+            "x-kubernetes-list-type": "set",
+            "items": { "type": "string" },
+        },
         "items": {
             "type": "array",
             "x-kubernetes-list-type": "map",
@@ -962,8 +983,8 @@ fn a_null_reaches_nothing_downstream_as_a_change_or_a_key() {
     assert_eq!(config["metadata"]["annotations"], json!({}), "{config}");
     assert_eq!(
         config["free"],
-        json!({ "added": { "kept": 1 } }),
-        "{config}"
+        json!({ "added": { "kept": 1, "gone": null } }),
+        "under a deduced node a null is a value: {config}"
     );
     assert_eq!(result.removals, vec![]);
 
@@ -1232,7 +1253,13 @@ fn a_reordered_list_map_goes_by_the_merge_patch_alone_and_an_append_does_not() {
     let result = built(&live, &base, &removed, root, &[]);
     assert_eq!(
         result.combined,
-        Combined::Fallback(json!({ "items": [{ "name": "B", "value": "$(A)" }] })),
+        Combined::Fallback {
+            patch: json!({ "items": [{ "name": "B", "value": "$(A)" }] }),
+            removals: vec![Path(vec![
+                Element::Field("items".to_owned()),
+                Element::Key(vec![("name".to_owned(), "\"A\"".to_owned())]),
+            ])],
+        },
         "losing an element is no reorder"
     );
 }
@@ -1300,13 +1327,15 @@ fn the_combined_patch_carries_changes_and_removals_over_the_live_object() {
         vec![".spec.strategy.rollingUpdate"]
     );
     assert!(result.config.is_some());
+    let Combined::Fallback { patch, removals } = result.combined else {
+        panic!("expected the fallback, got {:?}", result.combined);
+    };
     assert_eq!(
-        result.combined,
-        Combined::Fallback(
-            json!({ "spec": { "strategy": { "type": "Recreate", "rollingUpdate": null } } })
-        ),
+        patch,
+        json!({ "spec": { "strategy": { "type": "Recreate", "rollingUpdate": null } } }),
         "a change on the server since it was opened is not undone"
     );
+    assert_eq!(paths(&removals), vec![".spec.strategy.rollingUpdate"]);
 }
 
 #[test]
@@ -1361,4 +1390,369 @@ fn a_manifest_loses_the_paths_given_up_and_nothing_is_left_of_it_when_they_were_
     let dropped = vec![".free.x".to_owned()];
     let (config, _) = manifest(&lone, false, Some(root), &dropped);
     assert_eq!(config, None);
+}
+
+#[test]
+fn a_configuration_holds_its_elements_in_live_order_and_new_ones_after_them() {
+    let document = apps();
+    let root = deployment_root(&document);
+    let containers = |object: &Value| {
+        object["spec"]["template"]["spec"]["containers"]
+            .as_array()
+            .unwrap()
+            .clone()
+    };
+    let names = |items: &[Value]| -> Vec<String> {
+        items
+            .iter()
+            .map(|item| item["name"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let mut live = deployment_with(
+        json!({}),
+        vec![manager(
+            "twigo",
+            "Apply",
+            json!({ "f:spec": { "f:template": { "f:spec": { "f:containers": {
+                item("sidecar"): { ".": {}, "f:name": {}, "f:image": {} },
+                item("app"): { ".": {}, "f:name": {}, "f:env": {
+                    item("DERIVED"): { ".": {}, "f:name": {}, "f:value": {} },
+                } },
+            } } } } }),
+        )],
+    );
+    live["spec"] = json!({ "template": { "spec": { "containers": [
+        {
+            "name": "app",
+            "image": "a",
+            "env": [{ "name": "BASE", "value": "x" }, { "name": "DERIVED", "value": "$(BASE)/z" }],
+        },
+        { "name": "sidecar", "image": "s" },
+    ] } } });
+    let base = view(&live);
+    let mut edited = base.clone();
+    edited["spec"]["template"]["spec"]["containers"][0]["env"][0]["value"] = json!("x2");
+    edited["spec"]["template"]["spec"]["containers"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({ "name": "extra", "image": "e" }));
+    let result = built(&live, &base, &edited, root, &[]);
+    assert_eq!(result.combined, Combined::None);
+    let config = result.config.unwrap();
+    let got = containers(&config);
+    assert_eq!(names(&got), ["app", "sidecar", "extra"], "{config}");
+    assert_eq!(
+        names(got[0]["env"].as_array().unwrap()),
+        ["BASE", "DERIVED"],
+        "{config}"
+    );
+}
+
+#[test]
+fn an_element_placed_before_the_end_goes_by_the_merge_patch_and_an_append_does_not() {
+    let document = items_document();
+    let root = synthetic_root(&document);
+    let env = |pairs: &[(&str, &str)]| {
+        Value::Array(
+            pairs
+                .iter()
+                .map(|(name, value)| json!({ "name": name, "value": value }))
+                .collect(),
+        )
+    };
+    let with_edit = |before: Value, after: Value| {
+        let live = env_widget(before);
+        let base = view(&live);
+        let mut edited = base.clone();
+        edited["items"] = after;
+        built(&live, &base, &edited, root, &[])
+    };
+    let inserted = with_edit(
+        env(&[("A", "1"), ("B", "$(C)/b")]),
+        env(&[("A", "1"), ("C", "c"), ("B", "$(C)/b")]),
+    );
+    assert_eq!(inserted.config, None);
+    assert_eq!(
+        only_patch(&inserted),
+        &json!({ "items": [
+            { "name": "A", "value": "1" },
+            { "name": "C", "value": "c" },
+            { "name": "B", "value": "$(C)/b" },
+        ] })
+    );
+    let renamed = with_edit(
+        env(&[("A", "1"), ("B", "2"), ("C", "3")]),
+        env(&[("A", "1"), ("X", "2"), ("C", "3")]),
+    );
+    assert!(matches!(renamed.combined, Combined::Only(_)), "{renamed:?}");
+    let first = with_edit(env(&[("A", "1")]), env(&[("Z", "0"), ("A", "1")]));
+    assert!(matches!(first.combined, Combined::Only(_)), "{first:?}");
+
+    let appended = with_edit(env(&[("A", "1")]), env(&[("A", "1"), ("B", "2")]));
+    assert_eq!(appended.combined, Combined::None);
+    assert!(appended.config.is_some());
+    let renamed_last = with_edit(
+        env(&[("A", "1"), ("B", "2")]),
+        env(&[("A", "1"), ("X", "2")]),
+    );
+    assert!(
+        !matches!(renamed_last.combined, Combined::Only(_)),
+        "{renamed_last:?}"
+    );
+}
+
+#[test]
+fn a_changed_element_of_a_list_with_atomic_items_is_taken_whole() {
+    let document = items_document();
+    let root = synthetic_root(&document);
+    let live = owned_by(
+        widget(json!({ "refs": [
+            { "name": "r", "ns": "n1", "kind": "K" },
+            { "name": "s", "ns": "n2", "kind": "L" },
+        ] })),
+        vec![],
+    );
+    let base = view(&live);
+    let mut edited = base.clone();
+    edited["refs"][0]["ns"] = json!("n9");
+    let result = built(&live, &base, &edited, root, &[]);
+    assert_eq!(
+        result.config.unwrap()["refs"],
+        json!([{ "name": "r", "ns": "n9", "kind": "K" }])
+    );
+    assert_eq!(result.removals, vec![]);
+
+    let mut edited = base.clone();
+    edited["refs"][0].as_object_mut().unwrap().remove("ns");
+    let result = built(&live, &base, &edited, root, &[]);
+    assert_eq!(
+        result.config.unwrap()["refs"],
+        json!([{ "name": "r", "kind": "K" }]),
+        "what goes from an atomic element is no removal of its own"
+    );
+    assert_eq!(result.removals, vec![]);
+
+    let result = built(&live, &base, &base, root, &[]);
+    assert!(result.unchanged(), "{result:?}");
+}
+
+#[test]
+fn a_new_duplicate_of_a_key_goes_by_the_merge_patch_and_keeps_the_element_it_copies() {
+    let document = items_document();
+    let root = synthetic_root(&document);
+    let live = env_widget(json!([{ "name": "A", "value": "1" }]));
+    let base = view(&live);
+    let mut edited = base.clone();
+    edited["items"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({ "name": "A", "value": "2" }));
+    let result = built(&live, &base, &edited, root, &[]);
+    assert_eq!(result.config, None);
+    assert_eq!(
+        only_patch(&result),
+        &json!({ "items": [
+            { "name": "A", "value": "1" },
+            { "name": "A", "value": "2" },
+        ] })
+    );
+}
+
+#[test]
+fn a_reordered_set_goes_by_the_merge_patch_and_so_does_a_value_placed_before_the_end() {
+    let document = items_document();
+    let root = synthetic_root(&document);
+    let live = owned_by(widget(json!({ "tags": ["a", "b"] })), vec![]);
+    let base = view(&live);
+    let edit_to = |tags: Value| {
+        let mut edited = base.clone();
+        edited["tags"] = tags;
+        built(&live, &base, &edited, root, &[])
+    };
+    for tags in [json!(["b", "a"]), json!(["a", "c", "b"])] {
+        let result = edit_to(tags.clone());
+        assert_eq!(result.config, None, "{tags}");
+        assert_eq!(only_patch(&result), &json!({ "tags": tags }));
+    }
+    let appended = edit_to(json!(["a", "b", "c"]));
+    assert_eq!(appended.combined, Combined::None);
+    assert_eq!(appended.config.unwrap()["tags"], json!(["c"]));
+}
+
+#[test]
+fn a_null_goes_only_where_the_schema_types_the_field() {
+    let document = items_document();
+    let root = synthetic_root(&document);
+    let object = widget(json!({
+        "metadata": { "name": "one", "annotations": { "a": null, "b": "1" } },
+        "ports": [{ "port": 80, "protocol": null, "name": null }],
+        "free": { "hosts": [{ "host": "a", "tls": null }], "gone": null },
+        "conf": { "a": null },
+        "lst": [{ "name": "x", "value": null }],
+        "refs": [{ "name": "r", "ns": null }],
+        "bogus": null,
+    }));
+    assert_eq!(
+        normalized(&object, Some(root)),
+        widget(json!({
+            "metadata": { "name": "one", "annotations": { "b": "1" } },
+            "ports": [{ "port": 80 }],
+            "free": { "hosts": [{ "host": "a", "tls": null }], "gone": null },
+            "conf": { "a": null },
+            "lst": [{ "name": "x", "value": null }],
+            "refs": [{ "name": "r", "ns": null }],
+            "bogus": null,
+        }))
+    );
+    assert_eq!(normalized(&object, None), object);
+}
+
+#[test]
+fn what_twigo_owns_keeps_a_null_of_the_live_object_on_an_unrelated_edit() {
+    let document = items_document();
+    let root = synthetic_root(&document);
+    let live = owned_by(
+        widget(json!({
+            "free": { "hosts": [{ "host": "a", "tls": null }] },
+            "tags": ["x"],
+        })),
+        vec![manager(
+            "twigo",
+            "Apply",
+            json!({ "f:free": { "f:hosts": {} } }),
+        )],
+    );
+    let base = view(&live);
+    let mut edited = base.clone();
+    edited["tags"].as_array_mut().unwrap().push(json!("y"));
+    let config = built(&live, &base, &edited, root, &[]).config.unwrap();
+    assert_eq!(
+        config["free"],
+        json!({ "hosts": [{ "host": "a", "tls": null }] })
+    );
+}
+
+#[test]
+fn a_list_sent_whole_that_the_server_holds_otherwise_is_refused_and_so_is_one_whose_element_went() {
+    let document = apps();
+    let root = deployment_root(&document);
+    let object = |containers: Value| {
+        let mut object = deployment_with(json!({}), vec![]);
+        object["spec"] = json!({ "template": { "spec": { "containers": containers } } });
+        object
+    };
+    let opened = object(json!([{ "name": "app", "image": "x", "env": [
+        { "name": "A", "value": "1" }, { "name": "B", "value": "2" },
+    ] }]));
+    let base = view(&opened);
+    let mut edited = base.clone();
+    edited["spec"]["template"]["spec"]["containers"][0]["env"]
+        .as_array_mut()
+        .unwrap()
+        .reverse();
+    let build_over = |live: &Value| {
+        build(Edit {
+            live,
+            base: &base,
+            edited: &edited,
+            root,
+            status_subresource: true,
+            lock: "42",
+            dropped: &[],
+        })
+    };
+    let path = ".spec.template.spec.containers[name=\"app\"].env".to_owned();
+
+    let other_wrote = object(json!([{ "name": "app", "image": "x", "env": [
+        { "name": "A", "value": "from-other" }, { "name": "B", "value": "2" },
+        { "name": "X", "value": "other" },
+    ] }]));
+    assert_eq!(
+        build_over(&other_wrote),
+        Err(Refusal::ListsMoved(vec![path.clone()]))
+    );
+
+    let element_gone = object(json!([{ "name": "other", "image": "x" }]));
+    assert_eq!(
+        build_over(&element_gone),
+        Err(Refusal::ListsMoved(vec![path]))
+    );
+
+    let same = object(json!([{ "name": "app", "image": "y", "env": [
+        { "name": "A", "value": "1" }, { "name": "B", "value": "2" },
+    ] }]));
+    assert!(
+        matches!(build_over(&same).unwrap().combined, Combined::Only(_)),
+        "what the server moved elsewhere does not matter"
+    );
+}
+
+#[test]
+fn comparing_with_owners_counts_a_new_manager_and_not_what_a_status_writer_moves() {
+    let object = json!({
+        "metadata": {
+            "name": "web",
+            "resourceVersion": "1",
+            "managedFields": [
+                { "manager": "a", "operation": "Update", "time": "1", "fieldsV1": { "f:spec": {} } },
+                { "manager": "ctl", "operation": "Update", "subresource": "status", "time": "1", "fieldsV1": { "f:status": {} } },
+            ],
+        },
+        "status": { "replicas": 1 },
+    });
+    let mut status_moved = object.clone();
+    status_moved["metadata"]["resourceVersion"] = json!("2");
+    status_moved["status"]["replicas"] = json!(2);
+    status_moved["metadata"]["managedFields"][0]["time"] = json!("9");
+    status_moved["metadata"]["managedFields"][1]["time"] = json!("9");
+    status_moved["metadata"]["managedFields"][1]["fieldsV1"] =
+        json!({ "f:status": { "f:replicas": {} } });
+    assert_eq!(
+        comparable_with_owners(&object),
+        comparable_with_owners(&status_moved)
+    );
+
+    let mut co_owner = object.clone();
+    co_owner["metadata"]["managedFields"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({ "manager": "third", "operation": "Apply", "time": "1", "fieldsV1": { "f:spec": {} } }));
+    assert_eq!(comparable(&object), comparable(&co_owner));
+    assert_ne!(
+        comparable_with_owners(&object),
+        comparable_with_owners(&co_owner)
+    );
+}
+
+#[test]
+fn the_fallback_lists_every_removal_it_carries_those_the_apply_would_take_too() {
+    let document = items_document();
+    let root = synthetic_root(&document);
+    let live = owned_by(
+        widget(json!({ "metadata": { "annotations": { "mine": "1", "theirs": "2" } } })),
+        vec![
+            manager(
+                "twigo",
+                "Apply",
+                json!({ "f:metadata": { "f:annotations": { "f:mine": {} } } }),
+            ),
+            manager(
+                "gitops",
+                "Apply",
+                json!({ "f:metadata": { "f:annotations": { "f:theirs": {} } } }),
+            ),
+        ],
+    );
+    let base = view(&live);
+    let mut edited = base.clone();
+    edited["metadata"]["annotations"] = json!({});
+    let result = built(&live, &base, &edited, root, &[]);
+    assert_eq!(paths(&result.removals), [".metadata.annotations.theirs"]);
+    let Combined::Fallback { removals, .. } = &result.combined else {
+        panic!("expected the fallback, got {:?}", result.combined);
+    };
+    assert_eq!(
+        paths(removals),
+        [".metadata.annotations.theirs", ".metadata.annotations.mine"]
+    );
 }

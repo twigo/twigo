@@ -33,12 +33,14 @@
 //! as staying, and the dry-run's answer settles it, since what it no longer
 //! holds needs no patch.
 //!
-//! Some edits no apply can express: a list map reordered, an element of a
-//! key the server holds twice, changed or removed, or a change an apply
-//! cannot validate with the old field still there (`strategy: Recreate`
-//! over another manager's `rollingUpdate`). They go by one JSON merge patch
-//! that carries the changes and the removals together ([`Combined`]), as
-//! `kubectl edit` does.
+//! Some edits no apply can express without owning what it does not change:
+//! a list's elements put in another order, one inserted before the end (an
+//! apply could say where only by naming every element of the list, and the
+//! server puts a new one last), an element of a key held twice, changed or
+//! removed, or a change an apply cannot validate with the old field still
+//! there (`strategy: Recreate` over another manager's `rollingUpdate`). They
+//! go by one JSON merge patch that carries the changes and the removals
+//! together ([`Combined`]), as `kubectl edit` does.
 //!
 //! [`ExtractInto`]: https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apimachinery/pkg/util/managedfields/extract.go#L52-L88
 //! [`Updater::prune`]: https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/merge/update.go#L256-L280
@@ -107,9 +109,10 @@ pub struct Edit<'a> {
 pub enum Combined {
     /// No such patch is needed.
     None,
-    /// Tried when the apply's dry-run answers `422`, and there are removals
-    /// that go by patch.
-    Fallback(Value),
+    /// Tried when the apply's dry-run or that of its patch answers `422`,
+    /// and there are removals that go by patch: `removals` are all that go
+    /// by it, those the apply alone would have taken included.
+    Fallback { patch: Value, removals: Vec<Path> },
     /// Only this can express the edit; no apply is sent.
     Only(Value),
 }
@@ -142,11 +145,22 @@ pub struct ForeignVersion {
     pub paths: Vec<String>,
 }
 
-/// Builds what an edit sends. Every null in the objects leaves first, so
-/// nothing downstream reads one as a value: a null a person left means no
-/// value, and the server's own (`creationTimestamp: null` in a template) is
-/// not a field of the object.
-pub fn build(edit: Edit<'_>) -> Result<Built, ForeignVersion> {
+/// Why an edit cannot be built.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refusal {
+    Foreign(ForeignVersion),
+    /// Lists the edit sends whole that the server holds otherwise than the
+    /// edit was opened with: sending them would revert the other writer, and
+    /// nothing can merge them.
+    ListsMoved(Vec<String>),
+}
+
+/// Builds what an edit sends. A null where the schema types the field leaves
+/// first, so nothing downstream reads one as a value: a null a person left
+/// there means no value, and the server's own (`creationTimestamp: null` in
+/// a template) is not a field of the object ([`normalized`]). What Twigo
+/// owns comes from the live object as it stands, nulls included.
+pub fn build(edit: Edit<'_>) -> Result<Built, Refusal> {
     let Edit {
         live,
         base,
@@ -156,7 +170,12 @@ pub fn build(edit: Edit<'_>) -> Result<Built, ForeignVersion> {
         lock,
         dropped,
     } = edit;
-    let (live, base, edited) = (&normalized(live), &normalized(base), &normalized(edited));
+    let raw_live = live;
+    let (live, base, edited) = (
+        &normalized(live, Some(root)),
+        &normalized(base, Some(root)),
+        &normalized(edited, Some(root)),
+    );
     let ignored = ignored(Some(base), edited, status_subresource);
 
     let mut found = Found::default();
@@ -182,6 +201,16 @@ pub fn build(edit: Edit<'_>) -> Result<Built, ForeignVersion> {
         rewritten,
     } = found;
     removals.retain(|removal| still_has(live, removal));
+    let moved: Vec<String> = rewritten
+        .iter()
+        .filter(|(path, _)| {
+            merge::value_at(live, path.elements()) != merge::value_at(base, path.elements())
+        })
+        .map(|(path, _)| path.to_string())
+        .collect();
+    if !moved.is_empty() {
+        return Err(Refusal::ListsMoved(moved));
+    }
     let object = Value::Object(editable(live, status_subresource));
 
     if !rewritten.is_empty() {
@@ -205,15 +234,15 @@ pub fn build(edit: Edit<'_>) -> Result<Built, ForeignVersion> {
         Some(ours) => {
             if ours.api_version != api_version {
                 let mut found = Vec::new();
-                owned::missing(live, &ours.fields, &mut Path::default(), &mut found);
+                owned::missing(raw_live, &ours.fields, &mut Path::default(), &mut found);
                 if !found.is_empty() {
-                    return Err(ForeignVersion {
+                    return Err(Refusal::Foreign(ForeignVersion {
                         version: ours.api_version.clone(),
                         paths: found.iter().map(ToString::to_string).collect(),
-                    });
+                    }));
                 }
             }
-            owned::extract(live, &ours.fields, Some(root)).unwrap_or_else(|| json!({}))
+            owned::extract(raw_live, &ours.fields, Some(root)).unwrap_or_else(|| json!({}))
         }
         None => json!({}),
     };
@@ -229,6 +258,7 @@ pub fn build(edit: Edit<'_>) -> Result<Built, ForeignVersion> {
         false,
         &mut Path::default(),
     );
+    merge::in_live_order(&mut config, live, Some(root));
 
     let comparable = ownership.at_version(api_version);
     let (by_patch, by_apply): (Vec<Path>, Vec<Path>) = removals.into_iter().partition(|removal| {
@@ -238,13 +268,10 @@ pub fn build(edit: Edit<'_>) -> Result<Built, ForeignVersion> {
         Combined::None
     } else {
         let every: Vec<Path> = by_patch.iter().chain(&by_apply).cloned().collect();
-        Combined::Fallback(Value::Object(merge::combined(
-            &object,
-            changed,
-            &every,
-            &[],
-            Some(root),
-        )))
+        Combined::Fallback {
+            patch: Value::Object(merge::combined(&object, changed, &every, &[], Some(root))),
+            removals: every,
+        }
     };
 
     let config = (has_changes || !by_apply.is_empty()).then(|| {
@@ -274,7 +301,7 @@ pub fn manifest(
     root: Option<Node<'_>>,
     dropped: &[String],
 ) -> (Option<Value>, Vec<String>) {
-    let edited = &normalized(edited);
+    let edited = &normalized(edited, root);
     let ignored = ignored(None, edited, status_subresource);
     let mut fields = Value::Object(editable(edited, status_subresource));
     if !dropped.is_empty() {
@@ -299,8 +326,44 @@ pub fn manifest(
     (Some(config), ignored)
 }
 
-/// `object` without a null map value at any depth.
-fn normalized(object: &Value) -> Value {
+/// `object` without the nulls of fields the schema types, whose absence is
+/// what the person meant. Where the schema does not type a place, a deduced
+/// or untyped node, a field it does not know, or in an atomic value, a null
+/// is a value, which the server keeps.
+fn normalized(object: &Value, root: Option<Node<'_>>) -> Value {
+    fn strip(value: &mut Value, node: Node<'_>) {
+        if !node.typed() {
+            return;
+        }
+        match value {
+            Value::Object(map) if !node.atomic_map() => {
+                map.retain(|name, value| {
+                    !value.is_null() || !node.field(name).is_some_and(|field| field.typed())
+                });
+                for (name, value) in map.iter_mut() {
+                    if let Some(field) = node.field(name) {
+                        strip(value, field);
+                    }
+                }
+            }
+            Value::Array(items) if node.list() != ListType::Atomic => {
+                if let Some(of_items) = node.items() {
+                    items.iter_mut().for_each(|item| strip(item, of_items));
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut object = object.clone();
+    if let Some(root) = root {
+        strip(&mut object, root);
+    }
+    object
+}
+
+/// `object` without a null map value at any depth, for a comparison, and for
+/// a Pod or a Job, whose fields the schema all types.
+fn without_nulls(object: &Value) -> Value {
     fn strip(value: &mut Value) {
         match value {
             Value::Object(map) => {
@@ -320,7 +383,7 @@ fn normalized(object: &Value) -> Value {
 /// subresource: its `resourceVersion` and `generation` move on every status
 /// write, which changes nothing a person edits.
 pub fn comparable(object: &Value) -> Value {
-    let mut object = normalized(object);
+    let mut object = without_nulls(object);
     if let Some(root) = object.as_object_mut() {
         root.remove("status");
         if let Some(metadata) = root.get_mut("metadata").and_then(Value::as_object_mut) {
@@ -332,6 +395,29 @@ pub fn comparable(object: &Value) -> Value {
     object
 }
 
+/// [`comparable`] and who owns what, to tell whether an object changed since
+/// a preview read it: a co-owner that arrived since would make a removal
+/// silently not happen. Each entry's `time` and the entries of a subresource
+/// are left out, as a status writer moves only those.
+pub fn comparable_with_owners(object: &Value) -> Value {
+    let mut view = comparable(object);
+    let entries: Vec<Value> = object["metadata"]["managedFields"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|entry| entry["subresource"].as_str().unwrap_or_default().is_empty())
+        .map(|entry| {
+            let mut entry = entry.clone();
+            if let Some(entry) = entry.as_object_mut() {
+                entry.remove("time");
+            }
+            entry
+        })
+        .collect();
+    view["metadata"]["managedFields"] = Value::Array(entries);
+    view
+}
+
 /// `edited` without its server fields, for a create: `status`, the server's
 /// metadata and, for a Job the server selected for, the labels and the
 /// selector it generates ([`generateSelector`]), which do not survive a new
@@ -339,7 +425,7 @@ pub fn comparable(object: &Value) -> Value {
 ///
 /// [`generateSelector`]: https://github.com/kubernetes/kubernetes/blob/v1.37.0/pkg/registry/batch/job/strategy.go#L209-L255
 pub fn for_create(edited: &Value, job: bool) -> Value {
-    let mut object = normalized(edited);
+    let mut object = without_nulls(edited);
     let Some(root) = object.as_object_mut() else {
         return object;
     };

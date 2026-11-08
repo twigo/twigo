@@ -3025,3 +3025,509 @@ async fn the_one_merge_patch_adds_no_field_to_what_twigo_applied() {
     );
     cluster.delete(&namespace).await;
 }
+
+fn names(list: &Value) -> Vec<&str> {
+    list.as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["name"].as_str().unwrap())
+        .collect()
+}
+
+fn containers(object: &Value) -> &Value {
+    &object["spec"]["template"]["spec"]["containers"]
+}
+
+fn containers_mut(object: &mut Value) -> &mut Value {
+    &mut object["spec"]["template"]["spec"]["containers"]
+}
+
+fn with_containers(name: &str, list: Value) -> Value {
+    let mut object = deployment(name);
+    *containers_mut(&mut object) = list;
+    object
+}
+
+fn env_of(pairs: &[(&str, &str)]) -> Value {
+    Value::Array(
+        pairs
+            .iter()
+            .map(|(name, value)| json!({ "name": name, "value": value }))
+            .collect(),
+    )
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn an_edit_leaves_a_list_in_the_order_the_server_holds_it() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-order").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    post(
+        &cluster.admin,
+        &deployments(&namespace),
+        &with_containers(
+            "web",
+            json!([
+                { "name": "app", "image": "fake:1", "env": env_of(&[("BASE", "x"), ("DERIVED", "$(BASE)/y")]) },
+                { "name": "sidecar", "image": "fake:2" },
+            ]),
+        ),
+    )
+    .await;
+    server_apply(
+        &cluster.admin,
+        &path,
+        &with_only_containers(
+            "web",
+            json!([
+                { "name": "app", "env": [{ "name": "DERIVED", "value": "$(BASE)/z" }] },
+                { "name": "sidecar", "image": "fake:3" },
+            ]),
+        ),
+        "twigo",
+    )
+    .await;
+    let target = deployment_ref(&namespace, "web");
+
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    containers_mut(&mut edited)[0]["env"][0]["value"] = json!("x2");
+    let (id, result, _, _) = ready(
+        preview(
+            &core,
+            edit(&cluster, target.clone(), &live, edited, true, vec![]),
+        )
+        .await,
+    );
+    assert_eq!(names(containers(&result)), ["app", "sidecar"], "{result}");
+    assert_eq!(names(&containers(&result)[0]["env"]), ["BASE", "DERIVED"]);
+    applied(&core, &cluster, id).await;
+    let after = settled(&cluster.admin, &path).await;
+    assert_eq!(names(containers(&after)), ["app", "sidecar"]);
+    assert_eq!(names(&containers(&after)[0]["env"]), ["BASE", "DERIVED"]);
+    assert_eq!(containers(&after)[0]["env"][1]["value"], "$(BASE)/z");
+
+    let mut edited = view(&after);
+    containers_mut(&mut edited)
+        .as_array_mut()
+        .unwrap()
+        .push(json!({ "name": "extra", "image": "fake:4" }));
+    let (id, result, _, _) =
+        ready(preview(&core, edit(&cluster, target, &after, edited, false, vec![])).await);
+    assert_eq!(
+        names(containers(&result)),
+        ["app", "sidecar", "extra"],
+        "a new one goes after them"
+    );
+    applied(&core, &cluster, id).await;
+    cluster.delete(&namespace).await;
+}
+
+fn with_only_containers(name: &str, list: Value) -> Value {
+    json!({
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": { "name": name },
+        "spec": { "template": { "spec": { "containers": list } } },
+    })
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn an_element_put_before_the_end_stands_there_on_the_server() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-insert").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    post(
+        &cluster.admin,
+        &deployments(&namespace),
+        &with_containers(
+            "web",
+            json!([{ "name": "app", "image": "fake:1", "env": env_of(&[("A", "1"), ("B", "$(C)/b")]) }]),
+        ),
+    )
+    .await;
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    containers_mut(&mut edited)[0]["env"] = env_of(&[("A", "1"), ("C", "c"), ("B", "$(C)/b")]);
+    let (id, result) = by_patch(
+        preview(
+            &core,
+            edit(
+                &cluster,
+                deployment_ref(&namespace, "web"),
+                &live,
+                edited,
+                false,
+                vec![],
+            ),
+        )
+        .await,
+    );
+    assert_eq!(names(&containers(&result)[0]["env"]), ["A", "C", "B"]);
+    applied(&core, &cluster, id).await;
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(names(&containers(&after)[0]["env"]), ["A", "C", "B"]);
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_new_duplicate_key_keeps_the_element_it_copies_on_the_server() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-dup").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    post(
+        &cluster.admin,
+        &deployments(&namespace),
+        &with_containers(
+            "web",
+            json!([{ "name": "app", "image": "fake:1", "env": env_of(&[("A", "1")]) }]),
+        ),
+    )
+    .await;
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    containers_mut(&mut edited)[0]["env"] = env_of(&[("A", "1"), ("A", "2")]);
+    let (id, _) = by_patch(
+        preview(
+            &core,
+            edit(
+                &cluster,
+                deployment_ref(&namespace, "web"),
+                &live,
+                edited,
+                false,
+                vec![],
+            ),
+        )
+        .await,
+    );
+    applied(&core, &cluster, id).await;
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(
+        containers(&after)[0]["env"],
+        env_of(&[("A", "1"), ("A", "2")])
+    );
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_reversed_set_reaches_the_server() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-set").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let configmaps = format!("/api/v1/namespaces/{namespace}/configmaps");
+    let path = format!("{configmaps}/held");
+    post(
+        &cluster.admin,
+        &configmaps,
+        &json!({
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": { "name": "held", "finalizers": ["a.example.com/x", "b.example.com/y"] },
+        }),
+    )
+    .await;
+    let live = read(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["metadata"]["finalizers"]
+        .as_array_mut()
+        .unwrap()
+        .reverse();
+    let (id, _) = by_patch(
+        preview(
+            &core,
+            edit(
+                &cluster,
+                reference("", "v1", "configmaps", Some(&namespace), "held"),
+                &live,
+                edited,
+                false,
+                vec![],
+            ),
+        )
+        .await,
+    );
+    applied(&core, &cluster, id).await;
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(
+        after["metadata"]["finalizers"],
+        json!(["b.example.com/y", "a.example.com/x"])
+    );
+    merge_patch(
+        &cluster.admin,
+        &path,
+        &json!({ "metadata": { "finalizers": null } }),
+        "cleanup",
+    )
+    .await;
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_changed_owner_reference_stays_whole_as_its_items_are_atomic() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-owners").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let configmaps = format!("/api/v1/namespaces/{namespace}/configmaps");
+    let path = format!("{configmaps}/owned");
+    let owner = post(
+        &cluster.admin,
+        &configmaps,
+        &json!({ "apiVersion": "v1", "kind": "ConfigMap", "metadata": { "name": "owner" } }),
+    )
+    .await;
+    post(
+        &cluster.admin,
+        &configmaps,
+        &json!({
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": { "name": "owned", "ownerReferences": [{
+                "apiVersion": "v1",
+                "kind": "ConfigMap",
+                "name": "owner",
+                "uid": owner["metadata"]["uid"],
+                "blockOwnerDeletion": true,
+            }] },
+        }),
+    )
+    .await;
+    let live = read(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["metadata"]["ownerReferences"][0]["blockOwnerDeletion"] = json!(false);
+    let (id, result, _, _) = ready(
+        preview(
+            &core,
+            edit(
+                &cluster,
+                reference("", "v1", "configmaps", Some(&namespace), "owned"),
+                &live,
+                edited,
+                true,
+                vec![],
+            ),
+        )
+        .await,
+    );
+    assert_eq!(
+        result["metadata"]["ownerReferences"][0]["kind"],
+        "ConfigMap"
+    );
+    assert_eq!(
+        result["metadata"]["ownerReferences"][0]["blockOwnerDeletion"],
+        false
+    );
+    applied(&core, &cluster, id).await;
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_crd_s_atomic_items_stay_whole_and_a_null_in_a_preserved_field_stays() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-crd2").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .subsec_nanos();
+    let group = format!("a{nanos}.twigo.test");
+    let crd_name = with_crd(
+        &cluster,
+        widget_crd(
+            &group,
+            "things",
+            "Thing",
+            json!({
+                "type": "object",
+                "properties": {
+                    "note": { "type": "string" },
+                    "refs": {
+                        "type": "array",
+                        "x-kubernetes-list-type": "map",
+                        "x-kubernetes-list-map-keys": ["name"],
+                        "items": {
+                            "type": "object",
+                            "required": ["name"],
+                            "x-kubernetes-map-type": "atomic",
+                            "properties": {
+                                "name": { "type": "string" },
+                                "ns": { "type": "string" },
+                                "kind": { "type": "string" },
+                            },
+                        },
+                    },
+                    "free": {
+                        "type": "object",
+                        "x-kubernetes-preserve-unknown-fields": true,
+                    },
+                },
+            }),
+        ),
+    )
+    .await;
+    let collection = format!("/apis/{group}/v1/namespaces/{namespace}/things");
+    let path = format!("{collection}/one");
+    let admin = cluster.admin.clone();
+    eventually("the things are served", || {
+        let admin = admin.clone();
+        let collection = collection.clone();
+        async move {
+            admin
+                .request::<Value>(http::Request::get(collection).body(Vec::new()).unwrap())
+                .await
+                .is_ok()
+        }
+    })
+    .await;
+    post(
+        &cluster.admin,
+        &collection,
+        &json!({
+            "apiVersion": format!("{group}/v1"),
+            "kind": "Thing",
+            "metadata": { "name": "one" },
+            "spec": { "note": "n", "refs": [
+                { "name": "r", "ns": "n1", "kind": "K" },
+                { "name": "s", "ns": "n2", "kind": "L" },
+            ] },
+        }),
+    )
+    .await;
+    server_apply(
+        &cluster.admin,
+        &path,
+        &json!({
+            "apiVersion": format!("{group}/v1"),
+            "kind": "Thing",
+            "metadata": { "name": "one" },
+            "spec": { "free": { "hosts": [{ "host": "a", "tls": null }] } },
+        }),
+        "twigo",
+    )
+    .await;
+    let target = reference(&group, "v1", "things", Some(&namespace), "one");
+
+    let live = read(&cluster.admin, &path).await;
+    assert_eq!(
+        live["spec"]["free"]["hosts"][0].get("tls"),
+        Some(&Value::Null)
+    );
+    let mut edited = view(&live);
+    edited["spec"]["refs"][0]["ns"] = json!("n9");
+    let answer = wait_served(
+        &core,
+        &edit(&cluster, target.clone(), &live, edited, true, vec![]),
+    )
+    .await;
+    let (id, result, _, _) = ready(answer);
+    assert_eq!(
+        result["spec"]["refs"][0],
+        json!({ "name": "r", "ns": "n9", "kind": "K" }),
+        "{result}"
+    );
+    assert_eq!(result["spec"]["refs"][1]["kind"], "L");
+    applied(&core, &cluster, id).await;
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(after["spec"]["refs"][0]["kind"], "K");
+    assert_eq!(after["spec"]["refs"][0]["ns"], "n9");
+
+    let mut edited = view(&after);
+    edited["spec"]["note"] = json!("other");
+    let (id, result, _, _) =
+        ready(preview(&core, edit(&cluster, target, &after, edited, true, vec![])).await);
+    assert_eq!(
+        result["spec"]["free"]["hosts"][0].get("tls"),
+        Some(&Value::Null),
+        "{result}"
+    );
+    applied(&core, &cluster, id).await;
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(
+        after["spec"]["free"]["hosts"][0].get("tls"),
+        Some(&Value::Null)
+    );
+
+    delete_crd(&cluster, &crd_name).await;
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn keep_mine_with_a_list_sent_whole_is_stale_when_the_server_holds_it_otherwise() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-keepall").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    post(
+        &cluster.admin,
+        &deployments(&namespace),
+        &with_containers(
+            "web",
+            json!([{ "name": "app", "image": "fake:1", "env": env_of(&[("A", "1"), ("B", "2")]) }]),
+        ),
+    )
+    .await;
+    let opened = settled(&cluster.admin, &path).await;
+    let mut edited = view(&opened);
+    containers_mut(&mut edited)[0]["env"] = env_of(&[("B", "2"), ("A", "1")]);
+    let target = deployment_ref(&namespace, "web");
+
+    merge_patch(
+        &cluster.admin,
+        &path,
+        &json!({ "spec": { "template": { "spec": { "containers": [
+            { "name": "app", "image": "fake:1", "env": env_of(&[("A", "other"), ("B", "2")]) },
+        ] } } } }),
+        "other",
+    )
+    .await;
+    let current = settled(&cluster.admin, &path).await;
+    let mut keep_mine = edit(
+        &cluster,
+        target.clone(),
+        &opened,
+        edited.clone(),
+        false,
+        vec![],
+    );
+    keep_mine.opened.as_mut().unwrap().lock = rv(&current);
+    let answer = preview(&core, keep_mine).await;
+    assert!(matches!(answer, ApplyPreviewed::Stale { .. }), "{answer:?}");
+
+    merge_patch(
+        &cluster.admin,
+        &path,
+        &json!({ "spec": { "template": { "spec": { "containers": [
+            { "name": "renamed", "image": "fake:1" },
+        ] } } } }),
+        "other",
+    )
+    .await;
+    let current = settled(&cluster.admin, &path).await;
+    let mut keep_mine = edit(&cluster, target, &opened, edited, false, vec![]);
+    keep_mine.opened.as_mut().unwrap().lock = rv(&current);
+    let answer = preview(&core, keep_mine).await;
+    assert!(
+        matches!(answer, ApplyPreviewed::Stale { .. }),
+        "the outer element is gone: {answer:?}"
+    );
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(names(containers(&after)), ["renamed"]);
+    cluster.delete(&namespace).await;
+}

@@ -82,8 +82,24 @@ fn of_value(
     }
 }
 
-/// What a set gained; what it lost is removed by value.
+/// Whether what stayed changed order, or something new stands before what
+/// stayed: an apply puts a new element after every other, and it could say
+/// where only by naming every element, owning them all.
+fn moved<T: PartialEq>(was: &[T], now: &[T]) -> bool {
+    let stayed_was = was.iter().filter(|item| now.contains(item));
+    let stayed_now = now.iter().filter(|item| was.contains(item));
+    let last_stayed = now.iter().rposition(|item| was.contains(item));
+    !stayed_was.eq(stayed_now)
+        || last_stayed.is_some_and(|last| now[..last].iter().any(|item| !was.contains(item)))
+}
+
+/// What a set gained; what it lost is removed by value. A set whose values
+/// moved is left to a merge patch, as a list map is.
 fn of_set(before: &[Value], after: &[Value], at: &Path, found: &mut Found) -> Option<Value> {
+    if moved(before, after) {
+        found.rewritten.push((at.clone(), after.to_vec()));
+        return None;
+    }
     let element =
         |item: &Value| Element::of_item(item, &ListType::Set, None).expect("sets name their items");
     for item in before {
@@ -121,10 +137,15 @@ fn occurrences(
 
 /// A list map's changes, its elements paired by key and occurrence: a pair
 /// carries its keys and its changes, a new element goes whole, and one gone
-/// is removed by its keys. An apply can neither reorder a list nor address
-/// one of two elements with a key, so such a list is left to a merge patch;
-/// a duplicate nobody touched sends nothing, as an apply that names its key
-/// replaces every element of it ([`visitListItems`]).
+/// is removed by its keys. An element whose items are atomic is taken whole,
+/// keys included, as the server takes an atomic map ([`doMap`]). An apply
+/// cannot address one of two elements with a key, and it could say where an
+/// element stands only by naming every element of the list, so a list whose
+/// elements moved or whose duplicated key is touched, by the edit too, is
+/// left to a merge patch; a duplicate nobody touched sends nothing, as an
+/// apply that names its key replaces every element of it ([`visitListItems`]).
+///
+/// [`doMap`]: https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/typed/merge.go#L415
 ///
 /// [`visitListItems`]: https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/typed/merge.go#L168-L283
 fn of_list_map(
@@ -153,26 +174,20 @@ fn of_list_map(
         .collect();
     let duplicated: HashSet<&Element> = was
         .iter()
+        .chain(&now)
         .flatten()
         .filter(|(_, count)| *count > 0)
         .map(|(element, _)| element)
         .collect();
 
-    let order_of = |list: &[Option<Occurrence>], kept: &HashMap<&Occurrence, &Value>| {
-        list.iter()
-            .flatten()
-            .filter(|occurrence| kept.contains_key(occurrence))
-            .cloned()
-            .collect::<Vec<_>>()
-    };
-    let reordered = order_of(&was, &new) != order_of(&now, &old);
+    let named = |list: &[Option<Occurrence>]| list.iter().flatten().cloned().collect::<Vec<_>>();
     let duplicate_touched = was
         .iter()
         .chain(&now)
         .flatten()
         .filter(|occurrence| duplicated.contains(&occurrence.0))
         .any(|occurrence| old.get(occurrence) != new.get(occurrence));
-    if reordered || duplicate_touched {
+    if moved(&named(&was), &named(&now)) || duplicate_touched {
         found.rewritten.push((at.clone(), after.to_vec()));
         return None;
     }
@@ -187,6 +202,11 @@ fn of_list_map(
             continue;
         }
         match (old.get(occurrence), item) {
+            (Some(old_item), item) if items.is_some_and(|items| items.atomic_map()) => {
+                if *old_item != item {
+                    changes.push(item.clone());
+                }
+            }
             (Some(Value::Object(old_item)), Value::Object(new_item)) => {
                 at.push(occurrence.0.clone());
                 let changed = of_map(old_item, new_item, items, keys, at, found);
