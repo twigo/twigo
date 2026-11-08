@@ -59,8 +59,9 @@ test("each list asks for its own resource, and again when its selection moves", 
   );
   const keys = ["resource.capability.delete"];
   const PODS = { group: "", version: "v1", resource: "pods" };
-  capabilities.ask("pods", "qa", PODS, "shop", keys);
-  capabilities.ask("deployments", "qa", DEPLOYMENTS, "shop", keys);
+  const BASIS = {};
+  capabilities.ask("pods", "qa", PODS, "shop", keys, BASIS);
+  capabilities.ask("deployments", "qa", DEPLOYMENTS, "shop", keys, BASIS);
   expect(capabilities.values("pods", keys)).toEqual({
     "resource.capability.delete": true,
   });
@@ -73,9 +74,9 @@ test("each list asks for its own resource, and again when its selection moves", 
   });
   expect(invoke).toHaveBeenCalledTimes(2);
 
-  capabilities.ask("deployments", "qa", DEPLOYMENTS, "shop", keys);
+  capabilities.ask("deployments", "qa", DEPLOYMENTS, "shop", keys, BASIS);
   expect(invoke).toHaveBeenCalledTimes(2);
-  capabilities.ask("deployments", "qa", DEPLOYMENTS, "web", keys);
+  capabilities.ask("deployments", "qa", DEPLOYMENTS, "web", keys, BASIS);
   expect(invoke).toHaveBeenCalledTimes(3);
   expect(capabilities.values("deployments", keys)).toEqual({
     "resource.capability.delete": true,
@@ -86,6 +87,8 @@ test("each list asks for its own resource, and again when its selection moves", 
   });
 
   capabilities.closed("deployments");
-  capabilities.ask("deployments", "qa", DEPLOYMENTS, "web", keys);
+  capabilities.ask("deployments", "qa", DEPLOYMENTS, "web", keys, BASIS);
   expect(invoke).toHaveBeenCalledTimes(4);
+  capabilities.ask("deployments", "qa", DEPLOYMENTS, "web", keys, {});
+  expect(invoke).toHaveBeenCalledTimes(5);
 });

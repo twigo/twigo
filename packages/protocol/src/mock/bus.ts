@@ -114,6 +114,8 @@ function setBy(source: ModeSource): string {
 interface Revert {
   readonly context: string;
   readonly write: { readonly verb: string; readonly target: string };
+  /** What a scale back to zero asks about, as Rust's `empties`; none for any other. */
+  readonly emptied?: () => Affected[];
   readonly question: string;
   readonly doing: string;
   readonly done: string;
@@ -631,6 +633,14 @@ export class MockBus {
           revert: {
             context,
             write,
+            ...(from === 0 && {
+              emptied: () => {
+                const going = cluster.podsOf(ns, name);
+                return going.length > 0
+                  ? [{ title: "Its pods go", objects: going.map(podRef) }]
+                  : [];
+              },
+            }),
             question: `Scale ${what} in ${ns} back to ${String(from)} on ${context}?`,
             doing: `Scaling ${what} back to ${String(from)}`,
             done: `Scaled ${what} back to ${String(from)}`,
@@ -936,12 +946,14 @@ export class MockBus {
         context: revert.context,
         question: revert.question,
         confirm: "Undo",
-        consequences: [],
-        affected: [],
+        consequences: revert.emptied
+          ? ["Its pods go, and none take their place."]
+          : [],
+        affected: revert.emptied?.() ?? [],
         kubectl: revert.kubectl,
         doing: revert.doing,
       },
-      risk: { kind: "reversible" },
+      risk: revert.emptied ? { kind: "lasting" } : { kind: "reversible" },
       write: revert.write,
       run: (tell) => {
         const live = this.#undos.get(space);

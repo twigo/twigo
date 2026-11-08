@@ -23,6 +23,7 @@ export class Capabilities {
     string,
     {
       readonly asked: string;
+      readonly basis: unknown;
       readonly answers: Readonly<Record<string, boolean>>;
     }
   >();
@@ -41,7 +42,9 @@ export class Capabilities {
   /**
    * Asks for the keys of a list's selected object of `resource` in
    * `namespace`, none for a cluster-scoped one, unless the list asked for
-   * the same already.
+   * the same on the same `basis` already: the contexts as the catalog last
+   * listed them, which an edit of a kubeconfig, and so a rebuild of the
+   * clients and of Rust's answers, lists anew.
    */
   ask(
     uri: string,
@@ -49,6 +52,7 @@ export class Capabilities {
     resource: Gvr,
     namespace: string | undefined,
     keys: readonly string[],
+    basis: unknown,
   ): void {
     const checks = keys.flatMap((key) => {
       const access = accessOf(key, resource);
@@ -56,8 +60,8 @@ export class Capabilities {
     });
     const asked = JSON.stringify([space, namespace ?? null, checks]);
     const list = this.#lists.get(uri);
-    if (list?.asked === asked) return;
-    this.#lists.set(uri, { asked, answers: list?.answers ?? {} });
+    if (list?.asked === asked && list.basis === basis) return;
+    this.#lists.set(uri, { asked, basis, answers: list?.answers ?? {} });
     if (checks.length === 0) return;
     this.backend
       .invoke("access_review", {
@@ -66,9 +70,11 @@ export class Capabilities {
         checks: checks.map(({ access }) => access),
       })
       .then((answers) => {
-        if (this.#lists.get(uri)?.asked !== asked) return;
+        const current = this.#lists.get(uri);
+        if (current?.asked !== asked || current.basis !== basis) return;
         this.#lists.set(uri, {
           asked,
+          basis,
           answers: Object.fromEntries(
             checks.map(({ key }, index) => [key, answers[index] ?? true]),
           ),

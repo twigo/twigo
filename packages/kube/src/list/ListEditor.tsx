@@ -108,19 +108,21 @@ function Loaded({
   services: ListServices;
 }) {
   const workbench = useWorkbench();
-  const { keys, lists, editors, menus, commands } = workbench;
+  const { keys, lists, editors, menus, commands, catalog } = workbench;
   const { selection, states, capabilities } = services;
   useChanges(selection.changes);
   useChanges(menus.changes);
   useChanges(keys.changes);
   useChanges(capabilities.changes);
   useChanges(commands.changes);
+  useChanges(catalog.changes);
   const selected = selection.get(uri);
   const namespace = selected && objectOf(selected).namespace;
   const referenced = CAPABILITY_PREFIXES.flatMap((prefix) =>
     commands.referenced(prefix),
   );
   const capabilityKeys = JSON.stringify(referenced);
+  const contexts = catalog.list;
   useEffect(() => {
     capabilities.ask(
       uri,
@@ -128,8 +130,17 @@ function Loaded({
       resource.gvr,
       namespace,
       JSON.parse(capabilityKeys) as string[],
+      contexts,
     );
-  }, [capabilities, uri, input.space, resource.gvr, namespace, capabilityKeys]);
+  }, [
+    capabilities,
+    uri,
+    input.space,
+    resource.gvr,
+    namespace,
+    capabilityKeys,
+    contexts,
+  ]);
   const allowed = capabilities.values(uri, referenced);
   const scoped = JSON.stringify({
     ...allowed,

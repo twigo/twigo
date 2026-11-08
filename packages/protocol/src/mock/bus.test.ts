@@ -359,6 +359,94 @@ test("an undo puts back the space's last action only", async () => {
   ]);
 });
 
+test("the last action is the one that started last, whichever ends first", async () => {
+  const backend = createMockBackend("live");
+  await answered(backend.invoke("space_open", "qa"));
+  const [drained, cordoned] = ["qa-node-3", "qa-node-4"];
+  const drain = await answered(
+    backend.invoke("command_plan", {
+      action: "drain",
+      space: "qa",
+      node: drained,
+    }),
+  );
+  await answered(
+    backend.subscribe(
+      "command_execute",
+      { plan: drain.id, typed: null },
+      () => undefined,
+    ),
+  );
+  const cordon = await answered(
+    backend.invoke("command_plan", {
+      action: "cordon",
+      space: "qa",
+      node: cordoned,
+      unschedulable: true,
+    }),
+  );
+  await run(backend, cordon.id);
+  const undo = await answered(
+    backend.invoke("command_plan", { action: "undo", space: "qa" }),
+  );
+  expect(undo.question).toBe(`Uncordon node ${cordoned} on qa?`);
+
+  const first = await answered(
+    backend.invoke("command_plan", {
+      action: "cordon",
+      space: "qa",
+      node: drained,
+      unschedulable: false,
+    }),
+  );
+  const later = await answered(
+    backend.invoke("command_plan", {
+      action: "drain",
+      space: "qa",
+      node: cordoned,
+    }),
+  );
+  const both = [first, later].map((plan) =>
+    backend.subscribe(
+      "command_execute",
+      { plan: plan.id, typed: null },
+      () => undefined,
+    ),
+  );
+  await answered(Promise.all(both));
+  await vi.advanceTimersByTimeAsync(2000);
+  const nothing = await refused(
+    backend.invoke("command_plan", { action: "undo", space: "qa" }),
+  );
+  expect(nothing.kind).toBe("notFound");
+});
+
+test("an undo that scales back to zero asks and lists the pods that go", async () => {
+  const backend = createMockBackend("live");
+  await answered(backend.invoke("space_open", "qa"));
+  const { target } = deployment();
+  const scale = (replicas: number): PlanRequest => ({
+    action: "scale",
+    space: "qa",
+    target,
+    replicas,
+  });
+  await run(
+    backend,
+    (await answered(backend.invoke("command_plan", scale(0)))).id,
+  );
+  await run(
+    backend,
+    (await answered(backend.invoke("command_plan", scale(2)))).id,
+  );
+  const undo = await answered(
+    backend.invoke("command_plan", { action: "undo", space: "qa" }),
+  );
+  expect(undo.friction).toEqual({ kind: "confirm" });
+  expect(undo.affected[0]?.title).toBe("Its pods go");
+  expect(undo.affected[0]?.objects).toHaveLength(2);
+});
+
 test("a drain cordons the node and lists the pods it evicts", async () => {
   const backend = createMockBackend("live");
   await answered(backend.invoke("space_open", "qa"));

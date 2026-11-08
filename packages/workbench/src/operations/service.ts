@@ -102,7 +102,16 @@ export class Operations {
   }
 
   /** Plans `request`, asks as its friction says, and runs it once the person agrees. */
-  async run(request: PlanRequest, look: Look): Promise<Outcome> {
+  run(request: PlanRequest, look: Look): Promise<Outcome> {
+    return this.#run(request, look, undefined);
+  }
+
+  /** As `run`, telling `taken` once Rust took the run, which a refused one it did not. */
+  async #run(
+    request: PlanRequest,
+    look: Look,
+    taken: (() => void) | undefined,
+  ): Promise<Outcome> {
     let plan: Plan;
     try {
       plan = await this.backend.invoke("command_plan", request);
@@ -120,7 +129,7 @@ export class Operations {
       request.action === "reveal" || request.action === "undo"
         ? undefined
         : request.space;
-    return this.#execute(plan, agreed.typed, space, look);
+    return this.#execute(plan, agreed.typed, space, look, taken);
   }
 
   /** Puts back the space's last action while its undo lasts, as ⌘Z does; a second press while it goes does nothing. */
@@ -128,13 +137,15 @@ export class Operations {
     const undo = this.#undos.get(space);
     if (!undo || undo.undoing) return { state: "cancelled" };
     undo.undoing = true;
-    const outcome = await this.run({ action: "undo", space }, undo.look);
+    // Rust takes the undo as its run starts; a refused one leaves it.
+    const outcome = await this.#run(
+      { action: "undo", space },
+      undo.look,
+      () => {
+        if (this.#undos.get(space) === undo) this.#drop(space);
+      },
+    );
     undo.undoing = false;
-    if (outcome.state !== "cancelled" && this.#undos.get(space) === undo) {
-      undo.dismiss();
-      this.#undos.delete(space);
-      this.#undoable();
-    }
     return outcome;
   }
 
@@ -262,6 +273,7 @@ export class Operations {
     typed: string | undefined,
     space: string | undefined,
     look: Look,
+    taken: (() => void) | undefined,
   ): Promise<Outcome> {
     return new Promise((resolve) => {
       let ended = false;
@@ -269,8 +281,10 @@ export class Operations {
       // Once Rust took the run, which a refused one it did not, the space's
       // last action is this one.
       const begin = () => {
-        if (begun || space === undefined) return;
+        if (begun) return;
         begun = true;
+        taken?.();
+        if (space === undefined) return;
         this.#latest.set(space, plan.id);
         this.#drop(space);
       };
@@ -290,6 +304,8 @@ export class Operations {
           this.#latest.get(space) === plan.id
         ) {
           this.#offer(space, plan.context, look, done.text, undoUntil);
+        } else if (done !== undefined) {
+          notify.success(done.text);
         }
         resolve(outcome);
       };
@@ -310,9 +326,6 @@ export class Operations {
             this.#changed();
             return;
           case "done":
-            if (event.undoUntil === null || space === undefined) {
-              notify.success(event.text);
-            }
             end({ state: "done" }, event);
             return;
           case "stopped":

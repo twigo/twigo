@@ -307,12 +307,29 @@ test("an action's undo is offered in its space while it lasts, and a later actio
   expect(document.body.textContent).toContain("Scaled deployment web to 5");
   expect(document.body.textContent).toContain("Undo");
 
-  const run = vi.spyOn(operations, "run").mockResolvedValue({ state: "done" });
-  await operations.undo("dev");
-  expect(run).toHaveBeenCalledWith({ action: "undo", space: "dev" }, LOOK);
-  run.mockRestore();
+  const undone = operations.undo("dev");
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await expect(undone).resolves.toEqual({ state: "done" });
+  expect(scaled.sent.map(({ request }) => request)).toContainEqual({
+    action: "undo",
+    space: "dev",
+  });
+  expect(keys.lookup(null)(UNDOABLE)).toEqual([]);
+  await expect(operations.undo("dev")).resolves.toEqual({ state: "cancelled" });
+});
 
-  await act(() => vi.advanceTimersByTimeAsync(30_000));
+test("an undo nobody takes lasts its 30 s", async () => {
+  vi.spyOn(notify, "undoable").mockReturnValue({ dismiss: vi.fn() });
+  const until = Date.now() + 30_000;
+  const scaled = await started(plan({ kind: "atOnce" }), [
+    { state: "done", text: "Scaled deployment web to 5", undoUntil: until },
+  ]);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await scaled.outcome;
+  const { keys, operations } = scaled.workbench;
+  await act(() => vi.advanceTimersByTimeAsync(29_000));
+  expect(keys.lookup(null)(UNDOABLE)).toEqual(["dev"]);
+  await act(() => vi.advanceTimersByTimeAsync(1_000));
   expect(keys.lookup(null)(UNDOABLE)).toEqual([]);
   await expect(operations.undo("dev")).resolves.toEqual({ state: "cancelled" });
 });
@@ -381,19 +398,16 @@ test("a second ⌘Z while the undo goes does nothing", async () => {
   ]);
   await act(() => vi.advanceTimersByTimeAsync(20));
   await scaled.outcome;
-  const { operations, keys } = scaled.workbench;
-  let finish: (outcome: Outcome) => void = () => undefined;
-  const run = vi
-    .spyOn(operations, "run")
-    .mockReturnValue(new Promise((resolve) => (finish = resolve)));
-  const first = operations.undo("dev");
+  const { operations, keys, backend } = scaled.workbench;
+  const invoke = vi
+    .spyOn(backend, "invoke")
+    .mockImplementationOnce(() => new Promise(() => undefined));
+  void operations.undo("dev");
   await expect(operations.undo("dev")).resolves.toEqual({
     state: "cancelled",
   });
-  expect(run).toHaveBeenCalledOnce();
-  finish({ state: "done" });
-  await first;
-  expect(keys.lookup(null)(UNDOABLE)).toEqual([]);
+  expect(invoke).toHaveBeenCalledOnce();
+  expect(keys.lookup(null)(UNDOABLE)).toEqual(["dev"]);
 });
 
 test("⌘Z cancels a countdown before it undoes, and undoes in a list otherwise", async () => {
@@ -421,4 +435,83 @@ test("⌘Z cancels a countdown before it undoes, and undoes in a list otherwise"
     expect.any(Function),
     undefined,
   );
+});
+
+/**
+ * A backend whose plans answer in turn with ids from 1, and whose runs tell
+ * what `told` gives for their plan, after `after` ms.
+ */
+function scripted(
+  told: Record<number, { after: number; events: OperationEvent[] }>,
+) {
+  const mock = createMockBackend("ready");
+  let next = 0;
+  const backend: Backend = {
+    invoke(command, request) {
+      if (command === "command_plan") {
+        return Promise.resolve({
+          ...plan({ kind: "atOnce" }),
+          id: ++next,
+        } as never);
+      }
+      if (command === "command_cancel") return Promise.resolve(null as never);
+      return mock.invoke(command, request);
+    },
+    subscribe(command, request, onMessage) {
+      if (command !== "command_execute") {
+        return mock.subscribe(command, request, onMessage);
+      }
+      const { plan: id } = request as { plan: number };
+      const run = told[id];
+      setTimeout(() => {
+        for (const event of run?.events ?? []) onMessage(event);
+      }, run?.after ?? 0);
+      return Promise.resolve(null as never);
+    },
+  };
+  return backend;
+}
+
+test("the last action is the one that started last, whichever ends first", async () => {
+  const offered = vi
+    .spyOn(notify, "undoable")
+    .mockReturnValue({ dismiss: vi.fn() });
+  const until = Date.now() + 30_000;
+  const done = (text: string) => ({
+    state: "done" as const,
+    text,
+    undoUntil: until,
+  });
+  const workbench = await testWorkbench(
+    "ready",
+    scripted({
+      1: { after: 100, events: [done("Scaled deployment web to 5")] },
+      2: { after: 10, events: [done("Cordoned node n")] },
+    }),
+  );
+  const first = workbench.operations.run(REQUEST, LOOK);
+  await act(() => vi.advanceTimersByTimeAsync(1));
+  const second = workbench.operations.run(REQUEST, LOOK);
+  await act(() => vi.advanceTimersByTimeAsync(200));
+  await Promise.all([first, second]);
+  expect(offered.mock.calls.map(([props]) => props.message)).toEqual([
+    "Cordoned node n",
+  ]);
+  expect(workbench.keys.lookup(null)(UNDOABLE)).toEqual(["dev"]);
+});
+
+test("an undo Rust refused leaves the undo to try again", async () => {
+  vi.spyOn(notify, "undoable").mockReturnValue({ dismiss: vi.fn() });
+  const until = Date.now() + 30_000;
+  const scaled = await started(plan({ kind: "atOnce" }), [
+    { state: "done", text: "Scaled deployment web to 5", undoUntil: until },
+  ]);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await scaled.outcome;
+  const { operations, keys, backend } = scaled.workbench;
+  vi.spyOn(backend, "invoke").mockRejectedValueOnce(
+    new IpcError("conflict", "prod-eu is read-only now"),
+  );
+  await expect(operations.undo("dev")).resolves.toEqual({ state: "failed" });
+  expect(keys.lookup(null)(UNDOABLE)).toEqual(["dev"]);
 });
