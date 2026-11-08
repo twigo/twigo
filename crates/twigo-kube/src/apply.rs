@@ -80,6 +80,9 @@ pub const FIELD_MANAGER: &str = "twigo";
 /// can express, as `kubectl edit` names its own.
 pub const EDIT_FIELD_MANAGER: &str = "twigo-edit";
 
+/// 2^53, from which a double no longer holds every integer.
+const EXACT: f64 = 9_007_199_254_740_992.0;
+
 /// What the server sets on an object, which no apply configuration may
 /// carry.
 const SERVER_METADATA: [&str; 8] = [
@@ -161,6 +164,10 @@ pub enum Refusal {
     /// edit was opened with: sending them would revert the other writer, and
     /// nothing can merge them.
     ListsMoved(Vec<String>),
+    /// Arrays and objects the edit sends whole, by path, that hold a number
+    /// the webview cannot carry exactly: one it read rounded would go out
+    /// changed.
+    Inexact(Vec<String>),
 }
 
 /// Builds what an edit sends. A null where the schema types the field leaves
@@ -208,7 +215,22 @@ pub fn build(edit: Edit<'_>) -> Result<Built, Refusal> {
         mut removals,
         rewritten,
         emptied,
+        whole,
     } = found;
+    let inexact: Vec<String> = whole
+        .iter()
+        .filter(|path| merge::value_at(&changed, path.elements()).is_some_and(holds_inexact))
+        .chain(
+            rewritten
+                .iter()
+                .filter(|(_, list)| list.iter().any(holds_inexact))
+                .map(|(path, _)| path),
+        )
+        .map(ToString::to_string)
+        .collect();
+    if !inexact.is_empty() {
+        return Err(Refusal::Inexact(inexact));
+    }
     removals.retain(|removal| still_has(live, removal));
     let moved: Vec<String> = rewritten
         .iter()
@@ -303,6 +325,17 @@ pub fn build(edit: Edit<'_>) -> Result<Built, Refusal> {
         ignored,
         combined,
     })
+}
+
+/// Whether `value` holds a number past what a double, and so the webview's
+/// JSON, carries exactly.
+fn holds_inexact(value: &Value) -> bool {
+    match value {
+        Value::Number(number) => number.as_f64().is_some_and(|number| number.abs() >= EXACT),
+        Value::Array(items) => items.iter().any(holds_inexact),
+        Value::Object(map) => map.values().any(holds_inexact),
+        _ => false,
+    }
 }
 
 /// What an edit no apply can express sends: the one merge patch, or nothing

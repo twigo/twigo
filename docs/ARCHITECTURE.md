@@ -717,6 +717,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
     Dates, sexagesimal numbers (`22:22`), sets, ordered maps and binary are no types there, so `2024-01-01` and `22:22` stay strings, as keys too, and `0o777` is `511`.
     Whether a plain scalar is a number is decided by the rules of `resolve` in go.yaml.in/yaml/v2 v2.4.4 (`resolve.go`), which `goNumber` follows.
     What JSON cannot carry through the IPC is a parse error at its line: `.inf`, `.nan`, an integer past 2^53, negative zero.
+    An integer past 2^53 in a live object shows rounded in the editor, as it reaches the webview through JSON; an edit that would send it whole is refused (6.5).
     So is a key that is empty, not a single value, or a float, which kubectl names at 32 bits.
     So is what Twigo does not read: a tag (`!!set`, `!!omap`, `!!binary`, `!!float`, `!!int`, `!!timestamp`, a local tag), a directive, an anchor outside `[0-9A-Za-z_-]`, an alias with no anchor or inside its own anchor, a merge of something else than maps.
     A key JSON makes one of two (`1` and `"1"`, `y` and `true`) is refused, since kubectl takes the last of such keys or, over a Go map, a random one.
@@ -1575,6 +1576,9 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
      Sending only this edit's changes would undo the previous edit: a forced `replicas: 5` would fall back on the next annotation change.
    - Changed items of map-type lists are sent with their keys; atomic lists are sent whole.
      Which a field is comes from the kind's OpenAPI schema, read as the server converts it (3.6).
+   - An array or object the edit sends whole is refused, on the apply and on the merge patch alike, when it holds a number of magnitude 2^53 or more (`Refusal::Inexact`), since such a number reached the webview rounded and a change to its neighbour would send it changed.
+     The refusal names the paths and says the editor cannot carry an integer that large and kubectl can; a reload would show the same number, so none is offered.
+     A changed bare scalar is what the person typed, and what Twigo owns comes from the live object exact, so both pass.
    - Applying the whole object would make Twigo a co-owner of every field.
      Fields that a GitOps tool later removes would then stay behind.
    - `status` where the resource has a status subresource, and the server's metadata, never enter it: an edit that changes them is answered with what was ignored.

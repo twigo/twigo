@@ -25,6 +25,17 @@ pub(super) struct Found {
     /// [`doList`]: https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/typed/tofieldset.go#L132-L147
     /// [`removingWalker`]: https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/typed/remove.go#L171-L173
     pub emptied: bool,
+    /// Arrays and objects that go out as the edit left them, numbers the
+    /// webview rounded included; a bare scalar is what the person typed.
+    pub whole: Vec<Path>,
+}
+
+impl Found {
+    fn sent_whole(&mut self, at: &Path, value: &Value) {
+        if value.is_array() || value.is_object() {
+            self.whole.push(at.clone());
+        }
+    }
 }
 
 /// The changes between two maps; a key in `skip` is a list map's key, which
@@ -45,6 +56,7 @@ pub(super) fn of_map(
         at.push(Element::Field(name.clone()));
         match before.get(name) {
             None => {
+                found.sent_whole(at, edited);
                 changes.insert(name.clone(), edited.clone());
             }
             Some(value) => {
@@ -86,12 +98,18 @@ fn of_value(
             let list = node.list();
             found.emptied |= after.is_empty() && list != ListType::Atomic;
             match list {
-                ListType::Atomic => Some(Value::Array(after.clone())),
+                ListType::Atomic => {
+                    found.whole.push(at.clone());
+                    Some(Value::Array(after.clone()))
+                }
                 ListType::Set => of_set(before, after, at, found),
                 ListType::Map { keys } => of_list_map(before, after, &keys, node, at, found),
             }
         }
-        _ => Some(after.clone()),
+        _ => {
+            found.sent_whole(at, after);
+            Some(after.clone())
+        }
     }
 }
 
@@ -125,6 +143,9 @@ fn of_set(before: &[Value], after: &[Value], at: &Path, found: &mut Found) -> Op
         .filter(|item| !before.contains(item))
         .cloned()
         .collect();
+    for item in &added {
+        found.sent_whole(at, item);
+    }
     (!added.is_empty()).then_some(Value::Array(added))
 }
 
@@ -208,6 +229,7 @@ fn of_list_map(
     let mut changes = Vec::new();
     for (item, occurrence) in after.iter().zip(&now) {
         let Some(occurrence) = occurrence else {
+            found.sent_whole(at, item);
             changes.push(item.clone());
             continue;
         };
@@ -217,6 +239,7 @@ fn of_list_map(
         match (old.get(occurrence), item) {
             (Some(old_item), item) if items.is_some_and(|items| items.atomic_map()) => {
                 if *old_item != item {
+                    found.sent_whole(&at.with(occurrence.0.clone()), item);
                     changes.push(item.clone());
                 }
             }
@@ -233,7 +256,10 @@ fn of_list_map(
                     changes.push(Value::Object(carried));
                 }
             }
-            _ => changes.push(item.clone()),
+            _ => {
+                found.sent_whole(&at.with(occurrence.0.clone()), item);
+                changes.push(item.clone());
+            }
         }
     }
     for occurrence in was.iter().flatten() {

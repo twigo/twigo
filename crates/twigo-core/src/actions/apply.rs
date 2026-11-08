@@ -656,6 +656,18 @@ fn lists_moved(paths: &[String]) -> ApplyPreviewed {
     }
 }
 
+/// The refusal of an edit that sends whole what holds a number too large for
+/// the webview: a reload would show the same rounded number, so it offers none.
+fn inexact(paths: &[String]) -> IpcError {
+    IpcError::new(
+        ErrorKind::InvalidInput,
+        format!(
+            "{} holds an integer too large for this editor to carry exactly, and this edit sends it whole, so it would change: make this edit with kubectl, which can carry it",
+            paths.join(", ")
+        ),
+    )
+}
+
 /// Builds and dry-runs an edit, and keeps what it prepared for the plan. The
 /// object is read again and the whole done over when a status write alone
 /// landed between the read and the dry-run, up to [`ATTEMPTS`] times.
@@ -759,6 +771,7 @@ pub(crate) async fn preview(
                 }) {
                     Ok(built) => built,
                     Err(Refusal::ListsMoved(paths)) => return Ok(lists_moved(&paths)),
+                    Err(Refusal::Inexact(paths)) => return Err(inexact(&paths)),
                     Err(Refusal::Foreign(foreign)) => {
                         return Err(IpcError::new(
                             ErrorKind::Conflict,
@@ -2362,6 +2375,23 @@ mod tests {
                 Some(Ok(ApplyPreviewed::Stale { keepable: true, .. }))
             ),
             "{answer:?}"
+        );
+    }
+
+    #[test]
+    fn an_integer_too_large_to_carry_is_refused_by_its_paths_and_sends_to_the_tool_that_can() {
+        let error = inexact(&[".spec.a".to_owned(), ".spec.b".to_owned()]);
+        assert_eq!(error.kind, ErrorKind::InvalidInput);
+        assert!(
+            error.message.starts_with(".spec.a, .spec.b holds"),
+            "{}",
+            error.message
+        );
+        assert!(error.message.contains("kubectl"), "{}", error.message);
+        assert!(
+            !error.message.to_lowercase().contains("reload"),
+            "{}",
+            error.message
         );
     }
 

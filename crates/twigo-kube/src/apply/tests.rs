@@ -2223,3 +2223,219 @@ fn the_fallback_lists_every_removal_it_carries_those_the_apply_would_take_too() 
         [".metadata.annotations.theirs", ".metadata.annotations.mine"]
     );
 }
+
+const LARGE: u64 = 9_007_199_254_740_992;
+
+fn edited_widget(before: Value, after: Value, dropped: &[String]) -> Result<Built, Refusal> {
+    let document = items_document();
+    let live = widget(before);
+    let base = view(&live);
+    let edited = widget(after);
+    build(Edit {
+        live: &live,
+        base: &base,
+        edited: &edited,
+        root: synthetic_root(&document),
+        status_subresource: true,
+        lock: "42",
+        dropped,
+    })
+}
+
+#[test]
+fn a_number_past_what_the_webview_carries_is_refused_in_whatever_goes_out_whole() {
+    let cases: Vec<(&str, Value, Value, &str)> = vec![
+        (
+            "an atomic list",
+            json!({ "lst": [{ "name": "a", "value": LARGE }] }),
+            json!({ "lst": [{ "name": "b", "value": LARGE }] }),
+            ".lst",
+        ),
+        (
+            "an atomic map",
+            json!({ "conf": { "a": LARGE, "b": "1" } }),
+            json!({ "conf": { "a": LARGE, "b": "2" } }),
+            ".conf",
+        ),
+        (
+            "a place the schema does not know",
+            json!({ "unknown": { "a": LARGE, "b": "1" } }),
+            json!({ "unknown": { "a": LARGE, "b": "2" } }),
+            ".unknown",
+        ),
+        (
+            "a list whose elements moved, by the merge patch",
+            json!({ "items": [{ "name": "a", "value": LARGE }, { "name": "b" }] }),
+            json!({ "items": [{ "name": "b" }, { "name": "a", "value": LARGE }] }),
+            ".items",
+        ),
+        (
+            "a set whose values moved, by the merge patch",
+            json!({ "tags": ["x", LARGE] }),
+            json!({ "tags": [LARGE, "x"] }),
+            ".tags",
+        ),
+        (
+            "a new field",
+            json!({}),
+            json!({ "added": { "deep": [LARGE] } }),
+            ".added",
+        ),
+        (
+            "a new element of a list map",
+            json!({ "items": [{ "name": "a" }] }),
+            json!({ "items": [{ "name": "a" }, { "name": "b", "value": LARGE }] }),
+            ".items[name=\"b\"]",
+        ),
+        (
+            "an atomic element of a list map",
+            json!({ "refs": [{ "name": "a", "ns": LARGE, "kind": "x" }] }),
+            json!({ "refs": [{ "name": "a", "ns": LARGE, "kind": "y" }] }),
+            ".refs[name=\"a\"]",
+        ),
+        (
+            "an element of a list map that has no key",
+            json!({ "items": [] }),
+            json!({ "items": [{ "value": LARGE }] }),
+            ".items",
+        ),
+        (
+            "a list inside what the schema leaves free",
+            json!({ "free": { "deep": [LARGE, 1] } }),
+            json!({ "free": { "deep": [LARGE, 2] } }),
+            ".free.deep",
+        ),
+        (
+            "a whole item added to a set",
+            json!({ "tags": ["x"] }),
+            json!({ "tags": ["x", { "a": LARGE }] }),
+            ".tags",
+        ),
+        (
+            "a negative number",
+            json!({ "conf": { "a": -9_007_199_254_740_992_i64, "b": "1" } }),
+            json!({ "conf": { "a": -9_007_199_254_740_992_i64, "b": "2" } }),
+            ".conf",
+        ),
+        (
+            "a float that large",
+            json!({ "conf": { "a": 1e20, "b": "1" } }),
+            json!({ "conf": { "a": 1e20, "b": "2" } }),
+            ".conf",
+        ),
+    ];
+    for (name, before, after, path) in cases {
+        assert_eq!(
+            edited_widget(before, after, &[]),
+            Err(Refusal::Inexact(vec![path.to_owned()])),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn the_refusal_holds_on_the_one_patch_as_on_the_apply() {
+    let refused = edited_widget(
+        json!({ "tags": ["x", "y"], "conf": { "a": LARGE, "b": "1" } }),
+        json!({ "tags": ["y", "x"], "conf": { "a": LARGE, "b": "2" } }),
+        &[],
+    );
+    assert_eq!(refused, Err(Refusal::Inexact(vec![".conf".to_owned()])));
+    let without_it = edited_widget(
+        json!({ "tags": ["x", "y"], "conf": { "a": 1, "b": "1" } }),
+        json!({ "tags": ["y", "x"], "conf": { "a": 1, "b": "2" } }),
+        &[],
+    );
+    assert!(matches!(without_it.unwrap().combined, Combined::Only(_)));
+}
+
+#[test]
+fn a_rewritten_list_holding_such_a_number_is_refused_as_that_and_not_as_moved() {
+    let document = items_document();
+    let live = widget(json!({ "items": [
+        { "name": "a", "value": 9_007_199_254_740_993_u64 }, { "name": "b" },
+    ] }));
+    let base = widget(json!({ "items": [
+        { "name": "a", "value": LARGE }, { "name": "b" },
+    ] }));
+    let edited = widget(json!({ "items": [
+        { "name": "b" }, { "name": "a", "value": LARGE },
+    ] }));
+    assert_eq!(
+        build(Edit {
+            live: &live,
+            base: &base,
+            edited: &edited,
+            root: synthetic_root(&document),
+            status_subresource: true,
+            lock: "42",
+            dropped: &[],
+        }),
+        Err(Refusal::Inexact(vec![".items".to_owned()]))
+    );
+}
+
+#[test]
+fn a_changed_bare_scalar_of_that_size_is_what_the_person_typed_and_passes() {
+    let built = edited_widget(
+        json!({ "items": [{ "name": "a", "value": 1 }] }),
+        json!({ "items": [{ "name": "a", "value": LARGE }], "scalar": LARGE }),
+        &[],
+    )
+    .unwrap();
+    let config = built.config.unwrap();
+    assert_eq!(config["items"], json!([{ "name": "a", "value": LARGE }]));
+    assert_eq!(config["scalar"], json!(LARGE));
+}
+
+#[test]
+fn what_comes_from_the_live_object_is_exact_and_passes() {
+    let document = items_document();
+    let root = synthetic_root(&document);
+    let exact = 9_007_199_254_740_993_u64;
+    let live = owned_by(
+        widget(json!({
+            "items": [{ "name": "a", "value": exact }],
+            "conf": { "a": exact },
+            "tags": ["x"],
+        })),
+        vec![manager(
+            "twigo",
+            "Apply",
+            json!({
+                "f:items": { item("a"): { ".": {}, "f:name": {}, "f:value": {} } },
+                "f:conf": {},
+            }),
+        )],
+    );
+    let mut base = view(&live);
+    base["items"][0]["value"] = json!(LARGE);
+    base["conf"]["a"] = json!(LARGE);
+    let mut edited = base.clone();
+    edited["tags"].as_array_mut().unwrap().push(json!("y"));
+    let config = built(&live, &base, &edited, root, &[]).config.unwrap();
+    assert_eq!(config["items"], json!([{ "name": "a", "value": exact }]));
+    assert_eq!(config["conf"], json!({ "a": exact }));
+}
+
+#[test]
+fn what_stays_unsent_holds_such_a_number_without_harm() {
+    let untouched = edited_widget(
+        json!({ "conf": { "a": LARGE }, "tags": ["x"] }),
+        json!({ "conf": { "a": LARGE }, "tags": ["x", "y"] }),
+        &[],
+    );
+    assert!(untouched.is_ok(), "{untouched:?}");
+    let given_up = edited_widget(
+        json!({ "conf": { "a": LARGE, "b": "1" }, "tags": ["x"] }),
+        json!({ "conf": { "a": LARGE, "b": "2" }, "tags": ["x", "y"] }),
+        &[".conf".to_owned()],
+    );
+    assert!(given_up.is_ok(), "{given_up:?}");
+    let below = edited_widget(
+        json!({ "conf": { "a": 9_007_199_254_740_991_u64, "b": "1" } }),
+        json!({ "conf": { "a": 9_007_199_254_740_991_u64, "b": "2" } }),
+        &[],
+    );
+    assert!(below.is_ok(), "{below:?}");
+}
