@@ -4,7 +4,9 @@ import type { Resource } from "@twigo/protocol";
 import { ActionBar, EmptyState, GridSkeleton } from "@twigo/ui";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { Details } from "../Details";
+import { CAPABILITY_PREFIXES } from "../capabilities";
 import { logsKind } from "../logs/entries";
+import { objectOf } from "../selection";
 import { sameGvr, useResources } from "../discovery";
 import { pluralTitle } from "../kinds";
 import type { ListServices } from "../services";
@@ -105,12 +107,22 @@ function Loaded({
   services: ListServices;
 }) {
   const workbench = useWorkbench();
-  const { keys, lists, editors, menus } = workbench;
-  const { selection, states } = services;
+  const { keys, lists, editors, menus, commands } = workbench;
+  const { selection, states, capabilities } = services;
   useChanges(selection.changes);
   useChanges(menus.changes);
   useChanges(keys.changes);
+  useChanges(capabilities.changes);
+  useChanges(commands.changes);
   const selected = selection.get(uri);
+  const namespace = selected && objectOf(selected).namespace;
+  const allowed = capabilities.values(
+    input.space,
+    resource.gvr,
+    namespace,
+    CAPABILITY_PREFIXES.flatMap((prefix) => commands.referenced(prefix)),
+  );
+  const scoped = JSON.stringify(allowed);
   const marks = selection.marks(uri);
   const [open, setOpen] = useState(selected?.reveal === true);
   const [revealed, setRevealed] = useState(selected);
@@ -129,6 +141,14 @@ function Loaded({
     scope.set("listMarked", marks.size > 0);
     scope.set("resource.selected", selected !== undefined);
     scope.set("resource.logs", logsKind(input.gvr) !== undefined);
+    scope.set("resource.group", resource.gvr.group);
+    scope.set("resource.kind", resource.kind);
+    scope.set("resource.namespaced", resource.namespaced);
+    scope.set("resource.scalable", resource.subresources.includes("scale"));
+    for (const [key, value] of Object.entries(
+      JSON.parse(scoped) as Record<string, boolean>,
+    ))
+      scope.set(key, value);
     const unregister = lists.register(wrapper, {
       filter: () => {
         states.focus(uri);
@@ -154,6 +174,8 @@ function Loaded({
     marks.size,
     selected,
     input.gvr,
+    resource,
+    scoped,
   ]);
 
   return (

@@ -1,4 +1,5 @@
 import type { Workbench } from "@twigo/workbench";
+import { Capabilities } from "./capabilities";
 import { Discovery } from "./discovery";
 import { ListStatuses } from "./list/listStatus";
 import { ListStates } from "./listState";
@@ -22,6 +23,8 @@ export interface ListServices {
   readonly pinned: PinnedLists;
   /** What the person chose in each kind's Overviews. */
   readonly overviews: OverviewStates;
+  /** What RBAC lets the person do, for the `capability.*` keys. */
+  readonly capabilities: Capabilities;
 }
 
 export function createServices(workbench: Workbench): ListServices {
@@ -37,5 +40,6 @@ export function createServices(workbench: Workbench): ListServices {
     statuses: new ListStatuses(),
     pinned: new PinnedLists(workbench.spaces),
     overviews: new OverviewStates(),
+    capabilities: new Capabilities(workbench.backend),
   };
 }

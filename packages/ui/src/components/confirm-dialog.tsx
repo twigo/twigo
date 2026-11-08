@@ -9,6 +9,19 @@ import {
 } from "./dialog";
 import { Kbd } from "./kbd";
 
+/** Objects that one thing happens to: `With it go`. */
+export interface ConfirmList {
+  readonly title: string;
+  readonly items: readonly {
+    readonly key: string;
+    /** `ReplicaSet`, quieter before the name. */
+    readonly kind: string;
+    readonly name: string;
+    /** Its namespace, quiet at the end. */
+    readonly detail?: string;
+  }[];
+}
+
 export interface ConfirmDialogProps {
   /** Says where it acts first: the context's type and name. */
   readonly badge?: ReactNode;
@@ -18,6 +31,8 @@ export interface ConfirmDialogProps {
   readonly question: string;
   /** What follows, a sentence each. */
   readonly consequences: readonly string[];
+  /** The exact objects it acts on and those that follow, by what happens to them. */
+  readonly lists?: readonly ConfirmList[];
   /** The command line that does the same, shown as code to copy. */
   readonly command?: string;
   /** What the person types before the button works. */
@@ -43,6 +58,7 @@ export function ConfirmDialog({
   accent,
   question,
   consequences,
+  lists = [],
   command,
   typed,
   confirm,
@@ -100,6 +116,9 @@ export function ConfirmDialog({
               {question}
             </DialogDescription>
           )}
+          {lists.map((list) => (
+            <Listed key={list.title} list={list} />
+          ))}
           {command && <CommandLine command={command} />}
           {typed !== undefined && (
             <div className="grid gap-1.5">
@@ -146,6 +165,39 @@ export function ConfirmDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** A list of objects under its title and count, scrolling past a few rows. */
+function Listed({ list }: { list: ConfirmList }) {
+  const heading = useId();
+  return (
+    <section aria-labelledby={heading} className="grid gap-1">
+      <h3
+        id={heading}
+        className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground"
+      >
+        {list.title}
+        <span className="font-normal tabular-nums text-muted-foreground-2">
+          {list.items.length.toLocaleString("en")}
+        </span>
+      </h3>
+      <ul className="max-h-[132px] overflow-y-auto rounded-md py-1 shadow-[inset_0_0_0_1px_var(--border)]">
+        {list.items.map((item) => (
+          <li key={item.key} className="flex h-[22px] items-center gap-2 px-2">
+            <span className="w-[88px] shrink-0 truncate text-muted-foreground-2">
+              {item.kind}
+            </span>
+            <span className="min-w-0 flex-1 truncate">{item.name}</span>
+            {item.detail && (
+              <span className="min-w-0 shrink-[2] truncate text-muted-foreground">
+                {item.detail}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

@@ -26,36 +26,70 @@ async function withEveryEnablement() {
   workbench.keys.set("inQuickOpen", true);
   workbench.keys.set("quickOpenToSide", true);
   workbench.keys.set("operationCountingDown", true);
+  workbench.keys.set("space.id", "dev");
+  workbench.keys.set("operationUndo", ["dev"]);
+  workbench.keys.set("resource.scalable", true);
+  for (const capability of [
+    "resource.capability.delete",
+    "resource.capability.patch",
+    "resource.capability.patch/scale",
+    "capability.create.pods/eviction",
+    "capability.create.jobs.batch",
+  ])
+    workbench.keys.set(capability, true);
   return workbench;
 }
+
+/** The kinds whose actions only their lists show, and those actions. */
+const KINDS = [
+  { group: "", kind: "Node", commands: /^k8s\.node\./ },
+  { group: "apps", kind: "Deployment", commands: /^k8s\.resource\.restart$/ },
+  {
+    group: "batch",
+    kind: "CronJob",
+    commands: /^k8s\.(cronjob\.|resource\.(suspend|resume)$)/,
+  },
+] as const;
 
 test("every registered command appears in the palette", async () => {
   const workbench = await withEveryEnablement();
   const resolved = workbench.quickAccess.resolve(">");
-  const shown = await resolved?.provider.items("", {
-    lookup: workbench.keys.lookup(document.body),
-  });
+  const shown = new Set<string>();
+  for (const { group, kind } of KINDS) {
+    workbench.keys.set("resource.group", group);
+    workbench.keys.set("resource.kind", kind);
+    const items = await resolved?.provider.items("", {
+      lookup: workbench.keys.lookup(document.body),
+    });
+    for (const item of items ?? []) shown.add(item.id);
+  }
   const ids = workbench.commands
     .all()
     .map((command) => command.id)
     .filter((id) => id !== "k8s.logs.open");
   expect(ids.length).toBeGreaterThan(25);
-  expect(shown?.map((item) => item.id).sort()).toEqual([...ids].sort());
+  expect([...shown].sort()).toEqual([...ids].sort());
 });
 
 test("every registered command runs from a key the user binds to it", async () => {
   const workbench = await withEveryEnablement();
   const ids = workbench.commands.all().map((command) => command.id);
-  const keys = ["", "shift+"].flatMap((modifier) =>
-    Array.from({ length: 36 }, (_, index) => modifier + index.toString(36)),
+  // Two chords, each with a key and a shifted key for every letter and digit.
+  const keys = ["k", "j"].flatMap((chord) =>
+    ["", "shift+"].flatMap((modifier) =>
+      Array.from({ length: 36 }, (_, index) => ({
+        chord,
+        key: modifier + index.toString(36),
+      })),
+    ),
   );
   expect(ids.length).toBeLessThanOrEqual(keys.length);
   workbench.keybindings.register(
     "user",
-    ids.map((command, index) => ({
-      key: `ctrl+alt+k ${keys[index] ?? ""}`,
-      command,
-    })),
+    ids.map((command, index) => {
+      const { chord, key } = keys[index] ?? { chord: "", key: "" };
+      return { key: `ctrl+alt+${chord} ${key}`, command };
+    }),
   );
   const execute = vi
     .spyOn(workbench.commands, "execute")
@@ -65,10 +99,16 @@ test("every registered command runs from a key the user binds to it", async () =
       new KeyboardEvent("keydown", { code, cancelable: true, ...init }),
     );
   ids.forEach((id, index) => {
-    const key = keys[index] ?? "";
+    const { group, kind } =
+      KINDS.find(({ commands }) => commands.test(id)) ?? KINDS[1];
+    workbench.keys.set("resource.group", group);
+    workbench.keys.set("resource.kind", kind);
+    const { chord, key } = keys[index] ?? { chord: "", key: "" };
     const char = key.slice(-1);
     const code = /\d/.test(char) ? `Digit${char}` : `Key${char.toUpperCase()}`;
-    expect(press("KeyK", { ctrlKey: true, altKey: true })).toBe(true);
+    expect(
+      press(`Key${chord.toUpperCase()}`, { ctrlKey: true, altKey: true }),
+    ).toBe(true);
     expect(press(code, { shiftKey: key.startsWith("shift+") })).toBe(true);
     expect(execute).toHaveBeenLastCalledWith(
       id,

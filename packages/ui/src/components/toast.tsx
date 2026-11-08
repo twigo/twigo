@@ -89,13 +89,15 @@ export interface CountdownToastProps {
   until: number;
   /** How long it counts in all, which its bar shows. */
   seconds: number;
-  cancel: { label: string; keys?: string; run: () => void };
+  /** Its one button: Cancel of a send, Undo of what ran. */
+  action: { label: string; keys?: string; run: () => void };
 }
 
 /**
- * Something that happens once its seconds run out unless cancelled, as
- * Headlamp holds a delete (ARCHITECTURE 6.4): a bar runs down under it,
- * and its owner, not the toast, keeps the time.
+ * Something that lasts its seconds, as Headlamp holds a delete
+ * (ARCHITECTURE 6.4): a send that happens once they run out unless
+ * cancelled, or an undo that lasts as long. A bar runs down under it, and
+ * its owner, not the toast, keeps the time.
  */
 export function CountdownToast({
   icon: Icon,
@@ -103,7 +105,7 @@ export function CountdownToast({
   detail,
   until,
   seconds,
-  cancel,
+  action,
 }: CountdownToastProps) {
   const [shown, setShown] = useState(() => secondsLeft(until));
   useEffect(() => {
@@ -136,11 +138,11 @@ export function CountdownToast({
       </span>
       <button
         type="button"
-        onClick={cancel.run}
+        onClick={action.run}
         className="flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 font-medium text-foreground shadow-[inset_0_0_0_1px_var(--border)] transition-colors hover:bg-accent focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none"
       >
-        {cancel.label}
-        {cancel.keys && <Kbd>{cancel.keys}</Kbd>}
+        {action.label}
+        {action.keys && <Kbd>{action.keys}</Kbd>}
       </button>
       <span
         aria-hidden

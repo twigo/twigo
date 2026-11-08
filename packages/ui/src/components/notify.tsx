@@ -40,8 +40,35 @@ function countdown(props: CountdownToastProps): { dismiss: () => void } {
   const id = toast.custom(() => <CountdownToast {...props} />, {
     duration: Infinity,
     dismissible: false,
-    onDismiss: props.cancel.run,
+    onDismiss: props.action.run,
   });
+  return {
+    dismiss: () => {
+      toast.dismiss(id);
+    },
+  };
+}
+
+/**
+ * What ran, with its undo for as long as it lasts: the toast goes when the
+ * undo ends, and dismissing it leaves the undo to ⌘Z.
+ */
+function undoable(props: CountdownToastProps): { dismiss: () => void } {
+  const id = toast.custom(
+    (id) => (
+      <CountdownToast
+        {...props}
+        action={{
+          ...props.action,
+          run: () => {
+            props.action.run();
+            toast.dismiss(id);
+          },
+        }}
+      />
+    ),
+    { duration: Math.max(0, props.until - Date.now()) },
+  );
   return {
     dismiss: () => {
       toast.dismiss(id);
@@ -60,4 +87,5 @@ export const notify = {
   warning: show("warning"),
   info: show("info"),
   countdown,
+  undoable,
 };

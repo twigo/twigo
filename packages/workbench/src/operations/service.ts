@@ -1,4 +1,4 @@
-import type { LucideIcon } from "lucide-react";
+import { CircleCheck, type LucideIcon } from "lucide-react";
 import type {
   Backend,
   OperationEvent,
@@ -15,6 +15,12 @@ export const COUNTING_DOWN = "operationCountingDown";
 
 /** Cancels the newest countdown. */
 export const CANCEL_COUNTDOWN = "workbench.action.cancelCountdown";
+
+/** The context key that lists the spaces whose last action an undo puts back now. */
+export const UNDOABLE = "operationUndo";
+
+/** Puts back the active space's last action (decision 5 of M2). */
+export const UNDO = "workbench.action.undo";
 
 /** How a command's caller draws its friction: the button's icon, and whether it destroys. */
 export interface Look {
@@ -63,12 +69,18 @@ export class Operations {
     readonly cancel: () => void;
   }[] = [];
   #all: readonly Running[] = [];
+  /** Each space's undo while it lasts, by space. */
+  readonly #undos = new Map<
+    string,
+    { readonly look: Look; readonly dismiss: () => void }
+  >();
 
-  /** `cancelKeys` labels the key that cancels a countdown, if one does. */
+  /** `cancelKeys` and `undoKeys` label the keys that cancel a countdown and undo, if any do. */
   constructor(
     private readonly backend: Backend,
     private readonly keys: ContextKeys,
     private readonly cancelKeys: () => string | undefined,
+    private readonly undoKeys: () => string | undefined,
     private readonly report: (error: unknown) => void,
   ) {}
 
@@ -95,7 +107,15 @@ export class Operations {
       this.backend.invoke("command_cancel", plan.id).catch(this.report);
       return { state: "cancelled" };
     }
-    return this.#execute(plan, agreed.typed);
+    const space = request.action === "reveal" ? undefined : request.space;
+    return this.#execute(plan, agreed.typed, space, look);
+  }
+
+  /** Puts back the space's last action while its undo lasts, as ⌘Z does. */
+  async undo(space: string): Promise<Outcome> {
+    const undo = this.#undos.get(space);
+    if (!undo) return { state: "cancelled" };
+    return this.run({ action: "undo", space }, undo.look);
   }
 
   /** Cancels the newest countdown, as ⌘Z does. */
@@ -200,7 +220,7 @@ export class Operations {
         detail: (left) => `${plan.context} · sends in ${String(left)}\u00a0s`,
         until,
         seconds,
-        cancel: {
+        action: {
           label: "Cancel",
           ...(keys !== undefined && { keys }),
           run: cancel,
@@ -217,13 +237,23 @@ export class Operations {
     });
   }
 
-  #execute(plan: Plan, typed: string | undefined): Promise<Outcome> {
+  #execute(
+    plan: Plan,
+    typed: string | undefined,
+    space: string | undefined,
+    look: Look,
+  ): Promise<Outcome> {
     return new Promise((resolve) => {
       let ended = false;
-      const end = (outcome: Outcome) => {
+      const end = (
+        outcome: Outcome,
+        done?: { text: string; undoUntil: number | null },
+      ) => {
         if (ended) return;
         ended = true;
         if (this.#running.delete(plan.id)) this.#changed();
+        // The space's last action is this one now, as in Rust.
+        if (space !== undefined) this.#ended(space, plan.context, look, done);
         resolve(outcome);
       };
       const stop = () => {
@@ -242,8 +272,10 @@ export class Operations {
             this.#changed();
             return;
           case "done":
-            notify.success(event.text);
-            end({ state: "done" });
+            if (event.undoUntil === null || space === undefined) {
+              notify.success(event.text);
+            }
+            end({ state: "done" }, event);
             return;
           case "stopped":
             notify.info(event.text);
@@ -278,5 +310,52 @@ export class Operations {
   #changed(): void {
     this.#all = [...this.#running.values()];
     this.changes.emit();
+  }
+
+  /** Keeps a space's undo until it ends, and drops the one an earlier action left. */
+  #ended(
+    space: string,
+    context: string,
+    look: Look,
+    done: { text: string; undoUntil: number | null } | undefined,
+  ): void {
+    this.#undos.get(space)?.dismiss();
+    this.#undos.delete(space);
+    const undoUntil = done?.undoUntil ?? null;
+    if (done && undoUntil !== null) {
+      const keys = this.undoKeys();
+      const toast = notify.undoable({
+        icon: CircleCheck,
+        message: done.text,
+        detail: (left) => `${context} · undo for ${String(left)}\u00a0s`,
+        until: undoUntil,
+        seconds: Math.max(1, Math.round((undoUntil - Date.now()) / 1000)),
+        action: {
+          label: "Undo",
+          ...(keys !== undefined && { keys }),
+          run: () => {
+            this.undo(space).catch(this.report);
+          },
+        },
+      });
+      const timer = setTimeout(() => {
+        if (this.#undos.get(space) !== entry) return;
+        this.#undos.delete(space);
+        this.#undoable();
+      }, undoUntil - Date.now());
+      const entry = {
+        look,
+        dismiss: () => {
+          clearTimeout(timer);
+          toast.dismiss();
+        },
+      };
+      this.#undos.set(space, entry);
+    }
+    this.#undoable();
+  }
+
+  #undoable(): void {
+    this.keys.set(UNDOABLE, [...this.#undos.keys()]);
   }
 }

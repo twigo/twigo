@@ -60,7 +60,7 @@ test("a countdown says the seconds left and its Cancel runs", () => {
       detail={(left) => `dev · sends in ${String(left)} s`}
       until={Date.now() + 5000}
       seconds={5}
-      cancel={{ label: "Cancel", keys: "⌘Z", run }}
+      action={{ label: "Cancel", keys: "⌘Z", run }}
     />,
   );
   expect(screen.getByRole("status").textContent).toContain("sends in 5 s");
@@ -84,7 +84,7 @@ test("a countdown's toast cannot be swiped away, and dismissing it cancels it", 
       detail: () => "dev · sends in 5 s",
       until: Date.now() + 5000,
       seconds: 5,
-      cancel: { label: "Cancel", run },
+      action: { label: "Cancel", run },
     });
   });
   await act(() => vi.advanceTimersByTimeAsync(100));

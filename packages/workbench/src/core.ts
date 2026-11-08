@@ -21,7 +21,12 @@ import { registerListCommands } from "./lists/commands";
 import { registerSpaceColor } from "./spaces/colorCommand";
 import { registerContextModes } from "./spaces/modeCommands";
 import { registerQuickInputCommands } from "./quickaccess/commands";
-import { CANCEL_COUNTDOWN, COUNTING_DOWN } from "./operations/service";
+import {
+  CANCEL_COUNTDOWN,
+  COUNTING_DOWN,
+  UNDO,
+  UNDOABLE,
+} from "./operations/service";
 import { useOperationEntries } from "./operations/entries";
 
 const TOGGLES: readonly {
@@ -345,7 +350,22 @@ export function registerCore(workbench: Workbench): void {
       workbench.operations.cancelCountdown();
     },
   });
+  commands.register({
+    id: UNDO,
+    title: "Undo the Last Action",
+    category: "View",
+    enablement: `space.id in ${UNDOABLE}`,
+    run: async () => {
+      const space = workbench.spaces.active;
+      if (space) await workbench.operations.undo(space.id);
+    },
+  });
   keybindings.register("core", [
+    {
+      key: "mod+z",
+      command: UNDO,
+      when: `listFocus && space.id in ${UNDOABLE}`,
+    },
     {
       key: "mod+z",
       command: CANCEL_COUNTDOWN,

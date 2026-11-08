@@ -29,12 +29,14 @@ const LOOK = { icon: Trash2, destructive: true };
 const REQUEST: PlanRequest = {
   action: "delete",
   space: "dev",
-  target: {
-    gvr: { group: "", version: "v1", resource: "pods" },
-    namespaced: true,
-    namespace: "default",
-    name: "web-1",
-  },
+  targets: [
+    {
+      gvr: { group: "", version: "v1", resource: "pods" },
+      namespaced: true,
+      namespace: "default",
+      name: "web-1",
+    },
+  ],
 };
 
 function plan(friction: Plan["friction"]): Plan {
@@ -47,6 +49,7 @@ function plan(friction: Plan["friction"]): Plan {
     question: "Delete pod web-1 in default from dev?",
     confirm: "Delete pod",
     consequences: ["Its replica set web-5d4f replaces it."],
+    affected: [],
     kubectl: "kubectl --context dev delete pods web-1 -n default",
     doing: "Deleting pod web-1",
   };
@@ -112,7 +115,7 @@ test("a cancel in the countdown sends nothing, and the countdown's end runs the 
 
   const done = await started(plan({ kind: "countdown", seconds: 5 }), [
     { state: "running", text: "Waiting for pod web-1 to go" },
-    { state: "done", text: "Deleted pod web-1" },
+    { state: "done", text: "Deleted pod web-1", undoUntil: null },
   ]);
   await act(() => vi.advanceTimersByTimeAsync(4900));
   expect(commands(done.sent)).toEqual(["command_plan"]);
@@ -128,7 +131,7 @@ test("a cancel in the countdown sends nothing, and the countdown's end runs the 
 
 test("a dialog runs the plan with what was typed, and its cancel drops it", async () => {
   const typed = await started(plan({ kind: "typed", text: "dev" }), [
-    { state: "done", text: "Deleted pod web-1" },
+    { state: "done", text: "Deleted pod web-1", undoUntil: null },
   ]);
   const asking = typed.workbench.operations.asking;
   expect(asking?.plan.id).toBe(7);
@@ -283,7 +286,7 @@ test("a countdown that runs out runs its plan, though its toast's dismissal canc
   render(<Toaster />);
   const { sent, outcome } = await started(
     plan({ kind: "countdown", seconds: 5 }),
-    [{ state: "done", text: "Deleted pod web-1" }],
+    [{ state: "done", text: "Deleted pod web-1", undoUntil: null }],
   );
   await act(() => vi.advanceTimersByTimeAsync(5000));
   await act(() => vi.advanceTimersByTimeAsync(1000));

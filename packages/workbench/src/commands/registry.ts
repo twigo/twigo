@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import { Changes } from "../changes";
 import {
   evaluate,
+  keysOf,
   parseWhen,
   type Lookup,
   type When,
@@ -68,6 +69,18 @@ export class Commands {
   all(): readonly CommandDescriptor[] {
     this.#all ??= [...this.#entries.values()].map((entry) => entry.command);
     return this.#all;
+  }
+
+  /** The keys the commands' enablement reads that start with `prefix`. */
+  referenced(prefix: string): readonly string[] {
+    const keys = new Set<string>();
+    for (const { enablement } of this.#entries.values()) {
+      if (!enablement) continue;
+      for (const key of keysOf(enablement)) {
+        if (key.startsWith(prefix)) keys.add(key);
+      }
+    }
+    return [...keys].sort();
   }
 
   /** Whether the command exists and its enablement holds. */

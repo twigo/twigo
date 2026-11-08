@@ -75,10 +75,12 @@ test("⌘⌫ on a row asks the bus to delete it, and its dialog names the cluste
     {
       action: "delete",
       space: "staging",
-      target: expect.objectContaining({
-        gvr: { group: "", version: "v1", resource: "pods" },
-        namespaced: true,
-      }) as unknown,
+      targets: [
+        expect.objectContaining({
+          gvr: { group: "", version: "v1", resource: "pods" },
+          namespaced: true,
+        }) as unknown,
+      ],
     },
     expect.objectContaining({ destructive: true }),
   );
