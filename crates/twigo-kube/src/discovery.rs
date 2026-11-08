@@ -8,9 +8,10 @@ use http::{HeaderValue, Request, StatusCode};
 use http_body_util::BodyExt;
 use kube::Client;
 use kube::client::{APIGroupDiscoveryList, Body};
-use kube::core::Status;
 use serde::{Deserialize, Serialize};
 use twigo_ipc::{ErrorKind, Gvr, IpcError, Resource};
+
+use crate::errors;
 
 pub use cache::Cache;
 
@@ -208,23 +209,13 @@ async fn fetch(
     };
     let body = response.into_body().collect().await?.to_bytes();
     if status.is_client_error() || status.is_server_error() {
-        return Err(Error::Request(api_error(status, &body)));
+        return Err(Error::Request(errors::refused(status, &body)));
     }
     if !aggregated(&content_type) {
         return Err(Error::NotAggregated { path, content_type });
     }
     let list = serde_json::from_slice(&body).map_err(|source| Error::Decode { path, source })?;
     Ok(Some(Document { etag, list }))
-}
-
-/// The status a refused request answers with, as kube's
-/// `handle_api_errors` reads it, which `Client::send` leaves to its caller.
-fn api_error(status: StatusCode, body: &[u8]) -> kube::Error {
-    let status = serde_json::from_slice::<Status>(body).unwrap_or_else(|_| {
-        Status::failure(&String::from_utf8_lossy(body), "Failed to parse error data")
-            .with_code(status.as_u16())
-    });
-    kube::Error::Api(status.boxed())
 }
 
 /// Whether a media type names `APIGroupDiscoveryList` of
