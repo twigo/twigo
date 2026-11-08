@@ -704,6 +704,8 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   The core group is an empty segment, `k8s://prod//v1/pods/payments/api-0`, so an object in a namespace has five path segments and a cluster-scoped one four.
 - **Sub-tabs.**
   A resource editor's Overview, YAML, Events and Related switch at the right of its group's tab bar, where a list keeps its filters; Rust follows only the one shown.
+- **Closing a tab.**
+  When closing an editor drops the keyboard focus to the page, the editor that becomes active takes it, so a key such as ⌘S still reaches an editor after ⌘W on a diff.
 - **Working copies.**
   A YAML editor that the user has changed holds a working copy based on the opened `resourceVersion`.
   - The service is keyed by the editor's URI and holds the object as opened (`base`), the `lock` an apply is held to, the object at that lock after "Keep mine" (`locked`) and the text.

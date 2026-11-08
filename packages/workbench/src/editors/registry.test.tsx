@@ -220,6 +220,38 @@ test("opening an editor again withdraws a close that waits for its space, and cl
   expect(tabs()).toEqual([{ title: "again", preview: "false" }]);
 });
 
+test("closing the editor that holds the keyboard focus gives it to the editor that becomes active, and closing another does not move it", async () => {
+  const { workbench, editors } = await mounted();
+  workbench.editors.register({
+    id: "test.field",
+    scheme: "field",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <input aria-label={uri} />,
+  });
+  act(() => {
+    editors.open("field://a");
+    editors.open("field://b");
+    editors.open("field://c");
+  });
+  act(() => {
+    screen.getByLabelText("field://c").focus();
+  });
+
+  act(() => {
+    editors.close("field://a");
+  });
+  expect(document.activeElement).toBe(screen.getByLabelText("field://c"));
+
+  act(() => {
+    editors.close("field://c");
+  });
+  expect(editors.active).toBe("field://b");
+  expect(document.activeElement).not.toBe(document.body);
+  expect(
+    document.activeElement?.contains(screen.getByLabelText("field://b")),
+  ).toBe(true);
+});
+
 test("closing an editor says so, while moving it or switching spaces does not", async () => {
   const { workbench, editors } = await mounted();
   const closed: string[] = [];

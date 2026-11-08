@@ -289,14 +289,21 @@ export class Editors {
   }
 
   /**
-   * Closes an editor. One that belongs to another space than its area shows
-   * closes when that space's dock is mounted, as an open for it waits.
+   * Closes an editor, and gives the keyboard focus to the editor that becomes
+   * active if closing it dropped the focus to the page. One that belongs to another space than
+   * its area shows closes when that space's dock is mounted, as an open for it
+   * waits.
    */
   close(uri: string): void {
     this.#waiting.delete(uri);
     const open = this.#find(uri);
     if (open) {
+      const held = open.panel.group.element.contains(document.activeElement);
       open.panel.api.close();
+      // A focused element that goes takes the keyboard focus to the page.
+      if (held && document.activeElement === document.body) {
+        this.#apis.get(open.area)?.focus();
+      }
       return;
     }
     const provider = this.resolve(uri);
