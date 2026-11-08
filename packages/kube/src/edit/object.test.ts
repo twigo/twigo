@@ -96,15 +96,100 @@ test("an alias with no anchor and a merge of something else than maps are errors
   ).toEqual({ ok: true, object: { b: { x: 1 }, v: { x: 1, w: 2, z: 3 } } });
 });
 
-test("aliases that expand past the package's limit are an error at the manifest, not a throw", () => {
+test("aliases past Go's budget are a parse error at the first alias over it, at once, and those within it read", () => {
   const levels = Array.from(
     { length: 14 },
     (_, level) =>
       `l${String(level)}: &l${String(level)} [${level === 0 ? "x" : `*l${String(level - 1)}, *l${String(level - 1)}`}]`,
   );
   const parsed = parseManifest(`${levels.join("\n")}\n`);
-  expect(parsed).toMatchObject({ ok: false, line: 1 });
-  expect(parsed.ok || parsed.message).toMatch(/alias/i);
+  expect(parsed).toMatchObject({ ok: false });
+  expect(parsed.ok || parsed.message).toMatch(/aliases/);
+  expect(parsed.ok || parsed.line).toBeGreaterThan(1);
+
+  let bomb = "a0: &a0 {x: 1}\n";
+  for (let k = 1; k <= 10; k++) {
+    bomb += `a${String(k)}: &a${String(k)}\n  <<: [${Array(9)
+      .fill(`*a${String(k - 1)}`)
+      .join(", ")}]\n`;
+  }
+  const started = performance.now();
+  expect(parseManifest(bomb)).toMatchObject({ ok: false });
+  expect(performance.now() - started).toBeLessThan(1000);
+
+  const uses = Array(300).fill("*x").join(", ");
+  expect(parseManifest(`x: &x 1\nl: [${uses}]\n`)).toMatchObject({
+    ok: true,
+  });
+});
+
+test("nothing that reads text throws, whatever the nesting", () => {
+  for (const depth of [1000, 12000]) {
+    const flow = `a: ${"[".repeat(depth)}${"]".repeat(depth)}\n`;
+    const parsed = parseManifest(flow);
+    if (!parsed.ok) {
+      expect(parsed.line).toBe(1);
+      expect(parsed.message).not.toMatch(/Maximum call stack/);
+    }
+    expect(() => statusLines(flow)).not.toThrow();
+    expect(() =>
+      mayHoldSecret("untitled://prod-eu/manifest-1", flow),
+    ).not.toThrow();
+  }
+  expect(parseManifest(`a: ${"[".repeat(12000)}\n`)).toMatchObject({
+    ok: false,
+  });
+}, 20_000);
+
+test("one-line JSON reads in linear time", () => {
+  const object = (keys: number) =>
+    JSON.stringify({
+      apiVersion: "v1",
+      kind: "ConfigMap",
+      metadata: { name: "x" },
+      data: Object.fromEntries(
+        Array.from({ length: keys }, (_, i) => [
+          `key-${String(i)}`,
+          `v-${String(i)}`,
+        ]),
+      ),
+    });
+  const time = (text: string) => {
+    const started = performance.now();
+    expect(parseManifest(text).ok).toBe(true);
+    return performance.now() - started;
+  };
+  time(object(100));
+  expect(time(object(40000))).toBeLessThan(2500);
+});
+
+test("a tab in a block scalar is the text it is, unless Go has yet to learn the indentation or the column is below it", () => {
+  const text =
+    "kind: ConfigMap\ndata:\n  Makefile: |\n    all:\n    \tgo build\n";
+  expect(objectOf(text)).toEqual({
+    kind: "ConfigMap",
+    data: { Makefile: "all:\n\tgo build\n" },
+  });
+  expect(yamlOfObject({ data: { Makefile: "all:\n\tgo build\n" } })).toBe(
+    "data:\n  Makefile: |\n    all:\n    \tgo build\n",
+  );
+  expect(parseManifest("a: |\n  \tx\n")).toMatchObject({ ok: false, line: 2 });
+  expect(parseManifest("a: |\n  x\n \ty\n")).toMatchObject({ ok: false });
+  expect(objectOf("a: |2\n  \tx\n")).toEqual({ a: "\tx\n" });
+  expect(parseManifest("a: |2\n \tx\n")).toMatchObject({ ok: false });
+});
+
+test("raw U+2028 where kubectl writes one reads as Go reads it, and is refused where the package would read it otherwise", () => {
+  expect(objectOf("a: 'x\u2028  y'\n")).toEqual({ a: "x\u2028y" });
+  expect(objectOf("a: |\n  l1\n  x\u2028  y\n")).toEqual({
+    a: "l1\nx\u2028y\n",
+  });
+  expect(objectOf("a: |\n  l1\n  x\u2028")).toEqual({ a: "l1\nx\u2028" });
+  expect(parseManifest("a: x\u2028y\n")).toMatchObject({
+    ok: false,
+    message: expect.stringContaining("U+2028") as unknown,
+  });
+  expect(parseManifest("a: 1 # c\u2028b: 2\n")).toMatchObject({ ok: false });
 });
 
 test("the lines of status are found, flow style and a missing block included", () => {

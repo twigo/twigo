@@ -1,14 +1,15 @@
 {
-  "matched": 524,
-  "refusedByBoth": 218,
+  "matched": 567,
+  "refusedByBoth": 254,
   "refused": {
     " a: 1\nb: 2\n": "Unexpected scalar at node end",
     "!!binary aGVsbG8=: a\n": "Twigo does not read the tag !!binary",
     "!!int '1': a\n": "Twigo does not read the tag !!int",
+    "!!merge x: 1\n": "Twigo does not read the tag !!merge",
     "# c\n﻿a: 1\n": "Kubectl does not read U+FEFF here; a double-quoted escape does.",
     "# c\ra: 1\n": "Kubectl does not read U+000D here; a double-quoted escape does.",
     "# ca: 1\n": "Kubectl does not read U+0085 here; a double-quoted escape does.",
-    "# c a: 1\n": "Kubectl does not read U+2028 here; a double-quoted escape does.",
+    "# c a: 1\n": "Kubectl reads a raw U+2028 or U+2029 as a line break here; a double-quoted escape reads as the character.",
     "%TAG ! tag:x:\n---\nv: !a b\n": "Twigo does not read YAML directives.",
     "%TAG ! tag:yaml.org,2002:\n---\nv: !str 1\n": "Twigo does not read YAML directives.",
     "%TAG !! tag:yaml.org,2002:\n---\nv: !!str 1\n": "Twigo does not read YAML directives.",
@@ -39,10 +40,11 @@
     "? a\n": "A ? key needs its : on a line of its own, in the same column.",
     "? a\n? b\n": "A ? key needs its : on a line of its own, in the same column.",
     "? a\nb: 1\n": "A ? key needs its : on a line of its own, in the same column.",
-    "a: \"b\n\tc\"\n": "Kubectl refuses a tab at the start of a line.",
+    "a: \"b\n\tc\"\n": "Twigo does not read a tab at the start of a line outside a block scalar; indent with spaces.",
     "a: \"b\rc\"\n": "Kubectl does not read U+000D here; a double-quoted escape does.",
     "a: \"bc\"\n": "Kubectl does not read U+0085 here; a double-quoted escape does.",
-    "a: \"b c\"\n": "Kubectl does not read U+2028 here; a double-quoted escape does.",
+    "a: \"b c\"\n": "Kubectl reads a raw U+2028 or U+2029 as a line break here; a double-quoted escape reads as the character.",
+    "a: \"x y\"\n": "Kubectl reads a raw U+2028 or U+2029 as a line break here; a double-quoted escape reads as the character.",
     "a: &a {1: x}\nv:\n  1: y\n  <<: *a\n": "The key 1 is set before the merge that also sets it, and kubectl takes the merge's.",
     "a: &a {on: x}\nv:\n  true: y\n  <<: *a\n": "The key true is set before the merge that also sets it, and kubectl takes the merge's.",
     "a: &a {x: 1, x: 2}\nv:\n  <<: *a\n": "Map keys must be unique: x is set twice.",
@@ -50,10 +52,11 @@
     "a: &a {x: 1}\nv: {x: 2, <<: *a}\n": "The key x is set before the merge that also sets it, and kubectl takes the merge's.",
     "a: &x 1.5\n*x : 1\n": "The key 1.5 is a float, which kubectl names differently; quote it.",
     "a: &x b\n*x: 1\n": "Implicit map keys need to be followed by map values",
-    "a: 'b\n\tc'\n": "Kubectl refuses a tab at the start of a line.",
+    "a: 'b\n\tc'\n": "Twigo does not read a tab at the start of a line outside a block scalar; indent with spaces.",
     "a: 'b\rc'\n": "Kubectl does not read U+000D here; a double-quoted escape does.",
     "a: 'bc'\n": "Kubectl does not read U+0085 here; a double-quoted escape does.",
-    "a: 'b c'\n": "Kubectl does not read U+2029 here; a double-quoted escape does.",
+    "a: 'x\n   y'\n": "Kubectl reads a raw U+2028 or U+2029 as a line break here; a double-quoted escape reads as the character.",
+    "a: 'x \n  y'\n": "Kubectl reads a raw U+2028 or U+2029 as a line break here; a double-quoted escape reads as the character.",
     "a: 1\n\"a\": 2\n": "Map keys must be unique: a is set twice.",
     "a: 1\n'a': 2\n": "Map keys must be unique: a is set twice.",
     "a: 1\n---\n''\n": "The manifest has 2 documents, and Twigo previews one object at a time.",
@@ -64,25 +67,29 @@
     "a: 1\n... x\n": "Unexpected scalar at node end",
     "a: 1\n? b\n": "A ? key needs its : on a line of its own, in the same column.",
     "a: 1\na: 2\n": "Map keys must be unique: a is set twice.",
-    "a: 1\n b: 2\n": "Kubectl does not read U+2028 here; a double-quoted escape does.",
+    "a: 1\n b: 2\n": "Kubectl refuses a key that spans lines.",
     "a: 1\n﻿b: 2\n": "Kubectl does not read U+FEFF here; a double-quoted escape does.",
     "a: 1\rb: 2\r": "Kubectl does not read U+000D here; a double-quoted escape does.",
     "a: 1 # c\rb: 2\n": "Kubectl does not read U+000D here; a double-quoted escape does.",
+    "a: 1 # c b: 2\n": "Kubectl reads a raw U+2028 or U+2029 as a line break here; a double-quoted escape reads as the character.",
     "a: 1b: 2\n": "Kubectl does not read U+0085 here; a double-quoted escape does.",
-    "a: 1 b: 2\n": "Kubectl does not read U+2028 here; a double-quoted escape does.",
+    "a: 1 b: 2\n": "Kubectl refuses a key that spans lines.",
     "a: 2\n<<: {a: 1}\n": "The key a is set before the merge that also sets it, and kubectl takes the merge's.",
+    "a: >\n  x   y\n": "Kubectl reads a raw U+2028 or U+2029 as a line break here; a double-quoted escape reads as the character.",
     "a: [\n1\n]\n": "Flow sequence in block collection must be sufficiently indented and end with a ]",
     "a: [b:]\n": "Kubectl reads this key and its colon as one text; quote the key or give it a value.",
-    "a: b\n \tc\n": "Kubectl refuses a tab at the start of a line.",
+    "a: b\n \tc\n": "Twigo does not read a tab at the start of a line outside a block scalar; indent with spaces.",
     "a: b\r  c\r": "Kubectl does not read U+000D here; a double-quoted escape does.",
     "a: b  c\n": "Kubectl does not read U+0085 here; a double-quoted escape does.",
-    "a: b   c\n": "Kubectl does not read U+2028 here; a double-quoted escape does.",
-    "a: b   c\n": "Kubectl does not read U+2029 here; a double-quoted escape does.",
+    "a: b   c\n": "Kubectl reads a raw U+2028 or U+2029 as a line break here; a double-quoted escape reads as the character.",
+    "a: b   c\n": "Kubectl reads a raw U+2028 or U+2029 as a line break here; a double-quoted escape reads as the character.",
     "a: {b: 1, b: 2}\n": "Map keys must be unique: b is set twice.",
     "a: {b:}\n": "Kubectl reads this key and its colon as one text; quote the key or give it a value.",
     "a: |\n  b  c\n": "Kubectl does not read U+0085 here; a double-quoted escape does.",
-    "a: |\n  b   c\n": "Kubectl does not read U+2028 here; a double-quoted escape does.",
+    "a: |\n  x   y \n": "Kubectl reads a raw U+2028 or U+2029 as a line break here; a double-quoted escape reads as the character.",
+    "a: |\n    c\n": "Kubectl reads a raw U+2028 or U+2029 as a line break here; a double-quoted escape reads as the character.",
     "a: |\r  b\r  c\r": "Kubectl does not read U+000D here; a double-quoted escape does.",
+    "a: |2\n   x   y\n  z\n": "Kubectl reads a raw U+2028 or U+2029 as a line break here; a double-quoted escape reads as the character.",
     "a: ﻿b\n": "Kubectl does not read U+FEFF here; a double-quoted escape does.",
     "b1: &b1 {x: 1, z: 2}\nv:\n  x: 9\n  <<: *b1\n  z: 8\n": "The key x is set before the merge that also sets it, and kubectl takes the merge's.",
     "b1: &b1 {x: 1}\nb2: &b2 {x: 2}\nv:\n  <<: *b1\n  <<: *b2\n": "A mapping takes one merge key: kubectl takes the last of several.",
@@ -90,6 +97,10 @@
     "b1: &b1 {x: 1}\nb2: &b2 {y: 2}\nv:\n  <<: *b1\n  <<: *b2\n": "A mapping takes one merge key: kubectl takes the last of several.",
     "b1: &b1 {x: 1}\nv:\n  x: 9\n  !  <<: *b1\n": "The key x is set before the merge that also sets it, and kubectl takes the merge's.",
     "b1: &b1 {x: 1}\nv:\n  x: 9\n  <<: *b1\n": "The key x is set before the merge that also sets it, and kubectl takes the merge's.",
+    "k: [!!str, a]\n": "Kubectl refuses a tag that has no space after it.",
+    "k: {!!str <<:, a: 1}\n": "Kubectl reads this key and its colon as one text; quote the key or give it a value.",
+    "k: {!!str <<:}\n": "Kubectl reads this key and its colon as one text; quote the key or give it a value.",
+    "k: {a: !!str,b: 1}\n": "Kubectl refuses a tag that has no space after it.",
     "on: 1\ntrue: 2\n": "Map keys must be unique: true is set twice.",
     "status: 1\nstatus: 2\n": "Map keys must be unique: status is set twice.",
     "v:\n  x: 9\n  <<: {x: 1}\n": "The key x is set before the merge that also sets it, and kubectl takes the merge's.",
@@ -107,6 +118,7 @@
     "v: !!int 9007199254740993\n": "Twigo does not read the tag !!int",
     "v: !!int []\n": "Twigo does not read the tag !!int",
     "v: !!map []\n": "Twigo does not read the tag !!map",
+    "v: !!merge 5\n": "Twigo does not read the tag !!merge",
     "v: !!omap [a: 1, b: 2]\n": "Twigo does not read the tag !!omap",
     "v: !!pairs [a: 1, a: 2]\n": "Twigo does not read the tag !!pairs",
     "v: !!seq {}\n": "Twigo does not read the tag !!seq",
@@ -145,6 +157,7 @@
     "v: >\n  a\n---\nb\n": "The manifest has 2 documents, and Twigo previews one object at a time.",
     "v: a﻿b\n": "Kubectl does not read U+FEFF here; a double-quoted escape does.",
     "v: |\n  a\n  ": "Kubectl reads the lines of spaces in this block scalar otherwise; remove them or end the text with a line break.",
+    "v: |\n  \n  a\n": "Kubectl reads a raw U+2028 or U+2029 as a line break here; a double-quoted escape reads as the character.",
     "v: |#c\n  a\n": "Comments must be separated from other tokens by white space characters",
     "v: |+\n\n  ": "Kubectl reads the lines of spaces in this block scalar otherwise; remove them or end the text with a line break.",
     "v: |1\n  ": "Kubectl reads the lines of spaces in this block scalar otherwise; remove them or end the text with a line break.",
@@ -153,9 +166,14 @@
     "v: |2-\n    a\n   \n": "Kubectl reads the lines of spaces in this block scalar otherwise; remove them or end the text with a line break.",
     "y: 1\nyes: 2\n": "Map keys must be unique: true is set twice.",
     "yes: 1\ntrue: 2\n": "Map keys must be unique: true is set twice.",
+    "{!!str <<:}\n": "Kubectl reads this key and its colon as one text; quote the key or give it a value.",
     "{?a  b}\n": "Kubectl reads this text differently inside [ ] or { }; quote it.",
     "{a:, b}\n": "Kubectl reads this key and its colon as one text; quote the key or give it a value.",
     "{}\n---\na: 1\n": "The manifest has 2 documents, and Twigo previews one object at a time.",
+    "﻿     apiVersion: v1\nmetadata: {name: x}\n": "Kubectl reads what follows this byte-order mark otherwise; remove the mark or start the line in column 1.",
+    "﻿    v:\n  <<: {a: 1}\n": "Kubectl reads what follows this byte-order mark otherwise; remove the mark or start the line in column 1.",
+    "﻿  name: t\ndata:\n  a: |\n": "Kubectl reads what follows this byte-order mark otherwise; remove the mark or start the line in column 1.",
+    "﻿  name: x\n": "Kubectl reads what follows this byte-order mark otherwise; remove the mark or start the line in column 1.",
     "﻿﻿a: 1\n": "Kubectl does not read U+FEFF here; a double-quoted escape does."
   }
 }

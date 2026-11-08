@@ -26,19 +26,26 @@ export type KubeObject = Record<string, unknown>;
 /** Characters Go refuses, reads as line breaks, or takes as a byte-order mark in the wrong place; `\r` alone is one too. */
 const CHARACTER =
   "[^\\t\\n\\r\\x20-\\x7e\\xa0-\\u2027\\u202a-\\ud7ff\\ue000-\\ufefe\\uff00-\\ufffd\\u{10000}-\\u{10ffff}]";
-const UNREADABLE = new RegExp(`(?!^\\ufeff)${CHARACTER}|\\r(?!\\n)`, "u");
+const UNREADABLE = new RegExp(
+  `(?!^\\ufeff|[\\u2028\\u2029])${CHARACTER}|\\r(?!\\n)`,
+  "u",
+);
 const UNWRITABLE = new RegExp(`${CHARACTER}|\\r`, "u");
 
-/** A line the block form cannot carry: Go refuses a tab that starts a line of one, and a line of spaces does not read back. */
-const UNBLOCKABLE = /^ *\t|^ +$/m;
-
-/** Whether a string goes in double quotes: what would read as a number, a merge or a line of its own is safe nowhere else. */
+/**
+ * Whether a string goes in double quotes: what would read as a number, a
+ * merge or a line of its own is safe nowhere else. A block cannot carry a
+ * line of spaces, which does not read back, a first line that starts with a
+ * tab, where Go has yet to learn the indentation, or nothing but blanks,
+ * which the package writes with no indentation indicator.
+ */
 function needsQuotes(text: string): boolean {
   return (
     UNWRITABLE.test(text) ||
     goNumber(text) !== undefined ||
     text === "<<" ||
-    (text.includes("\n") && (text.startsWith("\n") || UNBLOCKABLE.test(text)))
+    (text.includes("\n") &&
+      (/^[\n\t]/.test(text) || /^ +$/m.test(text) || /^[ \t\n]*$/.test(text)))
   );
 }
 
@@ -183,9 +190,72 @@ const ANCHOR = /^[0-9A-Za-z_-]+$/;
 function isMergeKey(key: unknown): key is Scalar {
   return (
     isScalar(key) &&
+    key.tag !== STR_TAG &&
     ((typeof key.value === "symbol" && key.value.description === "<<") ||
       (key.type === Scalar.PLAIN && key.value === "<<"))
   );
+}
+
+/** The share of what is decoded that may come through aliases, as go.yaml.in/yaml/v2's `allowedAliasRatio` has it. */
+function allowedAliasRatio(decoded: number): number {
+  const low = 400_000;
+  const high = 4_000_000;
+  if (decoded <= low) return 0.99;
+  if (decoded >= high) return 0.1;
+  return 0.99 - (0.89 * (decoded - low)) / (high - low);
+}
+
+/**
+ * Go's `excessive aliasing` check, decoding as its `unmarshal` does: the
+ * alias, through `*x` and `<<` alike, past which it refuses a text; nothing
+ * when it reads the whole of it. The walk ends as soon as Go would, so a
+ * bomb costs what a thousand nodes do.
+ */
+function excessiveAlias(
+  root: unknown,
+  targets: ReadonlyMap<unknown, unknown>,
+): unknown {
+  let decoded = 1;
+  let aliased = 0;
+  let outermost: unknown;
+  const decode = (node: unknown, expanding: boolean): unknown => {
+    decoded += 1;
+    if (expanding) aliased += 1;
+    if (
+      aliased > 100 &&
+      decoded > 1000 &&
+      aliased / decoded > allowedAliasRatio(decoded)
+    ) {
+      return outermost ?? node;
+    }
+    if (isAlias(node)) {
+      if (!expanding) outermost = node;
+      return decode(targets.get(node), true);
+    }
+    if (isSeq(node)) {
+      for (const item of node.items) {
+        const excessive = decode(item, expanding);
+        if (excessive) return excessive;
+      }
+      return undefined;
+    }
+    if (!isMap(node)) return undefined;
+    for (const { key, value } of node.items) {
+      if (isMergeKey(key)) {
+        // Go steps backwards through a list of sources, for the precedence of the earlier ones.
+        const sources = isSeq(value) ? [...value.items].reverse() : [value];
+        for (const source of sources) {
+          const excessive = decode(source, expanding);
+          if (excessive) return excessive;
+        }
+        continue;
+      }
+      const excessive = decode(key, expanding) ?? decode(value, expanding);
+      if (excessive) return excessive;
+    }
+    return undefined;
+  };
+  return decode(root, false);
 }
 
 /**
@@ -199,14 +269,16 @@ function unreadable(
 ): Problem | undefined {
   const start = (node: unknown) => (isNode(node) ? node.range?.[0] : undefined);
   visit(document, {
-    Scalar: (_, scalar) => {
-      if (scalar.type !== Scalar.PLAIN || scalar.tag !== undefined) {
-        // `!!str <<` is the key `<<` to Go, and the package would merge it.
-        if (scalar.tag === STR_TAG && scalar.source === "<<") {
-          scalar.type = Scalar.QUOTE_SINGLE;
-        }
+    Scalar: (key, scalar) => {
+      // Only a key `<<` merges in Go; `!!merge` anywhere else is the text it stands on.
+      if (
+        typeof scalar.value === "symbol" &&
+        (key !== "key" || scalar.source !== "<<")
+      ) {
+        scalar.value = scalar.source ?? "";
         return;
       }
+      if (scalar.type !== Scalar.PLAIN || scalar.tag !== undefined) return;
       const number = goNumber(scalar.source ?? "");
       if (number !== undefined) scalar.value = number;
     },
@@ -217,17 +289,23 @@ function unreadable(
     found = { message, offset: start(node) ?? 0 };
     return visit.BREAK;
   };
-  const anchor = (node: { anchor?: string; range?: Range | null }) =>
-    node.anchor === undefined || ANCHOR.test(node.anchor)
+  const anchors = new Map<string, unknown>();
+  const targets = new Map<unknown, unknown>();
+  const anchor = (node: { anchor?: string; range?: Range | null }) => {
+    if (node.anchor === undefined) return undefined;
+    anchors.set(node.anchor, node);
+    return ANCHOR.test(node.anchor)
       ? undefined
       : refuse(node, `Kubectl refuses the anchor &${node.anchor}.`);
+  };
   visit(document, {
     Alias: (_, alias, path) => {
-      const target = alias.resolve(document);
+      const target = anchors.get(alias.source);
       if (target === undefined) {
         return refuse(alias, `The alias *${alias.source} has no anchor.`);
       }
-      return path.includes(target)
+      targets.set(alias, target);
+      return (path as readonly unknown[]).includes(target)
         ? refuse(alias, `The anchor ${alias.source} contains itself.`)
         : undefined;
     },
@@ -235,13 +313,15 @@ function unreadable(
     Scalar: (_, scalar) => anchor(scalar),
   });
   if (problem()) return problem();
+  const excessive = excessiveAlias(document.contents, targets);
+  if (excessive) {
+    return {
+      message: "Kubectl refuses a manifest whose aliases expand this far.",
+      offset: start(excessive) ?? 0,
+    };
+  }
   const resolved = (node: unknown) =>
-    isAlias(node) ? node.resolve(document) : node;
-  const tabbedIndicator = (offset: number | undefined): boolean => {
-    if (offset === undefined) return false;
-    const prefix = text.slice(text.lastIndexOf("\n", offset) + 1, offset);
-    return prefix.includes("\t") && /^[ ]*(?:[-?:][ \t]*)+$/.test(prefix);
-  };
+    isAlias(node) ? targets.get(node) : node;
   const flowing = (path: readonly unknown[]) =>
     path.some((node) => isCollection(node) && node.flow === true);
   const keyOf = (key: unknown): { name: string; type: string } => {
@@ -271,12 +351,6 @@ function unreadable(
     });
     let merging = false;
     for (const { key, value } of map.items) {
-      if (tabbedIndicator(start(key)) || tabbedIndicator(start(value))) {
-        return {
-          node: key ?? value,
-          message: "Kubectl refuses a tab after this indicator.",
-        };
-      }
       const scalar = resolved(key);
       if (isCollection(scalar)) {
         return { node: key, message: "A key must be a single value." };
@@ -306,6 +380,18 @@ function unreadable(
         return {
           node: key,
           message: `The key ${scalar.source ?? String(scalar.value)} is a float, which kubectl names differently; quote it.`,
+        };
+      }
+      if (
+        isScalar(scalar) &&
+        scalar.tag === "!" &&
+        scalar.source === "<<" &&
+        scalar.type !== Scalar.PLAIN
+      ) {
+        return {
+          node: key,
+          message:
+            "Kubectl reads this quoted << with a ! as a merge; remove the !.",
         };
       }
       if (isMergeKey(scalar)) {
@@ -350,13 +436,8 @@ function unreadable(
     }
     return undefined;
   };
+  const carried: { readonly from: number; readonly to: number }[] = [];
   visit(document, {
-    Seq: (_, seq) => {
-      const tabbed = seq.items.find((item) => tabbedIndicator(start(item)));
-      return tabbed
-        ? refuse(tabbed, "Kubectl refuses a tab after this indicator.")
-        : undefined;
-    },
     Map: (_, map) => {
       const problem = mapProblem(map);
       return problem ? refuse(problem.node, problem.message) : undefined;
@@ -371,6 +452,12 @@ function unreadable(
           scalar,
           "Kubectl reads an escape in this string otherwise, or refuses it.",
         );
+      }
+      if (
+        scalar.type === Scalar.QUOTE_SINGLE &&
+        !/^'(?:[^']|'')*'$/.test(raw)
+      ) {
+        return refuse(scalar, "This string has no closing quote.");
       }
       if (
         scalar.type === Scalar.BLOCK_LITERAL ||
@@ -389,6 +476,17 @@ function unreadable(
         if (atEnd && typeof scalar.value === "string") {
           scalar.value = scalar.value.replace(/\n$/, "");
         }
+      }
+      if (SEPARATOR.test(raw)) {
+        const value = acrossSeparators(scalar, raw);
+        if (value === undefined) {
+          return refuse(scalar, SEPARATOR_MESSAGE);
+        }
+        scalar.value = value;
+        carried.push({
+          from: scalar.range?.[0] ?? 0,
+          to: scalar.range?.[1] ?? 0,
+        });
       }
       if (scalar.type === Scalar.PLAIN && flowing(path) && unreadInFlow(raw)) {
         return refuse(
@@ -415,15 +513,81 @@ function unreadable(
     },
   });
   if (problem()) return problem();
-  // Last, since the checks above tell an integer key from a float one by this.
+  const loose = looseSeparator(text, carried);
+  if (loose !== undefined) {
+    return { message: SEPARATOR_MESSAGE, offset: loose };
+  }
+  // Last, since the checks above tell a merge from a key `<<` and an integer key from a float one by these.
   visit(document, {
     Scalar: (_, scalar) => {
+      if (scalar.tag === STR_TAG && scalar.source === "<<") {
+        scalar.type = Scalar.QUOTE_SINGLE;
+      }
       if (typeof scalar.value === "bigint") {
         scalar.value = Number(scalar.value);
       }
     },
   });
   return undefined;
+}
+
+const SEPARATOR = /[\u2028\u2029]/;
+const SEPARATOR_MESSAGE =
+  "Kubectl reads a raw U+2028 or U+2029 as a line break here; a double-quoted escape reads as the character.";
+
+/** The offset of a U+2028 or U+2029 outside the scalars `carried` that Go and the package read alike. */
+function looseSeparator(
+  text: string,
+  carried: readonly { readonly from: number; readonly to: number }[],
+): number | undefined {
+  let index = 0;
+  for (const { index: at } of text.matchAll(/[\u2028\u2029]/g)) {
+    while ((carried[index]?.to ?? Infinity) <= at) index += 1;
+    const range = carried[index];
+    if (range === undefined || at < range.from) return at;
+  }
+  return undefined;
+}
+
+/**
+ * A raw U+2028 or U+2029 is a line break to Go and text to the package. In
+ * the two forms `kubectl -o yaml` writes them, a single-quoted scalar and a
+ * literal block, this is the value Go reads: the blanks around one go from a
+ * quoted scalar, and a block loses its indentation after one. It is undefined
+ * for what would read otherwise in the package.
+ */
+function acrossSeparators(scalar: Scalar, raw: string): string | undefined {
+  if (typeof scalar.value !== "string") return undefined;
+  if (scalar.type === Scalar.QUOTE_SINGLE) {
+    return /[\r\n][ \t]*[\u2028\u2029]|[\u2028\u2029][ \t]*[\r\n]|[\u2028\u2029](?:---|\.\.\.)[ \t\r\n]/.test(
+      raw,
+    )
+      ? undefined
+      : scalar.value.replace(/[ \t]*([\u2028\u2029])[ \t]*/g, "$1");
+  }
+  if (
+    scalar.type !== Scalar.BLOCK_LITERAL ||
+    !/^\|[-+]?[ \t]*(?:#.*)?\r?\n/.test(raw) ||
+    /[\u2028\u2029][ \t]*\r?\n[ \t\r\n]*$/.test(scalar.value) ||
+    (raw.startsWith("|-") && /[\u2028\u2029]$/.test(scalar.value))
+  ) {
+    return undefined;
+  }
+  const body = raw.slice(raw.indexOf("\n") + 1);
+  // Go takes it for a blank line, and learns the indentation from what follows.
+  if (/^(?: *\r?\n)* *[\u2028\u2029]/.test(body)) return undefined;
+  const size = /^ *(?=[^ \r\n])/m.exec(body)?.[0].length ?? 0;
+  const indentation = " ".repeat(size);
+  for (const { index } of scalar.value.matchAll(/[\u2028\u2029]/g)) {
+    const next = scalar.value.slice(index + 1, index + 1 + size);
+    if (next !== "" && next !== indentation && !/^\r?\n/.test(next)) {
+      return undefined;
+    }
+  }
+  return scalar.value.replace(
+    new RegExp(`([\\u2028\\u2029]) {${String(size)}}`, "g"),
+    "$1",
+  );
 }
 
 /** Whether a block scalar, as written, is one where lines of spaces read otherwise in Go: with an indentation indicator, or ending the text without a line break. */
@@ -464,30 +628,136 @@ function goRefusesEscape(raw: string): boolean {
   return false;
 }
 
+interface BlockBody {
+  readonly from: number;
+  readonly to: number;
+  readonly body: string;
+  /** The column of its lines when an indicator says it; Go learns it from the first line otherwise. */
+  readonly indent: number | undefined;
+}
+
+/** The body of a block scalar, and the indentation an indicator gives it. */
+function blockBody(
+  token: CST.BlockScalar,
+  parent: { readonly indent: number },
+): BlockBody {
+  const props = token.props.map((prop) =>
+    "source" in prop ? prop.source : "",
+  );
+  const increment = /\d/.exec(props[0] ?? "")?.[0];
+  const from = token.offset + props.join("").length;
+  return {
+    from,
+    to: from + token.source.length,
+    body: token.source,
+    indent:
+      increment === undefined ? undefined : parent.indent + Number(increment),
+  };
+}
+
+/** Whether a tab at the start of a line of a block scalar lies where Go has yet to learn the indentation, or below it. */
+function tabInIndentation(
+  { body, indent }: BlockBody,
+  column: number,
+  at: number,
+): boolean {
+  if (indent !== undefined) return column < indent;
+  const first = /^ *[^ \r\n]/m.exec(body);
+  if (!first || at < first.index + first[0].length) return true;
+  return column < first[0].length - 1;
+}
+
+const TAB_AFTER = new Set(["seq-item-ind", "explicit-key-ind"]);
+const TAB_AFTER_COLON = new Set(["map-value-ind"]);
+
 /**
- * A block mapping's key that only the package reads: an implicit key whose
- * colon is not on its line, and a `?` whose `:` is not in its column, which
- * Go's scanner refuses.
+ * What Go's scanner refuses and the package reads: a tab in a block scalar's
+ * indentation or after an indicator, a tag run into what follows it, a flow
+ * key's tag or anchor on a line above it, and a block mapping's key whose `:`
+ * is not on its line or in its `?` key's column.
  */
-function looseKey(
+function scannerProblem(
   tokens: readonly CST.Token[],
   lines: LineCounter,
+  text: string,
 ): Problem | undefined {
+  const bodies: BlockBody[] = [];
+  const tabAfter = (
+    list: readonly CST.SourceToken[] | undefined,
+    types: ReadonlySet<string>,
+  ): CST.SourceToken | undefined =>
+    list?.find(
+      ({ type }, index) =>
+        types.has(type) &&
+        list[index + 1]?.type === "space" &&
+        list[index + 1]?.source.includes("\t"),
+    );
+  const glued = (list: readonly CST.SourceToken[] | undefined) =>
+    list?.find(
+      ({ type, offset, source }) =>
+        type === "tag" &&
+        !/^(?:[ \t\r\n]|$)/.test(text.charAt(offset + source.length)),
+    );
+  const NO_SPACE = "Kubectl refuses a tag that has no space after it.";
   let found: Problem | undefined;
   for (const token of tokens) {
     if (token.type !== "document") continue;
+    const rootTag = glued(token.start);
+    if (rootTag) return { message: NO_SPACE, offset: rootTag.offset };
     CST.visit(token, (item, path) => {
       if (path.length === 0) return undefined;
-      const collection = CST.visit.parentCollection(token, path).type;
-      const block = collection === "block-map";
-      if (!block && collection !== "flow-collection") return undefined;
+      const parent = CST.visit.parentCollection(token, path);
+      const collection = parent.type;
+      const tag = glued(item.start) ?? glued(item.sep);
+      if (tag) {
+        found = { message: NO_SPACE, offset: tag.offset };
+        return CST.visit.BREAK;
+      }
+      const blockMap = collection === "block-map";
+      const block = blockMap || collection === "block-seq";
       const explicit = item.start.find(
         ({ type }) => type === "explicit-key-ind",
       );
+      if (block) {
+        for (const field of [item.key, item.value]) {
+          if (field?.type === "block-scalar") {
+            bodies.push(blockBody(field, parent));
+          }
+        }
+        const tabbed =
+          tabAfter(item.start, TAB_AFTER) ??
+          (item.key && !explicit
+            ? undefined
+            : tabAfter(item.sep, TAB_AFTER_COLON));
+        if (tabbed) {
+          found = {
+            message: "Kubectl refuses a tab after this indicator.",
+            offset: tabbed.offset,
+          };
+          return CST.visit.BREAK;
+        }
+      }
+      if (!blockMap && collection !== "flow-collection") return undefined;
       const colon = item.sep?.find(({ type }) => type === "map-value-ind");
+      if (
+        !blockMap &&
+        colon &&
+        item.start.some(
+          ({ type }, index) =>
+            (type === "tag" || type === "anchor") &&
+            item.start.slice(index).some(({ type }) => type === "newline"),
+        )
+      ) {
+        found = {
+          message:
+            "Kubectl refuses a key whose tag or anchor is on a line above it.",
+          offset: item.start[0]?.offset ?? 0,
+        };
+        return CST.visit.BREAK;
+      }
       if (explicit) {
         if (
-          block &&
+          blockMap &&
           (colon === undefined ||
             lines.linePos(colon.offset).col !==
               lines.linePos(explicit.offset).col)
@@ -501,7 +771,11 @@ function looseKey(
         }
         return undefined;
       }
-      if (item.key && "source" in item.key && item.key.source.includes("\n")) {
+      if (
+        item.key &&
+        "source" in item.key &&
+        /[\n\u2028\u2029]/.test(item.key.source)
+      ) {
         found = {
           message: "Kubectl refuses a key that spans lines.",
           offset: item.key.offset,
@@ -527,7 +801,27 @@ function looseKey(
     });
     if (found) return found;
   }
-  return found;
+  let body = 0;
+  for (const match of text.matchAll(/^ *\t/gm)) {
+    const tab = match.index + match[0].length - 1;
+    while ((bodies[body]?.to ?? Infinity) <= tab) body += 1;
+    const block = bodies[body];
+    if (block === undefined || tab < block.from) {
+      return {
+        message:
+          "Twigo does not read a tab at the start of a line outside a block scalar; indent with spaces.",
+        offset: tab,
+      };
+    }
+    if (tabInIndentation(block, match[0].length - 1, tab - block.from)) {
+      return {
+        message:
+          "Kubectl refuses a tab in the indentation of a block scalar; indent it with spaces.",
+        offset: tab,
+      };
+    }
+  }
+  return undefined;
 }
 
 function describe(message: string): string {
@@ -536,6 +830,10 @@ function describe(message: string): string {
     ? message
     : `Twigo does not read the tag ${tag.replace("tag:yaml.org,2002:", "!!")}`;
 }
+
+/** The stack gives out in the package's recursion, which reports it as an error of a node or throws it. */
+const NESTED_TOO_DEEPLY = /call stack/i;
+const NESTING_MESSAGE = "The manifest nests too deeply to read.";
 
 /**
  * The manifest as the one object it names. It reads YAML as Go does
@@ -547,74 +845,90 @@ function describe(message: string): string {
  */
 export function parseManifest(text: string): Parsed {
   const lines = new LineCounter();
-  const tokens = [...new Parser(lines.addNewLine).parse(text)];
   const failed = (message: string, offset: number): Parsed => {
     const { line, col } = lines.linePos(offset);
     return { ok: false, message, line, column: col };
   };
-  const character = UNREADABLE.exec(text);
-  if (character) {
-    return failed(
-      `Kubectl does not read U+${(character[0].codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0")} here; a double-quoted escape does.`,
-      character.index,
-    );
-  }
-  const tab = /^ *\t/m.exec(text);
-  if (tab) {
-    return failed(
-      "Kubectl refuses a tab at the start of a line.",
-      tab.index + tab[0].length - 1,
-    );
-  }
-  const directive = tokens.find(({ type }) => type === "directive");
-  if (directive) {
-    return failed("Twigo does not read YAML directives.", directive.offset);
-  }
-  const keyed = looseKey(tokens, lines);
-  if (keyed) return failed(keyed.message, keyed.offset);
-  const documents = Array.from(
-    new Composer(READING).compose(tokens, true, text.length),
-  );
-  for (const document of documents) {
-    const [problem] = [...document.errors, ...document.warnings];
-    if (problem) return failed(describe(problem.message), problem.pos[0]);
-  }
-  const isFilled = ({ contents }: Document.Parsed) =>
-    contents !== null && !(isScalar(contents) && contents.value === null);
-  const filled = documents.filter(isFilled);
-  const [first, second] = filled;
-  if (!first) return failed("The manifest is empty.", 0);
-  if (second) {
-    return failed(
-      `The manifest has ${String(filled.length)} documents, and Twigo previews one object at a time.`,
-      second.range[0],
-    );
-  }
-  if (documents[0] !== first) {
-    return failed(
-      "An empty document stands before the object; remove it.",
-      first.range[0],
-    );
-  }
-  const refused = unreadable(first, text);
-  if (refused) return failed(refused.message, refused.offset);
-  let object: unknown;
   try {
-    object = JSON.parse(JSON.stringify(first.toJS()));
+    const tokens = [...new Parser(lines.addNewLine).parse(text)];
+    const character = UNREADABLE.exec(text);
+    if (character) {
+      return failed(
+        `Kubectl does not read U+${(character[0].codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0")} here; a double-quoted escape does.`,
+        character.index,
+      );
+    }
+    // Go skips a byte-order mark and keeps no account of what follows it: a
+    // tab there it refuses, and it reads an indented line beyond its column.
+    if (/^\ufeff(?: *\t| +[^ \t\r\n])/.test(text)) {
+      return failed(
+        "Kubectl reads what follows this byte-order mark otherwise; remove the mark or start the line in column 1.",
+        0,
+      );
+    }
+    const directive = tokens.find(({ type }) => type === "directive");
+    if (directive) {
+      return failed("Twigo does not read YAML directives.", directive.offset);
+    }
+    const scanned = scannerProblem(tokens, lines, text);
+    if (scanned) return failed(scanned.message, scanned.offset);
+    const documents = Array.from(
+      new Composer(READING).compose(tokens, true, text.length),
+    );
+    for (const document of documents) {
+      const [problem] = [...document.errors, ...document.warnings];
+      if (problem) {
+        return NESTED_TOO_DEEPLY.test(problem.message)
+          ? failed(NESTING_MESSAGE, 0)
+          : failed(describe(problem.message), problem.pos[0]);
+      }
+    }
+    const isFilled = ({ contents }: Document.Parsed) =>
+      contents !== null && !(isScalar(contents) && contents.value === null);
+    const filled = documents.filter(isFilled);
+    const [first, second] = filled;
+    if (!first) {
+      const separator = text.search(SEPARATOR);
+      return separator < 0
+        ? failed("The manifest is empty.", 0)
+        : failed(SEPARATOR_MESSAGE, separator);
+    }
+    if (second) {
+      return failed(
+        `The manifest has ${String(filled.length)} documents, and Twigo previews one object at a time.`,
+        second.range[0],
+      );
+    }
+    if (documents[0] !== first) {
+      return failed(
+        "An empty document stands before the object; remove it.",
+        first.range[0],
+      );
+    }
+    const refused = unreadable(first, text);
+    if (refused) return failed(refused.message, refused.offset);
+    // `excessiveAlias` above is the budget, and Go's: the package's own limit refuses what Go reads.
+    const object: unknown = JSON.parse(
+      JSON.stringify(first.toJS({ maxAliasCount: -1 })),
+    );
+    if (
+      typeof object !== "object" ||
+      object === null ||
+      Array.isArray(object)
+    ) {
+      return failed(
+        "The manifest must be the fields of one object.",
+        first.range[0],
+      );
+    }
+    return { ok: true, object: object as KubeObject };
   } catch (error) {
-    // Aliases that expand past the package's limit, which no walk of the tree sees.
+    const message = error instanceof Error ? error.message : String(error);
     return failed(
-      error instanceof Error ? error.message : String(error),
-      first.range[0],
+      NESTED_TOO_DEEPLY.test(message) ? NESTING_MESSAGE : message,
+      0,
     );
   }
-  if (typeof object !== "object" || object === null || Array.isArray(object)) {
-    return failed(
-      "The manifest must be the fields of one object.",
-      first.range[0],
-    );
-  }
-  return { ok: true, object: object as KubeObject };
 }
 
 /** The lines of the top-level `status`, 1-based and inclusive; none when the text has no such block. */
@@ -622,22 +936,27 @@ export function statusLines(
   text: string,
 ): { readonly from: number; readonly to: number } | undefined {
   const lines = new LineCounter();
-  const [document] = parseAllDocuments(text, {
-    ...READING,
-    lineCounter: lines,
-  });
-  const root = document?.contents;
-  if (!isMap(root)) return undefined;
-  const pair = root.items.find(
-    ({ key }) => isScalar(key) && key.value === "status",
-  );
-  if (!pair || !isScalar(pair.key)) return undefined;
-  const start = pair.key.range[0];
-  const end = isNode(pair.value) ? pair.value.range[1] : pair.key.range[1];
-  return {
-    from: lines.linePos(start).line,
-    to: lines.linePos(Math.max(start, end - 1)).line,
-  };
+  try {
+    const [document] = parseAllDocuments(text, {
+      ...READING,
+      lineCounter: lines,
+    });
+    const root = document?.contents;
+    if (!isMap(root)) return undefined;
+    const pair = root.items.find(
+      ({ key }) => isScalar(key) && key.value === "status",
+    );
+    if (!pair || !isScalar(pair.key)) return undefined;
+    const start = pair.key.range[0];
+    const end = isNode(pair.value) ? pair.value.range[1] : pair.key.range[1];
+    return {
+      from: lines.linePos(start).line,
+      to: lines.linePos(Math.max(start, end - 1)).line,
+    };
+  } catch {
+    // Text that nests past the stack has no `status` the editor can lock.
+    return undefined;
+  }
 }
 
 export function kindOf(object: unknown):
