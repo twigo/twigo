@@ -105,8 +105,9 @@ pub enum ApplyPreviewed {
     Conflicts {
         conflicts: Vec<ApplyConflict>,
     },
-    /// The server refused for a `resourceVersion` that is gone, and no
-    /// field conflict.
+    /// The object changed on the server since the edit was opened: a `409`
+    /// that is no field conflict, or a list the edit sends whole that the
+    /// server holds otherwise, which Twigo answers without asking it.
     Stale {
         message: String,
     },
