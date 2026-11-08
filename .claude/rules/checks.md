@@ -26,7 +26,8 @@
 - State across ⌘Q and a restart, on macOS with the screen unlocked: `bench/restart.sh <kind kubeconfig>` after the debug build; it runs the app with a temporary `HOME` and presses keys through System Events, which needs the terminal's Accessibility permission.
 - The churn generator alone: `cargo run --release -p twigo-bench -- churn --kubeconfig <path> --rate 100 --seconds 60 --log churn.jsonl`.
 - The hub's live tests sit in the library (`crates/twigo-cache/src/hub/live.rs`) and run with the others under `--ignored`; `crates/twigo-cache/tests/restart_live.rs` restarts the API server of a kind cluster through `docker exec … crictl stop`, so it refuses kwok contexts and waits for the controller manager before it ends.
-- `crates/twigo-core/tests/bus_live.rs` runs the kubectl command of each plan through `sh`, with `KUBECONFIG` set to a copy of the test's kubeconfig, so it needs kubectl on `PATH`.
+- `crates/twigo-core/tests/bus_live/` runs the kubectl command of each plan through `sh`, with `KUBECONFIG` set to a copy of the test's kubeconfig, so it needs kubectl on `PATH`.
+  Its cordons and drains each take kwok nodes of their own (`kwok-node-5` to `-9`) and uncordon them first, since a run that failed leaves them cordoned.
 - The logs' live tests (`crates/twigo-sessions/tests/logs_live.rs`) and `objects_live`'s crash loop need a kubelet, so they refuse contexts other than `kind-*`.
   Their pods run on kind's node from its `docker.io/kindest/local-path-helper` image with `imagePullPolicy: Never`, so nothing is pulled; it has bash and no other command, so their scripts sleep by reading a coprocess that never writes, and a forced restart is `crictl stop` through `docker exec`.
 - The hub's heap at 5,000 pods: `bench/pods.sh <kubeconfig> 5000`, then `TWIGO_TEST_KUBECONFIG=<kubeconfig> cargo run --release -p twigo-cache --example hub_memory`, next to `--example table_memory`.

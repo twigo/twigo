@@ -732,6 +732,8 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   Each open list keeps its own; a count in the status bar picks the same health.
 - A pinned list keeps its namespaces, text and health in its URI and shows at the top of the explorer; a kind whose list is open shows its rows and its worst health there.
 - Single-key verbs work only when a table is focused (context key `listFocus`): `l` logs, `s` shell, `e` edit YAML, `d` describe/overview, `y` copy YAML, `f` port-forward, `⇧J` jump to owner, `⌘⌫` delete (with confirmation), off a bare key since k9s users deleted the wrong object from one ([research](research/workbench-design.md)).
+  Bare letters read; a write is ⇧ and a letter, with its friction (6.4): `⇧S` scale, `⇧R` restart, `⇧C` cordon, `⇧U` uncordon, `⇧D` drain, `⇧T` trigger, `⇧P` suspend, `⇧O` resume.
+  `⌘⌫` deletes the marked rows while there are marks, else the selected one.
   These are ordinary commands with keybindings, so users can remap them.
 - Changed cells flash briefly: the cell's background starts at the `--flash` tint and fades out over 1 s, as the opacity of a layer behind the text, which runs on the compositor and leaves the page asleep ([bench](bench.md#the-visible-window)).
   A batch that changes more than 8 rows flashes nothing, so a rollout does not strobe the table.
@@ -879,6 +881,7 @@ The toasts exist; the centre does not yet.
 Every long operation reports progress from Rust: drain, apply, Helm, provider "Create cluster".
 A command's run tells how it goes over the channel of `command_execute` (5.1).
 The status bar shows a run that waits, as for a deleted namespace to go, until it ends, and a click stops the wait; a toast says how it ended, and an error waits to be read.
+An action with an undo ends in a toast that offers it for as long as it lasts, a bar running down under it, and ⌘Z in the list does the same (6.4).
 
 ### 4.8 Settings and state
 
@@ -1009,6 +1012,7 @@ interface CommandDescriptor {
     Rust checks the proof, runs a plan once, only from the window it was made for and on the cluster it was planned for, refuses it when the mode now asks for more, and decides on the policy again; the gate checks each request as it goes out.
   - `command_cancel` drops a plan, or stops a run where stopping leaves what it sent standing, as the wait for a deleted object to go.
   - Args are resource references (`ResourceRef`), never full objects.
+    What a command still needs is asked in quick access, as VS Code's input box: scale's replicas, prefilled with what the row says.
 - **Menus are data that point at commands**, with `group`, `order` and `when`, as VS Code's MenuRegistry.
   The menu IDs:
   - `commandPalette`
@@ -1028,14 +1032,18 @@ interface CommandDescriptor {
 - **Context keys** are typed values scoped to the focused element.
   A `when` expression evaluates them, using a subset of the VS Code grammar: `==`, `!=`, `&&`, `||`, `!`, `=~`, `in`, `<`, `>`.
   Core keys:
-  - `space.contexts`, `space.multiContext`
+  - `space.id`, `space.contexts`, `space.multiContext`
   - `context.name`, `context.readOnly`, `context.mode`, `context.unlocked`, `context.provider`
   - `listFocus`, `treeFocus` (a tree, which is also a list: left and right close and open), `editorFocus`, `inputFocus`
   - `inQuickOpen`, `quickOpenToSide` (the open provider opens rows to the side)
-  - `resource.group`, `resource.kind`, `resource.namespaced`, `resource.namespace`
+  - `resource.group`, `resource.kind`, `resource.namespaced`, `resource.namespace`, `resource.scalable` (discovery lists its `scale` subresource)
+  - `resource.cordoned`, `resource.suspended`: what the selected row's cells say, so a menu offers Uncordon only on a cordoned node and Resume only on a suspended Job or CronJob
   - `selection.count`
   - `editor.open`, `editor.dirty`, `editor.type`
-  - `capability.<verb>.<resource>` (cached SelfSubjectAccessReview)
+  - `capability.<verb>.<resource>[/<subresource>]`, the resource by kubectl's name (`capability.create.jobs.batch`), and `resource.capability.<verb>[/<subresource>]` for the list's own resource, which a command of every resource, as delete, cannot name.
+    A list asks `access_review` for the keys some command's enablement reads, in the selected row's namespace; Rust answers each with a SelfSubjectAccessReview kept with the context's clients.
+    A key holds until its answer says no, and one the cluster cannot answer holds, so only what RBAC refuses is disabled and the server still decides.
+  - `operationUndo`: the spaces whose last action an undo puts back now
   - `platform`
 
   Extensions may define keys under their own prefix.
@@ -1487,10 +1495,12 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     The mockup's third, a 2 px line of its colour along the title bar's top, was dropped on 2026-11-07: the chip, the tint and the bar's left end in the context's colour already say it.
     The chip opens what set the mode, in words, with the choices the person has.
   - Friction grows with the blast radius (Primer), and the mode raises it; Rust names it in a command's plan and checks it before the plan runs (5.1):
-    - scale, cordon and suspend run at once with an undo (⌘Z);
+    - scale, cordon and suspend run at once with an undo (⌘Z): for 30 s the space's last action can be put back, refused once anyone else changed the object since.
+      Status moves an object's resourceVersion every second (a scale's went 873 to 888 within 1 s on kind 1.37, 2026-11-08), so the undo holds to its generation instead, or for a node, which has none, to the `spec.unschedulable` it set, and its write carries the resourceVersion it checked;
+    - scaling to zero, a rollout restart, a CronJob's trigger and a drain ask in a dialog that lists the pods that go or are replaced; a drain that meets pods kubectl refuses without `--force` or `--delete-emptydir-data` takes them too and asks for the node's name typed, since they and that data go for good;
     - deleting a pod that its ReplicaSet, StatefulSet or DaemonSet replaces, outside production, sends after a 5 s toast with Cancel, as Headlamp holds it, and ⌘Z cancels it too; in production it asks in a dialog, and a Job's or a workflow's pod, which may not come back, asks in one everywhere;
     - deleting one object asks in a dialog that names the cluster in its question and lists what follows, with the equivalent kubectl command;
-    - a namespace, a node, a CustomResourceDefinition or a bulk delete asks for the object's name typed;
+    - a namespace, a node or a CustomResourceDefinition asks for the object's name typed, and a delete of several objects for the context's, as `guarded` does;
     - in `guarded` every write asks for the context's name typed, whatever it risks, and a Reveal asks in a dialog, as in `read-only`; in `read-write` a Reveal shows at once;
     - the confirming button names its action, `Delete namespace`, never Yes or OK.
   - Delete is ⌘⌫, never a bare key (4.4).
@@ -1518,7 +1528,8 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
 8. Immutable fields return 422; the dry-run catches this before any write.
    Delete-and-recreate is offered only for Pods and Jobs, with confirmation.
 
-Destructive actions (delete, drain, scale to 0) use dry-run where the API supports it, list the exact objects, and need a confirmation that matches the policy mode.
+Destructive actions (delete, drain, scale to 0) list the exact objects and need a confirmation that matches the policy mode.
+Their plans read the objects and what the garbage collector takes with them (every object whose owners all go, among what the core's controllers make) and send nothing before the confirmation: a server dry-run of a DELETE or an eviction is a write to the gate, which reads no body (6.4), and a fault in that body would delete unconfirmed.
 
 ### 6.6 MCP server and agents (D5)
 
