@@ -37,6 +37,8 @@ export interface WorkingCopy {
 export interface EditorBuffer {
   readonly model: editor.ITextModel;
   view: editor.ICodeEditorViewState | null;
+  /** Puts the keyboard focus in the view, while the editor has one. */
+  focus?: () => void;
 }
 
 export interface Opened {
@@ -117,6 +119,7 @@ export class WorkingCopies {
       readonly result: string | undefined;
     }
   >();
+  readonly #focusing = new Set<string>();
   #manifests = 0;
   readonly #seen = new Map<
     string,
@@ -156,11 +159,27 @@ export class WorkingCopies {
     return buffer;
   }
 
+  /**
+   * Gives the editor the keyboard focus, as a bar or a diff that had it goes:
+   * now if the editor has a view, else when it has.
+   */
+  focus(uri: string): void {
+    const focus = this.#buffers.get(uri)?.focus;
+    if (focus) focus();
+    else this.#focusing.add(uri);
+  }
+
+  /** Whether the editor was asked for focus while it had no view, which its new view takes. */
+  takeFocus(uri: string): boolean {
+    return this.#focusing.delete(uri);
+  }
+
   /** The editor closed: its buffer goes, and its copy, if it has one, stays as text. */
   closed(uri: string): void {
     this.#buffers.get(uri)?.model.dispose();
     this.#buffers.delete(uri);
     this.#held.delete(uri);
+    this.#focusing.delete(uri);
   }
 
   edit(uri: string, text: string, opened: Opened): void {

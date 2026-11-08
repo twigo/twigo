@@ -266,6 +266,27 @@ test("an editor's buffer is made once and kept for as long as the editor lives, 
   expect(second.dispose).not.toHaveBeenCalled();
 });
 
+test("a focus asked of an editor without a view waits for its view, and closing the editor forgets it", async () => {
+  const { copies } = await services();
+  const { buffer } = fakeBuffer();
+  copies.buffer(DEPLOYMENT, () => buffer);
+  const focus = vi.fn();
+  buffer.focus = focus;
+  copies.focus(DEPLOYMENT);
+  expect(focus).toHaveBeenCalledTimes(1);
+  expect(copies.takeFocus(DEPLOYMENT)).toBe(false);
+
+  buffer.focus = undefined;
+  copies.focus(DEPLOYMENT);
+  expect(focus).toHaveBeenCalledTimes(1);
+  expect(copies.takeFocus(DEPLOYMENT)).toBe(true);
+  expect(copies.takeFocus(DEPLOYMENT)).toBe(false);
+
+  copies.focus(DEPLOYMENT);
+  copies.closed(DEPLOYMENT);
+  expect(copies.takeFocus(DEPLOYMENT)).toBe(false);
+});
+
 const applied = (replicas: number, version: string) =>
   JSON.stringify({
     ...JSON.parse(base),

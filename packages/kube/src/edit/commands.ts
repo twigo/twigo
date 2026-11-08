@@ -146,6 +146,7 @@ export function registerEdits(
   const back = (uri: string) => {
     if (!inView(uri)) return;
     editors.open(uri);
+    copies.focus(uri);
   };
 
   /**

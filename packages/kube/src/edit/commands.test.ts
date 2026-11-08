@@ -426,3 +426,23 @@ test("a diff tab acts on the edit it shows, ⌘S stays off it, and the palette's
     "editor.type!=kube.diff",
   );
 });
+
+test("a bar's action and a diff's end give the focus back to the editor", async () => {
+  const { edits, uri, run } = await setupEdit("applyStale");
+  const focus = vi.spyOn(edits.copies, "focus");
+  await run("k8s.edit.apply");
+  expect(focus).toHaveBeenCalledWith(uri);
+  focus.mockClear();
+  await run("k8s.edit.dismiss");
+  expect(focus).toHaveBeenCalledWith(uri);
+  focus.mockClear();
+  await run("k8s.edit.discard");
+  expect(focus).toHaveBeenCalledWith(uri);
+
+  const ready = await setupEdit("live");
+  const afterDiff = vi.spyOn(ready.edits.copies, "focus");
+  await ready.run("k8s.edit.apply");
+  expect(afterDiff).not.toHaveBeenCalled();
+  await ready.run("k8s.edit.confirm");
+  expect(afterDiff).toHaveBeenCalledWith(ready.uri);
+});

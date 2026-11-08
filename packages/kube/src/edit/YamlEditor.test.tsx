@@ -14,6 +14,7 @@ interface FakeView {
   readonly model: FakeModel;
   cursor: number;
   disposed: boolean;
+  focused: boolean;
 }
 
 const fake = vi.hoisted(() => ({
@@ -57,6 +58,10 @@ vi.mock("./monaco", () => {
           model,
           cursor: 0,
           disposed: false,
+          focused: false,
+          focus() {
+            this.focused = true;
+          },
           saveViewState() {
             return { cursor: this.cursor };
           },
@@ -122,4 +127,18 @@ test("a text that comes from outside replaces the model's and leaves the cursor 
   view.rerender(<YamlEditor uri={URI} text="a: 2" buffers={copies} />);
   expect(fake.models[0]?.value).toBe("a: 2");
   expect(shown.cursor).toBe(7);
+});
+
+test("a focus asked of the editor goes to its view now, or to the one it gets", async () => {
+  const copies = await buffers();
+  copies.focus(URI);
+  const first = render(<YamlEditor uri={URI} text="a: 1" buffers={copies} />);
+  expect(fake.views[0]?.focused).toBe(true);
+  first.unmount();
+
+  render(<YamlEditor uri={URI} text="a: 1" buffers={copies} />);
+  expect(fake.views[1]?.focused).toBe(false);
+  copies.focus(URI);
+  expect(fake.views[1]?.focused).toBe(true);
+  expect(copies.takeFocus(URI)).toBe(false);
 });
