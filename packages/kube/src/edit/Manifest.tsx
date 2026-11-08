@@ -2,7 +2,7 @@ import { lazy, Suspense, useMemo } from "react";
 import { stringify } from "yaml";
 import { Skeleton } from "@twigo/ui";
 
-const YamlView = lazy(() => import("./YamlView"));
+const YamlEditor = lazy(() => import("./YamlEditor"));
 
 /**
  * The object as YAML, from the JSON Rust sends without managedFields or a
@@ -18,7 +18,7 @@ export function Manifest({ json }: { json: string }) {
   const text = useMemo(() => yamlOf(json), [json]);
   return (
     <Suspense fallback={<Skeleton className="m-3 h-4 w-1/2" />}>
-      <YamlView text={text} />
+      <YamlEditor text={text} />
     </Suspense>
   );
 }

@@ -7,7 +7,7 @@ import type {
 } from "@twigo/protocol";
 import { cn, EmptyState, LinkButton, Skeleton } from "@twigo/ui";
 import { ViewStatus } from "../ViewStatus";
-import { Manifest } from "./Manifest";
+import { Manifest } from "../edit/Manifest";
 import { Events, Overview, type OverviewProps } from "./Overview";
 import { OBJECT_TABS, type ObjectTab } from "./tabs";
 
