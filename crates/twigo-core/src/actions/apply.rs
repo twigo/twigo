@@ -6,7 +6,8 @@
 //! The configuration holds a Secret's real values, since Twigo may own keys
 //! it applied before, so nothing built from it leaves Rust unmasked: both
 //! sides of the diff go through [`for_view`], warnings and error text are
-//! scrubbed of every value it knows, a plan names no value, and a Secret's
+//! scrubbed of every value it knows, what the dry-run's answer adds
+//! included, whole tokens only, a plan names no value, and a Secret's
 //! `kubectl` line carries no body, so it stops being runnable at `-f -`,
 //! where the configuration would go on stdin.
 //!
@@ -41,8 +42,8 @@ use kube::core::{GroupVersionKind, Request, Status};
 use serde_json::{Value, json};
 use twigo_cache::hub::Resource;
 use twigo_ipc::{
-    ApplyConflict, ApplyPreviewed, ApplyRequest, ApplyStrategy, ErrorKind, IpcError, OpenedEdit,
-    PreviewId, Resource as Served,
+    Affected, ApplyConflict, ApplyPreviewed, ApplyRequest, ApplyStrategy, ErrorKind, IpcError,
+    OpenedEdit, PreviewId, Resource as Served,
 };
 use twigo_kube::apply::{
     self, Combined, EDIT_FIELD_MANAGER, Edit, FIELD_MANAGER, Path, comparable, merge_patch,
@@ -56,6 +57,7 @@ use twigo_policy::Attributes;
 use twigo_policy::friction::Risk;
 use twigo_policy::redact::{for_view, is_mask};
 
+use super::dependents::{Deleted, dependents};
 use super::{
     ATTEMPTS, Target, attributes, clients_for, get, kind_words, kubectl, lost, sentence, write,
 };
@@ -199,11 +201,32 @@ fn invalid_body(message: &str) -> bool {
         || message.starts_with("failed to convert new object")
 }
 
-/// Takes every value in `secrets` out of `text`.
+/// Takes every value in `secrets` out of `text`, where it stands as a whole
+/// token, so that a short value does not garble the words around it.
 fn scrub(text: &str, secrets: &[String]) -> String {
-    secrets
-        .iter()
-        .fold(text.to_owned(), |text, value| text.replace(value, HIDDEN))
+    secrets.iter().fold(text.to_owned(), |text, value| {
+        whole_tokens_replaced(&text, value)
+    })
+}
+
+fn whole_tokens_replaced(text: &str, value: &str) -> String {
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    let bounded_start = value.chars().next().is_some_and(word);
+    let bounded_end = value.chars().next_back().is_some_and(word);
+    let mut replaced = String::with_capacity(text.len());
+    let mut from = 0;
+    for (index, _) in text.match_indices(value) {
+        let end = index + value.len();
+        let joins_word = (bounded_start && text[..index].chars().next_back().is_some_and(word))
+            || (bounded_end && text[end..].chars().next().is_some_and(word));
+        if !joins_word {
+            replaced.push_str(&text[from..index]);
+            replaced.push_str(HIDDEN);
+            from = end;
+        }
+    }
+    replaced.push_str(&text[from..]);
+    replaced
 }
 
 fn scrubbed(error: IpcError, secrets: &[String]) -> IpcError {
@@ -239,8 +262,16 @@ fn secret_values(objects: &[&Value]) -> Vec<String> {
     values
 }
 
-fn is_secret(object: &Value) -> bool {
-    object["apiVersion"] == "v1" && object["kind"] == "Secret"
+/// Adds what a dry-run's answer holds, known only after it: a warning may
+/// echo a value the edit never named, as `stringData`'s in `data`.
+fn add_answered(secrets: &mut Vec<String>, answer: &Value) {
+    if secrets.is_empty() {
+        return;
+    }
+    secrets.extend(secret_values(&[answer]));
+    secrets.sort();
+    secrets.dedup();
+    secrets.sort_by_key(|value| std::cmp::Reverse(value.len()));
 }
 
 /// Refuses a value of a Secret that still reads as a mask but is not the
@@ -492,8 +523,8 @@ fn side(object: Value) -> Value {
 /// Builds and dry-runs an edit, and keeps what it prepared with `keep`.
 pub(crate) async fn preview(
     core: &Core,
+    window: &str,
     request: ApplyRequest,
-    keep: Keep<'_>,
 ) -> Result<ApplyPreviewed, IpcError> {
     let ApplyRequest {
         space,
@@ -502,7 +533,16 @@ pub(crate) async fn preview(
         force,
         drop: dropped,
     } = request;
+    let ticket = core.bus.ticket(window);
     let context = core.context(&space)?;
+    let opened_target = opened
+        .as_ref()
+        .map(|opened| Target::of(core, &space, opened.target.clone()))
+        .transpose()?;
+    let mut started = opened_target.as_ref().map(|target| {
+        core.bus
+            .start_preview(window, &target.context, &target.path)
+    });
     let clients = core
         .clients(&context)
         .await
@@ -513,9 +553,8 @@ pub(crate) async fn preview(
         .expect("discovery asked with no cached answer is answered");
     let resources = discovery.resources();
 
-    let (target, status_subresource) = match &opened {
-        Some(opened) => {
-            let target = Target::of(core, &space, opened.target.clone())?;
+    let (target, status_subresource) = match opened_target {
+        Some(target) => {
             let status = resources
                 .iter()
                 .find(|resource| {
@@ -525,8 +564,17 @@ pub(crate) async fn preview(
                 .is_some_and(has_status);
             (target, status)
         }
-        None => manifest_target(context.clone(), &resources, &edited)?,
+        None => {
+            let (target, status) = manifest_target(context.clone(), &resources, &edited)?;
+            started = Some(
+                core.bus
+                    .start_preview(window, &target.context, &target.path),
+            );
+            (target, status)
+        }
     };
+    let started = started.expect("a preview's object is known by now");
+    let keep: Keep<'_> = Box::new(|prepared| core.bus.keep_preview(ticket, started, prepared));
 
     let live = match get(&clients, &target.path).await {
         Ok(live) => Some(live),
@@ -536,7 +584,8 @@ pub(crate) async fn preview(
     if let (Some(_), Some(live)) = (&opened, &live) {
         same_object(&target, live, &edited)?;
     }
-    if is_secret(&edited) {
+    let secret = target.is("", &["secrets"]);
+    if secret {
         refuse_masks(opened.as_ref().map(|opened| &opened.base), &edited)?;
     }
     let lock = opened
@@ -546,23 +595,34 @@ pub(crate) async fn preview(
     let group = target.resource.group.clone();
     let version = target.resource.version.clone();
     let kind = edited["kind"].as_str().unwrap_or_default().to_owned();
-    let (config, removals, ignored, combined) = match (&opened, &live) {
-        (Some(opened), Some(live)) => {
-            let document = Document::load(&clients.api, &core.openapi, &group, &version)
+    let document = if opened.is_some() || !dropped.is_empty() {
+        Some(
+            Document::load(&clients.api, &core.openapi, &group, &version)
                 .await
-                .map_err(|error| IpcError::from(&error))?;
+                .map_err(|error| IpcError::from(&error))?,
+        )
+    } else {
+        None
+    };
+    let root = match &document {
+        Some(document) => {
             let gvk = GroupVersionKind::gvk(&group, &version, &kind);
-            let root = document.shape(&gvk).ok_or_else(|| {
+            Some(document.shape(&gvk).ok_or_else(|| {
                 IpcError::new(
                     ErrorKind::NotFound,
                     format!("the cluster's OpenAPI for {group}/{version} has no kind {kind}"),
                 )
-            })?;
+            })?)
+        }
+        None => None,
+    };
+    let (config, removals, ignored, combined) = match (&opened, &live) {
+        (Some(opened), Some(live)) => {
             let built = apply::build(Edit {
                 live,
                 base: &opened.base,
                 edited: &edited,
-                root,
+                root: root.expect("loaded for an edit of an object"),
                 status_subresource,
                 lock: lock.as_deref().unwrap_or_default(),
                 dropped: &dropped,
@@ -585,12 +645,15 @@ pub(crate) async fn preview(
             (built.config, built.removals, built.ignored, built.combined)
         }
         _ => {
-            let (config, ignored) = apply::manifest(&edited, status_subresource, None, &dropped);
+            let (config, ignored) = apply::manifest(&edited, status_subresource, root, &dropped);
+            if config.is_none() {
+                return Ok(ApplyPreviewed::Unchanged { ignored });
+            }
             (config, Vec::new(), ignored, Combined::None)
         }
     };
 
-    let secrets = if is_secret(&edited) {
+    let mut secrets = if secret {
         let mut objects = vec![&edited];
         objects.extend(&config);
         objects.extend(&live);
@@ -601,6 +664,8 @@ pub(crate) async fn preview(
 
     let comparable_to = live.as_ref().filter(|_| status_subresource).map(comparable);
     let by_patch = |patch: Value, object: Value, told: Vec<String>, keep| {
+        let mut secrets = secrets.clone();
+        add_answered(&mut secrets, &object);
         answer_patch(Asked {
             target: &target,
             connection: clients.connection(),
@@ -608,8 +673,8 @@ pub(crate) async fn preview(
             live: live.as_ref(),
             ignored: ignored.clone(),
             removals: &removals,
-            secret: is_secret(&edited),
-            secrets: secrets.clone(),
+            secret,
+            secrets,
             comparable: comparable_to.clone(),
             lock: lock.clone(),
             patch,
@@ -621,14 +686,17 @@ pub(crate) async fn preview(
     if let Combined::Only(patch) = &combined {
         return match dry_run_patch(&clients, &target, patch, lock.as_deref()).await {
             Ok((object, told)) => by_patch(patch.clone(), object, told, keep),
-            Err(error) => answer_refused(
-                Refused::of(&error, &secrets),
-                keep,
-                &target,
-                &edited,
-                live.as_ref(),
-                clients.connection(),
-            ),
+            Err(error) => {
+                answer_refused(
+                    Refused::of(&error, &secrets),
+                    keep,
+                    &clients,
+                    &target,
+                    &edited,
+                    live.as_ref(),
+                )
+                .await
+            }
         };
     }
 
@@ -639,6 +707,7 @@ pub(crate) async fn preview(
             match send(&clients.api, request).await {
                 Ok((object, told)) => {
                     warnings = told;
+                    add_answered(&mut secrets, &object);
                     Some(object)
                 }
                 Err(error) => {
@@ -653,11 +722,12 @@ pub(crate) async fn preview(
                     return answer_refused(
                         Refused::of(&error, &secrets),
                         keep,
+                        &clients,
                         &target,
                         &edited,
                         live.as_ref(),
-                        clients.connection(),
-                    );
+                    )
+                    .await;
                 }
             }
         }
@@ -679,15 +749,19 @@ pub(crate) async fn preview(
             lock.as_deref(),
         );
         let request = merge_request(&target, &patch, true, FIELD_MANAGER)?;
-        if let Err(error) = send(&clients.api, request).await {
-            return answer_refused(
-                Refused::of(&error, &secrets),
-                keep,
-                &target,
-                &edited,
-                live.as_ref(),
-                clients.connection(),
-            );
+        match send(&clients.api, request).await {
+            Ok((_, told)) => warnings.extend(told),
+            Err(error) => {
+                return answer_refused(
+                    Refused::of(&error, &secrets),
+                    keep,
+                    &clients,
+                    &target,
+                    &edited,
+                    live.as_ref(),
+                )
+                .await;
+            }
         }
     }
 
@@ -706,7 +780,7 @@ pub(crate) async fn preview(
         force,
         patch_for_line.as_ref(),
         &kind_name,
-        is_secret(&edited),
+        secret,
     )?;
     let mut writes = Vec::new();
     if config.is_some() {
@@ -747,14 +821,14 @@ pub(crate) async fn preview(
 }
 
 /// A refused dry-run as the webview hears it, preparing a recreate for a Pod
-/// or a Job with a field that cannot change.
-fn answer_refused(
+/// or a Job with a field that cannot change, when the edit can be created.
+async fn answer_refused(
     refused: Refused,
     keep: Keep<'_>,
+    clients: &Clients,
     target: &Target,
     edited: &Value,
     live: Option<&Value>,
-    connection: Option<u64>,
 ) -> Result<ApplyPreviewed, IpcError> {
     match refused {
         Refused::Conflicts(conflicts) => Ok(ApplyPreviewed::Conflicts { conflicts }),
@@ -762,15 +836,71 @@ fn answer_refused(
         Refused::Other(error) => Err(error),
         Refused::Immutable(message) => {
             let job = target.is("batch", &["jobs"]);
-            let recreatable = job || target.is("", &["pods"]);
-            let recreate = match (recreatable, live) {
-                (true, Some(live)) => {
-                    Some(keep(recreation(target, edited, live, connection, job)?)?)
-                }
-                _ => None,
+            let pod = target.is("", &["pods"]);
+            let Some(live) = live.filter(|_| job || pod) else {
+                return Ok(ApplyPreviewed::Immutable {
+                    message,
+                    recreate: None,
+                });
             };
-            Ok(ApplyPreviewed::Immutable { message, recreate })
+            if let Some(owner) = pod.then(|| controller_owner(live)).flatten() {
+                return Ok(ApplyPreviewed::Immutable {
+                    message: format!(
+                        "{message}. It belongs to {owner}, which would replace it: edit that instead"
+                    ),
+                    recreate: None,
+                });
+            }
+            let prepared = recreation(target, edited, live, clients.connection(), job)?;
+            if let Step::Recreate(step) = &prepared.step
+                && let Err(refused) = can_create(clients, target, &step.body).await
+            {
+                return Ok(ApplyPreviewed::Immutable {
+                    message: format!(
+                        "{message}. Nor can it be created from this edit: {}",
+                        refused.message
+                    ),
+                    recreate: None,
+                });
+            }
+            Ok(ApplyPreviewed::Immutable {
+                message,
+                recreate: Some(keep(prepared)?),
+            })
         }
+    }
+}
+
+/// What owns a Pod as its controller, as a sentence names it.
+fn controller_owner(live: &Value) -> Option<String> {
+    let owners = live["metadata"]["ownerReferences"].as_array()?;
+    let owner = owners.iter().find(|owner| owner["controller"] == true)?;
+    Some(format!(
+        "{} {}",
+        kind_words(owner["kind"].as_str().unwrap_or_default()),
+        owner["name"].as_str().unwrap_or_default()
+    ))
+}
+
+/// Whether a create of `body` would be accepted, by the server's dry-run:
+/// an invalid body answers `422` even with the name taken, and a valid one
+/// `409` AlreadyExists (kind 1.37, 2026-11-08).
+async fn can_create(clients: &Clients, target: &Target, body: &Value) -> Result<(), IpcError> {
+    let path = format!(
+        "{}?dryRun=All&fieldManager={FIELD_MANAGER}&fieldValidation=Strict",
+        collection(target)
+    );
+    match send(
+        &clients.api,
+        write(Method::POST, &path, "application/json", body),
+    )
+    .await
+    {
+        Ok(_) => Ok(()),
+        Err(kube::Error::Api(status)) if status.code == 409 && status.reason == "AlreadyExists" => {
+            Ok(())
+        }
+        Err(error) => Err(errors::request(&error)),
     }
 }
 
@@ -952,7 +1082,7 @@ fn answer_patch(asked: Asked<'_>) -> Result<ApplyPreviewed, IpcError> {
 }
 
 /// The plan of a preview, by its id, which takes it.
-pub(crate) fn apply(
+pub(crate) async fn apply(
     core: &Core,
     window: &str,
     space: String,
@@ -1047,6 +1177,34 @@ pub(crate) fn apply(
             }
         }
         Step::Recreate(step) => {
+            let clients = core
+                .clients(&context)
+                .await
+                .map_err(|error| IpcError::from(&error))?;
+            let following = dependents(
+                &clients,
+                &[Deleted {
+                    group: &target.resource.group,
+                    resource: &target.resource.resource,
+                    namespace: target.namespace.as_deref().unwrap_or_default(),
+                    uid: &step.uid,
+                }],
+            )
+            .await;
+            let mut consequences = vec![if target.is("batch", &["jobs"]) {
+                "It goes with its pods, and a new one with a new uid runs from the start, whatever this one finished.".to_owned()
+            } else {
+                "It goes, and a new one with a new uid takes its place.".to_owned()
+            }];
+            consequences.extend(following.unknown);
+            let affected = if following.objects.is_empty() {
+                Vec::new()
+            } else {
+                vec![Affected {
+                    title: "With it go".to_owned(),
+                    objects: following.objects,
+                }]
+            };
             let run = Recreate {
                 core: this,
                 context: context.clone(),
@@ -1061,10 +1219,8 @@ pub(crate) fn apply(
                 ),
                 confirm: format!("Delete and recreate {what}"),
                 destructive: true,
-                consequences: vec![
-                    "It goes, and a new one with a new uid takes its place.".to_owned(),
-                ],
-                affected: Vec::new(),
+                consequences,
+                affected,
                 kubectl,
                 doing: format!("Recreating {what}"),
                 command: "recreate",
@@ -1260,6 +1416,16 @@ impl Recreate {
         )
         .await?;
         let (target, what, step) = (&self.target, &self.what, &self.step);
+        if let Err(refused) = can_create(&clients, target, &step.body).await {
+            return Err(IpcError::new(
+                refused.kind,
+                format!(
+                    "{} cannot be created from your edit, so Twigo deleted nothing: {}",
+                    sentence(what),
+                    refused.message
+                ),
+            ));
+        }
         let options = DeleteParams {
             propagation_policy: Some(PropagationPolicy::Background),
             preconditions: Some(Preconditions {
@@ -1457,6 +1623,44 @@ mod tests {
         ] {
             assert_eq!(conflict_manager(message), manager, "{message}");
         }
+    }
+
+    #[test]
+    fn scrubbing_takes_a_value_only_as_a_whole_token() {
+        let secrets = vec!["a".to_owned(), "hunter2".to_owned(), "x=".to_owned()];
+        assert_eq!(
+            scrub("a a-bcd spat a_b ahunter2 hunter2 at x= cx=", &secrets),
+            format!("{HIDDEN} {HIDDEN}-bcd spat a_b ahunter2 {HIDDEN} at {HIDDEN} cx=")
+        );
+    }
+
+    #[test]
+    fn what_a_dry_run_s_answer_holds_is_scrubbed_too() {
+        let mut secrets = secret_values(&[&json!({ "stringData": { "a": "first" } })]);
+        let answer = json!({ "data": { "token": "dHlwZWQ=", "a": "Zmlyc3Q=" } });
+        add_answered(&mut secrets, &answer);
+        assert_eq!(
+            scrub("dHlwZWQ= or typed or first or Zmlyc3Q=", &secrets),
+            format!("{HIDDEN} or {HIDDEN} or {HIDDEN} or {HIDDEN}")
+        );
+        let mut other_kinds = Vec::new();
+        add_answered(&mut other_kinds, &answer);
+        assert!(other_kinds.is_empty(), "only a Secret has values to hide");
+    }
+
+    #[test]
+    fn a_pod_s_controller_is_read_from_its_owners() {
+        let owned = |controller: bool| {
+            json!({ "metadata": { "ownerReferences": [
+                { "kind": "ReplicaSet", "name": "web-1", "controller": controller },
+            ] } })
+        };
+        assert_eq!(
+            controller_owner(&owned(true)).as_deref(),
+            Some("replica set web-1")
+        );
+        assert_eq!(controller_owner(&owned(false)), None);
+        assert_eq!(controller_owner(&json!({ "metadata": {} })), None);
     }
 
     #[test]

@@ -34,6 +34,8 @@ Findings that belong to no step yet.
   - A node's Overview asks for `resource.k8s.io/v1` ResourceSlices, which Kubernetes 1.33 does not serve: there the need fails and retries while the Overview is shown, and the section stays out, as kubectl leaves it out.
 - The visible window ([bench](docs/bench.md#the-visible-window)):
   - A row memo in `DataGrid`, since each batch renders every row of the window; JavaScript is about half of WebContent's main thread under churn, which is 2.1 % of a core by Name.
+- Applying an edit (`twigo_core::actions::apply`, ARCHITECTURE 6.5):
+  - A window reloaded during a recreate's wait stops it with the object gone and nothing created, which the audit log records but the page cannot show.
 - Modes (`twigo_policy`, ARCHITECTURE 6.4):
   - The mode a person chooses and the type they mark live in the app's state (`policy/choices`, `crates/twigo-core/src/state.rs`): `@todo` to move them to `settings.json` once the settings files come in M3, with nothing of this left behind.
   - The policy file is read once, as the app starts, so an admin's change takes a restart.

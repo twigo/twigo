@@ -323,7 +323,9 @@ impl Core {
             } => actions::suspend(self, &space, target, suspend).await?,
             PlanRequest::Undo { space } => actions::undo(self, &space).await?,
             PlanRequest::Reveal { object, key } => actions::reveal(self, window, object, key)?,
-            PlanRequest::Apply { space, preview } => actions::apply(self, window, space, preview)?,
+            PlanRequest::Apply { space, preview } => {
+                actions::apply(self, window, space, preview).await?
+            }
         };
         self.authorize(&planned.context, &planned.writes)?;
         let access = self.policy.access(&planned.context);
@@ -443,13 +445,7 @@ impl Core {
         window: &str,
         request: ApplyRequest,
     ) -> Result<ApplyPreviewed, IpcError> {
-        let ticket = self.bus.ticket(window);
-        actions::preview(
-            self,
-            request,
-            Box::new(|prepared| self.bus.keep_preview(ticket, prepared)),
-        )
-        .await
+        actions::preview(self, window, request).await
     }
 
     /// Whether the person may do each check in a space's context, a check

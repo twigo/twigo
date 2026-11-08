@@ -330,6 +330,13 @@ fn table() -> Vec<Row> {
             OPEN,
         ),
         row(
+            "a recreate's check that its body can be created",
+            post.clone(),
+            "/api/v1/namespaces/a/pods?dryRun=All&fieldManager=twigo&fieldValidation=Strict",
+            DryRun,
+            OPEN,
+        ),
+        row(
             "recreate's create, under a Pod or a Job",
             post.clone(),
             "/api/v1/namespaces/a/pods?fieldManager=twigo&fieldValidation=Strict",

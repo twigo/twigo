@@ -1832,3 +1832,1140 @@ async fn a_reorder_and_a_touched_duplicate_go_by_the_patch_and_an_untouched_dupl
     );
     cluster.delete(&namespace).await;
 }
+
+async fn admission_policy(
+    cluster: &Cluster,
+    namespace: &str,
+    resource: (&str, &str),
+    actions: Value,
+    validation: Value,
+) -> String {
+    let name = namespace.to_owned();
+    let (group, plural) = resource;
+    let admin = &cluster.admin;
+    let _: Value = admin
+        .request(
+            http::Request::post(
+                "/apis/admissionregistration.k8s.io/v1/validatingadmissionpolicies",
+            )
+            .header("content-type", "application/json")
+            .body(
+                serde_json::to_vec(&json!({
+                    "apiVersion": "admissionregistration.k8s.io/v1",
+                    "kind": "ValidatingAdmissionPolicy",
+                    "metadata": { "name": name },
+                    "spec": {
+                        "failurePolicy": "Fail",
+                        "matchConstraints": { "resourceRules": [{
+                            "apiGroups": [group],
+                            "apiVersions": ["*"],
+                            "operations": ["CREATE", "UPDATE"],
+                            "resources": [plural],
+                        }] },
+                        "validations": [validation],
+                    },
+                }))
+                .unwrap(),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let _: Value = admin
+        .request(
+            http::Request::post(
+                "/apis/admissionregistration.k8s.io/v1/validatingadmissionpolicybindings",
+            )
+            .header("content-type", "application/json")
+            .body(
+                serde_json::to_vec(&json!({
+                    "apiVersion": "admissionregistration.k8s.io/v1",
+                    "kind": "ValidatingAdmissionPolicyBinding",
+                    "metadata": { "name": name },
+                    "spec": {
+                        "policyName": name,
+                        "validationActions": actions,
+                        "matchResources": { "namespaceSelector": { "matchLabels": {
+                            "kubernetes.io/metadata.name": namespace,
+                        } } },
+                    },
+                }))
+                .unwrap(),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    name
+}
+
+async fn delete_admission_policy(cluster: &Cluster, name: &str) {
+    for kind in [
+        "validatingadmissionpolicybindings",
+        "validatingadmissionpolicies",
+    ] {
+        let _: Value = cluster
+            .admin
+            .request(
+                http::Request::delete(format!(
+                    "/apis/admissionregistration.k8s.io/v1/{kind}/{name}"
+                ))
+                .body(Vec::new())
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+}
+
+async fn merge_answer(
+    admin: &kube::Client,
+    path: &str,
+    body: &Value,
+) -> Result<Value, kube::Error> {
+    admin
+        .request(
+            http::Request::patch(path.to_owned())
+                .header("content-type", "application/merge-patch+json")
+                .body(serde_json::to_vec(body).unwrap())
+                .unwrap(),
+        )
+        .await
+}
+
+fn pod(name: &str, finalizer: Option<&str>) -> Value {
+    let mut object = json!({
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": { "name": name },
+        "spec": {
+            "nodeName": "kwok-node-0",
+            "containers": [{ "name": "app", "image": "fake:1" }],
+        },
+    });
+    if let Some(finalizer) = finalizer {
+        object["metadata"]["finalizers"] = json!([finalizer]);
+    }
+    object
+}
+
+async fn recreate_of(core: &Core, request: ApplyRequest) -> PreviewId {
+    match preview(core, request).await {
+        ApplyPreviewed::Immutable {
+            recreate: Some(recreate),
+            ..
+        } => recreate,
+        other => panic!("expected a recreate, got {other:?}"),
+    }
+}
+
+fn changed_pod(live: &Value) -> Value {
+    let mut edited = view(live);
+    edited["spec"]["containers"][0]["command"] = json!(["sh"]);
+    edited
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_merge_patch_refused_after_its_apply_says_what_is_left() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-after").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let configmaps = format!("/api/v1/namespaces/{namespace}/configmaps");
+    let with_theirs = |name: &str| {
+        json!({
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": { "name": name, "annotations": { "theirs": "1" } },
+        })
+    };
+    post(&cluster.admin, &configmaps, &with_theirs("probe")).await;
+    post(&cluster.admin, &configmaps, &with_theirs("settings")).await;
+    let policy = admission_policy(
+        &cluster,
+        &namespace,
+        ("", "configmaps"),
+        json!(["Deny"]),
+        json!({
+            "expression": "request.dryRun == true || !has(oldObject.metadata.annotations) || !('theirs' in oldObject.metadata.annotations) || (has(object.metadata.annotations) && 'theirs' in object.metadata.annotations)",
+            "message": "theirs stays",
+        }),
+    )
+    .await;
+    let probe = format!("{configmaps}/probe");
+    let admin = cluster.admin.clone();
+    eventually("the policy refuses", || {
+        let (admin, probe) = (admin.clone(), probe.clone());
+        async move {
+            match merge_answer(
+                &admin,
+                &probe,
+                &json!({ "metadata": { "annotations": { "theirs": null } } }),
+            )
+            .await
+            {
+                Ok(_) => {
+                    merge_answer(
+                        &admin,
+                        &probe,
+                        &json!({ "metadata": { "annotations": { "theirs": "1" } } }),
+                    )
+                    .await
+                    .unwrap();
+                    false
+                }
+                Err(_) => true,
+            }
+        }
+    })
+    .await;
+
+    let path = format!("{configmaps}/settings");
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["metadata"]["annotations"]["mine"] = json!("1");
+    edited["metadata"]["annotations"]
+        .as_object_mut()
+        .unwrap()
+        .remove("theirs");
+    let target = reference("", "v1", "configmaps", Some(&namespace), "settings");
+    let (id, _, removals, _) =
+        ready(preview(&core, edit(&cluster, target, &live, edited, false, vec![])).await);
+    assert_eq!(removals, vec![".metadata.annotations.theirs"]);
+    let plan = plan(&core, &cluster, id).await;
+    let events = run(&core, &plan, None).await.unwrap();
+    let error = failed(&events);
+    assert!(
+        error.message.contains("Applied config map settings")
+            && error.message.contains("but the merge patch that removes")
+            && error.message.contains("still there"),
+        "{error:?}"
+    );
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(after["metadata"]["annotations"]["mine"], "1");
+    assert_eq!(after["metadata"]["annotations"]["theirs"], "1");
+    delete_admission_policy(&cluster, &policy).await;
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_recreate_stopped_while_its_object_lingers_creates_nothing() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-finalizer").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let pods = format!("/api/v1/namespaces/{namespace}/pods");
+    let finalizer = "twigo.test/hold";
+    post(&cluster.admin, &pods, &pod("held", Some(finalizer))).await;
+    let path = format!("{pods}/held");
+    let live = settled(&cluster.admin, &path).await;
+    let target = reference("", "v1", "pods", Some(&namespace), "held");
+    let id = recreate_of(
+        &core,
+        edit(&cluster, target, &live, changed_pod(&live), true, vec![]),
+    )
+    .await;
+    let plan_of = plan(&core, &cluster, id).await;
+    assert!(plan_of.destructive);
+
+    let (sender, mut events) = tokio::sync::mpsc::unbounded_channel();
+    core.command_execute(
+        "main",
+        twigo_ipc::Execute {
+            plan: plan_of.id,
+            typed: None,
+        },
+        move |event| sender.send(event).is_ok(),
+    )
+    .await
+    .unwrap();
+    let stopped = tokio::time::timeout(super::WAIT, async {
+        while let Some(event) = events.recv().await {
+            match event {
+                twigo_ipc::OperationEvent::Running { text } if text.starts_with("Waiting") => {
+                    core.command_cancel("main", plan_of.id);
+                }
+                twigo_ipc::OperationEvent::Stopped { text } => return text,
+                twigo_ipc::OperationEvent::Running { .. } => {}
+                other => panic!("expected the wait to stop, got {other:?}"),
+            }
+        }
+        panic!("no last event");
+    })
+    .await
+    .expect("the stop ends within 60 s");
+    assert!(stopped.contains("created nothing"), "{stopped}");
+    let lingering = read(&cluster.admin, &path).await;
+    assert_eq!(lingering["metadata"]["uid"], live["metadata"]["uid"]);
+    assert_eq!(lingering["spec"]["containers"][0].get("command"), None);
+    assert!(lingering["metadata"]["deletionTimestamp"].is_string());
+    merge_patch(
+        &cluster.admin,
+        &path,
+        &json!({ "metadata": { "finalizers": null } }),
+        "other",
+    )
+    .await;
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_recreate_holds_to_the_uid_it_previewed() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-uid").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let pods = format!("/api/v1/namespaces/{namespace}/pods");
+    post(&cluster.admin, &pods, &pod("web", None)).await;
+    let path = format!("{pods}/web");
+    let live = settled(&cluster.admin, &path).await;
+    let target = reference("", "v1", "pods", Some(&namespace), "web");
+    let id = recreate_of(
+        &core,
+        edit(&cluster, target, &live, changed_pod(&live), true, vec![]),
+    )
+    .await;
+    let plan_of = plan(&core, &cluster, id).await;
+
+    let _: Value = cluster
+        .admin
+        .request(
+            http::Request::delete(path.clone())
+                .header("content-type", "application/json")
+                .body(serde_json::to_vec(&json!({ "gracePeriodSeconds": 0 })).unwrap())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let admin = cluster.admin.clone();
+    let gone_path = path.clone();
+    eventually("the old pod is gone", || {
+        let (admin, path) = (admin.clone(), gone_path.clone());
+        async move {
+            admin
+                .request::<Value>(http::Request::get(path).body(Vec::new()).unwrap())
+                .await
+                .is_err()
+        }
+    })
+    .await;
+    post(&cluster.admin, &pods, &pod("web", None)).await;
+    let replacement = settled(&cluster.admin, &path).await;
+
+    let events = run(&core, &plan_of, None).await.unwrap();
+    let error = failed(&events);
+    assert_eq!(error.kind, ErrorKind::Conflict, "{error:?}");
+    assert!(error.message.contains("replaced since"), "{error:?}");
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(after["metadata"]["uid"], replacement["metadata"]["uid"]);
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_recreate_is_offered_only_for_what_can_be_created_and_is_not_a_controller_s() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-offer").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+
+    let replica_sets = format!("/apis/apps/v1/namespaces/{namespace}/replicasets");
+    post(
+        &cluster.admin,
+        &replica_sets,
+        &json!({
+            "apiVersion": "apps/v1",
+            "kind": "ReplicaSet",
+            "metadata": { "name": "web" },
+            "spec": {
+                "replicas": 1,
+                "selector": { "matchLabels": { "app": "web" } },
+                "template": {
+                    "metadata": { "labels": { "app": "web" } },
+                    "spec": {
+                        "nodeName": "kwok-node-0",
+                        "containers": [{ "name": "app", "image": "fake:1" }],
+                    },
+                },
+            },
+        }),
+    )
+    .await;
+    let pods = format!("/api/v1/namespaces/{namespace}/pods");
+    let admin = cluster.admin.clone();
+    let list = pods.clone();
+    eventually("the replica set makes its pod", || {
+        let (admin, list) = (admin.clone(), list.clone());
+        async move {
+            let pods: Value = admin
+                .request(http::Request::get(list).body(Vec::new()).unwrap())
+                .await
+                .unwrap();
+            pods["items"]
+                .as_array()
+                .is_some_and(|items| !items.is_empty())
+        }
+    })
+    .await;
+    let listed = read(&cluster.admin, &pods).await;
+    let name = listed["items"][0]["metadata"]["name"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let path = format!("{pods}/{name}");
+    let live = settled(&cluster.admin, &path).await;
+    let target = reference("", "v1", "pods", Some(&namespace), &name);
+    match preview(
+        &core,
+        edit(&cluster, target, &live, changed_pod(&live), true, vec![]),
+    )
+    .await
+    {
+        ApplyPreviewed::Immutable {
+            message,
+            recreate: None,
+        } => {
+            assert!(message.contains("replica set web"), "{message}");
+            assert!(message.contains("edit that"), "{message}");
+        }
+        other => panic!("expected no recreate, got {other:?}"),
+    }
+
+    let jobs = format!("/apis/batch/v1/namespaces/{namespace}/jobs");
+    post(
+        &cluster.admin,
+        &jobs,
+        &json!({
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "metadata": { "name": "migrate" },
+            "spec": {
+                "template": { "spec": {
+                    "nodeName": "kwok-node-0",
+                    "restartPolicy": "Never",
+                    "containers": [{ "name": "app", "image": "fake:1" }],
+                } },
+            },
+        }),
+    )
+    .await;
+    let path = format!("{jobs}/migrate");
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["spec"]["template"]["spec"]["containers"][0]["image"] = json!("fake:2");
+    edited["spec"]["template"]["spec"]["restartPolicy"] = json!("Always");
+    let target = reference("batch", "v1", "jobs", Some(&namespace), "migrate");
+    match preview(&core, edit(&cluster, target, &live, edited, true, vec![])).await {
+        ApplyPreviewed::Immutable {
+            message,
+            recreate: None,
+        } => {
+            assert!(message.contains("Nor can it be created"), "{message}");
+            assert!(message.contains("restartPolicy"), "{message}");
+        }
+        other => panic!("expected no recreate of what cannot be created, got {other:?}"),
+    }
+    let unchanged = read(&cluster.admin, &path).await;
+    assert_eq!(unchanged["metadata"]["uid"], live["metadata"]["uid"]);
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_recreate_checks_its_body_again_before_it_deletes() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-recheck").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let pods = format!("/api/v1/namespaces/{namespace}/pods");
+    post(&cluster.admin, &pods, &pod("web", None)).await;
+    let path = format!("{pods}/web");
+    let live = settled(&cluster.admin, &path).await;
+    let target = reference("", "v1", "pods", Some(&namespace), "web");
+    let id = recreate_of(
+        &core,
+        edit(&cluster, target, &live, changed_pod(&live), true, vec![]),
+    )
+    .await;
+    let plan_of = plan(&core, &cluster, id).await;
+
+    let policy = admission_policy(
+        &cluster,
+        &namespace,
+        ("", "pods"),
+        json!(["Deny"]),
+        json!({ "expression": "request.operation != 'CREATE'", "message": "no new pods" }),
+    )
+    .await;
+    let admin = cluster.admin.clone();
+    let probe = format!("{pods}?dryRun=All");
+    eventually("the policy refuses creating", || {
+        let (admin, probe) = (admin.clone(), probe.clone());
+        async move {
+            admin
+                .request::<Value>(
+                    http::Request::post(probe)
+                        .header("content-type", "application/json")
+                        .body(serde_json::to_vec(&pod("probe", None)).unwrap())
+                        .unwrap(),
+                )
+                .await
+                .is_err()
+        }
+    })
+    .await;
+
+    let events = run(&core, &plan_of, None).await.unwrap();
+    let error = failed(&events);
+    assert!(error.message.contains("deleted nothing"), "{error:?}");
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(after["metadata"]["uid"], live["metadata"]["uid"]);
+    assert_eq!(after["metadata"].get("deletionTimestamp"), None);
+    delete_admission_policy(&cluster, &policy).await;
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_job_s_recreate_lists_its_pods_and_says_it_runs_again() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-job-plan").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let jobs = format!("/apis/batch/v1/namespaces/{namespace}/jobs");
+    post(
+        &cluster.admin,
+        &jobs,
+        &json!({
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "metadata": { "name": "migrate" },
+            "spec": { "template": { "spec": {
+                "nodeName": "kwok-node-0",
+                "restartPolicy": "Never",
+                "containers": [{ "name": "app", "image": "fake:1" }],
+            } } },
+        }),
+    )
+    .await;
+    let path = format!("{jobs}/migrate");
+    let pods = format!("/api/v1/namespaces/{namespace}/pods");
+    let admin = cluster.admin.clone();
+    eventually("the job makes its pod", || {
+        let (admin, list) = (admin.clone(), pods.clone());
+        async move {
+            let pods: Value = admin
+                .request(http::Request::get(list).body(Vec::new()).unwrap())
+                .await
+                .unwrap();
+            pods["items"]
+                .as_array()
+                .is_some_and(|items| !items.is_empty())
+        }
+    })
+    .await;
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["spec"]["template"]["spec"]["containers"][0]["image"] = json!("fake:2");
+    let target = reference("batch", "v1", "jobs", Some(&namespace), "migrate");
+    let id = recreate_of(&core, edit(&cluster, target, &live, edited, true, vec![])).await;
+    let plan_of = plan(&core, &cluster, id).await;
+    let listed = read(&cluster.admin, &pods).await;
+    let name = listed["items"][0]["metadata"]["name"].as_str().unwrap();
+    assert_eq!(plan_of.affected.len(), 1, "{:?}", plan_of.affected);
+    assert_eq!(plan_of.affected[0].title, "With it go");
+    assert!(
+        plan_of.affected[0]
+            .objects
+            .iter()
+            .any(|object| object.name == name),
+        "{:?}",
+        plan_of.affected
+    );
+    assert!(
+        plan_of.consequences[0].contains("runs from the start"),
+        "{:?}",
+        plan_of.consequences
+    );
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn drop_my_change_clears_a_manifest_s_conflict() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-manifest-drop").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("/api/v1/namespaces/{namespace}/configmaps/settings");
+    post(
+        &cluster.admin,
+        &format!("/api/v1/namespaces/{namespace}/configmaps"),
+        &json!({
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": { "name": "settings" },
+            "data": { "a": "1" },
+        }),
+    )
+    .await;
+    let manifest = json!({
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": { "name": "settings", "namespace": namespace },
+        "data": { "a": "2", "b": "1" },
+    });
+    let request = |drop: Vec<String>, edited: Value| ApplyRequest {
+        space: cluster.context.clone(),
+        opened: None,
+        edited,
+        force: false,
+        drop,
+    };
+    let answer = preview(&core, request(vec![], manifest.clone())).await;
+    assert_eq!(
+        answer,
+        ApplyPreviewed::Conflicts {
+            conflicts: vec![ApplyConflict {
+                path: ".data.a".to_owned(),
+                manager: "other".to_owned(),
+            }],
+        }
+    );
+    let dropped = vec![".data.a".to_owned()];
+    let (id, result, _, _) = ready(preview(&core, request(dropped.clone(), manifest)).await);
+    assert_eq!(result["data"], json!({ "a": "1", "b": "1" }));
+    applied(&core, &cluster, id).await;
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(after["data"], json!({ "a": "1", "b": "1" }));
+    assert_eq!(
+        entry(&after, "twigo", "Apply").unwrap(),
+        &json!({ "f:data": { "f:b": {} } })
+    );
+
+    let lone = json!({
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": { "name": "settings", "namespace": namespace },
+        "data": { "a": "2" },
+    });
+    assert_eq!(
+        preview(&core, request(dropped, lone)).await,
+        ApplyPreviewed::Unchanged { ignored: vec![] },
+        "a manifest whose every change was given up sends nothing"
+    );
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_preview_is_replaced_by_a_newer_one_whatever_that_answers() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-newer").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    post(&cluster.admin, &deployments(&namespace), &deployment("web")).await;
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["metadata"]["annotations"]["mine"] = json!("1");
+    let target = deployment_ref(&namespace, "web");
+    let (older, _, _, _) = ready(
+        preview(
+            &core,
+            edit(
+                &cluster,
+                target.clone(),
+                &live,
+                edited.clone(),
+                true,
+                vec![],
+            ),
+        )
+        .await,
+    );
+
+    merge_patch(
+        &cluster.admin,
+        &path,
+        &json!({ "metadata": { "labels": { "other": "writer" } } }),
+        "other",
+    )
+    .await;
+    match preview(
+        &core,
+        edit(
+            &cluster,
+            target.clone(),
+            &live,
+            edited.clone(),
+            true,
+            vec![],
+        ),
+    )
+    .await
+    {
+        ApplyPreviewed::Stale { .. } => {}
+        other => panic!("expected stale, got {other:?}"),
+    }
+    let refused = core
+        .command_plan(
+            "main",
+            PlanRequest::Apply {
+                space: cluster.context.clone(),
+                preview: older,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::NotFound, "{refused:?}");
+
+    let live = read(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["metadata"]["annotations"]["mine"] = json!("2");
+    let (older, _, _, _) = ready(
+        preview(
+            &core,
+            edit(&cluster, target.clone(), &live, edited, true, vec![]),
+        )
+        .await,
+    );
+    let mut newer = view(&live);
+    newer["metadata"]["annotations"]["mine"] = json!("3");
+    let (latest, _, _, _) =
+        ready(preview(&core, edit(&cluster, target, &live, newer, true, vec![])).await);
+    let refused = core
+        .command_plan(
+            "main",
+            PlanRequest::Apply {
+                space: cluster.context.clone(),
+                preview: older,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::NotFound, "{refused:?}");
+    applied(&core, &cluster, latest).await;
+    assert_eq!(
+        read(&cluster.admin, &path).await["metadata"]["annotations"]["mine"],
+        "3"
+    );
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn an_api_version_written_slash_v1_is_still_a_secret() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-slash").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let request = |data: Value| ApplyRequest {
+        space: cluster.context.clone(),
+        opened: None,
+        edited: json!({
+            "apiVersion": "/v1",
+            "kind": "Secret",
+            "metadata": { "name": "db", "namespace": namespace },
+            "data": data,
+        }),
+        force: false,
+        drop: vec![],
+    };
+    let refused = core
+        .apply_preview("main", request(json!({ "password": "<12 bytes>" })))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::InvalidInput, "{refused:?}");
+    assert!(refused.message.contains("masked"), "{}", refused.message);
+
+    let answer = core
+        .apply_preview("main", request(json!({ "broken": format!("{SECRET}!!!") })))
+        .await;
+    match answer {
+        Ok(answer) => secret_text_free("the preview", &serde_json::to_string(&answer).unwrap()),
+        Err(error) => secret_text_free("the refusal", &serde_json::to_string(&error).unwrap()),
+    }
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_warning_that_echoes_what_the_answer_holds_is_scrubbed_and_a_merge_patch_s_is_kept() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-warnings").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let policy = admission_policy(
+        &cluster,
+        &namespace,
+        ("", "secrets"),
+        json!(["Warn"]),
+        json!({
+            "expression": "false",
+            "messageExpression": "'token is ' + string(object.data.token)",
+        }),
+    )
+    .await;
+    let request = || ApplyRequest {
+        space: cluster.context.clone(),
+        opened: None,
+        edited: json!({
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": { "name": "api", "namespace": namespace },
+            "stringData": { "token": STRING_VALUE },
+        }),
+        force: false,
+        drop: vec![],
+    };
+    let mut warned = None;
+    let wait = tokio::time::timeout(super::WAIT, async {
+        loop {
+            match preview(&core, request()).await {
+                ApplyPreviewed::Ready { warnings, .. } if !warnings.is_empty() => {
+                    warned = Some(warnings);
+                    return;
+                }
+                ApplyPreviewed::Ready { .. } => {
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                }
+                other => panic!("expected ready, got {other:?}"),
+            }
+        }
+    })
+    .await;
+    assert!(wait.is_ok(), "the policy warns within 60 s");
+    let warnings = warned.unwrap();
+    let text = warnings.join(" ");
+    secret_text_free("the warning", &text);
+    assert!(text.contains("token is <hidden>"), "{text}");
+    delete_admission_policy(&cluster, &policy).await;
+
+    let configmaps = format!("/api/v1/namespaces/{namespace}/configmaps");
+    post(
+        &cluster.admin,
+        &configmaps,
+        &json!({
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": { "name": "settings", "annotations": { "theirs": "1" } },
+        }),
+    )
+    .await;
+    let path = format!("{configmaps}/settings");
+    let policy = admission_policy(
+        &cluster,
+        &namespace,
+        ("", "configmaps"),
+        json!(["Warn"]),
+        json!({ "expression": "false", "message": "kept from the merge patch" }),
+    )
+    .await;
+    let target = reference("", "v1", "configmaps", Some(&namespace), "settings");
+    let mut warned = false;
+    let wait = tokio::time::timeout(super::WAIT, async {
+        while !warned {
+            let live = read(&cluster.admin, &path).await;
+            let mut edited = view(&live);
+            edited["metadata"]["annotations"]
+                .as_object_mut()
+                .unwrap()
+                .remove("theirs");
+            let (_, _, _, warnings) = ready(
+                preview(
+                    &core,
+                    edit(&cluster, target.clone(), &live, edited, false, vec![]),
+                )
+                .await,
+            );
+            warned = warnings
+                .iter()
+                .any(|text| text.contains("kept from the merge patch"));
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        }
+    })
+    .await;
+    assert!(
+        wait.is_ok(),
+        "the merge patch's warning reaches the preview"
+    );
+    delete_admission_policy(&cluster, &policy).await;
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn deleting_an_object_s_only_label_map_removes_it_and_its_kubectl_line_is_what_is_sent() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-labels").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, kubeconfig) = core(dir.path(), &cluster).await;
+    let configmaps = format!("/api/v1/namespaces/{namespace}/configmaps");
+    for name in ["c1", "c2"] {
+        post(
+            &cluster.admin,
+            &configmaps,
+            &json!({
+                "apiVersion": "v1",
+                "kind": "ConfigMap",
+                "metadata": { "name": name, "labels": { "a": "1" } },
+                "data": { "k": "v" },
+            }),
+        )
+        .await;
+    }
+    let forget_labels = |live: &Value| {
+        let mut edited = view(live);
+        edited["metadata"].as_object_mut().unwrap().remove("labels");
+        edited
+    };
+    let target = |name: &str| reference("", "v1", "configmaps", Some(&namespace), name);
+
+    let path = format!("{configmaps}/c1");
+    let live = settled(&cluster.admin, &path).await;
+    let (id, _, removals, _) = ready(
+        preview(
+            &core,
+            edit(
+                &cluster,
+                target("c1"),
+                &live,
+                forget_labels(&live),
+                false,
+                vec![],
+            ),
+        )
+        .await,
+    );
+    assert_eq!(removals, vec![".metadata.labels"]);
+    applied(&core, &cluster, id).await;
+    assert_eq!(
+        read(&cluster.admin, &path).await["metadata"].get("labels"),
+        None
+    );
+
+    let path = format!("{configmaps}/c2");
+    let live = settled(&cluster.admin, &path).await;
+    let (id, _, _, _) = ready(
+        preview(
+            &core,
+            edit(
+                &cluster,
+                target("c2"),
+                &live,
+                forget_labels(&live),
+                false,
+                vec![],
+            ),
+        )
+        .await,
+    );
+    let plan_of = plan(&core, &cluster, id).await;
+    assert!(
+        plan_of.kubectl.contains("\"labels\":null")
+            && plan_of
+                .kubectl
+                .contains(&format!("\"resourceVersion\":\"{}\"", rv(&live))),
+        "{}",
+        plan_of.kubectl
+    );
+    kubectl(&plan_of, &kubeconfig);
+    assert_eq!(
+        read(&cluster.admin, &path).await["metadata"].get("labels"),
+        None
+    );
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn twigo_s_only_field_removed_leaves_no_claim_that_keeps_another_appliers_container() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-claim").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    let gitops = |containers: Value| {
+        json!({
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": { "name": "web" },
+            "spec": {
+                "replicas": 1,
+                "selector": { "matchLabels": { "app": "web" } },
+                "template": {
+                    "metadata": { "labels": { "app": "web" } },
+                    "spec": { "nodeName": "kwok-node-0", "containers": containers },
+                },
+            },
+        })
+    };
+    server_apply(
+        &cluster.admin,
+        &path,
+        &gitops(json!([
+            { "name": "app", "image": "fake:1" },
+            { "name": "side", "image": "fake:2" },
+        ])),
+        "gitops",
+    )
+    .await;
+    server_apply(
+        &cluster.admin,
+        &path,
+        &json!({
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": { "name": "web" },
+            "spec": { "template": { "spec": { "containers": [
+                { "name": "app", "workingDir": "/x" },
+            ] } } },
+        }),
+        "twigo",
+    )
+    .await;
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["spec"]["template"]["spec"]["containers"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("workingDir");
+    let target = deployment_ref(&namespace, "web");
+    let (id, _, removals, _) =
+        ready(preview(&core, edit(&cluster, target, &live, edited, false, vec![])).await);
+    assert_eq!(removals, Vec::<String>::new());
+    applied(&core, &cluster, id).await;
+
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(
+        after["spec"]["template"]["spec"]["containers"][0].get("workingDir"),
+        None
+    );
+    assert_eq!(entry(&after, "twigo", "Apply"), None, "{after}");
+
+    server_apply(
+        &cluster.admin,
+        &path,
+        &gitops(json!([{ "name": "side", "image": "fake:2" }])),
+        "gitops",
+    )
+    .await;
+    let after = read(&cluster.admin, &path).await;
+    let names: Vec<&str> = after["spec"]["template"]["spec"]["containers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|container| container["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["side"], "the container went, as no claim keeps it");
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_null_a_person_left_is_no_value_on_the_server() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-null").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let path = format!("{}/web", deployments(&namespace));
+    post(&cluster.admin, &deployments(&namespace), &deployment("web")).await;
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["metadata"]["annotations"]["note"] = Value::Null;
+    edited["spec"]["template"]["spec"]["containers"][0]["ports"][0]["protocol"] = Value::Null;
+    edited["spec"]["template"]["spec"]["containers"][0]["ports"][0]["name"] = json!("web");
+    let target = deployment_ref(&namespace, "web");
+    let (id, _, removals, _) =
+        ready(preview(&core, edit(&cluster, target, &live, edited, true, vec![])).await);
+    assert_eq!(removals, Vec::<String>::new());
+    applied(&core, &cluster, id).await;
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(after["metadata"]["annotations"].get("note"), None);
+    assert_eq!(
+        after["spec"]["template"]["spec"]["containers"][0]["ports"],
+        json!([{ "name": "web", "containerPort": 80, "protocol": "TCP" }])
+    );
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_co_owner_of_an_element_keeps_it_for_the_patch_on_the_server() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-coowner").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .subsec_nanos();
+    let group = format!("o{nanos}.twigo.test");
+    let crd_name = with_crd(
+        &cluster,
+        widget_crd(
+            &group,
+            "widgets",
+            "Widget",
+            json!({
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "x-kubernetes-list-type": "map",
+                        "x-kubernetes-list-map-keys": ["name"],
+                        "items": {
+                            "type": "object",
+                            "required": ["name"],
+                            "properties": {
+                                "name": { "type": "string" },
+                                "value": { "type": "string" },
+                            },
+                        },
+                    },
+                },
+            }),
+        ),
+    )
+    .await;
+    let collection = format!("/apis/{group}/v1/namespaces/{namespace}/widgets");
+    let admin = cluster.admin.clone();
+    eventually("the widgets are served", || {
+        let (admin, collection) = (admin.clone(), collection.clone());
+        async move {
+            admin
+                .request::<Value>(http::Request::get(collection).body(Vec::new()).unwrap())
+                .await
+                .is_ok()
+        }
+    })
+    .await;
+    let path = format!("{collection}/one");
+    let widget = |value: &str| {
+        json!({
+            "apiVersion": format!("{group}/v1"),
+            "kind": "Widget",
+            "metadata": { "name": "one" },
+            "spec": { "items": [{ "name": "x", "value": value }] },
+        })
+    };
+    server_apply(&cluster.admin, &path, &widget("1"), "gitops").await;
+    server_apply(&cluster.admin, &path, &widget("2"), "twigo").await;
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["spec"]["items"] = json!([]);
+    let target = reference(&group, "v1", "widgets", Some(&namespace), "one");
+    let request = edit(&cluster, target, &live, edited, false, vec![]);
+    let (id, result, removals, _) = ready(wait_served(&core, &request).await);
+    assert_eq!(removals, vec![".spec.items[name=\"x\"]"]);
+    assert_eq!(result["spec"]["items"], json!([]), "{result}");
+    applied(&core, &cluster, id).await;
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(after["spec"]["items"], json!([]), "{after}");
+    delete_crd(&cluster, &crd_name).await;
+    cluster.delete(&namespace).await;
+}

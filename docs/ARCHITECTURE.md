@@ -1551,6 +1551,9 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
    It adds no field to the `twigo` Apply entry.
 8. Immutable fields return 422; the dry-run catches this before any write.
    Delete-and-recreate is offered only for Pods and Jobs, with confirmation; the uid is held by a precondition, and what the Job controller generates, its selector and its `controller-uid` and `job-name` labels, does not go along.
+   A Pod that a controller owns is not offered it, as the controller would replace it within seconds, so its message says to edit the owner.
+   The body is dry-run as a `POST` before it is offered and again before the delete, so an edit that cannot be created never takes the object away: an invalid body answers 422 even with the name taken, and a valid one 409 AlreadyExists (kind 1.37, 2026-11-08).
+   The plan lists what goes with it, a Job's pods, and says a Job runs again.
 
 Destructive actions (delete, drain, scale to 0) list the exact objects and need a confirmation that matches the policy mode.
 Their plans read the objects and what the garbage collector takes with them (every object whose owners all go, among what the core's controllers make) and send nothing before the confirmation: a server dry-run of a DELETE or an eviction is a write to the gate, which reads no body (6.4), and a fault in that body would delete unconfirmed.

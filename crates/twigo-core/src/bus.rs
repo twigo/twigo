@@ -179,6 +179,7 @@ pub(crate) struct Bus {
 struct Inner {
     next: u32,
     next_preview: u32,
+    next_started: u64,
     windows: HashMap<String, Window>,
 }
 
@@ -188,8 +189,11 @@ struct Window {
     generation: u64,
     entries: HashMap<PlanId, Entry>,
     /// What each preview prepared, until a plan takes it or a newer preview
-    /// of the same object replaces it.
+    /// of the same object starts.
     previews: HashMap<PreviewId, Prepared>,
+    /// The newest preview started of each object, by its context and path,
+    /// so an older one that finishes later keeps nothing.
+    started: HashMap<(String, String), u64>,
 }
 
 /// Where a window stood when it asked for a plan, which may wait on the
@@ -259,11 +263,29 @@ impl Bus {
         Ok(plan)
     }
 
-    /// Keeps what a preview prepared, in place of any earlier preview of the
-    /// same object, as a preview is good only for the diff it answers.
+    /// Starts a preview of an object: an older one is good only for the
+    /// diff it answered, so it stops being runnable now, whatever this one
+    /// answers. Returns what `keep_preview` asks for.
+    pub(crate) fn start_preview(&self, window: &str, context: &str, path: &str) -> u64 {
+        let mut inner = self.inner();
+        inner.next_started += 1;
+        let started = inner.next_started;
+        let window = inner.windows.entry(window.to_owned()).or_default();
+        window
+            .previews
+            .retain(|_, kept| kept.path != path || kept.context != context);
+        window
+            .started
+            .insert((context.to_owned(), path.to_owned()), started);
+        started
+    }
+
+    /// Keeps what a preview prepared, unless a newer preview of the object
+    /// has started since.
     pub(crate) fn keep_preview(
         &self,
         ticket: Ticket,
+        started: u64,
         prepared: Prepared,
     ) -> Result<PreviewId, IpcError> {
         let mut inner = self.inner();
@@ -276,9 +298,13 @@ impl Bus {
                 "the page that asked for the preview is gone",
             ));
         }
-        window
-            .previews
-            .retain(|_, kept| kept.path != prepared.path || kept.context != prepared.context);
+        let key = (prepared.context.clone(), prepared.path.clone());
+        if window.started.get(&key) != Some(&started) {
+            return Err(IpcError::new(
+                ErrorKind::Conflict,
+                "a newer preview of this object replaced this one",
+            ));
+        }
         window.previews.insert(id, prepared);
         Ok(id)
     }
@@ -381,6 +407,7 @@ impl Bus {
             let window = inner.windows.entry(window.to_owned()).or_default();
             window.generation += 1;
             window.previews.clear();
+            window.started.clear();
             std::mem::take(&mut window.entries)
         };
         for entry in dropped.into_values() {
