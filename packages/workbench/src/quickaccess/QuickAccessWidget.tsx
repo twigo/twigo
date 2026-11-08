@@ -69,6 +69,14 @@ function Open({ session }: { session: Session }) {
   const [loaded, setLoaded] = useState<{ value: string; result: Loaded }>();
   const [selected, setSelected] = useState("");
   const root = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLInputElement>(null);
+
+  // The command a row accepted may pick in the tick the palette closed in, after
+  // quick access gave the focus back and before this widget unmounted, so
+  // autoFocus never fires for the pick.
+  useEffect(() => {
+    field.current?.focus();
+  }, [pick, ask]);
 
   const source = pick?.source;
   useEffect(() => {
@@ -194,7 +202,7 @@ function Open({ session }: { session: Session }) {
         }}
       >
         <CommandInput
-          autoFocus
+          ref={field}
           // An input starts with all its value selected, as VS Code's.
           {...(ask && {
             onFocus: (event) => {

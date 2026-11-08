@@ -74,6 +74,46 @@ test("a pick with a source is asked for the rows of each value typed, and shows 
   await expect(picked).resolves.toEqual({ id: "z", label: "zulu" });
 });
 
+test("a pick that the accepted command opens holds the focus, and Escape gives it back to where it was", async () => {
+  const workbench = await testWorkbench();
+  const { registered } = provider(
+    "!",
+    [{ id: "compare", label: "Compare with…" }],
+    {
+      accept: () => {
+        void workbench.quickAccess.pick("Compare with…", [
+          { id: "a", label: "alpha" },
+        ]);
+      },
+    },
+  );
+  workbench.quickAccess.register(registered);
+  render(
+    <>
+      <textarea aria-label="Editor" />
+      <QuickAccessWidget />
+    </>,
+    { wrapper: inWorkbench(workbench) },
+  );
+  const editor = screen.getByLabelText("Editor");
+  editor.focus();
+  await act(async () => {
+    workbench.quickAccess.show("!");
+    await Promise.resolve();
+  });
+  expect(document.activeElement).toBe(input());
+
+  press("Enter");
+  await act(() => Promise.resolve());
+  expect(workbench.quickAccess.session?.pick?.placeholder).toBe(
+    "Compare with…",
+  );
+  expect(document.activeElement).toBe(input());
+
+  press("Escape");
+  expect(document.activeElement).toBe(editor);
+});
+
 test("a pick's notice says what its rows are, and shows with none", async () => {
   const workbench = await testWorkbench();
   render(<QuickAccessWidget />, { wrapper: inWorkbench(workbench) });
