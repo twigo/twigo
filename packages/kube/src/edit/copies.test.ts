@@ -179,6 +179,26 @@ test("what the person typed into a Secret never reaches the state", async () => 
   ]);
 });
 
+test("a manifest that cannot be read is left out of the backup and does not stop the backup of the others", async () => {
+  const { backend, copies, state } = await services();
+  copies.edit(DEPLOYMENT, "replicas: 2\n", opened);
+  copies.write(
+    "untitled://manifest-1",
+    "prod-eu",
+    "spec:\n  rules:\n    - host: *.example.com\n",
+  );
+  expect(() => {
+    copies.flush();
+  }).not.toThrow();
+  await state.settled();
+  const stored = await backend.invoke("state_load", null);
+  const edits = JSON.parse(stored.spaces["prod-eu"]?.edits ?? "{}") as Record<
+    string,
+    unknown
+  >;
+  expect(Object.keys(edits)).toEqual([DEPLOYMENT]);
+});
+
 function fakeBuffer() {
   const dispose = vi.fn();
   const buffer: EditorBuffer = {

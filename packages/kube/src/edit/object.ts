@@ -1,10 +1,14 @@
 import {
+  isAlias,
   isMap,
   isNode,
   isScalar,
+  isSeq,
   LineCounter,
   parseAllDocuments,
   stringify,
+  visit,
+  type Document,
 } from "yaml";
 
 export type KubeObject = Record<string, unknown>;
@@ -31,10 +35,58 @@ export type Parsed =
       readonly column: number;
     };
 
+interface Problem {
+  readonly message: string;
+  /** Where in the text, from its start. */
+  readonly offset: number;
+}
+
+/**
+ * What the package's `toJS` throws on, found where it stands: an alias with
+ * no anchor before it and a merge key that takes something else than maps.
+ */
+function unresolved(document: Document.Parsed): Problem | undefined {
+  let found: Problem | undefined;
+  const refuse = (node: unknown, message: string) => {
+    found = {
+      message,
+      offset: (isNode(node) ? node.range?.[0] : undefined) ?? 0,
+    };
+    return visit.BREAK;
+  };
+  visit(document, {
+    Alias: (_, alias) =>
+      alias.resolve(document) === undefined
+        ? refuse(alias, `The alias *${alias.source} has no anchor.`)
+        : undefined,
+    Pair: (_, { key, value }) => {
+      if (
+        !isScalar(key) ||
+        typeof key.value !== "symbol" ||
+        key.value.description !== "<<"
+      )
+        return undefined;
+      for (const source of isSeq(value) ? value.items : [value]) {
+        const merged = isAlias(source) ? source.resolve(document) : source;
+        if (merged !== undefined && !isMap(merged)) {
+          return refuse(
+            isNode(source) ? source : key,
+            "A merge key takes a map or a list of maps.",
+          );
+        }
+      }
+      return undefined;
+    },
+  });
+  return found;
+}
+
 /**
  * The manifest as the one object it names. It reads YAML 1.1 like
  * `yamlOfObject` writes it, so there is one dialect, and Twigo previews one
  * object at a time: a second document is an error, not something left out.
+ * Nothing here throws on the text; what cannot be read is an error at its
+ * line.
  */
 export function parseManifest(text: string): Parsed {
   const lines = new LineCounter();
@@ -70,7 +122,18 @@ export function parseManifest(text: string): Parsed {
       second.range[0],
     );
   }
-  const object: unknown = first.toJS();
+  const refused = unresolved(first);
+  if (refused) return failed(refused.message, refused.offset);
+  let object: unknown;
+  try {
+    object = first.toJS();
+  } catch (error) {
+    // Aliases that expand past the package's limit, which no walk of the tree sees.
+    return failed(
+      error instanceof Error ? error.message : String(error),
+      first.range[0],
+    );
+  }
   if (typeof object !== "object" || object === null || Array.isArray(object)) {
     return failed(
       "The manifest must be the fields of one object.",

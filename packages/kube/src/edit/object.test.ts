@@ -61,6 +61,46 @@ test("a second document is named by the line of its ---, wherever the first begi
   });
 });
 
+test("an alias with no anchor and a merge of something else than maps are errors at their line, never thrown", () => {
+  expect(
+    parseManifest("spec:\n  rules:\n    - host: *.example.com\n"),
+  ).toMatchObject({
+    ok: false,
+    line: 3,
+    column: 13,
+    message: "The alias *.example.com has no anchor.",
+  });
+  expect(parseManifest("a: 1\nv:\n  <<: 1\n")).toMatchObject({
+    ok: false,
+    line: 3,
+    column: 7,
+    message: "A merge key takes a map or a list of maps.",
+  });
+  expect(parseManifest("v:\n  <<: [1]\n")).toMatchObject({
+    ok: false,
+    line: 2,
+  });
+  expect(parseManifest("v:\n  <<: *missing\n")).toMatchObject({
+    ok: false,
+    line: 2,
+    message: "The alias *missing has no anchor.",
+  });
+  expect(
+    parseManifest("b: &b {x: 1}\nv:\n  <<: [*b, {w: 2}]\n  z: 3\n"),
+  ).toEqual({ ok: true, object: { b: { x: 1 }, v: { x: 1, w: 2, z: 3 } } });
+});
+
+test("aliases that expand past the package's limit are an error at the manifest, not a throw", () => {
+  const levels = Array.from(
+    { length: 14 },
+    (_, level) =>
+      `l${String(level)}: &l${String(level)} [${level === 0 ? "x" : `*l${String(level - 1)}, *l${String(level - 1)}`}]`,
+  );
+  const parsed = parseManifest(`${levels.join("\n")}\n`);
+  expect(parsed).toMatchObject({ ok: false, line: 1 });
+  expect(parsed.ok || parsed.message).toMatch(/alias/i);
+});
+
 test("the lines of status are found, flow style and a missing block included", () => {
   const text =
     "kind: Deployment\nspec:\n  replicas: 1\nstatus:\n  ready: 1\n  items:\n    - a\nmetadata: {}\n";
