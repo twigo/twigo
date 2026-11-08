@@ -71,23 +71,35 @@ export function joinsStatus(
 }
 
 /**
- * Whether typing or pasting over a selection would put its text onto
- * `status:`: the selection of whole lines that ends at column 1 of it, which
- * may be deleted but not replaced.
+ * Whether replacing a selection with text that does not end in a line break
+ * would put that text onto `status:`: the selection of whole lines that ends
+ * at column 1 of it. Deleting it leaves `status:` where it is, and so does
+ * what Monaco does to whole lines, such as indenting or commenting them.
  */
 export function gluesStatus(block: StatusBlock, { start, end }: Span): boolean {
   return before(start, end) && end.line === block.from && end.column === 1;
 }
 
-/** What a key does to the text of a selection that Monaco acts on after the key is read. */
+/**
+ * What a key does to the text of a selection that Monaco acts on after the
+ * key is read. `type` holds for as long as the selection stands; `replace` is
+ * what a typed character and a paste not ending in a line break do.
+ */
 export type StatusKey =
-  "type" | "backwards" | "forwards" | "cut" | "moveDown" | "moveUp" | "join";
+  | "type"
+  | "replace"
+  | "backwards"
+  | "forwards"
+  | "cut"
+  | "moveDown"
+  | "moveUp"
+  | "join";
 
 /**
  * Whether `key`, run at every selection, would change the `status` block: by
  * touching it, by joining a text to it, by gluing text onto it, or by moving
  * a line into it or out of it. Lines with nothing on them change nothing by
- * moving or joining. `type` stands for anything that replaces a selection.
+ * moving or joining.
  */
 export function refusesStatus(
   block: StatusBlock,
@@ -109,6 +121,8 @@ export function refusesStatus(
       start.line < end.line && end.column === 1 ? end.line - 1 : end.line;
     switch (key) {
       case "type":
+        return false;
+      case "replace":
         return gluesStatus(block, selection);
       case "backwards":
       case "forwards":

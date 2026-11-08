@@ -106,6 +106,13 @@ function commandOf(event: IKeyboardEvent): StatusKey | "undo" | undefined {
   return undefined;
 }
 
+/** Whether the key types a character over the selection. */
+function typesCharacter(event: IKeyboardEvent): boolean {
+  return (
+    event.browserEvent.key.length === 1 && !event.metaKey && !event.ctrlKey
+  );
+}
+
 /**
  * The YAML editor, bundled locally and loaded on its first use (ARCHITECTURE
  * 4.6), on the app's light or dark theme. Its text lives in the editor's
@@ -235,19 +242,39 @@ export default function YamlEditor({
     // Monaco reads a key after this does, and a read-only editor refuses
     // undo and redo along with typing, so a key sets the lock for itself,
     // and the cursor's lock comes back once Monaco has acted.
-    const keys = instance.onKeyDown((event) => {
-      const command = commandOf(event);
-      if (command === undefined) return;
+    const hold = (key: StatusKey | "undo") => {
       instance.updateOptions({
-        readOnly: command === "undo" ? false : refuses(command),
+        readOnly: key === "undo" ? false : refuses(key),
         readOnlyMessage: STATUS_IS_THE_SERVERS,
       });
       setTimeout(lock, 0);
+    };
+    const keys = instance.onKeyDown((event) => {
+      const command = commandOf(event);
+      if (command !== undefined) hold(command);
+      else if (typesCharacter(event)) hold("replace");
     });
+    const paste = (event: ClipboardEvent) => {
+      if (!event.clipboardData?.getData("text/plain").endsWith("\n")) {
+        hold("replace");
+      }
+    };
+    const element = host.current;
+    element?.addEventListener("paste", paste, true);
+    const composing = instance.onDidCompositionStart(() => {
+      instance.updateOptions({
+        readOnly: refuses("replace"),
+        readOnlyMessage: STATUS_IS_THE_SERVERS,
+      });
+    });
+    const composed = instance.onDidCompositionEnd(lock);
     const selection = instance.onDidChangeCursorSelection(lock);
     const content = current.onDidChangeContent(lock);
     return () => {
       keys.dispose();
+      element?.removeEventListener("paste", paste, true);
+      composing.dispose();
+      composed.dispose();
       selection.dispose();
       content.dispose();
       instance.updateOptions({ readOnly: false });

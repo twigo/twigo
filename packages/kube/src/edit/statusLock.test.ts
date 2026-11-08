@@ -85,8 +85,8 @@ test("whole lines that end at column 1 of status can be deleted but not typed or
 
   const endOfLine = () => 9;
   const whole = [range(1, 1, 3, 1)];
-  expect(refusesStatus(block, whole, "type", endOfLine)).toBe(true);
-  for (const key of ["backwards", "forwards", "cut"] as const) {
+  expect(refusesStatus(block, whole, "replace", endOfLine)).toBe(true);
+  for (const key of ["type", "backwards", "forwards", "cut"] as const) {
     expect(refusesStatus(block, whole, key, endOfLine), key).toBe(false);
   }
   expect(refusesStatus(block, [range(2, 4, 3, 1)], "cut", endOfLine)).toBe(
