@@ -49,8 +49,18 @@ pub(crate) async fn scale(
         ));
     }
     let from = known.unwrap_or(0);
-    let (risk, consequences, affected) =
+    let (shrinks, mut consequences, affected) =
         shrinking(&clients, &target, &object, from, replicas.into()).await;
+    let destructive = shrinks == Risk::Lasting;
+    let risk = if known.is_none() {
+        consequences.push(
+            "Twigo cannot tell its replicas at 0 from replicas left unset, so it offers no undo."
+                .to_owned(),
+        );
+        Risk::Lasting
+    } else {
+        shrinks
+    };
     let kind_name = target.resource.name();
     let count = replicas.to_string();
     let kubectl = target.kubectl(&[
@@ -81,7 +91,7 @@ pub(crate) async fn scale(
     Ok(Planned {
         question: format!("Scale {what}{place} to {replicas} on {context}?"),
         confirm: format!("Scale to {replicas}"),
-        destructive: risk == Risk::Lasting,
+        destructive,
         doing: format!("Scaling {what} to {replicas}"),
         consequences,
         affected,
@@ -338,7 +348,7 @@ impl Run {
             ));
         };
         let done = format!("Scaled {what} to {}", self.replicas);
-        // Replicas left unset no undo could put back.
+        // Replicas that may have been unset no undo puts back as they were.
         if count(target, &current).is_none() {
             return Ok(Finished::Done(done));
         }

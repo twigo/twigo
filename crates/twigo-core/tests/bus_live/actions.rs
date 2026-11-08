@@ -458,6 +458,23 @@ async fn cordon_and_uncordon_run_at_once_and_their_undo_holds_to_the_field() {
         format!("Node {ghost} was replaced since Twigo asked, so it changed nothing")
     );
     assert!(!cordoned(&nodes, ghost).await);
+    let planned = plan(
+        &core,
+        PlanRequest::Drain {
+            space: context.clone(),
+            node: ghost.to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    gone().await;
+    create(&nodes, json!({ "metadata": { "name": ghost } })).await;
+    let told = run(&core, &planned, None).await.unwrap();
+    assert_eq!(
+        failed(&told).message,
+        format!("Node {ghost} was replaced since Twigo asked, so it drained nothing")
+    );
+    assert!(!cordoned(&nodes, ghost).await);
     gone().await;
 }
 

@@ -4,9 +4,16 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::time::Duration;
+
+use tokio::time::Instant;
 
 use twigo_ipc::Access;
 use twigo_kube::client::Clients;
+
+/// How long RBAC's no holds before it is asked again, so a RoleBinding
+/// granted since counts; a yes holds, as the server still decides.
+pub(crate) const REFUSED_FOR: Duration = Duration::from_secs(30);
 
 #[derive(Default)]
 pub(crate) struct Cluster {
@@ -17,8 +24,9 @@ pub(crate) struct Cluster {
 struct Facts {
     clients: Weak<Clients>,
     streaming: Option<bool>,
-    /// By namespace, none for all of them, and what is asked.
-    may: HashMap<(Option<String>, Access), bool>,
+    /// By namespace, none for all of them, and what is asked: the answer,
+    /// and when it came.
+    may: HashMap<(Option<String>, Access), (bool, Instant)>,
 }
 
 impl Cluster {
@@ -38,10 +46,11 @@ impl Cluster {
         namespace: Option<&str>,
         access: &Access,
     ) -> Option<bool> {
-        self.facts(clients)
+        let &(may, at) = self
+            .facts(clients)
             .may
-            .get(&(namespace.map(str::to_owned), access.clone()))
-            .copied()
+            .get(&(namespace.map(str::to_owned), access.clone()))?;
+        (may || at.elapsed() < REFUSED_FOR).then_some(may)
     }
 
     pub fn set_may(
@@ -51,9 +60,10 @@ impl Cluster {
         access: &Access,
         may: bool,
     ) {
-        self.facts(clients)
-            .may
-            .insert((namespace.map(str::to_owned), access.clone()), may);
+        self.facts(clients).may.insert(
+            (namespace.map(str::to_owned), access.clone()),
+            (may, Instant::now()),
+        );
     }
 
     fn facts(&self, clients: &Arc<Clients>) -> MutexGuard<'_, Facts> {

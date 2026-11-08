@@ -25,7 +25,7 @@ use twigo_kube::client::Clients;
 use twigo_policy::friction::Risk;
 
 use super::cordon::{node, patch};
-use super::{STRATEGIC_MERGE_PATCH, Target, attributes, clients_for, counted, get, write};
+use super::{STRATEGIC_MERGE_PATCH, Target, attributes, clients_for, counted, get, same, write};
 use crate::Core;
 use crate::bus::{Finished, Planned, Progress};
 
@@ -65,7 +65,10 @@ pub(crate) async fn drain(core: &Core, space: &str, name: String) -> Result<Plan
         .clients(&target.context)
         .await
         .map_err(|error| IpcError::from(&error))?;
-    get(&clients, &target.path).await?;
+    let uid = get(&clients, &target.path).await?["metadata"]["uid"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
     let pods = sorted(&clients, &target.name).await?;
     let pick = |wanted: &dyn Fn(Fate) -> bool| -> Vec<ObjectRef> {
         pods.iter()
@@ -178,6 +181,7 @@ pub(crate) async fn drain(core: &Core, space: &str, name: String) -> Result<Plan
         core: core.this.clone(),
         connection,
         target,
+        uid,
         forced: forced_uids,
     };
     Ok(Planned {
@@ -343,6 +347,8 @@ struct Run {
     core: Weak<Core>,
     connection: Option<u64>,
     target: Target,
+    /// The node its plan read.
+    uid: String,
     /// The uids of the pods its plan listed as gone for good, so the run
     /// takes no other: one that came since, the person never saw.
     forced: HashSet<String>,
@@ -360,6 +366,7 @@ impl Run {
         )
         .await?;
         let node = get(&clients, &target.path).await?;
+        same(&node, &self.uid, &format!("node {name}"), "drained nothing")?;
         if node["spec"]["unschedulable"] != true {
             clients
                 .api

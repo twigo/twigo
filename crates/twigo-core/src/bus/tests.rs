@@ -760,6 +760,12 @@ async fn a_custom_resource_that_left_its_replicas_unset_is_scaled_without_an_und
         replicas: 3,
     };
     let plan = core.command_plan("main", request).await.unwrap();
+    assert_eq!(plan.friction, Friction::Confirm);
+    assert!(!plan.destructive);
+    assert_eq!(
+        plan.consequences,
+        ["Twigo cannot tell its replicas at 0 from replicas left unset, so it offers no undo."]
+    );
     assert_eq!(
         ran(&core, plan.id).await,
         [OperationEvent::Done {
