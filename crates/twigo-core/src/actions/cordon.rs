@@ -15,7 +15,7 @@ use twigo_ipc::{ErrorKind, IpcError};
 use twigo_policy::friction::Risk;
 
 use super::undo::{Asks, Revert, Unchanged};
-use super::{ATTEMPTS, STRATEGIC_MERGE_PATCH, Target, clients_for, get, patch_as_of, same};
+use super::{ATTEMPTS, STRATEGIC_MERGE_PATCH, Target, clients_for, get, lost, patch_as_of, same};
 use crate::Core;
 use crate::bus::{Finished, Planned};
 
@@ -157,7 +157,7 @@ async fn send(
     let (_, clients) = clients_for(&core, &target.context, connection, "changed nothing").await?;
     let name = target.name.clone();
     let mut answer = None;
-    for _ in 0..ATTEMPTS {
+    for attempt in 0..ATTEMPTS {
         let node = get(&clients, &target.path).await?;
         same(&node, &uid, &format!("node {name}"), "changed nothing")?;
         if is(&node, unschedulable) {
@@ -168,6 +168,7 @@ async fn send(
         if answer.is_some() {
             break;
         }
+        lost(attempt).await;
     }
     let Some(written) = answer else {
         return Err(IpcError::new(
@@ -189,6 +190,7 @@ async fn send(
         patch: patch(!unschedulable),
         uid: uid.to_owned(),
         asks: Asks::Nothing,
+        said: Vec::new(),
         unchanged: Unchanged::Flag {
             pointer: "/spec/unschedulable",
             set: unschedulable,

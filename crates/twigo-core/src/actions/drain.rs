@@ -48,7 +48,7 @@ enum Fate {
     },
 }
 
-/// What the plan took, so the run takes no more.
+/// The flags kubectl needs for what the plan took.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct Flags {
     /// `--force`: pods no controller replaces.
@@ -169,11 +169,16 @@ pub(crate) async fn drain(core: &Core, space: &str, name: String) -> Result<Plan
     let name = target.name.clone();
     let context = target.context.clone();
     let connection = clients.connection();
+    let forced_uids = pods
+        .iter()
+        .filter(|(_, fate)| matches!(fate, Fate::Force { .. }))
+        .filter_map(|(pod, _)| pod.metadata.uid.clone())
+        .collect();
     let run = Run {
         core: core.this.clone(),
         connection,
         target,
-        flags,
+        forced: forced_uids,
     };
     Ok(Planned {
         question: format!("Drain node {name} on {context}?"),
@@ -338,7 +343,9 @@ struct Run {
     core: Weak<Core>,
     connection: Option<u64>,
     target: Target,
-    flags: Flags,
+    /// The uids of the pods its plan listed as gone for good, so the run
+    /// takes no other: one that came since, the person never saw.
+    forced: HashSet<String>,
 }
 
 impl Run {
@@ -376,12 +383,13 @@ impl Run {
             .map_err(|error| stays(error.message))?;
         let refused: Vec<String> = pods
             .iter()
-            .filter(|(_, fate)| match fate {
-                Fate::Force {
-                    unmanaged,
-                    empty_dir,
-                } => (*unmanaged && !self.flags.unmanaged) || (*empty_dir && !self.flags.empty_dir),
-                _ => false,
+            .filter(|(pod, fate)| {
+                matches!(fate, Fate::Force { .. })
+                    && !pod
+                        .metadata
+                        .uid
+                        .as_ref()
+                        .is_some_and(|uid| self.forced.contains(uid))
             })
             .map(|(pod, _)| pod_name(pod))
             .collect();

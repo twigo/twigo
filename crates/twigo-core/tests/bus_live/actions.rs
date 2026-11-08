@@ -115,6 +115,8 @@ async fn uids(pods: &Api<Pod>, app: &str) -> std::collections::BTreeMap<String, 
         .collect()
 }
 
+const RESUMED: &str = "Its schedule starts jobs again, and the latest run it missed while suspended starts at once, unless its starting deadline has passed.";
+
 fn done(told: &[OperationEvent]) -> (&str, Option<i64>) {
     match told.last() {
         Some(OperationEvent::Done { text, undo_until }) => (text, *undo_until),
@@ -422,6 +424,41 @@ async fn cordon_and_uncordon_run_at_once_and_their_undo_holds_to_the_field() {
 
     let uncordon = plan(&core, cordon(false)).await.unwrap_err();
     assert_eq!(uncordon.kind, ErrorKind::InvalidInput);
+
+    let ghost = "twigo-ghost";
+    let gone = || async {
+        if nodes.get_opt(ghost).await.unwrap().is_some() {
+            nodes
+                .delete(ghost, &kube::api::DeleteParams::default())
+                .await
+                .unwrap();
+        }
+        eventually("the node goes", || async {
+            nodes.get_opt(ghost).await.unwrap().is_none()
+        })
+        .await;
+    };
+    gone().await;
+    create(&nodes, json!({ "metadata": { "name": ghost } })).await;
+    let planned = plan(
+        &core,
+        PlanRequest::Cordon {
+            space: context.clone(),
+            node: ghost.to_owned(),
+            unschedulable: true,
+        },
+    )
+    .await
+    .unwrap();
+    gone().await;
+    create(&nodes, json!({ "metadata": { "name": ghost } })).await;
+    let told = run(&core, &planned, None).await.unwrap();
+    assert_eq!(
+        failed(&told).message,
+        format!("Node {ghost} was replaced since Twigo asked, so it changed nothing")
+    );
+    assert!(!cordoned(&nodes, ghost).await);
+    gone().await;
 }
 
 #[tokio::test]
@@ -712,9 +749,16 @@ async fn suspend_and_resume_run_at_once_and_their_undo_holds_to_the_generation()
     )
     .await;
     let refused = plan(&core, undo(&cluster)).await.unwrap();
+    assert_eq!(refused.consequences, [RESUMED]);
     let told = run(&core, &refused, None).await.unwrap();
     assert_eq!(failed(&told).kind, ErrorKind::Conflict);
     assert!(cronjob_suspended().await);
+    let resume = plan(&core, suspend("cronjobs", "nightly", false))
+        .await
+        .unwrap();
+    assert_eq!(resume.friction, Friction::AtOnce);
+    assert_eq!(resume.consequences, [RESUMED]);
+    core.command_cancel("main", resume.id);
 
     create(&cronjobs, cronjob("again", false)).await;
     run(
@@ -813,6 +857,25 @@ async fn suspend_and_resume_run_at_once_and_their_undo_holds_to_the_generation()
     merge(&cronjobs, "late", json!({ "spec": { "suspend": true } })).await;
     let told = run(&core, &late, None).await.unwrap();
     assert_eq!(done(&told), ("Cron job late is suspended already", None));
+
+    create(&cronjobs, cronjob("renewed", false)).await;
+    let planned = plan(&core, suspend("cronjobs", "renewed", true))
+        .await
+        .unwrap();
+    cronjobs
+        .delete("renewed", &kube::api::DeleteParams::default())
+        .await
+        .unwrap();
+    eventually("the cron job goes", || async {
+        cronjobs.get_opt("renewed").await.unwrap().is_none()
+    })
+    .await;
+    create(&cronjobs, cronjob("renewed", false)).await;
+    let told = run(&core, &planned, None).await.unwrap();
+    assert_eq!(
+        failed(&told).message,
+        "Cron job renewed was replaced since Twigo asked, so it changed nothing"
+    );
     cluster.delete(&namespace).await;
 }
 
@@ -1266,6 +1329,25 @@ async fn a_drain_that_meets_pods_kubectl_refuses_asks_for_the_node_s_name_and_ta
     );
     let refused = run(&core, &planned, Some(context)).await.unwrap_err();
     assert_eq!(refused.kind, ErrorKind::InvalidInput);
+    let planned = plan(&core, drain(forced)).await.unwrap();
+    create(
+        &pods,
+        json!({
+            "metadata": { "name": "late", "labels": { "app": "late" } },
+            "spec": { "nodeName": forced, "containers": [{ "name": "app", "image": "fake" }] },
+        }),
+    )
+    .await;
+    pods_of(&pods, "late", 1).await;
+    let told = run(&core, &planned, Some(forced)).await.unwrap();
+    assert_eq!(
+        failed(&told).message,
+        format!(
+            "Node {forced} stays cordoned: 1 pod came that the plan did not take: {namespace}/late"
+        )
+    );
+    assert!(pods.get_opt("lonely").await.unwrap().is_some());
+    assert!(pods.get_opt("late").await.unwrap().is_some());
     let planned = plan(&core, drain(forced)).await.unwrap();
     let told = run(&core, &planned, Some(forced)).await.unwrap();
     assert_eq!(done(&told).0, format!("Drained node {forced}"));

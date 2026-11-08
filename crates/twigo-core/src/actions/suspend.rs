@@ -17,7 +17,7 @@ use twigo_policy::friction::Risk;
 
 use super::undo::{Asks, Revert, Unchanged};
 use super::{
-    ATTEMPTS, MERGE_PATCH, Target, clients_for, get, kind_words, patch_as_of, same, sentence,
+    ATTEMPTS, MERGE_PATCH, Target, clients_for, get, kind_words, lost, patch_as_of, same, sentence,
 };
 use crate::Core;
 use crate::bus::{Finished, Planned};
@@ -69,11 +69,7 @@ pub(crate) async fn suspend(
             ],
             Vec::new(),
         ),
-        (true, false) => (
-            Risk::Reversible,
-            vec!["Its schedule starts jobs again.".to_owned()],
-            Vec::new(),
-        ),
+        (true, false) => (Risk::Reversible, vec![RESUMED.to_owned()], Vec::new()),
     };
     let words = Words::of(suspend);
     let kubectl = line(&target, suspend)?;
@@ -109,6 +105,12 @@ pub(crate) async fn suspend(
         run: Box::new(move |_| Box::pin(run.run())),
     })
 }
+
+/// What a CronJob's resume does: its controller takes the latest schedule
+/// time since its last, and starts a Job for it at once unless its
+/// `startingDeadlineSeconds` passed (kubernetes v1.37.1,
+/// `pkg/controller/cronjob/utils.go`, `mostRecentScheduleTime`).
+const RESUMED: &str = "Its schedule starts jobs again, and the latest run it missed while suspended starts at once, unless its starting deadline has passed.";
 
 /// Whether `object` is suspended, or not, as `suspend` says.
 fn is(object: &Value, suspend: bool) -> bool {
@@ -312,7 +314,7 @@ impl Run {
         let what = &self.what;
         let patch = json!({ "spec": { "suspend": self.suspend } });
         let mut answer = None;
-        for _ in 0..ATTEMPTS {
+        for attempt in 0..ATTEMPTS {
             let object = get(&clients, &target.path).await?;
             same(&object, &self.uid, what, "changed nothing")?;
             if is(&object, self.suspend) {
@@ -325,6 +327,7 @@ impl Run {
             if answer.is_some() {
                 break;
             }
+            lost(attempt).await;
         }
         let Some(written) = answer else {
             return Err(IpcError::new(
@@ -349,6 +352,11 @@ impl Run {
             patch: json!({ "spec": { "suspend": !self.suspend } }),
             uid: uid.to_owned(),
             unchanged: Unchanged::Generation(generation),
+            said: if self.suspend && target.resource.resource == "cronjobs" {
+                vec![RESUMED.to_owned()]
+            } else {
+                Vec::new()
+            },
             asks: if self.suspend || target.resource.resource != "jobs" {
                 Asks::Nothing
             } else {

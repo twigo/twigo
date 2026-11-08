@@ -143,6 +143,15 @@ pub(crate) async fn get(clients: &Clients, path: &str) -> Result<Value, IpcError
         .map_err(|error| twigo_kube::errors::request(&error))
 }
 
+/// Waits after the try `attempt` of a write that lost to another, longer
+/// each time, so a busy object's status settles before the next; nothing
+/// after the last.
+pub(crate) async fn lost(attempt: usize) {
+    if attempt + 1 < ATTEMPTS {
+        tokio::time::sleep(std::time::Duration::from_millis(50 << attempt)).await;
+    }
+}
+
 /// Sends `patch` to `path` as of `read`, the object just read: with its
 /// resourceVersion, so a write in between makes it fail with a `409`
 /// instead of being lost to it. `None` on that `409`.

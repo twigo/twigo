@@ -18,7 +18,7 @@ use twigo_policy::friction::Risk;
 use super::dependents::{Deleted, dependents};
 use super::undo::{Asks, Revert, Unchanged};
 use super::{
-    ATTEMPTS, MERGE_PATCH, Target, clients_for, get, kind_words, patch_as_of, same, sentence,
+    ATTEMPTS, MERGE_PATCH, Target, clients_for, get, kind_words, lost, patch_as_of, same, sentence,
 };
 use crate::Core;
 use crate::bus::{Finished, Planned};
@@ -41,14 +41,14 @@ pub(crate) async fn scale(
     let current = get(&clients, &target.subpath(Some("scale"))).await?;
     let kind = kind_words(object["kind"].as_str().unwrap_or(&target.resource.resource));
     let what = format!("{kind} {}", target.name);
-    // autoscaling/v1 omits replicas at zero.
-    if current["spec"]["replicas"].as_u64().unwrap_or(0) == u64::from(replicas) {
+    let known = count(&target, &current);
+    if known == Some(u64::from(replicas)) {
         return Err(IpcError::new(
             ErrorKind::InvalidInput,
             format!("{} has {replicas} replicas already", sentence(&what)),
         ));
     }
-    let from = current["spec"]["replicas"].as_u64().unwrap_or(0);
+    let from = known.unwrap_or(0);
     let (risk, consequences, affected) =
         shrinking(&clients, &target, &object, from, replicas.into()).await;
     let kind_name = target.resource.name();
@@ -95,6 +95,18 @@ pub(crate) async fn scale(
         risk,
         run: Box::new(move |_| Box::pin(run.run())),
     })
+}
+
+/// The replicas a Scale says, none when a custom resource leaves them
+/// unset: autoscaling/v1 omits them at zero, and a custom resource's Scale
+/// answers an unset field so too (apiextensions-apiserver v0.37.1,
+/// `scaleFromCustomResource`), which its controller may default to more.
+fn count(target: &Target, scale: &serde_json::Value) -> Option<u64> {
+    match scale["spec"]["replicas"].as_u64() {
+        Some(count) => Some(count),
+        None if matches!(target.resource.group.as_str(), "" | "apps") => Some(0),
+        None => None,
+    }
 }
 
 /// What setting `target`'s replicas from `from` to `to` risks, and what goes
@@ -287,14 +299,15 @@ impl Run {
         let (from, to) = (self.from, u64::from(self.replicas));
         let patch = json!({ "spec": { "replicas": to } });
         let mut written = None;
-        for _ in 0..ATTEMPTS {
+        for attempt in 0..ATTEMPTS {
             // The scale carries the object's resourceVersion but not its
             // generation, so the write goes as of the object's read.
             let object = get(&clients, &target.path).await?;
             same(&object, &self.uid, what, "scaled nothing")?;
             let current = get(&clients, &scale).await?;
-            let now = current["spec"]["replicas"].as_u64().unwrap_or(0);
-            if now == to {
+            let known = count(target, &current);
+            let now = known.unwrap_or(0);
+            if known == Some(to) {
                 return Ok(Finished::Done(format!(
                     "{} has {to} replicas already",
                     sentence(what)
@@ -316,6 +329,7 @@ impl Run {
                 written = Some((object, current));
                 break;
             }
+            lost(attempt).await;
         }
         let Some((object, current)) = written else {
             return Err(IpcError::new(
@@ -324,11 +338,8 @@ impl Run {
             ));
         };
         let done = format!("Scaled {what} to {}", self.replicas);
-        // A custom resource may leave its replicas unset, which its Scale
-        // answers as none (apiextensions-apiserver v0.37.1,
-        // `scaleFromCustomResource`) and an undo could not put back.
-        let builtin = matches!(target.resource.group.as_str(), "" | "apps");
-        if !builtin && current["spec"]["replicas"].is_null() {
+        // Replicas left unset no undo could put back.
+        if count(target, &current).is_none() {
             return Ok(Finished::Done(done));
         }
         // A change of its replicas moves its generation by one.
@@ -361,6 +372,7 @@ impl Run {
             uid: uid.to_owned(),
             unchanged: Unchanged::Generation(generation),
             asks: Asks::Scale(from),
+            said: Vec::new(),
             what: what.clone(),
             past: "scaled",
             question: format!("Scale {what}{place} back to {from} on {context}?"),

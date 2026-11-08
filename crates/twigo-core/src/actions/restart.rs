@@ -16,7 +16,7 @@ use twigo_policy::friction::Risk;
 
 use super::dependents::{Deleted, dependents};
 use super::{
-    ATTEMPTS, STRATEGIC_MERGE_PATCH, Target, clients_for, get, kind_words, patch_as_of, same,
+    ATTEMPTS, STRATEGIC_MERGE_PATCH, Target, clients_for, get, kind_words, lost, patch_as_of, same,
     sentence,
 };
 use crate::Core;
@@ -173,7 +173,7 @@ async fn send(
     let patch = json!({
         "spec": { "template": { "metadata": { "annotations": { RESTARTED_AT: now } } } }
     });
-    for _ in 0..ATTEMPTS {
+    for attempt in 0..ATTEMPTS {
         let object = get(&clients, &target.path).await?;
         same(&object, &uid, &what, "restarted nothing")?;
         if patch_as_of(
@@ -188,6 +188,7 @@ async fn send(
         {
             return Ok(Finished::Done(done));
         }
+        lost(attempt).await;
     }
     Err(IpcError::new(
         ErrorKind::Conflict,

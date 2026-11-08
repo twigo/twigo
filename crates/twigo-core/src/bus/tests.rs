@@ -755,7 +755,7 @@ async fn a_custom_resource_that_left_its_replicas_unset_is_scaled_without_an_und
     let dir = tempfile::tempdir().unwrap();
     let (core, space) = scripted_core(&server, dir.path()).await;
     let request = twigo_ipc::PlanRequest::Scale {
-        space,
+        space: space.clone(),
         target: object("example.com", "widgets", "w"),
         replicas: 3,
     };
@@ -764,6 +764,20 @@ async fn a_custom_resource_that_left_its_replicas_unset_is_scaled_without_an_und
         ran(&core, plan.id).await,
         [OperationEvent::Done {
             text: "Scaled widget w to 3".to_owned(),
+            undo_until: None,
+        }]
+    );
+    let request = twigo_ipc::PlanRequest::Scale {
+        space,
+        target: object("example.com", "widgets", "w"),
+        replicas: 0,
+    };
+    let plan = core.command_plan("main", request).await.unwrap();
+    assert_eq!(plan.friction, Friction::Confirm);
+    assert_eq!(
+        ran(&core, plan.id).await,
+        [OperationEvent::Done {
+            text: "Scaled widget w to 0".to_owned(),
             undo_until: None,
         }]
     );

@@ -18,7 +18,7 @@ use tokio::time::Instant;
 use twigo_ipc::{ErrorKind, IpcError};
 use twigo_policy::friction::Risk;
 
-use super::{ATTEMPTS, Target, clients_for, get, patch_as_of, sentence};
+use super::{ATTEMPTS, Target, clients_for, get, lost, patch_as_of, sentence};
 use crate::Core;
 use crate::bus::{Finished, Planned};
 
@@ -77,6 +77,8 @@ pub(crate) struct Revert {
     pub uid: String,
     pub unchanged: Unchanged,
     pub asks: Asks,
+    /// What its plan says when it asks nothing.
+    pub said: Vec<String>,
     /// `deployment web`.
     pub what: String,
     /// What the action did, as `changed since you … it` reads: `scaled`.
@@ -192,7 +194,7 @@ pub(crate) async fn undo(core: &Core, space: &str) -> Result<Planned, IpcError> 
     })?;
     let attributes = revert.target.attributes(Method::PATCH, revert.subresource);
     let (risk, consequences, affected) = match revert.asks {
-        Asks::Nothing => (Risk::Reversible, Vec::new(), Vec::new()),
+        Asks::Nothing => (Risk::Reversible, revert.said.clone(), Vec::new()),
         asks => {
             let target = &revert.target;
             core.authorize(&target.context, std::slice::from_ref(&attributes))?;
@@ -285,7 +287,7 @@ async fn run(
     let (_, clients) = clients_for(&core, context, connection, "put nothing back").await?;
     let (what, past) = (sentence(&revert.what), revert.past);
     let left = |why: String| IpcError::new(ErrorKind::Conflict, format!("{why}, so Twigo left it"));
-    for _ in 0..ATTEMPTS {
+    for attempt in 0..ATTEMPTS {
         let object = get(&clients, &revert.target.path).await?;
         if object["metadata"]["uid"].as_str() != Some(revert.uid.as_str()) {
             return Err(left(format!("{what} was replaced since you {past} it")));
@@ -303,6 +305,7 @@ async fn run(
         {
             return Ok(Finished::Done(revert.done.clone()));
         }
+        lost(attempt).await;
     }
     Err(left(format!("{what} kept changing")))
 }
@@ -329,6 +332,7 @@ mod tests {
             patch: json!({ "spec": { "unschedulable": null } }),
             uid: "u-1".to_owned(),
             asks: super::Asks::Nothing,
+            said: Vec::new(),
             unchanged: Unchanged::Flag {
                 pointer: "/spec/unschedulable",
                 set: true,
