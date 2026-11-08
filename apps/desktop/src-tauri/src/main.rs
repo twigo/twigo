@@ -20,7 +20,7 @@ use twigo_env::Environment;
 use twigo_ipc::{
     AccessQuery, Ack, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ErrorKind,
     ExecReview, Execute, GetValues, IpcError, KeyboardLayout, ListBatch, ListQuery, LogBatch,
-    ObjectBatch, OpenLogs, OpenObject, OperationEvent, Plan, PlanId, PlanRequest,
+    ObjectBatch, OpenLogs, OpenObject, OperationEvent, Plan, PlanId, PlanRequest, SchemaQuery,
     SetContextEnvironment, SetContextMode, SetLogSource, SetLogView, SetLogWindow, SetParts,
     SetWindow, ShellEnvironment, Space, StateEntry, StateSnapshot, SubscriptionId,
 };
@@ -415,6 +415,11 @@ fn object_close(
 }
 
 #[tauri::command]
+async fn schema_get(app: State<'_, App>, request: SchemaQuery) -> Result<String, IpcError> {
+    app.core.schema(request).await
+}
+
+#[tauri::command]
 async fn logs_open(
     webview: Webview,
     app: State<'_, App>,
@@ -665,6 +670,7 @@ fn main() {
             object_ack,
             object_values,
             object_close,
+            schema_get,
             logs_open,
             logs_set_source,
             logs_set_view,

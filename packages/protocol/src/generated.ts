@@ -983,6 +983,15 @@ counts: Array<ValueCount>, };
  */
 export type RowId = string;
 
+/**
+ * Names a kind of the cluster a space reaches.
+ */
+export type SchemaQuery = { space: string, 
+/**
+ * Empty for the core group.
+ */
+group: string, version: string, kind: string, };
+
 export type Section = { 
 /**
  * Stable, such as `core.metadata`; folding is kept by it.
@@ -1153,6 +1162,7 @@ export type Commands = {
   object_ack: { request: Ack; response: null; message: null };
   object_values: { request: GetValues; response: Array<string | null>; message: null };
   object_close: { request: SubscriptionId; response: null; message: null };
+  schema_get: { request: SchemaQuery; response: string; message: null };
   logs_open: { request: OpenLogs; response: SubscriptionId; message: LogBatch };
   logs_set_source: { request: SetLogSource; response: null; message: null };
   logs_set_view: { request: SetLogView; response: null; message: null };

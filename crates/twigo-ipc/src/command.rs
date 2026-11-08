@@ -7,9 +7,9 @@ use ts_rs::TS;
 use crate::{
     AccessQuery, Ack, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ExecReview,
     Execute, GetValues, KeyboardLayout, ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs,
-    OpenObject, OperationEvent, Plan, PlanId, PlanRequest, SetContextEnvironment, SetContextMode,
-    SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellEnvironment, Space,
-    StateEntry, StateSnapshot, SubscriptionId,
+    OpenObject, OperationEvent, Plan, PlanId, PlanRequest, SchemaQuery, SetContextEnvironment,
+    SetContextMode, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellEnvironment,
+    Space, StateEntry, StateSnapshot, SubscriptionId,
 };
 
 pub trait Command {
@@ -261,6 +261,19 @@ impl Command for ObjectClose {
     const NAME: &'static str = "object_close";
     type Request = SubscriptionId;
     type Response = ();
+    type Message = ();
+}
+
+/// The JSON Schema (draft-07) of a kind, as the JSON text that monaco-yaml
+/// takes, from the OpenAPI document of its group/version in the space's
+/// cluster (ARCHITECTURE 3.6): fetched when first asked for and kept on disk,
+/// never in memory.
+pub struct SchemaGet;
+
+impl Command for SchemaGet {
+    const NAME: &'static str = "schema_get";
+    type Request = SchemaQuery;
+    type Response = String;
     type Message = ();
 }
 

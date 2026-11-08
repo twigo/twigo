@@ -28,6 +28,7 @@ import { KINDS, wireRow, type MockKind, type MockRow } from "./kinds";
 import { CLUSTER_STREAMS } from "../logs";
 import { MockLogs } from "./logs";
 import { MockObject } from "./objects";
+import { recordedSchema } from "./schemas";
 import {
   CONTEXTS,
   FORBIDDEN,
@@ -286,6 +287,17 @@ export function createMockBackend(
         throw new IpcError("forbidden", "you may not list namespaces");
       }
       return [...NAMESPACES].sort();
+    },
+    schema_get: ({ space: id, group, version, kind }) => {
+      space(id);
+      const schema = recordedSchema(group, version, kind);
+      if (schema === undefined) {
+        throw new IpcError(
+          "notFound",
+          `the cluster's OpenAPI for ${group}/${version} has no kind ${kind}`,
+        );
+      }
+      return schema;
     },
     shell_environment_retry: () => {
       if (environment.state !== "failed") return null;

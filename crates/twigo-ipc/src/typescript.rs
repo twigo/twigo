@@ -10,7 +10,7 @@ use crate::command::{
     ContextSignInCancel, ContextUnlock, ContextsWatch, ExecReviewGet, ExecTrust,
     KeyboardLayoutWatch, ListAck, ListSetWindow, ListSubscribe, ListUnsubscribe, LogsAck,
     LogsClose, LogsDownload, LogsOpen, LogsSetSource, LogsSetView, LogsSetWindow, NamespacesList,
-    ObjectAck, ObjectClose, ObjectOpen, ObjectSetParts, ObjectValues, ResourcesWatch,
+    ObjectAck, ObjectClose, ObjectOpen, ObjectSetParts, ObjectValues, ResourcesWatch, SchemaGet,
     ShellEnvironmentRetry, ShellEnvironmentWatch, SpaceOpen, SpacesList, StateLoad, StateSet,
     UrlOpen,
 };
@@ -47,6 +47,7 @@ pub fn typescript() -> String {
     module.command::<ObjectAck>();
     module.command::<ObjectValues>();
     module.command::<ObjectClose>();
+    module.command::<SchemaGet>();
     module.command::<LogsOpen>();
     module.command::<LogsSetSource>();
     module.command::<LogsSetView>();

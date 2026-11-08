@@ -12,6 +12,7 @@ mod keyboard;
 mod list;
 mod logs;
 mod object;
+mod schema;
 mod space;
 mod state;
 mod typescript;
@@ -44,6 +45,7 @@ pub use object::{
     ObjectQuery, ObjectRef, OpenObject, Overview, Related, RelatedObject, Section, SetParts, Span,
     Tone, TreeNode, TreeValue, Value,
 };
+pub use schema::SchemaQuery;
 pub use space::{Context, ContextColor, Space};
 pub use state::{StateEntry, StateSnapshot};
 pub use typescript::typescript;

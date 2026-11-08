@@ -29,6 +29,7 @@ fn main() {
         "object_ack",
         "object_values",
         "object_close",
+        "schema_get",
         "logs_open",
         "logs_set_source",
         "logs_set_view",

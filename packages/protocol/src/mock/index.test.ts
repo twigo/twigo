@@ -818,6 +818,51 @@ test("opening an unknown context fails with notFound", async () => {
   expect(await failed).toMatchObject({ kind: "notFound" });
 });
 
+test("a schema comes recorded for a few kinds and is not found for the others", async () => {
+  const backend = createMockBackend();
+  const schemaOf = async (group: string, version: string, kind: string) =>
+    JSON.parse(
+      await call(
+        backend.invoke("schema_get", {
+          space: "prod-eu",
+          group,
+          version,
+          kind,
+        }),
+      ),
+    ) as {
+      $schema: string;
+      properties: { apiVersion: { enum: string[] }; kind: { enum: string[] } };
+      definitions: Record<string, unknown>;
+    };
+
+  for (const [group, version, kind, apiVersion] of [
+    ["apps", "v1", "Deployment", "apps/v1"],
+    ["", "v1", "Pod", "v1"],
+    ["", "v1", "ConfigMap", "v1"],
+    ["kwok.x-k8s.io", "v1alpha1", "Stage", "kwok.x-k8s.io/v1alpha1"],
+  ] as const) {
+    const schema = await schemaOf(group, version, kind);
+    expect(schema.$schema).toBe("http://json-schema.org/draft-07/schema#");
+    expect(schema.properties.apiVersion.enum).toEqual([apiVersion]);
+    expect(schema.properties.kind.enum).toEqual([kind]);
+    expect(
+      schema.definitions["io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta"],
+    ).toBeDefined();
+  }
+
+  for (const request of [
+    { space: "prod-eu", group: "apps", version: "v1", kind: "Nothing" },
+    { space: "nowhere", group: "apps", version: "v1", kind: "Deployment" },
+  ]) {
+    const failed = backend
+      .invoke("schema_get", request)
+      .catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await failed).toMatchObject({ kind: "notFound" });
+  }
+});
+
 test("state loads what was stored, all of a set or none", async () => {
   const backend = createMockBackend();
   expect(await call(backend.invoke("state_load", null))).toEqual({
