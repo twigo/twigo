@@ -14,6 +14,11 @@ export default defineConfig(({ mode }) => ({
         "monaco-editor/editor/editor.worker",
     },
   },
+  optimizeDeps: {
+    // monaco-yaml's worker imports it, and the dev server serves a worker's
+    // imports as they are, so its CommonJS would not run there.
+    include: ["@twigo/kube > monaco-yaml > path-browserify"],
+  },
   clearScreen: false,
   // `vite build --mode bench` builds bench/index.html, the app with the
   // bench's driver, for bench/harness.sh; tauri.bench.conf.json points there.
