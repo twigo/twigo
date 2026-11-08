@@ -12,10 +12,11 @@ import { objectUri, parseObjectUri } from "../uri";
 
 /**
  * The objects "Compare with…" offers for the object of `uri`, as it asks for
- * the rows of each value typed: those of its kind in the space whose name
- * holds the text, which Rust filters as the live upstream serves them, so an
- * object past the first rows is found by typing its name, then the objects
- * the space opened lately, of any kind.
+ * the rows of each value typed: those of its kind in the space, in every
+ * namespace and not the ones selected for the lists, whose name holds the
+ * text, which Rust filters as the live upstream serves them, so an object past
+ * the first rows is found by typing its name, then the objects the space
+ * opened lately, of any kind.
  */
 export function comparisons(
   workbench: Workbench,
@@ -25,14 +26,14 @@ export function comparisons(
   return async (filter) => {
     const object = parseObjectUri(uri);
     if (!object) return [];
-    const { spaces, backend, recent } = workbench;
+    const { backend, recent } = workbench;
     const text = filter.trim();
     const snapshot = await firstRows(
       new ListView(backend, {
         space: object.space,
         gvr: object.gvr,
         namespaced,
-        namespaces: [...spaces.state(object.space).namespaces],
+        namespaces: [],
         labelSelector: null,
         fieldSelector: null,
         owners: null,

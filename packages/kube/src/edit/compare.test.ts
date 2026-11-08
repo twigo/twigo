@@ -34,3 +34,26 @@ test("what is typed reaches Rust as the list's text, so an object past the first
   expect(payments.every(({ id }) => id.includes("/payments/"))).toBe(true);
   expect(payments[0]?.matches).toEqual([{ start: 0, end: 8 }]);
 });
+
+test("it searches every namespace of the kind, not the ones selected for the lists", async () => {
+  const real = createMockBackend("ready");
+  const asked: unknown[] = [];
+  const backend: Backend = {
+    invoke: (command, request) => real.invoke(command, request),
+    subscribe: (command, request, onMessage) => {
+      if (command === "list_subscribe") {
+        asked.push((request as { namespaces: unknown }).namespaces);
+      }
+      return real.subscribe(command, request, onMessage);
+    },
+  };
+  const workbench = await testWorkbench("ready", backend);
+  workbench.spaces.update("prod-eu", (state) => ({
+    ...state,
+    namespaces: ["default"],
+  }));
+  const found = await comparisons(workbench, URI, true)("payments");
+  expect(asked).toEqual([[]]);
+  expect(found.length).toBeGreaterThan(0);
+  expect(found.every(({ id }) => id.includes("/payments/"))).toBe(true);
+});
