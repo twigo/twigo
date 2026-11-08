@@ -119,9 +119,10 @@ function Unchanged({
       action={<EditActions edits={edits} uri={uri} menus={["edit/answer"]} />}
     >
       {dropped.length > 0
-        ? `Nothing is left to send once ${dropped.join(", ")} ${dropped.length === 1 ? "is" : "are"} out of it. Your YAML still holds your ${dropped.length === 1 ? "value" : "values"}.`
-        : "The YAML says what the object has now."}
-      {ignored.length > 0 && ` Left out: ${ignored.join(", ")}.`}
+        ? `Nothing is left to send once ${dropped.join(", ")} ${dropped.length === 1 ? "is" : "are"} out of it. Your YAML still holds your ${dropped.length === 1 ? "value" : "values"}.${ignored.length > 0 ? ` Left out: ${ignored.join(", ")}.` : ""}`
+        : ignored.length > 0
+          ? `Nothing is left to apply: ${ignored.join(", ")} ${ignored.length === 1 ? "is" : "are"} left out of what is sent. Your YAML still holds ${ignored.length === 1 ? "it" : "them"}.`
+          : "The YAML says what the object has now."}
     </Banner>
   );
 }

@@ -192,9 +192,8 @@ function ObjectsDiff({
   return (
     <div className="flex h-full min-h-0 flex-col bg-editor">
       <Banner tone="info" icon={GitCompare} title={names.join(" and ")}>
-        Both as they are on the server, followed while this is open.
-        {(isSecret(original.manifest) || isSecret(modified.manifest)) &&
-          ` ${SECRET_NOTE}`}
+        {texts &&
+          `Both as they are on the server, followed while this is open.${isSecret(original.manifest) || isSecret(modified.manifest) ? ` ${SECRET_NOTE}` : ""}`}
       </Banner>
       <div className="min-h-0 flex-1">
         {texts ? (

@@ -132,6 +132,7 @@ test("comparing objects says when one cannot be read, and that a Secret's values
     screen.getByText(/auth\/limits: Could not load the object/),
   ).toBeTruthy();
   expect(screen.queryByRole("status")).toBeNull();
+  expect(screen.queryByText(/Both as they are/)).toBeNull();
   cleanup();
 
   await shown(
@@ -143,6 +144,7 @@ test("comparing objects says when one cannot be read, and that a Secret's values
     }),
   );
   expect(await screen.findByTestId("diff")).toBeTruthy();
+  expect(screen.getByText(/Both as they are on the server/)).toBeTruthy();
   expect(
     screen.getByText(
       /values are hidden, as their sizes: values of the same size may still differ/,

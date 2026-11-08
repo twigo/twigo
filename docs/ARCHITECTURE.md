@@ -1603,6 +1603,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
    Under an admin's policy file the lock cannot be lifted, so Apply is not offered and the diff says why in the words of the context's chip; a read-only the person set refuses it as the gate does, and it works after an unlock.
    A `409 FieldManagerConflict` shows a table per field with the owning manager, and offers **Force** or **Drop my change**.
    Giving up every conflicting field can leave nothing to send, and the bar then says that, and that the YAML still holds the change.
+   So can an edit of what the engine leaves out, as `status` is: the bar says that nothing is left to apply, names what was left out, and that the text still holds it.
    The plan takes the preview when it is made, once the gate has allowed it: a cancelled confirmation, a failed run and a stopped one end the preview and close its diff, while a plan the gate refuses, as in `read-only`, leaves it for an Apply after an unlock.
    The edit ends only if its text is still what the plan sent, so what was typed while it ran stays.
    An answer that arrives after the person went to another space, or that a newer preview or a clear replaced, opens no tab; the first stays with its editor, which offers to show it.

@@ -40,7 +40,12 @@ const buttons = () =>
 test("each answer has its own view, with its own choices", async () => {
   await shown("applyUnchanged");
   expect(screen.getByText("Nothing to apply")).toBeTruthy();
-  expect(screen.getByText(/Left out: \.status/)).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Nothing is left to apply: .status is left out of what is sent. Your YAML still holds it.",
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByText(/says what the object has now/)).toBeNull();
   expect(buttons()).toEqual(["Dismiss"]);
   cleanup();
 
@@ -202,6 +207,29 @@ test("giving up every conflicting field says nothing is left to send and that th
   expect(note).toContain(".spec.replicas, .metadata.labels.team are out of it");
   expect(note).toContain("Your YAML still holds your values");
   expect(screen.queryByText(/says what the object has now/)).toBeNull();
+});
+
+test("an unchanged answer that left several fields out says so, and that the text holds them", async () => {
+  const { workbench, edits, uri } = await setupEdit("live");
+  render(
+    <AnswerView
+      edits={edits}
+      uri={uri}
+      answer={{
+        state: "unchanged",
+        ignored: [".status", ".metadata.uid"],
+      }}
+      dropped={[]}
+      space="dev"
+      outdated={false}
+    />,
+    { wrapper: inWorkbench(workbench) },
+  );
+  expect(
+    screen.getByText(
+      "Nothing is left to apply: .status, .metadata.uid are left out of what is sent. Your YAML still holds them.",
+    ),
+  ).toBeTruthy();
 });
 
 test("an unchanged answer with no field given up says the YAML is the object", async () => {
