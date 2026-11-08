@@ -534,8 +534,15 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     The frontend follows the active space again whenever a credential comes after none or after a failed run.
     A run that a rejected credential sets off by itself does not count: against a server that keeps refusing fresh credentials, every view asking again would run the plugin again, forever.
     A fix on the server's side, as a role binding for the identity, and new oidc tokens are seen once the space is followed again, as after switching to another space and back.
-  - OpenAPI v3 documents are fetched lazily on the first edit of a group/version and cached forever under their `?hash=` URL, which is immutable.
-    Rust converts them to JSON Schema for the YAML editor.
+  - OpenAPI v3 documents are fetched on the first edit of a group/version, through the context's `api` client, so the gate sees them.
+    `GET /openapi/v3` lists each group/version with a `serverRelativeURL` whose `?hash=` is the upper-case hex SHA-512 of the JSON the server serves for it ([`computeETag`](https://github.com/kubernetes/kube-openapi/blob/d427ff9ee9ad05f5da435abbb7c5929cb713ac56/pkg/handler3/handler.go#L121-L126)), the aggregated servers' documents included.
+    A document is cached on disk for good under that URL, and used only while its bytes still hash to it, so a cached copy cannot be stale or another cluster's, and a server that answers something else under a hash writes nothing.
+    The module docs of `twigo_kube::openapi` give the source of each step.
+    The index is asked for on every load and never cached, since a CRD's change gives its group a new hash.
+  - Rust keeps a document's `components.schemas` only for the call that needs them.
+    `schema_get` answers the JSON Schema (draft-07) of a kind, with the definitions it reaches under `definitions`, and the apply engine reads from the same schemas how the server merges each field (6.5).
+    A first load of `api/v1` (1,604,476 bytes) took a fresh process from 11,456–11,504 KiB resident to 19,024–19,312 KiB, and one of `apis/apps/v1` (719,385 bytes) from 11,472–11,536 KiB to 16,112–16,224 KiB.
+    The allocator kept it after the document was dropped, and ten more loads of `api/v1` added 1,792 to 1,968 KiB (`cargo run --release -p twigo-kube --example openapi_memory -- v1 Pod`, three runs each, release build, macOS, kind 1.37, 2026-11-08).
 - **Never pre-fetched.**
   Counts for every kind, full lists of CRDs (they can be tens of MB), large ConfigMap values (rendered lazily), metrics for invisible rows.
 
@@ -1516,6 +1523,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
    - Why: a field that a later apply leaves out is removed, or reset to its default, when no other manager owns it.
      Sending only this edit's changes would undo the previous edit: a forced `replicas: 5` would fall back on the next annotation change.
    - Changed items of map-type lists are sent with their keys; atomic lists are sent whole.
+     Which a field is comes from the kind's OpenAPI schema, read as the server converts it (3.6).
    - Applying the whole object would make Twigo a co-owner of every field.
      Fields that a GitOps tool later removes would then stay behind.
 3. Add the opened `resourceVersion` as an optimistic lock.

@@ -22,6 +22,10 @@ Findings that belong to no step yet.
   - A resumed watch reports `ready` on its `200`, before a `410 Gone` in its body turns it to `relisting`, so a view can flash ready for a moment.
   - When a watch reconnects with other column definitions, as a CRD's edited printer columns might bring (not verified that the API server sends them on a re-watch), the rows stored before keep their old cells, which the query view reads by the new columns until each row changes or a relist; the per-namespace upstreams of one list may disagree on columns meanwhile.
   - Listing and storing 5,000 pods by a streaming list allocates 44.2 MiB in all, HTTP/2 reads and body chunks included, to keep 4.0 MiB (`examples/hub_memory.rs`, kind 1.37 with `bench/pods.sh` at 5,000, 2026-11-02); a paged list of the same pods was not measured the same way, and step 11's budgets say whether it matters.
+- OpenAPI documents (`twigo_kube::openapi`, ARCHITECTURE 3.6):
+  - The cache keeps every hash a group/version has had for good, so a CRD that is edited often leaves a file for each edit in the cache directory: nothing evicts them yet.
+  - The server converts a CRD that has `spec.preserveUnknownFields: true` as preserving unknown fields everywhere ([`NewTypeConverter`'s flag](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiextensions-apiserver/pkg/apiserver/customresource_handler.go#L695)); the merge shapes read every schema as if it were false, and not verified whether the document says otherwise.
+  - The first load of a group/version leaves the process 4,576 to 7,808 KiB larger for good (ARCHITECTURE 3.6), against a core RSS budget of 150 MB that the bench's typical runs of 2026-11-07 read 141 to 145 MB of (below); not measured with the editor open under the bench's churn.
 - Open objects (`twigo_core::objects`, ARCHITECTURE 4.3):
   - The Related tab lists the objects that the core controllers own (`twigo_describe::owned`); a custom resource's owned objects need an owner index across kinds.
 - Overviews (`twigo_describe`, ARCHITECTURE 4.3):
