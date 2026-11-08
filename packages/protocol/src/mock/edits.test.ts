@@ -395,6 +395,157 @@ test("a lock the object has moved from answers stale, and the new version Keep m
   expect(kept.state).toBe("ready");
 });
 
+test("an edit locked to a version the object has moved from is stale even after Keep mine", async () => {
+  const backend = await backendOf("live");
+  const object = await opened(backend);
+  const first = object.latest();
+  if (first === undefined) throw new Error("the object did not open");
+  await applyEdit(backend, first, { ...first, data: { changed: "yes" } });
+  const now = object.latest();
+  if (now === undefined) throw new Error("the object did not change");
+
+  const base = edit({ ...now, data: { changed: "mine" } });
+  const kept = await settled(
+    backend.invoke("apply_preview", {
+      ...base,
+      opened: base.opened && {
+        ...base.opened,
+        base: first,
+        lock: first.metadata.resourceVersion,
+        locked: first,
+      },
+    }),
+  );
+  expect(kept).toMatchObject({ state: "stale", keepable: true });
+});
+
+test("an edit of what an apply leaves out is unchanged and says what was left out, as Rust answers it", async () => {
+  const backend = await backendOf("live");
+  const deployment = {
+    apiVersion: "apps/v1",
+    kind: "Deployment",
+    metadata: { name: "web", namespace: "default", resourceVersion: "4" },
+    spec: { replicas: 1 },
+    status: { readyReplicas: 1 },
+  };
+  const request = (edited: unknown, base: unknown = deployment) =>
+    ({
+      space: "qa",
+      opened: {
+        target: {
+          gvr: { group: "apps", version: "v1", resource: "deployments" },
+          namespaced: true,
+          namespace: "default",
+          name: "web",
+        },
+        base,
+        lock: "4",
+      },
+      edited,
+      force: false,
+      drop: [],
+    }) satisfies ApplyRequest;
+  const statusOnly = await settled(
+    backend.invoke(
+      "apply_preview",
+      request({ ...deployment, status: { readyReplicas: 0 } }),
+    ),
+  );
+  expect(statusOnly).toEqual({ state: "unchanged", ignored: [".status"] });
+
+  const serverMetadata = await settled(
+    backend.invoke(
+      "apply_preview",
+      request({
+        ...deployment,
+        spec: { replicas: 1 },
+        metadata: { ...deployment.metadata, resourceVersion: "5", uid: "x" },
+      }),
+    ),
+  );
+  expect(serverMetadata).toEqual({
+    state: "unchanged",
+    ignored: [".metadata.uid", ".metadata.resourceVersion"],
+  });
+
+  const both = await settled(
+    backend.invoke(
+      "apply_preview",
+      request({
+        ...deployment,
+        spec: { replicas: 3 },
+        status: { readyReplicas: 0 },
+      }),
+    ),
+  );
+  expect(both).toMatchObject({ state: "ready", ignored: [".status"] });
+
+  const reordered = await settled(
+    backend.invoke(
+      "apply_preview",
+      request({
+        status: deployment.status,
+        spec: deployment.spec,
+        ...deployment,
+      }),
+    ),
+  );
+  expect(reordered).toEqual({ state: "unchanged", ignored: [] });
+
+  const configMap = await settled(
+    backend.invoke("apply_preview", edit({ ...SETTINGS, status: { a: 1 } })),
+  );
+  expect(configMap.state).toBe("ready");
+});
+
+test("a manifest of an object an apply left shows it as live, and one of an object nothing holds shows none", async () => {
+  const backend = await backendOf("live");
+  const manifest = (data: Record<string, string>) =>
+    ({
+      space: "qa",
+      opened: null,
+      edited: {
+        apiVersion: "v1",
+        kind: "ConfigMap",
+        metadata: { name: "fresh", namespace: "default" },
+        data,
+      },
+      force: false,
+      drop: [],
+    }) satisfies ApplyRequest;
+  const first = await settled(
+    backend.invoke("apply_preview", manifest({ a: "1" })),
+  );
+  if (first.state !== "ready") throw new Error(first.state);
+  expect(first.live).toBeNull();
+
+  const plan = await settled(
+    backend.invoke("command_plan", {
+      action: "apply",
+      space: "qa",
+      preview: first.id,
+    }),
+  );
+  await vi.advanceTimersByTimeAsync(
+    plan.friction.kind === "countdown" ? 6000 : 0,
+  );
+  void backend.subscribe(
+    "command_execute",
+    { plan: plan.id, typed: null },
+    () => undefined,
+  );
+  await vi.advanceTimersByTimeAsync(10);
+
+  const again = await settled(
+    backend.invoke("apply_preview", manifest({ a: "2" })),
+  );
+  expect(again).toMatchObject({
+    state: "ready",
+    live: { data: { a: "1" } },
+    result: { data: { a: "2" } },
+  });
+});
+
 test("a refused edit ends the plans of older previews of its object, and a namespaced kind with no namespace is refused", async () => {
   const backend = await backendOf("live");
   const ready = await settled(backend.invoke("apply_preview", edit()));

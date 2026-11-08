@@ -13,6 +13,7 @@ import type {
   Plan,
   PlanId,
   PlanRequest,
+  Resource,
   ResourceRef,
 } from "../generated";
 import { masked } from "./edits";
@@ -249,6 +250,91 @@ function applyConsequences({ step, job, removals }: Previewed): string[] {
     : [`Then a merge patch removes ${removals.join(", ")}.`];
 }
 
+/** The fields of an object that Rust never sends: `SERVER_METADATA` in `twigo-kube`'s `apply`. */
+const SERVER_METADATA = [
+  "uid",
+  "resourceVersion",
+  "generation",
+  "creationTimestamp",
+  "deletionTimestamp",
+  "deletionGracePeriodSeconds",
+  "selfLink",
+  "managedFields",
+] as const;
+
+type Fields = Record<string, unknown>;
+
+function metadataOf(object: unknown): Fields {
+  const { metadata } = (object ?? {}) as { metadata?: unknown };
+  return typeof metadata === "object" && metadata !== null
+    ? (metadata as Fields)
+    : {};
+}
+
+function omit(object: Fields, names: readonly string[]): Fields {
+  return Object.fromEntries(
+    Object.entries(object).filter(([name]) => !names.includes(name)),
+  );
+}
+
+/** The fields of an object that an apply may carry, as Rust's `editable`. */
+function editable(object: unknown, status: boolean): Fields {
+  return {
+    ...omit((object ?? {}) as Fields, [
+      "apiVersion",
+      "kind",
+      "metadata",
+      ...(status ? ["status"] : []),
+    ]),
+    metadata: omit(metadataOf(object), [
+      "name",
+      "namespace",
+      ...SERVER_METADATA,
+    ]),
+  };
+}
+
+/** What an edit says differently from its object in the fields no apply carries, as Rust's `ignored`; for a manifest, all it says of them. */
+function ignoredBy(base: unknown, edited: unknown, status: boolean): string[] {
+  const differs = (of: (object: unknown) => unknown): boolean =>
+    base === undefined
+      ? of(edited) !== undefined
+      : !isEqual(of(base), of(edited));
+  return [
+    ...(status && differs((object) => (object as Fields).status)
+      ? [".status"]
+      : []),
+    ...SERVER_METADATA.filter((field) =>
+      differs((object) => metadataOf(object)[field]),
+    ).map((field) => `.metadata.${field}`),
+  ];
+}
+
+/** Structural equality of JSON values, whatever the order of their keys. */
+function isEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (
+    typeof a !== "object" ||
+    typeof b !== "object" ||
+    a === null ||
+    b === null
+  )
+    return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((item, index) => isEqual(item, b[index]))
+    );
+  }
+  const left = Object.entries(a);
+  return (
+    left.length === Object.keys(b).length &&
+    left.every(([key, value]) => isEqual(value, (b as Fields)[key]))
+  );
+}
+
 /** An object as a side of the diff, as Rust's `side`: without what would only be noise. */
 function side(value: unknown): unknown {
   if (typeof value !== "object" || value === null) return value;
@@ -283,10 +369,13 @@ export interface BusHost {
   changed(): void;
   /** What `apply_preview` answers to every edit that changes something, unless the edit names an answer. */
   readonly answer: string | undefined;
-  /** The `resourceVersion` of an object that an edit or a change from outside has written, none while it is as recorded. */
-  version(context: string, target: ResourceRef): string | undefined;
-  /** Whether the cluster serves a kind namespaced, none when the mock does not know it. */
-  namespaced(apiVersion: string, kind: string): boolean | undefined;
+  /** The object that an edit or a change from outside has written, none while it is as recorded. */
+  written(
+    context: string,
+    target: ResourceRef,
+  ): Record<string, unknown> | undefined;
+  /** What the cluster serves of a kind, none when the mock does not know it. */
+  resource(apiVersion: string, kind: string): Resource | undefined;
   /** An edit was applied: the object in `context` is `edited` now. */
   applied(
     context: string,
@@ -364,14 +453,17 @@ export class MockBus {
    * (`unchanged`, `conflicts`, `stale`, `lists-moved` for a stale one that
    * Keep mine cannot answer, `immutable`, `recreate`, `removals` for a ready
    * answer with a removal step, or `merge-patch` for one that goes as a
-   * single merge patch); any other edit is ready, an edit equal to its base
-   * unchanged. The choices count as they do in Rust: Force takes the
-   * conflicting fields, so the edit is ready, and giving up every one of
-   * them leaves nothing to send; an edit locked to a version the object has
-   * moved from is stale, and one that Keep mine locked to the new version is
-   * not. An edit that names another object than the one it edits, or a
-   * namespaced kind with no namespace, is refused as Rust refuses it, and
-   * any preview of an object, a refused one too, ends the plans of older ones.
+   * single merge patch); any other edit is ready, an edit that differs from
+   * its base only in what an apply leaves out (`status` where the resource
+   * has the subresource, the server's metadata) unchanged, saying what it
+   * left out. A manifest of an object that an apply left shows it as live.
+   * The choices count as they do in Rust: Force takes the conflicting
+   * fields, so the edit is ready, and giving up every one of them leaves
+   * nothing to send; an edit locked to a version the object has moved from is
+   * stale, Keep mine's lock included. An edit that names another object than
+   * the one it edits, or a namespaced kind with no namespace, is refused as
+   * Rust refuses it, and any preview of an object, a refused one too, ends
+   * the plans of older ones.
    */
   applyPreview(request: ApplyRequest): ApplyPreviewed {
     const { space, opened, edited } = request;
@@ -402,8 +494,15 @@ export class MockBus {
         this.#waiting.delete(id);
       }
     }
+    const served = this.host.resource(
+      object.apiVersion ?? "",
+      object.kind ?? "",
+    );
+    const status = served?.subresources.includes("status") ?? false;
     const same =
-      opened !== null && JSON.stringify(opened.base) === JSON.stringify(edited);
+      opened !== null &&
+      isEqual(editable(opened.base, status), editable(edited, status));
+    const ignored = ignoredBy(opened?.base, edited, status);
     const live = opened?.base as
       { kind?: string; apiVersion?: string } | undefined;
     if (opened && live) {
@@ -431,7 +530,7 @@ export class MockBus {
         );
     } else if (
       object.metadata?.namespace === undefined &&
-      this.host.namespaced(object.apiVersion ?? "", kind) === true
+      served?.namespaced === true
     ) {
       throw new IpcError("invalidInput", `${name} names no namespace`);
     }
@@ -457,13 +556,29 @@ export class MockBus {
       return id;
     };
     if (same && object.metadata?.annotations?.[ANSWER] === undefined) {
-      return { state: "unchanged", ignored: [] };
+      return { state: "unchanged", ignored };
     }
+    const version = opened
+      ? (
+          this.host.written(context, opened.target)?.metadata as
+            { resourceVersion?: unknown } | undefined
+        )?.resourceVersion
+      : undefined;
     const moved =
-      opened !== null &&
-      opened.locked === undefined &&
-      this.host.version(context, opened.target) !== undefined &&
-      this.host.version(context, opened.target) !== opened.lock;
+      opened !== null && typeof version === "string" && version !== opened.lock;
+    const existing =
+      opened === null && served !== undefined && name !== ""
+        ? this.host.written(context, {
+            gvr: served.gvr,
+            namespaced: served.namespaced,
+            namespace: served.namespaced
+              ? (object.metadata?.namespace ?? null)
+              : null,
+            name,
+          })
+        : undefined;
+    const ready = (id: number) =>
+      this.#ready(id, opened?.base ?? existing, edited, ignored);
     const answer =
       object.metadata?.annotations?.[ANSWER] ??
       (moved ? "stale" : same ? undefined : this.host.answer);
@@ -482,16 +597,15 @@ export class MockBus {
         const remaining = CONFLICTS.filter(
           ({ path }) => !request.drop.includes(path),
         );
-        if (request.force)
-          return this.#ready(prepared("apply"), opened, edited);
+        if (request.force) return ready(prepared("apply"));
         if (remaining.length === 0) return { state: "unchanged", ignored: [] };
         return { state: "conflicts", conflicts: remaining };
       }
       case "stale":
         // Keep mine locks to the new version and sends the object at it.
-        return opened?.locked === undefined
+        return opened?.locked === undefined || moved
           ? stale(true)
-          : this.#ready(prepared("apply"), opened, edited);
+          : ready(prepared("apply"));
       case "lists-moved":
         return stale(false);
       case "immutable":
@@ -508,40 +622,37 @@ export class MockBus {
         };
       case "removals":
         return {
-          ...this.#ready(
-            prepared("apply", [".metadata.labels.team"]),
-            opened,
-            edited,
-          ),
+          ...ready(prepared("apply", [".metadata.labels.team"])),
           warnings: ["metadata.annotations: this annotation is deprecated"],
           removals: [".metadata.labels.team"],
           ignored: [".status"],
         };
       case "merge-patch":
         return {
-          ...this.#ready(prepared("mergePatch"), opened, edited),
+          ...ready(prepared("mergePatch")),
           removals: [".spec.strategy.rollingUpdate"],
           strategy: "mergePatch",
         };
       default:
-        return this.#ready(prepared("apply"), opened, edited);
+        return ready(prepared("apply"));
     }
   }
 
-  /** A ready answer: the object as it was against the edit, with nothing to say besides. */
+  /** A ready answer: the object as it was, none for a manifest of a new one, against the edit, with nothing to say besides. */
   #ready(
     id: number,
-    opened: ApplyRequest["opened"],
+    live: unknown,
     edited: unknown,
+    ignored: readonly string[],
   ): Extract<ApplyPreviewed, { state: "ready" }> {
     return {
       state: "ready",
       id,
-      live: side(opened?.base ?? null),
+      live: side(live ?? null),
       result: side(edited),
       warnings: [],
       removals: [],
-      ignored: [],
+      ignored: [...ignored],
       strategy: "serverSideApply",
     };
   }
