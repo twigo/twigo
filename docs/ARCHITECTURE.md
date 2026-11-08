@@ -1495,7 +1495,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     The mockup's third, a 2 px line of its colour along the title bar's top, was dropped on 2026-11-07: the chip, the tint and the bar's left end in the context's colour already say it.
     The chip opens what set the mode, in words, with the choices the person has.
   - Friction grows with the blast radius (Primer), and the mode raises it; Rust names it in a command's plan and checks it before the plan runs (5.1):
-    - scale, cordon and suspend run at once with an undo (⌘Z): for 30 s the space's last action can be put back, refused once anyone else changed the object since.
+    - scale, cordon and suspend run at once with an undo (⌘Z): for 30 s the space's last action, the one that started last, can be put back, refused once anyone else replaced or changed the object since.
       Status moves an object's resourceVersion every second (a scale's went 873 to 888 within 1 s on kind 1.37, 2026-11-08), so the undo holds to its generation instead, or for a node, which has none, to the `spec.unschedulable` it set, and its write carries the resourceVersion it checked;
     - scaling to zero, a rollout restart, a CronJob's trigger and a drain ask in a dialog that lists the pods that go or are replaced; a drain that meets pods kubectl refuses without `--force` or `--delete-emptydir-data` takes them too and asks for the node's name typed, since they and that data go for good;
     - deleting a pod that its ReplicaSet, StatefulSet or DaemonSet replaces, outside production, sends after a 5 s toast with Cancel, as Headlamp holds it, and ⌘Z cancels it too; in production it asks in a dialog, and a Job's or a workflow's pod, which may not come back, asks in one everywhere;

@@ -123,6 +123,18 @@ fn failed(told: &[OperationEvent]) -> &twigo_ipc::IpcError {
 }
 
 fn names(plan: &Plan, title: &str) -> Vec<String> {
+    named(plan, title, |_| true)
+}
+
+/// The names under `title` of the objects in `namespace`, as a node may
+/// hold pods a failed run left in namespaces of its own.
+fn names_in(plan: &Plan, title: &str, namespace: &str) -> Vec<String> {
+    named(plan, title, |object| {
+        object.namespace.as_deref() == Some(namespace)
+    })
+}
+
+fn named(plan: &Plan, title: &str, keep: impl Fn(&twigo_ipc::ObjectRef) -> bool) -> Vec<String> {
     plan.affected
         .iter()
         .find(|affected| affected.title == title)
@@ -130,6 +142,7 @@ fn names(plan: &Plan, title: &str) -> Vec<String> {
             affected
                 .objects
                 .iter()
+                .filter(|object| keep(object))
                 .map(|object| object.name.clone())
                 .collect()
         })
@@ -512,6 +525,29 @@ async fn suspend_and_resume_run_at_once_and_their_undo_holds_to_the_generation()
     assert_eq!(failed(&told).kind, ErrorKind::Conflict);
     assert!(cronjob_suspended().await);
 
+    create(&cronjobs, cronjob("again", false)).await;
+    run(
+        &core,
+        &plan(&core, suspend("cronjobs", "again", true))
+            .await
+            .unwrap(),
+        None,
+    )
+    .await
+    .unwrap();
+    cronjobs
+        .delete("again", &kube::api::DeleteParams::default())
+        .await
+        .unwrap();
+    create(&cronjobs, cronjob("again", false)).await;
+    merge(&cronjobs, "again", json!({ "spec": { "suspend": true } })).await;
+    let refused = plan(&core, undo(&cluster)).await.unwrap();
+    let told = run(&core, &refused, None).await.unwrap();
+    assert_eq!(
+        failed(&told).message,
+        "Cron job again was replaced since you suspended it, so Twigo left it"
+    );
+
     let resume = plan(&core, suspend("jobs", "held", false)).await.unwrap();
     let told = run(&core, &resume, None).await.unwrap();
     assert_eq!(done(&told).0, "Resumed job held");
@@ -675,14 +711,15 @@ async fn a_drain_waits_on_a_budget_then_finishes_and_leaves_daemon_set_pods() {
         planned.kubectl,
         format!("kubectl --context {context} drain {node} --ignore-daemonsets")
     );
-    let evicts = names(&planned, "Evicts");
+    let evicts = names_in(&planned, "Evicts", &namespace);
     for pod in &web {
         assert!(evicts.contains(pod), "{pod} in {evicts:?}");
     }
     assert!(!evicts.contains(&agent[0]), "{evicts:?}");
-    let staying = names(
+    let staying = names_in(
         &planned,
         "Stay, as their daemon sets run them on every node",
+        &namespace,
     );
     assert!(staying.contains(&agent[0]), "{staying:?}");
 
@@ -754,7 +791,9 @@ async fn a_stopped_drain_leaves_the_node_cordoned_and_says_so() {
     assert_eq!(
         last,
         OperationEvent::Stopped {
-            text: format!("Stopped draining node {node}, which stays cordoned; 0 of 1 pod went")
+            text: format!(
+                "Stopped draining node {node}, which stays cordoned; it evicted 0 of 1 pod"
+            )
         }
     );
     assert!(cordoned(&nodes, node).await);
@@ -812,14 +851,15 @@ async fn a_drain_that_meets_pods_kubectl_refuses_asks_for_the_node_s_name_and_ta
         )
     );
     assert_eq!(
-        names(
+        names_in(
             &planned,
-            "Gone for good, with no controller to replace them"
+            "Gone for good, with no controller to replace them",
+            &namespace,
         ),
         ["lonely"]
     );
     assert_eq!(
-        names(&planned, "Their emptyDir data goes with them"),
+        names_in(&planned, "Their emptyDir data goes with them", &namespace),
         scratched
     );
     let refused = run(&core, &planned, Some(context)).await.unwrap_err();
@@ -828,6 +868,35 @@ async fn a_drain_that_meets_pods_kubectl_refuses_asks_for_the_node_s_name_and_ta
     let told = run(&core, &planned, Some(forced)).await.unwrap();
     assert_eq!(done(&told).0, format!("Drained node {forced}"));
     assert!(pods.get_opt("lonely").await.unwrap().is_none());
+
+    uncordon(&nodes, forced).await;
+    let budgets = Api::<PodDisruptionBudget>::namespaced(cluster.admin.clone(), &namespace);
+    create(&deployments, deployment("both", 1, forced)).await;
+    create(&deployments, deployment("free", 1, forced)).await;
+    for name in ["both-a", "both-b"] {
+        let mut twice = budget("both", 0);
+        twice["metadata"]["name"] = json!(name);
+        create(&budgets, twice).await;
+    }
+    let both = pods_of(&pods, "both", 1).await;
+    let free = pods_of(&pods, "free", 1).await;
+    let planned = plan(&core, drain(forced)).await.unwrap();
+    let told = run(&core, &planned, Some(forced)).await.unwrap();
+    let error = failed(&told);
+    assert!(
+        error.message.starts_with(&format!(
+            "Node {forced} stays cordoned: evicting pod {namespace}/{} failed:",
+            both[0]
+        )),
+        "{}",
+        error.message
+    );
+    assert!(
+        pods.get_opt(&free[0]).await.unwrap().is_none(),
+        "the others went"
+    );
+    assert!(pods.get_opt(&both[0]).await.unwrap().is_some());
+    assert!(cordoned(&nodes, forced).await);
 
     let by_kubectl = plan(&core, drain(plain)).await.unwrap();
     assert_eq!(by_kubectl.friction, Friction::Confirm);

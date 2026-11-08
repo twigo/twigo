@@ -41,6 +41,8 @@ struct Words {
     verb: &'static str,
     doing: &'static str,
     done: &'static str,
+    /// As `changed since you … it` reads.
+    past: &'static str,
 }
 
 fn words(unschedulable: bool) -> Words {
@@ -49,12 +51,14 @@ fn words(unschedulable: bool) -> Words {
             verb: "cordon",
             doing: "Cordoning",
             done: "Cordoned",
+            past: "cordoned",
         }
     } else {
         Words {
             verb: "uncordon",
             doing: "Uncordoning",
             done: "Uncordoned",
+            past: "uncordoned",
         }
     }
 }
@@ -85,7 +89,9 @@ pub(crate) async fn cordon(
             format!("Node {name} is {already}"),
         ));
     }
-    let Words { verb, doing, done } = words(unschedulable);
+    let Words {
+        verb, doing, done, ..
+    } = words(unschedulable);
     let context = target.context.clone();
     let connection = clients.connection();
     let consequence = if unschedulable {
@@ -130,9 +136,9 @@ async fn send(
     done: String,
 ) -> Result<Finished, IpcError> {
     let (_, clients) = clients_for(&core, &target.context, connection, "changed nothing").await?;
-    clients
+    let written: Value = clients
         .api
-        .request_text(write(
+        .request(write(
             Method::PATCH,
             &target.path,
             STRATEGIC_MERGE_PATCH,
@@ -141,15 +147,25 @@ async fn send(
         .await
         .map_err(|error| twigo_kube::errors::request(&error))?;
     let name = target.name.clone();
+    let text = format!("{done} {name}");
     let back = words(!unschedulable);
+    let (Some(uid), Ok(kubectl)) = (
+        written["metadata"]["uid"].as_str(),
+        target.kubectl(&[back.verb, &name]),
+    ) else {
+        return Ok(Finished::Done(text));
+    };
     let revert = Revert {
         subresource: None,
         content_type: STRATEGIC_MERGE_PATCH,
         patch: patch(!unschedulable),
+        uid: uid.to_owned(),
         unchanged: Unchanged::Flag {
             pointer: "/spec/unschedulable",
             set: unschedulable,
         },
+        what: format!("node {name}"),
+        past: words(unschedulable).past,
         question: format!(
             "{} node {name} on {}?",
             super::sentence(back.verb),
@@ -157,15 +173,11 @@ async fn send(
         ),
         doing: format!("{} node {name}", back.doing),
         done: format!("{} node {name}", back.done),
-        changed: format!(
-            "Node {name} changed since you {}ed it",
-            words(unschedulable).verb
-        ),
-        kubectl: target.kubectl(&[back.verb, &name])?,
+        kubectl,
         target,
     };
     Ok(Finished::Undoable {
-        text: format!("{done} {name}"),
+        text,
         revert: Box::new(revert),
     })
 }

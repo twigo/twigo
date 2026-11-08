@@ -20,8 +20,12 @@ contexts:
 ";
 
 fn running(dir: &Path) -> Arc<Core> {
+    running_with(dir, KUBECONFIG)
+}
+
+fn running_with(dir: &Path, text: &str) -> Arc<Core> {
     let kubeconfig = dir.join("config");
-    std::fs::write(&kubeconfig, KUBECONFIG).unwrap();
+    std::fs::write(&kubeconfig, text).unwrap();
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
     let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter([]))));
     tokio::spawn({
@@ -508,4 +512,138 @@ async fn a_plan_whose_read_waited_across_an_edit_of_its_context_never_runs() {
     tokio::time::sleep(Duration::from_millis(200)).await;
     let seen = server.seen.lock().unwrap().clone();
     assert_eq!(seen, ["GET /api/v1/namespaces/a/configmaps/m HTTP/1.1"]);
+}
+
+/// A server that answers each request line by `answer`, given how many
+/// times that line came before.
+struct Scripted {
+    port: u16,
+    seen: Arc<Mutex<Vec<String>>>,
+}
+
+impl Scripted {
+    async fn start(answer: fn(&str, usize) -> (u16, &'static str)) -> Self {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        tokio::spawn({
+            let seen = Arc::clone(&seen);
+            async move {
+                loop {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    let seen = Arc::clone(&seen);
+                    tokio::spawn(async move {
+                        let mut read = Vec::new();
+                        let mut buffer = [0; 4096];
+                        let end = loop {
+                            if let Some(at) = read.windows(4).position(|w| w == b"\r\n\r\n") {
+                                break at + 4;
+                            }
+                            let n = socket.read(&mut buffer).await.unwrap();
+                            if n == 0 {
+                                return;
+                            }
+                            read.extend_from_slice(&buffer[..n]);
+                        };
+                        let head = String::from_utf8_lossy(&read[..end]).into_owned();
+                        let length: usize = head
+                            .lines()
+                            .find_map(|line| {
+                                let (name, value) = line.split_once(':')?;
+                                name.eq_ignore_ascii_case("content-length")
+                                    .then(|| value.trim().parse().ok())?
+                            })
+                            .unwrap_or(0);
+                        while read.len() < end + length {
+                            let n = socket.read(&mut buffer).await.unwrap();
+                            read.extend_from_slice(&buffer[..n]);
+                        }
+                        let line = head.lines().next().unwrap_or_default().to_owned();
+                        let before = {
+                            let mut seen = seen.lock().unwrap();
+                            let before = seen.iter().filter(|other| **other == line).count();
+                            seen.push(line.clone());
+                            before
+                        };
+                        let (status, body) = answer(&line, before);
+                        let answer = format!(
+                            "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                            body.len()
+                        );
+                        socket.write_all(answer.as_bytes()).await.unwrap();
+                    });
+                }
+            }
+        });
+        Scripted { port, seen }
+    }
+}
+
+#[tokio::test]
+async fn a_scale_that_happened_is_done_when_the_read_after_it_fails() {
+    const OBJECT: &str = "GET /apis/apps/v1/namespaces/a/deployments/d HTTP/1.1";
+    const SCALE: &str = "GET /apis/apps/v1/namespaces/a/deployments/d/scale HTTP/1.1";
+    const PATCH: &str = "PATCH /apis/apps/v1/namespaces/a/deployments/d/scale HTTP/1.1";
+    let server = Scripted::start(|line, before| match line {
+        OBJECT if before == 0 => (
+            200,
+            r#"{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"d","namespace":"a","uid":"u-1","generation":1}}"#,
+        ),
+        OBJECT => (
+            500,
+            r#"{"kind":"Status","apiVersion":"v1","status":"Failure","message":"etcd is away","code":500}"#,
+        ),
+        SCALE | PATCH => (
+            200,
+            r#"{"apiVersion":"autoscaling/v1","kind":"Scale","metadata":{"name":"d","namespace":"a"},"spec":{"replicas":1}}"#,
+        ),
+        _ => (404, r#"{"kind":"Status","apiVersion":"v1","code":404}"#),
+    })
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = running_with(
+        dir.path(),
+        &KUBECONFIG.replace("127.0.0.1:1", &format!("127.0.0.1:{}", server.port)),
+    );
+    core.catalog.contexts().await;
+    let space = core.state.open_space("kind-a").id;
+    let target = twigo_ipc::ResourceRef {
+        gvr: twigo_ipc::Gvr {
+            group: "apps".to_owned(),
+            version: "v1".to_owned(),
+            resource: "deployments".to_owned(),
+        },
+        namespaced: true,
+        namespace: Some("a".to_owned()),
+        name: "d".to_owned(),
+    };
+    let request = twigo_ipc::PlanRequest::Scale {
+        space,
+        target,
+        replicas: 3,
+    };
+    let plan = core.command_plan("main", request).await.unwrap();
+    assert_eq!(plan.friction, Friction::AtOnce);
+    let (told, send) = events();
+    core.command_execute(
+        "main",
+        Execute {
+            plan: plan.id,
+            typed: None,
+        },
+        send,
+    )
+    .await
+    .unwrap();
+    until("the scale ends", || !told.lock().unwrap().is_empty()).await;
+    assert_eq!(
+        told.lock().unwrap().as_slice(),
+        [OperationEvent::Done {
+            text: "Scaled deployment d to 3".to_owned(),
+            undo_until: None,
+        }]
+    );
+    let seen = server.seen.lock().unwrap().clone();
+    assert!(seen.iter().any(|line| line == PATCH), "{seen:?}");
 }

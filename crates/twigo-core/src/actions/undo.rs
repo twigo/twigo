@@ -1,10 +1,11 @@
 //! Undo (decision 5 of M2): what the last action of a space changed goes
-//! back for 30 s, from its toast or ⌘Z. It is refused once anyone else
-//! changed the object since: its generation moved, or, for a node, which
-//! has none, the field Twigo set no longer holds what it set. Status
-//! changes every second on a busy object, so its resourceVersion cannot say
-//! that; the write carries the one it checked instead, so nothing changes
-//! between the check and the write.
+//! back for 30 s, from its toast or ⌘Z; the last is the one that started
+//! last. It is refused once anyone else changed the object since: it was
+//! replaced, its generation moved, or, for a node, which has none, the field
+//! Twigo set no longer holds what it set. Status changes every second on a
+//! busy object, so its resourceVersion cannot say that; the write carries
+//! the one it checked instead, so nothing changes between the check and the
+//! write.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, Weak};
@@ -17,7 +18,7 @@ use tokio::time::Instant;
 use twigo_ipc::{ErrorKind, IpcError};
 use twigo_policy::friction::Risk;
 
-use super::{Target, clients_for, get, write};
+use super::{Target, clients_for, get, sentence, write};
 use crate::Core;
 use crate::bus::{Finished, Planned};
 
@@ -65,22 +66,36 @@ pub(crate) struct Revert {
     /// The patch that puts it back, to which the undo adds the
     /// resourceVersion it checked.
     pub patch: Value,
+    /// The object's uid as Twigo wrote it, so a new object of its name is
+    /// left alone.
+    pub uid: String,
     pub unchanged: Unchanged,
+    /// `deployment web`.
+    pub what: String,
+    /// What the action did, as `changed since you … it` reads: `scaled`.
+    pub past: &'static str,
     /// `Scale deployment web in default back to 3 on kind-a?`
     pub question: String,
     /// `Scaling deployment web back to 3`.
     pub doing: String,
     /// `Scaled deployment web back to 3`.
     pub done: String,
-    /// `Deployment web changed since you scaled it`.
-    pub changed: String,
     pub kubectl: String,
 }
 
 /// Each space's last action, while its undo lasts.
 #[derive(Default)]
 pub(crate) struct Undos {
-    slots: Mutex<HashMap<String, Slot>>,
+    inner: Mutex<Inner>,
+}
+
+#[derive(Default)]
+struct Inner {
+    /// Numbers the actions and the undos alike, never twice.
+    next: u64,
+    /// The action of each space that started last.
+    latest: HashMap<String, u64>,
+    slots: HashMap<String, Slot>,
 }
 
 struct Slot {
@@ -91,21 +106,40 @@ struct Slot {
 }
 
 impl Undos {
-    fn slots(&self) -> std::sync::MutexGuard<'_, HashMap<String, Slot>> {
-        self.slots.lock().expect("undo lock")
+    fn inner(&self) -> std::sync::MutexGuard<'_, Inner> {
+        self.inner.lock().expect("undo lock")
     }
 
-    /// Notes that an action of `space` ended, with what puts it back if it
-    /// has an undo, made on the clients of `connection`; answers when the
-    /// undo ends, in milliseconds since the epoch.
-    pub(crate) fn ended(&self, space: &str, undo: Option<(Revert, Option<u64>)>) -> Option<i64> {
-        let mut slots = self.slots();
-        let Some((revert, connection)) = undo else {
-            slots.remove(space);
+    /// Notes that an action of `space` starts to run, which ends the
+    /// space's undo; answers the ticket that says, as it ends, whether it
+    /// is still the space's last.
+    pub(crate) fn started(&self, space: &str) -> u64 {
+        let mut inner = self.inner();
+        inner.next += 1;
+        let ticket = inner.next;
+        inner.latest.insert(space.to_owned(), ticket);
+        inner.slots.remove(space);
+        ticket
+    }
+
+    /// Notes that the action of `ticket` ended, with what puts it back if it
+    /// has an undo, made on the clients of `connection`, kept while no later
+    /// action of the space started; answers when the undo ends, in
+    /// milliseconds since the epoch.
+    pub(crate) fn ended(
+        &self,
+        space: &str,
+        ticket: u64,
+        undo: Option<(Revert, Option<u64>)>,
+    ) -> Option<i64> {
+        let mut inner = self.inner();
+        if inner.latest.get(space) != Some(&ticket) {
             return None;
-        };
-        let id = slots.get(space).map_or(1, |slot| slot.id + 1);
-        slots.insert(
+        }
+        let (revert, connection) = undo?;
+        inner.next += 1;
+        let id = inner.next;
+        inner.slots.insert(
             space.to_owned(),
             Slot {
                 id,
@@ -119,8 +153,9 @@ impl Undos {
     }
 
     fn get(&self, space: &str) -> Option<(u64, Option<u64>, Revert)> {
-        let slots = self.slots();
-        let slot = slots
+        let inner = self.inner();
+        let slot = inner
+            .slots
             .get(space)
             .filter(|slot| Instant::now() < slot.until)?;
         Some((slot.id, slot.connection, slot.revert.clone()))
@@ -129,12 +164,13 @@ impl Undos {
     /// Takes the undo a plan was made for, unless it ended or another
     /// action's took its place.
     fn take(&self, space: &str, id: u64) -> bool {
-        let mut slots = self.slots();
-        let live = slots
+        let mut inner = self.inner();
+        let live = inner
+            .slots
             .get(space)
             .is_some_and(|slot| slot.id == id && Instant::now() < slot.until);
         if live {
-            slots.remove(space);
+            inner.slots.remove(space);
         }
         live
     }
@@ -152,7 +188,8 @@ pub(crate) fn undo(core: &Core, space: &str) -> Result<Planned, IpcError> {
     Ok(Planned {
         context: revert.target.context.clone(),
         connection,
-        space: Some(space.clone()),
+        // It takes its own undo as it runs, and leaves a later one standing.
+        space: None,
         risk: Risk::Reversible,
         target: attributes.target(),
         writes: vec![attributes],
@@ -182,11 +219,15 @@ async fn run(
             "the undo ended before it ran, so Twigo put nothing back",
         ));
     }
-    let left = || format!("{}, so Twigo left it", revert.changed);
+    let (what, past) = (sentence(&revert.what), revert.past);
+    let left = |why: String| IpcError::new(ErrorKind::Conflict, format!("{why}, so Twigo left it"));
     for _ in 0..ATTEMPTS {
         let object = get(&clients, &revert.target.path).await?;
+        if object["metadata"]["uid"].as_str() != Some(revert.uid.as_str()) {
+            return Err(left(format!("{what} was replaced since you {past} it")));
+        }
         if !revert.unchanged.holds(&object) {
-            return Err(IpcError::new(ErrorKind::Conflict, left()));
+            return Err(left(format!("{what} changed since you {past} it")));
         }
         let mut patch = revert.patch.clone();
         patch["metadata"]["resourceVersion"] = object["metadata"]["resourceVersion"].clone();
@@ -202,7 +243,7 @@ async fn run(
             Err(error) => return Err(twigo_kube::errors::request(&error)),
         }
     }
-    Err(IpcError::new(ErrorKind::Conflict, left()))
+    Err(left(format!("{what} kept changing")))
 }
 
 #[cfg(test)]
@@ -225,27 +266,35 @@ mod tests {
             subresource: None,
             content_type: super::super::STRATEGIC_MERGE_PATCH,
             patch: json!({ "spec": { "unschedulable": null } }),
+            uid: "u-1".to_owned(),
             unchanged: Unchanged::Flag {
                 pointer: "/spec/unschedulable",
                 set: true,
             },
+            what: format!("node {name}"),
+            past: "cordoned",
             question: String::new(),
             doing: String::new(),
             done: String::new(),
-            changed: String::new(),
             kubectl: String::new(),
         }
+    }
+
+    /// Runs an action of `space` from start to end.
+    fn action(undos: &Undos, space: &str, undo: Option<&str>) -> Option<i64> {
+        let ticket = undos.started(space);
+        undos.ended(space, ticket, undo.map(|name| (revert(name), Some(1))))
     }
 
     #[tokio::test(start_paused = true)]
     async fn an_undo_lasts_30_s_and_only_while_its_action_is_the_space_s_last() {
         let undos = Undos::default();
-        assert!(undos.ended("s", Some((revert("a"), Some(1)))).is_some());
+        assert!(action(&undos, "s", Some("a")).is_some());
         let (first, connection, kept) = undos.get("s").unwrap();
         assert_eq!((connection, kept.target.name.as_str()), (Some(1), "a"));
         assert!(undos.get("other").is_none());
 
-        undos.ended("s", Some((revert("b"), Some(1))));
+        action(&undos, "s", Some("b"));
         assert!(!undos.take("s", first), "a later action took its place");
         let (second, _, kept) = undos.get("s").unwrap();
         assert_eq!(kept.target.name, "b");
@@ -254,19 +303,41 @@ mod tests {
         assert!(undos.get("s").is_none());
         assert!(!undos.take("s", second), "it lasted 30 s");
 
-        undos.ended("s", Some((revert("c"), Some(1))));
+        action(&undos, "s", Some("c"));
         let (third, _, _) = undos.get("s").unwrap();
-        undos.ended("s", None);
+        action(&undos, "s", None);
         assert!(
             undos.get("s").is_none(),
             "an action without an undo ends it"
         );
-        assert!(!undos.take("s", third));
-
-        undos.ended("s", Some((revert("d"), Some(1))));
+        action(&undos, "s", Some("d"));
+        assert!(
+            !undos.take("s", third),
+            "a removed undo's id is never another's"
+        );
         let (fourth, _, _) = undos.get("s").unwrap();
         assert!(undos.take("s", fourth));
         assert!(!undos.take("s", fourth), "an undo runs once");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_last_action_is_the_one_that_started_last() {
+        let undos = Undos::default();
+        action(&undos, "s", Some("a"));
+        let long = undos.started("s");
+        assert!(undos.get("s").is_none(), "a start ends the undo before it");
+        action(&undos, "s", Some("b"));
+        assert_eq!(undos.ended("s", long, None), None);
+        let (_, _, kept) = undos.get("s").unwrap();
+        assert_eq!(kept.target.name, "b", "an earlier action ends after it");
+        let started = undos.started("s");
+        assert_eq!(undos.ended("s", long, Some((revert("c"), Some(1)))), None);
+        assert!(undos.get("s").is_none());
+        assert!(
+            undos
+                .ended("s", started, Some((revert("e"), Some(1))))
+                .is_some()
+        );
     }
 
     #[test]

@@ -137,10 +137,26 @@ impl Run {
         let what = &self.what;
         let done = format!("Scaled {what} to {}", self.replicas);
         // The scale's answer carries no generation: the object's, read now,
-        // is what an undo holds to.
-        let Some(generation) =
-            get(&clients, &target.path).await?["metadata"]["generation"].as_i64()
-        else {
+        // is what an undo holds to. The replicas changed whatever this read
+        // finds, so its failure only takes the undo away.
+        let Ok(object) = get(&clients, &target.path).await else {
+            return Ok(Finished::Done(done));
+        };
+        let (Some(generation), Some(uid)) = (
+            object["metadata"]["generation"].as_i64(),
+            object["metadata"]["uid"].as_str(),
+        ) else {
+            return Ok(Finished::Done(done));
+        };
+        let Ok(kubectl) = target.kubectl(&[
+            "scale",
+            &self.kind_name,
+            &target.name,
+            "--current-replicas",
+            &self.replicas.to_string(),
+            "--replicas",
+            &from.to_string(),
+        ]) else {
             return Ok(Finished::Done(done));
         };
         let place = target.place();
@@ -150,20 +166,14 @@ impl Run {
             subresource: Some("scale"),
             content_type: MERGE_PATCH,
             patch: json!({ "spec": { "replicas": from } }),
+            uid: uid.to_owned(),
             unchanged: Unchanged::Generation(generation),
+            what: what.clone(),
+            past: "scaled",
             question: format!("Scale {what}{place} back to {from} on {context}?"),
             doing: format!("Scaling {what} back to {from}"),
             done: format!("Scaled {what} back to {from}"),
-            changed: format!("{} changed since you scaled it", sentence(what)),
-            kubectl: target.kubectl(&[
-                "scale",
-                &self.kind_name,
-                &target.name,
-                "--current-replicas",
-                &self.replicas.to_string(),
-                "--replicas",
-                &from.to_string(),
-            ])?,
+            kubectl,
         };
         Ok(Finished::Undoable {
             text: done,

@@ -7,7 +7,7 @@
 use std::sync::Weak;
 
 use http::Method;
-use jiff::{Timestamp, Unit};
+use jiff::Timestamp;
 use serde_json::json;
 use twigo_ipc::{Affected, ErrorKind, IpcError, ResourceRef};
 use twigo_policy::friction::Risk;
@@ -106,12 +106,7 @@ async fn send(
     done: String,
 ) -> Result<Finished, IpcError> {
     let (_, clients) = clients_for(&core, &target.context, connection, "restarted nothing").await?;
-    // As Go's time.RFC3339 prints UTC, stamped as it is sent.
-    let now = Timestamp::now()
-        .round(Unit::Second)
-        .expect("a second rounds")
-        .strftime("%Y-%m-%dT%H:%M:%SZ")
-        .to_string();
+    let now = Timestamp::now().strftime("%Y-%m-%dT%H:%M:%SZ").to_string();
     let patch = json!({
         "spec": { "template": { "metadata": { "annotations": { RESTARTED_AT: now } } } }
     });

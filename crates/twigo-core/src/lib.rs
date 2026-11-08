@@ -403,13 +403,12 @@ impl Core {
             planned.connection,
             planned.run,
         );
+        let ticket = space.as_deref().map(|space| undos.started(space));
         tokio::spawn(async move {
             let ended = run(progress.clone()).await;
-            // The space's last action is this one now, with its undo if it
-            // has one.
-            let undo_until = space.and_then(|space| {
+            let undo_until = space.zip(ticket).and_then(|(space, ticket)| {
                 let revert = ended.as_ref().ok().and_then(Finished::revert);
-                undos.ended(&space, revert.map(|revert| (revert, connection)))
+                undos.ended(&space, ticket, revert.map(|revert| (revert, connection)))
             });
             let (event, outcome, message) = match ended {
                 Ok(finished) => finished.told(undo_until),

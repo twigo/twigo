@@ -153,7 +153,11 @@ impl Run {
         let (words, back) = (Words::of(self.suspend), Words::of(!self.suspend));
         let what = &self.what;
         let done = format!("{} {what}", words.done);
-        let Some(generation) = written["metadata"]["generation"].as_i64() else {
+        let (Some(generation), Some(uid), Ok(kubectl)) = (
+            written["metadata"]["generation"].as_i64(),
+            written["metadata"]["uid"].as_str(),
+            line(target, !self.suspend),
+        ) else {
             return Ok(Finished::Done(done));
         };
         let place = target.place();
@@ -162,12 +166,14 @@ impl Run {
             subresource: None,
             content_type: MERGE_PATCH,
             patch: json!({ "spec": { "suspend": !self.suspend } }),
+            uid: uid.to_owned(),
             unchanged: Unchanged::Generation(generation),
+            what: what.clone(),
+            past: words.past,
             question: format!("{} {what}{place} on {}?", back.verb, target.context),
             doing: format!("{} {what}", back.doing),
             done: format!("{} {what}", back.done),
-            changed: format!("{} changed since you {} it", sentence(what), words.past),
-            kubectl: line(target, !self.suspend)?,
+            kubectl,
         };
         Ok(Finished::Undoable {
             text: done,

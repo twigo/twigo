@@ -559,7 +559,7 @@ async fn a_delete_lists_what_goes_with_it_and_several_ask_for_the_context_s_name
             format!("kubectl --context {context} delete configmaps {names} -n {namespace}")
         })
         .collect();
-    assert_eq!(plan.kubectl, lines.join(" && "));
+    assert_eq!(plan.kubectl, lines.join("; "));
     let refused = run(&core, &plan, Some("3")).await.unwrap_err();
     assert_eq!(refused.kind, ErrorKind::InvalidInput);
     let plan = core.command_plan("main", several(&three)).await.unwrap();

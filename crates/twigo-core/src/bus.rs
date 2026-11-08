@@ -29,8 +29,9 @@ pub(crate) struct Planned {
     /// delete's, that of the clients it read the object with; a Reveal's,
     /// the context's as it planned.
     pub connection: Option<u64>,
-    /// The space whose last action it is once it ends, which holds its
-    /// undo; none for a Reveal, which changes nothing.
+    /// The space whose last action it is once it starts, which holds its
+    /// undo; none for a Reveal, which changes nothing, and for an undo,
+    /// which takes its own.
     pub space: Option<String>,
     pub risk: Risk,
     /// The requests it sends that change the cluster, as they go out, for

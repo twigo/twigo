@@ -202,7 +202,8 @@ fn place(targets: &[Target]) -> String {
     }
 }
 
-/// One kubectl command a namespace, joined so a shell runs them in turn.
+/// One kubectl command a namespace, joined so a shell runs each whatever
+/// the one before answered, as the run deletes the rest when one is gone.
 fn kubectl_lines(
     targets: &[Target],
     context: &str,
@@ -227,7 +228,7 @@ fn kubectl_lines(
             kubectl(&words)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(lines.join(" && "))
+    Ok(lines.join("; "))
 }
 
 /// The kind and name of the pod's controller, when it is one that replaces

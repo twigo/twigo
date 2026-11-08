@@ -12,9 +12,10 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Weak;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use futures::future::try_join_all;
+use futures::future::join_all;
 use http::Method;
 use k8s_openapi::api::core::v1::Pod;
 use serde_json::json;
@@ -397,13 +398,10 @@ impl Run {
             .map(|(pod, _)| pod)
             .collect();
         let total = evicted.len();
-        let uids: HashSet<String> = evicted
-            .iter()
-            .filter_map(|pod| pod.metadata.uid.clone())
-            .collect();
-        let stopped = |gone: usize| {
+        let accepted = AtomicUsize::new(0);
+        let stopped = |accepted: usize| {
             Finished::Stopped(format!(
-                "Stopped draining node {name}, which stays cordoned; {gone} of {} went",
+                "Stopped draining node {name}, which stays cordoned; it evicted {accepted} of {}",
                 counted(total, "pod")
             ))
         };
@@ -428,21 +426,53 @@ impl Run {
             "Evicting {} from node {name}",
             counted(total, "pod")
         ));
-        let evictions = try_join_all(evicted.iter().map(|pod| evict(&clients, pod, &progress)));
-        tokio::select! {
-            evicted = evictions => {
-                evicted.map_err(|error| stays(error.message))?;
+        // As kubectl's evictPods: one pod's failure stops none of the others,
+        // and the failures are told once the rest have gone.
+        let evictions = join_all(evicted.iter().map(|pod| {
+            let (clients, progress, accepted) = (&clients, &progress, &accepted);
+            async move {
+                let evicted = evict(clients, pod, progress).await;
+                if evicted.is_ok() {
+                    accepted.fetch_add(1, Ordering::Relaxed);
+                }
+                (pod.metadata.uid.clone(), evicted)
             }
-            () = progress.stopped() => return Ok(stopped(0)),
-        }
+        }));
+        let results = tokio::select! {
+            results = evictions => results,
+            () = progress.stopped() => return Ok(stopped(accepted.load(Ordering::Relaxed))),
+        };
+        let uids: HashSet<String> = results
+            .iter()
+            .filter(|(_, evicted)| evicted.is_ok())
+            .filter_map(|(uid, _)| uid.clone())
+            .collect();
+        let failed: Vec<&IpcError> = results
+            .iter()
+            .filter_map(|(_, evicted)| evicted.as_ref().err())
+            .collect();
+        let finish = |done: String| match failed.first() {
+            None => Ok(Finished::Done(done)),
+            Some(first) => Err(IpcError::new(
+                first.kind,
+                format!(
+                    "Node {name} stays cordoned: {}",
+                    failed
+                        .iter()
+                        .map(|error| error.message.as_str())
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                ),
+            )),
+        };
         tokio::select! {
             whole = followed.whole() => if whole.is_err() {
-                return Ok(Finished::Done(format!(
+                return finish(format!(
                     "Evicted {} from node {name}; Twigo cannot watch them go",
-                    counted(total, "pod")
-                )));
+                    counted(uids.len(), "pod")
+                ));
             },
-            () = progress.stopped() => return Ok(stopped(0)),
+            () = progress.stopped() => return Ok(stopped(uids.len())),
         }
         let mut told = None;
         loop {
@@ -457,18 +487,18 @@ impl Run {
                 })
                 .count();
             if left == 0 {
-                return Ok(Finished::Done(format!("Drained node {name}")));
+                return finish(format!("Drained node {name}"));
             }
             if told != Some(left) {
                 progress.running(format!(
                     "Waiting for {left} of {} to leave node {name}",
-                    counted(total, "pod")
+                    counted(uids.len(), "pod")
                 ));
                 told = Some(left);
             }
             tokio::select! {
                 () = followed.changed() => {}
-                () = progress.stopped() => return Ok(stopped(total - left)),
+                () = progress.stopped() => return Ok(stopped(uids.len())),
             }
         }
     }
