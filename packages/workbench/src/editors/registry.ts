@@ -27,8 +27,6 @@ export interface EditorProvider {
   readonly component: ComponentType<EditorProps>;
   /** What the editor shows at the right of its group's tab strip while it is the group's active one. */
   readonly actions?: ComponentType<EditorProps>;
-  /** What the tab shows before Close, such as a mark that says something of the editor's state; it renders nothing when it has none. */
-  readonly marker?: ComponentType<EditorProps>;
 }
 
 /** A place in an editor that `@` in quick access goes to, such as a YAML key. */
