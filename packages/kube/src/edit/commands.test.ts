@@ -34,7 +34,9 @@ test("in read-only the dry run and the diff work and Apply is refused by the gat
 
   const operation = vi.spyOn(workbench.operations, "run");
   await run("k8s.edit.confirm");
-  expect(await operation.mock.results[0]?.value).toEqual({ state: "failed" });
+  expect(await operation.mock.results[0]?.value).toEqual({
+    state: "refused",
+  });
   expect(edits.copies.get(uri)).toBeDefined();
   expect(edits.previews.get(uri)).toMatchObject({
     answer: { state: "ready" },

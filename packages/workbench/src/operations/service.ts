@@ -54,9 +54,15 @@ interface Undo {
   readonly dismiss: () => void;
 }
 
-/** How a run ended, for its caller: a Reveal's value among them. */
+/**
+ * How a run ended, for its caller: a Reveal's value among them. `refused` is
+ * a plan the gate refused, before anything was asked or taken, so what the
+ * plan was of, a preview among it, is still there.
+ */
 export type Outcome =
-  | { readonly state: "done" | "stopped" | "cancelled" | "failed" }
+  | {
+      readonly state: "done" | "stopped" | "cancelled" | "failed" | "refused";
+    }
   | {
       readonly state: "revealed";
       readonly value: string;
@@ -118,7 +124,9 @@ export class Operations {
       plan = await this.backend.invoke("command_plan", request);
     } catch (error) {
       this.#refused(error);
-      return { state: "failed" };
+      return {
+        state: toIpcError(error).blocked === undefined ? "failed" : "refused",
+      };
     }
     if (undo) {
       if (

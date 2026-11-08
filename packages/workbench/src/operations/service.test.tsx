@@ -187,7 +187,9 @@ test("a refused plan runs nothing, and a lock the person may lift offers the unl
   const error = vi.spyOn(notify, "error");
   const refused = blocked({ kind: "environment", environment: "production" });
   const { workbench, sent, report, outcome } = await started(refused, []);
-  await expect(outcome).resolves.toEqual({ state: "failed" } satisfies Outcome);
+  await expect(outcome).resolves.toEqual({
+    state: "refused",
+  } satisfies Outcome);
   expect(commands(sent)).toEqual(["command_plan"]);
   expect(report).not.toHaveBeenCalled();
   const [message, options] = error.mock.calls[0] ?? [];
@@ -206,11 +208,18 @@ test("a policy file's lock is only reported, as nothing in Twigo lifts it", asyn
     pattern: "dev",
   });
   const { report, outcome } = await started(refused, []);
-  await expect(outcome).resolves.toEqual({ state: "failed" });
+  await expect(outcome).resolves.toEqual({ state: "refused" });
   expect(report).toHaveBeenCalledWith(refused);
   expect(error.mock.calls.map(([, options]) => options?.action)).toEqual(
     error.mock.calls.map(() => undefined),
   );
+});
+
+test("a plan that fails for another reason than the gate is failed, not refused", async () => {
+  const gone = new IpcError("notFound", "no preview 1 waits to apply");
+  const { report, outcome } = await started(gone, []);
+  await expect(outcome).resolves.toEqual({ state: "failed" });
+  expect(report).toHaveBeenCalledWith(gone);
 });
 
 test("a run that fails is reported", async () => {
