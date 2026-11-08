@@ -12,7 +12,7 @@ import {
 import { createMockBackend } from "@twigo/protocol/mock";
 import { notify, Toaster } from "@twigo/ui";
 import { testWorkbench } from "../testing";
-import { COUNTING_DOWN, type Outcome } from "./service";
+import { COUNTING_DOWN, UNDOABLE, type Outcome } from "./service";
 
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -292,4 +292,53 @@ test("a countdown that runs out runs its plan, though its toast's dismissal canc
   await act(() => vi.advanceTimersByTimeAsync(1000));
   await expect(outcome).resolves.toEqual({ state: "done" });
   expect(commands(sent)).toEqual(["command_plan", "command_execute"]);
+});
+
+test("an action's undo is offered in its space while it lasts, and a later action ends it", async () => {
+  render(<Toaster />);
+  const until = Date.now() + 30_000;
+  const scaled = await started(plan({ kind: "atOnce" }), [
+    { state: "done", text: "Scaled deployment web to 5", undoUntil: until },
+  ]);
+  const { keys, operations } = scaled.workbench;
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await expect(scaled.outcome).resolves.toEqual({ state: "done" });
+  expect(keys.lookup(null)(UNDOABLE)).toEqual(["dev"]);
+  expect(document.body.textContent).toContain("Scaled deployment web to 5");
+  expect(document.body.textContent).toContain("Undo");
+
+  const run = vi.spyOn(operations, "run").mockResolvedValue({ state: "done" });
+  await operations.undo("dev");
+  expect(run).toHaveBeenCalledWith({ action: "undo", space: "dev" }, LOOK);
+  run.mockRestore();
+
+  await act(() => vi.advanceTimersByTimeAsync(30_000));
+  expect(keys.lookup(null)(UNDOABLE)).toEqual([]);
+  await expect(operations.undo("dev")).resolves.toEqual({ state: "cancelled" });
+});
+
+test("an action without an undo ends the one before it in its space", async () => {
+  const events: OperationEvent[] = [
+    {
+      state: "done",
+      text: "Scaled deployment web to 5",
+      undoUntil: Date.now() + 30_000,
+    },
+  ];
+  const { backend } = bus(plan({ kind: "atOnce" }), events);
+  const workbench = await testWorkbench("ready", backend);
+  const scaled = workbench.operations.run(REQUEST, LOOK);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await scaled;
+  expect(workbench.keys.lookup(null)(UNDOABLE)).toEqual(["dev"]);
+
+  events.splice(0, events.length, {
+    state: "done",
+    text: "Restarted deployment web",
+    undoUntil: null,
+  });
+  const restarted = workbench.operations.run(REQUEST, LOOK);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await restarted;
+  expect(workbench.keys.lookup(null)(UNDOABLE)).toEqual([]);
 });

@@ -90,3 +90,101 @@ test("⌘⌫ on a row asks the bus to delete it, and its dialog names the cluste
   );
   expect(screen.getByLabelText("Type staging to confirm")).toBeTruthy();
 });
+
+/** The workbench with a list of staging open. */
+async function openInStaging(scenario: "ready" | "viewer", uri: string) {
+  const workbench = await mountKube(createMockBackend(scenario));
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  await settle(2);
+  act(() => {
+    workbench.editors.open(uri);
+  });
+  await settle(30);
+  return workbench;
+}
+
+/** The first grid with its first row selected and the focus. */
+async function selectFirst(): Promise<HTMLElement> {
+  const main = screen.getAllByRole("grid")[0];
+  if (!main) throw new Error("a list");
+  act(() => {
+    main.focus();
+  });
+  fireEvent.keyDown(main, { code: "KeyJ", key: "j" });
+  await settle(4);
+  return main;
+}
+
+test("a person RBAC lets only read sees the writes disabled", async () => {
+  for (const [scenario, allowed] of [
+    ["viewer", false],
+    ["ready", true],
+  ] as const) {
+    const workbench = await openInStaging(
+      scenario,
+      "k8s-list://staging/apps/v1/deployments",
+    );
+    const main = await selectFirst();
+    const lookup = workbench.keys.lookup(main);
+    for (const command of [
+      "k8s.resource.delete",
+      "k8s.resource.scale",
+      "k8s.resource.restart",
+    ]) {
+      expect(workbench.commands.enabled(command, lookup), command).toBe(
+        allowed,
+      );
+    }
+    expect(workbench.commands.enabled("k8s.resource.yaml", lookup)).toBe(true);
+    cleanup();
+  }
+});
+
+test("⇧S asks for the replicas in quick access and scales to what is typed", async () => {
+  const workbench = await openInStaging(
+    "ready",
+    "k8s-list://staging/apps/v1/deployments",
+  );
+  const run = vi
+    .spyOn(workbench.operations, "run")
+    .mockResolvedValue({ state: "done" });
+  const main = await selectFirst();
+  fireEvent.keyDown(main, { code: "KeyS", key: "S", shiftKey: true });
+  await settle(2);
+  const ask = workbench.quickAccess.session?.ask;
+  expect(ask?.prompt).toMatch(/^Scale deployment \S+, now at \d+$/);
+  expect(ask?.validate("-1")).toBe("Type a count of replicas: 0 or more");
+  act(() => {
+    workbench.quickAccess.setValue("7");
+    workbench.quickAccess.submit();
+  });
+  await settle(2);
+  expect(run).toHaveBeenCalledWith(
+    expect.objectContaining({ action: "scale", space: "staging", replicas: 7 }),
+    expect.objectContaining({ destructive: false }),
+  );
+});
+
+test("⌘⌫ with marked rows deletes those rows", async () => {
+  const workbench = await openInStaging("ready", "k8s-list://staging/v1/pods");
+  const run = vi
+    .spyOn(workbench.operations, "run")
+    .mockResolvedValue({ state: "done" });
+  const main = await selectFirst();
+  fireEvent.keyDown(main, { code: "KeyX", key: "x" });
+  fireEvent.keyDown(main, { code: "ArrowDown", key: "ArrowDown" });
+  fireEvent.keyDown(main, { code: "KeyX", key: "x" });
+  await settle(2);
+  fireEvent.keyDown(main, {
+    code: "Backspace",
+    key: "Backspace",
+    metaKey: true,
+  });
+  await settle(2);
+  expect(run).toHaveBeenCalledOnce();
+  const [request] = run.mock.calls[0] ?? [];
+  expect(request).toMatchObject({ action: "delete", space: "staging" });
+  expect(request?.action === "delete" && request.targets).toHaveLength(2);
+});

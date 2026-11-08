@@ -64,3 +64,29 @@ test("Escape cancels", () => {
   });
   expect(onCancel).toHaveBeenCalledOnce();
 });
+
+test("each list says what happens to its objects, how many, and names them", () => {
+  render(
+    <ConfirmDialog
+      question="Delete deployment web in shop from dev?"
+      consequences={[]}
+      lists={[
+        {
+          title: "With it go",
+          items: [
+            { key: "rs", kind: "ReplicaSet", name: "web-5d4f" },
+            { key: "p1", kind: "Pod", name: "web-5d4f-x2kq9", detail: "shop" },
+          ],
+        },
+      ]}
+      confirm="Delete deployment"
+      destructive
+      onConfirm={vi.fn()}
+      onCancel={vi.fn()}
+    />,
+  );
+  const list = screen.getByRole("region", { name: /With it go/ });
+  expect(list.textContent).toBe(
+    "With it go2ReplicaSetweb-5d4fPodweb-5d4f-x2kq9shop",
+  );
+});

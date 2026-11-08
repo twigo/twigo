@@ -89,3 +89,31 @@ test("showing quick access over a pick dismisses the pick", async () => {
   await expect(picked).resolves.toBeUndefined();
   expect(quick.session?.value).toBe(">");
 });
+
+test("an input takes only a value it can, and gives none when dismissed", async () => {
+  const quick = new QuickAccess(new ContextKeys());
+  const ask = () =>
+    quick.input({
+      placeholder: "Replicas",
+      prompt: "Scale deployment web, now at 3",
+      acceptLabel: "Scale",
+      value: "3",
+      validate: (value) => (/^\d+$/.test(value) ? undefined : "a count"),
+    });
+  const typed = ask();
+  expect(quick.session?.value).toBe("3");
+  quick.setValue("x");
+  quick.submit();
+  expect(quick.session?.ask).toBeDefined();
+  quick.setValue("5");
+  quick.submit();
+  await expect(typed).resolves.toBe("5");
+  expect(quick.session).toBeUndefined();
+
+  const dismissed = ask();
+  quick.hide();
+  await expect(dismissed).resolves.toBeUndefined();
+  const replaced = ask();
+  quick.show(">");
+  await expect(replaced).resolves.toBeUndefined();
+});

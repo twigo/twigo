@@ -175,8 +175,6 @@ async fn scale_runs_at_once_and_its_undo_puts_it_back_unless_someone_else_change
     assert!(undo_until.is_some());
     assert_eq!(replicas().await, Some(3));
 
-    // Its status moves the resourceVersion meanwhile; only the generation
-    // says whether someone else changed it.
     pods_of(&pods, "web", 3).await;
     let back = plan(&core, undo(&cluster)).await.unwrap();
     assert_eq!(back.friction, Friction::AtOnce);
@@ -287,8 +285,6 @@ async fn cordon_and_uncordon_run_at_once_and_their_undo_holds_to_the_field() {
     let told = run(&core, &plan_cordon, None).await.unwrap();
     assert_eq!(done(&told).0, format!("Cordoned node {name}"));
     assert!(unschedulable().await);
-    // The node controller adds its taint meanwhile, which moves the
-    // resourceVersion and leaves the field.
     tokio::time::sleep(Duration::from_secs(2)).await;
     let back = plan(&core, undo(&cluster)).await.unwrap();
     assert_eq!(
@@ -364,7 +360,6 @@ async fn a_restart_stamps_the_template_and_lists_the_pods_it_replaces() {
     assert_eq!(done(&told), ("Restarted deployment web", None));
     let first = stamp().await.expect("the template is stamped");
 
-    // kubectl stamps the second it runs in.
     tokio::time::sleep(Duration::from_millis(1100)).await;
     let by_kubectl = plan(&core, restart()).await.unwrap();
     core.command_cancel("main", by_kubectl.id);
@@ -626,13 +621,9 @@ async fn a_drain_waits_on_a_budget_then_finishes_and_leaves_daemon_set_pods() {
     let context = &cluster.context;
     let node = "kwok-node-6";
     let nodes = Api::<Node>::all(cluster.admin.clone());
-    // A run that failed may have left it cordoned.
     uncordon(&nodes, node).await;
     let pods = Api::<Pod>::namespaced(cluster.admin.clone(), &namespace);
     let budgets = Api::<PodDisruptionBudget>::namespaced(cluster.admin.clone(), &namespace);
-    // Pods that only the labelled nodes take, so the pod that replaces an
-    // evicted one waits until the test labels another node, and the budget
-    // holds the second back meanwhile.
     let label =
         |value: Option<&str>| json!({ "metadata": { "labels": { "twigo.io/drain-test": value } } });
     let elsewhere = "kwok-node-3";
@@ -972,7 +963,6 @@ async fn a_person_without_rights_is_told_so_before_they_try() {
         .and_then(|status| status.token)
         .expect("a token for the ServiceAccount");
 
-    // The test's cluster, reached as the ServiceAccount.
     let mut kubeconfig = Kubeconfig::read_from(&cluster.path).unwrap();
     let viewer = format!("{}-viewer", cluster.context);
     let mut named = kubeconfig
@@ -997,7 +987,6 @@ async fn a_person_without_rights_is_told_so_before_they_try() {
     kubeconfig.current_context = Some(viewer.clone());
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config");
-    // JSON is YAML too.
     std::fs::write(&path, serde_json::to_string(&kubeconfig).unwrap()).unwrap();
     let viewing = core_over(dir.path(), &path, &viewer).await;
 
