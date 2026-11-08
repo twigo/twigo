@@ -286,8 +286,9 @@ export class MockBus {
   /**
    * `apply_preview` over the mock: it merges nothing. An edit's annotation
    * `mock.twigo.io/answer` names the answer (`unchanged`, `conflicts`, `stale`,
-   * `immutable`, `recreate`, or `removals` for a ready answer with a removal
-   * step); any other edit is ready, an edit equal to its base unchanged.
+   * `immutable`, `recreate`, `removals` for a ready answer with a removal step,
+   * or `merge-patch` for one that goes as a single merge patch); any other edit
+   * is ready, an edit equal to its base unchanged.
    */
   applyPreview(request: ApplyRequest): ApplyPreviewed {
     const { space, opened, edited } = request;
@@ -363,6 +364,18 @@ export class MockBus {
           warnings: ["metadata.annotations: this annotation is deprecated"],
           removals: [".metadata.labels.team"],
           ignored: [".status"],
+          strategy: "serverSideApply",
+        };
+      case "merge-patch":
+        return {
+          state: "ready",
+          id: prepared(false),
+          live: opened?.base ?? null,
+          result: edited,
+          warnings: [],
+          removals: [".spec.strategy.rollingUpdate"],
+          ignored: [],
+          strategy: "mergePatch",
         };
       default:
         return {
@@ -373,6 +386,7 @@ export class MockBus {
           warnings: [],
           removals: [],
           ignored: [],
+          strategy: "serverSideApply",
         };
     }
   }

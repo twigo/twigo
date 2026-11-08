@@ -57,9 +57,10 @@ ignored: Array<string>, } | { "state": "ready", id: PreviewId,
  */
 live: unknown, result: unknown, warnings: Array<string>, 
 /**
- * The paths that go by a separate merge patch, as their own step.
+ * What goes by a merge patch: a separate step after a
+ * server-side apply, or part of the one patch.
  */
-removals: Array<string>, ignored: Array<string>, } | { "state": "conflicts", conflicts: Array<ApplyConflict>, } | { "state": "stale", message: string, } | { "state": "immutable", message: string, recreate: PreviewId | null, };
+removals: Array<string>, ignored: Array<string>, strategy: ApplyStrategy, } | { "state": "conflicts", conflicts: Array<ApplyConflict>, } | { "state": "stale", message: string, } | { "state": "immutable", message: string, recreate: PreviewId | null, };
 
 /**
  * An edit to preview, parsed by the webview's YAML parser, so there is one
@@ -84,6 +85,11 @@ force: boolean,
  * them, which leave the configuration.
  */
 drop: Array<string>, };
+
+/**
+ * How an edit that can go is sent.
+ */
+export type ApplyStrategy = "serverSideApply" | "mergePatch";
 
 export type Block = { "type": "fields", fields: Array<Field>, } | { "type": "conditions", conditions: Array<Condition>, } | { "type": "data", entries: Array<DataEntry>, 
 /**

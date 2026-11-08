@@ -55,6 +55,17 @@ pub struct ApplyConflict {
     pub manager: String,
 }
 
+/// How an edit that can go is sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ApplyStrategy {
+    /// A server-side apply, and a merge patch for what it leaves.
+    ServerSideApply,
+    /// One merge patch that carries the changes and the removals together,
+    /// as an apply cannot express the edit.
+    MergePatch,
+}
+
 /// What a dry-run found; a closed set, so the webview cannot miss a case.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(
@@ -79,9 +90,11 @@ pub enum ApplyPreviewed {
         #[ts(type = "unknown")]
         result: Value,
         warnings: Vec<String>,
-        /// The paths that go by a separate merge patch, as their own step.
+        /// What goes by a merge patch: a separate step after a
+        /// server-side apply, or part of the one patch.
         removals: Vec<String>,
         ignored: Vec<String>,
+        strategy: ApplyStrategy,
     },
     Conflicts {
         conflicts: Vec<ApplyConflict>,

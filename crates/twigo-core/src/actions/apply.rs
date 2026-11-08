@@ -14,6 +14,12 @@
 //! sends the outermost list on its path whole, as it stands after the
 //! apply, under the `resourceVersion` the apply returned.
 //!
+//! What an apply cannot express goes by one merge patch instead, carrying
+//! the changes and the removals together, field manager `twigo-edit`
+//! ([`Combined`]): a list map reordered, a duplicated key touched, or an
+//! edit whose apply answers `422` while its combined patch is clean, as the
+//! server validates an apply with the old field still there.
+//!
 //! A `resourceVersion` moves on every status write, so for a resource with a
 //! `status` subresource only [`comparable`] says an object changed: the
 //! preview holds to the server's version when only what a status write moves
@@ -35,11 +41,12 @@ use kube::core::{GroupVersionKind, Request, Status};
 use serde_json::{Value, json};
 use twigo_cache::hub::Resource;
 use twigo_ipc::{
-    ApplyConflict, ApplyPreviewed, ApplyRequest, ErrorKind, IpcError, OpenedEdit, PreviewId,
-    Resource as Served,
+    ApplyConflict, ApplyPreviewed, ApplyRequest, ApplyStrategy, ErrorKind, IpcError, OpenedEdit,
+    PreviewId, Resource as Served,
 };
 use twigo_kube::apply::{
-    self, Edit, FIELD_MANAGER, Path, comparable, merge_patch, still_has, without,
+    self, Combined, EDIT_FIELD_MANAGER, Edit, FIELD_MANAGER, Path, comparable, merge_patch,
+    still_has, without,
 };
 use twigo_kube::client::Clients;
 use twigo_kube::discovery::Discovery;
@@ -73,6 +80,7 @@ pub(crate) struct Prepared {
 
 enum Step {
     Apply(Box<ApplyStep>),
+    Patch(Box<PatchStep>),
     Recreate(Box<RecreateStep>),
 }
 
@@ -96,11 +104,22 @@ struct ApplyStep {
     secrets: Vec<String>,
 }
 
+/// The one merge patch of an edit no apply can express.
+struct PatchStep {
+    patch: Value,
+    lock: Option<String>,
+    comparable: Option<Value>,
+    secrets: Vec<String>,
+}
+
 struct RecreateStep {
     uid: String,
     /// The object as edited, without what the server made.
     body: Value,
 }
+
+/// Keeps what a preview prepared, once, for the window that asked.
+pub(crate) type Keep<'a> = Box<dyn FnOnce(Prepared) -> Result<PreviewId, IpcError> + Send + 'a>;
 
 /// A refusal by the server, sorted by what the person can do about it.
 enum Refused {
@@ -349,10 +368,11 @@ fn merge_request(
     target: &Target,
     patch: &Value,
     dry_run: bool,
+    manager: &str,
 ) -> Result<http::Request<Vec<u8>>, IpcError> {
     let params = PatchParams {
         dry_run,
-        field_manager: Some(FIELD_MANAGER.to_owned()),
+        field_manager: Some(manager.to_owned()),
         ..PatchParams::default()
     };
     Request::new(collection(target))
@@ -473,7 +493,7 @@ fn side(object: Value) -> Value {
 pub(crate) async fn preview(
     core: &Core,
     request: ApplyRequest,
-    keep: impl FnOnce(Prepared) -> Result<PreviewId, IpcError>,
+    keep: Keep<'_>,
 ) -> Result<ApplyPreviewed, IpcError> {
     let ApplyRequest {
         space,
@@ -526,7 +546,7 @@ pub(crate) async fn preview(
     let group = target.resource.group.clone();
     let version = target.resource.version.clone();
     let kind = edited["kind"].as_str().unwrap_or_default().to_owned();
-    let (config, removals, ignored) = match (&opened, &live) {
+    let (config, removals, ignored, combined) = match (&opened, &live) {
         (Some(opened), Some(live)) => {
             let document = Document::load(&clients.api, &core.openapi, &group, &version)
                 .await
@@ -562,11 +582,11 @@ pub(crate) async fn preview(
                     ignored: built.ignored,
                 });
             }
-            (built.config, built.removals, built.ignored)
+            (built.config, built.removals, built.ignored, built.combined)
         }
         _ => {
             let (config, ignored) = apply::manifest(&edited, status_subresource, None, &dropped);
-            (config, Vec::new(), ignored)
+            (config, Vec::new(), ignored, Combined::None)
         }
     };
 
@@ -579,6 +599,39 @@ pub(crate) async fn preview(
         Vec::new()
     };
 
+    let comparable_to = live.as_ref().filter(|_| status_subresource).map(comparable);
+    let by_patch = |patch: Value, object: Value, told: Vec<String>, keep| {
+        answer_patch(Asked {
+            target: &target,
+            connection: clients.connection(),
+            edited: &edited,
+            live: live.as_ref(),
+            ignored: ignored.clone(),
+            removals: &removals,
+            secret: is_secret(&edited),
+            secrets: secrets.clone(),
+            comparable: comparable_to.clone(),
+            lock: lock.clone(),
+            patch,
+            object,
+            told,
+            keep,
+        })
+    };
+    if let Combined::Only(patch) = &combined {
+        return match dry_run_patch(&clients, &target, patch, lock.as_deref()).await {
+            Ok((object, told)) => by_patch(patch.clone(), object, told, keep),
+            Err(error) => answer_refused(
+                Refused::of(&error, &secrets),
+                keep,
+                &target,
+                &edited,
+                live.as_ref(),
+                clients.connection(),
+            ),
+        };
+    }
+
     let mut warnings = Vec::new();
     let answered = match &config {
         Some(config) => {
@@ -589,6 +642,14 @@ pub(crate) async fn preview(
                     Some(object)
                 }
                 Err(error) => {
+                    if let (Combined::Fallback(patch), kube::Error::Api(status)) =
+                        (&combined, &error)
+                        && status.code == 422
+                        && let Ok((object, told)) =
+                            dry_run_patch(&clients, &target, patch, lock.as_deref()).await
+                    {
+                        return by_patch(patch.clone(), object, told, keep);
+                    }
                     return answer_refused(
                         Refused::of(&error, &secrets),
                         keep,
@@ -617,7 +678,7 @@ pub(crate) async fn preview(
                 .expect("every removal was read in the live object"),
             lock.as_deref(),
         );
-        let request = merge_request(&target, &patch, true)?;
+        let request = merge_request(&target, &patch, true, FIELD_MANAGER)?;
         if let Err(error) = send(&clients.api, request).await {
             return answer_refused(
                 Refused::of(&error, &secrets),
@@ -637,7 +698,8 @@ pub(crate) async fn preview(
         kind_words(edited["kind"].as_str().unwrap_or(&target.resource.resource)),
         target.name
     );
-    let patch_for_line = merge_patch(answered.as_ref().unwrap_or(live_or_empty), &removals);
+    let patch_for_line = merge_patch(answered.as_ref().unwrap_or(live_or_empty), &removals)
+        .map(|patch| locked(&patch, lock.as_deref().filter(|_| config.is_none())));
     let line = apply_line(
         &target,
         config.as_ref(),
@@ -654,7 +716,6 @@ pub(crate) async fn preview(
         writes.push(target.attributes(Method::PATCH, None));
     }
     let warnings: Vec<String> = warnings.iter().map(|text| scrub(text, &secrets)).collect();
-    let comparable_to = live.as_ref().filter(|_| status_subresource).map(comparable);
     let live_view = side(live.clone().unwrap_or(Value::Null));
     let id = keep(Prepared {
         context: target.context.clone(),
@@ -681,6 +742,7 @@ pub(crate) async fn preview(
         warnings,
         removals: removals.iter().map(ToString::to_string).collect(),
         ignored,
+        strategy: ApplyStrategy::ServerSideApply,
     })
 }
 
@@ -688,7 +750,7 @@ pub(crate) async fn preview(
 /// or a Job with a field that cannot change.
 fn answer_refused(
     refused: Refused,
-    keep: impl FnOnce(Prepared) -> Result<PreviewId, IpcError>,
+    keep: Keep<'_>,
     target: &Target,
     edited: &Value,
     live: Option<&Value>,
@@ -779,19 +841,114 @@ fn apply_line(
         });
     }
     if let Some(patch) = patch {
-        let manager = format!("--field-manager={FIELD_MANAGER}");
-        let body = patch.to_string();
-        lines.push(target.kubectl(&[
-            "patch",
-            kind_name,
-            &target.name,
-            "--type=merge",
-            &manager,
-            "-p",
-            &body,
-        ])?);
+        lines.push(patch_line(target, patch, kind_name, FIELD_MANAGER, secret)?);
     }
     Ok(lines.join(" && "))
+}
+
+/// The `kubectl patch` line of a merge patch, as it is sent; a Secret's
+/// names no body, where a value would be.
+fn patch_line(
+    target: &Target,
+    patch: &Value,
+    kind_name: &str,
+    manager: &str,
+    secret: bool,
+) -> Result<String, IpcError> {
+    let manager = format!("--field-manager={manager}");
+    let body = patch.to_string();
+    let mut words = vec!["patch", kind_name, &target.name, "--type=merge", &manager];
+    if !secret {
+        words.extend(["-p", &body]);
+    }
+    target.kubectl(&words)
+}
+
+/// The dry-run of the one merge patch of an edit.
+async fn dry_run_patch(
+    clients: &Clients,
+    target: &Target,
+    patch: &Value,
+    lock: Option<&str>,
+) -> Result<(Value, Vec<String>), kube::Error> {
+    let request = merge_request(target, &locked(patch, lock), true, EDIT_FIELD_MANAGER)
+        .expect("a merge patch is a body the server reads");
+    send(&clients.api, request).await
+}
+
+/// What a preview that goes by one merge patch answers.
+struct Asked<'a> {
+    target: &'a Target,
+    connection: Option<u64>,
+    edited: &'a Value,
+    live: Option<&'a Value>,
+    ignored: Vec<String>,
+    removals: &'a [Path],
+    secret: bool,
+    secrets: Vec<String>,
+    comparable: Option<Value>,
+    lock: Option<String>,
+    patch: Value,
+    object: Value,
+    told: Vec<String>,
+    keep: Keep<'a>,
+}
+
+fn answer_patch(asked: Asked<'_>) -> Result<ApplyPreviewed, IpcError> {
+    let Asked {
+        target,
+        connection,
+        edited,
+        live,
+        ignored,
+        removals,
+        secret,
+        secrets,
+        comparable,
+        lock,
+        patch,
+        object,
+        told,
+        keep,
+    } = asked;
+    let what = format!(
+        "{} {}",
+        kind_words(edited["kind"].as_str().unwrap_or(&target.resource.resource)),
+        target.name
+    );
+    let kubectl = patch_line(
+        target,
+        &locked(&patch, lock.as_deref()),
+        &target.resource.name(),
+        EDIT_FIELD_MANAGER,
+        secret,
+    )?;
+    let warnings: Vec<String> = told.iter().map(|text| scrub(text, &secrets)).collect();
+    let live_view = side(live.cloned().unwrap_or(Value::Null));
+    let id = keep(Prepared {
+        context: target.context.clone(),
+        path: target.path.clone(),
+        writes: vec![target.attributes(Method::PATCH, None)],
+        connection,
+        target: target.clone(),
+        what,
+        kubectl,
+        step: Step::Patch(Box::new(PatchStep {
+            patch,
+            lock,
+            comparable,
+            secrets,
+        })),
+    })?;
+    Ok(ApplyPreviewed::Ready {
+        id,
+        live: live_view,
+        result: side(object),
+        warnings,
+        removals: removals.iter().map(ToString::to_string).collect(),
+        ignored,
+        strategy: ApplyStrategy::MergePatch,
+    })
 }
 
 /// The plan of a preview, by its id, which takes it.
@@ -847,6 +1004,35 @@ pub(crate) fn apply(
                 confirm: "Apply".to_owned(),
                 destructive: false,
                 consequences,
+                affected: Vec::new(),
+                kubectl,
+                doing: format!("Applying {what}"),
+                command,
+                target: audit_target,
+                writes,
+                context,
+                connection,
+                space: Some(space),
+                risk: Risk::Reviewed,
+                run: Box::new(move |_| Box::pin(run.run())),
+            }
+        }
+        Step::Patch(step) => {
+            let run = PatchRun {
+                core: this,
+                context: context.clone(),
+                connection,
+                target,
+                what: what.clone(),
+                step,
+            };
+            Planned {
+                question: format!("Apply your changes to {what}{place} on {context}?"),
+                confirm: "Apply".to_owned(),
+                destructive: false,
+                consequences: vec![format!(
+                    "An apply cannot express this edit, so it goes as one merge patch under field manager {EDIT_FIELD_MANAGER}, as kubectl edit would."
+                )],
                 affected: Vec::new(),
                 kubectl,
                 doing: format!("Applying {what}"),
@@ -955,7 +1141,7 @@ impl Run {
         };
         let baseline = step.comparable.as_ref().map(|_| comparable(&object));
         let sent = send_held(&clients, target, baseline.as_ref(), lock, |lock| {
-            merge_request(target, &locked(&patch, lock), false)
+            merge_request(target, &locked(&patch, lock), false, FIELD_MANAGER)
         })
         .await?;
         match sent {
@@ -992,6 +1178,57 @@ impl Run {
                 };
                 Err(IpcError::new(failed.kind, message))
             }
+        }
+    }
+}
+
+struct PatchRun {
+    core: Weak<Core>,
+    context: String,
+    connection: Option<u64>,
+    target: Target,
+    what: String,
+    step: Box<PatchStep>,
+}
+
+impl PatchRun {
+    async fn run(self) -> Result<Finished, IpcError> {
+        let (_, clients) = clients_for(
+            &self.core,
+            &self.context,
+            self.connection,
+            "applied nothing",
+        )
+        .await?;
+        let step = &self.step;
+        let what = &self.what;
+        let target = &self.target;
+        let sent = send_held(
+            &clients,
+            target,
+            step.comparable.as_ref(),
+            step.lock.clone(),
+            |lock| {
+                merge_request(
+                    target,
+                    &locked(&step.patch, lock),
+                    false,
+                    EDIT_FIELD_MANAGER,
+                )
+            },
+        )
+        .await?;
+        match sent {
+            Ok(_) => Ok(Finished::Done(format!("Applied {what}"))),
+            Err(kube::Error::Api(status)) if status.code == 409 => Err(IpcError::new(
+                ErrorKind::Conflict,
+                format!(
+                    "{} changed since the diff, so Twigo applied nothing: {}",
+                    sentence(what),
+                    scrub(&status.message, &step.secrets)
+                ),
+            )),
+            Err(error) => Err(scrubbed(errors::request(&error), &step.secrets)),
         }
     }
 }

@@ -1062,6 +1062,7 @@ test("apply_preview answers each case of the enum, and a ready one's plan runs o
     ["immutable", "immutable"],
     ["recreate", "immutable"],
     ["removals", "ready"],
+    ["merge-patch", "ready"],
     [null, "ready"],
   ] as const) {
     const answer = await answered(

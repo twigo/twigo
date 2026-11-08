@@ -316,6 +316,20 @@ fn table() -> Vec<Row> {
             OPEN,
         ),
         row(
+            "one merge patch for an edit an apply cannot express",
+            patch.clone(),
+            "/apis/apps/v1/namespaces/a/deployments/d?fieldManager=twigo-edit",
+            Write,
+            NOT_READ_ONLY,
+        ),
+        row(
+            "that merge patch's dry-run",
+            patch.clone(),
+            "/apis/apps/v1/namespaces/a/deployments/d?dryRun=All&fieldManager=twigo-edit",
+            DryRun,
+            OPEN,
+        ),
+        row(
             "recreate's create, under a Pod or a Job",
             post.clone(),
             "/api/v1/namespaces/a/pods?fieldManager=twigo&fieldValidation=Strict",

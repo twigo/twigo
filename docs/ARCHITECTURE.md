@@ -1545,6 +1545,10 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
 7. A field the user deleted goes by the apply only when Twigo's Apply entry is its only owner.
    Another manager's or nobody's stays after an apply, so it needs a separate merge patch with `null`, shown as its own step in the diff.
    The patch is sent after the apply, on the `resourceVersion` the apply returned; a merge patch cannot address a list element, so a removal inside a list sends the outermost list whole, as it stands after the apply minus the removal, and nothing is sent when the dry-run already shows it gone.
+   Some edits no apply can express: a list map reordered, an element of a key the server holds twice, changed or removed, or an edit whose apply is validated with the old field still there and answers 422 (a Deployment changed to `strategy: Recreate` while another manager owns `rollingUpdate`, an env var from `value` to `valueFrom`) while the same object as one write is valid.
+   Those go by one JSON merge patch that carries the changes and the removals together, a list on the path whole, under field manager `twigo-edit`, as `kubectl edit` would, and held to the `resourceVersion`; the preview says which strategy it is, so the diff can say so, and the plan's `kubectl` is that patch.
+   A conflict answers before validation does on the server, so a `409` is never routed here.
+   It adds no field to the `twigo` Apply entry.
 8. Immutable fields return 422; the dry-run catches this before any write.
    Delete-and-recreate is offered only for Pods and Jobs, with confirmation; the uid is held by a precondition, and what the Job controller generates, its selector and its `controller-uid` and `job-name` labels, does not go along.
 

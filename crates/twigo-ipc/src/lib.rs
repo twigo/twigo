@@ -25,7 +25,9 @@ pub use access::{
 pub use action::{
     Affected, Execute, Friction, OperationEvent, Plan, PlanId, PlanRequest, ResourceRef,
 };
-pub use apply::{ApplyConflict, ApplyPreviewed, ApplyRequest, OpenedEdit, PreviewId};
+pub use apply::{
+    ApplyConflict, ApplyPreviewed, ApplyRequest, ApplyStrategy, OpenedEdit, PreviewId,
+};
 pub use credentials::{ContextAuth, EnvVar, ExecPlugin, ExecReview, PluginStatus, ReviewedPlugin};
 pub use discovery::{ClusterVersion, Discovered, Resource};
 pub use environment::ShellEnvironment;

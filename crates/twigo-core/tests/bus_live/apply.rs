@@ -7,8 +7,8 @@ use kube::api::PostParams;
 use serde_json::{Value, json};
 use twigo_core::Core;
 use twigo_ipc::{
-    ApplyConflict, ApplyPreviewed, ApplyRequest, ErrorKind, Mode, OpenedEdit, Plan, PlanRequest,
-    PreviewId, ResourceRef, SetContextMode,
+    ApplyConflict, ApplyPreviewed, ApplyRequest, ApplyStrategy, ErrorKind, Mode, OpenedEdit, Plan,
+    PlanRequest, PreviewId, ResourceRef, SetContextMode,
 };
 
 use super::{Cluster, core, eventually, kubectl, reference, run};
@@ -1582,5 +1582,253 @@ async fn a_spec_or_a_metadata_change_between_the_preview_and_the_run_does_not_ap
             other => panic!("{name}: expected stale, got {other:?}"),
         }
     }
+    cluster.delete(&namespace).await;
+}
+
+fn by_patch(answer: ApplyPreviewed) -> (PreviewId, Value) {
+    match answer {
+        ApplyPreviewed::Ready {
+            id,
+            result,
+            strategy: ApplyStrategy::MergePatch,
+            ..
+        } => (id, result),
+        other => panic!("expected the merge patch, got {other:?}"),
+    }
+}
+
+fn strategy_deployment(name: &str) -> Value {
+    let mut object = deployment(name);
+    object["spec"]["template"]["spec"]["containers"][0]["env"] =
+        json!([{ "name": "A", "value": "1" }]);
+    object
+}
+
+fn manager_entry<'a>(object: &'a Value, manager: &str) -> Option<&'a Value> {
+    object["metadata"]["managedFields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["manager"] == manager)
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn an_edit_an_apply_cannot_express_goes_by_one_merge_patch_and_owns_nothing() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-strategy").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, kubeconfig) = core(dir.path(), &cluster).await;
+    let collection = deployments(&namespace);
+    let target = |name: &str| deployment_ref(&namespace, name);
+    for name in ["web", "line"] {
+        post(&cluster.admin, &collection, &strategy_deployment(name)).await;
+    }
+    let path = format!("{collection}/web");
+    let live = settled(&cluster.admin, &path).await;
+    assert!(live["spec"]["strategy"]["rollingUpdate"].is_object());
+
+    let mut edited = view(&live);
+    edited["spec"]["strategy"] = json!({ "type": "Recreate" });
+    match preview(
+        &core,
+        edit(
+            &cluster,
+            target("web"),
+            &live,
+            edited.clone(),
+            false,
+            vec![],
+        ),
+    )
+    .await
+    {
+        ApplyPreviewed::Conflicts { .. } => {}
+        other => panic!("a conflict is never routed to the merge patch: {other:?}"),
+    }
+
+    let (id, result) = by_patch(
+        preview(
+            &core,
+            edit(&cluster, target("web"), &live, edited, true, vec![]),
+        )
+        .await,
+    );
+    assert_eq!(result["spec"]["strategy"], json!({ "type": "Recreate" }));
+    let plan_of = plan(&core, &cluster, id).await;
+    assert!(
+        plan_of.kubectl.contains("patch deployments.apps web")
+            && plan_of.kubectl.contains("--type=merge")
+            && plan_of.kubectl.contains("--field-manager=twigo-edit"),
+        "{}",
+        plan_of.kubectl
+    );
+    assert!(!plan_of.kubectl.contains(" apply "), "{}", plan_of.kubectl);
+    let events = run(&core, &plan_of, None).await.unwrap();
+    assert!(
+        matches!(events.last(), Some(twigo_ipc::OperationEvent::Done { .. })),
+        "{events:?}"
+    );
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(after["spec"]["strategy"], json!({ "type": "Recreate" }));
+    assert_eq!(entry(&after, "twigo", "Apply"), None);
+    assert_eq!(
+        manager_entry(&after, "twigo-edit").unwrap()["operation"],
+        "Update"
+    );
+
+    let line_path = format!("{collection}/line");
+    let live = settled(&cluster.admin, &line_path).await;
+    let mut edited = view(&live);
+    edited["spec"]["strategy"] = json!({ "type": "Recreate" });
+    let (id, _) = by_patch(
+        preview(
+            &core,
+            edit(&cluster, target("line"), &live, edited, true, vec![]),
+        )
+        .await,
+    );
+    let plan_of = plan(&core, &cluster, id).await;
+    kubectl(&plan_of, &kubeconfig);
+    let after = read(&cluster.admin, &line_path).await;
+    assert_eq!(after["spec"]["strategy"], json!({ "type": "Recreate" }));
+    assert_eq!(entry(&after, "twigo", "Apply"), None);
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn the_one_merge_patch_changes_value_to_value_from_and_a_bad_edit_keeps_its_422() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-env").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let collection = deployments(&namespace);
+    post(&cluster.admin, &collection, &strategy_deployment("web")).await;
+    let path = format!("{collection}/web");
+    let live = settled(&cluster.admin, &path).await;
+    let target = deployment_ref(&namespace, "web");
+
+    let mut edited = view(&live);
+    edited["spec"]["template"]["spec"]["containers"][0]["env"][0] = json!({
+        "name": "A",
+        "valueFrom": { "fieldRef": { "fieldPath": "metadata.name" } },
+    });
+    let (id, result) = by_patch(
+        preview(
+            &core,
+            edit(&cluster, target.clone(), &live, edited, true, vec![]),
+        )
+        .await,
+    );
+    assert_eq!(
+        result["spec"]["template"]["spec"]["containers"][0]["env"][0].get("value"),
+        None
+    );
+    applied(&core, &cluster, id).await;
+    let after = read(&cluster.admin, &path).await;
+    let env = &after["spec"]["template"]["spec"]["containers"][0]["env"][0];
+    assert_eq!(env.get("value"), None);
+    assert_eq!(env["valueFrom"]["fieldRef"]["fieldPath"], "metadata.name");
+    assert_eq!(entry(&after, "twigo", "Apply"), None);
+
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["spec"]["strategy"] = json!({ "type": "Bogus" });
+    let refused = core
+        .apply_preview("main", edit(&cluster, target, &live, edited, true, vec![]))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::InvalidInput, "{refused:?}");
+    assert!(refused.message.contains("strategy"), "{}", refused.message);
+    assert!(refused.message.contains("Bogus"), "{}", refused.message);
+    cluster.delete(&namespace).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_reorder_and_a_touched_duplicate_go_by_the_patch_and_an_untouched_duplicate_stays() {
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-order").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let collection = deployments(&namespace);
+    let mut object = deployment("web");
+    object["spec"]["template"]["spec"]["containers"][0]["env"] = json!([
+        { "name": "A", "value": "1" },
+        { "name": "A", "value": "2" },
+        { "name": "B", "value": "x" },
+    ]);
+    post(&cluster.admin, &collection, &object).await;
+    let path = format!("{collection}/web");
+    let target = deployment_ref(&namespace, "web");
+    let env_of =
+        |object: &Value| object["spec"]["template"]["spec"]["containers"][0]["env"].clone();
+
+    let live = settled(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["spec"]["template"]["spec"]["containers"][0]["env"][2]["value"] = json!("y");
+    let (id, _, _, _) = ready(
+        preview(
+            &core,
+            edit(&cluster, target.clone(), &live, edited, true, vec![]),
+        )
+        .await,
+    );
+    applied(&core, &cluster, id).await;
+    let after = settled(&cluster.admin, &path).await;
+    assert_eq!(
+        env_of(&after),
+        json!([
+            { "name": "A", "value": "1" },
+            { "name": "A", "value": "2" },
+            { "name": "B", "value": "y" },
+        ]),
+        "the duplicate is not touched"
+    );
+
+    let mut edited = view(&after);
+    edited["spec"]["template"]["spec"]["containers"][0]["env"][1]["value"] = json!("3");
+    let (id, _) = by_patch(
+        preview(
+            &core,
+            edit(&cluster, target.clone(), &after, edited, false, vec![]),
+        )
+        .await,
+    );
+    applied(&core, &cluster, id).await;
+    let after = settled(&cluster.admin, &path).await;
+    assert_eq!(
+        env_of(&after),
+        json!([
+            { "name": "A", "value": "1" },
+            { "name": "A", "value": "3" },
+            { "name": "B", "value": "y" },
+        ])
+    );
+
+    let mut edited = view(&after);
+    edited["spec"]["template"]["spec"]["containers"][0]["env"]
+        .as_array_mut()
+        .unwrap()
+        .reverse();
+    let (id, _) = by_patch(
+        preview(
+            &core,
+            edit(&cluster, target.clone(), &after, edited, false, vec![]),
+        )
+        .await,
+    );
+    applied(&core, &cluster, id).await;
+    let after = read(&cluster.admin, &path).await;
+    assert_eq!(
+        env_of(&after),
+        json!([
+            { "name": "B", "value": "y" },
+            { "name": "A", "value": "3" },
+            { "name": "A", "value": "1" },
+        ]),
+        "a reorder of a list map is written"
+    );
     cluster.delete(&namespace).await;
 }

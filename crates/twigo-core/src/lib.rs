@@ -444,9 +444,11 @@ impl Core {
         request: ApplyRequest,
     ) -> Result<ApplyPreviewed, IpcError> {
         let ticket = self.bus.ticket(window);
-        actions::preview(self, request, |prepared| {
-            self.bus.keep_preview(ticket, prepared)
-        })
+        actions::preview(
+            self,
+            request,
+            Box::new(|prepared| self.bus.keep_preview(ticket, prepared)),
+        )
         .await
     }
 
