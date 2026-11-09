@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type FunctionComponent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type FunctionComponent,
+} from "react";
 import {
   DockviewReact,
   themeLight,
@@ -18,7 +25,7 @@ import {
   readParams,
   type Area,
 } from "../editors/registry";
-import { useChanges, useWorkbench } from "../react";
+import { EditorShownContext, useChanges, useWorkbench } from "../react";
 import { PanelBoundary } from "./PanelBoundary";
 
 const THEME: DockviewTheme = {
@@ -156,9 +163,20 @@ export function SpaceDock({
   );
 }
 
-function EditorPanel({ params: raw }: IDockviewPanelProps) {
-  const { editors } = useWorkbench();
+function EditorPanel({ params: raw, api }: IDockviewPanelProps) {
+  const { editors, spaces } = useWorkbench();
   useChanges(editors.changes);
+  useChanges(spaces.changes);
+  const subscribe = useCallback(
+    (changed: () => void) => {
+      const listener = api.onDidVisibilityChange(changed);
+      return () => {
+        listener.dispose();
+      };
+    },
+    [api],
+  );
+  const visible = useSyncExternalStore(subscribe, () => api.isVisible);
   const params = readParams(raw);
   const provider = params && editors.resolve(params.uri);
   if (!params || !provider) {
@@ -173,10 +191,19 @@ function EditorPanel({ params: raw }: IDockviewPanelProps) {
     );
   }
   const Component = provider.component;
+  const space = spaces.active;
+  const panel = space && spaces.state(space.id).parts.panel;
+  const covered =
+    provider.area !== "panel" &&
+    panel !== undefined &&
+    panel.visible &&
+    panel.maximized;
   return (
-    <PanelBoundary label={provider.title(new URL(params.uri))}>
-      <Component uri={params.uri} />
-    </PanelBoundary>
+    <EditorShownContext.Provider value={visible && !covered}>
+      <PanelBoundary label={provider.title(new URL(params.uri))}>
+        <Component uri={params.uri} />
+      </PanelBoundary>
+    </EditorShownContext.Provider>
   );
 }
 

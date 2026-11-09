@@ -15,7 +15,7 @@ export type { Platform } from "./keybindings/chord";
 export { platformOf } from "./keybindings/platform";
 export type { KeybindingRule } from "./keybindings/resolver";
 export { Changes } from "./changes";
-export { useChanges, useWorkbench } from "./react";
+export { EditorShownContext, useChanges, useEditorShown, useWorkbench } from "./react";
 export type {
   AcceptOptions,
   PickSource,

@@ -21,7 +21,7 @@ const THEME: DockviewTheme = {
  * 4.1).
  */
 export function PanelArea() {
-  const { spaces, keys } = useWorkbench();
+  const { spaces, keys, editors } = useWorkbench();
   useChanges(spaces.changes);
   const space = spaces.active;
   const ref = useRef<HTMLDivElement>(null);
@@ -43,6 +43,11 @@ export function PanelArea() {
     keys.set("panelVisible", visible);
     keys.set("panelMaximized", maximized);
   }, [keys, visible, maximized]);
+
+  // The editor area it covers went with the focus, if it held it.
+  useEffect(() => {
+    if (maximized) editors.keepFocus("panel");
+  }, [editors, maximized]);
 
   return (
     <section

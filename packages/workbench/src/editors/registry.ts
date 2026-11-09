@@ -163,7 +163,7 @@ export class Editors {
         : undefined;
     if (area === "editor") {
       this.#setActive(api.activePanel);
-      this.#keepFocus("editor");
+      this.keepFocus("editor");
     }
     for (const [uri, later] of [...this.#leaving]) {
       if (later.area !== area || later.space !== space) continue;
@@ -209,7 +209,7 @@ export class Editors {
       if (!preview) this.pin(uri);
       this.reveal(open.area);
       open.panel.api.setActive();
-      this.#keepFocus(open.area);
+      this.keepFocus(open.area);
       return;
     }
     const api = this.#apis.get(area);
@@ -239,7 +239,7 @@ export class Editors {
       }),
     });
     replaced?.api.close();
-    this.#keepFocus(area);
+    this.keepFocus(area);
   }
 
   /** Turns a preview tab into an ordinary one. */
@@ -304,7 +304,7 @@ export class Editors {
     const open = this.#find(uri);
     if (open) {
       open.panel.api.close();
-      this.#keepFocus(open.area);
+      this.keepFocus(open.area);
       return;
     }
     const provider = this.resolve(uri);
@@ -320,7 +320,7 @@ export class Editors {
     const panel = this.#apis.get(area)?.activePanel;
     if (!panel || panel.group.panels.length < 2) return;
     panel.api.moveTo({ group: panel.group, position: side });
-    this.#keepFocus(area);
+    this.keepFocus(area);
   }
 
   /**
@@ -330,7 +330,7 @@ export class Editors {
    * editor that can hold it, its own; an area with no editor left gives it to
    * the editor area.
    */
-  #keepFocus(area: Area): void {
+  keepFocus(area: Area): void {
     if (document.activeElement !== document.body) return;
     const holder = this.activeIn(area) === undefined ? "editor" : area;
     this.#apis.get(holder)?.focus();

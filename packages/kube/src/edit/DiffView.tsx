@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useEditorShown } from "@twigo/workbench";
 import { editor } from "./monaco";
 
 export default function DiffView({
@@ -8,7 +9,9 @@ export default function DiffView({
   readonly original: string;
   readonly modified: string;
 }) {
+  const shown = useEditorShown();
   const host = useRef<HTMLDivElement>(null);
+  const place = useRef<editor.IDiffEditorViewState | null>(null);
   const diff = useRef<editor.IStandaloneDiffEditor>(undefined);
   const models = useRef<{
     original: editor.ITextModel;
@@ -18,8 +21,10 @@ export default function DiffView({
   useEffect(() => {
     latest.current = { original, modified };
   });
+  // Only a diff on screen has a Monaco view, as a YAML editor's does; the
+  // diff's own place in it is kept for when it shows again.
   useEffect(() => {
-    if (!host.current) return;
+    if (!host.current || !shown) return;
     const pair = {
       original: editor.createModel(latest.current.original, "yaml"),
       modified: editor.createModel(latest.current.modified, "yaml"),
@@ -36,9 +41,11 @@ export default function DiffView({
       renderOverviewRuler: false,
     });
     view.setModel(pair);
+    if (place.current) view.restoreViewState(place.current);
     diff.current = view;
     models.current = pair;
     return () => {
+      place.current = view.saveViewState();
       // A diff still being computed fails once its models are gone.
       view.setModel(null);
       view.dispose();
@@ -47,7 +54,7 @@ export default function DiffView({
       diff.current = undefined;
       models.current = undefined;
     };
-  }, []);
+  }, [shown]);
   useEffect(() => {
     const pair = models.current;
     const view = diff.current;

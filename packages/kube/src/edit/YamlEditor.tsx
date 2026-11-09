@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useEditorShown } from "@twigo/workbench";
 import type { EditorBuffer } from "./copies";
 import type {
   IKeyboardEvent,
@@ -118,8 +119,15 @@ function typesCharacter(event: IKeyboardEvent): boolean {
  * The YAML editor, bundled locally and loaded on its first use (ARCHITECTURE
  * 4.6), on the app's light or dark theme. Its text lives in the editor's
  * working copy and its model in `buffers`, so this keeps nothing of its own.
+ * Only an editor on screen has a Monaco view: Monaco sends a typed key to
+ * whichever view says it has the focus, and in WebKit a view whose panel left
+ * the page goes on saying so.
  */
-export default function YamlEditor({
+export default function YamlEditor(props: YamlEditorProps) {
+  return useEditorShown() ? <ShownYamlEditor {...props} /> : null;
+}
+
+function ShownYamlEditor({
   uri,
   text,
   readOnly = false,
@@ -141,7 +149,8 @@ export default function YamlEditor({
   });
 
   useEffect(() => {
-    if (!host.current) return;
+    const element = host.current;
+    if (!element) return;
     const make = (): EditorBuffer => ({
       model: editor.createModel(
         latest.current,
@@ -152,7 +161,7 @@ export default function YamlEditor({
     });
     const buffer = buffers ? buffers.buffer(uri, make) : make();
     const created = buffer.model;
-    const instance = editor.create(host.current, {
+    const instance = editor.create(element, {
       model: created,
       readOnly,
       automaticLayout: true,
@@ -170,19 +179,24 @@ export default function YamlEditor({
     view.current = instance;
     buffer.focus = () => {
       instance.focus();
+      // In WebKit a panel that moved leaves Monaco sure it has the focus, and
+      // `focus` then only corrects that belief.
+      if (!element.contains(element.ownerDocument.activeElement)) {
+        instance.focus();
+      }
     };
     if (buffers?.takeFocus(uri)) instance.focus();
     const content = created.onDidChangeContent(() => {
       if (!setting.current) changed.current?.(created.getValue());
     });
     return () => {
-      const held = instance.hasTextFocus();
+      const held = element.contains(element.ownerDocument.activeElement);
       buffer.view = instance.saveViewState();
       buffer.focus = undefined;
       content.dispose();
       instance.dispose();
       if (!buffers) created.dispose();
-      // A view that goes with the focus, as its space goes, hands it to the next.
+      // A view replaced while it holds the focus hands it to the next.
       if (held) buffers?.focus(uri);
       model.current = undefined;
       view.current = undefined;
