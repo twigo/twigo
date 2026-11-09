@@ -1,4 +1,4 @@
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { tabsIn, testWorkbench } from "../testing";
 import { WorkbenchView } from "../WorkbenchView";
@@ -75,6 +75,32 @@ test("closing a panel editor tells the close listeners, and its title can change
   });
   expect(closed).toHaveBeenCalledWith("session://x");
   expect(tabsIn("panel")).toEqual([]);
+});
+
+test("closing the panel's last editor gives the focus to the editor area's active group", async () => {
+  const { workbench, editors } = await mounted();
+  workbench.editors.register({
+    id: "test.input",
+    scheme: "input",
+    area: "panel",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <input aria-label={uri} />,
+  });
+  act(() => {
+    editors.open("note://a");
+    editors.open("input://x");
+  });
+  act(() => {
+    screen.getByLabelText("input://x").focus();
+  });
+  act(() => {
+    editors.close("input://x");
+  });
+  expect(tabsIn("panel")).toEqual([]);
+  expect(document.activeElement).not.toBe(document.body);
+  expect(
+    document.activeElement?.contains(screen.getByText("note note://a")),
+  ).toBe(true);
 });
 
 test("the panel maximizes, restores and hides by its commands, and its menu offers the one that applies", async () => {

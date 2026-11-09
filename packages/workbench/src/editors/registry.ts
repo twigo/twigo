@@ -327,12 +327,14 @@ export class Editors {
    * An editor that opens, closes or moves, or a space that shows, takes a
    * focused element away, and the browser puts the keyboard focus on the page,
    * where no key reaches an editor. The active group then takes it, and an
-   * editor that can hold it, its own.
+   * editor that can hold it, its own; an area with no editor left gives it to
+   * the editor area.
    */
   #keepFocus(area: Area): void {
     if (document.activeElement !== document.body) return;
-    this.#apis.get(area)?.focus();
-    const uri = this.activeIn(area);
+    const holder = this.activeIn(area) === undefined ? "editor" : area;
+    this.#apis.get(holder)?.focus();
+    const uri = this.activeIn(holder);
     if (uri !== undefined) this.resolve(uri)?.focus?.(uri);
   }
 

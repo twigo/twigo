@@ -206,7 +206,7 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
         if (params) editors.pin(params.uri);
       }}
       onAuxClick={(event) => {
-        if (event.button === 1) api.close();
+        if (event.button === 1) editors.close(api.id);
       }}
     >
       {params && provider?.icon && (
@@ -224,7 +224,7 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
         data-dirty={dirty}
         onClick={(event) => {
           event.stopPropagation();
-          api.close();
+          editors.close(api.id);
         }}
         className={cn(
           "twigo-tab-close -ml-[3px] flex size-5 items-center justify-center rounded",

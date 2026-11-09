@@ -707,6 +707,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   A resource editor's Overview, YAML, Events and Related switch at the right of its group's tab bar, where a list keeps its filters; Rust follows only the one shown.
 - **Closing a tab.**
   When an editor that opens, closes or moves, or a space that shows, drops the keyboard focus to the page, the active group takes it, and the active editor its own where it has a text editor to hold it, so a key such as ⌘S or ⌘Z still reaches an editor.
+  A tab's X and a middle click close through the editor service as ⌘W does, and the panel's last editor leaves the focus to the editor area's active group.
 - **Working copies.**
   A YAML editor that the user has changed holds a working copy based on the opened `resourceVersion`.
   - The service is keyed by the editor's URI and holds the object as opened (`base`), the `lock` an apply is held to, the object at that lock after "Keep mine" (`locked`) and the text.

@@ -1,5 +1,11 @@
 import { StrictMode } from "react";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import { testWorkbench } from "../testing";
 import { WorkbenchView } from "../WorkbenchView";
@@ -250,6 +256,45 @@ test("closing the editor that holds the keyboard focus gives it to the editor th
   expect(
     document.activeElement?.contains(screen.getByLabelText("field://b")),
   ).toBe(true);
+});
+
+test("closing a tab by its X or a middle click gives the focus to the editor that becomes active", async () => {
+  const { workbench, editors } = await mounted();
+  workbench.editors.register({
+    id: "test.field",
+    scheme: "field",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <input aria-label={uri} />,
+  });
+  act(() => {
+    editors.open("field://a");
+    editors.open("field://b");
+    editors.open("field://c");
+  });
+  const inGroup = (uri: string) =>
+    document.activeElement !== document.body &&
+    (document.activeElement?.contains(screen.getByLabelText(uri)) ?? false);
+
+  const x = screen.getByRole("button", { name: "Close c" });
+  act(() => {
+    x.focus();
+  });
+  act(() => {
+    fireEvent.click(x);
+  });
+  expect(editors.active).toBe("field://b");
+  expect(inGroup("field://b")).toBe(true);
+
+  act(() => {
+    screen.getByLabelText("field://b").focus();
+  });
+  const tab = screen.getByRole("button", { name: "Close b" }).parentElement;
+  if (!tab) throw new Error("no tab");
+  act(() => {
+    fireEvent(tab, new MouseEvent("auxclick", { button: 1, bubbles: true }));
+  });
+  expect(editors.active).toBe("field://a");
+  expect(inGroup("field://a")).toBe(true);
 });
 
 test("opening, moving or a space shown gives the active group the focus that fell to the page, and an editor that can hold it its own", async () => {
