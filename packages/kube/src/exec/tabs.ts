@@ -46,7 +46,7 @@ export interface ExecOptions {
   readonly platform: Platform;
   readonly report: (error: unknown) => void;
   readonly openUrl: (url: string) => void;
-  /** Whether a key press is a binding of the workbench, which the terminal gives up. */
+  /** Whether the workbench takes a key press, which the terminal then gives up. */
   readonly binds: (event: KeyboardEvent) => boolean;
   /** The WebGL renderer of a terminal; a test brings another, as jsdom has no WebGL. */
   readonly webgl?: () => WebglRenderer;
@@ -122,8 +122,7 @@ export class ExecTab {
       this.#session?.resize(cols, rows);
     });
     this.term.attachCustomKeyEventHandler(
-      (event) =>
-        !(event.type === "keydown" && event.metaKey && options.binds(event)),
+      (event) => !(event.type === "keydown" && options.binds(event)),
     );
   }
 

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Backend } from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import { notify } from "@twigo/ui";
-import { WorkbenchView, type Workbench } from "@twigo/workbench";
+import { WorkbenchView, type Platform, type Workbench } from "@twigo/workbench";
 import { tabsIn, testWorkbench } from "@twigo/workbench/testing";
 import { settle, withScreenSize } from "../../test/workbench";
 import { withTerminalLayout } from "../../test/terminal";
@@ -65,9 +65,10 @@ interface Mounted {
 async function mounted(
   scenario: MockScenario = "ready",
   webgl?: () => WebglRenderer,
+  platform: Platform = "mac",
 ): Promise<Mounted> {
   const backend = createMockBackend(scenario);
-  const workbench = await testWorkbench(scenario, backend);
+  const workbench = await testWorkbench(scenario, backend, platform);
   const tabs = webgl
     ? new ExecTabs({
         backend,
@@ -488,7 +489,7 @@ test("a panel shown again gives the focus to the active tab's terminal", async (
   expect(document.activeElement).toBe(textarea);
 });
 
-test("the terminal's keys never reach a list's bare ones, and a chord that is bound stays the workbench's", async () => {
+test("the terminal's keys never reach a list's bare ones", async () => {
   const { workbench, open } = await mounted("shellOneContainer");
   await open("qa", ONE);
   const textarea = document.querySelector<HTMLTextAreaElement>(
@@ -508,12 +509,103 @@ test("the terminal's keys never reach a list's bare ones, and a chord that is bo
   expect(press({ key: "s", code: "KeyS" })).toBe(false);
   expect(press({ key: "l", code: "KeyL" })).toBe(false);
   expect(execute).not.toHaveBeenCalled();
+});
 
-  expect(
-    workbench.keybindings.handles(
-      new KeyboardEvent("keydown", { code: "KeyJ", metaKey: true }),
-    ),
-  ).toBe(true);
+const keydown = (target: Element, init: KeyboardEventInit, keyCode: number) => {
+  const event = new KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    ...init,
+  });
+  Object.defineProperty(event, "keyCode", { value: keyCode });
+  target.dispatchEvent(event);
+};
+
+const terminalOf = () => {
+  const textarea = document.querySelector<HTMLTextAreaElement>(
+    ".xterm-helper-textarea",
+  );
+  if (!textarea) throw new Error("no terminal");
+  return textarea;
+};
+
+const panelShown = (workbench: Workbench) =>
+  workbench.spaces.state("qa").parts.panel.visible;
+
+test("a ⌘ binding stays the workbench's, and the second press of a chord goes to it, not to the shell", async () => {
+  const { workbench, backend, open } = await mounted("shellOneContainer");
+  const ran = vi.fn();
+  workbench.commands.register({
+    id: "test.chord",
+    title: "Chord",
+    category: "Test",
+    run: ran,
+  });
+  workbench.keybindings.register("user", [
+    { key: "mod+k enter", command: "test.chord" },
+  ]);
+  await open("qa", ONE);
+  const textarea = terminalOf();
+  const invoke = vi.spyOn(backend, "invoke");
+  const inputs = () => invoke.mock.calls.filter(([c]) => c === "shell_input");
+
+  keydown(textarea, { key: "k", code: "KeyK", metaKey: true }, 75);
+  expect(workbench.keybindings.pending).toHaveLength(1);
+  keydown(textarea, { key: "Enter", code: "Enter" }, 13);
+  await settle(4);
+  expect(ran).toHaveBeenCalledOnce();
+  expect(workbench.keybindings.pending).toEqual([]);
+  expect(inputs()).toEqual([]);
+
+  keydown(textarea, { key: "j", code: "KeyJ", metaKey: true }, 74);
+  await settle(4);
+  expect(panelShown(workbench)).toBe(false);
+  expect(inputs()).toEqual([]);
+});
+
+test("on Linux and Windows quick access, the command palette and the panel's toggle win over the shell, and every other Ctrl chord stays with it", async () => {
+  const { workbench, backend, open } = await mounted(
+    "shellOneContainer",
+    undefined,
+    "linux",
+  );
+  await open("qa", ONE);
+  const textarea = terminalOf();
+  const invoke = vi.spyOn(backend, "invoke");
+  const inputs = () =>
+    invoke.mock.calls
+      .filter(([c]) => c === "shell_input")
+      .map(([, request]) => (request as { data: number[] }).data);
+
+  keydown(textarea, { key: "p", code: "KeyP", ctrlKey: true }, 80);
+  await settle(4);
+  expect(workbench.quickAccess.session).toBeDefined();
+  act(() => {
+    workbench.quickAccess.hide();
+  });
+  keydown(
+    textarea,
+    { key: "P", code: "KeyP", ctrlKey: true, shiftKey: true },
+    80,
+  );
+  await settle(4);
+  expect(workbench.quickAccess.session).toBeDefined();
+  act(() => {
+    workbench.quickAccess.hide();
+  });
+  expect(inputs()).toEqual([]);
+
+  const sidebar = () => workbench.spaces.state("qa").parts.sidebar.visible;
+  const before = sidebar();
+  keydown(textarea, { key: "b", code: "KeyB", ctrlKey: true }, 66);
+  await settle(4);
+  expect(inputs()).toEqual([[2]]);
+  expect(sidebar()).toBe(before);
+
+  keydown(textarea, { key: "j", code: "KeyJ", ctrlKey: true }, 74);
+  await settle(4);
+  expect(panelShown(workbench)).toBe(false);
+  expect(inputs()).toEqual([[2]]);
 });
 
 test("a tab that moves to another view keeps its terminal and its session", async () => {

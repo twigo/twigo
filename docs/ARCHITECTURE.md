@@ -937,7 +937,10 @@ Extensions add commands, not prefixes.
     A failed load and a lost context leave that terminal on the DOM renderer.
     With an opaque background, 6.0.0 drew colours, box drawing, Cyrillic, CJK and emoji correctly in a real WKWebView, also while scrolling thousands of lines (macOS 27.2, 2026-11-09), so [#5816](https://github.com/xtermjs/xterm.js/issues/5816) did not reproduce there.
   - **Keys, paste and links.**
-    The terminal keeps every key except the ⌘ chords that are workbench bindings, which `attachCustomKeyEventHandler` leaves to the workbench, as VS Code does; single-letter list keys never fire in a terminal, since `listFocus` does not hold there.
+    The terminal keeps every key except those the workbench takes, which `attachCustomKeyEventHandler` leaves to it, as VS Code does; single-letter list keys never fire in a terminal, since `listFocus` does not hold there.
+    The workbench takes the next key of a chord that waits, on every platform.
+    On macOS it takes a ⌘ chord that is a binding or starts one.
+    On Linux and Windows `mod` is Ctrl, which a shell needs, so only quick access, the command palette and the toggle of the panel win over the shell, a short list as VS Code's `commandsToSkipShell` is, and every other Ctrl chord stays with it.
     Copy and paste ride on the `copy` and `paste` events, which xterm answers with the selection and with `Terminal.paste`, so bracketed paste works; the Edit menu keeps its Copy and Paste for them.
     A `linkHandler` makes OSC 8 links do nothing unless ⌘-clicked, and opens only what the app's opener takes, `https` and `http` on localhost; xterm's `confirm` and `window.open` never run, and no addon detects URLs.
   - **Endings.**

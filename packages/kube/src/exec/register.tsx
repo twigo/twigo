@@ -7,6 +7,7 @@ import { EXEC_SCHEME, execUri, parseExecUri, type ExecInput } from "../uri";
 import { ExecActions } from "./ExecActions";
 import { ExecEditor } from "./ExecEditor";
 import { canShell } from "./kinds";
+import { workbenchKey } from "./keys";
 import { ExecTabs } from "./tabs";
 import { ending, execTitle, stateOf } from "./words";
 
@@ -20,7 +21,8 @@ export function createExecTabs(workbench: Workbench): ExecTabs {
     openUrl: (url) => {
       workbench.openUrl(url);
     },
-    binds: (event) => workbench.keybindings.handles(event),
+    binds: (event) =>
+      workbenchKey(workbench.keybindings, workbench.platform, event),
   });
 }
 

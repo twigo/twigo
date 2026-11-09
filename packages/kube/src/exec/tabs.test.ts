@@ -53,11 +53,16 @@ function fakeWebgl() {
   return { made, factory };
 }
 
-function setup(options: { webgl?: () => WebglRenderer; binds?: boolean } = {}) {
+function setup(
+  options: {
+    webgl?: () => WebglRenderer;
+    binds?: (event: KeyboardEvent) => boolean;
+  } = {},
+) {
   const fake = fakeShells();
   const report = vi.fn();
   const openUrl = vi.fn();
-  const binds = vi.fn(() => options.binds ?? false);
+  const binds = vi.fn(options.binds ?? (() => false));
   const tabs = new ExecTabs({
     backend: fake.backend,
     platform: "mac",
@@ -283,7 +288,9 @@ test("a layout change fits the terminal once it settles, and only a new size is 
 });
 
 test("typed keys and pastes go to the session in bytes, and the keys of a bound chord stay with the workbench", async () => {
-  const { mounted, opens, sent, binds } = setup({ binds: true });
+  const { mounted, opens, sent, binds } = setup({
+    binds: (event) => event.metaKey,
+  });
   const tab = await mounted();
   opens[0]?.send({ state: "running" });
   await vi.advanceTimersByTimeAsync(10);
@@ -292,11 +299,11 @@ test("typed keys and pastes go to the session in bytes, and the keys of a bound 
   textarea.dispatchEvent(enter());
   await vi.advanceTimersByTimeAsync(10);
   expect(sent("shell_input")).toEqual([{ id: 7, data: [13] }]);
-  expect(binds).not.toHaveBeenCalled();
+  expect(binds).toHaveBeenCalledOnce();
 
   textarea.dispatchEvent(enter({ metaKey: true }));
   await vi.advanceTimersByTimeAsync(10);
-  expect(binds).toHaveBeenCalledOnce();
+  expect(binds).toHaveBeenCalledTimes(2);
   expect(sent("shell_input")).toHaveLength(1);
 
   tab.term.paste("héllo\nwörld");
@@ -324,7 +331,7 @@ test("keys typed while the shell connects go to it, and none while it waits for 
 });
 
 test("a chord that is not a binding reaches the terminal", async () => {
-  const { mounted, opens, sent, binds } = setup({ binds: false });
+  const { mounted, opens, sent, binds } = setup();
   const tab = await mounted();
   opens[0]?.send({ state: "running" });
   await vi.advanceTimersByTimeAsync(10);
