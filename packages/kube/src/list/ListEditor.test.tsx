@@ -7,9 +7,15 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type { Backend } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import type { QuickAccessContext } from "@twigo/workbench";
-import { openList, settle, withScreenSize } from "../../test/workbench";
+import {
+  mountKube,
+  openList,
+  settle,
+  withScreenSize,
+} from "../../test/workbench";
 import { cellTone } from "../columns";
 import { DWELL_MS } from "../Details";
 import { PODS } from "../kinds";
@@ -87,6 +93,60 @@ test("an editor that takes the focus back gives it to the list's grid, where the
     workbench.editors.keepFocus("editor");
   });
   expect(document.activeElement).toBe(grid());
+});
+
+function withLateDiscovery() {
+  const mock = createMockBackend("ready");
+  const held: (() => void)[] = [];
+  const subscribe: Backend["subscribe"] = (command, request, onMessage) =>
+    mock.subscribe(
+      command,
+      request,
+      command === "resources_watch"
+        ? (message) => {
+            held.push(() => {
+              onMessage(message);
+            });
+          }
+        : onMessage,
+    );
+  return {
+    backend: { invoke: mock.invoke.bind(mock), subscribe } satisfies Backend,
+    arrive: () => {
+      for (const deliver of held.splice(0)) deliver();
+    },
+  };
+}
+
+test("a list that opens takes the focus when its grid mounts with the data", async () => {
+  const { backend, arrive } = withLateDiscovery();
+  const workbench = await mountKube(backend);
+  act(() => {
+    workbench.editors.open("k8s-list://prod-eu/v1/pods");
+  });
+  await settle();
+  expect(screen.queryByRole("grid")).toBeNull();
+  act(arrive);
+  await settle();
+  expect(document.activeElement).toBe(grid());
+});
+
+test("a grid that mounts after the focus moved on leaves it where it is", async () => {
+  const { backend, arrive } = withLateDiscovery();
+  const workbench = await mountKube(backend);
+  act(() => {
+    workbench.editors.open("k8s-list://prod-eu/v1/pods");
+  });
+  await settle();
+  const elsewhere = document.body.appendChild(document.createElement("button"));
+  act(() => {
+    elsewhere.focus();
+  });
+  act(arrive);
+  await settle();
+  expect(grid()).toBeTruthy();
+  expect(document.activeElement).toBe(elsewhere);
+  elsewhere.remove();
 });
 
 test("Enter on the selected row opens its details", async () => {

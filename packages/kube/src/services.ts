@@ -38,9 +38,11 @@ export function createServices(workbench: Workbench): ListServices {
   const capabilities = new Capabilities(workbench.backend, (error) => {
     workbench.report(error);
   });
+  const grids = new ListGrids();
   workbench.editors.onClose((uri) => {
     states.closed(uri);
     capabilities.closed(uri);
+    grids.closed(uri);
   });
   return {
     discovery: new Discovery(workbench),
@@ -48,7 +50,7 @@ export function createServices(workbench: Workbench): ListServices {
     states,
     selection: new Selection(),
     statuses: new ListStatuses(),
-    grids: new ListGrids(),
+    grids,
     pinned: new PinnedLists(workbench.spaces),
     overviews: new OverviewStates(),
     capabilities,
