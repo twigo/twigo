@@ -8,6 +8,7 @@ import { PanelBottom } from "lucide-react";
 import { EmptyState, InlineActions, KeyHints } from "@twigo/ui";
 import { useChanges, useWorkbench } from "../react";
 import { GroupActions, SpaceDock } from "./EditorArea";
+import { useInertWhile } from "./useInertWhile";
 
 const THEME: DockviewTheme = {
   ...themeLight,
@@ -48,6 +49,8 @@ export function PanelArea() {
   useEffect(() => {
     if (maximized) editors.keepFocus("panel");
   }, [editors, maximized]);
+
+  useInertWhile(ref, "panel");
 
   return (
     <section

@@ -14,6 +14,7 @@ mod list;
 mod logs;
 mod object;
 mod schema;
+mod shell;
 mod space;
 mod state;
 mod typescript;
@@ -50,6 +51,10 @@ pub use object::{
     Tone, TreeNode, TreeValue, Value,
 };
 pub use schema::SchemaQuery;
+pub use shell::{
+    OpenShell, ShellAck, ShellContainers, ShellEnd, ShellEvent, ShellInput, ShellKind,
+    ShellMessage, ShellPod, ShellResize, ShellTarget,
+};
 pub use space::{Context, ContextColor, Space};
 pub use state::{StateEntry, StateSnapshot};
 pub use typescript::typescript;

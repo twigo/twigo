@@ -87,7 +87,7 @@ function Grid({
 }) {
   const workbench = useWorkbench();
   const { backend, spaces, menus, keys } = workbench;
-  const { presets, states, selection, statuses } = services;
+  const { presets, states, selection, statuses, grids } = services;
   useChanges(spaces.changes);
   useChanges(presets.changes);
   useChanges(states.changes);
@@ -294,12 +294,14 @@ function Grid({
     (element: HTMLElement, controller: Parameters<typeof register>[1]) => {
       setGrid(element);
       const unregister = register(element, controller);
+      const forget = grids.add(uri, element);
       return () => {
+        forget();
         unregister();
         setGrid(null);
       };
     },
-    [register],
+    [register, grids, uri],
   );
   const lookup = keys.lookup(grid);
   // The grid selects a row before it runs one of the row's inline actions,

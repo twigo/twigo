@@ -13,6 +13,10 @@ async function withEveryEnablement() {
   workbench.keys.set("listMarked", true);
   workbench.keys.set("resource.selected", true);
   workbench.keys.set("resource.logs", true);
+  workbench.keys.set("resource.shell", true);
+  workbench.keys.set("execEnded", true);
+  workbench.keys.set("execTab", true);
+  workbench.keys.set("execOpen", true);
   workbench.keys.set("logsFocus", true);
   workbench.keys.set("logLines", true);
   workbench.keys.set("panelVisible", true);
@@ -72,7 +76,7 @@ test("every registered command appears in the palette", async () => {
   const ids = workbench.commands
     .all()
     .map((command) => command.id)
-    .filter((id) => id !== "k8s.logs.open");
+    .filter((id) => id !== "k8s.logs.open" && id !== "k8s.shell.open");
   expect(ids.length).toBeGreaterThan(25);
   expect([...shown].sort()).toEqual([...ids].sort());
 });

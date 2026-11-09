@@ -884,6 +884,26 @@ contexts: [{ name: kind-other, context: { cluster: c, user: u } }]
 }
 
 #[tokio::test]
+async fn a_wake_retires_the_connections_and_a_network_change_that_moved_no_route_does_not() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path(), UNREACHABLE);
+    core.catalog.contexts().await;
+    let clients = core.clients("kind-plain").await.unwrap();
+    let (retired, network) = (
+        clients.connections().retired(),
+        clients.connections().network(),
+    );
+
+    core.network_event(Event::NetworkChanged);
+    assert!(!retired.has_changed().unwrap());
+    assert!(!network.has_changed().unwrap());
+
+    core.network_event(Event::Woke);
+    assert!(retired.has_changed().unwrap());
+    assert!(network.has_changed().unwrap());
+}
+
+#[tokio::test]
 async fn an_unlock_holds_only_for_the_cluster_it_was_given_on() {
     let dir = tempfile::tempdir().unwrap();
     let core = running(dir.path(), UNREACHABLE);

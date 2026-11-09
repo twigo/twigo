@@ -1,5 +1,6 @@
 import {
   ArrowDownToLine,
+  Cable,
   CircleCheck,
   CirclePause,
   CirclePlay,
@@ -12,11 +13,12 @@ import {
   Scaling,
   ScrollText,
   SquareArrowOutUpRight,
+  SquareTerminal,
   Trash2,
   X,
   type LucideIcon,
 } from "lucide-react";
-import type { PlanRequest, ResourceRef } from "@twigo/protocol";
+import type { PlanRequest, ResourceRef, ShellKind } from "@twigo/protocol";
 import type { Lookup, MenuId, Workbench } from "@twigo/workbench";
 import type { ListServices } from "./services";
 import { objectOf, objectOfRow, type Selected } from "./selection";
@@ -55,8 +57,8 @@ export function replicasOf({ columns, row }: Selected): number | undefined {
  * the menus that place them (ARCHITECTURE 4.4, 5.1): the row's context
  * menu, its hover buttons and the marked rows' bar, and an object editor's
  * title. Delete goes through the command bus, whose plan says how much to
- * ask (6.4); it is ⌘⌫, never a bare key (4.4). Shell joins them with its
- * command.
+ * ask (6.4); it is ⌘⌫, never a bare key (4.4). A pod's shell and attach
+ * open their tab in the panel through `k8s.shell.open`.
  */
 export function registerResourceActions(
   workbench: Workbench,
@@ -89,6 +91,21 @@ export function registerResourceActions(
     await workbench.operations.run(request(space, found), look);
   };
   const node = (found: { selected: Selected }) => objectOf(found.selected).name;
+  /** Opens a shell, or an attach, in a container of the selected pod. */
+  const shell = async (kind: ShellKind) => {
+    const found = target();
+    const space = found && parseListUri(found.uri)?.space;
+    if (!found || space === undefined) return;
+    const { namespace, name } = objectOf(found.selected);
+    if (namespace === undefined) return;
+    await commands.execute("k8s.shell.open", workbench.keys.lookup(null), {
+      space,
+      gvr: found.selected.gvr,
+      namespace,
+      name,
+      kind,
+    });
+  };
 
   const actions: readonly {
     id: string;
@@ -139,6 +156,30 @@ export function registerResourceActions(
           name,
         });
       },
+    },
+    {
+      id: "k8s.resource.shell",
+      title: "Shell",
+      icon: SquareTerminal,
+      key: "s",
+      when: "resource.shell",
+      menus: [
+        ["resource/context", "navigation"],
+        ["resource/inline", "navigation"],
+        ["resource/details", "navigation"],
+      ],
+      run: () => shell("shell"),
+    },
+    {
+      id: "k8s.resource.attach",
+      title: "Attach",
+      icon: Cable,
+      when: "resource.shell",
+      menus: [
+        ["resource/context", "navigation"],
+        ["resource/details", "navigation"],
+      ],
+      run: () => shell("attach"),
     },
     {
       id: "k8s.resource.yaml",

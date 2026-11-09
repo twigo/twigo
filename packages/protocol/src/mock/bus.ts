@@ -13,8 +13,12 @@ import type {
   Plan,
   PlanId,
   PlanRequest,
+  RequestClass,
   Resource,
   ResourceRef,
+  ShellContainers,
+  ShellKind,
+  ShellTarget,
 } from "../generated";
 import { masked } from "./edits";
 import {
@@ -169,11 +173,18 @@ type Told =
 /** `live` says whether it still runs: a stop ends it. */
 type Run = (tell: (event: Told) => void, live: () => boolean) => void;
 
+/** What the gate reads of a request a plan sends: its class is a write unless it says. */
+interface Write {
+  readonly verb: string;
+  readonly target: string;
+  readonly class?: RequestClass;
+}
+
 interface Planned {
   readonly plan: Omit<Plan, "id" | "friction" | "mode" | "environment">;
   readonly risk: Risk;
   /** What the gate reads of the write it sends, none for a Reveal. */
-  readonly write?: { readonly verb: string; readonly target: string };
+  readonly write?: Write;
   /** The space whose last action it is once it starts; none for an undo, which takes its own. */
   readonly space?: string;
   /** What a stop while it runs says. */
@@ -365,6 +376,10 @@ export interface BusHost {
     namespace: string;
     name: string;
   };
+  /** The containers of a pod that run, none of a pod that does not exist or runs nothing. */
+  containers(context: string, namespace: string, pod: string): ShellContainers;
+  /** A shell's session, which starts once `shell_open` names it. */
+  session(target: ShellTarget, kind: ShellKind): number;
   /** Tells the lists that the cluster changed. */
   changed(): void;
   /** What `apply_preview` answers to every edit that changes something, unless the edit names an answer. */
@@ -731,6 +746,8 @@ export class MockBus {
         return this.#reveal(request.object, request.key);
       case "apply":
         return this.#apply(request.space, request.preview);
+      case "shell":
+        return this.#shell(request.target, request.kind);
     }
   }
 
@@ -822,7 +839,7 @@ export class MockBus {
       context,
       mode: access.mode,
       source: access.source,
-      class: "write",
+      class: write.class ?? "write",
       reason: "mode",
       verb: write.verb,
       target: write.target,
@@ -835,7 +852,7 @@ export class MockBus {
   }
 
   /** The space's context, refused in read-only before anything is read, as Rust refuses it. */
-  #context(space: string, write: { verb: string; target: string }): string {
+  #context(space: string, write: Write): string {
     const context = this.host.context(space);
     if (context === undefined)
       throw new IpcError("notFound", `no space ${space}`);
@@ -1602,6 +1619,53 @@ export class MockBus {
         revert.put();
         this.host.changed();
         tell({ state: "done", text: revert.done, undoUntil: null });
+      },
+    };
+  }
+
+  #shell(target: ShellTarget, kind: ShellKind): Planned {
+    const { space, namespace, pod, container } = target;
+    const attach = kind === "attach";
+    const write: Write = {
+      verb: "create",
+      target: `pods/${pod}/${attach ? "attach" : "exec"} in ${namespace}`,
+      class: "exec",
+    };
+    const context = this.#context(space, write);
+    if (
+      !this.host
+        .containers(context, namespace, pod)
+        .containers.includes(container)
+    ) {
+      throw new IpcError(
+        "notFound",
+        `container ${container} does not run in pod ${pod}`,
+      );
+    }
+    const where = `container ${container} of pod ${pod} on ${context}`;
+    return {
+      plan: {
+        context,
+        question: attach
+          ? `Attach to the main process of ${where}?`
+          : `Open a shell in ${where}?`,
+        confirm: attach ? "Attach" : "Open shell",
+        destructive: false,
+        consequences: [
+          attach
+            ? "What you type goes to the container's main process, and an interrupt may stop it."
+            : "It runs in the container with the rights of its service account.",
+        ],
+        affected: [],
+        kubectl: attach
+          ? `kubectl --context ${context} attach -it ${pod} -n ${namespace} -c ${container}`
+          : `kubectl --context ${context} exec -it ${pod} -n ${namespace} -c ${container} -- sh -c 'export TERM=xterm-256color; command -v bash >/dev/null && exec bash || exec sh'`,
+        doing: `${attach ? "Attaching to" : "Opening a shell in"} ${pod}`,
+      },
+      risk: { kind: "reviewed" },
+      write,
+      run: (tell) => {
+        tell({ state: "session", id: this.host.session(target, kind) });
       },
     };
   }

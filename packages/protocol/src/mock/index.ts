@@ -13,6 +13,8 @@ import type {
   ListBatch,
   RowId,
   ShellEnvironment,
+  ShellKind,
+  ShellTarget,
   ViewState,
 } from "../generated";
 import { MockAccess } from "./access";
@@ -36,6 +38,13 @@ import { KINDS, wireRow, type MockKind, type MockRow } from "./kinds";
 import { CLUSTER_STREAMS } from "../logs";
 import { MockLogs } from "./logs";
 import { MockObject } from "./objects";
+import {
+  isShellScenario,
+  MockShell,
+  shellContainers,
+  SHELL_SCENARIOS,
+  type ShellScenario,
+} from "./shell";
 import { recordedSchema } from "./schemas";
 import {
   CONTEXTS,
@@ -77,7 +86,9 @@ type ListScenario = "live" | ViewState["state"];
  * (`serverChange`, `statusChange`), or one that an apply leaves late
  * (`applyLate`), or `rbacNamespaces`: live lists for a person whose
  * RoleBindings reach only the namespace `default`, so a cluster-wide list
- * and one of any other namespace are forbidden.
+ * and one of any other namespace are forbidden, or live lists for a shell
+ * that waits, finds no shell, loses its connection or its write mode, or
+ * runs one container (`shellQueued` and the like).
  */
 export type MockScenario =
   | ListScenario
@@ -86,7 +97,8 @@ export type MockScenario =
   | "viewer"
   | "rbacNamespaces"
   | AuthScenario
-  | EditScenario;
+  | EditScenario
+  | ShellScenario;
 
 export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "live",
@@ -96,6 +108,7 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "rbacNamespaces",
   ...AUTH_SCENARIOS,
   ...EDIT_SCENARIOS,
+  ...SHELL_SCENARIOS,
   "queued",
   "connecting",
   "syncing",
@@ -162,7 +175,8 @@ export function createMockBackend(
     scenario === "viewer" ||
     scenario === "rbacNamespaces" ||
     isAuthScenario(scenario) ||
-    isEditScenario(scenario)
+    isEditScenario(scenario) ||
+    isShellScenario(scenario)
       ? "live"
       : scenario;
   const auth = new MockAuth(pinsAuth ? scenario : undefined);
@@ -202,6 +216,31 @@ export function createMockBackend(
     const found = subscriptions.get(id);
     if (!found) throw new IpcError("notFound", `no subscription ${id}`);
     return found;
+  };
+
+  const shellScenario = isShellScenario(scenario) ? scenario : undefined;
+  const shells = new Map<
+    number,
+    { target: ShellTarget; kind: ShellKind; shell?: MockShell }
+  >();
+  const shellOf = (id: number) => {
+    const found = shells.get(id);
+    if (!found) throw new IpcError("notFound", `no session ${id}`);
+    return found;
+  };
+  const running = (id: number) => {
+    const { shell } = shellOf(id);
+    if (!shell) throw new IpcError("conflict", `session ${id} has not opened`);
+    return shell;
+  };
+
+  const containersOf = (context: string, namespace: string, name: string) => {
+    const pod = cluster(context).pods.find(
+      (candidate) =>
+        candidate.namespace === namespace && candidate.name === name,
+    );
+    if (!pod) throw new IpcError("notFound", `pods "${name}" not found`);
+    return shellContainers(pod, shellScenario);
   };
 
   const objects = new Map<number, MockObject>();
@@ -270,6 +309,12 @@ export function createMockBackend(
         throw new IpcError("notFound", `no object subscription ${id}`);
       }
       return { context, ...object(id).names };
+    },
+    containers: containersOf,
+    session: (target, kind) => {
+      const id = nextId++;
+      shells.set(id, { target, kind });
+      return id;
     },
     changed: () => {
       for (const sub of subscriptions.values()) sub.touch();
@@ -425,6 +470,30 @@ export function createMockBackend(
       return null;
     },
     object_values: ({ id, keys }) => object(id).values(keys),
+    shell_containers: ({ space: id, namespace, pod }) => {
+      const [context] = space(id).contexts;
+      if (context === undefined) {
+        throw new IpcError("notFound", `space ${id} has no context`);
+      }
+      return containersOf(context, namespace, pod);
+    },
+    shell_input: ({ id, data }) => {
+      running(id).input(data);
+      return null;
+    },
+    shell_resize: ({ id, cols, rows }) => {
+      running(id).resize(cols, rows);
+      return null;
+    },
+    shell_ack: ({ id, bytes }) => {
+      running(id).ack(bytes);
+      return null;
+    },
+    shell_close: (id) => {
+      shellOf(id).shell?.close();
+      shells.delete(id);
+      return null;
+    },
     logs_set_source: ({ id, source }) => {
       log(id).setSource(source);
       return null;
@@ -603,6 +672,24 @@ export function createMockBackend(
         ),
       );
       return id;
+    },
+    shell_open: (open, onMessage) => {
+      const found = shellOf(open.id);
+      if (found.shell) {
+        throw new IpcError("conflict", `session ${open.id} opened already`);
+      }
+      const [context] = space(found.target.space).contexts;
+      found.shell = new MockShell(
+        found.target,
+        found.kind,
+        open,
+        shellScenario,
+        () => {
+          if (context !== undefined) access.setMode(context, "read-only");
+        },
+        onMessage,
+      );
+      return null;
     },
     command_execute: (request, onMessage) => bus.execute(request, onMessage),
     contexts_watch: (_request, onMessage) => access.watch(onMessage),

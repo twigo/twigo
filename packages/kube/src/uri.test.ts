@@ -1,7 +1,9 @@
 import { expect, test } from "vitest";
 import {
+  execUri,
   listUri,
   objectUri,
+  parseExecUri,
   parseListUri,
   parseObjectUri,
   parseUntitledUri,
@@ -95,4 +97,53 @@ test.each([
   "k8s://dev/manifest-1",
 ])("%s is no new manifest", (uri) => {
   expect(parseUntitledUri(uri)).toBeUndefined();
+});
+
+test.each([
+  [
+    { space: "prod-eu", namespace: "auth", pod: "api-0", container: "api" },
+    "exec://prod-eu/auth/api-0/api",
+  ],
+  [
+    {
+      space: "dev+qa",
+      namespace: "auth",
+      pod: "api-0",
+      container: "istio proxy",
+      n: 2,
+    },
+    "exec://dev%2Bqa/auth/api-0/istio%20proxy?n=2",
+  ],
+  [
+    {
+      space: "prod-eu",
+      namespace: "auth",
+      pod: "api-0",
+      container: "api",
+      n: 13,
+      attach: true,
+    },
+    "exec://prod-eu/auth/api-0/api?n=13&attach=1",
+  ],
+])("%o round-trips through %s", (input, uri) => {
+  expect(execUri(input)).toBe(uri);
+  expect(parseExecUri(uri)).toEqual(input);
+});
+
+test.each([
+  "exec://prod-eu/auth/api-0",
+  "exec://prod-eu/auth/api-0/api/extra",
+  "exec://prod-eu//api-0/api",
+  "logs://prod-eu/auth/api-0/api",
+])("%s is no shell", (uri) => {
+  expect(parseExecUri(uri)).toBeUndefined();
+});
+
+test("a shell's number is 2 or more, and anything else is the first", () => {
+  const base = "exec://prod-eu/auth/api-0/api";
+  expect(parseExecUri(`${base}?n=1`)?.n).toBeUndefined();
+  expect(parseExecUri(`${base}?n=0`)?.n).toBeUndefined();
+  expect(parseExecUri(`${base}?n=x`)?.n).toBeUndefined();
+  expect(parseExecUri(`${base}?n=7`)?.n).toBe(7);
+  expect(parseExecUri(`${base}?attach=0`)?.attach).toBeUndefined();
 });

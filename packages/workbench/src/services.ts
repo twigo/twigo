@@ -35,18 +35,33 @@ export class Workbench {
   });
   readonly menus = new Menus();
   readonly views = new Views();
-  readonly editors = new Editors(this.keys, (area) => {
-    const space = this.spaces.active;
-    if (!space) return;
-    // A maximized panel covers the editor area, as VS Code's does until an
-    // editor opens there.
-    this.spaces.setPart(
-      space.id,
-      "panel",
-      area === "panel" ? { visible: true } : { maximized: false },
-    );
+  readonly editors = new Editors(
+    this.keys,
+    (area) => {
+      const space = this.spaces.active;
+      if (!space) return;
+      // A maximized panel covers the editor area, as VS Code's does until an
+      // editor opens there.
+      this.spaces.setPart(
+        space.id,
+        "panel",
+        area === "panel" ? { visible: true } : { maximized: false },
+      );
+    },
+    (space, area) => {
+      const state = this.spaces.state(space);
+      return area === "panel" ? state.panelEditors : state.editors;
+    },
+    (area) => {
+      const space = this.spaces.active;
+      const panel = space && this.spaces.state(space.id).parts.panel;
+      const visible = panel?.visible ?? false;
+      return area === "panel" ? visible : !(visible && panel?.maximized);
+    },
+  );
+  readonly quickAccess = new QuickAccess(this.keys, (to) => {
+    this.editors.returnFocus(to);
   });
-  readonly quickAccess = new QuickAccess(this.keys);
   readonly lists = new Lists();
   readonly spaceStatus = new SpaceStatus();
   readonly keybindings: Keybindings;

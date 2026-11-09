@@ -9,6 +9,7 @@ import {
 } from "../discovery";
 import type { EditServices } from "../edit/services";
 import { YamlTab } from "../edit/YamlTab";
+import { canShell } from "../exec/kinds";
 import { logsKind } from "../logs/entries";
 import { parseObjectUri } from "../uri";
 import { ObjectContent } from "./ObjectContent";
@@ -128,10 +129,15 @@ export function ObjectTabSwitch({
   const input = parseObjectUri(uri);
   const lookup = workbench.keys.lookup(null);
   // The editor's object, as a row's keys tell a row's commands about it.
-  const scoped = (key: string) =>
-    key === "resource.logs"
-      ? input !== undefined && logsKind(input.gvr) !== undefined
-      : lookup(key);
+  const scoped = (key: string) => {
+    if (key === "resource.logs") {
+      return input !== undefined && logsKind(input.gvr) !== undefined;
+    }
+    if (key === "resource.shell") {
+      return input !== undefined && canShell(input.gvr);
+    }
+    return lookup(key);
+  };
   return (
     <div className="flex items-center gap-2">
       <InlineActions

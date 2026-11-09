@@ -61,3 +61,7 @@ Findings that belong to no step yet.
   - Closing a dirty editor keeps its copy and Discard Changes asks nothing.
   - Compare with… offers the objects of the kind in the space and those opened lately, not another space's.
   - In the dev server a diff editor logs "no diff result available" as it mounts, under StrictMode's second mount; the production build served by `vite preview` logged none (2026-11-08).
+- The terminal (`packages/kube/src/exec`, ARCHITECTURE 4.6):
+  - `theme.ts` hands xterm the tokens in sRGB hex and carries an `@todo`: the WebGL addon's pattern glyphs, such as ░, throw on `oklch` (`drawPatternChar` in 0.20.0-beta.300); xterm.js had no issue for it on 2026-11-10.
+  - xterm is on 6.1.0-beta.304, the betas VS Code 1.145.2 locks, until a 6.1.0 release.
+  - WebGL draws an emoji with a skin tone, or a flag, a cell per code point; xterm's `unicode-graphemes` addon was not tried.

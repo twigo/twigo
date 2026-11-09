@@ -4,7 +4,10 @@ import { useEditorShown } from "../react";
 import { tabsIn, testWorkbench } from "../testing";
 import { WorkbenchView } from "../WorkbenchView";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const shown = new Map<string, boolean>();
 
@@ -92,6 +95,273 @@ test("a focus that fell to the page goes to the panel when it is maximized over 
     workbench.spaces.setPart(space(), "panel", { maximized: true });
   });
   expect(document.activeElement?.closest('[aria-label="Panel"]')).toBeTruthy();
+});
+
+function withFields(
+  workbench: Awaited<ReturnType<typeof mounted>>["workbench"],
+) {
+  workbench.editors.register({
+    id: "test.field",
+    scheme: "field",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <input aria-label={uri} />,
+    focus: (uri) => {
+      document.querySelector<HTMLElement>(`[aria-label="${uri}"]`)?.focus();
+    },
+  });
+  workbench.editors.register({
+    id: "test.input",
+    scheme: "input",
+    area: "panel",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <input aria-label={uri} />,
+  });
+}
+
+test("hiding the panel moves the focus it held to the editor area's active editor", async () => {
+  const { workbench, editors, space } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+    editors.open("input://x");
+  });
+  act(() => {
+    screen.getByLabelText("input://x").focus();
+  });
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", { visible: false });
+  });
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+});
+
+test("hiding the panel leaves the page without a focus when the editor area has no editor", async () => {
+  const { workbench, editors, space } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("input://x");
+  });
+  act(() => {
+    screen.getByLabelText("input://x").focus();
+  });
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", { visible: false });
+  });
+  expect(document.activeElement).toBe(document.body);
+});
+
+test("hiding the panel does not take a focus that is elsewhere", async () => {
+  const { workbench, editors, space } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+    editors.open("input://x");
+  });
+  const outside = document.body.appendChild(document.createElement("input"));
+  act(() => {
+    outside.focus();
+  });
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", { visible: false });
+  });
+  expect(document.activeElement).toBe(outside);
+  outside.remove();
+});
+
+test("a panel maximized over the editor area takes the focus the editors held", async () => {
+  const { workbench, editors, space } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+    editors.open("input://x");
+  });
+  act(() => {
+    screen.getByLabelText("field://a").focus();
+  });
+  await act(() =>
+    workbench.commands.execute(
+      "workbench.action.maximizePanel",
+      workbench.keys.lookup(null),
+    ),
+  );
+  expect(workbench.spaces.state(space()).parts.panel.maximized).toBe(true);
+  expect(document.activeElement?.closest('[aria-label="Panel"]')).toBeTruthy();
+});
+
+const panelElement = () => document.querySelector('[aria-label="Panel"]');
+
+test("the panel is inert while hidden and the editor area while a maximized panel covers it", async () => {
+  const { workbench, editors, space } = await mounted();
+  act(() => {
+    editors.open("note://a");
+    editors.open("session://x");
+  });
+  const note = () => screen.getByText("note note://a");
+  expect(panelElement()?.hasAttribute("inert")).toBe(false);
+  expect(note().closest("[inert]")).toBeNull();
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", { visible: false });
+  });
+  expect(panelElement()?.hasAttribute("inert")).toBe(true);
+  expect(note().closest("[inert]")).toBeNull();
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", {
+      visible: true,
+      maximized: true,
+    });
+  });
+  expect(panelElement()?.hasAttribute("inert")).toBe(false);
+  expect(note().closest("[inert]")).not.toBeNull();
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", { visible: false });
+  });
+  expect(panelElement()?.hasAttribute("inert")).toBe(true);
+  expect(note().closest("[inert]")).toBeNull();
+});
+
+test("the focus leaves a part before the part goes inert", async () => {
+  const { workbench, editors, space } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+    editors.open("input://x");
+  });
+  const inertAtFocus: boolean[] = [];
+  const record = () => {
+    inertAtFocus.push(panelElement()?.hasAttribute("inert") ?? false);
+  };
+  act(() => {
+    screen.getByLabelText("input://x").focus();
+  });
+  document.addEventListener("focusin", record);
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", { visible: false });
+  });
+  document.removeEventListener("focusin", record);
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+  expect(inertAtFocus.length).toBeGreaterThan(0);
+  expect(inertAtFocus.every((inert) => !inert)).toBe(true);
+  expect(panelElement()?.hasAttribute("inert")).toBe(true);
+});
+
+test("an area that an open reveals takes the focus once it is no longer inert", async () => {
+  const { workbench, editors, space } = await mounted();
+  const inertAtFocus: string[] = [];
+  const root = (area: string) =>
+    area === "panel"
+      ? panelElement()
+      : document.querySelector(".twigo-dockview:not(.twigo-panel)");
+  const focusing = (area: string) => () => {
+    const inert = root(area)?.closest("[inert]") ?? null;
+    inertAtFocus.push(`${area}:${String(inert !== null)}`);
+  };
+  workbench.editors.register({
+    id: "test.focusing",
+    scheme: "focusing",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <p>focusing {uri}</p>,
+    focus: focusing("editor"),
+  });
+  workbench.editors.register({
+    id: "test.shell",
+    scheme: "shell",
+    area: "panel",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <p>shell {uri}</p>,
+    focus: focusing("panel"),
+  });
+  act(() => {
+    editors.open("session://x");
+  });
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", { visible: false });
+  });
+  expect(panelElement()?.hasAttribute("inert")).toBe(true);
+  act(() => {
+    editors.open("shell://a");
+  });
+  expect(inertAtFocus).toEqual(["panel:false"]);
+
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", { maximized: true });
+  });
+  expect(document.querySelectorAll("[inert]")).toHaveLength(1);
+  inertAtFocus.length = 0;
+  act(() => {
+    editors.open("focusing://b");
+  });
+  expect(inertAtFocus).toEqual(["editor:false"]);
+});
+
+test("the focus goes back to an element that can take it, else to the editor area's active editor", async () => {
+  const { workbench, editors } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+  });
+  const back = document.body.appendChild(document.createElement("button"));
+  const held = document.body.appendChild(document.createElement("input"));
+  act(() => {
+    held.focus();
+    editors.returnFocus(back);
+  });
+  expect(document.activeElement).toBe(back);
+
+  act(() => {
+    held.focus();
+    back.disabled = true;
+    editors.returnFocus(back);
+  });
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+
+  act(() => {
+    held.focus();
+    editors.returnFocus(document.body);
+  });
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+
+  act(() => {
+    held.focus();
+    editors.returnFocus(undefined);
+  });
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+  back.remove();
+  held.remove();
+});
+
+test("with no editor to take it, what held the focus lets go of it", async () => {
+  const { editors } = await mounted();
+  const held = document.body.appendChild(document.createElement("input"));
+  const gone = document.createElement("button");
+  act(() => {
+    held.focus();
+    editors.returnFocus(gone);
+  });
+  expect(document.activeElement).toBe(document.body);
+  held.remove();
+});
+
+test("quick access closes onto the active editor when the element it would restore cannot take the focus", async () => {
+  const { workbench, editors } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+    editors.open("input://x");
+  });
+  const terminal = screen.getByLabelText("input://x");
+  act(() => {
+    terminal.focus();
+  });
+  act(() => {
+    workbench.quickAccess.show("");
+  });
+  const field = document.body.appendChild(document.createElement("input"));
+  act(() => {
+    field.focus();
+    (terminal as HTMLInputElement).disabled = true;
+    workbench.quickAccess.hide();
+  });
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+  field.remove();
 });
 
 test("an open URI is focused where it is, in either area", async () => {
@@ -256,4 +526,146 @@ test("the panel's tabs come back after a switch to another space and back", asyn
     workbench.spaces.select(first);
   });
   expect(tabsIn("panel")).toEqual(["session://x"]);
+});
+
+function withTerminal(
+  workbench: Awaited<ReturnType<typeof mounted>>["workbench"],
+) {
+  workbench.editors.register({
+    id: "test.terminal",
+    scheme: "terminal",
+    area: "panel",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <input aria-label={uri} />,
+    focus: (uri) => {
+      document.querySelector<HTMLElement>(`[aria-label="${uri}"]`)?.focus();
+    },
+  });
+}
+
+function refuseInertFocus() {
+  const focus = Reflect.get(HTMLElement.prototype, "focus");
+  vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(function (
+    this: HTMLElement,
+    options?: FocusOptions,
+  ) {
+    if (this.closest("[inert]") === null) focus.call(this, options);
+  });
+}
+
+const maximize = (
+  workbench: Awaited<ReturnType<typeof mounted>>["workbench"],
+) =>
+  workbench.commands.execute(
+    "workbench.action.maximizePanel",
+    workbench.keys.lookup(null),
+  );
+
+test("a space that comes back with a maximized panel gives the focus to the panel", async () => {
+  refuseInertFocus();
+  const { workbench, editors, space } = await mounted();
+  withFields(workbench);
+  withTerminal(workbench);
+  const first = space();
+  act(() => {
+    editors.open("field://a");
+    editors.open("terminal://x");
+  });
+  await act(() => maximize(workbench));
+  const other = workbench.spaces.list.find((each) => each.id !== first);
+  if (!other) throw new Error("the mock lists one space");
+  act(() => {
+    workbench.spaces.select(other.id);
+  });
+  act(() => {
+    workbench.spaces.select(first);
+  });
+  await act(() => Promise.resolve());
+  expect(workbench.spaces.state(first).parts.panel.maximized).toBe(true);
+  expect(document.activeElement).toBe(screen.getByLabelText("terminal://x"));
+});
+
+test("an area that a maximized panel covers gives the focus back to the panel, not to the page", async () => {
+  refuseInertFocus();
+  const { workbench, editors } = await mounted();
+  withFields(workbench);
+  withTerminal(workbench);
+  act(() => {
+    editors.open("field://a");
+    editors.open("terminal://x");
+  });
+  act(() => {
+    screen.getByLabelText("field://a").focus();
+  });
+  act(() => {
+    workbench.quickAccess.show("");
+  });
+  await act(() => maximize(workbench));
+  act(() => {
+    workbench.quickAccess.hide();
+  });
+  expect(document.activeElement).toBe(screen.getByLabelText("terminal://x"));
+});
+
+test("with no editor in the editor area, the focus goes back to the panel's", async () => {
+  const { workbench, editors } = await mounted();
+  withTerminal(workbench);
+  act(() => {
+    editors.open("terminal://x");
+  });
+  const held = document.body.appendChild(document.createElement("input"));
+  act(() => {
+    held.focus();
+    editors.returnFocus(undefined);
+  });
+  expect(document.activeElement).toBe(screen.getByLabelText("terminal://x"));
+  held.remove();
+});
+
+test("a hidden panel is not asked for the focus", async () => {
+  const { workbench, editors, space } = await mounted();
+  const focus = vi.fn();
+  workbench.editors.register({
+    id: "test.terminal",
+    scheme: "terminal",
+    area: "panel",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <input aria-label={uri} />,
+    focus,
+  });
+  act(() => {
+    editors.open("terminal://x");
+  });
+  focus.mockClear();
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", { visible: false });
+  });
+  act(() => {
+    editors.returnFocus(undefined);
+  });
+  expect(focus).not.toHaveBeenCalled();
+});
+
+test("closing the active editor closes the panel's while a maximized panel covers the editors, whatever has the focus", async () => {
+  const { workbench, editors } = await mounted();
+  act(() => {
+    editors.open("note://a");
+    editors.open("session://x");
+  });
+  await act(() => maximize(workbench));
+  const outside = document.body.appendChild(document.createElement("button"));
+  act(() => {
+    outside.focus();
+  });
+  const close = () =>
+    workbench.commands.execute(
+      "workbench.action.closeActiveEditor",
+      workbench.keys.lookup(document.activeElement),
+    );
+  await act(close);
+  expect(tabsIn("panel")).toEqual([]);
+  expect(tabsIn("editor")).toEqual(["note://a"]);
+  await act(close);
+  expect(tabsIn("editor")).toEqual(["note://a"]);
+  outside.remove();
 });

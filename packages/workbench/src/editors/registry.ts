@@ -99,10 +99,17 @@ export class Editors {
   >();
   #active: string | undefined;
 
-  /** `reveal` shows a hidden area before an editor opens in it. */
+  /**
+   * `reveal` shows a hidden area before an editor opens in it, `saved` reads
+   * the layout a space keeps for an area, and `onScreen` says whether an area
+   * is on screen: not a hidden panel, nor the editor area under a maximized
+   * one, which take no focus.
+   */
   constructor(
     private readonly keys: ContextKeys,
     private readonly reveal: (area: Area) => void,
+    private readonly saved: (space: string, area: Area) => unknown,
+    readonly onScreen: (area: Area) => boolean,
   ) {}
 
   register(provider: EditorProvider): () => void {
@@ -137,9 +144,11 @@ export class Editors {
   }
 
   /**
-   * Tells `listener` the URI of each editor that closes. Moving an editor
-   * to another group closes none (dockview reports no removal while it
-   * moves a panel), and neither does a space giving way to another.
+   * Tells `listener` the URI of each editor that closes, and of each open
+   * that waited for a space and is forgotten, unless that space's saved layout
+   * holds the editor. Moving an editor to another group closes none (dockview
+   * reports no removal while it moves a panel), and neither does a space
+   * giving way to another.
    */
   onClose(listener: (uri: string) => void): () => void {
     this.#closed.add(listener);
@@ -151,8 +160,11 @@ export class Editors {
   /**
    * An area's dockview while it is mounted, and the space it shows. What
    * waited for the space opens in it; what waited for another is forgotten,
-   * since the person went elsewhere. What was closed for the space closes in
-   * it, however many other spaces came first.
+   * since the person went elsewhere, and reported as closed to whoever kept
+   * something for it, unless that space's saved layout holds the editor, which
+   * is then still open there. What was closed for the space closes in it,
+   * however many other spaces came first. The area on screen takes the focus
+   * that fell to the page, which the other, inert, would refuse.
    */
   attach(api: DockviewApi, area: Area, space: string): () => void {
     this.#apis.set(area, api);
@@ -162,7 +174,7 @@ export class Editors {
       else this.changes.emit();
     });
     const removal = api.onDidRemovePanel((panel) => {
-      for (const closed of this.#closed) closed(panel.id);
+      this.#notifyClosed(panel.id);
       if (area === "panel") this.changes.emit();
     });
     const added =
@@ -171,10 +183,8 @@ export class Editors {
             this.changes.emit();
           })
         : undefined;
-    if (area === "editor") {
-      this.#setActive(api.activePanel);
-      this.keepFocus("editor");
-    }
+    if (area === "editor") this.#setActive(api.activePanel);
+    if (area === this.#front) this.keepFocus(area);
     for (const [uri, later] of [...this.#leaving]) {
       if (later.area !== area || later.space !== space) continue;
       this.#leaving.delete(uri);
@@ -184,6 +194,9 @@ export class Editors {
       if (later.area !== area) continue;
       this.#waiting.delete(uri);
       if (later.space === space) this.open(uri, later.options);
+      else if (!hasPanel(this.saved(later.space, later.area), uri)) {
+        this.#notifyClosed(uri);
+      }
     }
     return () => {
       active.dispose();
@@ -344,10 +357,67 @@ export class Editors {
   keepFocus(area: Area): void {
     const focused = document.activeElement;
     if (focused !== document.body && !this.#groupHolds(focused)) return;
-    const holder = this.activeIn(area) === undefined ? "editor" : area;
-    this.#apis.get(holder)?.focus();
-    const uri = this.activeIn(holder);
+    this.#focusIn(this.activeIn(area) === undefined ? "editor" : area);
+  }
+
+  /**
+   * A part that is hidden or covered keeps the focus it held, since it loses
+   * its height and not its elements, and the keys go on to what nobody sees.
+   * The focus inside `from` moves to an area's active editor, or off the page
+   * when that area has none.
+   */
+  releaseFocus(from: Element, to: Area): void {
+    if (!from.contains(document.activeElement)) return;
+    this.#focusIn(to);
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && from.contains(focused)) {
+      focused.blur();
+    }
+  }
+
+  /**
+   * Gives the focus back to the element that held it before quick access or
+   * a dialog took it, or, when that cannot take it any more (inert with its
+   * part, hidden or gone) or there was none, to the editor area's active
+   * editor, and to the panel's when the editor area cannot take it (covered,
+   * or with no editor), as {@link releaseFocus} does: the page's body would
+   * take it, and no key does anything there. What held it meanwhile lets go:
+   * quick access's field would keep it until the widget unmounts, which is
+   * after the accepted command has opened its editor.
+   */
+  returnFocus(to: Element | null | undefined): void {
+    const held = document.activeElement;
+    if (to instanceof HTMLElement && to !== document.body && to.isConnected) {
+      to.focus();
+      if (document.activeElement === to) return;
+    }
+    if (!this.#focusIn("editor")) this.#focusIn("panel");
+    if (document.activeElement === held && held instanceof HTMLElement) {
+      held.blur();
+    }
+  }
+
+  /** The area the person works in: the editor area, or the panel while it covers it. */
+  get #front(): Area {
+    return this.onScreen("editor") ? "editor" : "panel";
+  }
+
+  /**
+   * Gives the focus to an area's active group and editor, if the area is on
+   * screen, and tells whether it holds the focus now.
+   */
+  #focusIn(area: Area): boolean {
+    if (!this.onScreen(area)) return false;
+    this.#apis.get(area)?.focus();
+    const uri = this.activeIn(area);
     if (uri !== undefined) this.resolve(uri)?.focus?.(uri);
+    return (
+      this.#apis
+        .get(area)
+        ?.groups.some((group) =>
+          group.element.contains(document.activeElement),
+        ) ?? false
+    );
   }
 
   /**
@@ -417,6 +487,10 @@ export class Editors {
     return undefined;
   }
 
+  #notifyClosed(uri: string): void {
+    for (const closed of this.#closed) closed(uri);
+  }
+
   #setActive(panel: IDockviewPanel | undefined) {
     const uri = panel && paramsOf(panel)?.uri;
     if (uri === this.#active) return;
@@ -428,6 +502,13 @@ export class Editors {
     );
     this.changes.emit();
   }
+}
+
+/** Whether a saved layout holds a panel; it is read back unchecked, so it is checked. */
+function hasPanel(layout: unknown, id: string): boolean {
+  if (typeof layout !== "object" || layout === null) return false;
+  const { panels } = layout as { panels?: unknown };
+  return typeof panels === "object" && panels !== null && id in panels;
 }
 
 export function paramsOf(panel: IDockviewPanel): EditorParams | undefined {

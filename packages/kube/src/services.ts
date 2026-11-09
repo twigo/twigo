@@ -1,6 +1,7 @@
 import type { Workbench } from "@twigo/workbench";
 import { Capabilities } from "./capabilities";
 import { Discovery } from "./discovery";
+import { ListGrids } from "./list/grids";
 import { ListStatuses } from "./list/listStatus";
 import { ListStates } from "./listState";
 import { PinnedLists } from "./explorer/pinned";
@@ -20,6 +21,8 @@ export interface ListServices {
   readonly selection: Selection;
   /** Each list editor's rows and state, for the status bar and the explorer. */
   readonly statuses: ListStatuses;
+  /** Each list editor's grid, for the keyboard focus. */
+  readonly grids: ListGrids;
   /** The lists each space pinned to its explorer. */
   readonly pinned: PinnedLists;
   /** What the person chose in each kind's Overviews. */
@@ -35,9 +38,11 @@ export function createServices(workbench: Workbench): ListServices {
   const capabilities = new Capabilities(workbench.backend, (error) => {
     workbench.report(error);
   });
+  const grids = new ListGrids();
   workbench.editors.onClose((uri) => {
     states.closed(uri);
     capabilities.closed(uri);
+    grids.closed(uri);
   });
   return {
     discovery: new Discovery(workbench),
@@ -45,6 +50,7 @@ export function createServices(workbench: Workbench): ListServices {
     states,
     selection: new Selection(),
     statuses: new ListStatuses(),
+    grids,
     pinned: new PinnedLists(workbench.spaces),
     overviews: new OverviewStates(),
     capabilities,

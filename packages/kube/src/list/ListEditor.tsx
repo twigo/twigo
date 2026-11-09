@@ -4,6 +4,7 @@ import type { Resource } from "@twigo/protocol";
 import { ActionBar, EmptyState, GridSkeleton } from "@twigo/ui";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { Details } from "../Details";
+import { canShell } from "../exec/kinds";
 import {
   CAPABILITY_PREFIXES,
   MARKED_DELETE,
@@ -176,6 +177,7 @@ function Loaded({
     scope.set("listMarked", marks.size > 0);
     scope.set("resource.selected", selected !== undefined);
     scope.set("resource.logs", logsKind(input.gvr) !== undefined);
+    scope.set("resource.shell", canShell(input.gvr));
     scope.set("resource.group", resource.gvr.group);
     scope.set("resource.kind", resource.kind);
     scope.set("resource.namespaced", resource.namespaced);

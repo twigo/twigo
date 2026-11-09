@@ -3,6 +3,7 @@ import { act } from "@testing-library/react";
 import type { Backend } from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import type { Area } from "./editors/registry";
+import type { Platform } from "./keybindings/chord";
 import { WorkbenchContext } from "./react";
 import { registerCore } from "./core";
 import { Workbench } from "./services";
@@ -15,11 +16,12 @@ import { StateStore } from "./state/store";
 export async function testWorkbench(
   scenario: MockScenario = "ready",
   backend: Backend = createMockBackend(scenario),
+  platform: Platform = "mac",
 ): Promise<Workbench> {
   const state = await StateStore.load(backend, () => undefined);
   const workbench = new Workbench(
     backend,
-    "mac",
+    platform,
     { id: "us", keys: {} },
     state,
   );

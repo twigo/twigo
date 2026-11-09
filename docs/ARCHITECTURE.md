@@ -336,11 +336,14 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
     If it gets none, the connection is retired and every upstream re-watches, as on wake; idle upstreams whose probes fail together retire it once.
   - On wake from sleep, every connection is retired and every upstream re-watches.
     `twigo-netmon` hears of it from IOKit's system power notifications on macOS, as Chromium's and Firefox's power monitors do, and from logind's `PrepareForSleep(false)` on Linux.
-  - On a network change, a connection is retired only when its route moved: the kernel would now send to its server, or its proxy, from another address, or not at all.
+  - On a network change, a context's connections are retired only when the route of one of its live api connections moved: the kernel would now send to that connection's server, or its proxy, from another address, or not at all.
+    A context with no live api connection has no route to judge, so a network change retires nothing there.
     `twigo-netmon` hears of a change from SystemConfiguration's dynamic store on macOS, which tells the addresses of services and interfaces, and from rtnetlink's address and route groups on Linux, where an overflow of its buffer counts as a change, and passes a burst on once it has been quiet for a second.
     On macOS a change of routes alone, without an address, goes unseen.
     Chromium closes every HTTP/2 session on any address change, which Docker's interfaces set off on Linux; here containers, kind's bridge and VPNs for other networks leave connections alone, while a Wi-Fi switch or a VPN in front of the cluster retires them.
     A move to another network that keeps the address goes unseen until a ping fails, 45 s at most.
+  - A wake and a moved route of a live api connection are also counted apart, as a change of the network (`Connections::network`), which ends the sessions of exec and attach (4.6): their sockets are on the sessions client, whose connections a retirement does not reach, and a retirement from a new certificate or a failed probe says nothing of them.
+    Only the api client's connections are tracked, so a context with a shell and no live api connection hears a wake but no network change: its shell ends later, when the kernel fails its socket, as `ConnectionLost` (how long that takes: not measured).
   - Retiring poisons the connection: the pool keeps a dead connection that still looks open, and every actor's client holds a clone of that pool, so rebuilding one client would not reach the others.
     The streams on it run until their upstreams re-watch.
   - While a client has no usable connection, one request dials and the others wait until it is connected or has failed: a cold client opens one TCP and TLS connection per concurrent first request and keeps only the first that negotiates `h2` ([HTTP/2 spike](spikes/http2.md)).
@@ -629,7 +632,7 @@ The bench also replays the cases that broke other clients, and one that loopback
 | Space rail         | Tiles of the open spaces (D6, Lens's hotbar), each with a dot of its connection, ⌘1..9 by position, a button that opens any context                                                                                                                                                                                                                                                                                                      |
 | Primary side bar   | View containers as tabs in its header (Explorer, Port forwards, Helm, Extensions and contributed ones); the active one's views: resource tree, saved filters                                                                                                                                                                                                                                                                             |
 | Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups; with no editor open, the space's home                                                                                                                                                                                                                                                                                                                   |
-| Panel              | A dockview of its own for sessions opened by URI, its layout kept per space beside the editor area's: logs tabs now (4.6); a pod's shell, the terminal (pty), the cluster's Events, Output (Twigo logs per channel) and Agent activity (audit, 6.6) later. Its tabs split and move; it maximizes over the editor area and hides with ⌘J                                                                                                  |
+| Panel              | A dockview of its own for sessions opened by URI, its layout kept per space beside the editor area's: logs and shell tabs now (4.6); the terminal (pty), the cluster's Events, Output (Twigo logs per channel) and Agent activity (audit, 6.6) later. Its tabs split and move; it maximizes over the editor area and hides with ⌘J                                                                                                       |
 | Secondary side bar | The ACP agent panel later; hidden while nothing lives there                                                                                                                                                                                                                                                                                                                                                                              |
 | Status bar         | In the shell's colour, entries as data: on the left the active space in its context's colour, with a lock while its mode holds writes back (6.4), a warning while the login shell's environment is missing (6.1), credentials that need the person, the cluster's version, or its connection in words when it is not connected (later port-forwards, sync); on the right the active list's rows and how many fail or wait, each a filter |
 
@@ -670,16 +673,16 @@ The layout per space is persisted (dockview `toJSON` and which parts show); part
 Inputs are typed URIs.
 A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor resolver does:
 
-| URI                                                                 | Editor                                                                                                                                                         |
-| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `k8s://<space>/<group>/<version>/<resource>[/<ns>]/<name>`          | Resource editor with sub-tabs: Overview, YAML, Events, Related; Logs in its title opens the object's logs tab in the panel, and Shell for pods comes with exec |
-| `k8s-list://<space>/<gvr>?ns=…&q=…`                                 | Resource table as an editor, so one can pin "pods in payments where status≠Running" next to another list                                                       |
-| `logs://<space>/<group>/<version>/<resource>/<ns>/<name>`           | Logs tab in the panel (4.6): a pod's, or a workload's pods' merged; the core group an empty segment, as in `k8s://`                                            |
-| `exec://<ctx>/<ns>/<pod>/<container>`                               | Terminal (xterm)                                                                                                                                               |
-| `pf://<space>/<forward-id>`                                         | Port-forward tab: state, target and resolved pod, local address, open connections, bytes, errors, a quick HTTP request tester                                  |
-| `diff://edit/apply?editor=<uri>`, `diff://<space>/objects?…`        | Monaco diff: the apply dry-run of an editor's edit, its opened object against the server's now (`edit/server`), Compare with…, any two objects                 |
-| `untitled://<space>/manifest-n`                                     | New manifest of a space, numbered within it; its first Apply asks for the target context and, once applied, opens the object it made                           |
-| `twigo://settings`, `twigo://keybindings`, `twigo://extension/<id>` | Settings UI, keybindings UI, extension details                                                                                                                 |
+| URI                                                                 | Editor                                                                                                                                                       |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `k8s://<space>/<group>/<version>/<resource>[/<ns>]/<name>`          | Resource editor with sub-tabs: Overview, YAML, Events, Related; Logs in its title opens the object's logs tab in the panel, and Shell for pods its shell tab |
+| `k8s-list://<space>/<gvr>?ns=…&q=…`                                 | Resource table as an editor, so one can pin "pods in payments where status≠Running" next to another list                                                     |
+| `logs://<space>/<group>/<version>/<resource>/<ns>/<name>`           | Logs tab in the panel (4.6): a pod's, or a workload's pods' merged; the core group an empty segment, as in `k8s://`                                          |
+| `exec://<space>/<ns>/<pod>/<container>[?n=2][?attach=1]`            | Shell tab in the panel (4.6): xterm over an exec of the container, `n` for a second shell on it, `attach` for its main process                               |
+| `pf://<space>/<forward-id>`                                         | Port-forward tab: state, target and resolved pod, local address, open connections, bytes, errors, a quick HTTP request tester                                |
+| `diff://edit/apply?editor=<uri>`, `diff://<space>/objects?…`        | Monaco diff: the apply dry-run of an editor's edit, its opened object against the server's now (`edit/server`), Compare with…, any two objects               |
+| `untitled://<space>/manifest-n`                                     | New manifest of a space, numbered within it; its first Apply asks for the target context and, once applied, opens the object it made                         |
+| `twigo://settings`, `twigo://keybindings`, `twigo://extension/<id>` | Settings UI, keybindings UI, extension details                                                                                                               |
 
 - **Details and preview tabs.**
   A click or Enter on a row opens its details, and Space shows or hides them, as Linear's peek; arrows move them along and Esc closes them.
@@ -699,6 +702,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 - **A URI and its space.**
   Each space has its own docks, and an editor opens in the dock of the space its URI names.
   An open for the URI of a space other than the one shown waits for that space's dock and opens there when it is the next one mounted; if another space comes first, it is forgotten.
+  A forgotten open is reported as closed, so what a feature kept for the URI goes, unless the space's saved layout holds the URI: its tab comes back with the layout, and a restart that answered late keeps its terminal for it.
   A close for such a URI waits for that space's dock too, whichever space is mounted first, so a tab whose edit ended while the person was elsewhere does not stay behind; opening the URI again, or closing one that waits to open, withdraws what waits.
   A provider says which space a URI is of, so an answer that arrives after a switch of spaces cannot open a tab in the wrong space.
   A new manifest's URI names the space it was written in, as an object's does, and its number counts within that space, so a number reused after a restart cannot show the text of one space in another's tab.
@@ -707,10 +711,17 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 - **Sub-tabs.**
   A resource editor's Overview, YAML, Events and Related switch at the right of its group's tab bar, where a list keeps its filters; Rust follows only the one shown.
 - **Closing a tab.**
-  When an editor that opens, closes or moves, or a space that shows, drops the keyboard focus to the page, the active group takes it, and the active editor its own where it has a text editor to hold it, so a key such as ⌘S or ⌘Z still reaches an editor.
+  When an editor that opens, closes or moves, or a space that shows, drops the keyboard focus to the page, the active group takes it, and the active editor its own where it has something to hold it, a text editor or a list's grid, so a key such as ⌘S, ⌘Z or `j` still reaches an editor.
   A tab's X and a middle click close through the editor service as ⌘W does, and the panel's last editor leaves the focus to the editor area's active group.
   An open that the person asked for, from quick access, a button or a command, gives the editor it opened the focus from whatever held it, an editor on screen in another group included, except a field outside the editors.
   One that arrives on its own, such as the diff of an answer or an object that a plan made, and the explorer's, whose tree goes on with its keys, take it only from the page and the dock's own elements, never from another editor or from anything outside the editors (`preserveFocus`).
+  A hidden or covered part loses its height and not its elements, so it would keep the focus it held, answer Tab, and take back the focus that quick access or a dialog gives back, and the keys would go on to what nobody sees.
+  Such a part is `inert` from the moment the panel's state changes, and the focus held inside moves just before to the other area's active editor, or off the page when that area has none: a maximized panel with nothing open leaves the page without a focus, since the covered editor area is inert and refuses it (the mock in Chromium and WebKit, 2026-11-09).
+  What quick access or a dialog took the focus from gets it back when it closes, or the editor area's active editor does when that cannot take it, or the panel's when the editor area is covered or has no editor, so a closed dialog or an Escape leaves the focus on the page only where no editor can take it.
+  A space shown with a maximized panel gives the focus that fell to the page to the panel's active editor once its dock is attached, since the covered editor area refuses it; a shell tab whose terminal is not on the page yet takes it when its view puts the terminal there (the mock in Chromium and WebKit, 2026-11-09).
+  A list that asked for the focus before its grid mounted, which is after its resources arrive, gets it when the grid mounts, unless the focus has moved on by then or the list closed (the mock in Chromium and WebKit, 2026-11-09).
+  While a maximized panel covers the editor area, Close Editor and the other editor commands act on the panel's active editor whatever has the focus, so ⌘W never closes what nobody sees.
+  A panel shown again gives the focus to its active shell tab, unless quick access is open, which stays on screen and keeps what is typed; a dialog needs no such rule: with the rule taken out, a confirm dialog kept the focus and the shell received nothing (the mock in Chromium and WebKit, 2026-11-09).
 - **An editor off screen has no Monaco view.**
   Behind another tab of its group or under a maximized panel, a YAML editor or a diff disposes its view.
   A YAML editor's model, cursor, scroll and undo stay in the working-copy service until it shows again; a diff's models go with its view, and `DiffView` keeps its view state (cursor and scroll) in a ref for the next one.
@@ -893,11 +904,67 @@ Extensions add commands, not prefixes.
     - a line shows its text as the container wrote it, ANSI colours as tokens at 4.5:1 or more on the editor, warnings and errors tinted with an edge as failing rows are; markers say that a container ended, with its code and next start, that a pod joined from its ReplicaSet or left, and what the buffer dropped;
     - F, W and T toggle follow, wrap and timestamps while the lines have the focus, ⌘F finds and `/` filters; below 1,100 px the toolbar drops the level counts, narrows its fields and shortens the range's label, and below 800 px, a split panel's group, the filter and the search go to a row of their own under it, which opens once their icons, `/` or ⌘F ask for a field, and while either is set, so a split panel keeps every control.
 - **Exec and attach.**
-  xterm.js 6 with the WebGL addon.
+  xterm.js 6.1.0-beta.304 with the WebGL addon 0.20.0-beta.300, the fit addon and Unicode 11, the betas VS Code 1.145.2 locks.
+  No release has followed 6.0.0 (2025-12-22), which rebuilds a hidden terminal's rows on every scroll: 12,642 DOM mutations in 5 s of `yes` behind another tab, against 0 on the beta (Chromium on the mock, 2026-11-09).
   It falls back to the DOM renderer on context loss, which happens on WebKitGTK.
   WebGL is disposed on hidden tabs.
-  kube-rs `AttachedProcess` (version 4.0 or later fixes the task leak and the join deadlock) handles resize.
-  The shell is detected by trying `bash`, then `sh`.
+  A shell or an attach is a plan of the command bus (5.1, 6.4): its run parks a session in `twigo-core` and connects nothing, and `shell_open` starts it with the terminal's size, so the first prompt is laid out right; a session is only reached through a plan that ran.
+  kube-rs `AttachedProcess` (version 4.0 or later fixes the task leak and the join deadlock) carries it, one WebSocket per session on the sessions client (3.2).
+  - **The shell** is one exec of `sh -c 'export TERM=xterm-256color; command -v bash >/dev/null && exec bash || exec sh'`, as k9s runs it ([`exec.go`](https://github.com/derailed/k9s/blob/v0.51.0/internal/view/exec.go#L37-L38)).
+    A second exec after a failure would log a runtime error on every shell into an Alpine image, and could read a person's `exit 1` as a shell that failed.
+    `TERM` has to be set: a tty exec leaves it unset, so `sh -c 'echo $TERM'` prints nothing on busybox and bash reports `dumb`, which breaks full-screen programs (kind 1.37, containerd, 2026-11-09).
+  - **Attach** takes `tty` and `stdin` from the container's spec and `stderr` when there is no tty, with no wrapper; a container whose spec keeps no stdin attaches read-only.
+  - **Flow control** is in bytes, counted by what the terminal has parsed (`shell_ack`, clamped to what was sent).
+    A frame is at most 64 KiB, as `twigo-sessions` names its constants; output goes out at once when the last frame left 16 ms ago or more, so an echo after a quiet moment never waits, and otherwise gathers until 16 ms after the last frame, about a display frame, or 64 KiB, since the webview pays per frame, each one a Tauri `eval`; at 256 KiB unacknowledged it stops reading, until it falls below 64 KiB.
+    Stopping the reader blocks kube's message loop, stdin and resizes included, until acks come; input and resizes therefore queue apart from the reader, and a Ctrl-C during `yes` reaches the process as the terminal catches up.
+  - **How a session ends** is `Exited { code }`, `Detached`, `NoShell`, `Failed`, `ConnectionLost` or `Relocked`, and none can resume, since an exec cannot.
+    `ended` comes last, after all the output of a process that ended; a session cut short by `Relocked`, or by a wake, a moved route of a live api connection (3.2) or replaced clients, sends only the output it had gathered, not what its pipe still held.
+    The status decides.
+    `Success` is exit 0 for a shell and `Detached` for an attach: the kubelet's [`ServeAttach`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/cri-streaming/pkg/streaming/remotecommand/attach.go#L46-L55) writes `Success` whenever the attach itself did not error, with no exit code.
+    `NonZeroExitCode` is its code, unless a shell printed nothing and the code is 126 or 127, which is `NoShell`, as CRI-O would report a missing binary (by reading its source, not measured).
+    containerd fails the exec itself: the upgrade succeeds, nothing prints, and the status is `InternalError` whose message says `executable file not found` (kind 1.37, kube 5.0.0, 2026-11-09), which is `NoShell` for a shell and `Failed` for an attach.
+    A message is a missing shell when it holds both `executable file` and `not found`, which covers runc's words and crun's ([`container.c`](https://github.com/containers/crun/blob/1.20/src/libcrun/container.c#L1263) in 1.20); a bare `no such file or directory` is not, since a failure of the API server's own leg to a node says it too.
+    Another `Failure` without an exit code, once the session has printed, is `ConnectionLost`: the API server's translator writes `InternalError` for any stream failure that is not an exit ([`streamtranslator.go`](https://github.com/kubernetes/kubernetes/blob/v1.35.0/staging/src/k8s.io/apiserver/pkg/util/proxy/streamtranslator.go#L120-L134)), as a kubelet restart is.
+    A socket that closes without a status is `ConnectionLost` too, as is a wake from sleep or a moved route of a live api connection (3.2) while it connects or runs, and clients abandoned while it waits, connects or runs; none is read as a shell that failed.
+    A network change that moves no route of a live api connection, or finds none, tells the session nothing (3.2): it ends when its socket fails, with no status, as `ConnectionLost`.
+    A session ends on those and on no other retirement: its socket is on the sessions client, whose connections are not tracked, so a new certificate or a failed probe, which retire the api client's connections (3.2, 6.2), say nothing of it; `Connections::network` counts only the wakes and the moved routes of live api connections.
+    A pod deleted under a session ended it as exit 137 (`shell_live` on kind 1.37 with containerd, 2026-11-09).
+    A context that turns read-only, by a relock or an unlock running out, ends its shells as `Relocked`, those parked or queued as well as those connecting or running; `guarded` does not.
+  - **A tab and its terminal.**
+    A shell is a `exec://` editor of the panel, opened by `s` on a pod, by Shell in its details, context menu and editor title, and by Attach, which joins the container's main process.
+    `s` asks which container when several run, the default first, then plans `action: "shell"` through the command bus, which draws its friction (6.4); only a run that answers with a session opens the tab, so a cancel or a refusal opens nothing.
+    The terminal and its element belong to a service keyed by the tab's URI, not to the view, which moves the element in when it mounts: moving a tab between groups or hiding the panel loses nothing, and the session goes on writing to the terminal meanwhile.
+    The first size goes in `shell_open`, once the terminal is mounted and fitted, and `shell_resize` follows a layout change that has held still for 100 ms, when cols or rows changed.
+    A tab restored after a restart has no session: it says its shell ended when Twigo closed and offers Start, and never runs anything on its own.
+    A new session in a tab, Restart's or Start's, keeps the scrollback and resets the modes the old program left: the mouse, bracketed paste, focus reporting, the cursor and keypad keys, and wrapping, insert and origin.
+    An ending turns the mouse, bracketed paste and focus reporting off as well, since xterm parses the new session's reset after the task that restarts, and a terminal focused in that task would report the focus to the new shell.
+  - **Output.**
+    Rust sends the bytes of the process's output and its events over one channel, in order.
+    The bytes are written to xterm as `Uint8Array`, which is stream-aware across frames, and Rust is told how many the terminal has parsed from the callback of `write`, so flow control follows what xterm has really parsed: a frame of 64 KiB at most, nothing more read at 256 KiB unacknowledged, reading again below 64 KiB.
+    A terminal keeps 5000 lines.
+    What is typed goes one `shell_input` at a time, and what is typed while a call is in flight goes in the next, so keystrokes keep their order whatever the transport does.
+    What is typed while the shell connects goes to Rust's queue and reaches the process once it runs, as a terminal keeps type-ahead.
+    Rust's queue takes whatever it is sent from the session's start, 32 chunks at most with the call waiting while it is full, and checks no state, so what is typed in the round trip before `queued` reaches the webview is kept too, and reaches the process however long the place takes.
+    Once the webview has heard `queued`, what is typed is dropped, since the wait can last minutes (read in `Session::input` and `run` of `crates/twigo-sessions/src/shell.rs`, not run against a full cluster).
+  - **WebGL.**
+    A terminal loads the addon while its tab is on screen, and gives it up in a task after the tab was hidden, behind another tab, under a maximized panel or in a hidden panel, so a tab hidden and shown again in one task keeps its context.
+    WebKit keeps 16 live WebGL contexts per page: of 24 terminals, the first 8 lost theirs (a real WKWebView, macOS 27.2, 2026-11-09), and Monaco or anything else that draws with WebGL shares the limit.
+    A failed load and a lost context leave that terminal on the DOM renderer.
+    With an opaque background, 6.1.0-beta.304 draws colours, box drawing, Cyrillic, CJK and emoji in a real WKWebView after 5,000 lines, on WebGL and on the DOM renderer (macOS 27.2, kind 1.37, 2026-11-10), so [#5816](https://github.com/xtermjs/xterm.js/issues/5816) did not reproduce there.
+    WebGL draws an emoji with a skin tone, or a flag, a cell per code point, which the DOM renderer joins.
+    Its pattern glyphs, such as ░, throw on an `oklch` colour and leave the rows below undrawn, on 6.0.0 too, so the theme goes to xterm in sRGB hex.
+  - **Keys, paste and links.**
+    The terminal keeps every key except those the workbench takes, which `attachCustomKeyEventHandler` leaves to it, as VS Code does; single-letter list keys never fire in a terminal, since `listFocus` does not hold there.
+    The workbench takes the next key of a chord that waits, on every platform.
+    On macOS it takes a ⌘ chord that is a binding or starts one.
+    On Linux and Windows `mod` is Ctrl, which a shell needs, so only quick access, the command palette and the toggle of the panel win over the shell, a short list as VS Code's `commandsToSkipShell` is, and every other Ctrl chord stays with it.
+    Copy and paste ride on the `copy` and `paste` events, which xterm answers with the selection and with `Terminal.paste`, so bracketed paste works; the Edit menu keeps its Copy and Paste for them.
+    A `linkHandler` makes OSC 8 links do nothing unless ⌘-clicked, and opens only what the app's opener takes, `https` and `http` on localhost; xterm's `confirm` and `window.open` never run, and no addon detects URLs.
+  - **Endings.**
+    A session's ending has its words, which stand once in the scrollback, in a quiet colour, with its state and Restart at the right of the tab strip: `Session ended.`, `Session ended with exit code N.`, `The attach ended.`, `This container has no shell.` with the runtime's message, the error's own message, `The connection was lost. A shell cannot be resumed.`, and `The context became read-only.`.
+    A finished tab stays with its scrollback readable and selectable and its input off, until it is closed or restarted; Restart plans a new shell, so `guarded` asks again.
+    A session that waits for a place among the cluster's 64 says so in its tab, and the status bar lists open shells while there are any, to go to one or close it.
+  - The theme is the editor's surface and the logs' sixteen colours from the tokens, and follows the document's theme live.
 - **Port-forward manager.**
   A target is a Pod, a Service or a workload.
   - The manager binds the local `TcpListener` and keeps it for the life of the forward, so no other process can take the port between check and bind.
@@ -1083,7 +1150,7 @@ interface CommandDescriptor {
 - **One namespace for commands**, as VS Code's CommandsRegistry.
   Every UI action is a command, including the single-key table verbs.
 - **Backend commands.**
-  - All Kubernetes operations: apply, delete, scale, restart, drain, cordon, trigger, suspend, Helm, and a Reveal of secret-grade data (3.6).
+  - All Kubernetes operations: apply, delete, scale, restart, drain, cordon, trigger, suspend, Helm, a shell or an attach in a pod (4.6), and a Reveal of secret-grade data (3.6).
   - Each is an action of the command bus in `twigo-core`, planned first through `command_plan`.
     Rust finds what it acts on, refuses what the policy blocks before anything is asked, and answers with what it will do, in words and as the equivalent kubectl command, and the friction its blast radius asks for in the context's mode (6.4).
   - The webview draws the friction and runs the plan by its id through `command_execute`, with what proves the friction was met: the name typed, the countdown passed.
@@ -1583,6 +1650,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     - deleting one object asks in a dialog that names the cluster in its question and lists what follows, with the equivalent kubectl command;
     - a namespace, a node or a CustomResourceDefinition asks for the object's name typed, and a delete of several objects for the context's, as `guarded` does;
     - an apply, whose diff the person has just read (6.5), runs at once in `read-write` and asks in a dialog in `guarded`;
+    - a shell or an attach (4.6) runs at once in `read-write` and asks in a dialog in `guarded`, since a person opens them often and a typed name would only slow them, and `read-only` refuses it before anything is asked, as the table says;
     - in `guarded` every other write asks for the context's name typed, whatever it risks, and a Reveal asks in a dialog, as in `read-only`; in `read-write` a Reveal shows at once;
     - the confirming button names its action, `Delete namespace`, never Yes or OK.
   - Delete is ⌘⌫, never a bare key (4.4).

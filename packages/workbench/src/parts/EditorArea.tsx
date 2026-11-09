@@ -27,6 +27,7 @@ import {
 } from "../editors/registry";
 import { EditorShownContext, useChanges, useWorkbench } from "../react";
 import { PanelBoundary } from "./PanelBoundary";
+import { useInertWhile } from "./useInertWhile";
 
 const THEME: DockviewTheme = {
   ...themeLight,
@@ -40,6 +41,8 @@ export function EditorArea() {
   useChanges(spaces.changes);
   const space = spaces.active;
   const ref = useRef<HTMLDivElement>(null);
+
+  useInertWhile(ref, "editor");
 
   useEffect(() => {
     const element = ref.current;
@@ -191,13 +194,7 @@ function EditorPanel({ params: raw, api }: IDockviewPanelProps) {
     );
   }
   const Component = provider.component;
-  const space = spaces.active;
-  const panel = space && spaces.state(space.id).parts.panel;
-  const covered =
-    provider.area !== "panel" &&
-    panel !== undefined &&
-    panel.visible &&
-    panel.maximized;
+  const covered = provider.area !== "panel" && !editors.onScreen("editor");
   return (
     <EditorShownContext.Provider value={visible && !covered}>
       <PanelBoundary label={provider.title(new URL(params.uri))}>
