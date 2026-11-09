@@ -10,20 +10,20 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use tauri::async_runtime::JoinHandle;
-use tauri::ipc::Channel;
+use tauri::ipc::{Channel, InvokeResponseBody, IpcResponse};
 use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Manager, RunEvent, State, Webview, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
-use twigo_core::{Core, PolicyFile};
+use twigo_core::{Core, PolicyFile, ShellFrame};
 use twigo_env::Environment;
 use twigo_ipc::{
     AccessQuery, Ack, ApplyPreviewed, ApplyRequest, ClusterVersion, Context, ContextAuth,
     Discovered, DownloadLogs, ErrorKind, ExecReview, Execute, GetValues, IpcError, KeyboardLayout,
-    ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject, OperationEvent, Plan,
-    PlanId, PlanRequest, SchemaQuery, SetContextEnvironment, SetContextMode, SetLogSource,
-    SetLogView, SetLogWindow, SetParts, SetWindow, ShellEnvironment, Space, StateEntry,
-    StateSnapshot, SubscriptionId,
+    ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent,
+    Plan, PlanId, PlanRequest, SchemaQuery, SetContextEnvironment, SetContextMode, SetLogSource,
+    SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck, ShellContainers, ShellEnvironment,
+    ShellInput, ShellPod, ShellResize, Space, StateEntry, StateSnapshot, SubscriptionId,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
 
@@ -530,6 +530,70 @@ fn logs_close(
 }
 
 #[tauri::command]
+async fn shell_containers(
+    app: State<'_, App>,
+    request: ShellPod,
+) -> Result<ShellContainers, IpcError> {
+    app.core.shell_containers(request).await
+}
+
+#[tauri::command]
+async fn shell_open(
+    webview: Webview,
+    app: State<'_, App>,
+    request: OpenShell,
+    channel: Channel<InvokeResponseBody>,
+) -> Result<(), IpcError> {
+    app.core
+        .shell_open(webview.label(), request, move |frame| {
+            let body = match frame {
+                ShellFrame::Output(bytes) => Ok(InvokeResponseBody::Raw(bytes)),
+                ShellFrame::Event(event) => event.body(),
+            };
+            match body.and_then(|body| channel.send(body)) {
+                Ok(()) => true,
+                Err(error) => {
+                    eprintln!("could not send a shell frame: {error}");
+                    false
+                }
+            }
+        })
+        .await
+}
+
+#[tauri::command]
+async fn shell_input(
+    webview: Webview,
+    app: State<'_, App>,
+    request: ShellInput,
+) -> Result<(), IpcError> {
+    app.core.shell_input(webview.label(), request).await
+}
+
+#[tauri::command]
+fn shell_resize(
+    webview: Webview,
+    app: State<'_, App>,
+    request: ShellResize,
+) -> Result<(), IpcError> {
+    app.core.shell_resize(webview.label(), request)
+}
+
+#[tauri::command]
+fn shell_ack(webview: Webview, app: State<'_, App>, request: ShellAck) -> Result<(), IpcError> {
+    app.core.shell_ack(webview.label(), request)
+}
+
+#[tauri::command]
+fn shell_close(
+    webview: Webview,
+    app: State<'_, App>,
+    request: SubscriptionId,
+) -> Result<(), IpcError> {
+    app.core.shell_close(webview.label(), request)
+}
+
+#[tauri::command]
 async fn context_sign_in(app: State<'_, App>, request: String) -> Result<(), IpcError> {
     app.core.sign_in(&request).await
 }
@@ -689,6 +753,12 @@ fn main() {
             logs_ack,
             logs_download,
             logs_close,
+            shell_containers,
+            shell_open,
+            shell_input,
+            shell_resize,
+            shell_ack,
+            shell_close,
             context_sign_in,
             context_sign_in_cancel,
             exec_review,
