@@ -353,6 +353,33 @@ test("opening, moving or a space shown gives the active group the focus that fel
   expect(document.activeElement).not.toBe(document.body);
 });
 
+test("a focus that fell to a group, as after a diff tab took it, goes to the editor that becomes active", async () => {
+  const { workbench, editors } = await mounted();
+  const focused: string[] = [];
+  workbench.editors.register({
+    id: "test.field",
+    scheme: "field",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <input aria-label={uri} />,
+    focus: (uri) => {
+      focused.push(uri);
+    },
+  });
+  act(() => {
+    editors.open("field://a");
+    editors.open("field://b");
+  });
+  focused.length = 0;
+  const group = document.querySelector<HTMLElement>(".dv-groupview");
+  group?.focus();
+  expect(document.activeElement).toBe(group);
+
+  act(() => {
+    editors.close("field://b");
+  });
+  expect(focused).toEqual(["field://a"]);
+});
+
 test("a focus already held outside the editor area stays where it is when an editor opens", async () => {
   const { workbench, editors } = await mounted();
   workbench.editors.register({

@@ -326,16 +326,25 @@ export class Editors {
   /**
    * An editor that opens, closes or moves, or a space that shows, takes a
    * focused element away, and the browser puts the keyboard focus on the page,
-   * where no key reaches an editor. The active group then takes it, and an
-   * editor that can hold it, its own; an area with no editor left gives it to
-   * the editor area.
+   * where no key reaches an editor; a group that already took it holds it for
+   * nothing but its keys. The active group then takes it, and an editor that
+   * can hold it, its own; an area with no editor left gives it to the editor
+   * area.
    */
   keepFocus(area: Area): void {
-    if (document.activeElement !== document.body) return;
+    const focused = document.activeElement;
+    if (focused !== document.body && !this.#groupHolds(focused)) return;
     const holder = this.activeIn(area) === undefined ? "editor" : area;
     this.#apis.get(holder)?.focus();
     const uri = this.activeIn(holder);
     if (uri !== undefined) this.resolve(uri)?.focus?.(uri);
+  }
+
+  #groupHolds(element: Element | null): boolean {
+    for (const api of this.#apis.values()) {
+      if (api.groups.some((group) => group.element === element)) return true;
+    }
+    return false;
   }
 
   #find(uri: string): { area: Area; panel: IDockviewPanel } | undefined {
