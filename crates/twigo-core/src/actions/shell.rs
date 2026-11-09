@@ -206,8 +206,7 @@ fn kubectl_line(kind: ShellKind, spec: &Spec, context: &str) -> Result<String, I
             match (*stdin, *tty) {
                 (true, true) => words.push("-it"),
                 (true, false) => words.push("-i"),
-                (false, true) => words.push("-t"),
-                (false, false) => {}
+                (false, _) => {}
             }
             words.extend([pod.as_str(), "-n", namespace, "-c", container]);
         }
@@ -453,6 +452,12 @@ mod tests {
         assert_eq!(
             kubectl_line(ShellKind::Attach, &attach, "kind-a").unwrap(),
             "kubectl --context kind-a attach web-1 -n ns -c app"
+        );
+        attach.tty = true;
+        assert_eq!(
+            kubectl_line(ShellKind::Attach, &attach, "kind-a").unwrap(),
+            "kubectl --context kind-a attach web-1 -n ns -c app",
+            "kubectl forces the tty off without stdin"
         );
     }
 }
