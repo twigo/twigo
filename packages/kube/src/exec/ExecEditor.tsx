@@ -1,5 +1,5 @@
 import "@xterm/xterm/css/xterm.css";
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Hourglass, SquareTerminal } from "lucide-react";
 import { CLUSTER_SESSIONS } from "@twigo/protocol";
 import { Banner, EmptyState } from "@twigo/ui";
@@ -24,7 +24,7 @@ export const RESTART_SHELL = "k8s.shell.restart";
  * ended, that nothing started it.
  */
 export function ExecEditor({ uri, tabs }: EditorProps & { tabs: ExecTabs }) {
-  const { keys, spaces, commands } = useWorkbench();
+  const { keys, spaces, commands, editors } = useWorkbench();
   useChanges(tabs.changes);
   useChanges(spaces.changes);
   const input = useMemo(() => parseExecUri(uri), [uri]);
@@ -61,6 +61,13 @@ export function ExecEditor({ uri, tabs }: EditorProps & { tabs: ExecTabs }) {
       tab.setShown(false);
     };
   }, [tab, container, shown]);
+
+  const wasVisible = useRef(panelVisible);
+  useEffect(() => {
+    const shownNow = panelVisible && !wasVisible.current;
+    wasVisible.current = panelVisible;
+    if (shownNow && shown && editors.activeIn("panel") === uri) tab?.focus();
+  }, [editors, panelVisible, shown, tab, uri]);
 
   useEffect(() => {
     if (!root) return;

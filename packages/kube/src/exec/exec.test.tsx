@@ -466,6 +466,28 @@ test("a shell tab that opens takes the focus", async () => {
   );
 });
 
+test("a panel shown again gives the focus to the active tab's terminal", async () => {
+  const { workbench, tabs, open } = await mounted("shellOneContainer");
+  await open("qa", ONE);
+  await open("qa", ONE);
+  const textarea = tabs.get(execUri({ ...RUNNING, n: 2 }))?.term.textarea;
+  expect(document.activeElement).toBe(textarea);
+
+  act(() => {
+    workbench.spaces.setPart("qa", "panel", { visible: false });
+  });
+  await settle(4);
+  act(() => {
+    (document.activeElement as HTMLElement).blur();
+  });
+  expect(document.activeElement).toBe(document.body);
+  act(() => {
+    workbench.spaces.setPart("qa", "panel", { visible: true });
+  });
+  await settle(4);
+  expect(document.activeElement).toBe(textarea);
+});
+
 test("the terminal's keys never reach a list's bare ones, and a chord that is bound stays the workbench's", async () => {
   const { workbench, open } = await mounted("shellOneContainer");
   await open("qa", ONE);
