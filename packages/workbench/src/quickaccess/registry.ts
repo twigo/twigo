@@ -137,7 +137,10 @@ export class QuickAccess {
   #restore: HTMLElement | undefined;
   #list: QuickAccessList | undefined;
 
-  constructor(private readonly keys: ContextKeys) {}
+  constructor(
+    private readonly keys: ContextKeys,
+    private readonly returnFocus: (to: Element | undefined) => void,
+  ) {}
 
   register(provider: QuickAccessProvider): () => void {
     if (this.#providers.has(provider.prefix)) {
@@ -293,12 +296,7 @@ export class QuickAccess {
     this.changes.emit();
     const restore = this.#restore;
     this.#restore = undefined;
-    if (restore?.isConnected && restore !== document.body) restore.focus();
-    else if (document.activeElement instanceof HTMLElement) {
-      // The field would keep the focus until the widget unmounts, which is
-      // after the accepted command has opened its editor.
-      document.activeElement.blur();
-    }
+    this.returnFocus(restore);
   }
 
   #settle(item: QuickPickItem | undefined) {

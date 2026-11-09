@@ -17,7 +17,7 @@ function provider(prefix: string, accept = vi.fn()): QuickAccessProvider {
 }
 
 test("the longest prefix wins and the empty prefix takes the rest", () => {
-  const quick = new QuickAccess(new ContextKeys());
+  const quick = new QuickAccess(new ContextKeys(), vi.fn());
   for (const prefix of ["", ">", "ns ", "n"]) quick.register(provider(prefix));
   expect(quick.resolve("ns payments")).toMatchObject({
     provider: { prefix: "ns " },
@@ -38,7 +38,7 @@ test("the longest prefix wins and the empty prefix takes the rest", () => {
 });
 
 test("a prefix registers once", () => {
-  const quick = new QuickAccess(new ContextKeys());
+  const quick = new QuickAccess(new ContextKeys(), vi.fn());
   quick.register(provider(">"));
   expect(() => quick.register(provider(">"))).toThrow();
 });
@@ -51,7 +51,8 @@ test("the context is the focused element's at opening, and the focus comes back"
   keys.scope(list).set("listFocus", true);
   list.focus();
   const accept = vi.fn();
-  const quick = new QuickAccess(keys);
+  const returnFocus = vi.fn();
+  const quick = new QuickAccess(keys, returnFocus);
   quick.register(provider(">", accept));
   quick.show(">");
   document.getElementById("input")?.focus();
@@ -66,21 +67,11 @@ test("the context is the focused element's at opening, and the focus comes back"
   expect(filter).toBe("run");
   expect(context.lookup("listFocus")).toBe(true);
   expect(quick.session).toBeUndefined();
-  expect(document.activeElement).toBe(list);
-});
-
-test("with nothing focused when it opened, quick access leaves no focus in its field as it closes", async () => {
-  document.body.innerHTML = `<input id="input" />`;
-  const quick = new QuickAccess(new ContextKeys());
-  quick.register(provider(">"));
-  quick.show(">");
-  document.getElementById("input")?.focus();
-  await quick.accept({ id: "x", label: "x" });
-  expect(document.activeElement).toBe(document.body);
+  expect(returnFocus).toHaveBeenCalledExactlyOnceWith(list);
 });
 
 test("a pick resolves with the item, or undefined when dismissed", async () => {
-  const quick = new QuickAccess(new ContextKeys());
+  const quick = new QuickAccess(new ContextKeys(), vi.fn());
   const items = [{ id: "a", label: "A" }];
   const picked = quick.pick("Pick", items);
   expect(quick.session?.pick?.items).toBe(items);
@@ -92,7 +83,7 @@ test("a pick resolves with the item, or undefined when dismissed", async () => {
 });
 
 test("showing quick access over a pick dismisses the pick", async () => {
-  const quick = new QuickAccess(new ContextKeys());
+  const quick = new QuickAccess(new ContextKeys(), vi.fn());
   quick.register(provider(">"));
   const picked = quick.pick("Pick", []);
   quick.show(">");
@@ -101,7 +92,7 @@ test("showing quick access over a pick dismisses the pick", async () => {
 });
 
 test("an input takes only a value it can, and gives none when dismissed", async () => {
-  const quick = new QuickAccess(new ContextKeys());
+  const quick = new QuickAccess(new ContextKeys(), vi.fn());
   const ask = () =>
     quick.input({
       placeholder: "Replicas",

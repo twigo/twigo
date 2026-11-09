@@ -289,6 +289,78 @@ test("an area that an open reveals takes the focus once it is no longer inert", 
   expect(inertAtFocus).toEqual(["editor:false"]);
 });
 
+test("the focus goes back to an element that can take it, else to the editor area's active editor", async () => {
+  const { workbench, editors } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+  });
+  const back = document.body.appendChild(document.createElement("button"));
+  const held = document.body.appendChild(document.createElement("input"));
+  act(() => {
+    held.focus();
+    editors.returnFocus(back);
+  });
+  expect(document.activeElement).toBe(back);
+
+  act(() => {
+    held.focus();
+    back.disabled = true;
+    editors.returnFocus(back);
+  });
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+
+  act(() => {
+    held.focus();
+    editors.returnFocus(document.body);
+  });
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+
+  act(() => {
+    held.focus();
+    editors.returnFocus(undefined);
+  });
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+  back.remove();
+  held.remove();
+});
+
+test("with no editor to take it, what held the focus lets go of it", async () => {
+  const { editors } = await mounted();
+  const held = document.body.appendChild(document.createElement("input"));
+  const gone = document.createElement("button");
+  act(() => {
+    held.focus();
+    editors.returnFocus(gone);
+  });
+  expect(document.activeElement).toBe(document.body);
+  held.remove();
+});
+
+test("quick access closes onto the active editor when the element it would restore cannot take the focus", async () => {
+  const { workbench, editors } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+    editors.open("input://x");
+  });
+  const terminal = screen.getByLabelText("input://x");
+  act(() => {
+    terminal.focus();
+  });
+  act(() => {
+    workbench.quickAccess.show("");
+  });
+  const field = document.body.appendChild(document.createElement("input"));
+  act(() => {
+    field.focus();
+    (terminal as HTMLInputElement).disabled = true;
+    workbench.quickAccess.hide();
+  });
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+  field.remove();
+});
+
 test("an open URI is focused where it is, in either area", async () => {
   const { workbench, editors, space } = await mounted();
   act(() => {

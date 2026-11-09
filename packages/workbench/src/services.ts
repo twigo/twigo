@@ -53,7 +53,9 @@ export class Workbench {
       return area === "panel" ? state.panelEditors : state.editors;
     },
   );
-  readonly quickAccess = new QuickAccess(this.keys);
+  readonly quickAccess = new QuickAccess(this.keys, (to) => {
+    this.editors.returnFocus(to);
+  });
   readonly lists = new Lists();
   readonly spaceStatus = new SpaceStatus();
   readonly keybindings: Keybindings;

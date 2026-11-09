@@ -372,6 +372,27 @@ export class Editors {
     }
   }
 
+  /**
+   * Gives the focus back to the element that held it before quick access or
+   * a dialog took it, or, when that cannot take it any more (inert with its
+   * part, hidden or gone) or there was none, to the editor area's active
+   * editor, as {@link releaseFocus} does: the page's body would take it, and
+   * no key does anything there. What held it meanwhile lets go: quick access's
+   * field would keep it until the widget unmounts, which is after the accepted
+   * command has opened its editor.
+   */
+  returnFocus(to: Element | null | undefined): void {
+    const held = document.activeElement;
+    if (to instanceof HTMLElement && to !== document.body && to.isConnected) {
+      to.focus();
+      if (document.activeElement === to) return;
+    }
+    this.#focusIn("editor");
+    if (document.activeElement === held && held instanceof HTMLElement) {
+      held.blur();
+    }
+  }
+
   #focusIn(area: Area): void {
     this.#apis.get(area)?.focus();
     const uri = this.activeIn(area);
