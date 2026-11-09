@@ -7,7 +7,8 @@ import type {
 } from "@twigo/protocol";
 import { cn, EmptyState, LinkButton, Skeleton } from "@twigo/ui";
 import { ViewStatus } from "../ViewStatus";
-import { Manifest } from "./Manifest";
+import { objectProblem } from "../viewProblem";
+import { Manifest } from "../edit/Manifest";
 import { Events, Overview, type OverviewProps } from "./Overview";
 import { OBJECT_TABS, type ObjectTab } from "./tabs";
 
@@ -24,6 +25,8 @@ export function ObjectContent({
   snapshot,
   values,
   reveal,
+  yaml,
+  kept,
   onOpen,
   onLogs,
 }: {
@@ -36,6 +39,13 @@ export function ObjectContent({
   snapshot: ObjectSnapshot;
   values: OverviewProps["values"];
   reveal?: OverviewProps["reveal"];
+  /** The YAML tab of an editor that edits; without it the tab is read-only, as the details show it. */
+  yaml?: (json: string) => ReactNode;
+  /**
+   * The YAML tab of an object that has an edit, for when the object is gone
+   * or cannot be read: the edit stays reachable, with why in its bar.
+   */
+  kept?: (problem: { title: string; body: string }) => ReactNode;
   onOpen: (target: ObjectRef) => void;
   onLogs?: OverviewProps["onLogs"];
 }) {
@@ -66,10 +76,15 @@ export function ObjectContent({
         </Shown>
       )}
       {tab === "yaml" && (
-        <Shown snapshot={snapshot} has={snapshot.manifest !== undefined}>
-          {snapshot.manifest !== undefined && (
-            <Manifest json={snapshot.manifest} />
-          )}
+        <Shown
+          snapshot={snapshot}
+          has={snapshot.manifest !== undefined}
+          kept={kept}
+        >
+          {snapshot.manifest !== undefined &&
+            (yaml?.(snapshot.manifest) ?? (
+              <Manifest json={snapshot.manifest} />
+            ))}
         </Shown>
       )}
       {tab === "events" && (
@@ -92,22 +107,24 @@ export function ObjectContent({
 function Shown({
   snapshot,
   has,
+  kept,
   children,
 }: {
   snapshot: ObjectSnapshot;
   has: boolean;
+  kept?: (problem: { title: string; body: string }) => ReactNode;
   children: ReactNode;
 }) {
   const { status } = snapshot;
-  const problem = <ViewStatus status={status} what="the object" />;
+  const found = objectProblem(snapshot);
+  if (found && kept) return kept(found);
   if (
     status.state === "error" ||
     status.state === "forbidden" ||
     status.state === "unauthorized"
   )
-    return problem;
-  if (status.state === "ready" && !snapshot.exists)
-    return <EmptyState title="The object does not exist" />;
+    return <ViewStatus status={status} what="the object" />;
+  if (found) return <EmptyState title="The object does not exist" />;
   if (!has)
     return (
       <div className="flex flex-col gap-2 p-3">

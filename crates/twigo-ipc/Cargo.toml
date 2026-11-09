@@ -10,7 +10,5 @@ publish.workspace = true
 
 [dependencies]
 serde.workspace = true
-ts-rs.workspace = true
-
-[dev-dependencies]
 serde_json.workspace = true
+ts-rs.workspace = true

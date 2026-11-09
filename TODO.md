@@ -22,6 +22,10 @@ Findings that belong to no step yet.
   - A resumed watch reports `ready` on its `200`, before a `410 Gone` in its body turns it to `relisting`, so a view can flash ready for a moment.
   - When a watch reconnects with other column definitions, as a CRD's edited printer columns might bring (not verified that the API server sends them on a re-watch), the rows stored before keep their old cells, which the query view reads by the new columns until each row changes or a relist; the per-namespace upstreams of one list may disagree on columns meanwhile.
   - Listing and storing 5,000 pods by a streaming list allocates 44.2 MiB in all, HTTP/2 reads and body chunks included, to keep 4.0 MiB (`examples/hub_memory.rs`, kind 1.37 with `bench/pods.sh` at 5,000, 2026-11-02); a paged list of the same pods was not measured the same way, and step 11's budgets say whether it matters.
+- OpenAPI documents (`twigo_kube::openapi`, ARCHITECTURE 3.6):
+  - The cache keeps every hash a group/version has had for good, so a CRD that is edited often leaves a file for each edit in the cache directory: nothing evicts them yet.
+  - The server converts a CRD that has `spec.preserveUnknownFields: true` as preserving unknown fields everywhere ([`NewTypeConverter`'s flag](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiextensions-apiserver/pkg/apiserver/customresource_handler.go#L695)); the merge shapes read every schema as if it were false, and not verified whether the document says otherwise.
+  - The first load of a group/version leaves the process 4,576 to 7,808 KiB larger for good (ARCHITECTURE 3.6), against a core RSS budget of 150 MB that the bench's typical runs of 2026-11-07 read 141 to 145 MB of (below); not measured with the editor open under the bench's churn.
 - Open objects (`twigo_core::objects`, ARCHITECTURE 4.3):
   - The Related tab lists the objects that the core controllers own (`twigo_describe::owned`); a custom resource's owned objects need an owner index across kinds.
 - Overviews (`twigo_describe`, ARCHITECTURE 4.3):
@@ -30,6 +34,8 @@ Findings that belong to no step yet.
   - A node's Overview asks for `resource.k8s.io/v1` ResourceSlices, which Kubernetes 1.33 does not serve: there the need fails and retries while the Overview is shown, and the section stays out, as kubectl leaves it out.
 - The visible window ([bench](docs/bench.md#the-visible-window)):
   - A row memo in `DataGrid`, since each batch renders every row of the window; JavaScript is about half of WebContent's main thread under churn, which is 2.1 % of a core by Name.
+- Applying an edit (`twigo_core::actions::apply`, ARCHITECTURE 6.5):
+  - A window reloaded during a recreate's wait stops it with the object gone and nothing created, which the audit log records but the page cannot show.
 - Modes (`twigo_policy`, ARCHITECTURE 6.4):
   - The mode a person chooses and the type they mark live in the app's state (`policy/choices`, `crates/twigo-core/src/state.rs`): `@todo` to move them to `settings.json` once the settings files come in M3, with nothing of this left behind.
   - The policy file is read once, as the app starts, so an admin's change takes a restart.
@@ -47,3 +53,11 @@ Findings that belong to no step yet.
 - The grid's row actions (`packages/ui/src/grid/DataGrid.tsx`):
   - Shift+Tab no longer stops on the menu button of a row without the cursor, which mounts once the focus is on that row.
   - WebView2 may fire `focusout` when the window deactivates, which would unmount a focused menu button of a row without the cursor; not verified, matters once Windows ships (D2).
+- The YAML editor (`packages/kube/src/edit`, ARCHITECTURE 4.3, 4.6):
+  - monaco-yaml's worker was built and run in a browser on the mock, not in the app: Tauri's CSP has not met it, and the built file was only searched for `eval` and `new Function`.
+  - The alias in `apps/desktop/vite.config.ts` and the `createWebWorker` in `monaco.ts` carry `@todo`s for monaco-worker-manager to follow Monaco 0.56 and later; a newer monaco-yaml or monaco-worker-manager than 5.5.1 and 2.0.1 may make both go (not published on 2026-11-08).
+  - `monaco.ts` imports `suggestController` from `monaco-editor/editor/contrib/suggest/browser/`, which Monaco 0.57's `features/suggest/register` leaves out, so that completion works; it carries an `@todo` for a release whose `register` imports it (0.57.0 is the latest, `npm view` on 2026-11-08).
+  - After an apply the editor holds the applied text until the live object differs from the one the edit was based on or equals the preview's result (`WorkingCopies.applied`), and a Secret's is never held: an admission webhook or a controller that puts the change back before the watch delivers it, as something else than the result, leaves the held text until it is edited or its editor closed, and the order of the plan's end and the watch against kind was not measured.
+  - Closing a dirty editor keeps its copy and Discard Changes asks nothing.
+  - Compare with… offers the objects of the kind in the space and those opened lately, not another space's.
+  - In the dev server a diff editor logs "no diff result available" as it mounts, under StrictMode's second mount; the production build served by `vite preview` logged none (2026-11-08).

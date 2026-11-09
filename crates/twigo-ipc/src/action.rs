@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{Environment, Gvr, IpcError, Mode, ObjectRef, SubscriptionId};
+use crate::{Environment, Gvr, IpcError, Mode, ObjectRef, PreviewId, SubscriptionId};
 
 /// An object of a space, by its resource as discovery names it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -71,6 +71,9 @@ pub enum PlanRequest {
     Undo { space: String },
     /// Shows a value of an open Secret.
     Reveal { object: SubscriptionId, key: String },
+    /// Applies what a preview prepared, or for a Pod or a Job whose edit
+    /// the server refused as immutable deletes it and creates it anew.
+    Apply { space: String, preview: PreviewId },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]

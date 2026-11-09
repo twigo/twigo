@@ -227,7 +227,7 @@ const MATCHES = 30;
 const WAIT_MS = 3000;
 
 /** The first rows a list query returns, then the subscription closes. */
-function firstRows(view: ListView): Promise<ListSnapshot> {
+export function firstRows(view: ListView): Promise<ListSnapshot> {
   return new Promise((resolve) => {
     const done = (snapshot: ListSnapshot) => {
       clearTimeout(timer);
@@ -403,7 +403,7 @@ function recentItem(
  * text holds it as a substring in any case of ASCII letters
  * (twigo-cache's view filter); a negation or a regex marks nothing.
  */
-function substring(label: string, filter: string): TextRange[] {
+export function substring(label: string, filter: string): TextRange[] {
   const search = lowerAscii(filter.trim());
   const at = search === "" ? -1 : lowerAscii(label).indexOf(search);
   return at < 0 ? [] : [{ start: at, end: at + search.length }];

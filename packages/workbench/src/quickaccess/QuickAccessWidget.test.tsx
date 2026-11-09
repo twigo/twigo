@@ -47,6 +47,87 @@ const selected = () =>
   document.querySelector('[cmdk-item][aria-selected="true"]')?.textContent;
 const footer = () => screen.getByLabelText("Keys").textContent;
 
+test("a pick with a source is asked for the rows of each value typed, and shows them as they come", async () => {
+  const workbench = await testWorkbench();
+  const source = vi.fn((filter: string): QuickPickItem[] =>
+    filter === ""
+      ? [{ id: "a", label: "alpha" }]
+      : [{ id: "z", label: "zulu" }],
+  );
+  render(<QuickAccessWidget />, { wrapper: inWorkbench(workbench) });
+  let picked: Promise<QuickPickItem | undefined> | undefined;
+  await act(async () => {
+    picked = workbench.quickAccess.pick("Compare with…", source);
+    await Promise.resolve();
+  });
+  expect(screen.getByText("alpha")).toBeTruthy();
+
+  await act(async () => {
+    fireEvent.change(input(), { target: { value: "u" } });
+    await Promise.resolve();
+  });
+  expect(source).toHaveBeenLastCalledWith("u");
+  expect(screen.queryByText("alpha")).toBeNull();
+  expect(screen.getByText("zulu")).toBeTruthy();
+
+  press("Enter");
+  await expect(picked).resolves.toEqual({ id: "z", label: "zulu" });
+});
+
+test("a pick that the accepted command opens holds the focus, and Escape gives it back to where it was", async () => {
+  const workbench = await testWorkbench();
+  const { registered } = provider(
+    "!",
+    [{ id: "compare", label: "Compare with…" }],
+    {
+      accept: () => {
+        void workbench.quickAccess.pick("Compare with…", [
+          { id: "a", label: "alpha" },
+        ]);
+      },
+    },
+  );
+  workbench.quickAccess.register(registered);
+  render(
+    <>
+      <textarea aria-label="Editor" />
+      <QuickAccessWidget />
+    </>,
+    { wrapper: inWorkbench(workbench) },
+  );
+  const editor = screen.getByLabelText("Editor");
+  editor.focus();
+  await act(async () => {
+    workbench.quickAccess.show("!");
+    await Promise.resolve();
+  });
+  expect(document.activeElement).toBe(input());
+
+  press("Enter");
+  await act(() => Promise.resolve());
+  expect(workbench.quickAccess.session?.pick?.placeholder).toBe(
+    "Compare with…",
+  );
+  expect(document.activeElement).toBe(input());
+
+  press("Escape");
+  expect(document.activeElement).toBe(editor);
+});
+
+test("a pick's notice says what its rows are, and shows with none", async () => {
+  const workbench = await testWorkbench();
+  render(<QuickAccessWidget />, { wrapper: inWorkbench(workbench) });
+  await act(async () => {
+    void workbench.quickAccess.pick("Compare with…", () => ({
+      items: [],
+      notice: "Only your namespaces",
+    }));
+    await Promise.resolve();
+  });
+  expect(screen.getByRole("status").textContent).toBe("Only your namespaces");
+  expect(screen.getByText("No results")).toBeTruthy();
+});
+
 test("items loaded for another value are neither shown nor accepted", async () => {
   const workbench = await testWorkbench();
   const pending = new Map<string, (items: QuickPickItem[]) => void>();

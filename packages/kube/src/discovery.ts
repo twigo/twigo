@@ -155,6 +155,21 @@ export function useResources(
   return discovery.get(space);
 }
 
+/** Whether the resource has a `status` subresource, which the engine owns: false until discovery says. */
+export function hasStatusSubresource(
+  resources: Loaded<readonly Resource[]>,
+  gvr: Gvr | undefined,
+): boolean {
+  return (
+    gvr !== undefined &&
+    resources.state === "ready" &&
+    (resources.value
+      .find((resource) => sameGvr(resource.gvr, gvr))
+      ?.subresources.includes("status") ??
+      false)
+  );
+}
+
 export function sameGvr(a: Gvr, b: Gvr): boolean {
   return (
     a.group === b.group && a.version === b.version && a.resource === b.resource

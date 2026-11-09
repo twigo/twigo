@@ -1,5 +1,6 @@
 import { expect, test, vi } from "vitest";
 import { testWorkbench } from "@twigo/workbench/testing";
+import { EDIT_KEYS } from "./edit/services";
 import { registerKube } from "./register";
 
 async function withEveryEnablement() {
@@ -29,6 +30,7 @@ async function withEveryEnablement() {
   workbench.keys.set("space.id", "dev");
   workbench.keys.set("operationUndo", ["dev"]);
   workbench.keys.set("resource.scalable", true);
+  for (const key of EDIT_KEYS) workbench.keys.set(key, true);
   for (const capability of [
     "resource.capability.delete",
     "marked.capability.delete",

@@ -50,6 +50,7 @@ yaml-edit.workspace = true
 bytes.workspace = true
 futures.workspace = true
 http-body-util.workspace = true
+jsonschema.workspace = true
 kube = { workspace = true, features = ["runtime", "ws"] }
 rcgen.workspace = true
 rustls = { workspace = true, features = ["ring"] }

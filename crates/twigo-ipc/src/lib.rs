@@ -3,6 +3,7 @@
 
 mod access;
 mod action;
+mod apply;
 pub mod command;
 mod credentials;
 mod discovery;
@@ -12,6 +13,7 @@ mod keyboard;
 mod list;
 mod logs;
 mod object;
+mod schema;
 mod space;
 mod state;
 mod typescript;
@@ -22,6 +24,9 @@ pub use access::{
 };
 pub use action::{
     Affected, Execute, Friction, OperationEvent, Plan, PlanId, PlanRequest, ResourceRef,
+};
+pub use apply::{
+    ApplyConflict, ApplyPreviewed, ApplyRequest, ApplyStrategy, OpenedEdit, PreviewId,
 };
 pub use credentials::{ContextAuth, EnvVar, ExecPlugin, ExecReview, PluginStatus, ReviewedPlugin};
 pub use discovery::{ClusterVersion, Discovered, Resource};
@@ -44,6 +49,7 @@ pub use object::{
     ObjectQuery, ObjectRef, OpenObject, Overview, Related, RelatedObject, Section, SetParts, Span,
     Tone, TreeNode, TreeValue, Value,
 };
+pub use schema::SchemaQuery;
 pub use space::{Context, ContextColor, Space};
 pub use state::{StateEntry, StateSnapshot};
 pub use typescript::typescript;

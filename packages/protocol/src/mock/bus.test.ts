@@ -1012,3 +1012,314 @@ test("pods that come and go leave each deployment its replicas", () => {
   for (let tick = 0; tick < 20; tick++) cluster.churn(3, [], Date.now());
   expect(count()).toEqual(before);
 });
+
+const EDITED = {
+  apiVersion: "v1",
+  kind: "ConfigMap",
+  metadata: { name: "settings", namespace: "default" },
+  data: { a: "1" },
+};
+
+function applyEdit(annotation: string | null) {
+  const metadata =
+    annotation === null
+      ? EDITED.metadata
+      : {
+          ...EDITED.metadata,
+          annotations: { "mock.twigo.io/answer": annotation },
+        };
+  return {
+    space: "qa",
+    opened: {
+      target: {
+        gvr: { group: "", version: "v1", resource: "configmaps" },
+        namespaced: true,
+        namespace: "default",
+        name: "settings",
+      },
+      base: { ...EDITED, data: { a: "0" } },
+      lock: "1",
+    },
+    edited: { ...EDITED, metadata },
+    force: false,
+    drop: [],
+  };
+}
+
+test("apply_preview answers each case of the enum, and a ready one's plan runs once", async () => {
+  const backend = createMockBackend();
+  await answered(backend.invoke("space_open", "qa"));
+  const unchanged = await answered(
+    backend.invoke("apply_preview", {
+      ...applyEdit(null),
+      edited: applyEdit(null).opened.base,
+    }),
+  );
+  expect(unchanged).toEqual({ state: "unchanged", ignored: [] });
+  for (const [annotation, state] of [
+    ["conflicts", "conflicts"],
+    ["stale", "stale"],
+    ["immutable", "immutable"],
+    ["recreate", "immutable"],
+    ["removals", "ready"],
+    ["merge-patch", "ready"],
+    [null, "ready"],
+  ] as const) {
+    const answer = await answered(
+      backend.invoke("apply_preview", applyEdit(annotation)),
+    );
+    expect(answer.state).toBe(state);
+  }
+  const ready = await answered(
+    backend.invoke("apply_preview", applyEdit(null)),
+  );
+  if (ready.state !== "ready") throw new Error("expected ready");
+  expect(ready.live).toEqual({ ...EDITED, data: { a: "0" } });
+  const plan = await answered(
+    backend.invoke("command_plan", {
+      action: "apply",
+      space: "qa",
+      preview: ready.id,
+    }),
+  );
+  expect(plan.friction).toEqual({ kind: "atOnce" });
+  expect(plan.confirm).toBe("Apply");
+  const events = await run(backend, plan.id);
+  expect(events).toEqual([
+    { state: "done", text: "Applied configmap settings", undoUntil: null },
+  ]);
+  const again = await refused(
+    backend.invoke("command_plan", {
+      action: "apply",
+      space: "qa",
+      preview: ready.id,
+    }),
+  );
+  expect(again.kind).toBe("notFound");
+});
+
+test("a recreate's plan asks and names what it deletes", async () => {
+  const backend = createMockBackend();
+  await answered(backend.invoke("space_open", "qa"));
+  const answer = await answered(
+    backend.invoke("apply_preview", applyEdit("recreate")),
+  );
+  if (answer.state !== "immutable" || answer.recreate === null) {
+    throw new Error("expected a recreate");
+  }
+  const plan = await answered(
+    backend.invoke("command_plan", {
+      action: "apply",
+      space: "qa",
+      preview: answer.recreate,
+    }),
+  );
+  expect(plan.destructive).toBe(true);
+  expect(plan.friction).toEqual({ kind: "confirm" });
+});
+
+test("an apply is at once in read-write, asks in guarded and is blocked in read-only", async () => {
+  const backend = createMockBackend();
+  await answered(backend.invoke("space_open", "qa"));
+  for (const [mode, expected] of [
+    ["guarded", { kind: "confirm" }],
+    ["read-write", { kind: "atOnce" }],
+  ] as const) {
+    await answered(backend.invoke("context_mode_set", { context: "qa", mode }));
+    const answer = await answered(
+      backend.invoke("apply_preview", applyEdit(null)),
+    );
+    if (answer.state !== "ready") throw new Error("expected ready");
+    const plan = await answered(
+      backend.invoke("command_plan", {
+        action: "apply",
+        space: "qa",
+        preview: answer.id,
+      }),
+    );
+    expect(plan.friction).toEqual(expected);
+  }
+  await answered(
+    backend.invoke("context_mode_set", {
+      context: "qa",
+      mode: "read-only",
+    }),
+  );
+  const answer = await answered(
+    backend.invoke("apply_preview", applyEdit(null)),
+  );
+  if (answer.state !== "ready") throw new Error("expected ready");
+  const blocked = await refused(
+    backend.invoke("command_plan", {
+      action: "apply",
+      space: "qa",
+      preview: answer.id,
+    }),
+  );
+  expect(blocked.kind).toBe("permissions");
+});
+
+test("a recreate is blocked by its first write, a delete, in read-only", async () => {
+  const backend = createMockBackend();
+  await answered(backend.invoke("space_open", "qa"));
+  const answer = await answered(
+    backend.invoke("apply_preview", applyEdit("recreate")),
+  );
+  if (answer.state !== "immutable" || answer.recreate === null) {
+    throw new Error("expected a recreate");
+  }
+  await answered(
+    backend.invoke("context_mode_set", { context: "qa", mode: "read-only" }),
+  );
+  const blocked = await refused(
+    backend.invoke("command_plan", {
+      action: "apply",
+      space: "qa",
+      preview: answer.recreate,
+    }),
+  );
+  expect(blocked.kind).toBe("permissions");
+  expect(blocked.message).toContain("delete");
+});
+
+test("a newer preview of an object drops the plan of an older one that waits", async () => {
+  const backend = createMockBackend();
+  await answered(backend.invoke("space_open", "qa"));
+  const older = await answered(
+    backend.invoke("apply_preview", applyEdit(null)),
+  );
+  if (older.state !== "ready") throw new Error("expected ready");
+  const waiting = await planOf(backend, older.id);
+  await answered(backend.invoke("apply_preview", applyEdit("stale")));
+  const gone = await refused(
+    backend.subscribe(
+      "command_execute",
+      { plan: waiting.id, typed: null },
+      () => undefined,
+    ),
+  );
+  expect(gone.kind).toBe("notFound");
+});
+
+test("a newer preview of an object replaces an older one, whatever it answers", async () => {
+  const backend = createMockBackend();
+  await answered(backend.invoke("space_open", "qa"));
+  const older = await answered(
+    backend.invoke("apply_preview", applyEdit(null)),
+  );
+  if (older.state !== "ready") throw new Error("expected ready");
+  await answered(backend.invoke("apply_preview", applyEdit("stale")));
+  const gone = await refused(
+    backend.invoke("command_plan", {
+      action: "apply",
+      space: "qa",
+      preview: older.id,
+    }),
+  );
+  expect(gone.kind).toBe("notFound");
+});
+
+function planOf(
+  backend: ReturnType<typeof createMockBackend>,
+  preview: number,
+) {
+  return answered(
+    backend.invoke("command_plan", { action: "apply", space: "qa", preview }),
+  );
+}
+
+test("a plan's kubectl line and consequences say how its edit is sent", async () => {
+  const backend = createMockBackend();
+  await answered(backend.invoke("space_open", "qa"));
+
+  const byPatch = await answered(
+    backend.invoke("apply_preview", applyEdit("merge-patch")),
+  );
+  if (byPatch.state !== "ready") throw new Error("expected ready");
+  const patchPlan = await planOf(backend, byPatch.id);
+  expect(patchPlan.kubectl).toContain(
+    "kubectl patch configmaps settings -n default --type=merge --field-manager=twigo-edit",
+  );
+  expect(patchPlan.kubectl).not.toContain("--server-side");
+  expect(patchPlan.consequences).toEqual([
+    "An apply cannot express this edit, so it goes as one merge patch under field manager twigo-edit, as kubectl edit would.",
+  ]);
+
+  const withRemoval = await answered(
+    backend.invoke("apply_preview", applyEdit("removals")),
+  );
+  if (withRemoval.state !== "ready") throw new Error("expected ready");
+  const removalPlan = await planOf(backend, withRemoval.id);
+  expect(removalPlan.kubectl).toContain("--server-side");
+  expect(removalPlan.kubectl).toContain("--type=merge");
+  expect(removalPlan.consequences).toEqual([
+    "Then a merge patch removes .metadata.labels.team.",
+  ]);
+
+  const replaced = await answered(
+    backend.invoke("apply_preview", applyEdit("recreate")),
+  );
+  if (replaced.state !== "immutable" || replaced.recreate === null) {
+    throw new Error("expected a recreate");
+  }
+  const recreatePlan = await planOf(backend, replaced.recreate);
+  expect(recreatePlan.kubectl).toContain(
+    "kubectl delete configmaps settings -n default && kubectl create",
+  );
+  expect(recreatePlan.kubectl).not.toContain("--server-side");
+  expect(recreatePlan.consequences).toEqual([
+    "It goes, and a new one with a new uid takes its place.",
+  ]);
+});
+
+test("a Job's recreate says it runs again, in its own words", async () => {
+  const backend = createMockBackend();
+  await answered(backend.invoke("space_open", "qa"));
+  const edit = applyEdit("recreate");
+  const answer = await answered(
+    backend.invoke("apply_preview", {
+      ...edit,
+      opened: {
+        ...edit.opened,
+        target: {
+          ...edit.opened.target,
+          gvr: { group: "batch", version: "v1", resource: "jobs" },
+        },
+      },
+    }),
+  );
+  if (answer.state !== "immutable" || answer.recreate === null) {
+    throw new Error("expected a recreate");
+  }
+  const plan = await planOf(backend, answer.recreate);
+  expect(plan.consequences).toEqual([
+    "It goes with its pods, and a new one with a new uid runs from the start, whatever this one finished.",
+  ]);
+  expect(plan.kubectl).toContain("kubectl delete jobs.batch settings");
+});
+
+test("the two sides of a preview lose resourceVersion and generation, as Rust's do", async () => {
+  const backend = createMockBackend();
+  await answered(backend.invoke("space_open", "qa"));
+  const edit = applyEdit(null);
+  const server = { resourceVersion: "9", generation: 2 };
+  const answer = await answered(
+    backend.invoke("apply_preview", {
+      ...edit,
+      opened: {
+        ...edit.opened,
+        base: {
+          ...edit.opened.base,
+          metadata: { ...edit.opened.base.metadata, ...server },
+        },
+      },
+      edited: {
+        ...edit.edited,
+        metadata: { ...edit.edited.metadata, ...server },
+      },
+    }),
+  );
+  if (answer.state !== "ready") throw new Error("expected ready");
+  expect(answer.live).toEqual({ ...EDITED, data: { a: "0" } });
+  expect(answer.result).toEqual(EDITED);
+});

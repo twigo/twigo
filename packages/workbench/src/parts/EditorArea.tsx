@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type FunctionComponent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type FunctionComponent,
+} from "react";
 import {
   DockviewReact,
   themeLight,
@@ -11,14 +18,14 @@ import {
   type IWatermarkPanelProps,
 } from "dockview-react";
 import { FileQuestion, X } from "lucide-react";
-import { cn, EmptyState, KeyHints } from "@twigo/ui";
+import { cn, EmptyState, KeyHints, UnsavedMark } from "@twigo/ui";
 import {
   EDITOR_COMPONENT,
   EDITOR_TAB,
   readParams,
   type Area,
 } from "../editors/registry";
-import { useChanges, useWorkbench } from "../react";
+import { EditorShownContext, useChanges, useWorkbench } from "../react";
 import { PanelBoundary } from "./PanelBoundary";
 
 const THEME: DockviewTheme = {
@@ -117,7 +124,7 @@ export function SpaceDock({
       }));
     };
     const changes = api.onDidLayoutChange(save);
-    const detach = workbench.editors.attach(api, area);
+    const detach = workbench.editors.attach(api, area, space);
     // Dockview reports layout changes a microtask late (its AsapEvent), so
     // the layout is saved once more as the space goes away, after the
     // listener stops, so nothing the teardown reports can overwrite it.
@@ -156,9 +163,20 @@ export function SpaceDock({
   );
 }
 
-function EditorPanel({ params: raw }: IDockviewPanelProps) {
-  const { editors } = useWorkbench();
+function EditorPanel({ params: raw, api }: IDockviewPanelProps) {
+  const { editors, spaces } = useWorkbench();
   useChanges(editors.changes);
+  useChanges(spaces.changes);
+  const subscribe = useCallback(
+    (changed: () => void) => {
+      const listener = api.onDidVisibilityChange(changed);
+      return () => {
+        listener.dispose();
+      };
+    },
+    [api],
+  );
+  const visible = useSyncExternalStore(subscribe, () => api.isVisible);
   const params = readParams(raw);
   const provider = params && editors.resolve(params.uri);
   if (!params || !provider) {
@@ -173,10 +191,19 @@ function EditorPanel({ params: raw }: IDockviewPanelProps) {
     );
   }
   const Component = provider.component;
+  const space = spaces.active;
+  const panel = space && spaces.state(space.id).parts.panel;
+  const covered =
+    provider.area !== "panel" &&
+    panel !== undefined &&
+    panel.visible &&
+    panel.maximized;
   return (
-    <PanelBoundary label={provider.title(new URL(params.uri))}>
-      <Component uri={params.uri} />
-    </PanelBoundary>
+    <EditorShownContext.Provider value={visible && !covered}>
+      <PanelBoundary label={provider.title(new URL(params.uri))}>
+        <Component uri={params.uri} />
+      </PanelBoundary>
+    </EditorShownContext.Provider>
   );
 }
 
@@ -195,8 +222,10 @@ export function GroupActions({ activePanel }: IDockviewHeaderActionsProps) {
 
 function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
   const { editors } = useWorkbench();
+  useChanges(editors.changes);
   const params = readParams(raw);
   const provider = params && editors.resolve(params.uri);
+  const dirty = params !== undefined && editors.isDirty(params.uri);
   return (
     <div
       className="flex h-full items-center gap-1.5 pr-[3px] pl-2 text-[13px]"
@@ -204,7 +233,7 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
         if (params) editors.pin(params.uri);
       }}
       onAuxClick={(event) => {
-        if (event.button === 1) api.close();
+        if (event.button === 1) editors.close(api.id);
       }}
     >
       {params && provider?.icon && (
@@ -219,16 +248,18 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
       <button
         type="button"
         aria-label={`Close ${api.title ?? ""}`}
+        data-dirty={dirty}
         onClick={(event) => {
           event.stopPropagation();
-          api.close();
+          editors.close(api.id);
         }}
         className={cn(
           "twigo-tab-close -ml-[3px] flex size-5 items-center justify-center rounded",
           "hover:bg-row-hover",
         )}
       >
-        <X className="size-3.5" />
+        {dirty && <UnsavedMark className="twigo-tab-unsaved" />}
+        <X className="twigo-tab-x size-3.5" />
       </button>
     </div>
   );

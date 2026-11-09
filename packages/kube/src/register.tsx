@@ -1,6 +1,9 @@
-import { FolderTree } from "lucide-react";
+import { FileCode, FolderTree, GitCompare } from "lucide-react";
 import { Changes, type Workbench } from "@twigo/workbench";
 import { Explorer, EXPLORER_VIEW } from "./explorer/Explorer";
+import { registerEdits } from "./edit/commands";
+import { DiffEditor } from "./edit/DiffEditors";
+import { ManifestEditor } from "./edit/ManifestEditor";
 import { Home } from "./home/Home";
 import { ListIcon, ObjectIcon } from "./KindIcon";
 import { ListActions } from "./list/ListActions";
@@ -16,12 +19,17 @@ import {
 import { registerLogs } from "./logs/register";
 import { LogsTabs } from "./logs/state";
 import { registerResourceActions } from "./resourceActions";
+import { editorSpace } from "./edit/services";
 import { createServices, type ListServices } from "./services";
 import {
+  DIFF_SCHEME,
   LIST_SCHEME,
   OBJECT_SCHEME,
+  parseDiffUri,
   parseListUri,
   parseObjectUri,
+  parseUntitledUri,
+  UNTITLED_SCHEME,
 } from "./uri";
 
 /** Kubernetes in the workbench, through its registries only (ARCHITECTURE 2.3). */
@@ -83,6 +91,7 @@ export function registerKube(workbench: Workbench): void {
   editors.register({
     id: "kube.list",
     scheme: LIST_SCHEME,
+    space: (uri) => parseListUri(uri.href)?.space,
     title: (uri) => {
       const resource = parseListUri(uri.href)?.gvr.resource ?? uri.href;
       return resource.charAt(0).toUpperCase() + resource.slice(1);
@@ -96,6 +105,7 @@ export function registerKube(workbench: Workbench): void {
   editors.register({
     id: "kube.object",
     scheme: OBJECT_SCHEME,
+    space: (uri) => parseObjectUri(uri.href)?.space,
     title: (uri) => parseObjectUri(uri.href)?.name ?? uri.href,
     icon: ObjectIcon,
     component: ({ uri }) => (
@@ -104,9 +114,70 @@ export function registerKube(workbench: Workbench): void {
         discovery={services.discovery}
         overviews={services.overviews}
         tabs={objectTabs}
+        edits={services.edits}
       />
     ),
     actions: ({ uri }) => <ObjectTabSwitch uri={uri} tabs={objectTabs} />,
+    focus: (uri) => {
+      if (objectTabs.get(uri) === "yaml") services.edits.copies.focus(uri);
+    },
+  });
+
+  editors.register({
+    id: "kube.diff",
+    scheme: DIFF_SCHEME,
+    space: (uri) => {
+      const input = parseDiffUri(uri.href);
+      if (input?.kind === "objects") return input.space;
+      return input && editorSpace(input.editor);
+    },
+    title: (uri) => {
+      const input = parseDiffUri(uri.href);
+      if (!input) return uri.href;
+      const name = (editor: string) => {
+        const manifest = parseUntitledUri(editor);
+        return (
+          parseObjectUri(editor)?.name ??
+          (manifest
+            ? `Manifest ${String(manifest.n)}`
+            : editor.replace(/^\w+:\/\//, ""))
+        );
+      };
+      switch (input.kind) {
+        case "apply":
+          return `Apply · ${name(input.editor)}`;
+        case "server":
+          return `Server · ${name(input.editor)}`;
+        case "objects":
+          return `${name(input.left)} ↔ ${name(input.right)}`;
+      }
+    },
+    icon: ({ className }) => <GitCompare className={className} />,
+    component: ({ uri }) => (
+      <DiffEditor
+        uri={uri}
+        edits={services.edits}
+        discovery={services.discovery}
+      />
+    ),
+  });
+
+  editors.register({
+    id: "kube.manifest",
+    scheme: UNTITLED_SCHEME,
+    space: (uri) => parseUntitledUri(uri.href)?.space,
+    title: (uri) => `Manifest ${String(parseUntitledUri(uri.href)?.n ?? "")}`,
+    icon: ({ className }) => <FileCode className={className} />,
+    component: ({ uri }) => (
+      <ManifestEditor
+        uri={uri}
+        edits={services.edits}
+        discovery={services.discovery}
+      />
+    ),
+    focus: (uri) => {
+      services.edits.copies.focus(uri);
+    },
   });
 
   commands.register({
@@ -121,6 +192,11 @@ export function registerKube(workbench: Workbench): void {
   ]);
   registerLogs(workbench, new LogsTabs(workbench.backend));
   registerResourceActions(workbench, services);
+  registerEdits(workbench, {
+    discovery: services.discovery,
+    edits: services.edits,
+    tabs: objectTabs,
+  });
 }
 
 /**

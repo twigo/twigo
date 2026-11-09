@@ -61,6 +61,20 @@ test("the list keys move through the tree, left and right close and open section
   expect(focused()).toBe("Custom Resources");
 });
 
+test("a kind opened from the tree leaves the focus in the tree, whose keys go on", async () => {
+  const workbench = await mountKube();
+  tree().focus();
+  press("ArrowDown");
+  press("Enter");
+  expect(workbench.editors.active).toBe("k8s-list://prod-eu/v1/pods");
+  expect(document.activeElement).toBe(tree());
+  fireEvent.doubleClick(item("Deployments"));
+  expect(workbench.editors.active).toBe(
+    "k8s-list://prod-eu/apps/v1/deployments",
+  );
+  expect(document.activeElement).toBe(tree());
+});
+
 test("open sections are kept per space, across switches and windows", async () => {
   const backend = createMockBackend("ready");
   const workbench = await mountKube(backend);

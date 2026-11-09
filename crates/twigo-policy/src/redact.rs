@@ -41,6 +41,14 @@ pub fn for_view(mut object: Value) -> Value {
     object
 }
 
+/// Whether `text` reads as what [`for_view`] puts in place of a Secret's
+/// value, as a mask left where a value should be.
+pub fn is_mask(text: &str) -> bool {
+    text.strip_prefix('<')
+        .and_then(|rest| rest.strip_suffix(" bytes>"))
+        .is_some_and(|size| !size.is_empty() && size.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
 /// A Secret's value of `key` (ARCHITECTURE 3.6): its text, or its base64 when
 /// it is not UTF-8, and whether it is; refused for any other kind.
 pub fn secret_value(object: &Value, key: &str) -> Result<(String, bool), IpcError> {
@@ -99,6 +107,23 @@ mod tests {
             json!({ "team": "payments" })
         );
         assert!(shown["metadata"].get("managedFields").is_none());
+    }
+
+    #[test]
+    fn a_mask_is_only_what_a_view_writes_for_a_value() {
+        for mask in ["<7 bytes>", "<0 bytes>", "<12345 bytes>"] {
+            assert!(is_mask(mask), "{mask}");
+        }
+        for not in [
+            "<bytes>",
+            "< bytes>",
+            "<7 byte>",
+            "7 bytes>",
+            "<x bytes>",
+            "hunter2",
+        ] {
+            assert!(!is_mask(not), "{not}");
+        }
     }
 
     #[test]

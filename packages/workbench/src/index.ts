@@ -15,9 +15,16 @@ export type { Platform } from "./keybindings/chord";
 export { platformOf } from "./keybindings/platform";
 export type { KeybindingRule } from "./keybindings/resolver";
 export { Changes } from "./changes";
-export { useChanges, useWorkbench } from "./react";
+export {
+  EditorShownContext,
+  useChanges,
+  useEditorShown,
+  useWorkbench,
+} from "./react";
 export type {
   AcceptOptions,
+  PickSource,
+  Picked,
   QuickAccessContext,
   QuickAccessProvider,
   QuickPickItem,
@@ -36,4 +43,10 @@ export type {
   Watermark,
 } from "./views/registry";
 export { SpaceTile } from "./parts/SpaceTile";
+export {
+  accessOfSpace,
+  chipLabel,
+  describeAccess,
+  setByPolicyFile,
+} from "./spaces/modes";
 export { WorkbenchView } from "./WorkbenchView";

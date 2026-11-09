@@ -50,7 +50,11 @@ export function QuickAccessWidget() {
 
 type Loaded =
   | { readonly state: "loading" }
-  | { readonly state: "ready"; readonly items: readonly QuickPickItem[] }
+  | {
+      readonly state: "ready";
+      readonly items: readonly QuickPickItem[];
+      readonly notice?: string;
+    }
   | { readonly state: "failed"; readonly message: string };
 
 /** cmdk's own keys, which go to the keybinding service instead. */
@@ -65,15 +69,35 @@ function Open({ session }: { session: Session }) {
   const [loaded, setLoaded] = useState<{ value: string; result: Loaded }>();
   const [selected, setSelected] = useState("");
   const root = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLInputElement>(null);
 
+  // The command a row accepted may pick in the tick the palette closed in, after
+  // quick access gave the focus back and before this widget unmounted, so
+  // autoFocus never fires for the pick.
   useEffect(() => {
-    if (pick || ask) return;
+    field.current?.focus();
+  }, [pick, ask]);
+
+  const source = pick?.source;
+  useEffect(() => {
+    if (ask || (pick && !source)) return;
+    const target = source ? undefined : quickAccess.resolve(value);
+    const load = source
+      ? () => source(value)
+      : target && (() => target.provider.items(target.filter, context));
+    if (!load) return;
     let live = true;
-    const target = quickAccess.resolve(value);
-    if (!target) return;
-    Promise.resolve(target.provider.items(target.filter, context)).then(
-      (items) => {
-        if (live) setLoaded({ value, result: { state: "ready", items } });
+    Promise.resolve(load()).then(
+      (picked) => {
+        if (live) {
+          setLoaded({
+            value,
+            result:
+              "items" in picked
+                ? { state: "ready", ...picked }
+                : { state: "ready", items: picked },
+          });
+        }
       },
       (error: unknown) => {
         if (live) {
@@ -87,11 +111,11 @@ function Open({ session }: { session: Session }) {
     return () => {
       live = false;
     };
-  }, [quickAccess, value, pick, ask, context]);
+  }, [quickAccess, value, pick, source, ask, context]);
 
   const result: Loaded = ask
     ? { state: "ready", items: [] }
-    : pick
+    : pick && !source
       ? { state: "ready", items: filtered(pick.items, value) }
       : loaded?.value === value
         ? loaded.result
@@ -178,7 +202,7 @@ function Open({ session }: { session: Session }) {
         }}
       >
         <CommandInput
-          autoFocus
+          ref={field}
           // An input starts with all its value selected, as VS Code's.
           {...(ask && {
             onFocus: (event) => {
@@ -194,6 +218,14 @@ function Open({ session }: { session: Session }) {
           }
         />
         <CommandList>
+          {result.state === "ready" && result.notice !== undefined && (
+            <p
+              role="status"
+              className="px-3 py-2 text-xs text-muted-foreground"
+            >
+              {result.notice}
+            </p>
+          )}
           {ask ? (
             <Asked message={ask.validate(value)} prompt={ask.prompt} />
           ) : result.state === "failed" ? (

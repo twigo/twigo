@@ -534,8 +534,15 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     The frontend follows the active space again whenever a credential comes after none or after a failed run.
     A run that a rejected credential sets off by itself does not count: against a server that keeps refusing fresh credentials, every view asking again would run the plugin again, forever.
     A fix on the server's side, as a role binding for the identity, and new oidc tokens are seen once the space is followed again, as after switching to another space and back.
-  - OpenAPI v3 documents are fetched lazily on the first edit of a group/version and cached forever under their `?hash=` URL, which is immutable.
-    Rust converts them to JSON Schema for the YAML editor.
+  - OpenAPI v3 documents are fetched on the first edit of a group/version, through the context's `api` client, so the gate sees them.
+    `GET /openapi/v3` lists each group/version with a `serverRelativeURL` whose `?hash=` is the upper-case hex SHA-512 of the JSON the server serves for it ([`computeETag`](https://github.com/kubernetes/kube-openapi/blob/d427ff9ee9ad05f5da435abbb7c5929cb713ac56/pkg/handler3/handler.go#L121-L126)), the aggregated servers' documents included.
+    A document is cached on disk for good under that URL, and used only while its bytes still hash to it, so a cached copy cannot be stale or another cluster's, and a server that answers something else under a hash writes nothing.
+    The module docs of `twigo_kube::openapi` give the source of each step.
+    The index is asked for on every load and never cached, since a CRD's change gives its group a new hash.
+  - Rust keeps a document's `components.schemas` only for the call that needs them.
+    `schema_get` answers the JSON Schema (draft-07) of a kind, with the definitions it reaches under `definitions`, and the apply engine reads from the same schemas how the server merges each field (6.5).
+    A first load of `api/v1` (1,604,476 bytes) took a fresh process from 11,456–11,504 KiB resident to 19,024–19,312 KiB, and one of `apis/apps/v1` (719,385 bytes) from 11,472–11,536 KiB to 16,112–16,224 KiB.
+    The allocator kept it after the document was dropped, and ten more loads of `api/v1` added 1,792 to 1,968 KiB (`cargo run --release -p twigo-kube --example openapi_memory -- v1 Pod`, three runs each, release build, macOS, kind 1.37, 2026-11-08).
 - **Never pre-fetched.**
   Counts for every kind, full lists of CRDs (they can be tens of MB), large ConfigMap values (rendered lazily), metrics for invisible rows.
 
@@ -670,8 +677,8 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 | `logs://<space>/<group>/<version>/<resource>/<ns>/<name>`           | Logs tab in the panel (4.6): a pod's, or a workload's pods' merged; the core group an empty segment, as in `k8s://`                                            |
 | `exec://<ctx>/<ns>/<pod>/<container>`                               | Terminal (xterm)                                                                                                                                               |
 | `pf://<space>/<forward-id>`                                         | Port-forward tab: state, target and resolved pod, local address, open connections, bytes, errors, a quick HTTP request tester                                  |
-| `diff://…`                                                          | Monaco diff: the apply dry-run, Compare with…, any two objects                                                                                                 |
-| `untitled://manifest-n`                                             | New manifest; Apply asks for the target context                                                                                                                |
+| `diff://edit/apply?editor=<uri>`, `diff://<space>/objects?…`        | Monaco diff: the apply dry-run of an editor's edit, its opened object against the server's now (`edit/server`), Compare with…, any two objects                 |
+| `untitled://<space>/manifest-n`                                     | New manifest of a space, numbered within it; its first Apply asks for the target context and, once applied, opens the object it made                           |
 | `twigo://settings`, `twigo://keybindings`, `twigo://extension/<id>` | Settings UI, keybindings UI, extension details                                                                                                                 |
 
 - **Details and preview tabs.**
@@ -685,15 +692,72 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
     The upstreams it leaves behind linger as a list's do, and give way to any watch that waits for the budget (3.2).
     Opening the resource from its details opens a preview tab (italic title); editing it or double-clicking its tab pins it.
     Opening an object from a list's details, or following a link in an object, pins the tab it came from, so the object opens beside it rather than in its place.
+- **Compare with….**
+  The picker offers the editor's own kind first, from every namespace and not the ones the lists have selected, and asks Rust for it with the text typed, as the pod search of quick access does, so an object past the first rows is found by its name; the objects the space opened lately, of any kind, follow.
+  Forbidden cluster-wide, it falls back to the selected namespaces and the object's own, and says so.
+  A view reads all its namespaces or none (`combine` takes the least ready part), so one selected namespace that may not be listed refuses the rest: it then tries the object's own namespace alone, and says so; forbidden there too, it says that.
+- **A URI and its space.**
+  Each space has its own docks, and an editor opens in the dock of the space its URI names.
+  An open for the URI of a space other than the one shown waits for that space's dock and opens there when it is the next one mounted; if another space comes first, it is forgotten.
+  A close for such a URI waits for that space's dock too, whichever space is mounted first, so a tab whose edit ended while the person was elsewhere does not stay behind; opening the URI again, or closing one that waits to open, withdraws what waits.
+  A provider says which space a URI is of, so an answer that arrives after a switch of spaces cannot open a tab in the wrong space.
+  A new manifest's URI names the space it was written in, as an object's does, and its number counts within that space, so a number reused after a restart cannot show the text of one space in another's tab.
 - **Object URIs.**
   The core group is an empty segment, `k8s://prod//v1/pods/payments/api-0`, so an object in a namespace has five path segments and a cluster-scoped one four.
 - **Sub-tabs.**
   A resource editor's Overview, YAML, Events and Related switch at the right of its group's tab bar, where a list keeps its filters; Rust follows only the one shown.
+- **Closing a tab.**
+  When an editor that opens, closes or moves, or a space that shows, drops the keyboard focus to the page, the active group takes it, and the active editor its own where it has a text editor to hold it, so a key such as ⌘S or ⌘Z still reaches an editor.
+  A tab's X and a middle click close through the editor service as ⌘W does, and the panel's last editor leaves the focus to the editor area's active group.
+  An open that the person asked for, from quick access, a button or a command, gives the editor it opened the focus from whatever held it, an editor on screen in another group included, except a field outside the editors.
+  One that arrives on its own, such as the diff of an answer or an object that a plan made, and the explorer's, whose tree goes on with its keys, take it only from the page and the dock's own elements, never from another editor or from anything outside the editors (`preserveFocus`).
+- **An editor off screen has no Monaco view.**
+  Behind another tab of its group or under a maximized panel, a YAML editor or a diff disposes its view.
+  A YAML editor's model, cursor, scroll and undo stay in the working-copy service until it shows again; a diff's models go with its view, and `DiffView` keeps its view state (cursor and scroll) in a ref for the next one.
+  [`CodeEditorWidget`](https://github.com/microsoft/vscode/blob/6a598d4a13031703d483d103c1d934a36ad27971/src/vs/editor/browser/widget/codeEditor/codeEditorWidget.ts#L1954) sends a typed character through a command that goes to the [first view that says it has the text focus](https://github.com/microsoft/vscode/blob/6a598d4a13031703d483d103c1d934a36ad27971/src/vs/editor/browser/services/abstractCodeEditorService.ts#L104), and WebKit, which has no `EditContext`, fires no blur on a focused element that leaves the page (measured with Playwright's WebKit on the mock, 2026-11-09), so a hidden view went on taking the keys typed into another.
 - **Working copies.**
   A YAML editor that the user has changed holds a working copy based on the opened `resourceVersion`.
+  - The service is keyed by the editor's URI and holds the object as opened (`base`), the `lock` an apply is held to, the object at that lock after "Keep mine" (`locked`) and the text.
+    A text that is the object again ends the copy.
+  - A dirty editor pins its tab and marks it, and the live object does not overwrite its text, so the object stays followed on the other views while the copy lives.
   - When the live object changes underneath, the editor shows "changed on server" with Compare, Reload and Keep mine.
-  - Save runs the apply flow (6.5).
-  - Unsaved working copies survive a restart (backups per space).
+    It compares the live object with `locked`, else `base`, without `resourceVersion` and `generation`, and without `status` where the resource has the `status` subresource, so a controller's status write raises nothing.
+  - Keep mine sends the old `base`, the new `lock` and `locked` (`OpenedEdit`), since diffing against the new live object would revert the other writer's change.
+  - Save runs the apply flow (6.5): the text is parsed with the `yaml` package at version 1.1, set to read what kubectl reads, which is the one dialect, and a text of several documents is refused, since the engine previews one object at a time.
+    kubectl reads a manifest with sigs.k8s.io/yaml v1.6.0 over go.yaml.in/yaml/v2 v2.4.4, which Kubernetes v1.37.0 pins ([go.mod](https://github.com/kubernetes/kubernetes/blob/v1.37.0/go.mod)).
+    The rule: every text reads as kubectl reads it or is a parse error at its line, and every value the writer writes reads back equal in the webview and in kubectl, so that an object the cluster holds always opens and reads back.
+    A refusal costs a person a pair of quotes, and a wrong value costs a live object.
+    Dates, sexagesimal numbers (`22:22`), sets, ordered maps and binary are no types there, so `2024-01-01` and `22:22` stay strings, as keys too, and `0o777` is `511`.
+    Whether a plain scalar is a number is decided by the rules of `resolve` in go.yaml.in/yaml/v2 v2.4.4 (`resolve.go`), which `goNumber` follows.
+    What JSON cannot carry through the IPC is a parse error at its line: `.inf`, `.nan`, an integer past 2^53, negative zero.
+    An integer past 2^53 in a live object shows rounded in the editor, as it reaches the webview through JSON; an edit that would send it whole is refused (6.5).
+    So is a key that is empty, not a single value, or a float, which kubectl names at 32 bits.
+    So is what Twigo does not read: a tag (`!!set`, `!!omap`, `!!binary`, `!!float`, `!!int`, `!!timestamp`, a local tag), a directive, an anchor outside `[0-9A-Za-z_-]`, an alias with no anchor or inside its own anchor, a merge of something else than maps.
+    A key JSON makes one of two (`1` and `"1"`, `y` and `true`) is refused, since kubectl takes the last of such keys or, over a Go map, a random one.
+    Where the two scanners read a text apart it is refused too, each named at its line.
+    A merge whose result depends on where it stands is one: a key set before the `<<` that also sets it, or a second `<<`.
+    So is a tab that starts a line or follows a block indicator, a control character, and a BOM past the first character.
+    So are U+0085, U+2028, U+2029 and a lone CR, which are line breaks to kubectl and text to the webview.
+    In double quotes `\/`, a surrogate escape and an escaped line break are refused.
+    So is a key that spans lines or whose `:` is not on its line, and a `?` whose `:` is not in its column.
+    Inside `[ ]` or `{ }`, so is a plain scalar that spans lines, holds a `?` or starts with `:`, and a key whose `:` touches the next indicator.
+    An empty document before the object is refused, as `YAMLToJSON` reads only the first.
+    Lines of spaces are refused in a block scalar with an indentation indicator, or at the end of a text with no final line break.
+    The writer quotes what would read as something else, a key named `<<` among it, uses double quotes where the block form cannot carry a string (a line that starts with a tab or holds only spaces, a string that starts with a line break), escapes U+0085, U+2028, U+2029, DEL, C1, U+FFFE, U+FFFF and a BOM, and writes an integer past 2^53 as an exponent.
+    `packages/kube/test/k8s-yaml/` holds the check, recorded from Go (`node record.mjs` there): what Go made of 897 texts, and that it read back 9,781 written values equal, and a Vitest test fails on any difference and lists each refusal with its reason in `refused.json`.
+    As recorded on 2026-11-08: no difference, 524 texts read alike, 218 refused by both, 155 refused here that Go reads (duplicate keys, float keys, integers past 2^53, the tags and the line breaks above).
+  - When the plan of an apply is done the copy ends, but its text stays the editor's until the live object differs from the one the copy was based on, or locked to, compared as "changed on server" is, so that the editor never shows the object as it was while the new one comes by its watch.
+    A status write does not end it, as it moves the `resourceVersion` without changing the object; the object equal to the `result` of the preview that was applied does, so that an apply that changes nothing in the object holds nothing for good; typing or closing the editor does, and it is never written to the state.
+    A Secret's text is not held at all: its values are masked to their sizes, so a value rotated to one of the same size would leave the object looking as it was, and the typed plaintext on show.
+  - Unsaved working copies survive a restart (backups per space, the `edits` key of the space's state), written a pause of 300 ms after the last change.
+    A space's backups are taken up when the space appears and before the first copy is made in it, so one that was hidden when the app started (its context missing from the catalog for a while) keeps them.
+    A Secret's never is: not an object of the `secrets` resource, not the text of any editor that mentions a Secret, since a Secret's manifest can be pasted into another object's editor, and not a new manifest that does not parse, or whose kind is empty or any prefix of `Secret` in any case, since the values may be typed before the kind, which is `Sec` on its way to `Secret`.
+  - Closing an editor keeps its copy, which the tab shows again when the object opens anew.
+  - An object that is deleted, or that the cluster cannot be asked for, leaves the YAML tab its editor while a copy exists, on the object the copy was based on, with a bar that says why the object is not there.
+  - The diff against the server, like the diff of two objects, follows the object itself rather than what its editor last saw, so it holds after a restart and when the editor's tab is closed, and it tells the copy what it read, so that Keep mine from it locks to the version it shows; a diff of two objects says which of them it cannot read, and that a Secret's values are hidden as their sizes.
+    A side that the object changes under updates in place and keeps the cursor and the selection of whoever is reading it.
+  - The service also keeps each shown YAML editor's Monaco model, which holds its undo stack, and the cursor and scroll of its view, so they survive a switch between Overview and YAML.
+    They go when the editor closes, the copy staying as text; a text that comes from outside, the live object once a copy has ended, replaces the model's and leaves the cursor and scroll where they were, and clears the undo stack.
 - **Overview.**
   One document per object, described in Rust by `twigo-describe` and rendered alike by the drawer, the Overview tab and MCP's describe-style summaries (6.6) ([research](research/details.md)).
   - Sections have ids and an order, the object's state first: Diagnostics when something is wrong, the kind's first section, conditions, the kind's other sections, extension sections, then metadata and events last.
@@ -869,8 +933,22 @@ Extensions add commands, not prefixes.
   Monaco with monaco-yaml (yaml-language-server).
   - The schema per model URI comes from the cluster's OpenAPI (3.6), so validation, completion and hover work for CRDs too.
   - The diff editor is Monaco's DiffEditor.
+  - Monaco has no read-only ranges, so where the resource has a `status` subresource the editor is read-only, with a message, while any of its selections touches the `status` block: a cursor in it or at either end, a selection that overlaps it or starts at its end.
+    A selection of whole lines that ends at column 1 of `status:` may be deleted or cut, but typing or pasting over it would put the text onto `status:`, so the lock holds for those; one that starts in the middle of a line touches the block, since deleting it would join the rest of that line to it.
+    The keys that would change the block from outside it set the lock for themselves, for every cursor and not the primary alone: Delete at the end of the line above `status:`, Backspace at column 1 of the line after the block, ⌥↓ on the line above `status:`, ⌥↑ on the line below the block, macOS's Ctrl+J on the line above `status:`, and macOS's Ctrl+D, Ctrl+K and Ctrl+H, which delete.
+    Undo and redo lift the lock for themselves, since a read-only editor refuses them.
+    Lines with nothing on them move, join and delete freely.
+    What the palette can still run, with Find and Replace and a drop, the diff shows and the engine leaves out as `ignored`.
+    The context menu's Paste can change the block too: Monaco's action reads the clipboard and inserts the text itself ([`clipboard.ts`](https://github.com/microsoft/vscode/blob/6a598d4a13031703d483d103c1d934a36ad27971/src/vs/editor/contrib/clipboard/browser/clipboard.ts#L279-L336), the commit monaco-editor 0.57.0 is built from), so no DOM `paste` event reaches the lock, and over a selection of whole lines that ends at column 1 of `status:` the pasted text lands on `status:`.
+    We accept that: the result is visible and can be undone, and the diff step says `.status` was left out of what is sent.
+    Checked with a right-click on the mock in headless Chrome, 2026-11-09: no `paste` event, `GLUEDstatus:` where the line was, ⌘Z gave the two lines back, and ⌘S showed "Left out of what is sent: .status."
   - Monaco is bundled locally (no CDN loader) and loaded lazily on the first YAML or diff editor.
     It is built from the tree-shakeable entry points of monaco-editor 0.57 (`monaco-editor/editor`, then each language and feature it needs), and its editor worker is a Vite `?worker` module served from the app.
+  - monaco-yaml 5.5.1 runs on those entry points, since it takes the Monaco namespace as an argument, with `yamlVersion: "1.1"`; its worker is a Vite `?worker` too, whose build has no `eval` and no `new Function`, so `script-src 'self'` covers it: validation and completion ran in a Tauri build under this CSP on kind (2026-11-09).
+    A model's schema comes from `schema_get` once its editor holds a copy, for a kind the cluster's discovery serves, so the kind of a new manifest is not asked for as it is typed, and its id names the space, since two clusters serve different ones for a kind; the editor works without one when that fails.
+  - monaco-yaml asks monaco-worker-manager 2.0.1, the latest and from 2022, for its worker, and that does not fit Monaco 0.56 and later in two ways: it imports `monaco-editor/esm/vs/editor/editor.worker.js`, which the `exports` of 0.57 no longer map (`./*.js` is `./esm/vs/*.js`), and it calls `editor.createWebWorker({ moduleId, label, createData })`, which takes a `worker` now.
+    The desktop's Vite config aliases the first path to `monaco-editor/editor/editor.worker`, and `packages/kube/src/edit/monaco.ts` hands monaco-yaml an `editor` whose `createWebWorker` makes the YAML worker and sends it `createData` as Monaco's own workers are sent theirs; both are marked `@todo` for the day monaco-worker-manager follows Monaco.
+    The dev server also pre-bundles `path-browserify`, which only the YAML worker imports.
   - CodeMirror 6 was rejected: its YAML schema support is weaker, and two editors would be waste.
 
 ### 4.7 Notifications and progress
@@ -1023,6 +1101,7 @@ interface CommandDescriptor {
   - `resource/title` (resource editor toolbar)
   - `view/title`, `view/item`
   - `editor/title`
+  - `edit/toolbar`, `edit/changed`, `edit/conflicts`, `edit/immutable`, `edit/diff`, `edit/answer` (the YAML editor's toolbar and the bars of what an apply answered, 4.3, 6.5)
   - `space/context`
   - `statusBar`
   - `explorer/kind`
@@ -1503,7 +1582,8 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     - deleting a pod that its ReplicaSet, StatefulSet or DaemonSet replaces, outside production, sends after a 5 s toast with Cancel, as Headlamp holds it, and ⌘Z cancels it too; in production it asks in a dialog, and a Job's or a workflow's pod, which may not come back, asks in one everywhere;
     - deleting one object asks in a dialog that names the cluster in its question and lists what follows, with the equivalent kubectl command;
     - a namespace, a node or a CustomResourceDefinition asks for the object's name typed, and a delete of several objects for the context's, as `guarded` does;
-    - in `guarded` every write asks for the context's name typed, whatever it risks, and a Reveal asks in a dialog, as in `read-only`; in `read-write` a Reveal shows at once;
+    - an apply, whose diff the person has just read (6.5), runs at once in `read-write` and asks in a dialog in `guarded`;
+    - in `guarded` every other write asks for the context's name typed, whatever it risks, and a Reveal asks in a dialog, as in `read-only`; in `read-write` a Reveal shows at once;
     - the confirming button names its action, `Delete namespace`, never Yes or OK.
   - Delete is ⌘⌫, never a bare key (4.4).
 
@@ -1516,19 +1596,60 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
    - Why: a field that a later apply leaves out is removed, or reset to its default, when no other manager owns it.
      Sending only this edit's changes would undo the previous edit: a forced `replicas: 5` would fall back on the next annotation change.
    - Changed items of map-type lists are sent with their keys; atomic lists are sent whole.
+     Which a field is comes from the kind's OpenAPI schema, read as the server converts it (3.6).
+   - An array or object the edit sends whole is refused, on the apply and on the merge patch alike, when it holds a number of magnitude 2^53 or more (`Refusal::Inexact`), since such a number reached the webview rounded and a change to its neighbour would send it changed.
+     The refusal names the paths and says the editor cannot carry an integer that large and kubectl can; a reload would show the same number, so none is offered.
+     A changed bare scalar is what the person typed, and what Twigo owns comes from the live object exact, so both pass.
    - Applying the whole object would make Twigo a co-owner of every field.
      Fields that a GitOps tool later removes would then stay behind.
-3. Add the opened `resourceVersion` as an optimistic lock.
+   - `status` where the resource has a status subresource, and the server's metadata, never enter it: an edit that changes them is answered with what was ignored.
+   - A `twigo` entry at another apiVersion than the one opened: the server prunes it at the version it was written with, so where its paths do not reach the object at the version opened, the preview refuses rather than leave fields out and lose them.
+3. Add the opened `resourceVersion` as an optimistic lock, passed apart from the base: "Keep mine" after a change on the server diffs against the old base and locks to the new version, since diffing against the new live object would revert the other writer's change.
+   Add the object's `uid` too: an apply with a `resourceVersion` to a name nothing holds creates the object, so one deleted between the preview and the run would come back, a Secret with real values from the preview's memory; with a uid the server answers a conflict and creates nothing (kind 1.37, 2026-11-08), which is told as changed on the server.
+   A status update moves it too, so where the resource has a `status` subresource only what such a write leaves alone says an object changed: `metadata.resourceVersion`, `generation`, `managedFields` and `status` are left out when comparing.
+   The preview holds to the server's version when the two compare equal, comparing with what "Keep mine" locked to where that is not the base, and does itself over when a status write lands between its read and its dry-run, as many times as an undo does (6.4).
+   A run that loses to a write that left the two equal reads the object and sends again as many times; there `managedFields` count, leaving out their `time` and the entries with a `subresource`, as a co-owner that arrived since the preview would make a removal silently not happen.
+   Anything else answers **Stale**, or fails as changed on the server.
+   A Secret has no such subresource, and its masked view cannot tell a changed value of the same size, so it stays strict.
 4. Dry-run: `PATCH` with `Patch::Apply`, `PatchParams::apply("twigo")`, `dry_run`, and `validation_strict()` (kubectl's default; the server's is Warn).
    Use `Client::send` so `Warning` headers are kept, because kube-rs drops them.
+   A field the typed conversion does not know, or a value it cannot convert, answers `500` rather than `422` (kind 1.37, 2026-11-08); it is reported as invalid input with the server's message.
 5. Show live against the dry-run result in a Monaco diff.
    Both sides are cleaned of managedFields, and Secret data is masked.
    The diff includes defaults and webhook mutations, which a local diff cannot know.
-6. Apply.
+   A preview keeps what it prepared in Rust for its window under an id, once, and the plan of that id sends exactly that.
+6. Apply, by a bus plan that the person has just read the diff of: at once in `read-write`, a confirmation in `guarded`, blocked in `read-only`.
+   Apply is offered for a diff that was shown, and again only when the plan of that preview has ended, since the engine plans a preview once.
+   Under an admin's policy file the lock cannot be lifted, so Apply is not offered and the diff says why in the words of the context's chip; a read-only the person set refuses it as the gate does, and it works after an unlock.
    A `409 FieldManagerConflict` shows a table per field with the owning manager, and offers **Force** or **Drop my change**.
-7. A field the user deleted but another manager owns needs a separate merge patch with `null`, shown as its own step in the diff.
+   Giving up every conflicting field can leave nothing to send, and the bar then says that, and that the YAML still holds the change.
+   So can an edit of what the engine leaves out, as `status` is: the bar says that nothing is left to apply, names what was left out, and that the text still holds it.
+   The plan takes the preview when it is made, once the gate has allowed it: a cancelled confirmation, a failed run and a stopped one end the preview and close its diff, while a plan the gate refuses, as in `read-only`, leaves it for an Apply after an unlock.
+   The edit ends only if its text is still what the plan sent, so what was typed while it ran stays.
+   An answer that arrives after the person went to another space, or that a newer preview or a clear replaced, opens no tab; the first stays with its editor, which offers to show it.
+   A new manifest applied to another context than its own space's stays, as the person may apply it elsewhere too, and a toast names the kind and the name from the manifest, says whether the object was created or updated (the preview's `live` tells), and where.
+   Its action selects that space, waits for its discovery, which follows the space shown only, and opens the object, or says that the context does not serve the kind.
+   A manifest applied to its own space opens the object it made and closes its own tab, and the tabs of a plan that ended while the person was in another space close when that space is shown again.
+7. A field the user deleted goes by the apply only when Twigo's Apply entry is its only owner.
+   Another manager's or nobody's stays after an apply, so it needs a separate merge patch with `null`, shown as its own step in the diff.
+   The patch is sent after the apply, on the `resourceVersion` the apply returned; a merge patch cannot address a list element, so a removal inside a list sends the outermost list whole, as it stands after the apply minus the removal, and nothing is sent when the dry-run already shows it gone.
+   A `409` on that patch is another write, as the Deployment controller's revision annotation right after the apply (1 of 25 on localhost kind, 2026-11-08): it reads again, rebuilds from what the server holds now, and sends on that version, as a removal is idempotent and the lock keeps a rebuilt list from clobbering anyone.
+   A configuration holds its list elements in the live object's order, new ones after them, as the server follows a configuration's order for the elements the two share.
+   A map or a list element that a removal empties in the configuration stays there while the edit holds it, as the server deletes the whole of what an apply stops naming, the fields nobody owns in it included; it leaves only when another manager's hold keeps it on the server anyway: its member for an element or a map's key, and anything under it for a field the schema declares ([`EnsureNamedFieldsAreMembers`](https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/fieldpath/set.go#L133-L151)).
+   Some edits no apply can express without owning what they do not change: a list's elements moved or one put before the end (the server places a new element before the next one the configuration shares with the object, but an edit moving elements names more of the list than the person changed), an element of a key held twice, changed or removed, or added by the edit, an edit whose apply or whose patch is validated with the old field still there and answers 422 (a Deployment changed to `strategy: Recreate` while another manager owns `rollingUpdate`, an env var from `value` to `valueFrom`, a `volumeMount` repointed while another manager's old volume goes) while the same object as one write is valid, a granular map or list the edit leaves empty, or a list losing Twigo's last element while the edit keeps one nobody owns.
+   Server-side apply cannot say that a map or a list stays, empty: an empty list claims nothing ([`doList`](https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/typed/tofieldset.go#L132-L147)), so as Twigo's only field under its parent it prunes the named chain above it with an unowned sibling and answers 200, and a map emptied by a prune is left null ([`removingWalker`](https://github.com/kubernetes-sigs/structured-merge-diff/blob/v6.4.2/typed/remove.go#L171-L173)), which a CRD refuses with 422; a merge patch of the same edit leaves `{}` (kind 1.37, 2026-11-08).
+   An atomic map or list is a value like any other, so an apply carries it empty and Twigo owns it.
+   Those go by one JSON merge patch that carries the changes and the removals together, a list on the path whole, under field manager `twigo-edit`, as `kubectl edit` would, held to the `resourceVersion` and validated strictly, as an apply is, or a typo would be lost with only a warning; the preview says which strategy it is, so the diff can say so, and the plan's `kubectl` is that patch.
+   A list that goes whole while the server holds it otherwise than the edit was opened with answers **Stale**: nothing can merge it, and "Keep mine" would revert the other writer.
+   That answer says `keepable: false`, and the editor offers Reload alone; a `409` answers `keepable: true`.
+   A conflict answers before validation does on the server, so a `409` is never routed here.
+   It adds no field to the `twigo` Apply entry.
 8. Immutable fields return 422; the dry-run catches this before any write.
-   Delete-and-recreate is offered only for Pods and Jobs, with confirmation.
+   Delete-and-recreate is offered only for Pods and Jobs, with confirmation; the uid is held by a precondition, and what the Job controller generates, its selector and its `controller-uid` and `job-name` labels, does not go along.
+   A Pod that a controller owns is not offered it, as the controller would replace it within seconds, so its message says to edit the owner.
+   The body is dry-run as a `POST` before it is offered and again before the delete, so an edit that cannot be created never takes the object away: an invalid body answers 422 even with the name taken, and a valid one 409 AlreadyExists (kind 1.37, 2026-11-08).
+   A namespace at its quota refuses that dry-run, as the old object still counts, so it gets no recreate and the message says why: losing the workload is worse than the person deleting and creating it by hand.
+   The plan lists what goes with it, a Job's pods, and says a Job runs again.
 
 Destructive actions (delete, drain, scale to 0) list the exact objects and need a confirmation that matches the policy mode.
 Their plans read the objects and what the garbage collector takes with them (every object whose owners all go, among what the core's controllers make) and send nothing before the confirmation: a server dry-run of a DELETE or an eviction is a write to the gate, which reads no body (6.4), and a fault in that body would delete unconfirmed.
@@ -1606,7 +1727,7 @@ Their plans read the objects and what the garbage collector takes with them (eve
 
 - **CSP.**
   Strict, no remote URLs.
-  `worker-src 'self' blob:` is allowed for Monaco's workers.
+  `worker-src` is not set, so Monaco's and monaco-yaml's workers load under its fallback to `script-src 'self'` ([CSP3](https://www.w3.org/TR/CSP3/#directive-worker-src)): each is a Vite `?worker` file served from the app, and `blob:` would widen what can run for nothing that needs it.
 - **Rendering.**
   Cluster data is rendered as text, never as HTML, so an annotation cannot inject markup.
   An XSS in the webview would reach every cluster.

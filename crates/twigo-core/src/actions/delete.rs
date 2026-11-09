@@ -211,6 +211,7 @@ pub(crate) async fn delete(
         connection,
         space: Some(space.to_owned()),
         risk,
+        previewed: None,
         run: Box::new(move |progress| Box::pin(run.run(progress))),
     })
 }

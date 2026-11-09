@@ -24,10 +24,19 @@ import {
   type AuthScenario,
 } from "./auth";
 import { Cluster } from "./cluster";
+import {
+  APPLIED_LAG_MS,
+  EDIT_SCENARIOS,
+  isEditScenario,
+  MockEdits,
+  PINNED_ANSWERS,
+  type EditScenario,
+} from "./edits";
 import { KINDS, wireRow, type MockKind, type MockRow } from "./kinds";
 import { CLUSTER_STREAMS } from "../logs";
 import { MockLogs } from "./logs";
 import { MockObject } from "./objects";
+import { recordedSchema } from "./schemas";
 import {
   CONTEXTS,
   FORBIDDEN,
@@ -50,6 +59,7 @@ import {
   type QueryResult,
 } from "./query";
 
+export { APPLIED_LAG_MS } from "./edits";
 export { UNMARKED } from "./fixtures";
 
 /**
@@ -62,17 +72,30 @@ type ListScenario = "live" | ViewState["state"];
  * A list scenario, `shellTimeout`: live lists while the login shell's
  * environment timed out, `policyFile`: live lists with an admin's policy
  * file over `prod-*`, `viewer`: live lists for a person who may only read,
- * or a pinned state of prod-eu's credentials.
+ * or a pinned state of prod-eu's credentials, or what `apply_preview` answers
+ * to an edit (`applyConflicts`), or an open object that changes on its own
+ * (`serverChange`, `statusChange`), or one that an apply leaves late
+ * (`applyLate`), or `rbacNamespaces`: live lists for a person whose
+ * RoleBindings reach only the namespace `default`, so a cluster-wide list
+ * and one of any other namespace are forbidden.
  */
 export type MockScenario =
-  ListScenario | "shellTimeout" | "policyFile" | "viewer" | AuthScenario;
+  | ListScenario
+  | "shellTimeout"
+  | "policyFile"
+  | "viewer"
+  | "rbacNamespaces"
+  | AuthScenario
+  | EditScenario;
 
 export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "live",
   "shellTimeout",
   "policyFile",
   "viewer",
+  "rbacNamespaces",
   ...AUTH_SCENARIOS,
+  ...EDIT_SCENARIOS,
   "queued",
   "connecting",
   "syncing",
@@ -137,7 +160,9 @@ export function createMockBackend(
     scenario === "shellTimeout" ||
     scenario === "policyFile" ||
     scenario === "viewer" ||
-    isAuthScenario(scenario)
+    scenario === "rbacNamespaces" ||
+    isAuthScenario(scenario) ||
+    isEditScenario(scenario)
       ? "live"
       : scenario;
   const auth = new MockAuth(pinsAuth ? scenario : undefined);
@@ -187,7 +212,54 @@ export function createMockBackend(
   };
 
   const objectContexts = new Map<number, string>();
+  const edits = new MockEdits();
   const bus = new MockBus({
+    answer: isEditScenario(scenario) ? PINNED_ANSWERS[scenario] : undefined,
+    written: (context, { gvr, namespace, name }) =>
+      edits.get(
+        MockEdits.key(context, gvr.group, gvr.resource, namespace, name),
+      ),
+    resource: (apiVersion, kind) => {
+      const slash = apiVersion.lastIndexOf("/");
+      const group = slash < 0 ? "" : apiVersion.slice(0, slash);
+      return RESOURCES.find(
+        (candidate) => candidate.gvr.group === group && candidate.kind === kind,
+      );
+    },
+    applied: (context, opened, edited) => {
+      const { apiVersion, kind, metadata } = edited as {
+        apiVersion?: string;
+        kind?: string;
+        metadata?: { name?: string; namespace?: string };
+      };
+      const group =
+        opened?.group ?? (apiVersion ?? "").split("/").slice(0, -1).join("/");
+      const known = RESOURCES.find(
+        (candidate) =>
+          candidate.gvr.group === group &&
+          (opened
+            ? candidate.gvr.resource === opened.resource
+            : candidate.kind === kind),
+      );
+      if (!known || metadata?.name === undefined) return;
+      const namespace = known.namespaced
+        ? (metadata.namespace ?? "default")
+        : null;
+      const key = MockEdits.key(
+        context,
+        group,
+        known.gvr.resource,
+        namespace,
+        metadata.name,
+      );
+      if (scenario === "applyLate") {
+        setTimeout(() => {
+          edits.put(key, edited);
+        }, APPLIED_LAG_MS);
+      } else {
+        edits.put(key, edited);
+      }
+    },
     access: (context) => access.of(context),
     context: (id) => space(id).contexts[0],
     cluster,
@@ -241,6 +313,7 @@ export function createMockBackend(
       return null;
     },
     command_plan: (request) => bus.plan(request),
+    apply_preview: (request) => bus.applyPreview(request),
     command_cancel: (id) => bus.cancel(id),
     access_review: ({ checks }) =>
       checks.map(
@@ -286,6 +359,17 @@ export function createMockBackend(
         throw new IpcError("forbidden", "you may not list namespaces");
       }
       return [...NAMESPACES].sort();
+    },
+    schema_get: ({ space: id, group, version, kind }) => {
+      space(id);
+      const schema = recordedSchema(group, version, kind);
+      if (schema === undefined) {
+        throw new IpcError(
+          "notFound",
+          `the cluster's OpenAPI for ${group}/${version} has no kind ${kind}`,
+        );
+      }
+      return schema;
     },
     shell_environment_retry: () => {
       if (environment.state !== "failed") return null;
@@ -367,7 +451,7 @@ export function createMockBackend(
       return null;
     },
     object_close: (id) => {
-      object(id);
+      object(id).close();
       objects.delete(id);
       objectContexts.delete(id);
       return null;
@@ -441,7 +525,13 @@ export function createMockBackend(
               error: { kind: "invalidInput", message: selected },
             }
           : lists === "forbidden" ||
-              (lists === "live" && FORBIDDEN[context]?.includes(resource))
+              (lists === "live" && FORBIDDEN[context]?.includes(resource)) ||
+              (scenario === "rbacNamespaces" &&
+                !(
+                  query.namespaced &&
+                  query.namespaces.length > 0 &&
+                  query.namespaces.every((name) => name === "default")
+                ))
             ? forbidden
             : lists;
       subscriptions.set(
@@ -476,6 +566,24 @@ export function createMockBackend(
           parts,
           context === undefined ? undefined : cluster(context),
           onMessage,
+          context === undefined
+            ? undefined
+            : {
+                edits,
+                key: MockEdits.key(
+                  context,
+                  query.gvr.group,
+                  query.gvr.resource,
+                  query.namespace,
+                  query.name,
+                ),
+                ...(scenario === "serverChange" && {
+                  change: "server" as const,
+                }),
+                ...(scenario === "statusChange" && {
+                  change: "status" as const,
+                }),
+              },
         ),
       );
       return id;

@@ -14,7 +14,8 @@ import {
   type ObjectRef,
   type Resource,
 } from "@twigo/protocol";
-import { objectUri } from "../uri";
+import { sameGvr, type Loaded } from "../discovery";
+import { objectUri, type ObjectInput } from "../uri";
 
 const NOTHING = () => () => undefined;
 const INITIAL = () => INITIAL_OBJECT;
@@ -67,6 +68,24 @@ export function useObject(
   );
   const id = useMemo(() => current && (() => current.id()), [current]);
   return { snapshot, values, id };
+}
+
+/** What opens an object, its resource told by discovery once that has come. */
+export function objectQuery(
+  input: ObjectInput,
+  resources: Loaded<readonly Resource[]>,
+): ObjectQuery {
+  const known =
+    resources.state === "ready"
+      ? resources.value.find((resource) => sameGvr(resource.gvr, input.gvr))
+      : undefined;
+  return {
+    space: input.space,
+    gvr: input.gvr,
+    namespaced: known?.namespaced ?? input.namespace !== undefined,
+    namespace: input.namespace ?? null,
+    name: input.name,
+  };
 }
 
 /**

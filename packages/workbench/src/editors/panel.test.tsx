@@ -1,9 +1,17 @@
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { useEditorShown } from "../react";
 import { tabsIn, testWorkbench } from "../testing";
 import { WorkbenchView } from "../WorkbenchView";
 
 afterEach(cleanup);
+
+const shown = new Map<string, boolean>();
+
+function Shown({ uri }: { uri: string }) {
+  shown.set(uri, useEditorShown());
+  return null;
+}
 
 async function mounted() {
   const workbench = await testWorkbench();
@@ -19,6 +27,12 @@ async function mounted() {
     area: "panel",
     title: (uri) => uri.host,
     component: ({ uri }) => <p>session {uri}</p>,
+  });
+  workbench.editors.register({
+    id: "test.shown",
+    scheme: "shown",
+    title: (uri) => uri.host,
+    component: Shown,
   });
   render(<WorkbenchView workbench={workbench} />);
   const space = () => workbench.spaces.active?.id ?? "";
@@ -40,6 +54,44 @@ test("an editor of the panel opens there, shows the panel, and leaves the editor
   expect(editors.activeIn("panel")).toBe("session://x");
   expect(tabsIn("panel")).toEqual(["session://x"]);
   expect(tabsIn("editor")).toEqual(["note://a"]);
+});
+
+test("an editor is shown only while it is the active tab of its group and no maximized panel covers its area", async () => {
+  const { workbench, editors, space } = await mounted();
+  act(() => {
+    editors.open("shown://a");
+    editors.open("session://x");
+  });
+  expect(shown.get("shown://a")).toBe(true);
+  act(() => {
+    editors.open("shown://b");
+  });
+  expect(shown.get("shown://a")).toBe(false);
+  expect(shown.get("shown://b")).toBe(true);
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", { maximized: true });
+  });
+  expect(shown.get("shown://b")).toBe(false);
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", { maximized: false });
+  });
+  expect(shown.get("shown://b")).toBe(true);
+});
+
+test("a focus that fell to the page goes to the panel when it is maximized over the editors", async () => {
+  const { workbench, editors, space } = await mounted();
+  act(() => {
+    editors.open("shown://a");
+    editors.open("session://x");
+  });
+  act(() => {
+    (document.activeElement as HTMLElement).blur();
+  });
+  expect(document.activeElement).toBe(document.body);
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", { maximized: true });
+  });
+  expect(document.activeElement?.closest('[aria-label="Panel"]')).toBeTruthy();
 });
 
 test("an open URI is focused where it is, in either area", async () => {
@@ -75,6 +127,32 @@ test("closing a panel editor tells the close listeners, and its title can change
   });
   expect(closed).toHaveBeenCalledWith("session://x");
   expect(tabsIn("panel")).toEqual([]);
+});
+
+test("closing the panel's last editor gives the focus to the editor area's active group", async () => {
+  const { workbench, editors } = await mounted();
+  workbench.editors.register({
+    id: "test.input",
+    scheme: "input",
+    area: "panel",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <input aria-label={uri} />,
+  });
+  act(() => {
+    editors.open("note://a");
+    editors.open("input://x");
+  });
+  act(() => {
+    screen.getByLabelText("input://x").focus();
+  });
+  act(() => {
+    editors.close("input://x");
+  });
+  expect(tabsIn("panel")).toEqual([]);
+  expect(document.activeElement).not.toBe(document.body);
+  expect(
+    document.activeElement?.contains(screen.getByText("note note://a")),
+  ).toBe(true);
 });
 
 test("the panel maximizes, restores and hides by its commands, and its menu offers the one that applies", async () => {

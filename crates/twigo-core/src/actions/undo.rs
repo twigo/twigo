@@ -246,6 +246,7 @@ pub(crate) async fn undo(core: &Core, space: &str) -> Result<Planned, IpcError> 
         affected,
         kubectl: revert.kubectl.clone(),
         doing: revert.doing.clone(),
+        previewed: None,
         run: Box::new(move |_| Box::pin(run(this, space, id, connection, revert))),
     })
 }

@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use jiff::Timestamp;
+use kube::core::GroupVersionKind;
 use tokio::sync::watch;
 use twigo_cache::batcher::Batcher;
 use twigo_cache::discovery::Follower;
@@ -25,15 +26,17 @@ use twigo_cache::hub::{Connect, Hub, Query, Resource, RowFormat};
 use twigo_cache::view::Spec;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    AccessQuery, Ack, ClusterVersion, Context, DownloadLogs, ErrorKind, Execute, Friction,
-    GetValues, IpcError, ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject,
-    OperationEvent, Plan, PlanId, PlanRequest, SetContextEnvironment, SetContextMode, SetLogSource,
-    SetLogView, SetLogWindow, SetParts, SetWindow, SubscriptionId, ViewState,
+    AccessQuery, Ack, ApplyPreviewed, ApplyRequest, ClusterVersion, Context, DownloadLogs,
+    ErrorKind, Execute, Friction, GetValues, IpcError, ListBatch, ListQuery, LogBatch, ObjectBatch,
+    OpenLogs, OpenObject, OperationEvent, Plan, PlanId, PlanRequest, SchemaQuery,
+    SetContextEnvironment, SetContextMode, SetLogSource, SetLogView, SetLogWindow, SetParts,
+    SetWindow, SubscriptionId, ViewState,
 };
 use twigo_kube::client::{Actor, Clients, ProxyEnv};
 use twigo_kube::credentials::{ExecError, OidcError, Provider, Registry, Source, Timeouts};
 use twigo_kube::discovery::Cache;
 use twigo_kube::kubeconfig;
+use twigo_kube::openapi::{self, Document};
 use twigo_netmon::Event;
 use twigo_policy::friction::{covers, friction};
 use twigo_policy::{Audit, Entry, Policy};
@@ -68,6 +71,7 @@ pub struct Core {
     bus: Arc<Bus>,
     undos: Arc<Undos>,
     discovery: Arc<Cache>,
+    openapi: openapi::Cache,
     credentials: Registry,
     /// Whether a Twigo window has the focus, which a plugin that may ask
     /// the person to sign in waits for.
@@ -120,6 +124,7 @@ impl Core {
             bus: Arc::default(),
             undos: Arc::default(),
             discovery: Arc::new(Cache::new(cache.join("discovery"))),
+            openapi: openapi::Cache::new(cache.join("openapi")),
             state,
             catalog,
             connections: Connections::default(),
@@ -318,6 +323,9 @@ impl Core {
             } => actions::suspend(self, &space, target, suspend).await?,
             PlanRequest::Undo { space } => actions::undo(self, &space).await?,
             PlanRequest::Reveal { object, key } => actions::reveal(self, window, object, key)?,
+            PlanRequest::Apply { space, preview } => {
+                actions::apply(self, window, space, preview).await?
+            }
         };
         self.authorize(&planned.context, &planned.writes)?;
         let access = self.policy.access(&planned.context);
@@ -430,6 +438,16 @@ impl Core {
         Ok(())
     }
 
+    /// Builds an edit's apply configuration and dry-runs it (ARCHITECTURE
+    /// 6.5), keeping what it prepared for this window; it writes nothing.
+    pub async fn apply_preview(
+        &self,
+        window: &str,
+        request: ApplyRequest,
+    ) -> Result<ApplyPreviewed, IpcError> {
+        actions::preview(self, window, request).await
+    }
+
     /// Whether the person may do each check in a space's context, a check
     /// the cluster cannot answer counting as allowed (ARCHITECTURE 5.1).
     pub async fn access_review(&self, query: AccessQuery) -> Result<Vec<bool>, IpcError> {
@@ -477,6 +495,33 @@ impl Core {
             .map_err(|e| twigo_kube::errors::request(&e))?;
         Ok(ClusterVersion {
             git_version: info.git_version,
+        })
+    }
+
+    /// The JSON Schema of a kind in a space's cluster, from the OpenAPI
+    /// document of its group/version (ARCHITECTURE 3.6), which is dropped
+    /// once the schema is made.
+    pub async fn schema(&self, query: SchemaQuery) -> Result<String, IpcError> {
+        let context = self.context(&query.space)?;
+        let clients = self
+            .clients(&context)
+            .await
+            .map_err(|e| IpcError::from(&e))?;
+        let document = Document::load(&clients.api, &self.openapi, &query.group, &query.version)
+            .await
+            .map_err(|e| IpcError::from(&e))?;
+        let gvk = GroupVersionKind::gvk(&query.group, &query.version, &query.kind);
+        let schema = tokio::task::spawn_blocking(move || document.json_schema(&gvk))
+            .await
+            .expect("converting a schema does not panic");
+        schema.ok_or_else(|| {
+            IpcError::new(
+                ErrorKind::NotFound,
+                format!(
+                    "the cluster's OpenAPI for {}/{} has no kind {}",
+                    query.group, query.version, query.kind
+                ),
+            )
         })
     }
 

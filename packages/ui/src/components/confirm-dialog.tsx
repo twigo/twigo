@@ -83,65 +83,71 @@ export function ConfirmDialog({
       }}
     >
       <DialogContent
-        className="max-w-[480px] overflow-hidden"
+        className="flex max-h-[calc(82%-24px)] max-w-[480px] flex-col overflow-hidden"
         onOpenAutoFocus={(event) => {
           event.preventDefault();
           (input.current ?? cancel.current)?.focus();
         }}
       >
         {accent && (
-          <div aria-hidden className="h-1" style={{ background: accent }} />
+          <div
+            aria-hidden
+            className="h-1 flex-none"
+            style={{ background: accent }}
+          />
         )}
         <form
-          className="grid gap-3 px-[18px] py-4 text-xs"
+          className="flex min-h-0 flex-col text-xs"
           onSubmit={(event) => {
             event.preventDefault();
             submit();
           }}
         >
-          {badge && <div className="flex items-center gap-2">{badge}</div>}
-          <DialogTitle className="text-[15px] leading-snug font-semibold">
-            {question}
-          </DialogTitle>
-          {consequences.length > 0 ? (
-            <DialogDescription asChild>
-              <ul className="grid gap-1 text-muted-foreground">
-                {consequences.map((consequence) => (
-                  <li key={consequence}>{consequence}</li>
-                ))}
-              </ul>
-            </DialogDescription>
-          ) : (
-            <DialogDescription className="sr-only">
+          <div className="grid min-h-0 grid-cols-[minmax(0,1fr)] gap-3 overflow-y-auto px-[18px] pt-4 pb-1">
+            {badge && <div className="flex items-center gap-2">{badge}</div>}
+            <DialogTitle className="text-[15px] leading-snug font-semibold wrap-anywhere">
               {question}
-            </DialogDescription>
-          )}
-          {lists.map((list) => (
-            <Listed key={list.title} list={list} />
-          ))}
-          {command && <CommandLine command={command} />}
-          {typed !== undefined && (
-            <div className="grid gap-1.5">
-              <label htmlFor={field}>
-                Type <span className="font-mono font-semibold">{typed}</span> to
-                confirm
-              </label>
-              <input
-                ref={input}
-                id={field}
-                value={text}
-                autoComplete="off"
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
-                onChange={(event) => {
-                  setText(event.target.value);
-                }}
-                className="h-7 rounded-md bg-editor px-2 font-mono text-xs shadow-[inset_0_0_0_1px_var(--input)] outline-none focus:shadow-[inset_0_0_0_1px_var(--ring)]"
-              />
-            </div>
-          )}
-          <div className="mt-1 flex items-center justify-end gap-2">
+            </DialogTitle>
+            {consequences.length > 0 ? (
+              <DialogDescription asChild>
+                <ul className="grid gap-1 text-muted-foreground">
+                  {consequences.map((consequence) => (
+                    <li key={consequence}>{consequence}</li>
+                  ))}
+                </ul>
+              </DialogDescription>
+            ) : (
+              <DialogDescription className="sr-only">
+                {question}
+              </DialogDescription>
+            )}
+            {lists.map((list) => (
+              <Listed key={list.title} list={list} />
+            ))}
+            {command && <CommandLine command={command} />}
+            {typed !== undefined && (
+              <div className="grid gap-1.5">
+                <label htmlFor={field}>
+                  Type <span className="font-mono font-semibold">{typed}</span>{" "}
+                  to confirm
+                </label>
+                <input
+                  ref={input}
+                  id={field}
+                  value={text}
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  onChange={(event) => {
+                    setText(event.target.value);
+                  }}
+                  className="h-7 rounded-md bg-editor px-2 font-mono text-xs shadow-[inset_0_0_0_1px_var(--input)] outline-none focus:shadow-[inset_0_0_0_1px_var(--ring)]"
+                />
+              </div>
+            )}
+          </div>
+          <div className="flex flex-none items-center justify-end gap-2 px-[18px] pt-3 pb-4">
             <Button
               ref={cancel}
               type="button"
@@ -206,7 +212,7 @@ function CommandLine({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex items-start gap-1 rounded-md bg-row-active py-1.5 pr-1 pl-2 font-mono text-[11px] leading-relaxed text-muted-foreground">
-      <code className="min-w-0 flex-1 break-words whitespace-pre-wrap select-text">
+      <code className="min-w-0 flex-1 wrap-anywhere whitespace-pre-wrap select-text">
         {command}
       </code>
       <Button

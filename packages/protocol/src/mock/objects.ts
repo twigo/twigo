@@ -11,6 +11,7 @@ import type {
   Value,
 } from "../generated";
 import { replicaSetUid, type Cluster, type Pod } from "./cluster";
+import { FIRST_CHANGE_MS, NEXT_CHANGE_MS, type MockEdits } from "./edits";
 import { CRASH_LINE as LAST_LINE } from "./logs";
 import OBJECTS from "./objects.json";
 import REVEALED from "./revealed.json";
@@ -67,6 +68,14 @@ function podFixture(pod: Pod | undefined): string {
   }
 }
 
+/** How an open object follows what edits leave, and whether it changes on its own. */
+export interface EditBinding {
+  readonly edits: MockEdits;
+  readonly key: string;
+  /** `server`: a colleague edits it; `status`: a controller writes its status. */
+  readonly change?: "server" | "status";
+}
+
 /**
  * An open object of the mock backend: the recorded object of its resource
  * under the name asked for, a pod's in the state of the mock's pod, sent
@@ -77,8 +86,9 @@ export class MockObject {
   /** The recorded object it stands for. */
   readonly #fixture: string;
   readonly #overview: Overview;
-  readonly #manifest: string;
+  #manifest: string;
   readonly #related: Related;
+  readonly #stops: (() => void)[] = [];
   readonly #onMessage: (batch: ObjectBatch) => void;
   #parts: ObjectParts;
   #seq = 0;
@@ -88,6 +98,7 @@ export class MockObject {
     parts: ObjectParts,
     cluster: Cluster | undefined,
     onMessage: (batch: ObjectBatch) => void,
+    binding?: EditBinding,
   ) {
     const { group, version, resource } = query.gvr;
     const pod = cluster?.pods.find(
@@ -115,7 +126,9 @@ export class MockObject {
     };
     manifest.metadata.name = query.name;
     if (query.namespace !== null) manifest.metadata.namespace = query.namespace;
-    this.#manifest = JSON.stringify(manifest);
+    this.#manifest = JSON.stringify(
+      binding?.edits.get(binding.key) ?? manifest,
+    );
     this.#related = {
       owners: owners(this.#overview),
       owned: [],
@@ -126,6 +139,38 @@ export class MockObject {
     setTimeout(() => {
       this.#send(parts);
     }, 0);
+    if (binding) this.#follow(binding);
+  }
+
+  /** Follows what edits leave of the object, and makes the changes a scenario asks for. */
+  #follow({ edits, key, change }: EditBinding): void {
+    this.#stops.push(
+      edits.watch(key, () => {
+        const written = edits.get(key);
+        if (written === undefined) return;
+        this.#manifest = JSON.stringify(written);
+        this.#send({ ...NONE, manifest: this.#parts.manifest });
+      }),
+    );
+    if (change === undefined) return;
+    let count = 0;
+    const next = (wait: number) => {
+      const timer = setTimeout(() => {
+        const current = JSON.parse(this.#manifest) as Fields;
+        edits.put(key, changed(current, change, ++count));
+        next(NEXT_CHANGE_MS);
+      }, wait);
+      this.#stops.push(() => {
+        clearTimeout(timer);
+      });
+    };
+    next(FIRST_CHANGE_MS);
+  }
+
+  /** Stops following and changing. */
+  close(): void {
+    for (const stop of this.#stops) stop();
+    this.#stops.length = 0;
   }
 
   setParts(parts: ObjectParts): void {
@@ -183,6 +228,45 @@ export class MockObject {
       related: parts.related ? this.#related : null,
     });
   }
+}
+
+type Fields = Record<string, unknown>;
+
+const NONE: ObjectParts = {
+  overview: false,
+  manifest: false,
+  events: false,
+  related: false,
+};
+
+/** What a colleague or a controller wrote: a label and an annotation, or a tick in the status. */
+function changed(
+  object: Fields,
+  kind: "server" | "status",
+  count: number,
+): Fields {
+  const metadata = (object.metadata ?? {}) as Fields;
+  if (kind === "status") {
+    return {
+      ...object,
+      status: { ...(object.status as Fields | undefined), mockTick: count },
+    };
+  }
+  const generation =
+    typeof metadata.generation === "number"
+      ? metadata.generation + 1
+      : undefined;
+  return {
+    ...object,
+    metadata: {
+      ...metadata,
+      ...(generation !== undefined && { generation }),
+      labels: {
+        ...(metadata.labels as Fields | undefined),
+        "edited-by": `colleague-${String(count)}`,
+      },
+    },
+  };
 }
 
 /** The recorded document with the metadata's name and namespace asked for. */

@@ -78,6 +78,7 @@ pub(crate) async fn trigger(
         connection,
         space: Some(space.to_owned()),
         risk: Risk::Lasting,
+        previewed: None,
         run: Box::new(move |_| Box::pin(run.run())),
     })
 }

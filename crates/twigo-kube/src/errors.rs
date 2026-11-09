@@ -1,5 +1,7 @@
 //! How a request's failure reaches the webview (`IpcError`).
 
+use http::StatusCode;
+use kube::core::Status;
 use twigo_ipc::{Blocked, ErrorKind, IpcError};
 
 use crate::credentials::{CredentialError, OidcError, RunError};
@@ -39,6 +41,16 @@ pub fn request(error: &kube::Error) -> IpcError {
         _ => error.to_string(),
     };
     IpcError::new(kind, message)
+}
+
+/// The status a refused request answers with, as kube's
+/// `handle_api_errors` reads it, which `Client::send` leaves to its caller.
+pub fn refused(status: StatusCode, body: &[u8]) -> kube::Error {
+    let status = serde_json::from_slice::<Status>(body).unwrap_or_else(|_| {
+        Status::failure(&String::from_utf8_lossy(body), "Failed to parse error data")
+            .with_code(status.as_u16())
+    });
+    kube::Error::Api(status.boxed())
 }
 
 /// What the gate said, when it stopped the request.

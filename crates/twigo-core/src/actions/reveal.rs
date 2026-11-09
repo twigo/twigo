@@ -62,6 +62,7 @@ pub(crate) fn reveal(
         connection,
         space: None,
         risk: Risk::Reveal,
+        previewed: None,
         run: Box::new(move |_| {
             Box::pin(async move {
                 // Read as it runs, and only while the view it is for is open.

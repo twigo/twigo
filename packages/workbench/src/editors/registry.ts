@@ -1,7 +1,7 @@
 import type { ComponentType } from "react";
 import type { DockviewApi, IDockviewPanel } from "dockview-react";
 import { Changes } from "../changes";
-import type { ContextKeys } from "../contextkey/service";
+import { isTypingTarget, type ContextKeys } from "../contextkey/service";
 
 export interface EditorProps {
   readonly uri: string;
@@ -22,9 +22,17 @@ export interface EditorProvider {
   /** Where its editors open; the editor area by default. */
   readonly area?: Area;
   readonly title: (uri: URL) => string;
+  /**
+   * The space whose dock the editor belongs in, if it belongs to one: an
+   * editor of another space than the one shown waits for that space's dock
+   * rather than land in this one's.
+   */
+  readonly space?: (uri: URL) => string | undefined;
   /** The tab's icon, which may depend on the URI (the kind of a list). */
   readonly icon?: ComponentType<{ uri: string; className?: string }>;
   readonly component: ComponentType<EditorProps>;
+  /** Gives the editor the keyboard focus, if it has something of its own to hold it, such as a text editor. */
+  readonly focus?: (uri: string) => void;
   /** What the editor shows at the right of its group's tab strip while it is the group's active one. */
   readonly actions?: ComponentType<EditorProps>;
 }
@@ -43,6 +51,21 @@ export interface EditorParams {
   readonly preview: boolean;
 }
 
+export interface OpenOptions {
+  readonly preview?: boolean;
+  readonly side?: boolean;
+  /**
+   * The open did not come from the person's own act, such as the answer to a
+   * request, or the person's keys belong to a list that goes on, such as the
+   * explorer's. The editor then takes the focus only from the page and from
+   * the dock's own elements, never from anything outside the editors or from
+   * another editor's content. Without it the person asked, and the editor
+   * opened takes the focus from whatever held it but a field outside the
+   * editors.
+   */
+  readonly preserveFocus?: boolean;
+}
+
 export const EDITOR_COMPONENT = "editor";
 export const EDITOR_TAB = "editor-tab";
 
@@ -56,7 +79,24 @@ export class Editors {
   readonly #providers = new Set<EditorProvider>();
   readonly #symbols = new Map<string, readonly EditorSymbol[]>();
   readonly #closed = new Set<(uri: string) => void>();
+  readonly #dirty = new Set<string>();
   readonly #apis = new Map<Area, DockviewApi>();
+  /** The space each mounted area shows. */
+  readonly #spaces = new Map<Area, string>();
+  /** Editors of a space whose dock is not shown, to open when it is. */
+  readonly #waiting = new Map<
+    string,
+    {
+      readonly space: string;
+      readonly area: Area;
+      readonly options: OpenOptions;
+    }
+  >();
+  /** Editors of a space whose dock is not shown, to close when it is. */
+  readonly #leaving = new Map<
+    string,
+    { readonly space: string; readonly area: Area }
+  >();
   #active: string | undefined;
 
   /** `reveal` shows a hidden area before an editor opens in it. */
@@ -108,9 +148,15 @@ export class Editors {
     };
   }
 
-  /** An area's dockview while it is mounted. */
-  attach(api: DockviewApi, area: Area = "editor"): () => void {
+  /**
+   * An area's dockview while it is mounted, and the space it shows. What
+   * waited for the space opens in it; what waited for another is forgotten,
+   * since the person went elsewhere. What was closed for the space closes in
+   * it, however many other spaces came first.
+   */
+  attach(api: DockviewApi, area: Area, space: string): () => void {
     this.#apis.set(area, api);
+    this.#spaces.set(area, space);
     const active = api.onDidActivePanelChange(({ panel }) => {
       if (area === "editor") this.#setActive(panel);
       else this.changes.emit();
@@ -125,13 +171,27 @@ export class Editors {
             this.changes.emit();
           })
         : undefined;
-    if (area === "editor") this.#setActive(api.activePanel);
+    if (area === "editor") {
+      this.#setActive(api.activePanel);
+      this.keepFocus("editor");
+    }
+    for (const [uri, later] of [...this.#leaving]) {
+      if (later.area !== area || later.space !== space) continue;
+      this.#leaving.delete(uri);
+      api.getPanel(uri)?.api.close();
+    }
+    for (const [uri, later] of [...this.#waiting]) {
+      if (later.area !== area) continue;
+      this.#waiting.delete(uri);
+      if (later.space === space) this.open(uri, later.options);
+    }
     return () => {
       active.dispose();
       removal.dispose();
       added?.dispose();
       if (this.#apis.get(area) === api) {
         this.#apis.delete(area);
+        this.#spaces.delete(area);
         if (area === "editor") this.#setActive(undefined);
       }
     };
@@ -140,35 +200,40 @@ export class Editors {
   /**
    * Opens an editor in its provider's area: in the area's active group, or
    * with `side` in a new group to its right. An open URI is focused where
-   * it is, since a URI is one panel.
+   * it is, since a URI is one panel. One that belongs to another space than
+   * the area shows opens when that space comes next.
    */
-  open(
-    uri: string,
-    {
-      preview = false,
-      side = false,
-    }: { preview?: boolean; side?: boolean } = {},
-  ): void {
+  open(uri: string, options: OpenOptions = {}): void {
+    const { preview = false, side = false, preserveFocus = false } = options;
     const provider = this.resolve(uri);
     if (!provider) throw new Error(`no editor opens ${uri}`);
+    this.#leaving.delete(uri);
+    const area = provider.area ?? "editor";
+    const space = provider.space?.(new URL(uri));
+    if (space !== undefined && this.#spaces.get(area) !== space) {
+      this.#waiting.set(uri, { space, area, options });
+      return;
+    }
     const open = this.#find(uri);
     if (open) {
       if (!preview) this.pin(uri);
       this.reveal(open.area);
       open.panel.api.setActive();
+      this.#focusOpened(open.area, open.panel, preserveFocus);
       return;
     }
-    const target = provider.area ?? "editor";
-    const api = this.#apis.get(target);
-    if (!api) throw new Error(`no ${target} area is mounted`);
-    this.reveal(target);
+    const api = this.#apis.get(area);
+    if (!api) throw new Error(`no ${area} area is mounted`);
+    this.reveal(area);
     const group = api.activeGroup;
+    // Changes of its own pin an editor that opens again.
+    const previewed = preview && !this.#dirty.has(uri);
     const replaced =
-      preview && !side
+      previewed && !side
         ? group?.panels.find((panel) => paramsOf(panel)?.preview)
         : undefined;
-    const params: EditorParams = { uri, preview };
-    api.addPanel({
+    const params: EditorParams = { uri, preview: previewed };
+    const panel = api.addPanel({
       id: uri,
       component: EDITOR_COMPONENT,
       tabComponent: EDITOR_TAB,
@@ -184,6 +249,7 @@ export class Editors {
       }),
     });
     replaced?.api.close();
+    this.#focusOpened(area, panel, preserveFocus);
   }
 
   /** Turns a preview tab into an ordinary one. */
@@ -192,6 +258,27 @@ export class Editors {
     const params = panel && paramsOf(panel);
     if (!panel || !params?.preview) return;
     panel.api.updateParameters({ ...params, preview: false });
+  }
+
+  /** Whether the editor holds changes that nothing has applied yet; its tab says so. */
+  isDirty(uri: string): boolean {
+    return this.#dirty.has(uri);
+  }
+
+  /**
+   * An editor with changes of its own marks its tab and pins it, so the next
+   * preview does not replace it. The mark outlives the tab, as the changes
+   * do: a tab that opens again for the URI shows it.
+   */
+  setDirty(uri: string, dirty: boolean): void {
+    if (this.#dirty.has(uri) === dirty) return;
+    if (dirty) {
+      this.#dirty.add(uri);
+      this.pin(uri);
+    } else {
+      this.#dirty.delete(uri);
+    }
+    this.changes.emit();
   }
 
   /** An editor publishes its symbols while it shows them. */
@@ -218,8 +305,24 @@ export class Editors {
     this.changes.emit();
   }
 
+  /**
+   * Closes an editor. One that belongs to another space than its area shows
+   * closes when that space's dock is mounted, as an open for it waits.
+   */
   close(uri: string): void {
-    this.#find(uri)?.panel.api.close();
+    this.#waiting.delete(uri);
+    const open = this.#find(uri);
+    if (open) {
+      open.panel.api.close();
+      this.keepFocus(open.area);
+      return;
+    }
+    const provider = this.resolve(uri);
+    const space = provider?.space?.(new URL(uri));
+    const area = provider?.area ?? "editor";
+    if (space !== undefined && this.#spaces.get(area) !== space) {
+      this.#leaving.set(uri, { space, area });
+    }
   }
 
   /** Moves an area's active editor into a new group beside its own. */
@@ -227,6 +330,83 @@ export class Editors {
     const panel = this.#apis.get(area)?.activePanel;
     if (!panel || panel.group.panels.length < 2) return;
     panel.api.moveTo({ group: panel.group, position: side });
+    this.keepFocus(area);
+  }
+
+  /**
+   * An editor that opens, closes or moves, or a space that shows, takes a
+   * focused element away, and the browser puts the keyboard focus on the page,
+   * where no key reaches an editor; a group that already took it holds it for
+   * nothing but its keys. The active group then takes it, and an editor that
+   * can hold it, its own; an area with no editor left gives it to the editor
+   * area.
+   */
+  keepFocus(area: Area): void {
+    const focused = document.activeElement;
+    if (focused !== document.body && !this.#groupHolds(focused)) return;
+    const holder = this.activeIn(area) === undefined ? "editor" : area;
+    this.#apis.get(holder)?.focus();
+    const uri = this.activeIn(holder);
+    if (uri !== undefined) this.resolve(uri)?.focus?.(uri);
+  }
+
+  /**
+   * What an open does to the focus (see {@link OpenOptions.preserveFocus}). A
+   * field outside the editors, or in the editor opened, keeps it either way.
+   */
+  #focusOpened(
+    area: Area,
+    panel: IDockviewPanel,
+    preserveFocus: boolean,
+  ): void {
+    const focused = document.activeElement;
+    const content = panel.view.content.element;
+    if (
+      isTypingTarget(focused) &&
+      (!this.#inGroup(focused) || content.contains(focused))
+    ) {
+      return;
+    }
+    const fell = focused === null || focused === document.body;
+    if (
+      preserveFocus &&
+      !fell &&
+      (!this.#inGroup(focused) || this.#inOtherEditor(focused, panel))
+    ) {
+      return;
+    }
+    this.#apis.get(area)?.focus();
+    this.resolve(panel.id)?.focus?.(panel.id);
+  }
+
+  #groupHolds(element: Element | null): boolean {
+    for (const api of this.#apis.values()) {
+      if (api.groups.some((group) => group.element === element)) return true;
+    }
+    return false;
+  }
+
+  #inGroup(element: Element | null): boolean {
+    for (const api of this.#apis.values()) {
+      if (api.groups.some((group) => group.element.contains(element))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  #inOtherEditor(element: Element | null, except: IDockviewPanel): boolean {
+    for (const api of this.#apis.values()) {
+      if (
+        api.panels.some(
+          (panel) =>
+            panel !== except && panel.view.content.element.contains(element),
+        )
+      ) {
+        return true;
+      }
+    }
+    return false;
   }
 
   #find(uri: string): { area: Area; panel: IDockviewPanel } | undefined {

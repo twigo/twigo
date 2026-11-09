@@ -1,8 +1,16 @@
-import { act, cleanup, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Backend, Discovered } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { mountKube, settle } from "../test/workbench";
+import { WorkingCopies } from "./edit/copies";
+import { diffUri } from "./uri";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -95,4 +103,67 @@ test("a space whose discovery failed shows an error dot, active or not", async (
   await settle(1);
   expect(dot("staging")).toBe("error");
   expect(dot("prod-eu")).toBe("ok");
+});
+
+test("an editor of another space waits for its space instead of opening in the one shown", async () => {
+  const workbench = await mountKube();
+  act(() => {
+    workbench.editors.open("k8s-list://staging/v1/pods");
+  });
+  await settle();
+  expect(workbench.editors.active).toBeUndefined();
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  await settle();
+  expect(workbench.editors.active).toBe("k8s-list://staging/v1/pods");
+});
+
+test("the tab of a diff names a new manifest as its own tab does, and an object by its name", async () => {
+  const workbench = await mountKube();
+  act(() => {
+    workbench.editors.open(
+      diffUri({ kind: "apply", editor: "untitled://prod-eu/manifest-2" }),
+    );
+    workbench.editors.open(
+      diffUri({
+        kind: "server",
+        editor: "k8s://prod-eu//v1/pods/auth/auth-api-1a4uyl1-r2bkk",
+      }),
+    );
+  });
+  await settle();
+  const titles = [...document.querySelectorAll(".dv-tab")].map(
+    (tab) => tab.textContent,
+  );
+  expect(titles).toEqual([
+    "Apply · Manifest 2",
+    "Server · auth-api-1a4uyl1-r2bkk",
+  ]);
+});
+
+test("a new manifest, and an object on its YAML tab, ask for the focus of the view they are about to get; an object on another tab asks for none", async () => {
+  const focus = vi.spyOn(WorkingCopies.prototype, "focus");
+  const workbench = await mountKube();
+  const manifest = "untitled://prod-eu/manifest-1";
+  const object = "k8s://prod-eu//v1/pods/auth/auth-api-1a4uyl1-r2bkk";
+  const asked = () => focus.mock.calls.map(([uri]) => uri);
+  act(() => {
+    workbench.editors.open(manifest);
+  });
+  await settle();
+  expect(asked()).toEqual([manifest]);
+
+  act(() => {
+    workbench.editors.open(object);
+  });
+  await settle();
+  expect(asked()).toEqual([manifest]);
+
+  fireEvent.click(screen.getByText("YAML"));
+  act(() => {
+    workbench.editors.open(object);
+  });
+  await settle();
+  expect(asked()).toEqual([manifest, object]);
 });

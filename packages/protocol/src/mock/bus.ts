@@ -1,6 +1,8 @@
 import { IpcError } from "../error";
 import type {
   Affected,
+  ApplyPreviewed,
+  ApplyRequest,
   Blocked,
   ContextAccess,
   Execute,
@@ -11,8 +13,10 @@ import type {
   Plan,
   PlanId,
   PlanRequest,
+  Resource,
   ResourceRef,
 } from "../generated";
+import { masked } from "./edits";
 import {
   cordoned,
   deploymentOf,
@@ -41,7 +45,8 @@ type Risk =
   | { readonly kind: "replaced" }
   | { readonly kind: "lasting" }
   | { readonly kind: "wide"; readonly name: string }
-  | { readonly kind: "reveal" };
+  | { readonly kind: "reveal" }
+  | { readonly kind: "reviewed" };
 
 /** `twigo_policy::friction::friction`. */
 function frictionOf(
@@ -49,7 +54,7 @@ function frictionOf(
   context: string,
   access: ContextAccess,
 ): Friction {
-  if (risk.kind === "reveal") {
+  if (risk.kind === "reveal" || risk.kind === "reviewed") {
     return access.mode === "read-write"
       ? { kind: "atOnce" }
       : { kind: "confirm" };
@@ -173,6 +178,8 @@ interface Planned {
   readonly space?: string;
   /** What a stop while it runs says. */
   readonly stopped?: string;
+  /** The object of the preview it was made from: a newer preview of it drops the plan. */
+  readonly previewed?: string;
   readonly run: Run;
 }
 
@@ -180,6 +187,168 @@ interface Waiting {
   readonly planned: Planned;
   readonly friction: Friction;
   readonly since: number;
+}
+
+/** What a preview left for the plan of its id, as Rust's `Prepared`. */
+interface Previewed {
+  readonly step: "apply" | "mergePatch" | "recreate";
+  readonly context: string;
+  /** `configmaps/settings in default`. */
+  readonly target: string;
+  /** `configmap settings`. */
+  readonly what: string;
+  /** `configmaps settings -n default`, as kubectl names the object. */
+  readonly named: string;
+  readonly job: boolean;
+  /** What a merge patch after the apply removes. */
+  readonly removals: readonly string[];
+  /** The edit, which an apply leaves as the object. */
+  readonly edited: Record<string, unknown>;
+  /** The resource of an edit of an opened object. */
+  readonly resource: ResourceRef["gvr"] | undefined;
+}
+
+/** The annotation a mock edit names the preview's answer by. */
+const ANSWER = "mock.twigo.io/answer";
+
+const CONFLICTS = [
+  { path: ".spec.replicas", manager: "kube-controller-manager" },
+  { path: ".metadata.labels.team", manager: "kubectl-client-side-apply" },
+] as const;
+
+/** The mock's stand-ins for Rust's kubectl lines: not run, as the mock sends nothing. */
+function applyKubectl({ step, named, removals }: Previewed): string {
+  if (step === "mergePatch") {
+    return `kubectl patch ${named} --type=merge --field-manager=twigo-edit -p '<the edit>'`;
+  }
+  if (step === "recreate") {
+    return `kubectl delete ${named} && kubectl create --field-manager twigo -f - < the edit`;
+  }
+  const apply =
+    "kubectl apply --server-side --field-manager=twigo -f - < the edit";
+  return removals.length === 0
+    ? apply
+    : `${apply} && kubectl patch ${named} --type=merge --field-manager=twigo -p '<what goes>'`;
+}
+
+/** What follows a plan, in the words of Rust's `apply`. */
+function applyConsequences({ step, job, removals }: Previewed): string[] {
+  if (step === "mergePatch") {
+    return [
+      "An apply cannot express this edit, so it goes as one merge patch under field manager twigo-edit, as kubectl edit would.",
+    ];
+  }
+  if (step === "recreate") {
+    return [
+      job
+        ? "It goes with its pods, and a new one with a new uid runs from the start, whatever this one finished."
+        : "It goes, and a new one with a new uid takes its place.",
+    ];
+  }
+  return removals.length === 0
+    ? []
+    : [`Then a merge patch removes ${removals.join(", ")}.`];
+}
+
+/** The fields of an object that Rust never sends: `SERVER_METADATA` in `twigo-kube`'s `apply`. */
+const SERVER_METADATA = [
+  "uid",
+  "resourceVersion",
+  "generation",
+  "creationTimestamp",
+  "deletionTimestamp",
+  "deletionGracePeriodSeconds",
+  "selfLink",
+  "managedFields",
+] as const;
+
+type Fields = Record<string, unknown>;
+
+function metadataOf(object: unknown): Fields {
+  const { metadata } = (object ?? {}) as { metadata?: unknown };
+  return typeof metadata === "object" && metadata !== null
+    ? (metadata as Fields)
+    : {};
+}
+
+function omit(object: Fields, names: readonly string[]): Fields {
+  return Object.fromEntries(
+    Object.entries(object).filter(([name]) => !names.includes(name)),
+  );
+}
+
+/** The fields of an object that an apply may carry, as Rust's `editable`. */
+function editable(object: unknown, status: boolean): Fields {
+  return {
+    ...omit((object ?? {}) as Fields, [
+      "apiVersion",
+      "kind",
+      "metadata",
+      ...(status ? ["status"] : []),
+    ]),
+    metadata: omit(metadataOf(object), [
+      "name",
+      "namespace",
+      ...SERVER_METADATA,
+    ]),
+  };
+}
+
+/** What an edit says differently from its object in the fields no apply carries, as Rust's `ignored`; for a manifest, all it says of them. */
+function ignoredBy(base: unknown, edited: unknown, status: boolean): string[] {
+  const differs = (of: (object: unknown) => unknown): boolean =>
+    base === undefined
+      ? of(edited) !== undefined
+      : !isEqual(of(base), of(edited));
+  return [
+    ...(status && differs((object) => (object as Fields).status)
+      ? [".status"]
+      : []),
+    ...SERVER_METADATA.filter((field) =>
+      differs((object) => metadataOf(object)[field]),
+    ).map((field) => `.metadata.${field}`),
+  ];
+}
+
+/** Structural equality of JSON values, whatever the order of their keys. */
+function isEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (
+    typeof a !== "object" ||
+    typeof b !== "object" ||
+    a === null ||
+    b === null
+  )
+    return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((item, index) => isEqual(item, b[index]))
+    );
+  }
+  const left = Object.entries(a);
+  return (
+    left.length === Object.keys(b).length &&
+    left.every(([key, value]) => isEqual(value, (b as Fields)[key]))
+  );
+}
+
+/** An object as a side of the diff, as Rust's `side`: without what would only be noise. */
+function side(value: unknown): unknown {
+  if (typeof value !== "object" || value === null) return value;
+  const object = masked(value as Record<string, unknown>);
+  const { metadata } = object as { metadata?: object };
+  if (metadata === undefined) return object;
+  return {
+    ...object,
+    metadata: Object.fromEntries(
+      Object.entries(metadata).filter(
+        ([name]) => name !== "resourceVersion" && name !== "generation",
+      ),
+    ),
+  };
 }
 
 /** What the mock backend's bus reaches. */
@@ -198,6 +367,21 @@ export interface BusHost {
   };
   /** Tells the lists that the cluster changed. */
   changed(): void;
+  /** What `apply_preview` answers to every edit that changes something, unless the edit names an answer. */
+  readonly answer: string | undefined;
+  /** The object that an edit or a change from outside has written, none while it is as recorded. */
+  written(
+    context: string,
+    target: ResourceRef,
+  ): Record<string, unknown> | undefined;
+  /** What the cluster serves of a kind, none when the mock does not know it. */
+  resource(apiVersion: string, kind: string): Resource | undefined;
+  /** An edit was applied: the object in `context` is `edited` now. */
+  applied(
+    context: string,
+    resource: { readonly group: string; readonly resource: string } | undefined,
+    edited: Record<string, unknown>,
+  ): void;
 }
 
 /** `1 pod`, `3 pods`: the mock's kinds all count with an s. */
@@ -258,8 +442,255 @@ export class MockBus {
   #next = 0;
   #undoId = 0;
   #jobs = 0;
+  readonly #previews = new Map<number, Previewed>();
+  #previewId = 0;
 
   constructor(private readonly host: BusHost) {}
+
+  /**
+   * `apply_preview` over the mock: it merges nothing. An edit's annotation
+   * `mock.twigo.io/answer`, or else the scenario, names the answer
+   * (`unchanged`, `conflicts`, `stale`, `lists-moved` for a stale one that
+   * Keep mine cannot answer, `immutable`, `recreate`, `removals` for a ready
+   * answer with a removal step, or `merge-patch` for one that goes as a
+   * single merge patch); any other edit is ready, an edit that differs from
+   * its base only in what an apply leaves out (`status` where the resource
+   * has the subresource, the server's metadata) unchanged, saying what it
+   * left out. A manifest of an object that an apply left shows it as live.
+   * The choices count as they do in Rust: Force takes the conflicting
+   * fields, so the edit is ready, and giving up every one of them leaves
+   * nothing to send; an edit locked to a version the object has moved from is
+   * stale, Keep mine's lock included. An edit that names another object than
+   * the one it edits, or a namespaced kind with no namespace, is refused as
+   * Rust refuses it, and any preview of an object, a refused one too, ends
+   * the plans of older ones.
+   */
+  applyPreview(request: ApplyRequest): ApplyPreviewed {
+    const { space, opened, edited } = request;
+    const context = this.host.context(space);
+    if (context === undefined)
+      throw new IpcError("notFound", `no space ${space}`);
+    const object = edited as {
+      readonly apiVersion?: string;
+      readonly kind?: string;
+      readonly metadata?: {
+        readonly name?: string;
+        readonly namespace?: string;
+        readonly annotations?: Readonly<Record<string, string>>;
+      };
+    };
+    const name = object.metadata?.name ?? opened?.target.name ?? "";
+    const kind = object.kind ?? opened?.target.gvr.resource ?? "object";
+    const namespace = opened?.target.namespace ?? object.metadata?.namespace;
+    const resource = opened?.target.gvr.resource ?? `${kind.toLowerCase()}s`;
+    const target = `${resource}/${opened?.target.name ?? name}${namespace === undefined ? "" : ` in ${namespace}`}`;
+    for (const [id, kept] of this.#previews) {
+      if (kept.context === context && kept.target === target) {
+        this.#previews.delete(id);
+      }
+    }
+    for (const [id, waiting] of this.#waiting) {
+      if (waiting.planned.previewed === `${context}/${target}`) {
+        this.#waiting.delete(id);
+      }
+    }
+    const served = this.host.resource(
+      object.apiVersion ?? "",
+      object.kind ?? "",
+    );
+    const status = served?.subresources.includes("status") ?? false;
+    const same =
+      opened !== null &&
+      isEqual(editable(opened.base, status), editable(edited, status));
+    const ignored = ignoredBy(opened?.base, edited, status);
+    const live = opened?.base as
+      { kind?: string; apiVersion?: string } | undefined;
+    if (opened && live) {
+      const refused = (what: string, named: unknown, target: unknown) =>
+        new IpcError(
+          "invalidInput",
+          `the edit names ${what} ${JSON.stringify(named)}, but it is an edit of ${JSON.stringify(target)}`,
+        );
+      const other = (["apiVersion", "kind"] as const).find(
+        (field) => (edited as Record<string, unknown>)[field] !== live[field],
+      );
+      if (other)
+        throw refused(
+          other,
+          (edited as Record<string, unknown>)[other],
+          live[other],
+        );
+      if (name !== opened.target.name)
+        throw refused("name", name, opened.target.name);
+      if ((object.metadata?.namespace ?? null) !== opened.target.namespace)
+        throw refused(
+          "namespace",
+          object.metadata?.namespace,
+          opened.target.namespace,
+        );
+    } else if (
+      object.metadata?.namespace === undefined &&
+      served?.namespaced === true
+    ) {
+      throw new IpcError("invalidInput", `${name} names no namespace`);
+    }
+    const what = `${kind.toLowerCase()} ${name}`;
+    const group = opened?.target.gvr.group ?? "";
+    const named = `${group === "" ? resource : `${resource}.${group}`} ${name}${inNamespace(namespace ?? null)}`;
+    const prepared = (
+      step: Previewed["step"],
+      removals: readonly string[] = [],
+    ): number => {
+      const id = ++this.#previewId;
+      this.#previews.set(id, {
+        step,
+        context,
+        target,
+        what,
+        named,
+        job: resource === "jobs",
+        removals,
+        edited: edited as Record<string, unknown>,
+        resource: opened?.target.gvr,
+      });
+      return id;
+    };
+    if (same && object.metadata?.annotations?.[ANSWER] === undefined) {
+      return { state: "unchanged", ignored };
+    }
+    const version = opened
+      ? (
+          this.host.written(context, opened.target)?.metadata as
+            { resourceVersion?: unknown } | undefined
+        )?.resourceVersion
+      : undefined;
+    const moved =
+      opened !== null && typeof version === "string" && version !== opened.lock;
+    const existing =
+      opened === null && served !== undefined && name !== ""
+        ? this.host.written(context, {
+            gvr: served.gvr,
+            namespaced: served.namespaced,
+            namespace: served.namespaced
+              ? (object.metadata?.namespace ?? null)
+              : null,
+            name,
+          })
+        : undefined;
+    const ready = (id: number) =>
+      this.#ready(id, opened?.base ?? existing, edited, ignored);
+    const answer =
+      object.metadata?.annotations?.[ANSWER] ??
+      (moved ? "stale" : same ? undefined : this.host.answer);
+    const stale = (keepable: boolean) =>
+      ({
+        state: "stale",
+        message: keepable
+          ? `Operation cannot be fulfilled on ${resource} "${name}": the object has been modified; please apply your changes to the latest version and try again`
+          : `.spec.template.spec.containers changed on the server since this edit was opened, and the edit sends it whole, so keeping yours would revert that change`,
+        keepable,
+      }) as const;
+    switch (answer) {
+      case "unchanged":
+        return { state: "unchanged", ignored: [".status"] };
+      case "conflicts": {
+        const remaining = CONFLICTS.filter(
+          ({ path }) => !request.drop.includes(path),
+        );
+        if (request.force) return ready(prepared("apply"));
+        if (remaining.length === 0) return { state: "unchanged", ignored: [] };
+        return { state: "conflicts", conflicts: remaining };
+      }
+      case "stale":
+        // Keep mine locks to the new version and sends the object at it.
+        return opened?.locked === undefined || moved
+          ? stale(true)
+          : ready(prepared("apply"));
+      case "lists-moved":
+        return stale(false);
+      case "immutable":
+        return {
+          state: "immutable",
+          message: `${kind} "${name}" is invalid: spec.selector: Invalid value: field is immutable`,
+          recreate: null,
+        };
+      case "recreate":
+        return {
+          state: "immutable",
+          message: `${kind} "${name}" is invalid: spec.template: Invalid value: field is immutable`,
+          recreate: prepared("recreate"),
+        };
+      case "removals":
+        return {
+          ...ready(prepared("apply", [".metadata.labels.team"])),
+          warnings: ["metadata.annotations: this annotation is deprecated"],
+          removals: [".metadata.labels.team"],
+          ignored: [".status"],
+        };
+      case "merge-patch":
+        return {
+          ...ready(prepared("mergePatch")),
+          removals: [".spec.strategy.rollingUpdate"],
+          strategy: "mergePatch",
+        };
+      default:
+        return ready(prepared("apply"));
+    }
+  }
+
+  /** A ready answer: the object as it was, none for a manifest of a new one, against the edit, with nothing to say besides. */
+  #ready(
+    id: number,
+    live: unknown,
+    edited: unknown,
+    ignored: readonly string[],
+  ): Extract<ApplyPreviewed, { state: "ready" }> {
+    return {
+      state: "ready",
+      id,
+      live: side(live ?? null),
+      result: side(edited),
+      warnings: [],
+      removals: [],
+      ignored: [...ignored],
+      strategy: "serverSideApply",
+    };
+  }
+
+  #apply(space: string, preview: number): Planned {
+    const previewed = this.#previews.get(preview);
+    if (previewed === undefined) {
+      throw new IpcError("notFound", `no preview ${preview} waits to apply`);
+    }
+    const { step, context, target, what, edited, resource } = previewed;
+    const recreate = step === "recreate";
+    const write = { verb: recreate ? "delete" : "patch", target };
+    this.#authorize(context, this.host.access(context), { write });
+    this.#previews.delete(preview);
+    const words = recreate ? "Recreated" : "Applied";
+    return {
+      plan: {
+        context,
+        question: recreate
+          ? `Delete ${what} on ${context} and create it from your edit?`
+          : `Apply your changes to ${what} on ${context}?`,
+        confirm: recreate ? `Delete and recreate ${what}` : "Apply",
+        destructive: recreate,
+        consequences: applyConsequences(previewed),
+        affected: [],
+        kubectl: applyKubectl(previewed),
+        doing: `${recreate ? "Recreating" : "Applying"} ${what}`,
+      },
+      risk: recreate ? { kind: "lasting" } : { kind: "reviewed" },
+      write,
+      space,
+      previewed: `${context}/${target}`,
+      run: (tell) => {
+        this.host.applied(context, resource, edited);
+        tell({ state: "done", text: `${words} ${what}`, undoUntil: null });
+      },
+    };
+  }
 
   plan(request: PlanRequest): Plan {
     const planned = this.#planned(request);
@@ -298,6 +729,8 @@ export class MockBus {
         return this.#undo(request.space);
       case "reveal":
         return this.#reveal(request.object, request.key);
+      case "apply":
+        return this.#apply(request.space, request.preview);
     }
   }
 

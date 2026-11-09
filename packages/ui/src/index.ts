@@ -36,6 +36,7 @@ export * from "./components/toned-text";
 export * from "./components/status-label";
 export * from "./components/highlighted-label";
 export * from "./components/tick";
+export * from "./components/unsaved-mark";
 export * from "./components/tile";
 export * from "./components/trigger";
 export {

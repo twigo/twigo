@@ -203,6 +203,7 @@ pub(crate) async fn drain(core: &Core, space: &str, name: String) -> Result<Plan
         connection,
         space: Some(space.to_owned()),
         risk,
+        previewed: None,
         run: Box::new(move |progress| Box::pin(run.run(progress))),
     })
 }

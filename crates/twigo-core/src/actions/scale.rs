@@ -105,6 +105,7 @@ pub(crate) async fn scale(
         connection,
         space: Some(space.to_owned()),
         risk,
+        previewed: None,
         run: Box::new(move |_| Box::pin(run.run())),
     })
 }
