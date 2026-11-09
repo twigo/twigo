@@ -1,7 +1,7 @@
 import type { ComponentType } from "react";
 import type { DockviewApi, IDockviewPanel } from "dockview-react";
 import { Changes } from "../changes";
-import type { ContextKeys } from "../contextkey/service";
+import { isTypingTarget, type ContextKeys } from "../contextkey/service";
 
 export interface EditorProps {
   readonly uri: string;
@@ -54,6 +54,16 @@ export interface EditorParams {
 export interface OpenOptions {
   readonly preview?: boolean;
   readonly side?: boolean;
+  /**
+   * The open did not come from the person's own act, such as the answer to a
+   * request, or the person's keys belong to a list that goes on, such as the
+   * explorer's. The editor then takes the focus only from the page and from
+   * the dock's own elements, never from anything outside the editors or from
+   * another editor's content. Without it the person asked, and the editor
+   * opened takes the focus from whatever held it but a field outside the
+   * editors.
+   */
+  readonly preserveFocus?: boolean;
 }
 
 export const EDITOR_COMPONENT = "editor";
@@ -194,7 +204,7 @@ export class Editors {
    * the area shows opens when that space comes next.
    */
   open(uri: string, options: OpenOptions = {}): void {
-    const { preview = false, side = false } = options;
+    const { preview = false, side = false, preserveFocus = false } = options;
     const provider = this.resolve(uri);
     if (!provider) throw new Error(`no editor opens ${uri}`);
     this.#leaving.delete(uri);
@@ -209,7 +219,7 @@ export class Editors {
       if (!preview) this.pin(uri);
       this.reveal(open.area);
       open.panel.api.setActive();
-      this.keepFocus(open.area);
+      this.#focusOpened(open.area, open.panel, preserveFocus);
       return;
     }
     const api = this.#apis.get(area);
@@ -223,7 +233,7 @@ export class Editors {
         ? group?.panels.find((panel) => paramsOf(panel)?.preview)
         : undefined;
     const params: EditorParams = { uri, preview: previewed };
-    api.addPanel({
+    const panel = api.addPanel({
       id: uri,
       component: EDITOR_COMPONENT,
       tabComponent: EDITOR_TAB,
@@ -239,7 +249,7 @@ export class Editors {
       }),
     });
     replaced?.api.close();
-    this.keepFocus(area);
+    this.#focusOpened(area, panel, preserveFocus);
   }
 
   /** Turns a preview tab into an ordinary one. */
@@ -340,9 +350,61 @@ export class Editors {
     if (uri !== undefined) this.resolve(uri)?.focus?.(uri);
   }
 
+  /**
+   * What an open does to the focus (see {@link OpenOptions.preserveFocus}). A
+   * field outside the editors, or in the editor opened, keeps it either way.
+   */
+  #focusOpened(
+    area: Area,
+    panel: IDockviewPanel,
+    preserveFocus: boolean,
+  ): void {
+    const focused = document.activeElement;
+    const content = panel.view.content.element;
+    if (
+      isTypingTarget(focused) &&
+      (!this.#inGroup(focused) || content.contains(focused))
+    ) {
+      return;
+    }
+    const fell = focused === null || focused === document.body;
+    if (
+      preserveFocus &&
+      !fell &&
+      (!this.#inGroup(focused) || this.#inOtherEditor(focused, panel))
+    ) {
+      return;
+    }
+    this.#apis.get(area)?.focus();
+    this.resolve(panel.id)?.focus?.(panel.id);
+  }
+
   #groupHolds(element: Element | null): boolean {
     for (const api of this.#apis.values()) {
       if (api.groups.some((group) => group.element === element)) return true;
+    }
+    return false;
+  }
+
+  #inGroup(element: Element | null): boolean {
+    for (const api of this.#apis.values()) {
+      if (api.groups.some((group) => group.element.contains(element))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  #inOtherEditor(element: Element | null, except: IDockviewPanel): boolean {
+    for (const api of this.#apis.values()) {
+      if (
+        api.panels.some(
+          (panel) =>
+            panel !== except && panel.view.content.element.contains(element),
+        )
+      ) {
+        return true;
+      }
     }
     return false;
   }

@@ -147,10 +147,15 @@ export function registerEdits(
     closeDiffs(uri);
   };
 
-  const back = (uri: string) => {
+  /**
+   * Shows the editor again. A command the person ran has them there; what
+   * follows an answer or a plan comes on its own, when they may be typing in
+   * another editor, so it takes the focus only if the page has it.
+   */
+  const back = (uri: string, late = false) => {
     if (!inView(uri)) return;
-    editors.open(uri);
-    copies.focus(uri);
+    editors.open(uri, { preserveFocus: late });
+    if (!late) copies.focus(uri);
   };
 
   /**
@@ -166,10 +171,12 @@ export function registerEdits(
       result.state === "answered" && placementOf(result.answer) === "page";
     editors.close(diffUri({ kind: "apply", editor: uri }));
     if (page) {
-      editors.open(diffUri({ kind: "apply", editor: uri }));
+      editors.open(diffUri({ kind: "apply", editor: uri }), {
+        preserveFocus: true,
+      });
       previews.shown(uri);
     } else {
-      back(uri);
+      back(uri, true);
     }
   };
 
@@ -219,7 +226,7 @@ export function registerEdits(
         notify.warning(`${nameOf(space)} does not serve ${made.ref.kind}`);
         return false;
       }
-      editors.open(uri);
+      editors.open(uri, { preserveFocus: true });
       return true;
     } catch (error) {
       notify.error(
@@ -240,7 +247,7 @@ export function registerEdits(
     const copy = copies.get(uri);
     if (answered(uri)?.answer === last.answer) dropPreview(uri);
     if (copy?.text !== last.subject.text) {
-      back(uri);
+      back(uri, true);
       return;
     }
     if (copy.base !== undefined) {
@@ -248,7 +255,7 @@ export function registerEdits(
         uri,
         last.answer.state === "ready" ? last.answer.result : undefined,
       );
-      back(uri);
+      back(uri, true);
       return;
     }
     const target = last.subject.space;
@@ -273,7 +280,7 @@ export function registerEdits(
           },
         },
       );
-      back(uri);
+      back(uri, true);
       return;
     }
     copies.applied(uri);
@@ -305,7 +312,7 @@ export function registerEdits(
     ) {
       // The plan took the preview, whatever came of it.
       dropPreview(uri);
-      back(uri);
+      back(uri, true);
     }
   };
 

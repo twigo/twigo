@@ -11,7 +11,9 @@ test("Apply… dry-runs the edit and opens its diff, and Apply applies it and en
     state: "answered",
     answer: { state: "ready" },
   });
-  expect(open).toHaveBeenCalledWith(diffUri({ kind: "apply", editor: uri }));
+  expect(open).toHaveBeenCalledWith(diffUri({ kind: "apply", editor: uri }), {
+    preserveFocus: true,
+  });
   expect(edits.copies.get(uri)).toBeDefined();
 
   await run("k8s.edit.confirm");
@@ -125,7 +127,7 @@ test("a text that does not parse stays in the editor, with no diff and nothing s
     at: { line: 3 },
   });
   expect(sent).toEqual([]);
-  expect(open).not.toHaveBeenCalledWith(
+  expect(open.mock.calls.map(([opened]) => opened)).not.toContain(
     diffUri({ kind: "apply", editor: uri }),
   );
   expect(edits.copies.get(uri)?.text).toBe("data:\n  a: [1, 2\n");
@@ -145,7 +147,7 @@ test("a manifest of two documents stays in the editor, with the line of the seco
     at: { line: 8 },
   });
   expect(sent).toEqual([]);
-  expect(open).not.toHaveBeenCalledWith(
+  expect(open.mock.calls.map(([opened]) => opened)).not.toContain(
     diffUri({ kind: "apply", editor: uri }),
   );
   expect(edits.copies.get(uri)?.text).toBe(text);
@@ -384,7 +386,7 @@ test("a preview that a newer one or a clear replaced while it was asked opens no
   expect(edits.previews.get(uri)).toBeUndefined();
 
   await run("k8s.edit.apply");
-  expect(open).toHaveBeenCalledWith(diff);
+  expect(open).toHaveBeenCalledWith(diff, { preserveFocus: true });
 });
 
 test("an answer that comes after the person left the space stays with its editor, which offers to show it", async () => {
@@ -479,9 +481,9 @@ test("a manifest applied to another context stays, and a toast says what was mad
 
   expect(edits.copies.get(manifest)?.text).toBe(MANIFEST);
   expect(close).not.toHaveBeenCalledWith(manifest);
-  expect(open).not.toHaveBeenCalledWith(
-    expect.stringContaining("k8s://staging"),
-  );
+  expect(
+    open.mock.calls.some(([opened]) => opened.includes("k8s://staging")),
+  ).toBe(false);
   const [message, options] =
     toast.mock.calls[toast.mock.calls.length - 1] ?? [];
   expect(message).toBe("Created ConfigMap default/fresh in staging");
@@ -492,6 +494,7 @@ test("a manifest applied to another context stays, and a toast says what was mad
   await vi.waitFor(() => {
     expect(open).toHaveBeenCalledWith(
       "k8s://staging//v1/configmaps/default/fresh",
+      { preserveFocus: true },
     );
   });
 });
@@ -572,7 +575,10 @@ test("a manifest whose plan ended after the person left its space opens the obje
     diffUri({ kind: "apply", editor: manifest }),
   );
   await vi.waitFor(() => {
-    expect(open).toHaveBeenCalledWith("k8s://dev//v1/configmaps/default/fresh");
+    expect(open).toHaveBeenCalledWith(
+      "k8s://dev//v1/configmaps/default/fresh",
+      { preserveFocus: true },
+    );
   });
   expect(close).toHaveBeenCalledWith(manifest);
 });
@@ -599,7 +605,10 @@ test("a manifest applied to its own context opens the object it made and ends", 
   await execute("k8s.edit.confirm");
   expect(edits.copies.get(manifest)).toBeUndefined();
   await vi.waitFor(() => {
-    expect(open).toHaveBeenCalledWith("k8s://dev//v1/configmaps/default/fresh");
+    expect(open).toHaveBeenCalledWith(
+      "k8s://dev//v1/configmaps/default/fresh",
+      { preserveFocus: true },
+    );
   });
   expect(close).toHaveBeenCalledWith(manifest);
 });
@@ -629,22 +638,26 @@ test("a diff tab acts on the edit it shows, ⌘S stays off it, and the palette's
   );
 });
 
-test("a bar's action and a diff's end give the focus back to the editor", async () => {
-  const { edits, uri, run } = await setupEdit("applyStale");
+test("a bar's action gives the focus back to the editor, while an answer and a plan that end come on their own and take it from the page only", async () => {
+  const { edits, open, uri, run } = await setupEdit("applyStale");
   const focus = vi.spyOn(edits.copies, "focus");
   await run("k8s.edit.apply");
-  expect(focus).toHaveBeenCalledWith(uri);
-  focus.mockClear();
+  expect(open).toHaveBeenLastCalledWith(uri, { preserveFocus: true });
+  expect(focus).not.toHaveBeenCalled();
   await run("k8s.edit.dismiss");
+  expect(open).toHaveBeenLastCalledWith(uri, { preserveFocus: false });
   expect(focus).toHaveBeenCalledWith(uri);
   focus.mockClear();
   await run("k8s.edit.discard");
+  expect(open).toHaveBeenLastCalledWith(uri, { preserveFocus: false });
   expect(focus).toHaveBeenCalledWith(uri);
 
   const ready = await setupEdit("live");
   const afterDiff = vi.spyOn(ready.edits.copies, "focus");
   await ready.run("k8s.edit.apply");
-  expect(afterDiff).not.toHaveBeenCalled();
   await ready.run("k8s.edit.confirm");
-  expect(afterDiff).toHaveBeenCalledWith(ready.uri);
+  expect(ready.open).toHaveBeenLastCalledWith(ready.uri, {
+    preserveFocus: true,
+  });
+  expect(afterDiff).not.toHaveBeenCalled();
 });

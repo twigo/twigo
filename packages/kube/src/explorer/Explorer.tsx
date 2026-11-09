@@ -141,7 +141,7 @@ function ResourceTree({
       rows={rows}
       active={editors.active}
       onOpen={(id, keep) => {
-        editors.open(id, { preview: !keep });
+        editors.open(id, { preview: !keep, preserveFocus: true });
       }}
       onToggle={toggle}
       register={register}

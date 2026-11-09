@@ -380,7 +380,7 @@ test("a focus that fell to a group, as after a diff tab took it, goes to the edi
   expect(focused).toEqual(["field://a"]);
 });
 
-test("a focus already held outside the editor area stays where it is when an editor opens", async () => {
+test("a field outside the editors keeps its focus when an editor opens, whether the person asked or not", async () => {
   const { workbench, editors } = await mounted();
   workbench.editors.register({
     id: "test.field",
@@ -395,7 +395,102 @@ test("a focus already held outside the editor area stays where it is when an edi
     editors.open("field://a");
   });
   expect(document.activeElement).toBe(outside);
+  act(() => {
+    editors.open("field://b", { preserveFocus: true });
+  });
+  expect(document.activeElement).toBe(outside);
   outside.remove();
+});
+
+async function apart() {
+  const mount = await mounted();
+  const focused: string[] = [];
+  mount.workbench.editors.register({
+    id: "test.field",
+    scheme: "field",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <input aria-label={uri} />,
+    focus: (uri) => {
+      focused.push(uri);
+    },
+  });
+  act(() => {
+    mount.editors.open("field://a");
+    mount.editors.open("field://b");
+  });
+  act(() => {
+    void mount.workbench.commands.execute(
+      "workbench.action.moveEditorToRightGroup",
+      mount.workbench.keys.lookup(null),
+    );
+  });
+  act(() => {
+    mount.editors.open("field://c");
+  });
+  act(() => {
+    screen.getByLabelText("field://a").focus();
+  });
+  focused.length = 0;
+  return { ...mount, focused };
+}
+
+test("an open the person asked for gives its editor the focus an editor on screen held", async () => {
+  const { editors, focused } = await apart();
+  act(() => {
+    editors.open("field://b");
+  });
+  expect(editors.active).toBe("field://b");
+  expect(focused).toEqual(["field://b"]);
+});
+
+test("an open that comes on its own leaves the focus of an editor on screen where it is", async () => {
+  const { editors, focused } = await apart();
+  act(() => {
+    editors.open("field://b", { preserveFocus: true });
+  });
+  expect(editors.active).toBe("field://b");
+  expect(focused).toEqual([]);
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+});
+
+test("an open that comes on its own takes a focus that fell to the dock's own elements, such as a click on a bar's button in WebKit", async () => {
+  const { editors, focused } = await apart();
+  const container = document.querySelector<HTMLElement>(
+    ".dv-content-container",
+  );
+  container?.focus();
+  expect(document.activeElement).toBe(container);
+  act(() => {
+    editors.open("field://b", { preserveFocus: true });
+  });
+  expect(focused).toEqual(["field://b"]);
+});
+
+test("an open of an editor that already holds the focus leaves it where it is", async () => {
+  const { editors, focused } = await apart();
+  act(() => {
+    editors.open("field://a");
+  });
+  expect(focused).toEqual([]);
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+});
+
+test("a pick that quick access gave the focus back to before the editor opened still gives the editor the focus", async () => {
+  const { workbench, editors, focused } = await apart();
+  workbench.quickAccess.register({
+    prefix: "go ",
+    placeholder: "Go",
+    help: "Go",
+    items: () => [{ id: "b", label: "b" }],
+    accept: (item) => {
+      editors.open(`field://${item.id}`);
+    },
+  });
+  act(() => {
+    workbench.quickAccess.show("go ");
+  });
+  await act(() => workbench.quickAccess.accept({ id: "b", label: "b" }));
+  expect(focused).toEqual(["field://b"]);
 });
 
 test("closing an editor says so, while moving it or switching spaces does not", async () => {

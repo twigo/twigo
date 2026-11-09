@@ -709,6 +709,8 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 - **Closing a tab.**
   When an editor that opens, closes or moves, or a space that shows, drops the keyboard focus to the page, the active group takes it, and the active editor its own where it has a text editor to hold it, so a key such as ⌘S or ⌘Z still reaches an editor.
   A tab's X and a middle click close through the editor service as ⌘W does, and the panel's last editor leaves the focus to the editor area's active group.
+  An open that the person asked for, from quick access, a button or a command, gives the editor it opened the focus from whatever held it, an editor on screen in another group included, except a field outside the editors.
+  One that arrives on its own, such as the diff of an answer or an object that a plan made, and the explorer's, whose tree goes on with its keys, take it only from the page and the dock's own elements, never from another editor or from anything outside the editors (`preserveFocus`).
 - **An editor off screen has no Monaco view.**
   Behind another tab of its group or under a maximized panel, a YAML editor or a diff disposes its view.
   A YAML editor's model, cursor, scroll and undo stay in the working-copy service until it shows again; a diff's models go with its view, and `DiffView` keeps its view state (cursor and scroll) in a ref for the next one.
