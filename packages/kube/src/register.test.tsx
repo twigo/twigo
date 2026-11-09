@@ -1,8 +1,15 @@
-import { act, cleanup, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Backend, Discovered } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { mountKube, settle } from "../test/workbench";
+import { WorkingCopies } from "./edit/copies";
 import { diffUri } from "./uri";
 
 beforeEach(() => {
@@ -133,4 +140,30 @@ test("the tab of a diff names a new manifest as its own tab does, and an object 
     "Apply · Manifest 2",
     "Server · auth-api-1a4uyl1-r2bkk",
   ]);
+});
+
+test("a new manifest, and an object on its YAML tab, ask for the focus of the view they are about to get; an object on another tab asks for none", async () => {
+  const focus = vi.spyOn(WorkingCopies.prototype, "focus");
+  const workbench = await mountKube();
+  const manifest = "untitled://prod-eu/manifest-1";
+  const object = "k8s://prod-eu//v1/pods/auth/auth-api-1a4uyl1-r2bkk";
+  const asked = () => focus.mock.calls.map(([uri]) => uri);
+  act(() => {
+    workbench.editors.open(manifest);
+  });
+  await settle();
+  expect(asked()).toEqual([manifest]);
+
+  act(() => {
+    workbench.editors.open(object);
+  });
+  await settle();
+  expect(asked()).toEqual([manifest]);
+
+  fireEvent.click(screen.getByText("YAML"));
+  act(() => {
+    workbench.editors.open(object);
+  });
+  await settle();
+  expect(asked()).toEqual([manifest, object]);
 });

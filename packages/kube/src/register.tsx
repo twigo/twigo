@@ -119,7 +119,7 @@ export function registerKube(workbench: Workbench): void {
     ),
     actions: ({ uri }) => <ObjectTabSwitch uri={uri} tabs={objectTabs} />,
     focus: (uri) => {
-      services.edits.copies.focusBuffer(uri);
+      if (objectTabs.get(uri) === "yaml") services.edits.copies.focus(uri);
     },
   });
 
@@ -176,7 +176,7 @@ export function registerKube(workbench: Workbench): void {
       />
     ),
     focus: (uri) => {
-      services.edits.copies.focusBuffer(uri);
+      services.edits.copies.focus(uri);
     },
   });
 
