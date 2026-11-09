@@ -142,6 +142,57 @@ export function parseLogsUri(uri: string): LogTarget | undefined {
   };
 }
 
+export const EXEC_SCHEME = "exec";
+
+/**
+ * A shell or an attach in a container, a tab of the panel (ARCHITECTURE 4.3,
+ * 4.6): `exec://<space>/<namespace>/<pod>/<container>`, `?n=2` for a second
+ * shell on the same container, `?attach=1` for one that joins its main
+ * process.
+ */
+export interface ExecInput {
+  readonly space: string;
+  readonly namespace: string;
+  readonly pod: string;
+  readonly container: string;
+  /** Which shell on the container: absent for the first, 2 and up for the others. */
+  readonly n?: number;
+  readonly attach?: boolean;
+}
+
+export function execUri({
+  space,
+  namespace,
+  pod,
+  container,
+  n,
+  attach,
+}: ExecInput): string {
+  const path = [namespace, pod, container].map(encodeURIComponent).join("/");
+  const query = new URLSearchParams();
+  if (n !== undefined) query.set("n", String(n));
+  if (attach === true) query.set("attach", "1");
+  const search = query.toString();
+  return `${EXEC_SCHEME}://${encodeURIComponent(space)}/${path}${search ? `?${search}` : ""}`;
+}
+
+export function parseExecUri(uri: string): ExecInput | undefined {
+  const url = new URL(uri);
+  if (url.protocol !== `${EXEC_SCHEME}:`) return undefined;
+  const parts = url.pathname.split("/").slice(1).map(decodeURIComponent);
+  const [namespace = "", pod = "", container = ""] = parts;
+  if (parts.length !== 3 || !namespace || !pod || !container) return undefined;
+  const n = url.searchParams.get("n");
+  return {
+    space: decodeURIComponent(url.host),
+    namespace,
+    pod,
+    container,
+    ...(n !== null && /^([2-9]|[1-9]\d+)$/.test(n) && { n: Number(n) }),
+    ...(url.searchParams.get("attach") === "1" && { attach: true }),
+  };
+}
+
 export const UNTITLED_SCHEME = "untitled";
 
 /** A new manifest and the space it was written in (ARCHITECTURE 4.3): `untitled://<space>/manifest-<n>`, the space encoded as an object's is. */

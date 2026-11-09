@@ -238,3 +238,28 @@ test("a new layout moves the bindings", async () => {
     "⇧⌘P",
   );
 });
+
+test("handles says which keys are the workbench's without running one", () => {
+  const { keybindings, ran } = setup();
+  const press = (code: string, init: KeyboardEventInit = {}) =>
+    new KeyboardEvent("keydown", { code, cancelable: true, ...init });
+  expect(
+    keybindings.handles(press("KeyP", { metaKey: true, shiftKey: true })),
+  ).toBe(true);
+  expect(keybindings.handles(press("KeyP", { ctrlKey: true }))).toBe(false);
+  expect(keybindings.handles(press("KeyC", { metaKey: true }))).toBe(false);
+  expect(keybindings.handles(press("ShiftLeft", { shiftKey: true }))).toBe(
+    false,
+  );
+  expect(ran).toEqual([]);
+});
+
+test("handles holds for the key that goes on a chord, and for the one that breaks it", () => {
+  const { keybindings } = setup();
+  const press = (code: string, init: KeyboardEventInit = {}) =>
+    new KeyboardEvent("keydown", { code, cancelable: true, ...init });
+  expect(keybindings.handles(press("KeyK", { metaKey: true }))).toBe(true);
+  keybindings.dispatch(press("KeyK", { metaKey: true }));
+  expect(keybindings.handles(press("KeyS", { metaKey: true }))).toBe(true);
+  expect(keybindings.handles(press("KeyX"))).toBe(true);
+});

@@ -5,6 +5,7 @@ import type {
   Plan,
   PlanId,
   PlanRequest,
+  SubscriptionId,
 } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
 import { notify } from "@twigo/ui";
@@ -55,9 +56,10 @@ interface Undo {
 }
 
 /**
- * How a run ended, for its caller: a Reveal's value among them. `refused` is
- * a plan the gate refused, before anything was asked or taken, so what the
- * plan was of, a preview among it, is still there.
+ * How a run ended, for its caller: a Reveal's value and a shell's session
+ * among them. `refused` is a plan the gate refused, before anything was
+ * asked or taken, so what the plan was of, a preview among it, is still
+ * there.
  */
 export type Outcome =
   | {
@@ -67,7 +69,8 @@ export type Outcome =
       readonly state: "revealed";
       readonly value: string;
       readonly binary: boolean;
-    };
+    }
+  | { readonly state: "session"; readonly id: SubscriptionId };
 
 /**
  * The webview's side of the command bus (ARCHITECTURE 5.1, 6.4): asks Rust
@@ -143,9 +146,12 @@ export class Operations {
       this.backend.invoke("command_cancel", plan.id).catch(this.report);
       return { state: "cancelled" };
     }
-    // An undo takes its own and leaves a later one standing, as in Rust.
+    // An undo takes its own and leaves a later one standing, as in Rust; a
+    // Reveal and a shell change nothing an undo could put back.
     const space =
-      request.action === "reveal" || request.action === "undo"
+      request.action === "reveal" ||
+      request.action === "undo" ||
+      request.action === "shell"
         ? undefined
         : request.space;
     // Rust takes the undo as its run starts; a refused one leaves it.
@@ -359,6 +365,9 @@ export class Operations {
               value: event.value,
               binary: event.binary,
             });
+            return;
+          case "session":
+            end({ state: "session", id: event.id });
             return;
           case "failed":
             this.report(event.error);

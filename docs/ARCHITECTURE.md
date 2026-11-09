@@ -630,7 +630,7 @@ The bench also replays the cases that broke other clients, and one that loopback
 | Space rail         | Tiles of the open spaces (D6, Lens's hotbar), each with a dot of its connection, ⌘1..9 by position, a button that opens any context                                                                                                                                                                                                                                                                                                      |
 | Primary side bar   | View containers as tabs in its header (Explorer, Port forwards, Helm, Extensions and contributed ones); the active one's views: resource tree, saved filters                                                                                                                                                                                                                                                                             |
 | Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups; with no editor open, the space's home                                                                                                                                                                                                                                                                                                                   |
-| Panel              | A dockview of its own for sessions opened by URI, its layout kept per space beside the editor area's: logs tabs now (4.6); a pod's shell, the terminal (pty), the cluster's Events, Output (Twigo logs per channel) and Agent activity (audit, 6.6) later. Its tabs split and move; it maximizes over the editor area and hides with ⌘J                                                                                                  |
+| Panel              | A dockview of its own for sessions opened by URI, its layout kept per space beside the editor area's: logs and shell tabs now (4.6); the terminal (pty), the cluster's Events, Output (Twigo logs per channel) and Agent activity (audit, 6.6) later. Its tabs split and move; it maximizes over the editor area and hides with ⌘J                                                                                                       |
 | Secondary side bar | The ACP agent panel later; hidden while nothing lives there                                                                                                                                                                                                                                                                                                                                                                              |
 | Status bar         | In the shell's colour, entries as data: on the left the active space in its context's colour, with a lock while its mode holds writes back (6.4), a warning while the login shell's environment is missing (6.1), credentials that need the person, the cluster's version, or its connection in words when it is not connected (later port-forwards, sync); on the right the active list's rows and how many fail or wait, each a filter |
 
@@ -671,16 +671,16 @@ The layout per space is persisted (dockview `toJSON` and which parts show); part
 Inputs are typed URIs.
 A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor resolver does:
 
-| URI                                                                 | Editor                                                                                                                                                         |
-| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `k8s://<space>/<group>/<version>/<resource>[/<ns>]/<name>`          | Resource editor with sub-tabs: Overview, YAML, Events, Related; Logs in its title opens the object's logs tab in the panel, and Shell for pods comes with exec |
-| `k8s-list://<space>/<gvr>?ns=…&q=…`                                 | Resource table as an editor, so one can pin "pods in payments where status≠Running" next to another list                                                       |
-| `logs://<space>/<group>/<version>/<resource>/<ns>/<name>`           | Logs tab in the panel (4.6): a pod's, or a workload's pods' merged; the core group an empty segment, as in `k8s://`                                            |
-| `exec://<space>/<ns>/<pod>/<container>`                             | Terminal (xterm)                                                                                                                                               |
-| `pf://<space>/<forward-id>`                                         | Port-forward tab: state, target and resolved pod, local address, open connections, bytes, errors, a quick HTTP request tester                                  |
-| `diff://edit/apply?editor=<uri>`, `diff://<space>/objects?…`        | Monaco diff: the apply dry-run of an editor's edit, its opened object against the server's now (`edit/server`), Compare with…, any two objects                 |
-| `untitled://<space>/manifest-n`                                     | New manifest of a space, numbered within it; its first Apply asks for the target context and, once applied, opens the object it made                           |
-| `twigo://settings`, `twigo://keybindings`, `twigo://extension/<id>` | Settings UI, keybindings UI, extension details                                                                                                                 |
+| URI                                                                 | Editor                                                                                                                                                       |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `k8s://<space>/<group>/<version>/<resource>[/<ns>]/<name>`          | Resource editor with sub-tabs: Overview, YAML, Events, Related; Logs in its title opens the object's logs tab in the panel, and Shell for pods its shell tab |
+| `k8s-list://<space>/<gvr>?ns=…&q=…`                                 | Resource table as an editor, so one can pin "pods in payments where status≠Running" next to another list                                                     |
+| `logs://<space>/<group>/<version>/<resource>/<ns>/<name>`           | Logs tab in the panel (4.6): a pod's, or a workload's pods' merged; the core group an empty segment, as in `k8s://`                                          |
+| `exec://<space>/<ns>/<pod>/<container>[?n=2][?attach=1]`            | Shell tab in the panel (4.6): xterm over an exec of the container, `n` for a second shell on it, `attach` for its main process                               |
+| `pf://<space>/<forward-id>`                                         | Port-forward tab: state, target and resolved pod, local address, open connections, bytes, errors, a quick HTTP request tester                                |
+| `diff://edit/apply?editor=<uri>`, `diff://<space>/objects?…`        | Monaco diff: the apply dry-run of an editor's edit, its opened object against the server's now (`edit/server`), Compare with…, any two objects               |
+| `untitled://<space>/manifest-n`                                     | New manifest of a space, numbered within it; its first Apply asks for the target context and, once applied, opens the object it made                         |
+| `twigo://settings`, `twigo://keybindings`, `twigo://extension/<id>` | Settings UI, keybindings UI, extension details                                                                                                               |
 
 - **Details and preview tabs.**
   A click or Enter on a row opens its details, and Space shows or hides them, as Linear's peek; arrows move them along and Esc closes them.
@@ -894,7 +894,7 @@ Extensions add commands, not prefixes.
     - a line shows its text as the container wrote it, ANSI colours as tokens at 4.5:1 or more on the editor, warnings and errors tinted with an edge as failing rows are; markers say that a container ended, with its code and next start, that a pod joined from its ReplicaSet or left, and what the buffer dropped;
     - F, W and T toggle follow, wrap and timestamps while the lines have the focus, ⌘F finds and `/` filters; below 1,100 px the toolbar drops the level counts, narrows its fields and shortens the range's label, and below 800 px, a split panel's group, the filter and the search go to a row of their own under it, which opens once their icons, `/` or ⌘F ask for a field, and while either is set, so a split panel keeps every control.
 - **Exec and attach.**
-  xterm.js 6 with the WebGL addon.
+  xterm.js 6.0.0 with the WebGL addon 0.19.0, the fit addon and Unicode 11.
   It falls back to the DOM renderer on context loss, which happens on WebKitGTK.
   WebGL is disposed on hidden tabs.
   A shell or an attach is a plan of the command bus (5.1, 6.4): its run parks a session in `twigo-core` and connects nothing, and `shell_open` starts it with the terminal's size, so the first prompt is laid out right; a session is only reached through a plan that ran.
@@ -918,6 +918,31 @@ Extensions add commands, not prefixes.
     A session ends on those and on no other retirement: its socket is on the sessions client, whose connections are not tracked, so a new certificate or a failed probe, which retire the api client's connections (3.2, 6.2), say nothing of it; `Connections::network` counts only the wakes and the moved routes.
     A pod deleted under a session ended it as exit 137 (`shell_live` on kind 1.37 with containerd, 2026-11-09).
     A context that turns read-only, by a relock or an unlock running out, ends its shells as `Relocked`, those parked or queued as well as those connecting or running; `guarded` does not.
+  - **A tab and its terminal.**
+    A shell is a `exec://` editor of the panel, opened by `s` on a pod, by Shell in its details, context menu and editor title, and by Attach, which joins the container's main process.
+    `s` asks which container when several run, the default first, then plans `action: "shell"` through the command bus, which draws its friction (6.4); only a run that answers with a session opens the tab, so a cancel or a refusal opens nothing.
+    The terminal and its element belong to a service keyed by the tab's URI, not to the view, which moves the element in when it mounts: moving a tab between groups or hiding the panel loses nothing, and the session goes on writing to the terminal meanwhile.
+    The first size goes in `shell_open`, once the terminal is mounted and fitted, and `shell_resize` follows a layout change that has held still for 100 ms, when cols or rows changed.
+    A tab restored after a restart has no session: it says its shell ended when Twigo closed and offers Start, and never runs anything on its own.
+  - **Output.**
+    Rust sends the bytes of the process's output and its events over one channel, in order.
+    The bytes are written to xterm as `Uint8Array`, which is stream-aware across frames, and Rust is told how many the terminal has parsed from the callback of `write`, so flow control follows what xterm has really parsed: a frame of 64 KiB at most, nothing more read at 256 KiB unacknowledged, reading again below 64 KiB.
+    A terminal keeps 5000 lines.
+    What is typed goes one `shell_input` at a time, and what is typed while a call is in flight goes in the next, so keystrokes keep their order whatever the transport does.
+  - **WebGL.**
+    A terminal loads the addon while its tab is on screen, and gives it up in a task after the tab was hidden, behind another tab, under a maximized panel or in a hidden panel, since disposing it in the task that hides the tab made the browser measure the terminal for every row ([xterm.js #6208](https://github.com/xtermjs/xterm.js/issues/6208)).
+    WebKit keeps 16 live WebGL contexts per page: of 24 terminals, the first 8 lost theirs (a real WKWebView, macOS 27.2, 2026-11-09), and Monaco or anything else that draws with WebGL shares the limit.
+    A failed load and a lost context leave that terminal on the DOM renderer.
+    With an opaque background, 6.0.0 drew colours, box drawing, Cyrillic, CJK and emoji correctly in a real WKWebView, also while scrolling thousands of lines (macOS 27.2, 2026-11-09), so [#5816](https://github.com/xtermjs/xterm.js/issues/5816) did not reproduce there.
+  - **Keys, paste and links.**
+    The terminal keeps every key except the ⌘ chords that are workbench bindings, which `attachCustomKeyEventHandler` leaves to the workbench, as VS Code does; single-letter list keys never fire in a terminal, since `listFocus` does not hold there.
+    Copy and paste ride on the `copy` and `paste` events, which xterm answers with the selection and with `Terminal.paste`, so bracketed paste works; the Edit menu keeps its Copy and Paste for them.
+    A `linkHandler` makes OSC 8 links do nothing unless ⌘-clicked, and opens only what the app's opener takes, `https` and `http` on localhost; xterm's `confirm` and `window.open` never run, and no addon detects URLs.
+  - **Endings.**
+    A session's ending has its words, which stand once in the scrollback, in a quiet colour, with its state and Restart at the right of the tab strip: `Session ended.`, `Session ended with exit code N.`, `The attach ended.`, `This container has no shell.` with the runtime's message, the error's own message, `The connection was lost. A shell cannot be resumed.`, and `The context became read-only.`.
+    A finished tab stays with its scrollback readable and selectable and its input off, until it is closed or restarted; Restart plans a new shell, so `guarded` asks again.
+    A session that waits for a place among the cluster's 64 says so in its tab, and the status bar lists open shells while there are any, to go to one or close it.
+  - The theme is the editor's surface and the logs' sixteen colours from the tokens, and follows the document's theme live.
 - **Port-forward manager.**
   A target is a Pod, a Service or a workload.
   - The manager binds the local `TcpListener` and keeps it for the life of the forward, so no other process can take the port between check and bind.
