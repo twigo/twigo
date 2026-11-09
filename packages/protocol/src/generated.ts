@@ -895,6 +895,11 @@ export type OpenLogs = { target: LogTarget, source: LogSource, view: LogView, };
 export type OpenObject = { object: ObjectQuery, parts: ObjectParts, };
 
 /**
+ * Starts the session a plan's run answered with.
+ */
+export type OpenShell = { id: SubscriptionId, cols: number, rows: number, };
+
+/**
  * The object as it was opened, which an edit is measured against. Its
  * `lock` is apart from `base`: "Keep mine" after a change on the server
  * diffs against the old base and locks to the new version, since diffing
@@ -921,7 +926,7 @@ locked?: unknown, };
  * How a running plan goes, over its channel; every kind but `running` is
  * the last.
  */
-export type OperationEvent = { "state": "running", text: string, } | { "state": "done", text: string, undoUntil: number | null, } | { "state": "stopped", text: string, } | { "state": "revealed", value: string, binary: boolean, } | { "state": "failed", error: IpcError, };
+export type OperationEvent = { "state": "running", text: string, } | { "state": "done", text: string, undoUntil: number | null, } | { "state": "stopped", text: string, } | { "state": "revealed", value: string, binary: boolean, } | { "state": "session", id: SubscriptionId, } | { "state": "failed", error: IpcError, };
 
 /**
  * An object described for people: sections in their order, each a list of
@@ -971,7 +976,7 @@ export type PlanId = number;
 /**
  * What a person asks a command to do.
  */
-export type PlanRequest = { "action": "delete", space: string, targets: Array<ResourceRef>, } | { "action": "scale", space: string, target: ResourceRef, replicas: number, } | { "action": "restart", space: string, target: ResourceRef, } | { "action": "cordon", space: string, node: string, unschedulable: boolean, } | { "action": "drain", space: string, node: string, } | { "action": "trigger", space: string, namespace: string, name: string, } | { "action": "suspend", space: string, target: ResourceRef, suspend: boolean, } | { "action": "undo", space: string, } | { "action": "reveal", object: SubscriptionId, key: string, } | { "action": "apply", space: string, preview: PreviewId, };
+export type PlanRequest = { "action": "delete", space: string, targets: Array<ResourceRef>, } | { "action": "scale", space: string, target: ResourceRef, replicas: number, } | { "action": "restart", space: string, target: ResourceRef, } | { "action": "cordon", space: string, node: string, unschedulable: boolean, } | { "action": "drain", space: string, node: string, } | { "action": "trigger", space: string, namespace: string, name: string, } | { "action": "suspend", space: string, target: ResourceRef, suspend: boolean, } | { "action": "undo", space: string, } | { "action": "reveal", object: SubscriptionId, key: string, } | { "action": "apply", space: string, preview: PreviewId, } | { "action": "shell", target: ShellTarget, kind: ShellKind, };
 
 export type PluginStatus = { "state": "idle" } | { "state": "waiting" } | { "state": "running", 
 /**
@@ -1122,6 +1127,26 @@ export type SetWindow = { id: SubscriptionId, start: number,
 end: number, };
 
 /**
+ * How many bytes of output the terminal has parsed since the last ack.
+ */
+export type ShellAck = { id: SubscriptionId, bytes: number, };
+
+/**
+ * The containers of a pod a shell can reach, those that run.
+ */
+export type ShellContainers = { containers: Array<string>, 
+/**
+ * The one its `kubectl.kubernetes.io/default-container` annotation
+ * names, when that one runs, else the first of `containers`.
+ */
+default: string, };
+
+/**
+ * Why a session ended; none can resume, as an exec cannot.
+ */
+export type ShellEnd = { "reason": "exited", code: number, } | { "reason": "noShell", message: string, } | { "reason": "failed", error: IpcError, } | { "reason": "connectionLost" } | { "reason": "relocked" };
+
+/**
  * Where the login shell's environment stands (ARCHITECTURE 6.1).
  */
 export type ShellEnvironment = { "state": "resolving" } | { "state": "resolved" } | { "state": "failed", 
@@ -1137,6 +1162,34 @@ reason: string,
  * The end of what the shell printed, the environment left out.
  */
 output: string, };
+
+/**
+ * How a session goes; `ended` comes last, after all of its output.
+ */
+export type ShellEvent = { "state": "queued" } | { "state": "connecting" } | { "state": "running" } | { "state": "ended", end: ShellEnd, };
+
+/**
+ * What the person typed or pasted, in the order the webview sends it, one
+ * call at a time.
+ */
+export type ShellInput = { id: SubscriptionId, data: Array<number>, };
+
+export type ShellKind = "shell" | "attach";
+
+/**
+ * What a session's channel carries: its output as bytes, and its events.
+ * Only TypeScript reads this type, which Rust sends as two kinds of body.
+ */
+export type ShellMessage = ArrayBuffer | ShellEvent;
+
+/**
+ * A pod a shell may be opened in.
+ */
+export type ShellPod = { space: string, namespace: string, pod: string, };
+
+export type ShellResize = { id: SubscriptionId, cols: number, rows: number, };
+
+export type ShellTarget = { space: string, namespace: string, pod: string, container: string, };
 
 /**
  * Where each container's lines start.
@@ -1257,6 +1310,12 @@ export type Commands = {
   object_values: { request: GetValues; response: Array<string | null>; message: null };
   object_close: { request: SubscriptionId; response: null; message: null };
   schema_get: { request: SchemaQuery; response: string; message: null };
+  shell_containers: { request: ShellPod; response: ShellContainers; message: null };
+  shell_open: { request: OpenShell; response: null; message: ShellMessage };
+  shell_input: { request: ShellInput; response: null; message: null };
+  shell_resize: { request: ShellResize; response: null; message: null };
+  shell_ack: { request: ShellAck; response: null; message: null };
+  shell_close: { request: SubscriptionId; response: null; message: null };
   logs_open: { request: OpenLogs; response: SubscriptionId; message: LogBatch };
   logs_set_source: { request: SetLogSource; response: null; message: null };
   logs_set_view: { request: SetLogView; response: null; message: null };

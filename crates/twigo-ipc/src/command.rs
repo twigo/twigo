@@ -7,9 +7,10 @@ use ts_rs::TS;
 use crate::{
     AccessQuery, Ack, ApplyPreviewed, ApplyRequest, ClusterVersion, Context, ContextAuth,
     Discovered, DownloadLogs, ExecReview, Execute, GetValues, KeyboardLayout, ListBatch, ListQuery,
-    LogBatch, ObjectBatch, OpenLogs, OpenObject, OperationEvent, Plan, PlanId, PlanRequest,
-    SchemaQuery, SetContextEnvironment, SetContextMode, SetLogSource, SetLogView, SetLogWindow,
-    SetParts, SetWindow, ShellEnvironment, Space, StateEntry, StateSnapshot, SubscriptionId,
+    LogBatch, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan, PlanId,
+    PlanRequest, SchemaQuery, SetContextEnvironment, SetContextMode, SetLogSource, SetLogView,
+    SetLogWindow, SetParts, SetWindow, ShellAck, ShellContainers, ShellEnvironment, ShellInput,
+    ShellMessage, ShellPod, ShellResize, Space, StateEntry, StateSnapshot, SubscriptionId,
 };
 
 pub trait Command {
@@ -467,6 +468,64 @@ pub struct UrlOpen;
 impl Command for UrlOpen {
     const NAME: &'static str = "url_open";
     type Request = String;
+    type Response = ();
+    type Message = ();
+}
+
+/// The containers of a pod a shell can reach; refused, in words, for a pod
+/// that runs none.
+pub struct ShellContainersGet;
+
+impl Command for ShellContainersGet {
+    const NAME: &'static str = "shell_containers";
+    type Request = ShellPod;
+    type Response = ShellContainers;
+    type Message = ();
+}
+
+/// Starts a session a plan's run answered with; its output and events come
+/// over the channel until it ends.
+pub struct ShellOpen;
+
+impl Command for ShellOpen {
+    const NAME: &'static str = "shell_open";
+    type Request = OpenShell;
+    type Response = ();
+    type Message = ShellMessage;
+}
+
+pub struct ShellSendInput;
+
+impl Command for ShellSendInput {
+    const NAME: &'static str = "shell_input";
+    type Request = ShellInput;
+    type Response = ();
+    type Message = ();
+}
+
+pub struct ShellSetSize;
+
+impl Command for ShellSetSize {
+    const NAME: &'static str = "shell_resize";
+    type Request = ShellResize;
+    type Response = ();
+    type Message = ();
+}
+
+pub struct ShellAcknowledge;
+
+impl Command for ShellAcknowledge {
+    const NAME: &'static str = "shell_ack";
+    type Request = ShellAck;
+    type Response = ();
+    type Message = ();
+}
+
+pub struct ShellClose;
+
+impl Command for ShellClose {
+    const NAME: &'static str = "shell_close";
+    type Request = SubscriptionId;
     type Response = ();
     type Message = ();
 }

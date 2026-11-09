@@ -4,6 +4,7 @@ use std::fmt::Write;
 
 use ts_rs::{Config, TS, TypeVisitor};
 
+use crate::ShellEvent;
 use crate::command::{
     AccessReview, ApplyPreview, ClusterVersionGet, Command, CommandCancel, CommandExecute,
     CommandPlan, ContextAuthWatch, ContextEnvironmentSet, ContextModeSet, ContextRelock,
@@ -11,8 +12,8 @@ use crate::command::{
     KeyboardLayoutWatch, ListAck, ListSetWindow, ListSubscribe, ListUnsubscribe, LogsAck,
     LogsClose, LogsDownload, LogsOpen, LogsSetSource, LogsSetView, LogsSetWindow, NamespacesList,
     ObjectAck, ObjectClose, ObjectOpen, ObjectSetParts, ObjectValues, ResourcesWatch, SchemaGet,
-    ShellEnvironmentRetry, ShellEnvironmentWatch, SpaceOpen, SpacesList, StateLoad, StateSet,
-    UrlOpen,
+    ShellAcknowledge, ShellClose, ShellContainersGet, ShellEnvironmentRetry, ShellEnvironmentWatch,
+    ShellOpen, ShellSendInput, ShellSetSize, SpaceOpen, SpacesList, StateLoad, StateSet, UrlOpen,
 };
 
 /// The TypeScript module of `packages/protocol`: every type the commands
@@ -49,6 +50,13 @@ pub fn typescript() -> String {
     module.command::<ObjectValues>();
     module.command::<ObjectClose>();
     module.command::<SchemaGet>();
+    module.command::<ShellContainersGet>();
+    module.command::<ShellOpen>();
+    module.visit::<ShellEvent>();
+    module.command::<ShellSendInput>();
+    module.command::<ShellSetSize>();
+    module.command::<ShellAcknowledge>();
+    module.command::<ShellClose>();
     module.command::<LogsOpen>();
     module.command::<LogsSetSource>();
     module.command::<LogsSetView>();
