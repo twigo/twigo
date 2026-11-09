@@ -53,9 +53,11 @@ fn exit_code(status: &Status) -> Option<i32> {
         .ok()
 }
 
-/// What a runtime says of a shell the container does not have.
+/// What a runtime says of a shell the container does not have: runc's words
+/// and crun's. A bare `no such file or directory` is not among them, since the
+/// API server's own leg to a node says it too.
 fn no_executable(message: &str) -> bool {
-    message.contains("executable file not found") || message.contains("no such file or directory")
+    message.contains("executable file") && message.contains("not found")
 }
 
 #[cfg(test)]
@@ -72,6 +74,7 @@ mod tests {
     const EXIT_126: &str = r#"{"status":"Failure","reason":"NonZeroExitCode","message":"command terminated with non-zero exit code","details":{"causes":[{"reason":"ExitCode","message":"126"}]}}"#;
     const NO_SHELL: &str = r#"{"status":"Failure","reason":"InternalError","code":500,"message":"Internal error occurred: Internal error occurred: failed to exec in container: failed to start exec \"b\": OCI runtime exec failed: exec failed: unable to start container process: exec: \"bash\": executable file not found in $PATH"}"#;
     const NOT_EXECUTABLE: &str = r#"{"status":"Failure","reason":"InternalError","code":500,"message":"Internal error occurred: failed to exec: exec: \"/etc/passwd\": permission denied"}"#;
+    const CRUN: &str = r#"{"status":"Failure","reason":"InternalError","code":500,"message":"Internal error occurred: crun: executable file `sh` not found in $PATH: No such file or directory"}"#;
     const NO_FILE: &str = r#"{"status":"Failure","reason":"InternalError","code":500,"message":"Internal error occurred: stat /bin/sh: no such file or directory"}"#;
 
     fn no_shell(json: &str) -> ShellEnd {
@@ -128,7 +131,14 @@ mod tests {
                 ShellEnd::Exited { code: 127 },
             ),
             ("not found", NO_SHELL, false, true, no_shell(NO_SHELL)),
-            ("no such file", NO_FILE, false, true, no_shell(NO_FILE)),
+            ("crun's words", CRUN, false, true, no_shell(CRUN)),
+            (
+                "no such file is no missing shell",
+                NO_FILE,
+                false,
+                true,
+                failed(NO_FILE),
+            ),
             (
                 "permission denied is no missing shell",
                 NOT_EXECUTABLE,
