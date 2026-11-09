@@ -100,13 +100,6 @@ struct Commands {
     size: watch::Receiver<(u16, u16)>,
 }
 
-/// What cuts a session short.
-struct Cuts {
-    relocked: BoxFuture<'static, ()>,
-    abandoned: BoxFuture<'static, ()>,
-    retired: watch::Receiver<u64>,
-}
-
 impl Session {
     /// Holds a session to start on `clients`. `relocked` ends once its
     /// context turns read-only.
@@ -192,29 +185,25 @@ impl Drop for Session {
     }
 }
 
-fn abandoned(clients: &Clients) -> impl Future<Output = ()> + Send + 'static {
-    let mut abandoned = clients.connections().abandoned();
-    async move {
-        // Its sender lives as long as the clients this session holds.
-        let _ = abandoned.wait_for(|abandoned| *abandoned).await;
-    }
+async fn abandoned(mut abandoned: watch::Receiver<bool>) {
+    // Its sender lives as long as the clients this session holds.
+    let _ = abandoned.wait_for(|abandoned| *abandoned).await;
 }
 
 /// The session's life: in the queue, connecting, then running; every step
-/// also ends on a relock or the clients going.
+/// also ends on a relock or the clients going. Clients abandoned before it
+/// runs are told by `abandoned`, and once it runs by the retirement that
+/// abandoning makes.
 async fn run(parked: Parked, mut send: impl FnMut(Frame) -> bool + Send + 'static) {
     let Parked {
         clients,
         connect,
         spec,
-        relocked,
+        mut relocked,
         commands,
     } = parked;
-    let mut cuts = Cuts {
-        relocked,
-        abandoned: abandoned(&clients).boxed(),
-        retired: clients.connections().retired(),
-    };
+    let mut abandoned = std::pin::pin!(abandoned(clients.connections().abandoned()));
+    let mut retired = clients.connections().retired();
     macro_rules! end {
         ($end:expr) => {{
             send(Frame::Event(ShellEvent::Ended { end: $end }));
@@ -231,8 +220,8 @@ async fn run(parked: Parked, mut send: impl FnMut(Frame) -> bool + Send + 'stati
         loop {
             tokio::select! {
                 biased;
-                () = &mut cuts.relocked => end!(ShellEnd::Relocked),
-                () = &mut cuts.abandoned => end!(ShellEnd::ConnectionLost),
+                () = &mut relocked => end!(ShellEnd::Relocked),
+                () = &mut abandoned => end!(ShellEnd::ConnectionLost),
                 permit = &mut admit => break permit,
                 Ok(()) = waiting.changed() => {
                     if *waiting.borrow_and_update()
@@ -247,12 +236,12 @@ async fn run(parked: Parked, mut send: impl FnMut(Frame) -> bool + Send + 'stati
     if !send(Frame::Event(ShellEvent::Connecting)) {
         return;
     }
-    cuts.retired.borrow_and_update();
+    retired.borrow_and_update();
     let connected = tokio::select! {
         biased;
-        () = &mut cuts.relocked => end!(ShellEnd::Relocked),
-        () = &mut cuts.abandoned => end!(ShellEnd::ConnectionLost),
-        _ = cuts.retired.changed() => end!(ShellEnd::ConnectionLost),
+        () = &mut relocked => end!(ShellEnd::Relocked),
+        () = &mut abandoned => end!(ShellEnd::ConnectionLost),
+        _ = retired.changed() => end!(ShellEnd::ConnectionLost),
         connected = connect.connect(&spec) => connected,
     };
     let connected = match connected {
@@ -264,7 +253,7 @@ async fn run(parked: Parked, mut send: impl FnMut(Frame) -> bool + Send + 'stati
     if !send(Frame::Event(ShellEvent::Running)) {
         return;
     }
-    pump(connected, &spec, commands, cuts, send).await;
+    pump(connected, &spec, commands, retired, relocked, send).await;
 }
 
 /// The stdout and stderr of a process as one stream of chunks.
@@ -308,7 +297,8 @@ async fn pump(
     connected: connect::Connected,
     spec: &Spec,
     commands: Commands,
-    cuts: Cuts,
+    mut retired: watch::Receiver<u64>,
+    mut relocked: BoxFuture<'static, ()>,
     mut send: impl FnMut(Frame) -> bool,
 ) {
     let Commands {
@@ -316,11 +306,6 @@ async fn pump(
         mut acks,
         mut size,
     } = commands;
-    let Cuts {
-        mut relocked,
-        mut abandoned,
-        mut retired,
-    } = cuts;
     let connect::Connected {
         stdout,
         stderr,
@@ -395,7 +380,6 @@ async fn pump(
             }
             () = set_size(&mut resize, new_size), if new_size.is_some() => new_size = None,
             _ = retired.changed() => end!(ShellEnd::ConnectionLost),
-            () = &mut abandoned => end!(ShellEnd::ConnectionLost),
             () = &mut relocked => end!(ShellEnd::Relocked),
         }
     };

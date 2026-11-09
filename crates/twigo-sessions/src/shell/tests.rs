@@ -389,6 +389,8 @@ async fn all_the_output_goes_before_the_end() {
     write(&mut process, b"first").await;
     write(&mut process, b"gathered").await;
     process.status.send(status(EXIT_3)).unwrap();
+    settle().await;
+    assert_eq!(harness.ended(), None, "the output has not ended yet");
     process.stdout.write_all(b" last").await.unwrap();
     process.stdout.shutdown().await.unwrap();
     settle().await;
@@ -535,6 +537,32 @@ async fn dropping_the_session_releases_its_permit_at_once() {
     settle().await;
     assert_eq!(usage.borrow().sessions.held, 0);
     drop(process.stdout);
+}
+
+struct NeverConnects;
+
+impl Connect for NeverConnects {
+    fn connect(&self, _spec: &Spec) -> BoxFuture<'static, Result<Connected, kube::Error>> {
+        futures::future::pending().boxed()
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn dropping_a_session_still_connecting_releases_its_permit_at_once() {
+    let clients = clients(Budgets::default());
+    let usage = clients.usage();
+    let session = Session::parked(
+        clients,
+        spec(true, true),
+        futures::future::pending().boxed(),
+        Box::new(NeverConnects),
+    );
+    session.open(80, 24, |_| true).unwrap();
+    settle().await;
+    assert_eq!(usage.borrow().sessions.held, 1);
+    drop(session);
+    settle().await;
+    assert_eq!(usage.borrow().sessions.held, 0);
 }
 
 #[tokio::test(start_paused = true)]
