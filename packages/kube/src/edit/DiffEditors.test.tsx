@@ -1,12 +1,13 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { EditorShownContext } from "@twigo/workbench";
 import { inWorkbench, testWorkbench } from "@twigo/workbench/testing";
 import { Discovery } from "../discovery";
 import { diffUri } from "../uri";
 import { DiffEditor } from "./DiffEditors";
 import { resourceVersionOf, yamlOfJson } from "./object";
 import { setupEdit } from "../../test/edits";
-import { createEdits } from "./services";
+import { createEdits, editLookup } from "./services";
 
 vi.mock("./DiffView", () => ({
   default: ({ original, modified }: { original: string; modified: string }) => (
@@ -59,6 +60,32 @@ test("a diff tab that is the active editor and displays the preview makes it sho
   active.mockReturnValue(diff);
   rerender(view());
   expect(answered()).toMatchObject({ shown: true });
+});
+
+test("a diff tab under a maximized panel is the active editor but not on screen, so its preview is shown once the panel is restored", async () => {
+  const { workbench, edits, uri } = await setupEdit("live", "dev");
+  await edits.previews.run(uri, {
+    space: "dev",
+    opened: null,
+    text: edits.copies.get(uri)?.text ?? "",
+  });
+  const diff = diffUri({ kind: "apply", editor: uri });
+  const discovery = new Discovery(workbench);
+  const view = (covered: boolean) => (
+    <EditorShownContext.Provider value={!covered}>
+      <DiffEditor uri={diff} edits={edits} discovery={discovery} />
+    </EditorShownContext.Provider>
+  );
+  vi.spyOn(workbench.editors, "active", "get").mockReturnValue(diff);
+  const { rerender } = render(view(true), { wrapper: inWorkbench(workbench) });
+  expect(await screen.findByTestId("diff")).toBeTruthy();
+  const keys = () => editLookup(edits, uri, workbench.keys.lookup(null));
+  expect(edits.previews.get(uri)).toMatchObject({ shown: false });
+  expect(keys()("edit.applicable")).toBe(false);
+
+  rerender(view(false));
+  expect(edits.previews.get(uri)).toMatchObject({ shown: true });
+  expect(keys()("edit.applicable")).toBe(true);
 });
 
 test("the diff against the server follows the object itself, which nothing else has open", async () => {

@@ -1,7 +1,12 @@
 import { lazy, Suspense, useEffect, useMemo } from "react";
 import { GitCompare } from "lucide-react";
 import { EmptyState, Banner, Skeleton } from "@twigo/ui";
-import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
+import {
+  useChanges,
+  useEditorShown,
+  useWorkbench,
+  type EditorProps,
+} from "@twigo/workbench";
 import {
   hasStatusSubresource,
   useResources,
@@ -59,8 +64,10 @@ function ApplyDiff({
   useChanges(edits.copies.changes);
   useChanges(editors.changes);
   const preview = edits.previews.get(editor);
-  // An answer that came while its space was away is shown once its tab is on screen.
-  const onScreen = editors.active === uri && preview?.state === "answered";
+  const shown = useEditorShown();
+  // An answer that came while its space was away, or its tab was under a maximized panel, is shown once its tab is on screen.
+  const onScreen =
+    shown && editors.active === uri && preview?.state === "answered";
   useEffect(() => {
     if (onScreen) edits.previews.shown(editor);
   }, [edits.previews, editor, onScreen]);
