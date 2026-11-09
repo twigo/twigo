@@ -22,6 +22,7 @@ interface FakeView {
 const fake = vi.hoisted(() => ({
   models: [] as FakeModel[],
   views: [] as FakeView[],
+  options: [] as object[],
   /** As Monaco's `type`: the text goes to the first view that says it has the focus. */
   type(text: string) {
     const view = this.views.find(({ disposed, focused }) => focused && !disposed);
@@ -61,7 +62,9 @@ vi.mock("./monaco", () => {
         fake.models.push(model);
         return model;
       },
-      create: (host: HTMLElement, { model }: { model: FakeModel }) => {
+      create: (host: HTMLElement, options: { model: FakeModel }) => {
+        const { model } = options;
+        fake.options.push(options);
         const input = document.createElement("textarea");
         host.append(input);
         const view = {
@@ -98,6 +101,7 @@ afterEach(() => {
   cleanup();
   fake.models.length = 0;
   fake.views.length = 0;
+  fake.options.length = 0;
 });
 
 const URI = "k8s://dev//v1/configmaps/default/settings";
@@ -125,6 +129,11 @@ test("the model and the view's state outlive the view that shows them, until the
 
   copies.closed(URI);
   expect(model.disposed).toBe(true);
+});
+
+test("completion rises as a key is typed, which YAML tokenizes as a string", () => {
+  render(<YamlEditor uri="details:1" text="a: 1" readOnly />);
+  expect(fake.options[0]).toMatchObject({ quickSuggestions: { strings: true } });
 });
 
 test("a viewer without buffers keeps nothing of its own", () => {

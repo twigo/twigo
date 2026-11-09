@@ -173,6 +173,8 @@ function ShownYamlEditor({
       tabSize: 2,
       insertSpaces: true,
       detectIndentation: false,
+      // A YAML key being typed tokenizes as a plain scalar, which is a string.
+      quickSuggestions: { strings: true },
     });
     if (buffer.view) instance.restoreViewState(buffer.view);
     model.current = created;
