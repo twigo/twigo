@@ -294,6 +294,62 @@ test("a cancelled plan frees its place for the next press", async () => {
   ]);
 });
 
+async function planAway() {
+  const mount = await mounted("shellOneContainer");
+  const { workbench, start } = mount;
+  await act(() => workbench.spaces.open("staging"));
+  await act(() => workbench.spaces.open("prod-eu"));
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  await settle(4);
+  const run = start("staging", ONE);
+  await settle(4);
+  act(() => {
+    workbench.spaces.select("qa");
+  });
+  await settle(4);
+  act(() => {
+    workbench.operations.asking?.confirm(undefined);
+  });
+  await run;
+  await settle(4);
+  return {
+    ...mount,
+    uri: execUri({ ...RUNNING, space: "staging", pod: FIRST.staging ?? POD }),
+  };
+}
+
+test("a shell planned while another space shows opens when its space comes back", async () => {
+  const { workbench, tabs, uri } = await planAway();
+  expect(panelTabs()).toEqual([]);
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  await settle(10);
+  expect(panelTabs()).toEqual([uri]);
+  expect(tabs.has(uri)).toBe(true);
+});
+
+test("a shell planned while another space shows ends, with its place freed, when the person goes to a third", async () => {
+  const { workbench, tabs, backend, uri } = await planAway();
+  const invoke = vi.spyOn(backend, "invoke");
+  act(() => {
+    workbench.spaces.select("prod-eu");
+  });
+  await settle(10);
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  await settle(10);
+  expect(panelTabs()).toEqual([]);
+  expect(tabs.has(uri)).toBe(false);
+  expect(invoke.mock.calls.filter(([c]) => c === "shell_close")).toHaveLength(
+    1,
+  );
+  expect(screen.queryByText(/\d+ shells?$/)).toBeNull();
+});
+
 test("a tab the layout restored says its shell ended when Twigo closed, runs nothing, and Start plans a shell", async () => {
   const { workbench, backend } = await mounted("shellOneContainer");
   const invoke = vi.spyOn(backend, "invoke");

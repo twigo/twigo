@@ -137,9 +137,10 @@ export class Editors {
   }
 
   /**
-   * Tells `listener` the URI of each editor that closes. Moving an editor
-   * to another group closes none (dockview reports no removal while it
-   * moves a panel), and neither does a space giving way to another.
+   * Tells `listener` the URI of each editor that closes, and of each open
+   * that waited for a space and is forgotten. Moving an editor to another
+   * group closes none (dockview reports no removal while it moves a panel),
+   * and neither does a space giving way to another.
    */
   onClose(listener: (uri: string) => void): () => void {
     this.#closed.add(listener);
@@ -151,8 +152,9 @@ export class Editors {
   /**
    * An area's dockview while it is mounted, and the space it shows. What
    * waited for the space opens in it; what waited for another is forgotten,
-   * since the person went elsewhere. What was closed for the space closes in
-   * it, however many other spaces came first.
+   * since the person went elsewhere, and reported as closed to whoever kept
+   * something for it. What was closed for the space closes in it, however
+   * many other spaces came first.
    */
   attach(api: DockviewApi, area: Area, space: string): () => void {
     this.#apis.set(area, api);
@@ -162,7 +164,7 @@ export class Editors {
       else this.changes.emit();
     });
     const removal = api.onDidRemovePanel((panel) => {
-      for (const closed of this.#closed) closed(panel.id);
+      this.#notifyClosed(panel.id);
       if (area === "panel") this.changes.emit();
     });
     const added =
@@ -184,6 +186,7 @@ export class Editors {
       if (later.area !== area) continue;
       this.#waiting.delete(uri);
       if (later.space === space) this.open(uri, later.options);
+      else this.#notifyClosed(uri);
     }
     return () => {
       active.dispose();
@@ -415,6 +418,10 @@ export class Editors {
       if (panel) return { area, panel };
     }
     return undefined;
+  }
+
+  #notifyClosed(uri: string): void {
+    for (const closed of this.#closed) closed(uri);
   }
 
   #setActive(panel: IDockviewPanel | undefined) {

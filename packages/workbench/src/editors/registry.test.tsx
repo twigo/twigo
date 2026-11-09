@@ -174,6 +174,20 @@ test("an editor waiting for a space that does not come next is forgotten", async
   expect(tabs()).toEqual([]);
 });
 
+test("an editor that waited for a space and is forgotten is reported closed, and one that opens is not", async () => {
+  const { workbench, editors } = await mounted();
+  const closed: string[] = [];
+  editors.onClose((uri) => closed.push(uri));
+  act(() => {
+    editors.open("note://opens?space=staging");
+    editors.open("note://forgotten?space=dev");
+  });
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  expect(closed).toEqual(["note://forgotten?space=dev"]);
+});
+
 test("a close for an editor of another space reaches its dock when that space is mounted, whichever space comes first", async () => {
   const { workbench, editors, tabs } = await mounted();
   const closed: string[] = [];
