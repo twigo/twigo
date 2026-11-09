@@ -119,6 +119,7 @@ export class MockShell {
   readonly #timers = new Set<ReturnType<typeof setTimeout>>();
   #size: { cols: number; rows: number };
   #state: ShellEvent["state"] = "connecting";
+  #ahead = "";
   #line = "";
   #escape = "";
   #pasting = false;
@@ -163,11 +164,16 @@ export class MockShell {
     }
   }
 
+  /** Keeps what is typed before the process runs and gives it to the process then, as Rust's queue does. */
   input(data: readonly number[]): void {
+    const text = this.#decoder.decode(Uint8Array.from(data), { stream: true });
+    if (this.#state === "connecting" || this.#state === "queued") {
+      this.#ahead += text;
+      return;
+    }
     if (this.#state !== "running") {
       throw new IpcError("conflict", "the shell does not run");
     }
-    const text = this.#decoder.decode(Uint8Array.from(data), { stream: true });
     for (const character of text) this.#key(character);
   }
 
@@ -207,6 +213,9 @@ export class MockShell {
         this.#write(BRACKETED_PASTE);
         this.#prompt();
       }
+      const ahead = this.#ahead;
+      this.#ahead = "";
+      for (const character of ahead) this.#key(character);
     });
   }
 

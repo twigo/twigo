@@ -307,6 +307,22 @@ test("typed keys and pastes go to the session in bytes, and the keys of a bound 
   });
 });
 
+test("keys typed while the shell connects go to it, and none while it waits for a place", async () => {
+  const { mounted, opens, sent } = setup();
+  const tab = await mounted();
+  const textarea = tab.term.textarea;
+  if (!textarea) throw new Error("no textarea");
+  expect(tab.getStatus()).toEqual({ state: "connecting" });
+  textarea.dispatchEvent(enter());
+  await vi.advanceTimersByTimeAsync(10);
+  expect(sent("shell_input")).toEqual([{ id: 7, data: [13] }]);
+
+  opens[0]?.send({ state: "queued" });
+  textarea.dispatchEvent(enter());
+  await vi.advanceTimersByTimeAsync(10);
+  expect(sent("shell_input")).toHaveLength(1);
+});
+
 test("a chord that is not a binding reaches the terminal", async () => {
   const { mounted, opens, sent, binds } = setup({ binds: false });
   const tab = await mounted();

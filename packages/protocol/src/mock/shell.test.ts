@@ -275,6 +275,15 @@ test("typed lines are echoed and run: echo, ls and the last size stty reads", as
   expect(shell.text()).toContain("sh: 1: nosuch: not found");
 });
 
+test("what is typed while it connects or waits for a place is kept and runs once the shell does", async () => {
+  const shell = await openShell("shellQueued");
+  await vi.advanceTimersByTimeAsync(1000);
+  await shell.type("echo ahead\r");
+  expect(shell.text()).toBe("");
+  await vi.advanceTimersByTimeAsync(5500);
+  expect(shell.text()).toContain("echo ahead\r\nahead\r\n");
+});
+
 test("a backspace erases what was typed, and a character split between two calls is one", async () => {
   const shell = await openShell();
   await vi.advanceTimersByTimeAsync(500);

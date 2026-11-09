@@ -84,10 +84,15 @@ export class ShellSession {
   /**
    * Sends what was typed or pasted. One call is in flight at a time, and
    * what is typed meanwhile goes in the next, so the keys keep their order
-   * whatever the transport does with concurrent calls.
+   * whatever the transport does with concurrent calls. Rust queues what is
+   * typed while the shell connects, as a terminal keeps type-ahead; one that
+   * waits for a place can wait for minutes, so nothing is kept for it.
    */
   input(data: Uint8Array): void {
-    if (this.#state.state !== "running" || this.#closed) return;
+    const { state } = this.#state;
+    if ((state !== "running" && state !== "connecting") || this.#closed) {
+      return;
+    }
     this.#typed.push(data);
     this.#type();
   }

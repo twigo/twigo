@@ -92,17 +92,22 @@ test("the next input goes after a call failed too, and the failure is reported",
   ]);
 });
 
-test("nothing is sent before the shell runs or after it ended", () => {
+test("what is typed while the shell connects goes, while it waits for a place it is dropped, and after it ended nothing goes", async () => {
   const { fake, session } = opened();
   session.input(new Uint8Array([97]));
+  expect(fake.sent("shell_input")).toEqual([{ id: 7, data: [97] }]);
+  await fake.answer(0);
   fake.send({ state: "queued" });
-  session.input(new Uint8Array([97]));
+  session.input(new Uint8Array([98]));
+  expect(fake.sent("shell_input")).toHaveLength(1);
   fake.send({ state: "connecting" });
-  session.input(new Uint8Array([97]));
+  session.input(new Uint8Array([99]));
+  expect(fake.sent("shell_input")[1]).toEqual({ id: 7, data: [99] });
+  await fake.answer(1);
   fake.send(running);
   fake.send({ state: "ended", end: { reason: "exited", code: 0 } });
-  session.input(new Uint8Array([97]));
-  expect(fake.sent("shell_input")).toEqual([]);
+  session.input(new Uint8Array([100]));
+  expect(fake.sent("shell_input")).toHaveLength(2);
 });
 
 test("acks count the bytes the terminal parsed, and wait for its callback", async () => {
