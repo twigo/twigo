@@ -77,6 +77,18 @@ test("a click opens the row's details over the list, arrows follow, Escape close
   expect(details()).toBeNull();
 });
 
+test("an editor that takes the focus back gives it to the list's grid, where the list keys work", async () => {
+  const workbench = await openList();
+  act(() => {
+    (document.activeElement as HTMLElement | null)?.blur();
+  });
+  expect(document.activeElement).toBe(document.body);
+  act(() => {
+    workbench.editors.keepFocus("editor");
+  });
+  expect(document.activeElement).toBe(grid());
+});
+
 test("Enter on the selected row opens its details", async () => {
   await openList();
   focusGrid();
