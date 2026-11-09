@@ -646,6 +646,13 @@ fn table() -> Vec<Row> {
             Exec,
             NOT_READ_ONLY,
         )),
+        upgrading(row(
+            "attach as kube sends it",
+            get.clone(),
+            "/api/v1/namespaces/a/pods/p/attach?stdin=true&stdout=true&tty=true&container=c",
+            Exec,
+            NOT_READ_ONLY,
+        )),
         // the conservative cases
         row(
             "a node's proxy",

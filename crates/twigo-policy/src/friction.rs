@@ -27,6 +27,9 @@ pub enum Risk {
     /// The person has just read what it changes: an apply, whose diff 6.5
     /// shows before it runs.
     Reviewed,
+    /// A shell or an attach, which a person opens often, so `guarded` asks
+    /// in a dialog rather than for a typed name (6.4).
+    Shell,
 }
 
 /// The friction of `risk` on `context`. A `read-only` context blocks a
@@ -40,6 +43,8 @@ pub fn friction(risk: &Risk, context: &str, access: &ContextAccess) -> Friction 
         (Risk::Reveal, Mode::Guarded | Mode::ReadOnly) => Friction::Confirm,
         (Risk::Reviewed, Mode::ReadWrite) => Friction::AtOnce,
         (Risk::Reviewed, Mode::Guarded | Mode::ReadOnly) => Friction::Confirm,
+        (Risk::Shell, Mode::ReadWrite) => Friction::AtOnce,
+        (Risk::Shell, Mode::Guarded | Mode::ReadOnly) => Friction::Confirm,
         (_, Mode::Guarded | Mode::ReadOnly) => typed_context(),
         (Risk::Reversible, Mode::ReadWrite) => Friction::AtOnce,
         (Risk::Replaced, Mode::ReadWrite)
@@ -136,6 +141,10 @@ mod tests {
                 production,
                 Friction::Confirm,
             ),
+            (Risk::Shell, Mode::ReadWrite, None, Friction::AtOnce),
+            (Risk::Shell, Mode::ReadWrite, production, Friction::AtOnce),
+            (Risk::Shell, Mode::Guarded, staging, Friction::Confirm),
+            (Risk::Shell, Mode::ReadOnly, production, Friction::Confirm),
         ];
         for (risk, mode, environment, expected) in cases {
             assert_eq!(
