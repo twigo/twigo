@@ -278,7 +278,11 @@ pub(crate) async fn containers(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use jiff::SignedDuration;
     use serde_json::json;
+    use twigo_ipc::Environment;
 
     use super::*;
 
@@ -370,6 +374,59 @@ mod tests {
             attach_settings(&value, "gone").unwrap_err().kind,
             ErrorKind::NotFound
         );
+    }
+
+    fn production_unlocked(policy: &Policy, length: SignedDuration) {
+        policy.set_environment("c", Some(Environment::Production));
+        policy.unlock_for("c", length).unwrap();
+        assert_eq!(policy.access("c").mode, Mode::Guarded);
+    }
+
+    #[tokio::test]
+    async fn a_relock_ends_the_wait_of_a_context_that_was_not_read_only() {
+        let policy = Policy::open();
+        production_unlocked(&policy, SignedDuration::from_mins(15));
+        let mut waiting = relocked(Arc::clone(&policy), "c".to_owned()).boxed();
+        assert!((&mut waiting).now_or_never().is_none(), "guarded: it waits");
+        policy.relock("c");
+        tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("a relock ends it");
+    }
+
+    #[tokio::test]
+    async fn an_unlock_running_out_ends_the_wait() {
+        let policy = Policy::open();
+        production_unlocked(&policy, SignedDuration::from_millis(200));
+        let follow = tokio::spawn({
+            let policy = Arc::clone(&policy);
+            async move { policy.follow_unlocks().await }
+        });
+        let mut waiting = relocked(Arc::clone(&policy), "c".to_owned()).boxed();
+        assert!(
+            (&mut waiting).now_or_never().is_none(),
+            "unlocked: it waits"
+        );
+        tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("the unlock running out ends it");
+        assert_eq!(policy.access("c").mode, Mode::ReadOnly);
+        follow.abort();
+    }
+
+    #[tokio::test]
+    async fn a_context_changed_to_another_mode_leaves_the_wait_alone() {
+        let policy = Policy::open();
+        let mut waiting = relocked(Arc::clone(&policy), "c".to_owned()).boxed();
+        assert!((&mut waiting).now_or_never().is_none());
+        policy.set_mode("c", Some(Mode::Guarded)).unwrap();
+        policy.set_mode("other", Some(Mode::ReadOnly)).unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!((&mut waiting).now_or_never().is_none());
+        policy.set_mode("c", Some(Mode::ReadOnly)).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("read-only ends it");
     }
 
     #[test]

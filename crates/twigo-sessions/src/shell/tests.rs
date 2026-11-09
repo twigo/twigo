@@ -703,6 +703,100 @@ async fn over_the_budget_it_says_queued_then_connecting_once_a_place_frees() {
     drop((relock, second));
 }
 
+async fn queued() -> (Harness, Harness, Process) {
+    let budgets = Budgets {
+        sessions: 1,
+        ..Budgets::default()
+    };
+    let (first_to, first_process) = connected(true);
+    let first = parked(true, budgets, Ok(first_to));
+    first.open(80, 24);
+    settle().await;
+    let (second_to, _second_process) = connected(true);
+    let second = harness(
+        spec(true, true),
+        Arc::clone(&first.clients),
+        Box::new(Fake(Mutex::new(Some(Ok(second_to))))),
+    );
+    second.open(80, 24);
+    settle().await;
+    assert_eq!(second.events(), vec![ShellEvent::Queued]);
+    (first, second, first_process)
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_relock_ends_a_queued_session_without_its_getting_a_place() {
+    let (first, mut second, _process) = queued().await;
+    second.relock();
+    settle().await;
+    assert_eq!(
+        second.events(),
+        vec![
+            ShellEvent::Queued,
+            ShellEvent::Ended {
+                end: ShellEnd::Relocked
+            }
+        ]
+    );
+    assert_eq!(first.held(), 1, "the first one keeps its place");
+    assert_eq!(first.ended(), None);
+}
+
+#[tokio::test(start_paused = true)]
+async fn abandoned_clients_end_a_queued_session_without_its_getting_a_place() {
+    let (first, second, _process) = queued().await;
+    first.clients.connections().abandon();
+    settle().await;
+    assert_eq!(
+        second.events(),
+        vec![
+            ShellEvent::Queued,
+            ShellEvent::Ended {
+                end: ShellEnd::ConnectionLost
+            }
+        ]
+    );
+    assert_eq!(
+        second.held(),
+        0,
+        "the place the first one left is not taken"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_relock_ends_a_session_still_connecting() {
+    let mut harness = connecting().await;
+    harness.relock();
+    settle().await;
+    assert_eq!(
+        harness.events(),
+        vec![
+            ShellEvent::Connecting,
+            ShellEvent::Ended {
+                end: ShellEnd::Relocked
+            }
+        ]
+    );
+    assert_eq!(harness.held(), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn abandoned_clients_end_a_session_still_connecting() {
+    let harness = connecting().await;
+    harness.clients.connections().abandon();
+    settle().await;
+    assert_eq!(
+        harness.events(),
+        vec![
+            ShellEvent::Connecting,
+            ShellEvent::Ended {
+                end: ShellEnd::ConnectionLost
+            }
+        ]
+    );
+    assert_eq!(harness.held(), 0);
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_refusal_from_the_connection_reads_as_its_error() {
     let refused = kube::Error::Api(

@@ -1017,16 +1017,25 @@ struct Server(Arc<Mutex<Vec<String>>>);
 
 impl Server {
     fn start() -> (Self, u16) {
-        Self::start_with(POD)
+        Self::serve(POD, false)
     }
 
     /// A server whose pod is `pod`.
     fn start_with(pod: &'static str) -> (Self, u16) {
+        Self::serve(pod, false)
+    }
+
+    fn start_hanging() -> (Self, u16) {
+        Self::serve(POD, true)
+    }
+
+    fn serve(pod: &'static str, hang: bool) -> (Self, u16) {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let server = Self::default();
         let seen = Arc::clone(&server.0);
         std::thread::spawn(move || {
+            let mut hung = Vec::new();
             for stream in listener.incoming() {
                 let mut stream = stream.unwrap();
                 let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
@@ -1040,6 +1049,11 @@ impl Server {
                     }
                 }
                 let session = line.contains("/exec") || line.contains("/attach");
+                if session && hang {
+                    seen.lock().unwrap().push(line.trim_end().to_owned());
+                    hung.push(stream);
+                    continue;
+                }
                 let (status, answer) = if session {
                     (
                         "403 Forbidden",
@@ -1284,6 +1298,28 @@ async fn a_shell_never_starts_a_context_turned_read_only_after_its_plan_ran() {
     until("it ends visibly", || ended(&told).is_some()).await;
     assert_eq!(ended(&told), Some(ShellEnd::Relocked));
     assert_eq!(server.sessions(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn a_relock_ends_a_session_whose_upgrade_is_under_way() {
+    let dir = tempfile::tempdir().unwrap();
+    let (server, port) = Server::start_hanging();
+    let core = over_server(dir.path(), port);
+    in_mode(&core, Mode::Guarded).await;
+    let plan = plan_shell(&core, ShellKind::Shell).await.unwrap();
+    let id = parked(&core, plan.id).await;
+    let told = opened(&core, id).await;
+    until("it asks for the upgrade", || !server.sessions().is_empty()).await;
+    assert_eq!(ended(&told), None);
+
+    core.set_context_mode(SetContextMode {
+        context: "kind-a".to_owned(),
+        mode: Some(Mode::ReadOnly),
+    })
+    .await
+    .unwrap();
+    until("it ends visibly", || ended(&told).is_some()).await;
+    assert_eq!(ended(&told), Some(ShellEnd::Relocked));
 }
 
 #[tokio::test]
