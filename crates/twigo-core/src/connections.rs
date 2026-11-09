@@ -190,16 +190,17 @@ impl Connections {
         }
     }
 
-    /// Retires the connections of every context, as on wake from sleep.
-    pub fn retire(&self) {
+    /// Retires the connections of every context, as on wake from sleep, and
+    /// tells their sessions that the network changed.
+    pub fn wake(&self) {
         for (name, clients) in self.built() {
-            clients.connections().retire();
+            clients.connections().wake();
             eprintln!("woke from sleep: retired the connections of {name}");
         }
     }
 
     /// Retires the connections of each context whose route moved, as after
-    /// a network change.
+    /// a network change, and tells the sessions of those only.
     pub fn retire_moved(&self) {
         for (name, clients) in self.built() {
             if clients.connections().retire_moved() {
@@ -335,11 +336,39 @@ contexts:
             .await
             .unwrap();
         let retired = a.connections().retired();
+        let network = a.connections().network();
 
         let slot = Arc::clone(&connections.contexts.lock().unwrap()["kind-a"]);
         let _building = slot.building.lock().await;
-        connections.retire();
+        connections.wake();
         assert!(retired.has_changed().unwrap());
+        assert!(network.has_changed().unwrap(), "a wake changes the network");
+    }
+
+    #[tokio::test]
+    async fn a_network_change_that_moved_no_route_tells_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config"), KUBECONFIG).unwrap();
+        ca(
+            dir.path(),
+            &rcgen::generate_simple_self_signed(["a".to_owned()]).unwrap(),
+        );
+        let connections = Connections::default();
+        let catalog = load(dir.path());
+        let a = connections
+            .clients(
+                find(&catalog, "kind-a"),
+                &ProxyEnv::default(),
+                None,
+                Gate::unrestricted(),
+            )
+            .await
+            .unwrap();
+        let (retired, network) = (a.connections().retired(), a.connections().network());
+
+        connections.retire_moved();
+        assert!(!retired.has_changed().unwrap());
+        assert!(!network.has_changed().unwrap());
     }
 
     #[tokio::test]

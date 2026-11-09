@@ -1,6 +1,7 @@
 //! The connections of a client (ARCHITECTURE 3.2): counted, retired on wake,
 //! on a network change or after a failed probe, and warmed by one request
-//! whenever none is usable.
+//! whenever none is usable. A wake and a moved route also count as a change
+//! of the network, for the sockets that retiring does not reach.
 //!
 //! Retiring poisons a connection, so the pool hands it out no more, while
 //! the streams on it run until their owners drop them. hyper-util keeps the
@@ -42,6 +43,7 @@ struct Inner {
     state: Mutex<State>,
     warming: Arc<tokio::sync::Mutex<()>>,
     retired: watch::Sender<u64>,
+    network: watch::Sender<u64>,
     abandoned: watch::Sender<bool>,
 }
 
@@ -88,6 +90,7 @@ impl Default for Connections {
             state: Mutex::default(),
             warming: Arc::default(),
             retired: watch::Sender::new(0),
+            network: watch::Sender::new(0),
             abandoned: watch::Sender::new(false),
         }))
     }
@@ -106,9 +109,21 @@ impl Connections {
 
     /// Retires every connection open or being dialled. The streams on them
     /// keep running: their owners re-open them after the returned
-    /// generation, which [`Connections::retired`] also tells.
+    /// generation, which [`Connections::retired`] also tells. It is no
+    /// change of the network, which [`Connections::network`] counts.
     pub fn retire(&self) {
         self.retire_locked(self.state());
+    }
+
+    /// Retires every connection, as on wake from sleep, which also counts as
+    /// a change of the network.
+    pub fn wake(&self) {
+        self.network_changed();
+    }
+
+    fn network_changed(&self) {
+        self.retire();
+        self.0.network.send_modify(|changes| *changes += 1);
     }
 
     /// Retires every connection unless a retirement came after `seen`, a
@@ -150,7 +165,7 @@ impl Connections {
             .filter_map(|open| open.route)
             .any(|route| source(route.remote) != Some(route.local));
         if moved {
-            self.retire();
+            self.network_changed();
         }
         moved
     }
@@ -158,6 +173,13 @@ impl Connections {
     /// Counts the retirements.
     pub fn retired(&self) -> watch::Receiver<u64> {
         self.0.retired.subscribe()
+    }
+
+    /// Counts the changes of the network under these connections: a wake, or
+    /// a route that moved. A session's socket, which no retirement reaches,
+    /// ends on it.
+    pub fn network(&self) -> watch::Receiver<u64> {
+        self.0.network.subscribe()
     }
 
     /// Retires every connection and says, as a state, that other clients
@@ -574,6 +596,42 @@ mod tests {
         let abandoned = connections.abandoned();
         assert!(*abandoned.borrow());
         assert_eq!(*connections.retired().borrow(), 1, "retired too");
+    }
+
+    #[test]
+    fn only_a_wake_and_a_moved_route_count_as_a_change_of_the_network() {
+        let connections = Connections::default();
+        let remote = SocketAddr::from((Ipv4Addr::new(10, 0, 0, 5), 6443));
+        let local = Ipv4Addr::new(192, 168, 1, 2).into();
+        let open = |connections: &Connections| {
+            let id = connections.dial();
+            connections.opened(id, Some(Route { local, remote }), false);
+            served(connections, id);
+        };
+        open(&connections);
+        let mut network = connections.network();
+
+        connections.retire();
+        let seen = *connections.retired().borrow();
+        assert!(connections.retire_after(seen));
+        connections.abandon();
+        assert!(
+            !network.has_changed().unwrap(),
+            "a new certificate, a failed probe and replaced clients are no change of the network"
+        );
+
+        open(&connections);
+        assert!(!connections.retire_if_moved(|_| Some(local)));
+        assert!(!network.has_changed().unwrap(), "the route did not move");
+
+        let elsewhere = Ipv4Addr::new(10, 8, 0, 2).into();
+        assert!(connections.retire_if_moved(|_| Some(elsewhere)));
+        assert_eq!(*network.borrow_and_update(), 1, "the route moved");
+
+        let retired = *connections.retired().borrow();
+        connections.wake();
+        assert_eq!(*network.borrow_and_update(), 2, "a wake");
+        assert_eq!(*connections.retired().borrow(), retired + 1, "retired too");
     }
 
     #[test]

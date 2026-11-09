@@ -1,7 +1,7 @@
 //! A shell in a pod against a kind cluster: a command's output and exit
 //! code, resizes, the shell chosen and `TERM`, a shell-less image, bytes
 //! that survive, the flood of `yes` with and without acks, the budget of
-//! sessions, a pod deleted under a session, a retired connection, and an
+//! sessions, a pod deleted under a session, a retirement and a wake, and an
 //! attach. They need a kubelet, so they refuse anything but `kind-*`.
 //!
 //! TWIGO_TEST_KUBECONFIG=… cargo test -p twigo-sessions --test shell_live -- --ignored
@@ -511,13 +511,27 @@ async fn a_pod_deleted_under_a_session_ends_it_visibly() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
-async fn a_retired_connection_ends_the_session_as_lost() {
+async fn a_wake_ends_the_session_as_lost() {
+    let live = live("woke").await;
+    live.busybox("p").await;
+    let open = open(&live.clients, live.shell_spec("p"), 80, 24);
+    open.prompt().await;
+    live.clients.connections().wake();
+    assert_eq!(open.ended().await, ShellEnd::ConnectionLost);
+    drop(open);
+    live.delete_namespace().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_retirement_leaves_a_running_session_alone() {
     let live = live("retired").await;
     live.busybox("p").await;
     let open = open(&live.clients, live.shell_spec("p"), 80, 24);
     open.prompt().await;
     live.clients.connections().retire();
-    assert_eq!(open.ended().await, ShellEnd::ConnectionLost);
+    open.run("echo ALIVE-$((40+2))").await;
+    open.sees("ALIVE-42").await;
     drop(open);
     live.delete_namespace().await;
 }

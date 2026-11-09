@@ -341,6 +341,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
     On macOS a change of routes alone, without an address, goes unseen.
     Chromium closes every HTTP/2 session on any address change, which Docker's interfaces set off on Linux; here containers, kind's bridge and VPNs for other networks leave connections alone, while a Wi-Fi switch or a VPN in front of the cluster retires them.
     A move to another network that keeps the address goes unseen until a ping fails, 45 s at most.
+  - A wake and a moved route are also counted apart, as a change of the network (`Connections::network`), which ends the sessions of exec and attach (4.6): their sockets are on the sessions client, whose connections a retirement does not reach, and a retirement from a new certificate or a failed probe says nothing of them.
   - Retiring poisons the connection: the pool keeps a dead connection that still looks open, and every actor's client holds a clone of that pool, so rebuilding one client would not reach the others.
     The streams on it run until their upstreams re-watch.
   - While a client has no usable connection, one request dials and the others wait until it is connected or has failed: a cold client opens one TCP and TLS connection per concurrent first request and keeps only the first that negotiates `h2` ([HTTP/2 spike](spikes/http2.md)).
@@ -907,7 +908,8 @@ Extensions add commands, not prefixes.
     Stopping the reader blocks kube's message loop, stdin and resizes included, until acks come; input and resizes therefore queue apart from the reader, and a Ctrl-C during `yes` reaches the process as the terminal catches up.
   - **How a session ends**, after all of its output, is `Exited { code }`, `NoShell`, `Failed`, `ConnectionLost` or `Relocked`, and none can resume, since an exec cannot.
     The status decides: `Success` is exit 0, `NonZeroExitCode` its code, unless a shell printed nothing and the code is 126 or 127, which is `NoShell`, as CRI-O would report a missing binary (by reading its source, not measured).
-    containerd fails the exec itself: the upgrade succeeds, nothing prints, and the status is `InternalError` whose message says `executable file not found` (kind 1.37, kube 5.0.0, 2026-11-09), which is `NoShell` for a shell and `Failed` for an attach; a socket that closes without a status, or a connection retired or abandoned while it runs, is `ConnectionLost`, never a shell that failed.
+    containerd fails the exec itself: the upgrade succeeds, nothing prints, and the status is `InternalError` whose message says `executable file not found` (kind 1.37, kube 5.0.0, 2026-11-09), which is `NoShell` for a shell and `Failed` for an attach; a socket that closes without a status is `ConnectionLost`, never a shell that failed, and so is a wake from sleep or a route that moved while it connects or runs, and clients abandoned while it waits, connects or runs.
+    A session ends on those and on no other retirement: its socket is on the sessions client, whose connections are not tracked, so a new certificate or a failed probe, which retire the api client's connections (3.2, 6.2), say nothing of it; `Connections::network` counts only the wakes and the moved routes.
     A pod deleted under a session ended it as exit 137 (`shell_live` on kind 1.37 with containerd, 2026-11-09).
     A context that turns read-only, by a relock or an unlock running out, ends its running shells as `Relocked`; `guarded` does not.
 - **Port-forward manager.**

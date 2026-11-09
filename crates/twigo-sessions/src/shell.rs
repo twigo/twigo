@@ -191,9 +191,10 @@ async fn abandoned(mut abandoned: watch::Receiver<bool>) {
 }
 
 /// The session's life: in the queue, connecting, then running; every step
-/// also ends on a relock or the clients going. Clients abandoned before it
-/// runs are told by `abandoned`, and once it runs by the retirement that
-/// abandoning makes.
+/// also ends on a relock or the clients going, and once it connects, on a
+/// change of the network under them. Its socket is on the sessions client,
+/// whose connections are not tracked, so a retirement ends nothing: a new
+/// certificate or a failed probe retires connections it never used.
 async fn run(parked: Parked, mut send: impl FnMut(Frame) -> bool + Send + 'static) {
     let Parked {
         clients,
@@ -203,7 +204,7 @@ async fn run(parked: Parked, mut send: impl FnMut(Frame) -> bool + Send + 'stati
         commands,
     } = parked;
     let mut abandoned = std::pin::pin!(abandoned(clients.connections().abandoned()));
-    let mut retired = clients.connections().retired();
+    let mut network = clients.connections().network();
     macro_rules! end {
         ($end:expr) => {{
             send(Frame::Event(ShellEvent::Ended { end: $end }));
@@ -236,12 +237,12 @@ async fn run(parked: Parked, mut send: impl FnMut(Frame) -> bool + Send + 'stati
     if !send(Frame::Event(ShellEvent::Connecting)) {
         return;
     }
-    retired.borrow_and_update();
+    network.borrow_and_update();
     let connected = tokio::select! {
         biased;
         () = &mut relocked => end!(ShellEnd::Relocked),
         () = &mut abandoned => end!(ShellEnd::ConnectionLost),
-        _ = retired.changed() => end!(ShellEnd::ConnectionLost),
+        _ = network.changed() => end!(ShellEnd::ConnectionLost),
         connected = connect.connect(&spec) => connected,
     };
     let connected = match connected {
@@ -253,7 +254,10 @@ async fn run(parked: Parked, mut send: impl FnMut(Frame) -> bool + Send + 'stati
     if !send(Frame::Event(ShellEvent::Running)) {
         return;
     }
-    pump(connected, &spec, commands, retired, relocked, send).await;
+    pump(
+        connected, &spec, commands, network, abandoned, relocked, send,
+    )
+    .await;
 }
 
 /// The stdout and stderr of a process as one stream of chunks.
@@ -297,7 +301,8 @@ async fn pump(
     connected: connect::Connected,
     spec: &Spec,
     commands: Commands,
-    mut retired: watch::Receiver<u64>,
+    mut network: watch::Receiver<u64>,
+    mut abandoned: impl Future<Output = ()> + Unpin,
     mut relocked: BoxFuture<'static, ()>,
     mut send: impl FnMut(Frame) -> bool,
 ) {
@@ -379,7 +384,8 @@ async fn pump(
                 }
             }
             () = set_size(&mut resize, new_size), if new_size.is_some() => new_size = None,
-            _ = retired.changed() => end!(ShellEnd::ConnectionLost),
+            _ = network.changed() => end!(ShellEnd::ConnectionLost),
+            () = &mut abandoned => end!(ShellEnd::ConnectionLost),
             () = &mut relocked => end!(ShellEnd::Relocked),
         }
     };

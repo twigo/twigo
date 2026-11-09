@@ -89,14 +89,13 @@ struct Harness {
     relock: Option<oneshot::Sender<()>>,
 }
 
-fn parked(tty: bool, budgets: Budgets, to: Result<Connected, kube::Error>) -> Harness {
+fn harness(tty: bool, clients: Arc<Clients>, connect: Box<dyn Connect>) -> Harness {
     let (relock, relocked) = oneshot::channel();
-    let clients = clients(budgets);
     let session = Session::parked(
         Arc::clone(&clients),
         spec(tty, true),
         relocked.map(|_| ()).boxed(),
-        Box::new(Fake(Mutex::new(Some(to)))),
+        connect,
     );
     Harness {
         session,
@@ -104,6 +103,26 @@ fn parked(tty: bool, budgets: Budgets, to: Result<Connected, kube::Error>) -> Ha
         frames: Arc::default(),
         relock: Some(relock),
     }
+}
+
+fn parked(tty: bool, budgets: Budgets, to: Result<Connected, kube::Error>) -> Harness {
+    harness(tty, clients(budgets), Box::new(Fake(Mutex::new(Some(to)))))
+}
+
+struct NeverConnects;
+
+impl Connect for NeverConnects {
+    fn connect(&self, _spec: &Spec) -> BoxFuture<'static, Result<Connected, kube::Error>> {
+        futures::future::pending().boxed()
+    }
+}
+
+async fn connecting() -> Harness {
+    let harness = harness(true, clients(Budgets::default()), Box::new(NeverConnects));
+    harness.open(80, 24);
+    settle().await;
+    assert_eq!(harness.events(), vec![ShellEvent::Connecting]);
+    harness
 }
 
 async fn settle() {
@@ -470,14 +489,47 @@ async fn the_output_of_a_session_without_a_tty_is_stdout_and_stderr_together() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_retired_connection_ends_the_session_as_lost_with_what_had_gathered() {
+async fn a_wake_ends_the_session_as_lost_with_what_had_gathered() {
     let (harness, mut process) = running(true).await;
     write(&mut process, b"a").await;
     write(&mut process, b"gathered").await;
-    harness.clients.connections().retire();
+    harness.clients.connections().wake();
     settle().await;
     assert_eq!(harness.ended(), Some(ShellEnd::ConnectionLost));
     assert_eq!(harness.outputs().concat(), b"agathered");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_wake_ends_a_session_still_connecting_as_lost() {
+    let harness = connecting().await;
+    harness.clients.connections().wake();
+    settle().await;
+    assert_eq!(harness.ended(), Some(ShellEnd::ConnectionLost));
+}
+
+fn retire_as_a_certificate_and_a_probe_do(clients: &Clients) {
+    let connections = clients.connections();
+    connections.retire();
+    let seen = *connections.retired().borrow();
+    assert!(connections.retire_after(seen));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_certificate_and_a_failed_probe_leave_a_running_session_alone() {
+    let (harness, mut process) = running(true).await;
+    retire_as_a_certificate_and_a_probe_do(&harness.clients);
+    settle().await;
+    assert_eq!(harness.ended(), None);
+    write(&mut process, b"still here").await;
+    assert_eq!(harness.outputs().concat(), b"still here");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_certificate_and_a_failed_probe_leave_a_session_still_connecting_alone() {
+    let harness = connecting().await;
+    retire_as_a_certificate_and_a_probe_do(&harness.clients);
+    settle().await;
+    assert_eq!(harness.events(), vec![ShellEvent::Connecting]);
 }
 
 #[tokio::test(start_paused = true)]
@@ -537,14 +589,6 @@ async fn dropping_the_session_releases_its_permit_at_once() {
     settle().await;
     assert_eq!(usage.borrow().sessions.held, 0);
     drop(process.stdout);
-}
-
-struct NeverConnects;
-
-impl Connect for NeverConnects {
-    fn connect(&self, _spec: &Spec) -> BoxFuture<'static, Result<Connected, kube::Error>> {
-        futures::future::pending().boxed()
-    }
 }
 
 #[tokio::test(start_paused = true)]
