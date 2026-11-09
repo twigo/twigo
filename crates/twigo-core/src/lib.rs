@@ -831,10 +831,14 @@ impl Core {
     /// 3.2, 4.6); never returns.
     pub async fn follow_network(&self, mut watch: twigo_netmon::Watch) {
         while let Some(event) = watch.next().await {
-            match event {
-                Event::Woke => self.connections.wake(),
-                Event::NetworkChanged => self.connections.retire_moved(),
-            }
+            self.network_event(event);
+        }
+    }
+
+    fn network_event(&self, event: Event) {
+        match event {
+            Event::Woke => self.connections.wake(),
+            Event::NetworkChanged => self.connections.retire_moved(),
         }
     }
 
