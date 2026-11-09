@@ -112,8 +112,9 @@ pub enum ShellEnd {
     Failed {
         error: IpcError,
     },
-    /// The connection broke or was retired, before the process said how it
-    /// ended.
+    /// The connection broke before the process said how it ended: a wake, a
+    /// moved route, a socket that closed with no status, or a failure of the
+    /// stream after output.
     ConnectionLost,
     /// The context became read-only while it ran.
     Relocked,

@@ -25,7 +25,10 @@ pub(super) fn ending(status: Option<&Status>, printed: bool, shell: bool) -> She
         }
         return ShellEnd::Exited { code };
     }
-    if shell && !printed && no_executable(&message) {
+    if printed {
+        return ShellEnd::ConnectionLost;
+    }
+    if shell && no_executable(&message) {
         return ShellEnd::NoShell { message };
     }
     ShellEnd::Failed {
@@ -134,11 +137,18 @@ mod tests {
                 failed(NOT_EXECUTABLE),
             ),
             (
-                "not found after output",
+                "a stream failure after output",
                 NO_SHELL,
                 true,
                 true,
-                failed(NO_SHELL),
+                ShellEnd::ConnectionLost,
+            ),
+            (
+                "a stream failure after output of an attach",
+                NO_SHELL,
+                true,
+                false,
+                ShellEnd::ConnectionLost,
             ),
             (
                 "not found on attach",

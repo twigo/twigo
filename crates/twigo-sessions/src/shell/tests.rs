@@ -502,13 +502,14 @@ async fn the_sender_dropped_with_the_pipes_left_open_ends_as_lost_with_no_hang()
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_failure_after_output_is_not_no_shell() {
+async fn a_failure_after_output_is_a_lost_connection_with_the_output_before_it() {
     let (harness, mut process) = running(true).await;
     write(&mut process, b"bash: command not found\n").await;
     process.status.send(status(NO_SHELL)).unwrap();
     process.stdout.shutdown().await.unwrap();
     settle().await;
-    assert!(matches!(harness.ended(), Some(ShellEnd::Failed { .. })));
+    assert_eq!(harness.ended(), Some(ShellEnd::ConnectionLost));
+    assert_eq!(harness.outputs().concat(), b"bash: command not found\n");
 }
 
 #[tokio::test(start_paused = true)]
