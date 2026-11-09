@@ -32,11 +32,17 @@ fn pods(context: String, namespace: String, name: String) -> Result<Target, IpcE
 
 /// The words a plan of `kind` reads in.
 struct Words {
-    subresource: &'static str,
     question: String,
     confirm: &'static str,
     doing: String,
     consequences: Vec<String>,
+}
+
+fn subresource(kind: ShellKind) -> &'static str {
+    match kind {
+        ShellKind::Shell => "exec",
+        ShellKind::Attach => "attach",
+    }
 }
 
 fn words(kind: ShellKind, spec: &Spec, context: &str) -> Words {
@@ -50,14 +56,12 @@ fn words(kind: ShellKind, spec: &Spec, context: &str) -> Words {
     let place = format!("container {container} of pod {pod} in {namespace} on {context}");
     match kind {
         ShellKind::Shell => Words {
-            subresource: "exec",
             question: format!("Open a shell in {place}?"),
             confirm: "Open shell",
             doing: format!("Opening a shell in {pod}"),
             consequences: vec!["What you run has the container's rights in the pod.".to_owned()],
         },
         ShellKind::Attach => Words {
-            subresource: "attach",
             question: format!("Attach to {place}?"),
             confirm: "Attach",
             doing: format!("Attaching to {pod}"),
@@ -126,11 +130,10 @@ pub(crate) async fn shell(
     if kind == ShellKind::Attach {
         spec.join = Join::Attach;
     }
-    let read = words(kind, &spec, &context);
     let writes = vec![Attributes::action(
         "create",
         "pods",
-        Some(read.subresource),
+        Some(subresource(kind)),
         Some(&spec.namespace),
         Some(&spec.pod),
     )];
@@ -143,6 +146,7 @@ pub(crate) async fn shell(
         let live = get(&clients, &object.path).await?;
         (spec.stdin, spec.tty) = attach_settings(&live, &spec.container)?;
     }
+    let read = words(kind, &spec, &context);
     let kubectl = kubectl_line(kind, &spec, &context)?;
     let connection = core.policy.connection(&context);
     let ticket = core.shells.ticket(window);

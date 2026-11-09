@@ -1010,11 +1010,18 @@ async fn a_manifest_whose_preview_fails_at_discovery_still_ends_the_older_previe
     );
 }
 
+const POD: &str = r#"{"kind":"Pod","apiVersion":"v1","metadata":{"name":"web-1"},"spec":{"containers":[{"name":"app","stdin":true,"tty":true}]}}"#;
+
 #[derive(Clone, Default)]
 struct Server(Arc<Mutex<Vec<String>>>);
 
 impl Server {
     fn start() -> (Self, u16) {
+        Self::start_with(POD)
+    }
+
+    /// A server whose pod is `pod`.
+    fn start_with(pod: &'static str) -> (Self, u16) {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let server = Self::default();
@@ -1039,10 +1046,7 @@ impl Server {
                         r#"{"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure","message":"forbidden by the server","reason":"Forbidden","code":403}"#,
                     )
                 } else {
-                    (
-                        "200 OK",
-                        r#"{"kind":"Pod","apiVersion":"v1","metadata":{"name":"web-1"},"spec":{"containers":[{"name":"app","stdin":true,"tty":true}]}}"#,
-                    )
+                    ("200 OK", pod)
                 };
                 seen.lock().unwrap().push(line.trim_end().to_owned());
                 let _ = write!(
@@ -1236,6 +1240,29 @@ async fn read_write_runs_a_shell_at_once_and_attach_takes_the_containers_stdin_a
     assert!(sessions[0].contains("/attach?"), "{sessions:?}");
     assert!(sessions[0].contains("stdin=true"), "{sessions:?}");
     assert!(sessions[0].contains("tty=true"), "{sessions:?}");
+}
+
+#[tokio::test]
+async fn an_attach_plan_says_whether_what_you_type_reaches_the_process() {
+    const QUIET: &str = r#"{"kind":"Pod","apiVersion":"v1","metadata":{"name":"web-1"},"spec":{"containers":[{"name":"app"}]}}"#;
+    let consequences = |pod: &'static str| async move {
+        let dir = tempfile::tempdir().unwrap();
+        let (_server, port) = Server::start_with(pod);
+        let core = over_server(dir.path(), port);
+        in_mode(&core, Mode::ReadWrite).await;
+        plan_shell(&core, ShellKind::Attach)
+            .await
+            .unwrap()
+            .consequences
+    };
+    assert_eq!(
+        consequences(POD).await,
+        ["You join its main process: what you type reaches it, Ctrl-C included."]
+    );
+    assert_eq!(
+        consequences(QUIET).await,
+        ["It keeps no stdin, so this attach only shows its output."]
+    );
 }
 
 #[tokio::test]
