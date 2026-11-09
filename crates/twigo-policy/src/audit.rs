@@ -64,8 +64,9 @@ struct Line<'a> {
 }
 
 impl Audit {
-    /// The log at `path`, appended to. A file that cannot be opened logs to
-    /// stderr once and keeps nothing: the log records, it guards nothing.
+    /// The log at `path`, appended to, its directory made if the app's first
+    /// run has not made it yet. A file that cannot be opened logs to stderr
+    /// once and keeps nothing: the log records, it guards nothing.
     pub fn open(path: &Path) -> Self {
         let mut options = OpenOptions::new();
         options.create(true).append(true);
@@ -74,7 +75,11 @@ impl Audit {
             use std::os::unix::fs::OpenOptionsExt as _;
             options.mode(0o600);
         }
-        match options.open(path) {
+        let opened = path
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|()| options.open(path));
+        match opened {
             Ok(file) => Self {
                 file: Some(Mutex::new(file)),
             },
@@ -128,5 +133,25 @@ impl Audit {
             mode,
             blocked,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opens_a_log_in_a_directory_that_does_not_exist_yet() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("app-data/nested/audit.jsonl");
+        Audit::open(&path).record(&Entry::Ended {
+            context: "kind-a",
+            command: "apply",
+            target: "deployments/web",
+            outcome: "done",
+            message: "",
+        });
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains(r#""event":"ended""#), "{written}");
     }
 }
