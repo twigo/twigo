@@ -17,7 +17,6 @@ import { execUri, objectUri, type ExecInput } from "../uri";
 import { registerKube } from "../register";
 import { createExecTabs, registerExec } from "./register";
 import { ExecTabs, type WebglRenderer } from "./tabs";
-import type { ExecVariants } from "./variants";
 
 withScreenSize(1400);
 withTerminalLayout();
@@ -65,7 +64,6 @@ interface Mounted {
 
 async function mounted(
   scenario: MockScenario = "ready",
-  variants: ExecVariants = { end: "inline", again: "new" },
   webgl?: () => WebglRenderer,
 ): Promise<Mounted> {
   const backend = createMockBackend(scenario);
@@ -82,7 +80,7 @@ async function mounted(
         webgl,
       })
     : createExecTabs(workbench);
-  registerExec(workbench, tabs, variants);
+  registerExec(workbench, tabs);
   await act(() => workbench.spaces.open("qa"));
   act(() => {
     workbench.spaces.select("qa");
@@ -235,7 +233,7 @@ test("a guarded context asks to confirm a shell, and a cancel opens nothing", as
   ]);
 });
 
-test("a second shell on a container opens another tab by default, and focuses the first where the variant says", async () => {
+test("a second shell on a container opens another tab", async () => {
   const fresh = await mounted("shellOneContainer");
   await fresh.open("qa", ONE);
   await fresh.open("qa", ONE);
@@ -243,41 +241,6 @@ test("a second shell on a container opens another tab by default, and focuses th
     execUri(RUNNING),
     execUri({ ...RUNNING, n: 2 }),
   ]);
-  cleanup();
-
-  const focus = await mounted("shellOneContainer", {
-    end: "inline",
-    again: "focus",
-  });
-  const run = vi.spyOn(focus.workbench.operations, "run");
-  await focus.open("qa", ONE);
-  await focus.open("qa", ONE);
-  expect(run).toHaveBeenCalledOnce();
-  expect(panelTabs()).toEqual([execUri(RUNNING)]);
-});
-
-test("where a live shell is focused, one that ended is started again in its own tab, and New Shell opens another", async () => {
-  const { workbench, tabs, open } = await mounted("shellNoShell", {
-    end: "inline",
-    again: "focus",
-  });
-  await open("qa", ONE);
-  const uri = execUri(RUNNING);
-  expect(tabs.get(uri)?.getStatus().state).toBe("ended");
-  const first = tabs.get(uri);
-  await open("qa", ONE);
-  expect(panelTabs()).toEqual([uri]);
-  expect(tabs.get(uri)).toBe(first);
-
-  await act(() =>
-    workbench.commands.execute(
-      "k8s.shell.new",
-      (key) => key === "execTab" || workbench.keys.lookup(null)(key),
-      { uri },
-    ),
-  );
-  await settle(10);
-  expect(panelTabs()).toEqual([uri, execUri({ ...RUNNING, n: 2 })]);
 });
 
 test("a tab the layout restored says its shell ended when Twigo closed, runs nothing, and Start plans a shell", async () => {
@@ -318,34 +281,22 @@ test("a tab the layout restored says its shell ended when Twigo closed, runs not
   expect(screen.queryByText("This shell ended when Twigo closed")).toBeNull();
 });
 
-test("an ending is worded in the tab's actions with Restart there, or in a bar across the terminal", async () => {
+test("an ending is worded in the tab's actions with Restart there", async () => {
   const inline = await mounted("shellNoShell");
   await inline.open("qa", ONE);
   await settle(10);
   screen.getByText("No shell");
   expect(screen.queryByText("Restart")).toBeNull();
   screen.getByRole("button", { name: "Restart Shell" });
-  cleanup();
-
-  const bar = await mounted("shellNoShell", { end: "bar", again: "new" });
-  await bar.open("qa", ONE);
-  await settle(10);
-  expect(
-    screen.getByRole("button", { name: "Restart" }).parentElement?.textContent,
-  ).toContain("This container has no shell.");
-  expect(screen.queryByRole("button", { name: "Restart Shell" })).toBeNull();
 });
 
 test("Restart asks again and starts a new session in the same tab", async () => {
-  const { workbench, tabs, open } = await mounted("shellNoShell", {
-    end: "bar",
-    again: "new",
-  });
+  const { workbench, tabs, open } = await mounted("shellNoShell");
   await open("qa", ONE);
   const uri = execUri(RUNNING);
   const tab = tabs.get(uri);
   const run = vi.spyOn(workbench.operations, "run");
-  fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+  fireEvent.click(screen.getByRole("button", { name: "Restart Shell" }));
   await settle(10);
   expect(run).toHaveBeenCalledOnce();
   expect(tabs.get(uri)).toBe(tab);
@@ -477,11 +428,7 @@ test("a hidden panel or a tab behind another holds no WebGL, and showing it load
       onContextLoss: () => ({ dispose: () => undefined }),
     };
   };
-  const { workbench, tabs, open } = await mounted(
-    "shellOneContainer",
-    { end: "inline", again: "new" },
-    webgl,
-  );
+  const { workbench, tabs, open } = await mounted("shellOneContainer", webgl);
   await open("qa", ONE);
   const first = tabs.get(execUri(RUNNING));
   expect(first?.renderer).toBe("webgl");

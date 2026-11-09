@@ -919,7 +919,7 @@ Extensions add commands, not prefixes.
     Copy and paste ride on the `copy` and `paste` events, which xterm answers with the selection and with `Terminal.paste`, so bracketed paste works; the Edit menu keeps its Copy and Paste for them.
     A `linkHandler` makes OSC 8 links do nothing unless ⌘-clicked, and opens `http` and `https` only, through the app's opener; xterm's `confirm` and `window.open` never run, and no addon detects URLs.
   - **Endings.**
-    A session ends in one of five ways, and its words stand once in the scrollback, in a quiet colour, and in the tab: `Session ended.`, `Session ended with exit code N.`, `This container has no shell.` with the runtime's message, the error's own message, `The connection was lost. A shell cannot be resumed.`, and `The context became read-only.`.
+    A session ends in one of five ways, and its words stand once in the scrollback, in a quiet colour, with its state and Restart at the right of the tab strip: `Session ended.`, `Session ended with exit code N.`, `This container has no shell.` with the runtime's message, the error's own message, `The connection was lost. A shell cannot be resumed.`, and `The context became read-only.`.
     A finished tab stays with its scrollback readable and selectable and its input off, until it is closed or restarted; Restart plans a new shell, so `guarded` asks again.
     A session that waits for a place among the cluster's 64 says so in its tab, and the status bar lists open shells while there are any, to go to one or close it.
   - The theme is the editor's surface and the logs' sixteen colours from the tokens, and follows the document's theme live.

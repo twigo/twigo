@@ -17,7 +17,6 @@ import {
   resourceProvider,
 } from "./quickaccess";
 import { createExecTabs, registerExec } from "./exec/register";
-import { readVariants } from "./exec/variants";
 import { registerLogs } from "./logs/register";
 import { LogsTabs } from "./logs/state";
 import { registerResourceActions } from "./resourceActions";
@@ -193,11 +192,7 @@ export function registerKube(workbench: Workbench): void {
     { key: "escape", command: "k8s.details.close", when: "detailsOpen" },
   ]);
   registerLogs(workbench, new LogsTabs(workbench.backend));
-  registerExec(
-    workbench,
-    createExecTabs(workbench),
-    readVariants(location.search),
-  );
+  registerExec(workbench, createExecTabs(workbench));
   registerResourceActions(workbench, services);
   registerEdits(workbench, {
     discovery: services.discovery,

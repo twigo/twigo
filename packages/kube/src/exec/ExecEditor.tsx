@@ -1,8 +1,8 @@
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { CircleAlert, Hourglass, Info, SquareTerminal } from "lucide-react";
+import { Hourglass, SquareTerminal } from "lucide-react";
 import { CLUSTER_SESSIONS } from "@twigo/protocol";
-import { Banner, Button, EmptyState } from "@twigo/ui";
+import { Banner, EmptyState } from "@twigo/ui";
 import {
   useChanges,
   useEditorShown,
@@ -12,8 +12,7 @@ import {
 } from "@twigo/workbench";
 import { parseExecUri } from "../uri";
 import type { ExecTabs } from "./tabs";
-import type { ExecVariants } from "./variants";
-import { ending, execTitle } from "./words";
+import { execTitle } from "./words";
 
 /** The command that starts a tab's shell again; its button asks it of a tab that has ended or never started. */
 export const RESTART_SHELL = "k8s.shell.restart";
@@ -24,11 +23,7 @@ export const RESTART_SHELL = "k8s.shell.restart";
  * session says that the terminal cannot: that it waits for a place, that it
  * ended, that nothing started it.
  */
-export function ExecEditor({
-  uri,
-  tabs,
-  variants,
-}: EditorProps & { tabs: ExecTabs; variants: ExecVariants }) {
+export function ExecEditor({ uri, tabs }: EditorProps & { tabs: ExecTabs }) {
   const { keys, spaces, commands } = useWorkbench();
   useChanges(tabs.changes);
   useChanges(spaces.changes);
@@ -71,7 +66,6 @@ export function ExecEditor({
     if (!root) return;
     const scope = keys.scope(root);
     scope.set("execEnded", ended);
-    scope.set("execTab", true);
     return () => {
       scope.dispose();
     };
@@ -107,7 +101,6 @@ export function ExecEditor({
     );
   }
 
-  const end = status.state === "ended" ? ending(status.end) : undefined;
   return (
     <div ref={setRoot} className="flex h-full min-h-0 flex-col bg-editor">
       {status.state === "queued" && (
@@ -117,20 +110,6 @@ export function ExecEditor({
           title={`Waiting for a place among the cluster's ${String(CLUSTER_SESSIONS)} sessions.`}
         >
           Close a shell to free one.
-        </Banner>
-      )}
-      {variants.end === "bar" && end && (
-        <Banner
-          tone={end.tone === "idle" ? "info" : (end.tone as "warn" | "error")}
-          icon={end.tone === "idle" ? Info : CircleAlert}
-          title={end.title}
-          action={
-            <Button variant="outline" size="sm" onClick={restart}>
-              Restart
-            </Button>
-          }
-        >
-          {end.detail}
         </Banner>
       )}
       <div ref={setContainer} className="min-h-0 flex-1" />

@@ -1,4 +1,4 @@
-import { Plus, RotateCcw, SquareTerminal } from "lucide-react";
+import { RotateCcw, SquareTerminal } from "lucide-react";
 import * as v from "valibot";
 import type { ShellKind, ShellTarget } from "@twigo/protocol";
 import type { QuickPickItem, StatusEntry, Workbench } from "@twigo/workbench";
@@ -8,7 +8,6 @@ import { ExecActions } from "./ExecActions";
 import { ExecEditor } from "./ExecEditor";
 import { canShell } from "./kinds";
 import { ExecTabs } from "./tabs";
-import type { ExecVariants } from "./variants";
 import { ending, execTitle, stateOf } from "./words";
 
 export function createExecTabs(workbench: Workbench): ExecTabs {
@@ -47,11 +46,7 @@ const URI_ARGUMENT = v.object({ uri: v.string() });
  * and in an object editor's title through `k8s.shell.open`; a status-bar
  * entry lists the open shells.
  */
-export function registerExec(
-  workbench: Workbench,
-  tabs: ExecTabs,
-  variants: ExecVariants,
-): void {
+export function registerExec(workbench: Workbench, tabs: ExecTabs): void {
   const { backend, commands, editors, keys, menus, operations, quickAccess } =
     workbench;
   editors.onClose((uri) => {
@@ -67,12 +62,8 @@ export function registerExec(
       return input ? execTitle(input) : uri.href;
     },
     icon: ({ className }) => <SquareTerminal className={className} />,
-    component: ({ uri }) => (
-      <ExecEditor uri={uri} tabs={tabs} variants={variants} />
-    ),
-    actions: ({ uri }) => (
-      <ExecActions uri={uri} tabs={tabs} variants={variants} />
-    ),
+    component: ({ uri }) => <ExecEditor uri={uri} tabs={tabs} />,
+    actions: ({ uri }) => <ExecActions uri={uri} tabs={tabs} />,
     focus: (uri) => {
       tabs.get(uri)?.focus();
     },
@@ -112,12 +103,12 @@ export function registerExec(
 
   /**
    * Asks which container when several run, and opens a shell or an attach in
-   * it: another tab, or the one a live shell has, as the variant says.
+   * it, in a tab of its own.
    */
   const open = async (
     pod: { space: string; namespace: string; pod: string },
     kind: ShellKind,
-    chosen?: { container?: string; again?: ExecVariants["again"] },
+    chosen?: { container?: string },
   ): Promise<void> => {
     let found;
     try {
@@ -148,15 +139,6 @@ export function registerExec(
       container,
       ...(kind === "attach" && { attach: true }),
     };
-    if ((chosen?.again ?? variants.again) === "focus") {
-      const uri = execUri(base);
-      if (tabs.get(uri)?.live) {
-        editors.open(uri);
-        return;
-      }
-      await start(base);
-      return;
-    }
     await start(free(base));
   };
 
@@ -205,32 +187,6 @@ export function registerExec(
     order: 2,
     when: "execEnded",
   });
-
-  if (variants.again === "focus") {
-    commands.register({
-      id: "k8s.shell.new",
-      title: "New Shell in This Container",
-      category: "Shell",
-      icon: Plus,
-      enablement: "execTab",
-      run: async (args) => {
-        const uri = uriOf(args);
-        const input = uri === undefined ? undefined : parseExecUri(uri);
-        if (input) {
-          await open(input, "shell", {
-            container: input.container,
-            again: "new",
-          });
-        }
-      },
-    });
-    menus.append("editor/title", {
-      command: "k8s.shell.new",
-      group: "navigation",
-      order: 3,
-      when: "execTab",
-    });
-  }
 
   /** The active space's shell tabs, as rows to pick. */
   const rows = (): QuickPickItem[] => {
