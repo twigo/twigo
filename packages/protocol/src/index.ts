@@ -104,7 +104,13 @@ export type {
   Row,
   RowGroup,
   RowId,
+  ShellContainers,
+  ShellEnd,
   ShellEnvironment,
+  ShellEvent,
+  ShellKind,
+  ShellPod,
+  ShellTarget,
   Sort,
   Space,
   StateEntry,
@@ -123,4 +129,12 @@ export {
   type LogsSnapshot,
 } from "./logs";
 export { INITIAL_OBJECT, ObjectView, type ObjectSnapshot } from "./object";
+export {
+  CLUSTER_SESSIONS,
+  SHELL_FRAME_BYTES,
+  SHELL_HIGH_WATER,
+  SHELL_LOW_WATER,
+  ShellSession,
+  type ShellOutput,
+} from "./shell";
 export { tauriBackend } from "./tauri";
