@@ -379,10 +379,11 @@ export class Editors {
    * Gives the focus back to the element that held it before quick access or
    * a dialog took it, or, when that cannot take it any more (inert with its
    * part, hidden or gone) or there was none, to the editor area's active
-   * editor, as {@link releaseFocus} does: the page's body would take it, and
-   * no key does anything there. What held it meanwhile lets go: quick access's
-   * field would keep it until the widget unmounts, which is after the accepted
-   * command has opened its editor.
+   * editor, and to the panel's when the editor area cannot take it (covered,
+   * or with no editor), as {@link releaseFocus} does: the page's body would
+   * take it, and no key does anything there. What held it meanwhile lets go:
+   * quick access's field would keep it until the widget unmounts, which is
+   * after the accepted command has opened its editor.
    */
   returnFocus(to: Element | null | undefined): void {
     const held = document.activeElement;
@@ -390,7 +391,7 @@ export class Editors {
       to.focus();
       if (document.activeElement === to) return;
     }
-    this.#focusIn("editor");
+    if (!this.#focusIn("editor")) this.#focusIn("panel");
     if (document.activeElement === held && held instanceof HTMLElement) {
       held.blur();
     }
@@ -401,10 +402,22 @@ export class Editors {
     return this.onScreen("editor") ? "editor" : "panel";
   }
 
-  #focusIn(area: Area): void {
+  /**
+   * Gives the focus to an area's active group and editor, if the area is on
+   * screen, and tells whether it holds the focus now.
+   */
+  #focusIn(area: Area): boolean {
+    if (!this.onScreen(area)) return false;
     this.#apis.get(area)?.focus();
     const uri = this.activeIn(area);
     if (uri !== undefined) this.resolve(uri)?.focus?.(uri);
+    return (
+      this.#apis
+        .get(area)
+        ?.groups.some((group) =>
+          group.element.contains(document.activeElement),
+        ) ?? false
+    );
   }
 
   /**

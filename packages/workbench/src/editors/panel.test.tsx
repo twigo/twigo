@@ -585,6 +585,67 @@ test("a space that comes back with a maximized panel gives the focus to the pane
   expect(document.activeElement).toBe(screen.getByLabelText("terminal://x"));
 });
 
+test("an area that a maximized panel covers gives the focus back to the panel, not to the page", async () => {
+  refuseInertFocus();
+  const { workbench, editors } = await mounted();
+  withFields(workbench);
+  withTerminal(workbench);
+  act(() => {
+    editors.open("field://a");
+    editors.open("terminal://x");
+  });
+  act(() => {
+    screen.getByLabelText("field://a").focus();
+  });
+  act(() => {
+    workbench.quickAccess.show("");
+  });
+  await act(() => maximize(workbench));
+  act(() => {
+    workbench.quickAccess.hide();
+  });
+  expect(document.activeElement).toBe(screen.getByLabelText("terminal://x"));
+});
+
+test("with no editor in the editor area, the focus goes back to the panel's", async () => {
+  const { workbench, editors } = await mounted();
+  withTerminal(workbench);
+  act(() => {
+    editors.open("terminal://x");
+  });
+  const held = document.body.appendChild(document.createElement("input"));
+  act(() => {
+    held.focus();
+    editors.returnFocus(undefined);
+  });
+  expect(document.activeElement).toBe(screen.getByLabelText("terminal://x"));
+  held.remove();
+});
+
+test("a hidden panel is not asked for the focus", async () => {
+  const { workbench, editors, space } = await mounted();
+  const focus = vi.fn();
+  workbench.editors.register({
+    id: "test.terminal",
+    scheme: "terminal",
+    area: "panel",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <input aria-label={uri} />,
+    focus,
+  });
+  act(() => {
+    editors.open("terminal://x");
+  });
+  focus.mockClear();
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", { visible: false });
+  });
+  act(() => {
+    editors.returnFocus(undefined);
+  });
+  expect(focus).not.toHaveBeenCalled();
+});
+
 test("closing the active editor closes the panel's while a maximized panel covers the editors, whatever has the focus", async () => {
   const { workbench, editors } = await mounted();
   act(() => {
