@@ -17,7 +17,7 @@ use twigo_ipc::{ErrorKind, ShellEnd, ShellEvent};
 use twigo_kube::client::{Actor, Budgets, Clients};
 
 use super::connect::{Connect, Connected};
-use super::flow::FRAME_MAX;
+use super::flow::{FRAME_MAX, GATHER};
 use super::{Frame, Join, Session, Spec};
 
 const KIB: usize = 1024;
@@ -217,6 +217,8 @@ fn status(json: &str) -> Status {
     serde_json::from_str(json).unwrap()
 }
 
+const MS: Duration = Duration::from_millis(1);
+
 const SUCCESS: &str = r#"{"status":"Success"}"#;
 const EXIT_3: &str = r#"{"status":"Failure","reason":"NonZeroExitCode","details":{"causes":[{"reason":"ExitCode","message":"3"}]}}"#;
 const NO_SHELL: &str = r#"{"status":"Failure","reason":"InternalError","code":500,"message":"Internal error occurred: exec: \"bash\": executable file not found in $PATH"}"#;
@@ -226,35 +228,35 @@ async fn output_after_a_quiet_moment_goes_out_at_once() {
     let (harness, mut process) = running(true).await;
     write(&mut process, b"prompt$ ").await;
     assert_eq!(harness.outputs(), vec![b"prompt$ ".to_vec()]);
-    advance(Duration::from_millis(5)).await;
+    advance(GATHER).await;
     write(&mut process, b"e").await;
     assert_eq!(harness.outputs(), vec![b"prompt$ ".to_vec(), b"e".to_vec()]);
 }
 
 #[tokio::test(start_paused = true)]
-async fn output_within_5_ms_of_a_frame_gathers_into_one_frame() {
+async fn output_soon_after_a_frame_gathers_into_one_frame() {
     let (harness, mut process) = running(true).await;
     write(&mut process, b"a").await;
     write(&mut process, b"b").await;
     write(&mut process, b"c").await;
     assert_eq!(harness.outputs(), vec![b"a".to_vec()]);
-    advance(Duration::from_millis(4)).await;
+    advance(GATHER - MS).await;
     settle().await;
     assert_eq!(harness.outputs(), vec![b"a".to_vec()]);
-    advance(Duration::from_millis(2)).await;
+    advance(MS * 2).await;
     settle().await;
     assert_eq!(harness.outputs(), vec![b"a".to_vec(), b"bc".to_vec()]);
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_ack_lets_no_output_out_before_its_5_ms() {
+async fn an_ack_lets_no_output_out_before_its_time() {
     let (harness, mut process) = running(true).await;
     write(&mut process, b"a").await;
     harness.session.ack(1);
     settle().await;
     write(&mut process, b"b").await;
     assert_eq!(harness.outputs(), vec![b"a".to_vec()]);
-    advance(Duration::from_millis(6)).await;
+    advance(GATHER + MS).await;
     settle().await;
     assert_eq!(harness.outputs(), vec![b"a".to_vec(), b"b".to_vec()]);
 }
@@ -265,7 +267,7 @@ async fn an_ack_for_more_than_was_sent_is_clamped() {
     write(&mut process, b"a").await;
     harness.session.ack(u32::MAX);
     settle().await;
-    advance(Duration::from_millis(6)).await;
+    advance(GATHER + MS).await;
     write(&mut process, b"b").await;
     assert_eq!(harness.outputs(), vec![b"a".to_vec(), b"b".to_vec()]);
 }
@@ -276,7 +278,7 @@ async fn a_frame_is_at_most_64_kib() {
     let mut stdout = process.stdout;
     tokio::spawn(async move { stdout.write_all(&vec![1; 200 * KIB]).await.unwrap() });
     settle().await;
-    advance(Duration::from_millis(6)).await;
+    advance(GATHER + MS).await;
     settle().await;
     assert_eq!(harness.sent(), 200 * KIB);
     assert!(
@@ -334,7 +336,7 @@ async fn stopped_at_high_water() -> (Harness, Process, Flood) {
     };
     for _ in 0..60 {
         settle().await;
-        advance(Duration::from_millis(6)).await;
+        advance(GATHER + MS).await;
     }
     settle().await;
     (harness, process, flood)
@@ -350,7 +352,7 @@ async fn the_reader_stops_at_256_kib_unacknowledged() {
     );
     for _ in 0..200 {
         settle().await;
-        advance(Duration::from_millis(6)).await;
+        advance(GATHER + MS).await;
     }
     assert_eq!(harness.sent(), sent, "stopped");
     flood.abort();
@@ -364,13 +366,13 @@ async fn the_reader_starts_again_below_64_kib() {
     harness.session.ack(acked);
     for _ in 0..20 {
         settle().await;
-        advance(Duration::from_millis(6)).await;
+        advance(GATHER + MS).await;
     }
     assert_eq!(harness.sent(), sent, "65 KiB unacknowledged is not below");
     harness.session.ack(u32::try_from(2 * KIB).unwrap());
     for _ in 0..20 {
         settle().await;
-        advance(Duration::from_millis(6)).await;
+        advance(GATHER + MS).await;
     }
     assert!(harness.sent() > sent, "resumes below the low mark");
     flood.abort();
@@ -395,7 +397,7 @@ async fn input_passes_while_output_is_stopped_and_output_starts_again_as_acks_co
     harness.session.ack(u32::try_from(sent).unwrap());
     for _ in 0..20 {
         settle().await;
-        advance(Duration::from_millis(6)).await;
+        advance(GATHER + MS).await;
     }
     assert!(harness.sent() > sent, "acks start the reader again");
     flood.abort();

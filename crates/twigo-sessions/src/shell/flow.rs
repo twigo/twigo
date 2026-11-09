@@ -7,7 +7,7 @@ use tokio::time::Instant;
 
 pub(super) const FRAME_MAX: usize = 64 * 1024;
 /// The least time between frames, since a webview pays for a frame far more than for its bytes.
-const GATHER: Duration = Duration::from_millis(5);
+pub(super) const GATHER: Duration = Duration::from_millis(16);
 const HIGH_WATER: u64 = 256 * 1024;
 const LOW_WATER: u64 = 64 * 1024;
 
