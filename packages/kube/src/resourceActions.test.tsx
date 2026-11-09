@@ -45,6 +45,51 @@ test("l on a row opens its logs through k8s.logs.open", async () => {
   ]);
 });
 
+test("s on a pod's row opens its shell through k8s.shell.open, and means nothing on a deployment's", async () => {
+  const pods = await openList(
+    createMockBackend("ready"),
+    "k8s-list://prod-eu/v1/pods",
+  );
+  const execute = vi.spyOn(pods.commands, "execute");
+  const grid = screen.getAllByRole("grid")[0];
+  if (!grid) throw new Error("a list of pods");
+  act(() => {
+    grid.focus();
+  });
+  fireEvent.keyDown(grid, { code: "KeyJ", key: "j" });
+  await settle(2);
+  fireEvent.keyDown(grid, { code: "KeyS", key: "s" });
+  await settle(4);
+  expect(execute).toHaveBeenCalledWith(
+    "k8s.shell.open",
+    expect.anything(),
+    expect.objectContaining({
+      space: "prod-eu",
+      gvr: { group: "", version: "v1", resource: "pods" },
+      kind: "shell",
+    }),
+  );
+  cleanup();
+
+  const deployments = await openList(
+    createMockBackend("ready"),
+    "k8s-list://prod-eu/apps/v1/deployments",
+  );
+  const other = vi.spyOn(deployments.commands, "execute");
+  const list = screen.getAllByRole("grid")[0];
+  if (!list) throw new Error("a list of deployments");
+  act(() => {
+    list.focus();
+  });
+  fireEvent.keyDown(list, { code: "KeyJ", key: "j" });
+  await settle(2);
+  fireEvent.keyDown(list, { code: "KeyS", key: "s" });
+  await settle(4);
+  expect(
+    other.mock.calls.filter(([command]) => command.startsWith("k8s.shell.")),
+  ).toEqual([]);
+});
+
 test("⌘⌫ on a row asks the bus to delete it, and its dialog names the cluster", async () => {
   const workbench = await mountKube();
   act(() => {
