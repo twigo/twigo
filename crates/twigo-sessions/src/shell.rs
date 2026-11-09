@@ -339,7 +339,7 @@ async fn pump(
     }
     macro_rules! end {
         ($end:expr) => {{
-            out!(flow.flush());
+            out!(flow.flush(Instant::now()));
             send(Frame::Event(ShellEvent::Ended { end: $end }));
             return;
         }};
@@ -358,14 +358,14 @@ async fn pump(
             },
             status = &mut status => break Some(status),
             () = sleep_until(due.unwrap_or_else(Instant::now)), if due.is_some() => {
-                out!(flow.flush());
+                out!(flow.flush(Instant::now()));
             }
             changed = acks.changed() => {
                 if changed.is_err() {
                     return;
                 }
                 let total = *acks.borrow_and_update();
-                out!(flow.ack(total - seen_acks));
+                flow.ack(total - seen_acks);
                 seen_acks = total;
             }
             data = input.recv(), if writing.is_empty() => match data {

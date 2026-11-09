@@ -6,6 +6,7 @@ use std::time::Duration;
 use tokio::time::Instant;
 
 pub(super) const FRAME_MAX: usize = 64 * 1024;
+/// The least time between frames, since a webview pays for a frame far more than for its bytes.
 const GATHER: Duration = Duration::from_millis(5);
 const HIGH_WATER: u64 = 256 * 1024;
 const LOW_WATER: u64 = 64 * 1024;
@@ -15,6 +16,8 @@ pub(super) struct Flow {
     gathered: Vec<u8>,
     /// Sent and not yet acknowledged.
     unacked: u64,
+    /// When the last frame went out.
+    sent: Option<Instant>,
     /// When what has gathered goes out.
     due: Option<Instant>,
     stopped: bool,
@@ -23,7 +26,6 @@ pub(super) struct Flow {
 impl Flow {
     /// Takes what was read and answers the frames to send now.
     pub(super) fn read(&mut self, mut bytes: &[u8], now: Instant) -> Vec<Vec<u8>> {
-        let idle = self.gathered.is_empty() && self.unacked == 0;
         let mut frames = Vec::new();
         while !bytes.is_empty() {
             let room = FRAME_MAX - self.gathered.len();
@@ -31,36 +33,32 @@ impl Flow {
             self.gathered.extend_from_slice(taken);
             bytes = rest;
             if self.gathered.len() == FRAME_MAX {
-                frames.extend(self.flush());
+                frames.extend(self.flush(now));
             }
         }
-        if idle {
-            frames.extend(self.flush());
-        } else if !self.gathered.is_empty() && self.due.is_none() {
-            self.due = Some(now + GATHER);
+        if !self.gathered.is_empty() {
+            match self.sent.map(|sent| sent + GATHER).filter(|due| *due > now) {
+                Some(due) => self.due = Some(due),
+                None => frames.extend(self.flush(now)),
+            }
         }
         frames
     }
 
     /// What has gathered, as a frame.
-    pub(super) fn flush(&mut self) -> Option<Vec<u8>> {
+    pub(super) fn flush(&mut self, now: Instant) -> Option<Vec<u8>> {
         self.due = None;
         if self.gathered.is_empty() {
             return None;
         }
+        self.sent = Some(now);
         self.unacked += self.gathered.len() as u64;
         Some(std::mem::take(&mut self.gathered))
     }
 
-    /// Counts bytes the terminal parsed, no more than were sent, and answers
-    /// what gathered once nothing is left unacknowledged.
-    pub(super) fn ack(&mut self, bytes: u64) -> Option<Vec<u8>> {
+    /// Counts bytes the terminal parsed, no more than were sent.
+    pub(super) fn ack(&mut self, bytes: u64) {
         self.unacked -= bytes.min(self.unacked);
-        if self.unacked == 0 {
-            self.flush()
-        } else {
-            None
-        }
     }
 
     pub(super) fn due(&self) -> Option<Instant> {
@@ -96,7 +94,7 @@ mod tests {
         assert!(flow.read(b"b", now()).is_empty());
         assert!(flow.read(b"c", now()).is_empty());
         assert_eq!(flow.due(), Some(now() + GATHER));
-        assert_eq!(flow.flush(), Some(b"bc".to_vec()));
+        assert_eq!(flow.flush(now()), Some(b"bc".to_vec()));
         assert_eq!(flow.due(), None);
     }
 
@@ -107,17 +105,37 @@ mod tests {
         let frames = flow.read(&vec![0; 3 * FRAME_MAX], now());
         assert_eq!(frames.len(), 3);
         assert!(frames.iter().all(|frame| frame.len() == FRAME_MAX));
-        assert_eq!(flow.flush(), None);
+        assert_eq!(flow.flush(now()), None);
         assert!(flow.read(&vec![0; KIB], now()).is_empty());
-        assert_eq!(flow.flush().map(|frame| frame.len()), Some(KIB));
+        assert_eq!(flow.flush(now()).map(|frame| frame.len()), Some(KIB));
     }
 
     #[tokio::test(start_paused = true)]
-    async fn an_ack_that_empties_the_unacknowledged_sends_what_has_gathered() {
+    async fn an_ack_lets_nothing_out_before_its_time() {
         let mut flow = Flow::default();
         flow.read(b"sent", now());
-        flow.read(b"more", now());
-        assert_eq!(flow.ack(4), Some(b"more".to_vec()));
+        flow.ack(4);
+        assert!(flow.read(b"more", now()).is_empty());
+        assert_eq!(flow.due(), Some(now() + GATHER));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn output_after_the_gap_goes_out_at_once_whatever_is_unacknowledged() {
+        let mut flow = Flow::default();
+        flow.read(b"sent", now());
+        tokio::time::advance(GATHER).await;
+        assert_eq!(flow.read(b"echo", now()), vec![b"echo".to_vec()]);
+        assert_eq!(flow.due(), None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_timer_counts_from_the_last_frame_not_from_the_first_byte_held() {
+        let mut flow = Flow::default();
+        flow.read(b"sent", now());
+        let due = now() + GATHER;
+        tokio::time::advance(Duration::from_millis(4)).await;
+        assert!(flow.read(b"more", now()).is_empty());
+        assert_eq!(flow.due(), Some(due));
     }
 
     #[tokio::test(start_paused = true)]
@@ -125,9 +143,11 @@ mod tests {
         let mut flow = Flow::default();
         flow.read(b"sent", now());
         flow.read(b"held", now());
-        assert_eq!(flow.ack(1 << 40), Some(b"held".to_vec()));
+        flow.ack(1 << 40);
+        assert_eq!(flow.unacked, 0);
+        flow.flush(now());
         assert_eq!(flow.unacked, 4);
-        assert_eq!(flow.ack(2), None);
+        flow.ack(2);
         assert_eq!(flow.unacked, 2);
     }
 

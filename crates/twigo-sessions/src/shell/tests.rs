@@ -222,14 +222,17 @@ const EXIT_3: &str = r#"{"status":"Failure","reason":"NonZeroExitCode","details"
 const NO_SHELL: &str = r#"{"status":"Failure","reason":"InternalError","code":500,"message":"Internal error occurred: exec: \"bash\": executable file not found in $PATH"}"#;
 
 #[tokio::test(start_paused = true)]
-async fn with_nothing_unacknowledged_output_goes_out_at_once() {
+async fn output_after_a_quiet_moment_goes_out_at_once() {
     let (harness, mut process) = running(true).await;
     write(&mut process, b"prompt$ ").await;
     assert_eq!(harness.outputs(), vec![b"prompt$ ".to_vec()]);
+    advance(Duration::from_millis(5)).await;
+    write(&mut process, b"e").await;
+    assert_eq!(harness.outputs(), vec![b"prompt$ ".to_vec(), b"e".to_vec()]);
 }
 
 #[tokio::test(start_paused = true)]
-async fn output_with_anything_unacknowledged_gathers_for_5_ms_into_one_frame() {
+async fn output_within_5_ms_of_a_frame_gathers_into_one_frame() {
     let (harness, mut process) = running(true).await;
     write(&mut process, b"a").await;
     write(&mut process, b"b").await;
@@ -244,12 +247,15 @@ async fn output_with_anything_unacknowledged_gathers_for_5_ms_into_one_frame() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_ack_that_clears_what_is_unacknowledged_lets_output_out_at_once_again() {
+async fn an_ack_lets_no_output_out_before_its_5_ms() {
     let (harness, mut process) = running(true).await;
     write(&mut process, b"a").await;
     harness.session.ack(1);
     settle().await;
     write(&mut process, b"b").await;
+    assert_eq!(harness.outputs(), vec![b"a".to_vec()]);
+    advance(Duration::from_millis(6)).await;
+    settle().await;
     assert_eq!(harness.outputs(), vec![b"a".to_vec(), b"b".to_vec()]);
 }
 
@@ -259,15 +265,9 @@ async fn an_ack_for_more_than_was_sent_is_clamped() {
     write(&mut process, b"a").await;
     harness.session.ack(u32::MAX);
     settle().await;
-    write(&mut process, b"b").await;
-    write(&mut process, b"c").await;
-    assert_eq!(harness.outputs(), vec![b"a".to_vec(), b"b".to_vec()]);
     advance(Duration::from_millis(6)).await;
-    settle().await;
-    assert_eq!(
-        harness.outputs(),
-        vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]
-    );
+    write(&mut process, b"b").await;
+    assert_eq!(harness.outputs(), vec![b"a".to_vec(), b"b".to_vec()]);
 }
 
 #[tokio::test(start_paused = true)]
