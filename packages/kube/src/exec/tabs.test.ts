@@ -464,6 +464,27 @@ test("a restart resets the modes the old program left, and focus sends no report
   expect(sent("shell_input")).toEqual([]);
 });
 
+test("an ending turns focus reporting off, so a terminal focused in the task of a restart reports nothing to the new shell", async () => {
+  const { mounted, opens, sent, tabs } = setup();
+  const tab = await mounted();
+  opens[0]?.send({ state: "running" });
+  opens[0]?.send(bytes("\x1b[?1004h\x1b[?1000h\x1b[?1006h\x1b[?2004h"));
+  await vi.advanceTimersByTimeAsync(10);
+  expect(tab.term.modes.sendFocusMode).toBe(true);
+  opens[0]?.send({ state: "ended", end: { reason: "connectionLost" } });
+  await vi.advanceTimersByTimeAsync(50);
+  expect(tab.term.modes).toMatchObject({
+    sendFocusMode: false,
+    mouseTrackingMode: "none",
+    bracketedPasteMode: false,
+  });
+
+  tabs.start(URI, INPUT, 8);
+  tab.focus();
+  await vi.advanceTimersByTimeAsync(50);
+  expect(sent("shell_input")).toEqual([{ id: 7, data: [27, 91, 79] }]);
+});
+
 test("a tab restored with no session says so and sends nothing, whatever shows", async () => {
   const { tabs, calls, container } = setup();
   const tab = tabs.tab(URI, INPUT);

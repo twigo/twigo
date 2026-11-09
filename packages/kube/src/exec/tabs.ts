@@ -19,9 +19,14 @@ const SCROLLBACK = 5000;
 /** How long a layout change waits for the next one before the terminal is fitted. */
 const FIT_MS = 100;
 
-/** The modes a program leaves on: the mouse, bracketed paste, and the cursor, hidden while the input is off. */
+/**
+ * The modes a program leaves on: the mouse, bracketed paste and focus
+ * reporting, and the cursor, hidden while the input is off. Written when a
+ * session ends too, since a restart's reset is parsed after the task that
+ * focuses the terminal, which would report the focus to the new shell.
+ */
 const MODES_OFF =
-  "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25l";
+  "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1004l\x1b[?1006l\x1b[?2004l\x1b[?25l";
 /** Leaves the alternate screen, which restores the cursor: a terminal that is not on it would jump home. */
 const LEAVE_ALTERNATE = "\x1b[?1049l";
 /**
