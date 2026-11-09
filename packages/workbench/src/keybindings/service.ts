@@ -61,16 +61,9 @@ export class Keybindings {
   /** Handles a keydown; true when the event was a binding's and is consumed. */
   dispatch(event: KeyboardEvent): boolean {
     if (event.defaultPrevented || event.isComposing) return false;
-    const press = this.#mapper.fromEvent(event);
-    if (!press) return false;
-    const target = event.target instanceof Element ? event.target : null;
-    const lookup = this.keys.lookup(target);
-    const resolution = this.#resolve().resolve(
-      this.#pending,
-      press,
-      lookup,
-      (binding) => this.commands.enabled(binding.command, lookup),
-    );
+    const found = this.#resolution(event);
+    if (!found) return false;
+    const { press, lookup, resolution } = found;
     const waited = this.#pending.length > 0;
     if (resolution.kind === "none") {
       if (!waited) return false;
@@ -89,6 +82,18 @@ export class Keybindings {
     return true;
   }
 
+  /**
+   * Whether a keydown is a binding's, or goes on a chord, where it happens,
+   * and nothing runs: a terminal asks it to keep every other key.
+   */
+  handles(event: KeyboardEvent): boolean {
+    const found = this.#resolution(event);
+    return (
+      found !== undefined &&
+      (found.resolution.kind !== "none" || this.#pending.length > 0)
+    );
+  }
+
   /** The binding that wins for a command, if any. */
   primary(command: string): Binding | undefined {
     return this.#resolve().bindingsOf(command)[0];
@@ -96,6 +101,20 @@ export class Keybindings {
 
   label(presses: readonly Press[]): string {
     return presses.map((press) => this.#mapper.label(press)).join(" ");
+  }
+
+  #resolution(event: KeyboardEvent) {
+    const press = this.#mapper.fromEvent(event);
+    if (!press) return undefined;
+    const target = event.target instanceof Element ? event.target : null;
+    const lookup = this.keys.lookup(target);
+    const resolution = this.#resolve().resolve(
+      this.#pending,
+      press,
+      lookup,
+      (binding) => this.commands.enabled(binding.command, lookup),
+    );
+    return { press, lookup, resolution };
   }
 
   #resolve(): Resolver {
