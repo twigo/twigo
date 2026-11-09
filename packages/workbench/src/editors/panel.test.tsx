@@ -4,7 +4,10 @@ import { useEditorShown } from "../react";
 import { tabsIn, testWorkbench } from "../testing";
 import { WorkbenchView } from "../WorkbenchView";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const shown = new Map<string, boolean>();
 
@@ -523,4 +526,85 @@ test("the panel's tabs come back after a switch to another space and back", asyn
     workbench.spaces.select(first);
   });
   expect(tabsIn("panel")).toEqual(["session://x"]);
+});
+
+function withTerminal(
+  workbench: Awaited<ReturnType<typeof mounted>>["workbench"],
+) {
+  workbench.editors.register({
+    id: "test.terminal",
+    scheme: "terminal",
+    area: "panel",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <input aria-label={uri} />,
+    focus: (uri) => {
+      document.querySelector<HTMLElement>(`[aria-label="${uri}"]`)?.focus();
+    },
+  });
+}
+
+function refuseInertFocus() {
+  const focus = Reflect.get(HTMLElement.prototype, "focus");
+  vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(function (
+    this: HTMLElement,
+    options?: FocusOptions,
+  ) {
+    if (this.closest("[inert]") === null) focus.call(this, options);
+  });
+}
+
+const maximize = (
+  workbench: Awaited<ReturnType<typeof mounted>>["workbench"],
+) =>
+  workbench.commands.execute(
+    "workbench.action.maximizePanel",
+    workbench.keys.lookup(null),
+  );
+
+test("a space that comes back with a maximized panel gives the focus to the panel", async () => {
+  refuseInertFocus();
+  const { workbench, editors, space } = await mounted();
+  withFields(workbench);
+  withTerminal(workbench);
+  const first = space();
+  act(() => {
+    editors.open("field://a");
+    editors.open("terminal://x");
+  });
+  await act(() => maximize(workbench));
+  const other = workbench.spaces.list.find((each) => each.id !== first);
+  if (!other) throw new Error("the mock lists one space");
+  act(() => {
+    workbench.spaces.select(other.id);
+  });
+  act(() => {
+    workbench.spaces.select(first);
+  });
+  await act(() => Promise.resolve());
+  expect(workbench.spaces.state(first).parts.panel.maximized).toBe(true);
+  expect(document.activeElement).toBe(screen.getByLabelText("terminal://x"));
+});
+
+test("closing the active editor closes the panel's while a maximized panel covers the editors, whatever has the focus", async () => {
+  const { workbench, editors } = await mounted();
+  act(() => {
+    editors.open("note://a");
+    editors.open("session://x");
+  });
+  await act(() => maximize(workbench));
+  const outside = document.body.appendChild(document.createElement("button"));
+  act(() => {
+    outside.focus();
+  });
+  const close = () =>
+    workbench.commands.execute(
+      "workbench.action.closeActiveEditor",
+      workbench.keys.lookup(document.activeElement),
+    );
+  await act(close);
+  expect(tabsIn("panel")).toEqual([]);
+  expect(tabsIn("editor")).toEqual(["note://a"]);
+  await act(close);
+  expect(tabsIn("editor")).toEqual(["note://a"]);
+  outside.remove();
 });

@@ -26,7 +26,6 @@ import {
   type Area,
 } from "../editors/registry";
 import { EditorShownContext, useChanges, useWorkbench } from "../react";
-import type { PanelState } from "../spaces/store";
 import { PanelBoundary } from "./PanelBoundary";
 import { useInertWhile } from "./useInertWhile";
 
@@ -36,9 +35,6 @@ const THEME: DockviewTheme = {
   gap: 0,
 };
 
-const isCovered = (panel: PanelState | undefined) =>
-  panel !== undefined && panel.visible && panel.maximized;
-
 /** The active space's editor groups; each space has its own layout (ARCHITECTURE 4.1, 4.2). */
 export function EditorArea() {
   const { spaces, keys } = useWorkbench();
@@ -46,7 +42,7 @@ export function EditorArea() {
   const space = spaces.active;
   const ref = useRef<HTMLDivElement>(null);
 
-  useInertWhile(ref, isCovered, "panel");
+  useInertWhile(ref, "editor");
 
   useEffect(() => {
     const element = ref.current;
@@ -198,9 +194,7 @@ function EditorPanel({ params: raw, api }: IDockviewPanelProps) {
     );
   }
   const Component = provider.component;
-  const space = spaces.active;
-  const panel = space && spaces.state(space.id).parts.panel;
-  const covered = provider.area !== "panel" && isCovered(panel);
+  const covered = provider.area !== "panel" && !editors.onScreen("editor");
   return (
     <EditorShownContext.Provider value={visible && !covered}>
       <PanelBoundary label={provider.title(new URL(params.uri))}>

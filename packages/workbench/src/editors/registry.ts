@@ -100,13 +100,16 @@ export class Editors {
   #active: string | undefined;
 
   /**
-   * `reveal` shows a hidden area before an editor opens in it, and `saved`
-   * reads the layout a space keeps for an area.
+   * `reveal` shows a hidden area before an editor opens in it, `saved` reads
+   * the layout a space keeps for an area, and `onScreen` says whether an area
+   * is on screen: not a hidden panel, nor the editor area under a maximized
+   * one, which take no focus.
    */
   constructor(
     private readonly keys: ContextKeys,
     private readonly reveal: (area: Area) => void,
     private readonly saved: (space: string, area: Area) => unknown,
+    readonly onScreen: (area: Area) => boolean,
   ) {}
 
   register(provider: EditorProvider): () => void {
@@ -160,7 +163,8 @@ export class Editors {
    * since the person went elsewhere, and reported as closed to whoever kept
    * something for it, unless that space's saved layout holds the editor, which
    * is then still open there. What was closed for the space closes in it,
-   * however many other spaces came first.
+   * however many other spaces came first. The area on screen takes the focus
+   * that fell to the page, which the other, inert, would refuse.
    */
   attach(api: DockviewApi, area: Area, space: string): () => void {
     this.#apis.set(area, api);
@@ -179,10 +183,8 @@ export class Editors {
             this.changes.emit();
           })
         : undefined;
-    if (area === "editor") {
-      this.#setActive(api.activePanel);
-      this.keepFocus("editor");
-    }
+    if (area === "editor") this.#setActive(api.activePanel);
+    if (area === this.#front) this.keepFocus(area);
     for (const [uri, later] of [...this.#leaving]) {
       if (later.area !== area || later.space !== space) continue;
       this.#leaving.delete(uri);
@@ -392,6 +394,11 @@ export class Editors {
     if (document.activeElement === held && held instanceof HTMLElement) {
       held.blur();
     }
+  }
+
+  /** The area the person works in: the editor area, or the panel while it covers it. */
+  get #front(): Area {
+    return this.onScreen("editor") ? "editor" : "panel";
   }
 
   #focusIn(area: Area): void {

@@ -274,8 +274,12 @@ export function registerCore(workbench: Workbench): void {
       category: "Editor",
       enablement: "editor.open || panelFocus",
       run: (_args, lookup) => {
-        // The panel's editors take the commands while it has the focus.
-        const area: Area = lookup("panelFocus") === true ? "panel" : "editor";
+        // The panel's editors take the commands while it has the focus, or
+        // covers the editor area, whose editors nobody sees.
+        const area: Area =
+          lookup("panelFocus") === true || !editors.onScreen("editor")
+            ? "panel"
+            : "editor";
         const uri =
           area === "panel" ? editors.activeIn("panel") : editors.active;
         if (uri) run(uri, area);

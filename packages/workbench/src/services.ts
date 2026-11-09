@@ -52,6 +52,12 @@ export class Workbench {
       const state = this.spaces.state(space);
       return area === "panel" ? state.panelEditors : state.editors;
     },
+    (area) => {
+      const space = this.spaces.active;
+      const panel = space && this.spaces.state(space.id).parts.panel;
+      const visible = panel?.visible ?? false;
+      return area === "panel" ? visible : !(visible && panel?.maximized);
+    },
   );
   readonly quickAccess = new QuickAccess(this.keys, (to) => {
     this.editors.returnFocus(to);

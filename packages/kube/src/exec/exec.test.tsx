@@ -586,6 +586,24 @@ test("a panel shown with split groups gives the focus to the active group's tab 
   expect(document.activeElement).not.toBe(tabs.get(second)?.term.textarea);
 });
 
+test("a space that comes back with a maximized panel gives the focus to its shell", async () => {
+  const { workbench, tabs, open } = await mounted("shellOneContainer");
+  await open("qa", ONE);
+  act(() => {
+    workbench.spaces.setPart("qa", "panel", { maximized: true });
+  });
+  await settle(4);
+  await act(() => workbench.spaces.open("staging"));
+  await settle(4);
+  act(() => {
+    workbench.spaces.select("qa");
+  });
+  await settle(4);
+  expect(document.activeElement).toBe(
+    tabs.get(execUri(RUNNING))?.term.textarea,
+  );
+});
+
 test("the terminal's keys never reach a list's bare ones", async () => {
   const { workbench, open } = await mounted("shellOneContainer");
   await open("qa", ONE);

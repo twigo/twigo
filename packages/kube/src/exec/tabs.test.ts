@@ -485,6 +485,25 @@ test("an ending turns focus reporting off, so a terminal focused in the task of 
   expect(sent("shell_input")).toEqual([{ id: 7, data: [27, 91, 79] }]);
 });
 
+test("a focus asked for while the terminal is off the page waits for the view that puts it back", async () => {
+  const { mounted, container } = setup();
+  const tab = await mounted();
+  tab.host.remove();
+  tab.focus();
+  expect(document.activeElement).not.toBe(tab.term.textarea);
+  tab.attach(container());
+  tab.layout();
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(document.activeElement).toBe(tab.term.textarea);
+});
+
+test("a focus asked for while the terminal is on the page takes it at once", async () => {
+  const { mounted } = setup();
+  const tab = await mounted();
+  tab.focus();
+  expect(document.activeElement).toBe(tab.term.textarea);
+});
+
 test("a tab restored with no session says so and sends nothing, whatever shows", async () => {
   const { tabs, calls, container } = setup();
   const tab = tabs.tab(URI, INPUT);

@@ -173,8 +173,9 @@ export class ExecTab {
     }, FIT_MS);
   }
 
+  /** A view puts the terminal on the page after the focus is asked for, so the focus waits for it. */
   focus(): void {
-    if (this.#opened) this.term.focus();
+    if (this.#opened && this.host.isConnected) this.term.focus();
     else this.#focusWanted = true;
   }
 
@@ -228,13 +229,13 @@ export class ExecTab {
     }
     if (this.#opened) {
       this.#fit.fit();
-      return;
+    } else {
+      this.term.open(this.host);
+      this.#opened = true;
+      this.#fit.fit();
+      this.#loadWebgl();
+      this.#begin();
     }
-    this.term.open(this.host);
-    this.#opened = true;
-    this.#fit.fit();
-    this.#loadWebgl();
-    this.#begin();
     if (this.#focusWanted) {
       this.#focusWanted = false;
       this.term.focus();
