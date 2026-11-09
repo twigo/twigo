@@ -184,6 +184,111 @@ test("a panel maximized over the editor area takes the focus the editors held", 
   expect(document.activeElement?.closest('[aria-label="Panel"]')).toBeTruthy();
 });
 
+const panelElement = () => document.querySelector('[aria-label="Panel"]');
+
+test("the panel is inert while hidden and the editor area while a maximized panel covers it", async () => {
+  const { workbench, editors, space } = await mounted();
+  act(() => {
+    editors.open("note://a");
+    editors.open("session://x");
+  });
+  const note = () => screen.getByText("note note://a");
+  expect(panelElement()?.hasAttribute("inert")).toBe(false);
+  expect(note().closest("[inert]")).toBeNull();
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", { visible: false });
+  });
+  expect(panelElement()?.hasAttribute("inert")).toBe(true);
+  expect(note().closest("[inert]")).toBeNull();
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", {
+      visible: true,
+      maximized: true,
+    });
+  });
+  expect(panelElement()?.hasAttribute("inert")).toBe(false);
+  expect(note().closest("[inert]")).not.toBeNull();
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", { visible: false });
+  });
+  expect(panelElement()?.hasAttribute("inert")).toBe(true);
+  expect(note().closest("[inert]")).toBeNull();
+});
+
+test("the focus leaves a part before the part goes inert", async () => {
+  const { workbench, editors, space } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+    editors.open("input://x");
+  });
+  const inertAtFocus: boolean[] = [];
+  const record = () => {
+    inertAtFocus.push(panelElement()?.hasAttribute("inert") ?? false);
+  };
+  act(() => {
+    screen.getByLabelText("input://x").focus();
+  });
+  document.addEventListener("focusin", record);
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", { visible: false });
+  });
+  document.removeEventListener("focusin", record);
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+  expect(inertAtFocus.length).toBeGreaterThan(0);
+  expect(inertAtFocus.every((inert) => !inert)).toBe(true);
+  expect(panelElement()?.hasAttribute("inert")).toBe(true);
+});
+
+test("an area that an open reveals takes the focus once it is no longer inert", async () => {
+  const { workbench, editors, space } = await mounted();
+  const inertAtFocus: string[] = [];
+  const root = (area: string) =>
+    area === "panel"
+      ? panelElement()
+      : document.querySelector(".twigo-dockview:not(.twigo-panel)");
+  const focusing = (area: string) => () => {
+    const inert = root(area)?.closest("[inert]") ?? null;
+    inertAtFocus.push(`${area}:${String(inert !== null)}`);
+  };
+  workbench.editors.register({
+    id: "test.focusing",
+    scheme: "focusing",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <p>focusing {uri}</p>,
+    focus: focusing("editor"),
+  });
+  workbench.editors.register({
+    id: "test.shell",
+    scheme: "shell",
+    area: "panel",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <p>shell {uri}</p>,
+    focus: focusing("panel"),
+  });
+  act(() => {
+    editors.open("session://x");
+  });
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", { visible: false });
+  });
+  expect(panelElement()?.hasAttribute("inert")).toBe(true);
+  act(() => {
+    editors.open("shell://a");
+  });
+  expect(inertAtFocus).toEqual(["panel:false"]);
+
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", { maximized: true });
+  });
+  expect(document.querySelectorAll("[inert]")).toHaveLength(1);
+  inertAtFocus.length = 0;
+  act(() => {
+    editors.open("focusing://b");
+  });
+  expect(inertAtFocus).toEqual(["editor:false"]);
+});
+
 test("an open URI is focused where it is, in either area", async () => {
   const { workbench, editors, space } = await mounted();
   act(() => {

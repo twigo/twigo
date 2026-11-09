@@ -7,13 +7,17 @@ import {
 import { PanelBottom } from "lucide-react";
 import { EmptyState, InlineActions, KeyHints } from "@twigo/ui";
 import { useChanges, useWorkbench } from "../react";
+import type { PanelState } from "../spaces/store";
 import { GroupActions, SpaceDock } from "./EditorArea";
+import { useInertWhile } from "./useInertWhile";
 
 const THEME: DockviewTheme = {
   ...themeLight,
   className: `${themeLight.className} twigo-dockview twigo-panel`,
   gap: 0,
 };
+
+const hidden = (panel: PanelState | undefined) => !(panel?.visible ?? false);
 
 /**
  * The active space's panel: a dockview of its own for sessions opened by
@@ -49,10 +53,7 @@ export function PanelArea() {
     if (maximized) editors.keepFocus("panel");
   }, [editors, maximized]);
 
-  useEffect(() => {
-    const element = ref.current;
-    if (!visible && element) editors.releaseFocus(element, "editor");
-  }, [editors, visible]);
+  useInertWhile(ref, hidden, "editor");
 
   return (
     <section
