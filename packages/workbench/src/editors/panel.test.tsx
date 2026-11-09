@@ -94,6 +94,96 @@ test("a focus that fell to the page goes to the panel when it is maximized over 
   expect(document.activeElement?.closest('[aria-label="Panel"]')).toBeTruthy();
 });
 
+function withFields(
+  workbench: Awaited<ReturnType<typeof mounted>>["workbench"],
+) {
+  workbench.editors.register({
+    id: "test.field",
+    scheme: "field",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <input aria-label={uri} />,
+    focus: (uri) => {
+      document.querySelector<HTMLElement>(`[aria-label="${uri}"]`)?.focus();
+    },
+  });
+  workbench.editors.register({
+    id: "test.input",
+    scheme: "input",
+    area: "panel",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <input aria-label={uri} />,
+  });
+}
+
+test("hiding the panel moves the focus it held to the editor area's active editor", async () => {
+  const { workbench, editors, space } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+    editors.open("input://x");
+  });
+  act(() => {
+    screen.getByLabelText("input://x").focus();
+  });
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", { visible: false });
+  });
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+});
+
+test("hiding the panel leaves the page without a focus when the editor area has no editor", async () => {
+  const { workbench, editors, space } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("input://x");
+  });
+  act(() => {
+    screen.getByLabelText("input://x").focus();
+  });
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", { visible: false });
+  });
+  expect(document.activeElement).toBe(document.body);
+});
+
+test("hiding the panel does not take a focus that is elsewhere", async () => {
+  const { workbench, editors, space } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+    editors.open("input://x");
+  });
+  const outside = document.body.appendChild(document.createElement("input"));
+  act(() => {
+    outside.focus();
+  });
+  act(() => {
+    workbench.spaces.setPart(space(), "panel", { visible: false });
+  });
+  expect(document.activeElement).toBe(outside);
+  outside.remove();
+});
+
+test("a panel maximized over the editor area takes the focus the editors held", async () => {
+  const { workbench, editors, space } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+    editors.open("input://x");
+  });
+  act(() => {
+    screen.getByLabelText("field://a").focus();
+  });
+  await act(() =>
+    workbench.commands.execute(
+      "workbench.action.maximizePanel",
+      workbench.keys.lookup(null),
+    ),
+  );
+  expect(workbench.spaces.state(space()).parts.panel.maximized).toBe(true);
+  expect(document.activeElement?.closest('[aria-label="Panel"]')).toBeTruthy();
+});
+
 test("an open URI is focused where it is, in either area", async () => {
   const { workbench, editors, space } = await mounted();
   act(() => {

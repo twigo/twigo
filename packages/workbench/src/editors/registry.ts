@@ -347,9 +347,27 @@ export class Editors {
   keepFocus(area: Area): void {
     const focused = document.activeElement;
     if (focused !== document.body && !this.#groupHolds(focused)) return;
-    const holder = this.activeIn(area) === undefined ? "editor" : area;
-    this.#apis.get(holder)?.focus();
-    const uri = this.activeIn(holder);
+    this.#focusIn(this.activeIn(area) === undefined ? "editor" : area);
+  }
+
+  /**
+   * A part that is hidden or covered keeps the focus it held, since it loses
+   * its height and not its elements, and the keys go on to what nobody sees.
+   * The focus inside `from` moves to an area's active editor, or off the page
+   * when that area has none.
+   */
+  releaseFocus(from: Element, to: Area): void {
+    if (!from.contains(document.activeElement)) return;
+    this.#focusIn(to);
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && from.contains(focused)) {
+      focused.blur();
+    }
+  }
+
+  #focusIn(area: Area): void {
+    this.#apis.get(area)?.focus();
+    const uri = this.activeIn(area);
     if (uri !== undefined) this.resolve(uri)?.focus?.(uri);
   }
 

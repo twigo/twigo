@@ -49,6 +49,11 @@ export function PanelArea() {
     if (maximized) editors.keepFocus("panel");
   }, [editors, maximized]);
 
+  useEffect(() => {
+    const element = ref.current;
+    if (!visible && element) editors.releaseFocus(element, "editor");
+  }, [editors, visible]);
+
   return (
     <section
       ref={ref}

@@ -36,10 +36,17 @@ const THEME: DockviewTheme = {
 
 /** The active space's editor groups; each space has its own layout (ARCHITECTURE 4.1, 4.2). */
 export function EditorArea() {
-  const { spaces, keys } = useWorkbench();
+  const { spaces, keys, editors } = useWorkbench();
   useChanges(spaces.changes);
   const space = spaces.active;
   const ref = useRef<HTMLDivElement>(null);
+  const panel = space && spaces.state(space.id).parts.panel;
+  const covered = panel !== undefined && panel.visible && panel.maximized;
+
+  useEffect(() => {
+    const element = ref.current;
+    if (covered && element) editors.releaseFocus(element, "panel");
+  }, [editors, covered]);
 
   useEffect(() => {
     const element = ref.current;
