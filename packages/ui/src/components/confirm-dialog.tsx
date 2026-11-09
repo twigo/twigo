@@ -44,6 +44,8 @@ export interface ConfirmDialogProps {
   readonly destructive: boolean;
   readonly onConfirm: (typed: string | undefined) => void;
   readonly onCancel: () => void;
+  /** Where the focus goes when it closes; Radix returns it only to a trigger, which this has none. */
+  readonly onCloseAutoFocus?: (event: Event) => void;
 }
 
 /**
@@ -66,6 +68,7 @@ export function ConfirmDialog({
   destructive,
   onConfirm,
   onCancel,
+  onCloseAutoFocus,
 }: ConfirmDialogProps) {
   const [text, setText] = useState("");
   const cancel = useRef<HTMLButtonElement>(null);
@@ -88,6 +91,7 @@ export function ConfirmDialog({
           event.preventDefault();
           (input.current ?? cancel.current)?.focus();
         }}
+        onCloseAutoFocus={onCloseAutoFocus}
       >
         {accent && (
           <div

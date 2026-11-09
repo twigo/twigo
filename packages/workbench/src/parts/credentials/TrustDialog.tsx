@@ -9,7 +9,7 @@ import {
   DialogFooter,
   DialogTitle,
 } from "@twigo/ui";
-import { useChanges, useWorkbench } from "../../react";
+import { useChanges, useReturnFocus, useWorkbench } from "../../react";
 
 /**
  * Asks before the active context's plugin first runs, or runs changed
@@ -20,6 +20,9 @@ export function TrustDialog() {
   const { credentials } = useWorkbench();
   useChanges(credentials.changes);
   const { prompt, context } = credentials;
+  const returnFocus = useReturnFocus(
+    prompt !== undefined && context !== undefined,
+  );
   if (!prompt || context === undefined) return null;
   return (
     <Dialog
@@ -28,7 +31,7 @@ export function TrustDialog() {
         credentials.setTrustOpen(open);
       }}
     >
-      <DialogContent className="max-w-lg p-4">
+      <DialogContent className="max-w-lg p-4" onCloseAutoFocus={returnFocus}>
         <div className="flex items-start gap-2.5">
           <ShieldAlert
             aria-hidden
@@ -75,6 +78,7 @@ export function ReviewDialog() {
   useChanges(credentials.changes);
   const { review } = credentials;
   const [kept, setKept] = useState<ReadonlySet<string> | undefined>();
+  const returnFocus = useReturnFocus(review.length > 0);
   if (review.length === 0) return null;
   const chosen = kept ?? new Set(review.map((p) => p.plugin.digest));
   const toggle = (digest: string) => {
@@ -90,7 +94,7 @@ export function ReviewDialog() {
         if (!open) void credentials.answerReview([]);
       }}
     >
-      <DialogContent className="max-w-xl p-4">
+      <DialogContent className="max-w-xl p-4" onCloseAutoFocus={returnFocus}>
         <div className="flex items-start gap-2.5">
           <ShieldAlert
             aria-hidden

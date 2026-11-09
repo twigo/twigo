@@ -153,6 +153,67 @@ test("a dialog runs the plan with what was typed, and its cancel drops it", asyn
   expect(commands(dropped.sent)).toEqual(["command_plan", "command_cancel"]);
 });
 
+test("a dialog's close gives the focus back to what held it, else to the active editor, and leaves a focus that moved meanwhile", async () => {
+  const before = document.body.appendChild(document.createElement("button"));
+  before.focus();
+  const asked = await started(plan({ kind: "confirm" }), []);
+  const { workbench } = asked;
+  workbench.editors.register({
+    id: "test.field",
+    scheme: "field",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <input aria-label={uri} />,
+    focus: (uri) => {
+      document.querySelector<HTMLElement>(`[aria-label="${uri}"]`)?.focus();
+    },
+  });
+  render(<WorkbenchView workbench={workbench} />);
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: /^Cancel/ }),
+  );
+  act(() => {
+    workbench.operations.asking?.cancel();
+  });
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  await expect(asked.outcome).resolves.toEqual({ state: "cancelled" });
+  expect(document.activeElement).toBe(before);
+
+  act(() => {
+    workbench.editors.open("field://a");
+  });
+  before.focus();
+  vi.spyOn(workbench.backend, "invoke").mockResolvedValueOnce({
+    ...plan({ kind: "confirm" }),
+    id: 9,
+  });
+  const next = workbench.operations.run(REQUEST, LOOK);
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  before.disabled = true;
+  act(() => {
+    workbench.operations.asking?.cancel();
+  });
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  await next;
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+
+  before.disabled = false;
+  vi.spyOn(workbench.backend, "invoke").mockResolvedValueOnce({
+    ...plan({ kind: "confirm" }),
+    id: 10,
+  });
+  const last = workbench.operations.run(REQUEST, LOOK);
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  act(() => {
+    workbench.operations.asking?.cancel();
+  });
+  before.focus();
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  await last;
+  expect(document.activeElement).toBe(before);
+  before.remove();
+});
+
 test("a wait shows until the run ends, and a stop asks Rust to stop it", async () => {
   const waiting = await started(plan({ kind: "atOnce" }), [
     { state: "running", text: "Waiting for namespace payments to go" },

@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { Lock, ShieldAlert } from "lucide-react";
 import { ConfirmDialog } from "@twigo/ui";
-import { useChanges, useWorkbench } from "../react";
+import { useChanges, useReturnFocus, useWorkbench } from "../react";
 import { environmentLabel, modeLabel } from "../spaces/modes";
 
 /**
@@ -14,6 +14,7 @@ export function ConfirmHost() {
   useChanges(operations.changes);
   useChanges(colors.changes);
   const asking = operations.asking;
+  const returnFocus = useReturnFocus(asking !== undefined);
   if (!asking) return null;
   const { plan, look } = asking;
   const color = colors.of(plan.context);
@@ -67,6 +68,7 @@ export function ConfirmHost() {
       destructive={plan.destructive}
       onConfirm={asking.confirm}
       onCancel={asking.cancel}
+      onCloseAutoFocus={returnFocus}
     />
   );
 }
