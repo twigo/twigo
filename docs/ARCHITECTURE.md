@@ -952,7 +952,7 @@ Extensions add commands, not prefixes.
     A failed load and a lost context leave that terminal on the DOM renderer.
     With an opaque background, 6.1.0-beta.304 draws colours, box drawing, Cyrillic, CJK and emoji in a real WKWebView after 5,000 lines, on WebGL and on the DOM renderer (macOS 27.2, kind 1.37, 2026-11-10), so [#5816](https://github.com/xtermjs/xterm.js/issues/5816) did not reproduce there.
     WebGL draws an emoji with a skin tone, or a flag, a cell per code point, which the DOM renderer joins.
-    Its pattern glyphs, such as ░, throw on the theme's `oklch` colours, and the rows below them are no longer drawn; 6.0.0 does the same.
+    Its pattern glyphs, such as ░, throw on an `oklch` colour and leave the rows below undrawn, on 6.0.0 too, so the theme goes to xterm in sRGB hex.
   - **Keys, paste and links.**
     The terminal keeps every key except those the workbench takes, which `attachCustomKeyEventHandler` leaves to it, as VS Code does; single-letter list keys never fire in a terminal, since `listFocus` does not hold there.
     The workbench takes the next key of a chord that waits, on every platform.

@@ -14,6 +14,7 @@ export { cn } from "./lib/cn";
 export * from "./components/toast";
 export * from "./components/notify";
 export { fuzzyMatch, type TextMatch, type TextRange } from "./lib/match";
+export { srgbHex } from "./lib/srgb";
 export * from "./components/actions";
 export * from "./components/banner";
 export * from "./components/callout";

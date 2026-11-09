@@ -1,3 +1,4 @@
+import { srgbHex } from "@twigo/ui";
 import type { ITheme } from "@xterm/xterm";
 
 const ANSI = [
@@ -18,8 +19,10 @@ const bright = (name: string) =>
  * xterm's theme from the tokens (ARCHITECTURE 4.9): the editor's surface,
  * opaque as the WebGL renderer needs, its text, and the sixteen colours the
  * logs use. A token that is not set leaves xterm's own colour for the slot.
- * xterm reads any CSS colour through a canvas, so the tokens' `oklch`
- * values pass as they are.
+ * @todo: pass the tokens as they are, not in sRGB hex, once xterm's WebGL
+ * addon reads a pattern glyph's colour from any CSS colour: it parses only
+ * hex and `rgba()` when it draws one such as ░, and throws on `oklch`, which
+ * leaves the rows below undrawn ([`drawPatternChar`](https://github.com/xtermjs/xterm.js/blob/c58ea3637f3968e0e6e79cd92cf9aace7ef89ee2/addons/addon-webgl/src/customGlyphs/CustomGlyphRasterizer.ts#L495-L504)).
  */
 export function terminalTheme(
   root: Element = document.documentElement,
@@ -39,7 +42,7 @@ export function terminalTheme(
   return Object.fromEntries(
     slots.flatMap(([slot, token]) => {
       const value = style.getPropertyValue(`--${token}`).trim();
-      return value === "" ? [] : [[slot, value]];
+      return value === "" ? [] : [[slot, srgbHex(value)]];
     }),
   );
 }

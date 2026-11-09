@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ShellEnd } from "@twigo/protocol";
+import { srgbHex } from "@twigo/ui";
 import { execUri, type ExecInput } from "../uri";
 import {
   enter,
@@ -564,15 +565,16 @@ test("a link opens only on a modifier click, and only as http or https", async (
   ]);
 });
 
-test("the theme follows the document's tokens as the app toggles its theme", async () => {
+test("the theme follows the document's tokens, in sRGB hex, as the app toggles its theme", async () => {
   const { mounted } = setup();
   document.documentElement.style.setProperty("--editor", "first");
   const tab = await mounted();
-  expect(tab.term.options.theme?.background).toBe("first");
+  expect(tab.term.options.theme?.background).toBe(srgbHex("first"));
+  expect(srgbHex("first")).not.toBe("first");
   document.documentElement.style.setProperty("--editor", "second");
   document.documentElement.classList.toggle("dark");
   await vi.advanceTimersByTimeAsync(10);
-  expect(tab.term.options.theme?.background).toBe("second");
+  expect(tab.term.options.theme?.background).toBe(srgbHex("second"));
   document.documentElement.classList.remove("dark");
 });
 
