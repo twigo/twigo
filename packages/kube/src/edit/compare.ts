@@ -18,7 +18,8 @@ import { objectUri, parseObjectUri } from "../uri";
  * the first rows is found by typing its name, then the objects the space
  * opened lately, of any kind. Someone who may not list the kind cluster-wide
  * gets the selected namespaces and the object's own instead, and is told so;
- * not there either, and the picker says that.
+ * if one of them is refused too, the object's own namespace alone; not there
+ * either, and the picker says that.
  */
 export function comparisons(
   workbench: Workbench,
@@ -51,24 +52,26 @@ export function comparisons(
     let snapshot = await rows([]);
     let notice: string | undefined;
     if (snapshot.status.state === "forbidden") {
-      const namespaces = namespaced
-        ? [
-            ...new Set([
-              ...spaces.state(object.space).namespaces,
-              ...(object.namespace === undefined ? [] : [object.namespace]),
-            ]),
-          ]
-        : [];
-      if (namespaces.length > 0) {
-        snapshot = await rows(namespaces);
+      const own = namespaced ? object.namespace : undefined;
+      if (own !== undefined) {
+        const together = [
+          ...new Set([...spaces.state(object.space).namespaces, own]),
+        ];
+        snapshot = await rows(together);
         notice = `You may not list ${object.gvr.resource} in this cluster: these are from the namespaces selected and the object's own.`;
+        // A view reads all its namespaces or none (twigo-cache's `combine`), so
+        // one the person may not list refuses the others with it.
+        if (snapshot.status.state === "forbidden" && together.length > 1) {
+          snapshot = await rows([own]);
+          notice = `You may not list ${object.gvr.resource} in this cluster, nor in the namespaces selected and the object's own: these are from the object's own namespace.`;
+        }
       }
-      if (namespaces.length === 0 || snapshot.status.state === "forbidden") {
+      if (own === undefined || snapshot.status.state === "forbidden") {
         throw new IpcError(
           "forbidden",
-          namespaces.length === 0
+          own === undefined
             ? `You may not list ${object.gvr.resource} in this cluster.`
-            : `You may not list ${object.gvr.resource} in this cluster, nor in the namespaces selected or the object's own.`,
+            : `You may not list ${object.gvr.resource} in this cluster, nor in the object's own namespace (${own}).`,
         );
       }
     }
