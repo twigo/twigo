@@ -32,6 +32,8 @@
 - The churn generator alone: `cargo run --release -p twigo-bench -- churn --kubeconfig <path> --rate 100 --seconds 60 --log churn.jsonl`.
 - The hub's live tests sit in the library (`crates/twigo-cache/src/hub/live.rs`) and run with the others under `--ignored`; `crates/twigo-cache/tests/restart_live.rs` restarts the API server of a kind cluster through `docker exec … crictl stop`, so it refuses kwok contexts and waits for the controller manager before it ends.
 - `crates/twigo-core/tests/bus_live/apply.rs` waits for an object's `resourceVersion` to hold still before it previews an edit, since a controller still writing status would answer `Stale`.
+- kwok 0.8.0 deletes a pod by name, with no uid, once it sees a deletion timestamp, and the API server writes one even for a graceless delete, so a pod created under that name straight after is deleted too: 95 of 200 replacements on kind 1.35 (2026-11-09).
+  A test that recreates a pod under one name gives it a scheduling gate, as `pod` in `bus_live/apply.rs` does, so kwok never holds it.
 - `crates/twigo-core/tests/bus_live/` runs the kubectl command of each plan through `sh`, with `KUBECONFIG` set to a copy of the test's kubeconfig, so it needs kubectl on `PATH`.
   Its cordons and drains each take kwok nodes of their own (`kwok-node-5` to `-9`) and uncordon them first, since a run that failed leaves them cordoned.
 - The logs' live tests (`crates/twigo-sessions/tests/logs_live.rs`) and `objects_live`'s crash loop need a kubelet, so they refuse contexts other than `kind-*`.
@@ -76,7 +78,7 @@
 - `packages/kube/test/k8s-yaml/read.json` and `written.json` are recorded by `node record.mjs` beside them, and `refused.json` by the test that reads them: never edit them by hand.
 - `packages/protocol/src/mock/resources.json` is recorded by the `record_discovery` example from a cluster of `bench/cluster.sh up <name> 1.37`, which installs kwok's CRDs: never edit it by hand.
 - `packages/protocol/src/mock/schemas.json` is recorded by the `record_openapi` example from a cluster of `bench/cluster.sh up <name> 1.37`: never edit it by hand.
-- `crates/twigo-kube/tests/openapi_live.rs` counts the documents the API server serves by its own `apiserver_request_total` with `subresource="openapi/v3/"`, so another client fetching OpenAPI documents from the cluster at that moment would fail it; not seen so far.
+- `crates/twigo-kube/tests/openapi_live.rs` counts the documents the API server serves by its own `apiserver_request_total` with `subresource="openapi/v3/"`, so its tests take one lock, and a client outside the test binary fetching OpenAPI documents at that moment would still fail it.
   It creates CRDs of random groups and deletes them.
 - `packages/protocol/src/mock/objects.json` is written by `twigo-describe`'s `overviews` test from the recorded objects: never edit it by hand.
   The same test writes `revealed.json`, the values a Reveal answers, and checks that `objects.json` holds none of them.

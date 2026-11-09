@@ -621,20 +621,7 @@ async fn an_immutable_field_is_caught_at_the_dry_run_and_only_a_pod_or_a_job_off
     }
 
     let pods = format!("/api/v1/namespaces/{namespace}/pods");
-    post(
-        &cluster.admin,
-        &pods,
-        &json!({
-            "apiVersion": "v1",
-            "kind": "Pod",
-            "metadata": { "name": "web" },
-            "spec": {
-                "nodeName": "kwok-node-0",
-                "containers": [{ "name": "app", "image": "fake:1" }],
-            },
-        }),
-    )
-    .await;
+    post(&cluster.admin, &pods, &pod("web", None)).await;
     let pod_path = format!("{pods}/web");
     let live = settled(&cluster.admin, &pod_path).await;
     let uid = live["metadata"]["uid"].clone();
@@ -738,20 +725,7 @@ async fn a_recreate_s_kubectl_line_does_what_the_plan_does() {
     let dir = tempfile::tempdir().unwrap();
     let (core, kubeconfig) = core(dir.path(), &cluster).await;
     let pods = format!("/api/v1/namespaces/{namespace}/pods");
-    post(
-        &cluster.admin,
-        &pods,
-        &json!({
-            "apiVersion": "v1",
-            "kind": "Pod",
-            "metadata": { "name": "web" },
-            "spec": {
-                "nodeName": "kwok-node-0",
-                "containers": [{ "name": "app", "image": "fake:1" }],
-            },
-        }),
-    )
-    .await;
+    post(&cluster.admin, &pods, &pod("web", None)).await;
     let path = format!("{pods}/web");
     let live = settled(&cluster.admin, &path).await;
     let mut edited = view(&live);
@@ -1954,7 +1928,7 @@ fn pod(name: &str, finalizer: Option<&str>) -> Value {
         "kind": "Pod",
         "metadata": { "name": name },
         "spec": {
-            "nodeName": "kwok-node-0",
+            "schedulingGates": [{ "name": "twigo.test/kept-from-kwok" }],
             "containers": [{ "name": "app", "image": "fake:1" }],
         },
     });

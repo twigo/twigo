@@ -9,8 +9,11 @@ use kube::config::{KubeConfigOptions, Kubeconfig};
 use kube::core::GroupVersionKind;
 use kube::{Client, Config};
 use serde_json::{Value, json};
+use tokio::sync::Mutex;
 use twigo_kube::client::{Clients, Gate, Options};
 use twigo_kube::openapi::{Cache, Document, Error};
+
+static SERVER_COUNTERS: Mutex<()> = Mutex::const_new(());
 
 async fn client() -> Client {
     let path = std::env::var_os("TWIGO_TEST_KUBECONFIG")
@@ -129,6 +132,7 @@ async fn load_when_listed(client: &Client, cache: &Cache, group: &str) -> Docume
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
 async fn a_second_request_for_a_document_does_not_reach_the_server() {
+    let _counters = SERVER_COUNTERS.lock().await;
     let client = client().await;
     let dir = tempfile::tempdir().unwrap();
     let cache = Cache::new(dir.path());
@@ -153,6 +157,7 @@ async fn a_second_request_for_a_document_does_not_reach_the_server() {
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
 async fn a_crd_that_changes_gets_a_new_hash_and_its_new_schema_is_answered() {
+    let _counters = SERVER_COUNTERS.lock().await;
     let client = client().await;
     let group = format!("{}.example.com", unique("openapi"));
     let crds: Api<CustomResourceDefinition> = Api::all(client.clone());
@@ -272,6 +277,7 @@ fn misspelled(object: &Value, pointer: &str) -> Value {
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
 async fn real_objects_validate_against_their_schemas_and_misspelled_twins_do_not() {
+    let _counters = SERVER_COUNTERS.lock().await;
     let client = client().await;
     let dir = tempfile::tempdir().unwrap();
     let cache = Cache::new(dir.path());
