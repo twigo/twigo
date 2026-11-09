@@ -150,6 +150,21 @@ test("a shell asks which container when several run, the default first, and open
   expect(tabs.get(uri)?.getStatus().state).toMatch(/^(connecting|running)$/);
 });
 
+test("the container the pod names as its default comes first in the picker, the others in their order", async () => {
+  const { workbench, start } = await mounted("shellDefaultSecond");
+  const run = start("qa");
+  await settle(4);
+  const asking = workbench.quickAccess.session?.pick;
+  expect(asking?.items.map(({ id, description }) => [id, description])).toEqual(
+    [
+      ["istio-proxy", "default"],
+      ["api", undefined],
+    ],
+  );
+  await pick(workbench);
+  await run;
+});
+
 test("a cancelled picker opens no tab and plans nothing", async () => {
   const { workbench, tabs, backend, start } = await mounted();
   const invoke = vi.spyOn(backend, "invoke");

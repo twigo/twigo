@@ -123,7 +123,7 @@ async function openShell(
 const states = (messages: readonly ShellMessage[]) =>
   messages.flatMap((message) => ("state" in message ? [message] : []));
 
-test("a pod's running containers come with the default first, and one container where the scenario says", async () => {
+test("a pod's running containers come in order with the first the default, the second where the scenario says, and one container where it says so", async () => {
   const backend = createMockBackend("live");
   await answered(backend.invoke("space_open", "qa"));
   const { namespace, pod } = targetOf("qa");
@@ -131,6 +131,12 @@ test("a pod's running containers come with the default first, and one container 
   const many = await answered(backend.invoke("shell_containers", request));
   expect(many.containers.length).toBeGreaterThanOrEqual(2);
   expect(many.default).toBe(many.containers[0]);
+
+  const annotated = createMockBackend("shellDefaultSecond");
+  await answered(annotated.invoke("space_open", "qa"));
+  expect(await answered(annotated.invoke("shell_containers", request))).toEqual(
+    { containers: many.containers, default: many.containers[1] },
+  );
 
   const one = createMockBackend("shellOneContainer");
   await answered(one.invoke("space_open", "qa"));

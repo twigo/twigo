@@ -121,7 +121,10 @@ export function registerExec(workbench: Workbench, tabs: ExecTabs): void {
     if (container === undefined) {
       const [only] = found.containers;
       if (found.containers.length > 1) {
-        const items: QuickPickItem[] = found.containers.map((name) => ({
+        const items: QuickPickItem[] = [
+          ...found.containers.filter((name) => name === found.default),
+          ...found.containers.filter((name) => name !== found.default),
+        ].map((name) => ({
           id: name,
           label: name,
           ...(name === found.default && { description: "default" }),
