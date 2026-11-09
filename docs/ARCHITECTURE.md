@@ -933,6 +933,9 @@ Extensions add commands, not prefixes.
     Undo and redo lift the lock for themselves, since a read-only editor refuses them.
     Lines with nothing on them move, join and delete freely.
     What the palette can still run, with Find and Replace and a drop, the diff shows and the engine leaves out as `ignored`.
+    The context menu's Paste can change the block too: Monaco's action reads the clipboard and inserts the text itself ([`clipboard.ts`](https://github.com/microsoft/vscode/blob/6a598d4a13031703d483d103c1d934a36ad27971/src/vs/editor/contrib/clipboard/browser/clipboard.ts#L279-L336), the commit monaco-editor 0.57.0 is built from), so no DOM `paste` event reaches the lock, and over a selection of whole lines that ends at column 1 of `status:` the pasted text lands on `status:`.
+    We accept that: the result is visible and can be undone, and the diff step says `.status` was left out of what is sent.
+    Checked with a right-click on the mock in headless Chrome, 2026-11-09: no `paste` event, `GLUEDstatus:` where the line was, ⌘Z gave the two lines back, and ⌘S showed "Left out of what is sent: .status."
   - Monaco is bundled locally (no CDN loader) and loaded lazily on the first YAML or diff editor.
     It is built from the tree-shakeable entry points of monaco-editor 0.57 (`monaco-editor/editor`, then each language and feature it needs), and its editor worker is a Vite `?worker` module served from the app.
   - monaco-yaml 5.5.1 runs on those entry points, since it takes the Monaco namespace as an argument, with `yamlVersion: "1.1"`; its worker is a Vite `?worker` too, whose build has no `eval` and no `new Function`, so `script-src 'self'` should cover it; it was not run under Tauri's CSP yet.
