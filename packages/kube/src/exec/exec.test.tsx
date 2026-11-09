@@ -489,6 +489,59 @@ test("a panel shown again gives the focus to the active tab's terminal", async (
   expect(document.activeElement).toBe(textarea);
 });
 
+test("a panel shown while quick access is open leaves the focus in it", async () => {
+  const { workbench, tabs, open } = await mounted("shellOneContainer");
+  await open("qa", ONE);
+  act(() => {
+    workbench.spaces.setPart("qa", "panel", { visible: false });
+  });
+  await settle(4);
+  act(() => {
+    workbench.quickAccess.show("");
+  });
+  await settle(4);
+  const field = screen.getByRole("combobox");
+  expect(document.activeElement).toBe(field);
+  act(() => {
+    workbench.spaces.setPart("qa", "panel", { visible: true });
+  });
+  await settle(4);
+  expect(document.activeElement).toBe(field);
+  expect(document.activeElement).not.toBe(
+    tabs.get(execUri(RUNNING))?.term.textarea,
+  );
+});
+
+test("a panel shown with split groups gives the focus to the active group's tab only", async () => {
+  const { workbench, tabs, open } = await mounted("shellOneContainer");
+  await open("qa", ONE);
+  await open("qa", ONE);
+  const first = execUri(RUNNING);
+  const second = execUri({ ...RUNNING, n: 2 });
+  act(() => {
+    workbench.editors.moveActive("right", "panel");
+  });
+  await settle(4);
+  act(() => {
+    workbench.editors.open(first);
+  });
+  await settle(4);
+  expect(workbench.editors.activeIn("panel")).toBe(first);
+  act(() => {
+    workbench.spaces.setPart("qa", "panel", { visible: false });
+  });
+  await settle(4);
+  act(() => {
+    (document.activeElement as HTMLElement).blur();
+  });
+  act(() => {
+    workbench.spaces.setPart("qa", "panel", { visible: true });
+  });
+  await settle(4);
+  expect(document.activeElement).toBe(tabs.get(first)?.term.textarea);
+  expect(document.activeElement).not.toBe(tabs.get(second)?.term.textarea);
+});
+
 test("the terminal's keys never reach a list's bare ones", async () => {
   const { workbench, open } = await mounted("shellOneContainer");
   await open("qa", ONE);
