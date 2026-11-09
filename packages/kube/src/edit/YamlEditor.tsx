@@ -175,6 +175,9 @@ function ShownYamlEditor({
       detectIndentation: false,
       // A YAML key being typed tokenizes as a plain scalar, which is a string.
       quickSuggestions: { strings: true },
+      // Quick suggestions in strings also offer the document's words in values
+      // and block scalars, and Enter then replaces what was typed with one.
+      wordBasedSuggestions: "off",
     });
     if (buffer.view) instance.restoreViewState(buffer.view);
     model.current = created;

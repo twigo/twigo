@@ -133,10 +133,11 @@ test("the model and the view's state outlive the view that shows them, until the
   expect(model.disposed).toBe(true);
 });
 
-test("completion rises as a key is typed, which YAML tokenizes as a string", () => {
+test("completion rises as a key is typed, which YAML tokenizes as a string, and offers no words of the document", () => {
   render(<YamlEditor uri="details:1" text="a: 1" readOnly />);
   expect(fake.options[0]).toMatchObject({
     quickSuggestions: { strings: true },
+    wordBasedSuggestions: "off",
   });
 });
 
