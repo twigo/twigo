@@ -25,7 +25,9 @@ const fake = vi.hoisted(() => ({
   options: [] as object[],
   /** As Monaco's `type`: the text goes to the first view that says it has the focus. */
   type(text: string) {
-    const view = this.views.find(({ disposed, focused }) => focused && !disposed);
+    const view = this.views.find(
+      ({ disposed, focused }) => focused && !disposed,
+    );
     if (view) view.model.value += text;
   },
 }));
@@ -133,7 +135,9 @@ test("the model and the view's state outlive the view that shows them, until the
 
 test("completion rises as a key is typed, which YAML tokenizes as a string", () => {
   render(<YamlEditor uri="details:1" text="a: 1" readOnly />);
-  expect(fake.options[0]).toMatchObject({ quickSuggestions: { strings: true } });
+  expect(fake.options[0]).toMatchObject({
+    quickSuggestions: { strings: true },
+  });
 });
 
 test("a viewer without buffers keeps nothing of its own", () => {
@@ -157,7 +161,9 @@ test("a focus asked of the editor goes to its view now, or to the one it gets, a
   copies.focus(URI);
   const first = render(<YamlEditor uri={URI} text="a: 1" buffers={copies} />);
   expect(fake.views[0]?.focused).toBe(true);
-  first.rerender(<YamlEditor uri={URI} text="a: 1" buffers={copies} readOnly />);
+  first.rerender(
+    <YamlEditor uri={URI} text="a: 1" buffers={copies} readOnly />,
+  );
   expect(fake.views[0]?.disposed).toBe(true);
   expect(fake.views[1]?.focused).toBe(true);
 
