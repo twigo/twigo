@@ -14,7 +14,7 @@ use kube::api::TerminalSize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, SimplexStream, WriteHalf, simplex};
 use tokio::time::advance;
 use twigo_ipc::{ErrorKind, ShellEnd, ShellEvent};
-use twigo_kube::client::{Budgets, Clients};
+use twigo_kube::client::{Actor, Budgets, Clients};
 
 use super::connect::{Connect, Connected};
 use super::flow::FRAME_MAX;
@@ -511,6 +511,27 @@ async fn the_sender_dropped_with_the_pipes_left_open_ends_as_lost_with_no_hang()
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_status_that_never_comes_still_sends_what_the_pipe_held_while_the_reader_was_stopped() {
+    let (harness, mut process) = running(true).await;
+    let output: Vec<u8> = (0..5 * FRAME_MAX)
+        .map(|at| u8::try_from(at % 251).unwrap())
+        .collect();
+    let (acked, held) = output.split_at(4 * FRAME_MAX);
+    for block in acked.chunks(FRAME_MAX) {
+        write(&mut process, block).await;
+    }
+    assert_eq!(harness.sent(), 4 * FRAME_MAX, "the reader has stopped");
+    write(&mut process, held).await;
+    assert_eq!(harness.sent(), 4 * FRAME_MAX, "the pipe holds the rest");
+
+    drop(process.status);
+    settle().await;
+    assert_eq!(harness.ended(), Some(ShellEnd::ConnectionLost));
+    assert_eq!(harness.sent(), output.len());
+    assert!(harness.outputs().concat() == output, "in order, unchanged");
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_failure_after_output_is_a_lost_connection_with_the_output_before_it() {
     let (harness, mut process) = running(true).await;
     write(&mut process, b"bash: command not found\n").await;
@@ -763,6 +784,32 @@ async fn queued() -> (Harness, Harness, Process) {
     settle().await;
     assert_eq!(second.events(), vec![ShellEvent::Queued]);
     (first, second, first_process)
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_wake_while_queued_leaves_the_session_to_connect_when_a_place_frees() {
+    let budgets = Budgets {
+        sessions: 1,
+        ..Budgets::default()
+    };
+    let (to, _process) = connected(true);
+    let harness = parked(true, budgets, Ok(to));
+    let place = harness.clients.admit_session(Actor::Ui, None).await;
+    harness.open(80, 24);
+    settle().await;
+    assert_eq!(harness.events(), vec![ShellEvent::Queued]);
+
+    harness.clients.connections().wake();
+    drop(place);
+    settle().await;
+    assert_eq!(
+        harness.events(),
+        vec![
+            ShellEvent::Queued,
+            ShellEvent::Connecting,
+            ShellEvent::Running
+        ]
+    );
 }
 
 #[tokio::test(start_paused = true)]
