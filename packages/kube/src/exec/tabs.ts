@@ -93,7 +93,7 @@ export class ExecTab {
     this.#pending = session;
     this.#status =
       session === undefined ? { state: "restored" } : { state: "connecting" };
-    this.host.className = "size-full overflow-hidden pt-1 pl-2";
+    this.host.className = "size-full overflow-hidden";
     this.term = new Terminal({
       allowProposedApi: true,
       scrollback: SCROLLBACK,

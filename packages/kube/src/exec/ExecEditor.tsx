@@ -119,7 +119,7 @@ export function ExecEditor({ uri, tabs }: EditorProps & { tabs: ExecTabs }) {
           Close a shell to free one.
         </Banner>
       )}
-      <div ref={setContainer} className="min-h-0 flex-1" />
+      <div ref={setContainer} className="min-h-0 flex-1 pt-1 pl-2" />
     </div>
   );
 }
