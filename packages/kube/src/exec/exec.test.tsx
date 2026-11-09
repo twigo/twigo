@@ -390,16 +390,21 @@ test("the terminal's keys never reach a list's bare ones, and a chord that is bo
 test("a tab that moves to another view keeps its terminal and its session", async () => {
   const { workbench, tabs, backend, open } = await mounted("shellOneContainer");
   await open("qa", ONE);
-  const uri = execUri(RUNNING);
+  await open("qa", ONE);
+  const uri = execUri({ ...RUNNING, n: 2 });
   const tab = tabs.get(uri);
   const host = tab?.host;
+  const groups = () =>
+    document.querySelectorAll('[aria-label="Panel"] .dv-groupview');
+  expect(groups()).toHaveLength(1);
   const subscribe = vi.spyOn(backend, "subscribe");
   const invoke = vi.spyOn(backend, "invoke");
   act(() => {
-    workbench.editors.close("k8s-list://qa/v1/pods");
     workbench.editors.moveActive("right", "panel");
   });
   await settle(10);
+  expect(groups()).toHaveLength(2);
+  expect(groups()[1]?.contains(host ?? null)).toBe(true);
   act(() => {
     workbench.spaces.setPart("qa", "panel", { visible: false });
   });
