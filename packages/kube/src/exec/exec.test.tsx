@@ -258,6 +258,42 @@ test("a second shell on a container opens another tab", async () => {
   ]);
 });
 
+test("two quick presses on a container make two tabs, and neither closes the other's session", async () => {
+  const { backend, start } = await mounted("shellOneContainer");
+  const invoke = vi.spyOn(backend, "invoke");
+  const first = start("qa", ONE);
+  const second = start("qa", ONE);
+  await settle(10);
+  await Promise.all([first, second]);
+  await settle(10);
+  expect(panelTabs()).toEqual([
+    execUri(RUNNING),
+    execUri({ ...RUNNING, n: 2 }),
+  ]);
+  expect(invoke.mock.calls.filter(([c]) => c === "shell_close")).toEqual([]);
+});
+
+test("a cancelled plan frees its place for the next press", async () => {
+  const { workbench, start } = await mounted("shellOneContainer");
+  await act(() => workbench.spaces.open("staging"));
+  const first = start("staging", ONE);
+  await settle(4);
+  act(() => {
+    workbench.operations.asking?.cancel();
+  });
+  await first;
+  const second = start("staging", ONE);
+  await settle(4);
+  act(() => {
+    workbench.operations.asking?.confirm(undefined);
+  });
+  await second;
+  await settle(6);
+  expect(panelTabs()).toEqual([
+    execUri({ ...RUNNING, space: "staging", pod: FIRST.staging ?? POD }),
+  ]);
+});
+
 test("a tab the layout restored says its shell ended when Twigo closed, runs nothing, and Start plans a shell", async () => {
   const { workbench, backend } = await mounted("shellOneContainer");
   const invoke = vi.spyOn(backend, "invoke");
