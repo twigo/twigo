@@ -715,6 +715,8 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   A tab's X and a middle click close through the editor service as ⌘W does, and the panel's last editor leaves the focus to the editor area's active group.
   An open that the person asked for, from quick access, a button or a command, gives the editor it opened the focus from whatever held it, an editor on screen in another group included, except a field outside the editors.
   One that arrives on its own, such as the diff of an answer or an object that a plan made, and the explorer's, whose tree goes on with its keys, take it only from the page and the dock's own elements, never from another editor or from anything outside the editors (`preserveFocus`).
+  A hidden or covered part keeps the focus it held, since it loses its height and not its elements, and the keys would go on to what nobody sees: when the panel hides, or a maximized panel covers the editor area, the focus held inside moves to the other area's active editor, or off the page when that area has none.
+  A panel shown again gives the focus to its active shell tab, unless quick access is open, which stays on screen and keeps what is typed; a dialog needs no such rule: with the rule taken out, a confirm dialog kept the focus and the shell received nothing (the mock in Chromium and WebKit, 2026-11-09).
 - **An editor off screen has no Monaco view.**
   Behind another tab of its group or under a maximized panel, a YAML editor or a diff disposes its view.
   A YAML editor's model, cursor, scroll and undo stay in the working-copy service until it shows again; a diff's models go with its view, and `DiffView` keeps its view state (cursor and scroll) in a ref for the next one.
@@ -929,6 +931,7 @@ Extensions add commands, not prefixes.
     The first size goes in `shell_open`, once the terminal is mounted and fitted, and `shell_resize` follows a layout change that has held still for 100 ms, when cols or rows changed.
     A tab restored after a restart has no session: it says its shell ended when Twigo closed and offers Start, and never runs anything on its own.
     A new session in a tab, Restart's or Start's, keeps the scrollback and resets the modes the old program left: the mouse, bracketed paste, focus reporting, the cursor and keypad keys, and wrapping, insert and origin.
+    An ending turns the mouse, bracketed paste and focus reporting off as well, since xterm parses the new session's reset after the task that restarts, and a terminal focused in that task would report the focus to the new shell.
   - **Output.**
     Rust sends the bytes of the process's output and its events over one channel, in order.
     The bytes are written to xterm as `Uint8Array`, which is stream-aware across frames, and Rust is told how many the terminal has parsed from the callback of `write`, so flow control follows what xterm has really parsed: a frame of 64 KiB at most, nothing more read at 256 KiB unacknowledged, reading again below 64 KiB.
