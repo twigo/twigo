@@ -904,7 +904,8 @@ Extensions add commands, not prefixes.
     - a line shows its text as the container wrote it, ANSI colours as tokens at 4.5:1 or more on the editor, warnings and errors tinted with an edge as failing rows are; markers say that a container ended, with its code and next start, that a pod joined from its ReplicaSet or left, and what the buffer dropped;
     - F, W and T toggle follow, wrap and timestamps while the lines have the focus, ⌘F finds and `/` filters; below 1,100 px the toolbar drops the level counts, narrows its fields and shortens the range's label, and below 800 px, a split panel's group, the filter and the search go to a row of their own under it, which opens once their icons, `/` or ⌘F ask for a field, and while either is set, so a split panel keeps every control.
 - **Exec and attach.**
-  xterm.js 6.0.0 with the WebGL addon 0.19.0, the fit addon and Unicode 11.
+  xterm.js 6.1.0-beta.304 with the WebGL addon 0.20.0-beta.300, the fit addon and Unicode 11, the betas VS Code 1.145.2 locks.
+  No release has followed 6.0.0 (2025-12-22), which rebuilds a hidden terminal's rows on every scroll: 12,642 DOM mutations in 5 s of `yes` behind another tab, against 0 on the beta (Chromium on the mock, 2026-11-09).
   It falls back to the DOM renderer on context loss, which happens on WebKitGTK.
   WebGL is disposed on hidden tabs.
   A shell or an attach is a plan of the command bus (5.1, 6.4): its run parks a session in `twigo-core` and connects nothing, and `shell_open` starts it with the terminal's size, so the first prompt is laid out right; a session is only reached through a plan that ran.
@@ -946,10 +947,12 @@ Extensions add commands, not prefixes.
     Rust's queue takes whatever it is sent from the session's start, 32 chunks at most with the call waiting while it is full, and checks no state, so what is typed in the round trip before `queued` reaches the webview is kept too, and reaches the process however long the place takes.
     Once the webview has heard `queued`, what is typed is dropped, since the wait can last minutes (read in `Session::input` and `run` of `crates/twigo-sessions/src/shell.rs`, not run against a full cluster).
   - **WebGL.**
-    A terminal loads the addon while its tab is on screen, and gives it up in a task after the tab was hidden, behind another tab, under a maximized panel or in a hidden panel, since disposing it in the task that hides the tab made the browser measure the terminal for every row ([xterm.js #6208](https://github.com/xtermjs/xterm.js/issues/6208)).
+    A terminal loads the addon while its tab is on screen, and gives it up in a task after the tab was hidden, behind another tab, under a maximized panel or in a hidden panel, so a tab hidden and shown again in one task keeps its context.
     WebKit keeps 16 live WebGL contexts per page: of 24 terminals, the first 8 lost theirs (a real WKWebView, macOS 27.2, 2026-11-09), and Monaco or anything else that draws with WebGL shares the limit.
     A failed load and a lost context leave that terminal on the DOM renderer.
-    With an opaque background, 6.0.0 drew colours, box drawing, Cyrillic, CJK and emoji correctly in a real WKWebView, also while scrolling thousands of lines (macOS 27.2, 2026-11-09), so [#5816](https://github.com/xtermjs/xterm.js/issues/5816) did not reproduce there.
+    With an opaque background, 6.1.0-beta.304 draws colours, box drawing, Cyrillic, CJK and emoji in a real WKWebView after 5,000 lines, on WebGL and on the DOM renderer (macOS 27.2, kind 1.37, 2026-11-10), so [#5816](https://github.com/xtermjs/xterm.js/issues/5816) did not reproduce there.
+    WebGL draws an emoji with a skin tone, or a flag, a cell per code point, which the DOM renderer joins.
+    Its pattern glyphs, such as ░, throw on the theme's `oklch` colours, and the rows below them are no longer drawn; 6.0.0 does the same.
   - **Keys, paste and links.**
     The terminal keeps every key except those the workbench takes, which `attachCustomKeyEventHandler` leaves to it, as VS Code does; single-letter list keys never fire in a terminal, since `listFocus` does not hold there.
     The workbench takes the next key of a chord that waits, on every platform.

@@ -32,7 +32,7 @@ const LEAVE_ALTERNATE = "\x1b[?1049l";
 /**
  * A soft reset (DECSTR): the cursor and keypad keys, bracketed paste, focus
  * reporting, wrapping, insert and origin modes, and the cursor shown
- * ([`CoreService.reset`](https://github.com/xtermjs/xterm.js/blob/6.0.0/src/common/services/CoreService.ts#L56-L59)).
+ * ([`CoreService.reset`](https://github.com/xtermjs/xterm.js/blob/c58ea3637f3968e0e6e79cd92cf9aace7ef89ee2/src/common/services/CoreService.ts#L68-L72)).
  * The screen and the scrollback stay, and so does the mouse, which is
  * `MODES_OFF`'s.
  */
@@ -148,8 +148,8 @@ export class ExecTab {
   /**
    * Whether the tab is on screen: not behind another tab, not under a
    * maximized panel, not in a hidden one. WebGL is held only while it is,
-   * and given up after the task that hid the tab, since doing it in that
-   * task made the browser measure the terminal again for every row.
+   * and given up after the task that hid the tab, so a tab hidden and shown
+   * again in one task keeps its context.
    */
   setShown(shown: boolean): void {
     if (shown === this.#shown) return;
