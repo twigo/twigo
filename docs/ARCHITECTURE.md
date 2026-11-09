@@ -934,7 +934,9 @@ Extensions add commands, not prefixes.
     The bytes are written to xterm as `Uint8Array`, which is stream-aware across frames, and Rust is told how many the terminal has parsed from the callback of `write`, so flow control follows what xterm has really parsed: a frame of 64 KiB at most, nothing more read at 256 KiB unacknowledged, reading again below 64 KiB.
     A terminal keeps 5000 lines.
     What is typed goes one `shell_input` at a time, and what is typed while a call is in flight goes in the next, so keystrokes keep their order whatever the transport does.
-    What is typed while the shell connects goes to Rust's queue and reaches the process once it runs, as a terminal keeps type-ahead; what is typed while the session waits for a place, which can last minutes, is dropped.
+    What is typed while the shell connects goes to Rust's queue and reaches the process once it runs, as a terminal keeps type-ahead.
+    Rust's queue takes whatever it is sent from the session's start, 32 chunks at most with the call waiting while it is full, and checks no state, so what is typed in the round trip before `queued` reaches the webview is kept too, and reaches the process however long the place takes.
+    Once the webview has heard `queued`, what is typed is dropped, since the wait can last minutes (read in `Session::input` and `run` of `crates/twigo-sessions/src/shell.rs`, not run against a full cluster).
   - **WebGL.**
     A terminal loads the addon while its tab is on screen, and gives it up in a task after the tab was hidden, behind another tab, under a maximized panel or in a hidden panel, since disposing it in the task that hides the tab made the browser measure the terminal for every row ([xterm.js #6208](https://github.com/xtermjs/xterm.js/issues/6208)).
     WebKit keeps 16 live WebGL contexts per page: of 24 terminals, the first 8 lost theirs (a real WKWebView, macOS 27.2, 2026-11-09), and Monaco or anything else that draws with WebGL shares the limit.
