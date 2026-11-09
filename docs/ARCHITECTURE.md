@@ -702,6 +702,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 - **A URI and its space.**
   Each space has its own docks, and an editor opens in the dock of the space its URI names.
   An open for the URI of a space other than the one shown waits for that space's dock and opens there when it is the next one mounted; if another space comes first, it is forgotten.
+  A forgotten open is reported as closed, so what a feature kept for the URI goes, unless the space's saved layout holds the URI: its tab comes back with the layout, and a restart that answered late keeps its terminal for it.
   A close for such a URI waits for that space's dock too, whichever space is mounted first, so a tab whose edit ended while the person was elsewhere does not stay behind; opening the URI again, or closing one that waits to open, withdraws what waits.
   A provider says which space a URI is of, so an answer that arrives after a switch of spaces cannot open a tab in the wrong space.
   A new manifest's URI names the space it was written in, as an object's does, and its number counts within that space, so a number reused after a restart cannot show the text of one space in another's tab.

@@ -351,6 +351,50 @@ test("a shell planned while another space shows ends, with its place freed, when
   expect(screen.queryByText(/\d+ shells?$/)).toBeNull();
 });
 
+test("a restart that answers after the person left keeps the live terminal for the layout's tab, whichever space comes next", async () => {
+  const { workbench, tabs, backend } = await mounted("shellOneContainer");
+  await act(() => workbench.spaces.open("staging"));
+  await act(() => workbench.spaces.open("prod-eu"));
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  await settle(4);
+  const uri = execUri({
+    ...RUNNING,
+    space: "staging",
+    pod: FIRST.staging ?? POD,
+  });
+  act(() => {
+    workbench.editors.open(uri);
+  });
+  await settle(10);
+  fireEvent.click(screen.getByRole("button", { name: "Start" }));
+  await settle(6);
+  act(() => {
+    workbench.spaces.select("qa");
+  });
+  await settle(4);
+  const invoke = vi.spyOn(backend, "invoke");
+  act(() => {
+    workbench.operations.asking?.confirm(undefined);
+  });
+  await settle(6);
+  act(() => {
+    workbench.spaces.select("prod-eu");
+  });
+  await settle(10);
+  expect(tabs.has(uri)).toBe(true);
+  expect(invoke.mock.calls.filter(([c]) => c === "shell_close")).toEqual([]);
+
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  await settle(10);
+  expect(panelTabs()).toEqual([uri]);
+  expect(screen.queryByText("This shell ended when Twigo closed")).toBeNull();
+  expect(tabs.get(uri)?.live).toBe(true);
+});
+
 test("a tab the layout restored says its shell ended when Twigo closed, runs nothing, and Start plans a shell", async () => {
   const { workbench, backend } = await mounted("shellOneContainer");
   const invoke = vi.spyOn(backend, "invoke");

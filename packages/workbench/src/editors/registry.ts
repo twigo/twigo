@@ -99,10 +99,14 @@ export class Editors {
   >();
   #active: string | undefined;
 
-  /** `reveal` shows a hidden area before an editor opens in it. */
+  /**
+   * `reveal` shows a hidden area before an editor opens in it, and `saved`
+   * reads the layout a space keeps for an area.
+   */
   constructor(
     private readonly keys: ContextKeys,
     private readonly reveal: (area: Area) => void,
+    private readonly saved: (space: string, area: Area) => unknown,
   ) {}
 
   register(provider: EditorProvider): () => void {
@@ -153,8 +157,9 @@ export class Editors {
    * An area's dockview while it is mounted, and the space it shows. What
    * waited for the space opens in it; what waited for another is forgotten,
    * since the person went elsewhere, and reported as closed to whoever kept
-   * something for it. What was closed for the space closes in it, however
-   * many other spaces came first.
+   * something for it, unless that space's saved layout holds the editor, which
+   * is then still open there. What was closed for the space closes in it,
+   * however many other spaces came first.
    */
   attach(api: DockviewApi, area: Area, space: string): () => void {
     this.#apis.set(area, api);
@@ -186,7 +191,9 @@ export class Editors {
       if (later.area !== area) continue;
       this.#waiting.delete(uri);
       if (later.space === space) this.open(uri, later.options);
-      else this.#notifyClosed(uri);
+      else if (!hasPanel(this.saved(later.space, later.area), uri)) {
+        this.#notifyClosed(uri);
+      }
     }
     return () => {
       active.dispose();
@@ -453,6 +460,13 @@ export class Editors {
     );
     this.changes.emit();
   }
+}
+
+/** Whether a saved layout holds a panel; it is read back unchecked, so it is checked. */
+function hasPanel(layout: unknown, id: string): boolean {
+  if (typeof layout !== "object" || layout === null) return false;
+  const { panels } = layout as { panels?: unknown };
+  return typeof panels === "object" && panels !== null && id in panels;
 }
 
 export function paramsOf(panel: IDockviewPanel): EditorParams | undefined {
