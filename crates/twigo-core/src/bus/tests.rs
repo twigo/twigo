@@ -1,3 +1,4 @@
+use std::io::{BufRead, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -5,13 +6,16 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tokio::sync::watch;
 use twigo_env::{ShellEnv, Status};
-use twigo_ipc::{ErrorKind, Execute, Friction, Mode, OperationEvent, PlanId, SetContextMode};
+use twigo_ipc::{
+    ErrorKind, Execute, Friction, Mode, OperationEvent, PlanId, PlanRequest, SetContextMode,
+    ShellEnd, ShellEvent, ShellKind, ShellTarget,
+};
 use twigo_policy::Attributes;
 use twigo_policy::friction::Risk;
 
 use super::{Finished, Planned, Previewed, Progress};
-use crate::Core;
 use crate::actions::Prepared;
+use crate::{Core, ShellFrame};
 
 const KUBECONFIG: &str = "
 clusters: [{ name: c, cluster: { server: 'http://127.0.0.1:1' } }]
@@ -1003,5 +1007,281 @@ async fn a_manifest_whose_preview_fails_at_discovery_still_ends_the_older_previe
     assert_eq!(
         execute(&core, "main", waiting.id, None).await,
         Err(ErrorKind::NotFound)
+    );
+}
+
+#[derive(Clone, Default)]
+struct Server(Arc<Mutex<Vec<String>>>);
+
+impl Server {
+    fn start() -> (Self, u16) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = Self::default();
+        let seen = Arc::clone(&server.0);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = stream.unwrap();
+                let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                loop {
+                    let mut header = String::new();
+                    reader.read_line(&mut header).unwrap();
+                    if header.trim().is_empty() {
+                        break;
+                    }
+                }
+                let session = line.contains("/exec") || line.contains("/attach");
+                let (status, answer) = if session {
+                    (
+                        "403 Forbidden",
+                        r#"{"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure","message":"forbidden by the server","reason":"Forbidden","code":403}"#,
+                    )
+                } else {
+                    (
+                        "200 OK",
+                        r#"{"kind":"Pod","apiVersion":"v1","metadata":{"name":"web-1"},"spec":{"containers":[{"name":"app","stdin":true,"tty":true}]}}"#,
+                    )
+                };
+                seen.lock().unwrap().push(line.trim_end().to_owned());
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{answer}",
+                    answer.len()
+                );
+            }
+        });
+        (server, port)
+    }
+
+    fn seen(&self) -> Vec<String> {
+        self.0.lock().unwrap().clone()
+    }
+
+    fn sessions(&self) -> Vec<String> {
+        self.seen()
+            .into_iter()
+            .filter(|line| line.contains("/exec") || line.contains("/attach"))
+            .collect()
+    }
+}
+
+fn over_server(dir: &Path, port: u16) -> Arc<Core> {
+    running_with(
+        dir,
+        &format!(
+            "
+clusters: [{{ name: c, cluster: {{ server: 'http://127.0.0.1:{port}' }} }}]
+users: [{{ name: u, user: {{}} }}]
+contexts:
+- name: kind-a
+  context: {{ cluster: c, user: u }}
+"
+        ),
+    )
+}
+
+async fn in_mode(core: &Core, mode: Mode) {
+    core.catalog.contexts().await;
+    core.state.open_space("kind-a");
+    core.set_context_mode(SetContextMode {
+        context: "kind-a".to_owned(),
+        mode: Some(mode),
+    })
+    .await
+    .unwrap();
+}
+
+fn shell_of(kind: ShellKind) -> PlanRequest {
+    PlanRequest::Shell {
+        target: ShellTarget {
+            space: "kind-a".to_owned(),
+            namespace: "shop".to_owned(),
+            pod: "web-1".to_owned(),
+            container: "app".to_owned(),
+        },
+        kind,
+    }
+}
+
+async fn plan_shell(core: &Core, kind: ShellKind) -> Result<twigo_ipc::Plan, ErrorKind> {
+    core.command_plan("main", shell_of(kind))
+        .await
+        .map_err(|error| error.kind)
+}
+
+async fn parked(core: &Core, plan: PlanId) -> twigo_ipc::SubscriptionId {
+    let (told, send) = events();
+    let request = Execute { plan, typed: None };
+    core.command_execute("main", request, send).await.unwrap();
+    let mut id = None;
+    until("the run answers a session", || {
+        id = told.lock().unwrap().iter().find_map(|event| match event {
+            OperationEvent::Session { id } => Some(*id),
+            _ => None,
+        });
+        id.is_some()
+    })
+    .await;
+    id.unwrap()
+}
+
+async fn opened(core: &Core, id: twigo_ipc::SubscriptionId) -> Arc<Mutex<Vec<ShellEvent>>> {
+    let told = Arc::new(Mutex::new(Vec::new()));
+    let sent = Arc::clone(&told);
+    core.shell_open(
+        "main",
+        twigo_ipc::OpenShell {
+            id,
+            cols: 80,
+            rows: 24,
+        },
+        move |frame| {
+            if let ShellFrame::Event(event) = frame {
+                sent.lock().unwrap().push(event);
+            }
+            true
+        },
+    )
+    .await
+    .unwrap();
+    told
+}
+
+fn ended(told: &Mutex<Vec<ShellEvent>>) -> Option<ShellEnd> {
+    told.lock().unwrap().iter().find_map(|event| match event {
+        ShellEvent::Ended { end } => Some(end.clone()),
+        _ => None,
+    })
+}
+
+#[tokio::test]
+async fn read_only_refuses_a_shell_before_anything_is_asked_and_nothing_reaches_the_server() {
+    let dir = tempfile::tempdir().unwrap();
+    let (server, port) = Server::start();
+    let core = over_server(dir.path(), port);
+    in_mode(&core, Mode::ReadOnly).await;
+    assert_eq!(
+        plan_shell(&core, ShellKind::Shell).await.unwrap_err(),
+        ErrorKind::Permissions
+    );
+    assert_eq!(
+        plan_shell(&core, ShellKind::Attach).await.unwrap_err(),
+        ErrorKind::Permissions
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(server.seen(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn guarded_needs_the_confirmation_and_connects_only_once_opened() {
+    let dir = tempfile::tempdir().unwrap();
+    let (server, port) = Server::start();
+    let core = over_server(dir.path(), port);
+    in_mode(&core, Mode::Guarded).await;
+    let plan = plan_shell(&core, ShellKind::Shell).await.unwrap();
+    assert_eq!(plan.friction, Friction::Confirm);
+    assert_eq!(
+        plan.kubectl,
+        "kubectl --context kind-a exec -it web-1 -n shop -c app -- sh -c 'export TERM=xterm-256color; command -v bash >/dev/null && exec bash || exec sh'"
+    );
+    assert_eq!(
+        server.seen(),
+        Vec::<String>::new(),
+        "nothing before the run"
+    );
+
+    let id = parked(&core, plan.id).await;
+    assert_eq!(server.seen(), Vec::<String>::new(), "parked, not connected");
+
+    let told = opened(&core, id).await;
+    until("the upgrade is refused", || ended(&told).is_some()).await;
+    let exec = server.sessions();
+    assert_eq!(exec.len(), 1, "{exec:?}");
+    assert!(
+        exec[0].starts_with("GET /api/v1/namespaces/shop/pods/web-1/exec?"),
+        "{exec:?}"
+    );
+    let Some(ShellEnd::Failed { error }) = ended(&told) else {
+        panic!("{:?}", told.lock().unwrap());
+    };
+    assert_eq!(error.kind, ErrorKind::Forbidden);
+    assert_eq!(error.message, "forbidden by the server");
+    core.shell_close("main", id).unwrap();
+}
+
+#[tokio::test]
+async fn read_write_runs_a_shell_at_once_and_attach_takes_the_containers_stdin_and_tty() {
+    let dir = tempfile::tempdir().unwrap();
+    let (server, port) = Server::start();
+    let core = over_server(dir.path(), port);
+    in_mode(&core, Mode::ReadWrite).await;
+    assert_eq!(
+        plan_shell(&core, ShellKind::Shell).await.unwrap().friction,
+        Friction::AtOnce
+    );
+
+    let attach = plan_shell(&core, ShellKind::Attach).await.unwrap();
+    assert_eq!(attach.friction, Friction::AtOnce);
+    assert_eq!(
+        attach.kubectl,
+        "kubectl --context kind-a attach -it web-1 -n shop -c app"
+    );
+    let id = parked(&core, attach.id).await;
+    let told = opened(&core, id).await;
+    until("the attach is refused", || ended(&told).is_some()).await;
+    let sessions = server.sessions();
+    assert_eq!(sessions.len(), 1, "{sessions:?}");
+    assert!(sessions[0].contains("/attach?"), "{sessions:?}");
+    assert!(sessions[0].contains("stdin=true"), "{sessions:?}");
+    assert!(sessions[0].contains("tty=true"), "{sessions:?}");
+}
+
+#[tokio::test]
+async fn a_shell_never_starts_a_context_turned_read_only_after_its_plan_ran() {
+    let dir = tempfile::tempdir().unwrap();
+    let (server, port) = Server::start();
+    let core = over_server(dir.path(), port);
+    in_mode(&core, Mode::Guarded).await;
+    let plan = plan_shell(&core, ShellKind::Shell).await.unwrap();
+    let id = parked(&core, plan.id).await;
+    core.set_context_mode(SetContextMode {
+        context: "kind-a".to_owned(),
+        mode: Some(Mode::ReadOnly),
+    })
+    .await
+    .unwrap();
+
+    let told = opened(&core, id).await;
+    until("it ends visibly", || ended(&told).is_some()).await;
+    assert_eq!(ended(&told), Some(ShellEnd::Relocked));
+    assert_eq!(server.sessions(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn a_session_goes_with_its_window_and_with_shell_close() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_server, port) = Server::start();
+    let core = over_server(dir.path(), port);
+    in_mode(&core, Mode::ReadWrite).await;
+    let plan = plan_shell(&core, ShellKind::Shell).await.unwrap();
+    let id = parked(&core, plan.id).await;
+    core.shell_close("main", id).unwrap();
+    assert_eq!(
+        core.shell_ack("main", twigo_ipc::ShellAck { id, bytes: 1 })
+            .unwrap_err()
+            .kind,
+        ErrorKind::NotFound
+    );
+
+    let plan = plan_shell(&core, ShellKind::Shell).await.unwrap();
+    let id = parked(&core, plan.id).await;
+    core.drop_window("main");
+    assert_eq!(
+        core.shell_ack("main", twigo_ipc::ShellAck { id, bytes: 1 })
+            .unwrap_err()
+            .kind,
+        ErrorKind::NotFound
     );
 }

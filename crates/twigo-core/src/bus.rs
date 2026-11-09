@@ -15,7 +15,8 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::watch;
 use tokio::time::Instant;
 use twigo_ipc::{
-    Affected, ContextAccess, ErrorKind, Friction, IpcError, OperationEvent, Plan, PlanId, PreviewId,
+    Affected, ContextAccess, ErrorKind, Friction, IpcError, OperationEvent, Plan, PlanId,
+    PreviewId, SubscriptionId,
 };
 use twigo_policy::Attributes;
 use twigo_policy::friction::Risk;
@@ -84,6 +85,8 @@ pub(crate) enum Finished {
         value: String,
         binary: bool,
     },
+    /// A shell's session, parked until `shell_open` names it.
+    Session(SubscriptionId),
 }
 
 impl Finished {
@@ -117,6 +120,7 @@ impl Finished {
                 "done",
                 "revealed".to_owned(),
             ),
+            Finished::Session(id) => (OperationEvent::Session { id }, "done", "opened".to_owned()),
         }
     }
 }

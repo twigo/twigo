@@ -28,9 +28,10 @@ use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
     AccessQuery, Ack, ApplyPreviewed, ApplyRequest, ClusterVersion, Context, DownloadLogs,
     ErrorKind, Execute, Friction, GetValues, IpcError, ListBatch, ListQuery, LogBatch, ObjectBatch,
-    OpenLogs, OpenObject, OperationEvent, Plan, PlanId, PlanRequest, SchemaQuery,
+    OpenLogs, OpenObject, OpenShell, OperationEvent, Plan, PlanId, PlanRequest, SchemaQuery,
     SetContextEnvironment, SetContextMode, SetLogSource, SetLogView, SetLogWindow, SetParts,
-    SetWindow, SubscriptionId, ViewState,
+    SetWindow, ShellAck, ShellContainers, ShellInput, ShellPod, ShellResize, SubscriptionId,
+    ViewState,
 };
 use twigo_kube::client::{Actor, Clients, ProxyEnv};
 use twigo_kube::credentials::{ExecError, OidcError, Provider, Registry, Source, Timeouts};
@@ -41,6 +42,7 @@ use twigo_netmon::Event;
 use twigo_policy::friction::{covers, friction};
 use twigo_policy::{Audit, Entry, Policy};
 use twigo_sessions::logs::Session;
+pub use twigo_sessions::shell::Frame as ShellFrame;
 
 use actions::undo::Undos;
 pub use auth::AuthFollower;
@@ -68,6 +70,7 @@ pub struct Core {
     lists: Subscriptions<Batcher>,
     objects: Subscriptions<Opened>,
     logs: Subscriptions<Session>,
+    shells: Subscriptions<twigo_sessions::shell::Session>,
     bus: Arc<Bus>,
     undos: Arc<Undos>,
     discovery: Arc<Cache>,
@@ -121,6 +124,7 @@ impl Core {
             lists: Subscriptions::new("list"),
             objects: Subscriptions::new("object"),
             logs: Subscriptions::new("logs"),
+            shells: Subscriptions::new("shell"),
             bus: Arc::default(),
             undos: Arc::default(),
             discovery: Arc::new(Cache::new(cache.join("discovery"))),
@@ -325,6 +329,9 @@ impl Core {
             PlanRequest::Reveal { object, key } => actions::reveal(self, window, object, key)?,
             PlanRequest::Apply { space, preview } => {
                 actions::apply(self, window, space, preview).await?
+            }
+            PlanRequest::Shell { target, kind } => {
+                actions::shell(self, window, target, kind).await?
             }
         };
         self.authorize(&planned.context, &planned.writes)?;
@@ -764,12 +771,58 @@ impl Core {
         })
     }
 
-    /// Ends the lists, open objects, logs sessions and plans of a window
-    /// that reloads or closes.
+    /// The containers of a pod a shell can reach (ARCHITECTURE 4.6), refused
+    /// in words for a pod that runs none.
+    pub async fn shell_containers(&self, request: ShellPod) -> Result<ShellContainers, IpcError> {
+        actions::containers(self, request).await
+    }
+
+    /// Starts a session a plan's run answered with, whose output and events
+    /// go through `send` until it ends. Async, as it spawns: Tauri runs a
+    /// plain command on the main thread, outside the runtime.
+    pub async fn shell_open(
+        &self,
+        window: &str,
+        request: OpenShell,
+        send: impl FnMut(ShellFrame) -> bool + Send + 'static,
+    ) -> Result<(), IpcError> {
+        self.shells.with(window, request.id, |session| {
+            session.open(request.cols, request.rows, send)
+        })?
+    }
+
+    /// Queues what the person typed, waiting while the session's queue is
+    /// full.
+    pub async fn shell_input(&self, window: &str, request: ShellInput) -> Result<(), IpcError> {
+        let queued = self
+            .shells
+            .with(window, request.id, |session| session.input(request.data))?;
+        queued.await;
+        Ok(())
+    }
+
+    pub fn shell_resize(&self, window: &str, request: ShellResize) -> Result<(), IpcError> {
+        self.shells.with(window, request.id, |session| {
+            session.resize(request.cols, request.rows);
+        })
+    }
+
+    pub fn shell_ack(&self, window: &str, request: ShellAck) -> Result<(), IpcError> {
+        self.shells
+            .with(window, request.id, |session| session.ack(request.bytes))
+    }
+
+    pub fn shell_close(&self, window: &str, id: SubscriptionId) -> Result<(), IpcError> {
+        self.shells.remove(window, id)
+    }
+
+    /// Ends the lists, open objects, logs sessions, shells and plans of a
+    /// window that reloads or closes.
     pub fn drop_window(&self, window: &str) {
         self.lists.drop_window(window);
         self.objects.drop_window(window);
         self.logs.drop_window(window);
+        self.shells.drop_window(window);
         self.bus.drop_window(window);
     }
 

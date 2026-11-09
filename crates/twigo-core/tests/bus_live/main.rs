@@ -7,6 +7,7 @@
 mod actions;
 mod apply;
 mod bus;
+mod shell;
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};

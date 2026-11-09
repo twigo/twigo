@@ -1095,7 +1095,7 @@ interface CommandDescriptor {
 - **One namespace for commands**, as VS Code's CommandsRegistry.
   Every UI action is a command, including the single-key table verbs.
 - **Backend commands.**
-  - All Kubernetes operations: apply, delete, scale, restart, drain, cordon, trigger, suspend, Helm, and a Reveal of secret-grade data (3.6).
+  - All Kubernetes operations: apply, delete, scale, restart, drain, cordon, trigger, suspend, Helm, a shell or an attach in a pod (4.6), and a Reveal of secret-grade data (3.6).
   - Each is an action of the command bus in `twigo-core`, planned first through `command_plan`.
     Rust finds what it acts on, refuses what the policy blocks before anything is asked, and answers with what it will do, in words and as the equivalent kubectl command, and the friction its blast radius asks for in the context's mode (6.4).
   - The webview draws the friction and runs the plan by its id through `command_execute`, with what proves the friction was met: the name typed, the countdown passed.
@@ -1595,6 +1595,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     - deleting one object asks in a dialog that names the cluster in its question and lists what follows, with the equivalent kubectl command;
     - a namespace, a node or a CustomResourceDefinition asks for the object's name typed, and a delete of several objects for the context's, as `guarded` does;
     - an apply, whose diff the person has just read (6.5), runs at once in `read-write` and asks in a dialog in `guarded`;
+    - a shell or an attach (4.6) runs at once in `read-write` and asks in a dialog in `guarded`, since a person opens them often and a typed name would only slow them, and `read-only` refuses it before anything is asked, as the table says;
     - in `guarded` every other write asks for the context's name typed, whatever it risks, and a Reveal asks in a dialog, as in `read-only`; in `read-write` a Reveal shows at once;
     - the confirming button names its action, `Delete namespace`, never Yes or OK.
   - Delete is ⌘⌫, never a bare key (4.4).
