@@ -89,11 +89,11 @@ struct Harness {
     relock: Option<oneshot::Sender<()>>,
 }
 
-fn harness(tty: bool, clients: Arc<Clients>, connect: Box<dyn Connect>) -> Harness {
+fn harness(spec: Spec, clients: Arc<Clients>, connect: Box<dyn Connect>) -> Harness {
     let (relock, relocked) = oneshot::channel();
     let session = Session::parked(
         Arc::clone(&clients),
-        spec(tty, true),
+        spec,
         relocked.map(|_| ()).boxed(),
         connect,
     );
@@ -106,7 +106,11 @@ fn harness(tty: bool, clients: Arc<Clients>, connect: Box<dyn Connect>) -> Harne
 }
 
 fn parked(tty: bool, budgets: Budgets, to: Result<Connected, kube::Error>) -> Harness {
-    harness(tty, clients(budgets), Box::new(Fake(Mutex::new(Some(to)))))
+    harness(
+        spec(tty, true),
+        clients(budgets),
+        Box::new(Fake(Mutex::new(Some(to)))),
+    )
 }
 
 struct NeverConnects;
@@ -118,7 +122,11 @@ impl Connect for NeverConnects {
 }
 
 async fn connecting() -> Harness {
-    let harness = harness(true, clients(Budgets::default()), Box::new(NeverConnects));
+    let harness = harness(
+        spec(true, true),
+        clients(Budgets::default()),
+        Box::new(NeverConnects),
+    );
     harness.open(80, 24);
     settle().await;
     assert_eq!(harness.events(), vec![ShellEvent::Connecting]);
@@ -208,6 +216,7 @@ fn status(json: &str) -> Status {
     serde_json::from_str(json).unwrap()
 }
 
+const SUCCESS: &str = r#"{"status":"Success"}"#;
 const EXIT_3: &str = r#"{"status":"Failure","reason":"NonZeroExitCode","details":{"causes":[{"reason":"ExitCode","message":"3"}]}}"#;
 const NO_SHELL: &str = r#"{"status":"Failure","reason":"InternalError","code":500,"message":"Internal error occurred: exec: \"bash\": executable file not found in $PATH"}"#;
 
@@ -439,6 +448,33 @@ async fn its_end_with_the_reader_stopped_drains_the_rest_without_waiting_for_ack
         frames.last(),
         Some(Frame::Event(ShellEvent::Ended { .. }))
     ));
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_attach_that_ends_with_success_is_detached_and_a_shell_that_does_exited_0() {
+    for (join, expected) in [
+        (Join::Attach, ShellEnd::Detached),
+        (
+            Join::Exec(vec!["sh".to_owned()]),
+            ShellEnd::Exited { code: 0 },
+        ),
+    ] {
+        let (to, mut process) = connected(true);
+        let harness = harness(
+            Spec {
+                join,
+                ..spec(true, true)
+            },
+            clients(Budgets::default()),
+            Box::new(Fake(Mutex::new(Some(Ok(to))))),
+        );
+        harness.open(80, 24);
+        settle().await;
+        process.status.send(status(SUCCESS)).unwrap();
+        process.stdout.shutdown().await.unwrap();
+        settle().await;
+        assert_eq!(harness.ended(), Some(expected));
+    }
 }
 
 #[tokio::test(start_paused = true)]

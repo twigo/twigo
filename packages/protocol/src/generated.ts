@@ -1144,7 +1144,7 @@ default: string, };
 /**
  * Why a session ended; none can resume, as an exec cannot.
  */
-export type ShellEnd = { "reason": "exited", code: number, } | { "reason": "noShell", message: string, } | { "reason": "failed", error: IpcError, } | { "reason": "connectionLost" } | { "reason": "relocked" };
+export type ShellEnd = { "reason": "exited", code: number, } | { "reason": "detached" } | { "reason": "noShell", message: string, } | { "reason": "failed", error: IpcError, } | { "reason": "connectionLost" } | { "reason": "relocked" };
 
 /**
  * Where the login shell's environment stands (ARCHITECTURE 6.1).

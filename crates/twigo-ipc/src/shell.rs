@@ -101,6 +101,9 @@ pub enum ShellEnd {
     Exited {
         code: i32,
     },
+    /// An attach ended with no exit code: the kubelet answers `Success` to
+    /// any attach that did not fail, whatever the process did.
+    Detached,
     /// The container has no shell to run, in the words of its runtime.
     NoShell {
         message: String,

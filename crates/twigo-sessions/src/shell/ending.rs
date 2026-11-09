@@ -12,7 +12,11 @@ pub(super) fn ending(status: Option<&Status>, printed: bool, shell: bool) -> She
         return ShellEnd::ConnectionLost;
     };
     if status.status.as_deref() == Some("Success") {
-        return ShellEnd::Exited { code: 0 };
+        return if shell {
+            ShellEnd::Exited { code: 0 }
+        } else {
+            ShellEnd::Detached
+        };
     }
     let message = status.message.clone().unwrap_or_default();
     if let Some(code) = exit_code(status) {
@@ -88,6 +92,13 @@ mod tests {
                 false,
                 true,
                 ShellEnd::Exited { code: 0 },
+            ),
+            (
+                "success of an attach",
+                SUCCESS,
+                true,
+                false,
+                ShellEnd::Detached,
             ),
             ("exit 3", EXIT_3, false, true, ShellEnd::Exited { code: 3 }),
             (
