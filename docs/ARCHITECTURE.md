@@ -675,7 +675,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 | `k8s://<space>/<group>/<version>/<resource>[/<ns>]/<name>`          | Resource editor with sub-tabs: Overview, YAML, Events, Related; Logs in its title opens the object's logs tab in the panel, and Shell for pods comes with exec |
 | `k8s-list://<space>/<gvr>?ns=…&q=…`                                 | Resource table as an editor, so one can pin "pods in payments where status≠Running" next to another list                                                       |
 | `logs://<space>/<group>/<version>/<resource>/<ns>/<name>`           | Logs tab in the panel (4.6): a pod's, or a workload's pods' merged; the core group an empty segment, as in `k8s://`                                            |
-| `exec://<ctx>/<ns>/<pod>/<container>`                               | Terminal (xterm)                                                                                                                                               |
+| `exec://<space>/<ns>/<pod>/<container>`                             | Terminal (xterm)                                                                                                                                               |
 | `pf://<space>/<forward-id>`                                         | Port-forward tab: state, target and resolved pod, local address, open connections, bytes, errors, a quick HTTP request tester                                  |
 | `diff://edit/apply?editor=<uri>`, `diff://<space>/objects?…`        | Monaco diff: the apply dry-run of an editor's edit, its opened object against the server's now (`edit/server`), Compare with…, any two objects                 |
 | `untitled://<space>/manifest-n`                                     | New manifest of a space, numbered within it; its first Apply asks for the target context and, once applied, opens the object it made                           |
@@ -896,8 +896,20 @@ Extensions add commands, not prefixes.
   xterm.js 6 with the WebGL addon.
   It falls back to the DOM renderer on context loss, which happens on WebKitGTK.
   WebGL is disposed on hidden tabs.
-  kube-rs `AttachedProcess` (version 4.0 or later fixes the task leak and the join deadlock) handles resize.
-  The shell is detected by trying `bash`, then `sh`.
+  A shell or an attach is a plan of the command bus (5.1, 6.4): its run parks a session in `twigo-core` and connects nothing, and `shell_open` starts it with the terminal's size, so the first prompt is laid out right; a session is only reached through a plan that ran.
+  kube-rs `AttachedProcess` (version 4.0 or later fixes the task leak and the join deadlock) carries it, one WebSocket per session on the sessions client (3.2).
+  - **The shell** is one exec of `sh -c 'export TERM=xterm-256color; command -v bash >/dev/null && exec bash || exec sh'`, as k9s runs it ([`exec.go`](https://github.com/derailed/k9s/blob/v0.51.0/internal/view/exec.go#L37-L38)).
+    A second exec after a failure would log a runtime error on every shell into an Alpine image, and could read a person's `exit 1` as a shell that failed.
+    `TERM` has to be set: a tty exec leaves it unset, so `sh -c 'echo $TERM'` prints nothing on busybox and bash reports `dumb`, which breaks full-screen programs (kind 1.37, containerd, 2026-11-09).
+  - **Attach** takes `tty` and `stdin` from the container's spec and `stderr` when there is no tty, with no wrapper; a container whose spec keeps no stdin attaches read-only.
+  - **Flow control** is in bytes, counted by what the terminal has parsed (`shell_ack`, clamped to what was sent).
+    A frame is at most 64 KiB, as `twigo-sessions` names its constants; with nothing unacknowledged output goes out at once so a keystroke's echo never waits, with anything unacknowledged it gathers for up to 5 ms or 64 KiB into a frame above Tauri's 1 KiB `eval` threshold, and at 256 KiB unacknowledged it stops reading, until it falls below 64 KiB.
+    Stopping the reader blocks kube's message loop, stdin and resizes included, until acks come; input and resizes therefore queue apart from the reader, and a Ctrl-C during `yes` reaches the process as the terminal catches up.
+  - **How a session ends**, after all of its output, is `Exited { code }`, `NoShell`, `Failed`, `ConnectionLost` or `Relocked`, and none can resume, since an exec cannot.
+    The status decides: `Success` is exit 0, `NonZeroExitCode` its code, unless a shell printed nothing and the code is 126 or 127, which is `NoShell`, as CRI-O would report a missing binary (by reading its source, not measured).
+    containerd fails the exec itself: the upgrade succeeds, nothing prints, and the status is `InternalError` whose message says `executable file not found` (kind 1.37, kube 5.0.0, 2026-11-09), which is `NoShell` for a shell and `Failed` for an attach; a socket that closes without a status, or a connection retired or abandoned while it runs, is `ConnectionLost`, never a shell that failed.
+    A pod deleted under a session ended it as exit 137 (`shell_live` on kind 1.37 with containerd, 2026-11-09).
+    A context that turns read-only, by a relock or an unlock running out, ends its running shells as `Relocked`; `guarded` does not.
 - **Port-forward manager.**
   A target is a Pod, a Service or a workload.
   - The manager binds the local `TcpListener` and keeps it for the life of the forward, so no other process can take the port between check and bind.
