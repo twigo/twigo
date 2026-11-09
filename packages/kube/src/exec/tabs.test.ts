@@ -435,6 +435,28 @@ test("a restart closes what ended, opens a new session at the terminal's size an
   expect(tab.live).toBe(true);
 });
 
+test("a restart resets the modes the old program left, and focus sends no report to the new shell", async () => {
+  const { mounted, opens, sent, tabs } = setup();
+  const tab = await mounted();
+  const fresh = { ...tab.term.modes };
+  opens[0]?.send({ state: "running" });
+  opens[0]?.send(
+    bytes(
+      "\x1b[?1004h\x1b[?1h\x1b[?66h\x1b[?6h\x1b[?45h\x1b[?2026h\x1b[?7l\x1b[4h\x1b[?1000h\x1b[?1006h\x1b[?2004h",
+    ),
+  );
+  opens[0]?.send({ state: "ended", end: { reason: "connectionLost" } });
+  await vi.advanceTimersByTimeAsync(50);
+  expect(tab.term.modes).not.toEqual(fresh);
+
+  tabs.start(URI, INPUT, 8);
+  await vi.advanceTimersByTimeAsync(50);
+  expect(tab.term.modes).toEqual(fresh);
+  tab.term.textarea?.dispatchEvent(new FocusEvent("focus"));
+  await vi.advanceTimersByTimeAsync(10);
+  expect(sent("shell_input")).toEqual([]);
+});
+
 test("a tab restored with no session says so and sends nothing, whatever shows", async () => {
   const { tabs, calls, container } = setup();
   const tab = tabs.tab(URI, INPUT);

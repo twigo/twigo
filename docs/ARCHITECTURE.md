@@ -924,6 +924,7 @@ Extensions add commands, not prefixes.
     The terminal and its element belong to a service keyed by the tab's URI, not to the view, which moves the element in when it mounts: moving a tab between groups or hiding the panel loses nothing, and the session goes on writing to the terminal meanwhile.
     The first size goes in `shell_open`, once the terminal is mounted and fitted, and `shell_resize` follows a layout change that has held still for 100 ms, when cols or rows changed.
     A tab restored after a restart has no session: it says its shell ended when Twigo closed and offers Start, and never runs anything on its own.
+    A new session in a tab, Restart's or Start's, keeps the scrollback and resets the modes the old program left: the mouse, bracketed paste, focus reporting, the cursor and keypad keys, and wrapping, insert and origin.
   - **Output.**
     Rust sends the bytes of the process's output and its events over one channel, in order.
     The bytes are written to xterm as `Uint8Array`, which is stream-aware across frames, and Rust is told how many the terminal has parsed from the callback of `write`, so flow control follows what xterm has really parsed: a frame of 64 KiB at most, nothing more read at 256 KiB unacknowledged, reading again below 64 KiB.
