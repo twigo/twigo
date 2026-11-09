@@ -906,7 +906,8 @@ Extensions add commands, not prefixes.
   - **Flow control** is in bytes, counted by what the terminal has parsed (`shell_ack`, clamped to what was sent).
     A frame is at most 64 KiB, as `twigo-sessions` names its constants; with nothing unacknowledged output goes out at once so a keystroke's echo never waits, with anything unacknowledged it gathers for up to 5 ms or 64 KiB into a frame above Tauri's 1 KiB `eval` threshold, and at 256 KiB unacknowledged it stops reading, until it falls below 64 KiB.
     Stopping the reader blocks kube's message loop, stdin and resizes included, until acks come; input and resizes therefore queue apart from the reader, and a Ctrl-C during `yes` reaches the process as the terminal catches up.
-  - **How a session ends**, after all of its output, is `Exited { code }`, `Detached`, `NoShell`, `Failed`, `ConnectionLost` or `Relocked`, and none can resume, since an exec cannot.
+  - **How a session ends** is `Exited { code }`, `Detached`, `NoShell`, `Failed`, `ConnectionLost` or `Relocked`, and none can resume, since an exec cannot.
+    `ended` comes last, after all the output of a process that ended; a session cut short by `Relocked`, or by a wake, a moved route or replaced clients, sends only the output it had gathered, not what its pipe still held.
     The status decides.
     `Success` is exit 0 for a shell and `Detached` for an attach: the kubelet's [`ServeAttach`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/cri-streaming/pkg/streaming/remotecommand/attach.go#L46-L55) writes `Success` whenever the attach itself did not error, with no exit code.
     `NonZeroExitCode` is its code, unless a shell printed nothing and the code is 126 or 127, which is `NoShell`, as CRI-O would report a missing binary (by reading its source, not measured).
@@ -916,7 +917,7 @@ Extensions add commands, not prefixes.
     A socket that closes without a status is `ConnectionLost` too, as is a wake from sleep or a route that moved while it connects or runs, and clients abandoned while it waits, connects or runs; none is read as a shell that failed.
     A session ends on those and on no other retirement: its socket is on the sessions client, whose connections are not tracked, so a new certificate or a failed probe, which retire the api client's connections (3.2, 6.2), say nothing of it; `Connections::network` counts only the wakes and the moved routes.
     A pod deleted under a session ended it as exit 137 (`shell_live` on kind 1.37 with containerd, 2026-11-09).
-    A context that turns read-only, by a relock or an unlock running out, ends its running shells as `Relocked`; `guarded` does not.
+    A context that turns read-only, by a relock or an unlock running out, ends its shells as `Relocked`, those parked or queued as well as those connecting or running; `guarded` does not.
 - **Port-forward manager.**
   A target is a Pod, a Service or a workload.
   - The manager binds the local `TcpListener` and keeps it for the life of the forward, so no other process can take the port between check and bind.

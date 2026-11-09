@@ -1164,7 +1164,10 @@ reason: string,
 output: string, };
 
 /**
- * How a session goes; `ended` comes last, after all of its output.
+ * How a session goes; `ended` comes last, after all the output of a process
+ * that ended. A session cut short by `relocked`, or by a `connectionLost`
+ * from a wake, a moved route or replaced clients, sends only the output it
+ * had gathered.
  */
 export type ShellEvent = { "state": "queued" } | { "state": "connecting" } | { "state": "running" } | { "state": "ended", end: ShellEnd, };
 

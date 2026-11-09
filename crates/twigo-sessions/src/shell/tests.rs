@@ -1,5 +1,6 @@
 use std::convert::Infallible;
 use std::future::ready;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -289,6 +290,7 @@ async fn a_frame_is_at_most_64_kib() {
 struct Flood {
     stop: oneshot::Sender<()>,
     task: tokio::task::JoinHandle<()>,
+    written: Arc<AtomicUsize>,
 }
 
 impl Flood {
@@ -307,12 +309,15 @@ async fn stopped_at_high_water() -> (Harness, Process, Flood) {
     let (_, placeholder) = simplex(1);
     let mut stdout = std::mem::replace(&mut process.stdout, placeholder);
     let (stop, stopped) = oneshot::channel::<()>();
+    let written = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&written);
     let task = tokio::spawn(async move {
         let flood = async {
             loop {
                 if stdout.write_all(&[7; 32 * KIB]).await.is_err() {
                     return;
                 }
+                counted.fetch_add(32 * KIB, Ordering::Relaxed);
                 tokio::task::yield_now().await;
             }
         };
@@ -322,7 +327,11 @@ async fn stopped_at_high_water() -> (Harness, Process, Flood) {
         }
         let _ = stdout.shutdown().await;
     });
-    let flood = Flood { stop, task };
+    let flood = Flood {
+        stop,
+        task,
+        written,
+    };
     for _ in 0..60 {
         settle().await;
         advance(Duration::from_millis(6)).await;
@@ -549,6 +558,38 @@ fn retire_as_a_certificate_and_a_probe_do(clients: &Clients) {
     connections.retire();
     let seen = *connections.retired().borrow();
     assert!(connections.retire_after(seen));
+}
+
+async fn cut_short_at_high_water(cut: impl FnOnce(&mut Harness)) -> (Harness, usize) {
+    let (mut harness, _process, flood) = stopped_at_high_water().await;
+    let written = flood.written.load(Ordering::Relaxed);
+    cut(&mut harness);
+    settle().await;
+    flood.abort();
+    (harness, written)
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_relock_sends_what_had_gathered_and_not_what_the_pipe_still_held() {
+    let (harness, written) = cut_short_at_high_water(Harness::relock).await;
+    assert_eq!(harness.ended(), Some(ShellEnd::Relocked));
+    assert!(
+        written > harness.sent(),
+        "{written} written, {} sent",
+        harness.sent()
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_wake_sends_what_had_gathered_and_not_what_the_pipe_still_held() {
+    let (harness, written) =
+        cut_short_at_high_water(|harness| harness.clients.connections().wake()).await;
+    assert_eq!(harness.ended(), Some(ShellEnd::ConnectionLost));
+    assert!(
+        written > harness.sent(),
+        "{written} written, {} sent",
+        harness.sent()
+    );
 }
 
 #[tokio::test(start_paused = true)]

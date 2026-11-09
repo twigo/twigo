@@ -238,7 +238,6 @@ pub fn kubectl(plan: &Plan, kubeconfig: &Path) -> String {
     kubectl_fed(plan, kubeconfig, "")
 }
 
-/// [`kubectl`], with `input` on the standard input of its line.
 pub fn kubectl_fed(plan: &Plan, kubeconfig: &Path, input: &str) -> String {
     let mut child = Command::new("sh")
         .arg("-c")
