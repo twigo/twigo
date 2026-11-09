@@ -142,9 +142,10 @@ export class Editors {
 
   /**
    * Tells `listener` the URI of each editor that closes, and of each open
-   * that waited for a space and is forgotten. Moving an editor to another
-   * group closes none (dockview reports no removal while it moves a panel),
-   * and neither does a space giving way to another.
+   * that waited for a space and is forgotten, unless that space's saved layout
+   * holds the editor. Moving an editor to another group closes none (dockview
+   * reports no removal while it moves a panel), and neither does a space
+   * giving way to another.
    */
   onClose(listener: (uri: string) => void): () => void {
     this.#closed.add(listener);

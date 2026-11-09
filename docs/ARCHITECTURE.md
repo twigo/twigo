@@ -711,11 +711,13 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 - **Sub-tabs.**
   A resource editor's Overview, YAML, Events and Related switch at the right of its group's tab bar, where a list keeps its filters; Rust follows only the one shown.
 - **Closing a tab.**
-  When an editor that opens, closes or moves, or a space that shows, drops the keyboard focus to the page, the active group takes it, and the active editor its own where it has a text editor to hold it, so a key such as ⌘S or ⌘Z still reaches an editor.
+  When an editor that opens, closes or moves, or a space that shows, drops the keyboard focus to the page, the active group takes it, and the active editor its own where it has something to hold it, a text editor or a list's grid, so a key such as ⌘S, ⌘Z or `j` still reaches an editor.
   A tab's X and a middle click close through the editor service as ⌘W does, and the panel's last editor leaves the focus to the editor area's active group.
   An open that the person asked for, from quick access, a button or a command, gives the editor it opened the focus from whatever held it, an editor on screen in another group included, except a field outside the editors.
   One that arrives on its own, such as the diff of an answer or an object that a plan made, and the explorer's, whose tree goes on with its keys, take it only from the page and the dock's own elements, never from another editor or from anything outside the editors (`preserveFocus`).
-  A hidden or covered part keeps the focus it held, since it loses its height and not its elements, and the keys would go on to what nobody sees: when the panel hides, or a maximized panel covers the editor area, the focus held inside moves to the other area's active editor, or off the page when that area has none.
+  A hidden or covered part loses its height and not its elements, so it would keep the focus it held, answer Tab, and take back the focus that quick access or a dialog gives back, and the keys would go on to what nobody sees.
+  Such a part is `inert` from the moment the panel's state changes, and the focus held inside moves just before to the other area's active editor, or off the page when that area has none: a maximized panel with nothing open leaves the page without a focus, since the covered editor area is inert and refuses it (the mock in Chromium and WebKit, 2026-11-09).
+  What quick access or a dialog took the focus from gets it back when it closes, or the editor area's active editor does when that cannot take it, so a closed dialog or an Escape leaves the focus on the page only where no editor can take it.
   A panel shown again gives the focus to its active shell tab, unless quick access is open, which stays on screen and keeps what is typed; a dialog needs no such rule: with the rule taken out, a confirm dialog kept the focus and the shell received nothing (the mock in Chromium and WebKit, 2026-11-09).
 - **An editor off screen has no Monaco view.**
   Behind another tab of its group or under a maximized panel, a YAML editor or a diff disposes its view.

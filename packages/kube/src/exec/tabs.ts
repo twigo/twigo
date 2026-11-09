@@ -30,9 +30,11 @@ const MODES_OFF =
 /** Leaves the alternate screen, which restores the cursor: a terminal that is not on it would jump home. */
 const LEAVE_ALTERNATE = "\x1b[?1049l";
 /**
- * A soft reset (DECSTR): the cursor and keypad keys, focus reporting, wrapping,
- * insert and origin modes, and the cursor shown. The screen and the scrollback
- * stay; the mouse and bracketed paste it leaves are `MODES_OFF`'s.
+ * A soft reset (DECSTR): the cursor and keypad keys, bracketed paste, focus
+ * reporting, wrapping, insert and origin modes, and the cursor shown
+ * ([`CoreService.reset`](https://github.com/xtermjs/xterm.js/blob/6.0.0/src/common/services/CoreService.ts#L56-L59)).
+ * The screen and the scrollback stay, and so does the mouse, which is
+ * `MODES_OFF`'s.
  */
 const SOFT_RESET = "\x1b[!p";
 const SESSION_STARTS = `${MODES_OFF}${SOFT_RESET}`;
