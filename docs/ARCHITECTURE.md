@@ -941,7 +941,7 @@ Extensions add commands, not prefixes.
     Checked with a right-click on the mock in headless Chrome, 2026-11-09: no `paste` event, `GLUEDstatus:` where the line was, ⌘Z gave the two lines back, and ⌘S showed "Left out of what is sent: .status."
   - Monaco is bundled locally (no CDN loader) and loaded lazily on the first YAML or diff editor.
     It is built from the tree-shakeable entry points of monaco-editor 0.57 (`monaco-editor/editor`, then each language and feature it needs), and its editor worker is a Vite `?worker` module served from the app.
-  - monaco-yaml 5.5.1 runs on those entry points, since it takes the Monaco namespace as an argument, with `yamlVersion: "1.1"`; its worker is a Vite `?worker` too, whose build has no `eval` and no `new Function`, so `script-src 'self'` should cover it; it was not run under Tauri's CSP yet.
+  - monaco-yaml 5.5.1 runs on those entry points, since it takes the Monaco namespace as an argument, with `yamlVersion: "1.1"`; its worker is a Vite `?worker` too, whose build has no `eval` and no `new Function`, so `script-src 'self'` covers it: validation and completion ran in a Tauri build under this CSP on kind (2026-11-09).
     A model's schema comes from `schema_get` once its editor holds a copy, for a kind the cluster's discovery serves, so the kind of a new manifest is not asked for as it is typed, and its id names the space, since two clusters serve different ones for a kind; the editor works without one when that fails.
   - monaco-yaml asks monaco-worker-manager 2.0.1, the latest and from 2022, for its worker, and that does not fit Monaco 0.56 and later in two ways: it imports `monaco-editor/esm/vs/editor/editor.worker.js`, which the `exports` of 0.57 no longer map (`./*.js` is `./esm/vs/*.js`), and it calls `editor.createWebWorker({ moduleId, label, createData })`, which takes a `worker` now.
     The desktop's Vite config aliases the first path to `monaco-editor/editor/editor.worker`, and `packages/kube/src/edit/monaco.ts` hands monaco-yaml an `editor` whose `createWebWorker` makes the YAML worker and sends it `createData` as Monaco's own workers are sent theirs; both are marked `@todo` for the day monaco-worker-manager follows Monaco.
@@ -1724,7 +1724,7 @@ Their plans read the objects and what the garbage collector takes with them (eve
 
 - **CSP.**
   Strict, no remote URLs.
-  `worker-src 'self' blob:` is allowed for Monaco's workers.
+  `worker-src` is not set, so Monaco's and monaco-yaml's workers load under its fallback to `script-src 'self'` ([CSP3](https://www.w3.org/TR/CSP3/#directive-worker-src)): each is a Vite `?worker` file served from the app, and `blob:` would widen what can run for nothing that needs it.
 - **Rendering.**
   Cluster data is rendered as text, never as HTML, so an annotation cannot inject markup.
   An XSS in the webview would reach every cluster.
