@@ -24,7 +24,13 @@ const MODES_OFF =
   "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25l";
 /** Leaves the alternate screen, which restores the cursor: a terminal that is not on it would jump home. */
 const LEAVE_ALTERNATE = "\x1b[?1049l";
-const SESSION_STARTS = "\x1b[?25h";
+/**
+ * A soft reset (DECSTR): the cursor and keypad keys, focus reporting, wrapping,
+ * insert and origin modes, and the cursor shown. The screen and the scrollback
+ * stay; the mouse and bracketed paste it leaves are `MODES_OFF`'s.
+ */
+const SOFT_RESET = "\x1b[!p";
+const SESSION_STARTS = `${MODES_OFF}${SOFT_RESET}`;
 
 /** The logs' bright black, for words that are not the process's. */
 const QUIET = "\x1b[90m";
@@ -40,7 +46,7 @@ export interface ExecOptions {
   readonly platform: Platform;
   readonly report: (error: unknown) => void;
   readonly openUrl: (url: string) => void;
-  /** Whether a key press is a binding of the workbench, which the terminal gives up. */
+  /** Whether the workbench takes a key press, which the terminal then gives up. */
   readonly binds: (event: KeyboardEvent) => boolean;
   /** The WebGL renderer of a terminal; a test brings another, as jsdom has no WebGL. */
   readonly webgl?: () => WebglRenderer;
@@ -87,7 +93,7 @@ export class ExecTab {
     this.#pending = session;
     this.#status =
       session === undefined ? { state: "restored" } : { state: "connecting" };
-    this.host.className = "size-full overflow-hidden pt-1 pl-2";
+    this.host.className = "size-full overflow-hidden";
     this.term = new Terminal({
       allowProposedApi: true,
       scrollback: SCROLLBACK,
@@ -116,8 +122,7 @@ export class ExecTab {
       this.#session?.resize(cols, rows);
     });
     this.term.attachCustomKeyEventHandler(
-      (event) =>
-        !(event.type === "keydown" && event.metaKey && options.binds(event)),
+      (event) => !(event.type === "keydown" && options.binds(event)),
     );
   }
 

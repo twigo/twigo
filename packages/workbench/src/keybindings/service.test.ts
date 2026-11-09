@@ -239,27 +239,40 @@ test("a new layout moves the bindings", async () => {
   );
 });
 
-test("handles says which keys are the workbench's without running one", () => {
+test("softDispatch says what a key would do without running it", () => {
   const { keybindings, ran } = setup();
   const press = (code: string, init: KeyboardEventInit = {}) =>
     new KeyboardEvent("keydown", { code, cancelable: true, ...init });
-  expect(
-    keybindings.handles(press("KeyP", { metaKey: true, shiftKey: true })),
-  ).toBe(true);
-  expect(keybindings.handles(press("KeyP", { ctrlKey: true }))).toBe(false);
-  expect(keybindings.handles(press("KeyC", { metaKey: true }))).toBe(false);
-  expect(keybindings.handles(press("ShiftLeft", { shiftKey: true }))).toBe(
-    false,
+  const kind = (code: string, init: KeyboardEventInit = {}) =>
+    keybindings.softDispatch(press(code, init))?.resolution.kind;
+  const found = keybindings.softDispatch(
+    press("KeyP", { metaKey: true, shiftKey: true }),
+  );
+  expect(found?.resolution).toMatchObject({
+    kind: "command",
+    binding: { command: "palette" },
+  });
+  expect(found?.waiting).toBe(false);
+  expect(kind("KeyP", { ctrlKey: true })).toBe("none");
+  expect(kind("KeyC", { metaKey: true })).toBe("none");
+  expect(kind("KeyK", { metaKey: true })).toBe("chord");
+  expect(keybindings.softDispatch(press("ShiftLeft", { shiftKey: true }))).toBe(
+    undefined,
   );
   expect(ran).toEqual([]);
 });
 
-test("handles holds for the key that goes on a chord, and for the one that breaks it", () => {
+test("softDispatch says a chord waits, and what its next key is, bound or not", () => {
   const { keybindings } = setup();
   const press = (code: string, init: KeyboardEventInit = {}) =>
     new KeyboardEvent("keydown", { code, cancelable: true, ...init });
-  expect(keybindings.handles(press("KeyK", { metaKey: true }))).toBe(true);
   keybindings.dispatch(press("KeyK", { metaKey: true }));
-  expect(keybindings.handles(press("KeyS", { metaKey: true }))).toBe(true);
-  expect(keybindings.handles(press("KeyX"))).toBe(true);
+  const next = keybindings.softDispatch(press("KeyS", { metaKey: true }));
+  expect(next?.resolution).toMatchObject({
+    kind: "command",
+    binding: { command: "keybindings" },
+  });
+  expect(next?.waiting).toBe(true);
+  const broken = keybindings.softDispatch(press("KeyX"));
+  expect(broken).toEqual({ resolution: { kind: "none" }, waiting: true });
 });

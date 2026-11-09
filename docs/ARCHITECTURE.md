@@ -927,18 +927,23 @@ Extensions add commands, not prefixes.
     The terminal and its element belong to a service keyed by the tab's URI, not to the view, which moves the element in when it mounts: moving a tab between groups or hiding the panel loses nothing, and the session goes on writing to the terminal meanwhile.
     The first size goes in `shell_open`, once the terminal is mounted and fitted, and `shell_resize` follows a layout change that has held still for 100 ms, when cols or rows changed.
     A tab restored after a restart has no session: it says its shell ended when Twigo closed and offers Start, and never runs anything on its own.
+    A new session in a tab, Restart's or Start's, keeps the scrollback and resets the modes the old program left: the mouse, bracketed paste, focus reporting, the cursor and keypad keys, and wrapping, insert and origin.
   - **Output.**
     Rust sends the bytes of the process's output and its events over one channel, in order.
     The bytes are written to xterm as `Uint8Array`, which is stream-aware across frames, and Rust is told how many the terminal has parsed from the callback of `write`, so flow control follows what xterm has really parsed: a frame of 64 KiB at most, nothing more read at 256 KiB unacknowledged, reading again below 64 KiB.
     A terminal keeps 5000 lines.
     What is typed goes one `shell_input` at a time, and what is typed while a call is in flight goes in the next, so keystrokes keep their order whatever the transport does.
+    What is typed while the shell connects goes to Rust's queue and reaches the process once it runs, as a terminal keeps type-ahead; what is typed while the session waits for a place, which can last minutes, is dropped.
   - **WebGL.**
     A terminal loads the addon while its tab is on screen, and gives it up in a task after the tab was hidden, behind another tab, under a maximized panel or in a hidden panel, since disposing it in the task that hides the tab made the browser measure the terminal for every row ([xterm.js #6208](https://github.com/xtermjs/xterm.js/issues/6208)).
     WebKit keeps 16 live WebGL contexts per page: of 24 terminals, the first 8 lost theirs (a real WKWebView, macOS 27.2, 2026-11-09), and Monaco or anything else that draws with WebGL shares the limit.
     A failed load and a lost context leave that terminal on the DOM renderer.
     With an opaque background, 6.0.0 drew colours, box drawing, Cyrillic, CJK and emoji correctly in a real WKWebView, also while scrolling thousands of lines (macOS 27.2, 2026-11-09), so [#5816](https://github.com/xtermjs/xterm.js/issues/5816) did not reproduce there.
   - **Keys, paste and links.**
-    The terminal keeps every key except the ⌘ chords that are workbench bindings, which `attachCustomKeyEventHandler` leaves to the workbench, as VS Code does; single-letter list keys never fire in a terminal, since `listFocus` does not hold there.
+    The terminal keeps every key except those the workbench takes, which `attachCustomKeyEventHandler` leaves to it, as VS Code does; single-letter list keys never fire in a terminal, since `listFocus` does not hold there.
+    The workbench takes the next key of a chord that waits, on every platform.
+    On macOS it takes a ⌘ chord that is a binding or starts one.
+    On Linux and Windows `mod` is Ctrl, which a shell needs, so only quick access, the command palette and the toggle of the panel win over the shell, a short list as VS Code's `commandsToSkipShell` is, and every other Ctrl chord stays with it.
     Copy and paste ride on the `copy` and `paste` events, which xterm answers with the selection and with `Terminal.paste`, so bracketed paste works; the Edit menu keeps its Copy and Paste for them.
     A `linkHandler` makes OSC 8 links do nothing unless ⌘-clicked, and opens only what the app's opener takes, `https` and `http` on localhost; xterm's `confirm` and `window.open` never run, and no addon detects URLs.
   - **Endings.**

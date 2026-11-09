@@ -15,15 +15,18 @@ import type { Pod } from "./cluster";
  * Pins what a shell does: `shellQueued` waits for a place among the
  * cluster's sessions, `shellNoShell` finds no shell in the container,
  * `shellLost` loses its connection and `shellRelocked` its context's write
- * mode a while after it opens, and `shellOneContainer` runs one container in
- * every pod, so no picker asks. Any other scenario runs two or three.
+ * mode a while after it opens, `shellOneContainer` runs one container in
+ * every pod, so no picker asks, and `shellDefaultSecond` has the pods'
+ * default-container annotation name the second container, so the default is
+ * not the first. Any other scenario runs two or three.
  */
 export type ShellScenario =
   | "shellQueued"
   | "shellNoShell"
   | "shellLost"
   | "shellRelocked"
-  | "shellOneContainer";
+  | "shellOneContainer"
+  | "shellDefaultSecond";
 
 export const SHELL_SCENARIOS: readonly ShellScenario[] = [
   "shellQueued",
@@ -31,6 +34,7 @@ export const SHELL_SCENARIOS: readonly ShellScenario[] = [
   "shellLost",
   "shellRelocked",
   "shellOneContainer",
+  "shellDefaultSecond",
 ];
 
 export function isShellScenario(scenario: string): scenario is ShellScenario {
@@ -49,8 +53,9 @@ const NAMES = ["api", "istio-proxy", "log-shipper"];
 
 /**
  * The containers of a pod a shell can reach: those that run, a pod that
- * runs none refused in words. The mock's pods run two or three, the first
- * the default, as an annotation would name it.
+ * runs none refused in words. The mock's pods run two or three, in the order
+ * of their statuses, and the first is the default unless an annotation names
+ * another, as Rust answers.
  */
 export function shellContainers(
   pod: Pod,
@@ -65,7 +70,8 @@ export function shellContainers(
   const count =
     scenario === "shellOneContainer" ? 1 : Math.max(2, pod.containers);
   const containers = NAMES.slice(0, count);
-  return { containers, default: containers[0] ?? "api" };
+  const annotated = scenario === "shellDefaultSecond" ? 1 : 0;
+  return { containers, default: containers[annotated] ?? "api" };
 }
 
 const FILES = [
@@ -113,6 +119,7 @@ export class MockShell {
   readonly #timers = new Set<ReturnType<typeof setTimeout>>();
   #size: { cols: number; rows: number };
   #state: ShellEvent["state"] = "connecting";
+  #ahead = "";
   #line = "";
   #escape = "";
   #pasting = false;
@@ -157,11 +164,16 @@ export class MockShell {
     }
   }
 
+  /** Keeps what is typed before the process runs and gives it to the process then, as Rust's queue does. */
   input(data: readonly number[]): void {
+    const text = this.#decoder.decode(Uint8Array.from(data), { stream: true });
+    if (this.#state === "connecting" || this.#state === "queued") {
+      this.#ahead += text;
+      return;
+    }
     if (this.#state !== "running") {
       throw new IpcError("conflict", "the shell does not run");
     }
-    const text = this.#decoder.decode(Uint8Array.from(data), { stream: true });
     for (const character of text) this.#key(character);
   }
 
@@ -201,6 +213,9 @@ export class MockShell {
         this.#write(BRACKETED_PASTE);
         this.#prompt();
       }
+      const ahead = this.#ahead;
+      this.#ahead = "";
+      for (const character of ahead) this.#key(character);
     });
   }
 

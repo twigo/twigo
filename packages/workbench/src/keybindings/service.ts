@@ -9,6 +9,7 @@ import {
   type Binding,
   type KeybindingRemoval,
   type KeybindingRule,
+  type Resolution,
   type Source,
   type Weight,
   validate,
@@ -83,14 +84,20 @@ export class Keybindings {
   }
 
   /**
-   * Whether a keydown is a binding's, or goes on a chord, where it happens,
-   * and nothing runs: a terminal asks it to keep every other key.
+   * What a keydown would do, where it happens, and nothing runs: a terminal
+   * asks it to decide which keys it keeps. `waiting` holds while a chord
+   * waits for its next key, which then breaks or finishes the chord, bound or
+   * not. None for a key that is no press, such as a modifier alone.
    */
-  handles(event: KeyboardEvent): boolean {
+  softDispatch(
+    event: KeyboardEvent,
+  ): { resolution: Resolution; waiting: boolean } | undefined {
     const found = this.#resolution(event);
     return (
-      found !== undefined &&
-      (found.resolution.kind !== "none" || this.#pending.length > 0)
+      found && {
+        resolution: found.resolution,
+        waiting: this.#pending.length > 0,
+      }
     );
   }
 

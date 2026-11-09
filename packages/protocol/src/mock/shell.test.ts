@@ -123,7 +123,7 @@ async function openShell(
 const states = (messages: readonly ShellMessage[]) =>
   messages.flatMap((message) => ("state" in message ? [message] : []));
 
-test("a pod's running containers come with the default first, and one container where the scenario says", async () => {
+test("a pod's running containers come in order with the first the default, the second where the scenario says, and one container where it says so", async () => {
   const backend = createMockBackend("live");
   await answered(backend.invoke("space_open", "qa"));
   const { namespace, pod } = targetOf("qa");
@@ -131,6 +131,12 @@ test("a pod's running containers come with the default first, and one container 
   const many = await answered(backend.invoke("shell_containers", request));
   expect(many.containers.length).toBeGreaterThanOrEqual(2);
   expect(many.default).toBe(many.containers[0]);
+
+  const annotated = createMockBackend("shellDefaultSecond");
+  await answered(annotated.invoke("space_open", "qa"));
+  expect(await answered(annotated.invoke("shell_containers", request))).toEqual(
+    { containers: many.containers, default: many.containers[1] },
+  );
 
   const one = createMockBackend("shellOneContainer");
   await answered(one.invoke("space_open", "qa"));
@@ -179,7 +185,10 @@ test("a shell asks as exec does: at once in read-write, to confirm in guarded, r
   expect((await answered(plan("qa"))).friction).toEqual({ kind: "atOnce" });
   const guarded = await answered(plan("staging"));
   expect(guarded.friction).toEqual({ kind: "confirm" });
-  expect(guarded.kubectl).toMatch(/^kubectl --context staging exec -it /);
+  const { namespace, pod } = targetOf("staging");
+  expect(guarded.kubectl).toBe(
+    `kubectl --context staging exec -it ${pod} -n ${namespace} -c api -- sh -c 'export TERM=xterm-256color; command -v bash >/dev/null && exec bash || exec sh'`,
+  );
   const readOnly = await refused(plan("prod-eu"));
   expect(readOnly.kind).toBe("permissions");
   expect(readOnly.blocked).toMatchObject({
@@ -200,7 +209,10 @@ test("an attach is planned apart from a shell, and a container that does not run
     }),
   );
   expect(attach.confirm).toBe("Attach");
-  expect(attach.kubectl).toMatch(/ attach -it /);
+  const { namespace, pod } = targetOf("qa");
+  expect(attach.kubectl).toBe(
+    `kubectl --context qa attach -it ${pod} -n ${namespace} -c api`,
+  );
   const error = await refused(
     backend.invoke("command_plan", {
       action: "shell",
@@ -261,6 +273,15 @@ test("typed lines are echoed and run: echo, ls and the last size stty reads", as
   expect(shell.text()).toContain("40 132\r\n");
   await shell.type("nosuch\r");
   expect(shell.text()).toContain("sh: 1: nosuch: not found");
+});
+
+test("what is typed while it connects or waits for a place is kept and runs once the shell does", async () => {
+  const shell = await openShell("shellQueued");
+  await vi.advanceTimersByTimeAsync(1000);
+  await shell.type("echo ahead\r");
+  expect(shell.text()).toBe("");
+  await vi.advanceTimersByTimeAsync(5500);
+  expect(shell.text()).toContain("echo ahead\r\nahead\r\n");
 });
 
 test("a backspace erases what was typed, and a character split between two calls is one", async () => {

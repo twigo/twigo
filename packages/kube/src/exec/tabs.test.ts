@@ -53,11 +53,16 @@ function fakeWebgl() {
   return { made, factory };
 }
 
-function setup(options: { webgl?: () => WebglRenderer; binds?: boolean } = {}) {
+function setup(
+  options: {
+    webgl?: () => WebglRenderer;
+    binds?: (event: KeyboardEvent) => boolean;
+  } = {},
+) {
   const fake = fakeShells();
   const report = vi.fn();
   const openUrl = vi.fn();
-  const binds = vi.fn(() => options.binds ?? false);
+  const binds = vi.fn(options.binds ?? (() => false));
   const tabs = new ExecTabs({
     backend: fake.backend,
     platform: "mac",
@@ -283,7 +288,9 @@ test("a layout change fits the terminal once it settles, and only a new size is 
 });
 
 test("typed keys and pastes go to the session in bytes, and the keys of a bound chord stay with the workbench", async () => {
-  const { mounted, opens, sent, binds } = setup({ binds: true });
+  const { mounted, opens, sent, binds } = setup({
+    binds: (event) => event.metaKey,
+  });
   const tab = await mounted();
   opens[0]?.send({ state: "running" });
   await vi.advanceTimersByTimeAsync(10);
@@ -292,11 +299,11 @@ test("typed keys and pastes go to the session in bytes, and the keys of a bound 
   textarea.dispatchEvent(enter());
   await vi.advanceTimersByTimeAsync(10);
   expect(sent("shell_input")).toEqual([{ id: 7, data: [13] }]);
-  expect(binds).not.toHaveBeenCalled();
+  expect(binds).toHaveBeenCalledOnce();
 
   textarea.dispatchEvent(enter({ metaKey: true }));
   await vi.advanceTimersByTimeAsync(10);
-  expect(binds).toHaveBeenCalledOnce();
+  expect(binds).toHaveBeenCalledTimes(2);
   expect(sent("shell_input")).toHaveLength(1);
 
   tab.term.paste("héllo\nwörld");
@@ -307,8 +314,24 @@ test("typed keys and pastes go to the session in bytes, and the keys of a bound 
   });
 });
 
+test("keys typed while the shell connects go to it, and none while it waits for a place", async () => {
+  const { mounted, opens, sent } = setup();
+  const tab = await mounted();
+  const textarea = tab.term.textarea;
+  if (!textarea) throw new Error("no textarea");
+  expect(tab.getStatus()).toEqual({ state: "connecting" });
+  textarea.dispatchEvent(enter());
+  await vi.advanceTimersByTimeAsync(10);
+  expect(sent("shell_input")).toEqual([{ id: 7, data: [13] }]);
+
+  opens[0]?.send({ state: "queued" });
+  textarea.dispatchEvent(enter());
+  await vi.advanceTimersByTimeAsync(10);
+  expect(sent("shell_input")).toHaveLength(1);
+});
+
 test("a chord that is not a binding reaches the terminal", async () => {
-  const { mounted, opens, sent, binds } = setup({ binds: false });
+  const { mounted, opens, sent, binds } = setup();
   const tab = await mounted();
   opens[0]?.send({ state: "running" });
   await vi.advanceTimersByTimeAsync(10);
@@ -417,6 +440,28 @@ test("a restart closes what ended, opens a new session at the terminal's size an
   expect(tab.term.options.disableStdin).toBe(false);
   expect(text(tab)).toContain("first");
   expect(tab.live).toBe(true);
+});
+
+test("a restart resets the modes the old program left, and focus sends no report to the new shell", async () => {
+  const { mounted, opens, sent, tabs } = setup();
+  const tab = await mounted();
+  const fresh = { ...tab.term.modes };
+  opens[0]?.send({ state: "running" });
+  opens[0]?.send(
+    bytes(
+      "\x1b[?1004h\x1b[?1h\x1b[?66h\x1b[?6h\x1b[?45h\x1b[?2026h\x1b[?7l\x1b[4h\x1b[?1000h\x1b[?1006h\x1b[?2004h",
+    ),
+  );
+  opens[0]?.send({ state: "ended", end: { reason: "connectionLost" } });
+  await vi.advanceTimersByTimeAsync(50);
+  expect(tab.term.modes).not.toEqual(fresh);
+
+  tabs.start(URI, INPUT, 8);
+  await vi.advanceTimersByTimeAsync(50);
+  expect(tab.term.modes).toEqual(fresh);
+  tab.term.textarea?.dispatchEvent(new FocusEvent("focus"));
+  await vi.advanceTimersByTimeAsync(10);
+  expect(sent("shell_input")).toEqual([]);
 });
 
 test("a tab restored with no session says so and sends nothing, whatever shows", async () => {

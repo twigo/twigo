@@ -9,7 +9,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Backend } from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import { notify } from "@twigo/ui";
-import { WorkbenchView, type Workbench } from "@twigo/workbench";
+import { WorkbenchView, type Platform, type Workbench } from "@twigo/workbench";
 import { tabsIn, testWorkbench } from "@twigo/workbench/testing";
 import { settle, withScreenSize } from "../../test/workbench";
 import { withTerminalLayout } from "../../test/terminal";
@@ -65,9 +65,10 @@ interface Mounted {
 async function mounted(
   scenario: MockScenario = "ready",
   webgl?: () => WebglRenderer,
+  platform: Platform = "mac",
 ): Promise<Mounted> {
   const backend = createMockBackend(scenario);
-  const workbench = await testWorkbench(scenario, backend);
+  const workbench = await testWorkbench(scenario, backend, platform);
   const tabs = webgl
     ? new ExecTabs({
         backend,
@@ -148,6 +149,21 @@ test("a shell asks which container when several run, the default first, and open
   expect(panelTabs()).toEqual([uri]);
   expect(workbench.editors.title(uri)).toBe(`${POD} · istio-proxy`);
   expect(tabs.get(uri)?.getStatus().state).toMatch(/^(connecting|running)$/);
+});
+
+test("the container the pod names as its default comes first in the picker, the others in their order", async () => {
+  const { workbench, start } = await mounted("shellDefaultSecond");
+  const run = start("qa");
+  await settle(4);
+  const asking = workbench.quickAccess.session?.pick;
+  expect(asking?.items.map(({ id, description }) => [id, description])).toEqual(
+    [
+      ["istio-proxy", "default"],
+      ["api", undefined],
+    ],
+  );
+  await pick(workbench);
+  await run;
 });
 
 test("a cancelled picker opens no tab and plans nothing", async () => {
@@ -241,6 +257,98 @@ test("a second shell on a container opens another tab", async () => {
     execUri(RUNNING),
     execUri({ ...RUNNING, n: 2 }),
   ]);
+});
+
+test("two quick presses on a container make two tabs, and neither closes the other's session", async () => {
+  const { backend, start } = await mounted("shellOneContainer");
+  const invoke = vi.spyOn(backend, "invoke");
+  const first = start("qa", ONE);
+  const second = start("qa", ONE);
+  await settle(10);
+  await Promise.all([first, second]);
+  await settle(10);
+  expect(panelTabs()).toEqual([
+    execUri(RUNNING),
+    execUri({ ...RUNNING, n: 2 }),
+  ]);
+  expect(invoke.mock.calls.filter(([c]) => c === "shell_close")).toEqual([]);
+});
+
+test("a cancelled plan frees its place for the next press", async () => {
+  const { workbench, start } = await mounted("shellOneContainer");
+  await act(() => workbench.spaces.open("staging"));
+  const first = start("staging", ONE);
+  await settle(4);
+  act(() => {
+    workbench.operations.asking?.cancel();
+  });
+  await first;
+  const second = start("staging", ONE);
+  await settle(4);
+  act(() => {
+    workbench.operations.asking?.confirm(undefined);
+  });
+  await second;
+  await settle(6);
+  expect(panelTabs()).toEqual([
+    execUri({ ...RUNNING, space: "staging", pod: FIRST.staging ?? POD }),
+  ]);
+});
+
+async function planAway() {
+  const mount = await mounted("shellOneContainer");
+  const { workbench, start } = mount;
+  await act(() => workbench.spaces.open("staging"));
+  await act(() => workbench.spaces.open("prod-eu"));
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  await settle(4);
+  const run = start("staging", ONE);
+  await settle(4);
+  act(() => {
+    workbench.spaces.select("qa");
+  });
+  await settle(4);
+  act(() => {
+    workbench.operations.asking?.confirm(undefined);
+  });
+  await run;
+  await settle(4);
+  return {
+    ...mount,
+    uri: execUri({ ...RUNNING, space: "staging", pod: FIRST.staging ?? POD }),
+  };
+}
+
+test("a shell planned while another space shows opens when its space comes back", async () => {
+  const { workbench, tabs, uri } = await planAway();
+  expect(panelTabs()).toEqual([]);
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  await settle(10);
+  expect(panelTabs()).toEqual([uri]);
+  expect(tabs.has(uri)).toBe(true);
+});
+
+test("a shell planned while another space shows ends, with its place freed, when the person goes to a third", async () => {
+  const { workbench, tabs, backend, uri } = await planAway();
+  const invoke = vi.spyOn(backend, "invoke");
+  act(() => {
+    workbench.spaces.select("prod-eu");
+  });
+  await settle(10);
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  await settle(10);
+  expect(panelTabs()).toEqual([]);
+  expect(tabs.has(uri)).toBe(false);
+  expect(invoke.mock.calls.filter(([c]) => c === "shell_close")).toHaveLength(
+    1,
+  );
+  expect(screen.queryByText(/\d+ shells?$/)).toBeNull();
 });
 
 test("a tab the layout restored says its shell ended when Twigo closed, runs nothing, and Start plans a shell", async () => {
@@ -359,7 +467,29 @@ test("a shell tab that opens takes the focus", async () => {
   );
 });
 
-test("the terminal's keys never reach a list's bare ones, and a chord that is bound stays the workbench's", async () => {
+test("a panel shown again gives the focus to the active tab's terminal", async () => {
+  const { workbench, tabs, open } = await mounted("shellOneContainer");
+  await open("qa", ONE);
+  await open("qa", ONE);
+  const textarea = tabs.get(execUri({ ...RUNNING, n: 2 }))?.term.textarea;
+  expect(document.activeElement).toBe(textarea);
+
+  act(() => {
+    workbench.spaces.setPart("qa", "panel", { visible: false });
+  });
+  await settle(4);
+  act(() => {
+    (document.activeElement as HTMLElement).blur();
+  });
+  expect(document.activeElement).toBe(document.body);
+  act(() => {
+    workbench.spaces.setPart("qa", "panel", { visible: true });
+  });
+  await settle(4);
+  expect(document.activeElement).toBe(textarea);
+});
+
+test("the terminal's keys never reach a list's bare ones", async () => {
   const { workbench, open } = await mounted("shellOneContainer");
   await open("qa", ONE);
   const textarea = document.querySelector<HTMLTextAreaElement>(
@@ -379,27 +509,123 @@ test("the terminal's keys never reach a list's bare ones, and a chord that is bo
   expect(press({ key: "s", code: "KeyS" })).toBe(false);
   expect(press({ key: "l", code: "KeyL" })).toBe(false);
   expect(execute).not.toHaveBeenCalled();
+});
 
-  expect(
-    workbench.keybindings.handles(
-      new KeyboardEvent("keydown", { code: "KeyJ", metaKey: true }),
-    ),
-  ).toBe(true);
+const keydown = (target: Element, init: KeyboardEventInit, keyCode: number) => {
+  const event = new KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    ...init,
+  });
+  Object.defineProperty(event, "keyCode", { value: keyCode });
+  target.dispatchEvent(event);
+};
+
+const terminalOf = () => {
+  const textarea = document.querySelector<HTMLTextAreaElement>(
+    ".xterm-helper-textarea",
+  );
+  if (!textarea) throw new Error("no terminal");
+  return textarea;
+};
+
+const panelShown = (workbench: Workbench) =>
+  workbench.spaces.state("qa").parts.panel.visible;
+
+test("a ⌘ binding stays the workbench's, and the second press of a chord goes to it, not to the shell", async () => {
+  const { workbench, backend, open } = await mounted("shellOneContainer");
+  const ran = vi.fn();
+  workbench.commands.register({
+    id: "test.chord",
+    title: "Chord",
+    category: "Test",
+    run: ran,
+  });
+  workbench.keybindings.register("user", [
+    { key: "mod+k enter", command: "test.chord" },
+  ]);
+  await open("qa", ONE);
+  const textarea = terminalOf();
+  const invoke = vi.spyOn(backend, "invoke");
+  const inputs = () => invoke.mock.calls.filter(([c]) => c === "shell_input");
+
+  keydown(textarea, { key: "k", code: "KeyK", metaKey: true }, 75);
+  expect(workbench.keybindings.pending).toHaveLength(1);
+  keydown(textarea, { key: "Enter", code: "Enter" }, 13);
+  await settle(4);
+  expect(ran).toHaveBeenCalledOnce();
+  expect(workbench.keybindings.pending).toEqual([]);
+  expect(inputs()).toEqual([]);
+
+  keydown(textarea, { key: "j", code: "KeyJ", metaKey: true }, 74);
+  await settle(4);
+  expect(panelShown(workbench)).toBe(false);
+  expect(inputs()).toEqual([]);
+});
+
+test("on Linux and Windows quick access, the command palette and the panel's toggle win over the shell, and every other Ctrl chord stays with it", async () => {
+  const { workbench, backend, open } = await mounted(
+    "shellOneContainer",
+    undefined,
+    "linux",
+  );
+  await open("qa", ONE);
+  const textarea = terminalOf();
+  const invoke = vi.spyOn(backend, "invoke");
+  const inputs = () =>
+    invoke.mock.calls
+      .filter(([c]) => c === "shell_input")
+      .map(([, request]) => (request as { data: number[] }).data);
+
+  keydown(textarea, { key: "p", code: "KeyP", ctrlKey: true }, 80);
+  await settle(4);
+  expect(workbench.quickAccess.session).toBeDefined();
+  act(() => {
+    workbench.quickAccess.hide();
+  });
+  keydown(
+    textarea,
+    { key: "P", code: "KeyP", ctrlKey: true, shiftKey: true },
+    80,
+  );
+  await settle(4);
+  expect(workbench.quickAccess.session).toBeDefined();
+  act(() => {
+    workbench.quickAccess.hide();
+  });
+  expect(inputs()).toEqual([]);
+
+  const sidebar = () => workbench.spaces.state("qa").parts.sidebar.visible;
+  const before = sidebar();
+  keydown(textarea, { key: "b", code: "KeyB", ctrlKey: true }, 66);
+  await settle(4);
+  expect(inputs()).toEqual([[2]]);
+  expect(sidebar()).toBe(before);
+
+  keydown(textarea, { key: "j", code: "KeyJ", ctrlKey: true }, 74);
+  await settle(4);
+  expect(panelShown(workbench)).toBe(false);
+  expect(inputs()).toEqual([[2]]);
 });
 
 test("a tab that moves to another view keeps its terminal and its session", async () => {
   const { workbench, tabs, backend, open } = await mounted("shellOneContainer");
   await open("qa", ONE);
-  const uri = execUri(RUNNING);
+  await open("qa", ONE);
+  const uri = execUri({ ...RUNNING, n: 2 });
   const tab = tabs.get(uri);
   const host = tab?.host;
+  const groups = () =>
+    document.querySelectorAll('[aria-label="Panel"] .dv-groupview');
+  expect(groups()).toHaveLength(1);
   const subscribe = vi.spyOn(backend, "subscribe");
   const invoke = vi.spyOn(backend, "invoke");
   act(() => {
-    workbench.editors.close("k8s-list://qa/v1/pods");
     workbench.editors.moveActive("right", "panel");
   });
   await settle(10);
+  expect(groups()).toHaveLength(2);
+  expect(groups()[1]?.contains(host ?? null)).toBe(true);
   act(() => {
     workbench.spaces.setPart("qa", "panel", { visible: false });
   });

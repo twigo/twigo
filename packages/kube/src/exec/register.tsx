@@ -7,6 +7,7 @@ import { EXEC_SCHEME, execUri, parseExecUri, type ExecInput } from "../uri";
 import { ExecActions } from "./ExecActions";
 import { ExecEditor } from "./ExecEditor";
 import { canShell } from "./kinds";
+import { workbenchKey } from "./keys";
 import { ExecTabs } from "./tabs";
 import { ending, execTitle, stateOf } from "./words";
 
@@ -20,7 +21,8 @@ export function createExecTabs(workbench: Workbench): ExecTabs {
     openUrl: (url) => {
       workbench.openUrl(url);
     },
-    binds: (event) => workbench.keybindings.handles(event),
+    binds: (event) =>
+      workbenchKey(workbench.keybindings, workbench.platform, event),
   });
 }
 
@@ -92,12 +94,21 @@ export function registerExec(workbench: Workbench, tabs: ExecTabs): void {
     editors.open(uri);
   };
 
+  /** The URIs whose plan has not answered yet, which another press must not pick too. */
+  const planning = new Set<string>();
+
   /** The first URI of a container's shells that no tab has. */
   const free = (input: ExecInput): ExecInput => {
     for (let n = 1; ; n++) {
       const candidate = n === 1 ? input : { ...input, n };
       const uri = execUri(candidate);
-      if (!tabs.has(uri) && editors.title(uri) === undefined) return candidate;
+      if (
+        !tabs.has(uri) &&
+        editors.title(uri) === undefined &&
+        !planning.has(uri)
+      ) {
+        return candidate;
+      }
     }
   };
 
@@ -121,7 +132,10 @@ export function registerExec(workbench: Workbench, tabs: ExecTabs): void {
     if (container === undefined) {
       const [only] = found.containers;
       if (found.containers.length > 1) {
-        const items: QuickPickItem[] = found.containers.map((name) => ({
+        const items: QuickPickItem[] = [
+          ...found.containers.filter((name) => name === found.default),
+          ...found.containers.filter((name) => name !== found.default),
+        ].map((name) => ({
           id: name,
           label: name,
           ...(name === found.default && { description: "default" }),
@@ -139,7 +153,14 @@ export function registerExec(workbench: Workbench, tabs: ExecTabs): void {
       container,
       ...(kind === "attach" && { attach: true }),
     };
-    await start(free(base));
+    const wanted = free(base);
+    const uri = execUri(wanted);
+    planning.add(uri);
+    try {
+      await start(wanted);
+    } finally {
+      planning.delete(uri);
+    }
   };
 
   commands.register({

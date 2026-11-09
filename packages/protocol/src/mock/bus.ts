@@ -1658,8 +1658,8 @@ export class MockBus {
         ],
         affected: [],
         kubectl: attach
-          ? `kubectl --context ${context} attach -it ${pod} -c ${container} -n ${namespace}`
-          : `kubectl --context ${context} exec -it ${pod} -c ${container} -n ${namespace} -- sh -c 'command -v bash >/dev/null && exec bash || exec sh'`,
+          ? `kubectl --context ${context} attach -it ${pod} -n ${namespace} -c ${container}`
+          : `kubectl --context ${context} exec -it ${pod} -n ${namespace} -c ${container} -- sh -c 'export TERM=xterm-256color; command -v bash >/dev/null && exec bash || exec sh'`,
         doing: `${attach ? "Attaching to" : "Opening a shell in"} ${pod}`,
       },
       risk: { kind: "reviewed" },
