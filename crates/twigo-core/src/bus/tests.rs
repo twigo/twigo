@@ -1020,7 +1020,6 @@ impl Server {
         Self::serve(POD, false)
     }
 
-    /// A server whose pod is `pod`.
     fn start_with(pod: &'static str) -> (Self, u16) {
         Self::serve(pod, false)
     }

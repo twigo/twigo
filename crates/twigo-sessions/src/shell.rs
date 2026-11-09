@@ -315,10 +315,11 @@ async fn pump(
         stdout,
         stderr,
         mut stdin,
-        mut resize,
+        resize,
         mut status,
         held,
     } = connected;
+    let mut resize = resize.filter(|_| spec.tty);
     let _held = held;
     let mut output = output(stdout, stderr);
     let mut flow = Flow::default();

@@ -68,7 +68,7 @@ fn connected(tty: bool) -> (Connected, Process) {
             stdout: stdout_rx,
             stderr: (!tty).then_some(stderr_rx),
             stdin: Some(stdin_tx),
-            resize: tty.then_some(resize_tx),
+            resize: Some(resize_tx),
             status: status_rx.map(Result::ok).boxed(),
             held: Box::new(()),
         },

@@ -10,7 +10,7 @@ use kube::api::PostParams;
 use serde_json::{Value, json};
 use twigo_ipc::{Friction, PlanRequest, ShellKind, ShellTarget};
 
-use super::{Cluster, WAIT, core, kubectl, plan};
+use super::{Cluster, WAIT, core, kubectl, kubectl_fed, plan};
 
 fn helper(node: &Node) -> String {
     node.status
@@ -124,7 +124,8 @@ async fn a_shell_and_an_attach_each_run_as_their_kubectl_line_says() {
         shell.kubectl
     );
     core.command_cancel("main", shell.id);
-    kubectl(&shell, &kubeconfig);
+    let printed = kubectl_fed(&shell, &kubeconfig, "echo PICKED-$0-$TERM\n");
+    assert!(printed.contains("PICKED-bash-xterm-256color"), "{printed}");
 
     let attach = plan(
         &core,

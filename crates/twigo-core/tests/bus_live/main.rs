@@ -10,8 +10,9 @@ mod bus;
 mod shell;
 
 use std::ffi::OsString;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -234,12 +235,27 @@ pub async fn run(
 
 /// The plan's kubectl line, run by a shell over `kubeconfig` only.
 pub fn kubectl(plan: &Plan, kubeconfig: &Path) -> String {
-    let output = Command::new("sh")
+    kubectl_fed(plan, kubeconfig, "")
+}
+
+/// [`kubectl`], with `input` on the standard input of its line.
+pub fn kubectl_fed(plan: &Plan, kubeconfig: &Path, input: &str) -> String {
+    let mut child = Command::new("sh")
         .arg("-c")
         .arg(&plan.kubectl)
         .env("KUBECONFIG", kubeconfig)
-        .output()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .expect("kubectl runs");
+    child
+        .stdin
+        .take()
+        .expect("piped")
+        .write_all(input.as_bytes())
+        .expect("its input is written");
+    let output = child.wait_with_output().expect("kubectl ends");
     assert!(
         output.status.success(),
         "{}: {}",
