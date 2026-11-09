@@ -710,7 +710,8 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   When an editor that opens, closes or moves, or a space that shows, drops the keyboard focus to the page, the active group takes it, and the active editor its own where it has a text editor to hold it, so a key such as ⌘S or ⌘Z still reaches an editor.
   A tab's X and a middle click close through the editor service as ⌘W does, and the panel's last editor leaves the focus to the editor area's active group.
 - **An editor off screen has no Monaco view.**
-  Behind another tab of its group or under a maximized panel, a YAML editor or a diff disposes its view, and its model, cursor, scroll and undo stay in the working-copy service until the editor shows again.
+  Behind another tab of its group or under a maximized panel, a YAML editor or a diff disposes its view.
+  A YAML editor's model, cursor, scroll and undo stay in the working-copy service until it shows again; a diff's models go with its view, and `DiffView` keeps its view state (cursor and scroll) in a ref for the next one.
   [`CodeEditorWidget`](https://github.com/microsoft/vscode/blob/6a598d4a13031703d483d103c1d934a36ad27971/src/vs/editor/browser/widget/codeEditor/codeEditorWidget.ts#L1954) sends a typed character through a command that goes to the [first view that says it has the text focus](https://github.com/microsoft/vscode/blob/6a598d4a13031703d483d103c1d934a36ad27971/src/vs/editor/browser/services/abstractCodeEditorService.ts#L104), and WebKit, which has no `EditContext`, fires no blur on a focused element that leaves the page (measured with Playwright's WebKit on the mock, 2026-11-09), so a hidden view went on taking the keys typed into another.
 - **Working copies.**
   A YAML editor that the user has changed holds a working copy based on the opened `resourceVersion`.
