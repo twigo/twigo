@@ -69,6 +69,16 @@ test("the context is the focused element's at opening, and the focus comes back"
   expect(document.activeElement).toBe(list);
 });
 
+test("with nothing focused when it opened, quick access leaves no focus in its field as it closes", async () => {
+  document.body.innerHTML = `<input id="input" />`;
+  const quick = new QuickAccess(new ContextKeys());
+  quick.register(provider(">"));
+  quick.show(">");
+  document.getElementById("input")?.focus();
+  await quick.accept({ id: "x", label: "x" });
+  expect(document.activeElement).toBe(document.body);
+});
+
 test("a pick resolves with the item, or undefined when dismissed", async () => {
   const quick = new QuickAccess(new ContextKeys());
   const items = [{ id: "a", label: "A" }];

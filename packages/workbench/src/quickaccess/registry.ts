@@ -293,7 +293,12 @@ export class QuickAccess {
     this.changes.emit();
     const restore = this.#restore;
     this.#restore = undefined;
-    if (restore?.isConnected) restore.focus();
+    if (restore?.isConnected && restore !== document.body) restore.focus();
+    else if (document.activeElement instanceof HTMLElement) {
+      // The field would keep the focus until the widget unmounts, which is
+      // after the accepted command has opened its editor.
+      document.activeElement.blur();
+    }
   }
 
   #settle(item: QuickPickItem | undefined) {
