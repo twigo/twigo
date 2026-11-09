@@ -90,7 +90,11 @@ export function ConfirmDialog({
         }}
       >
         {accent && (
-          <div aria-hidden className="h-1" style={{ background: accent }} />
+          <div
+            aria-hidden
+            className="h-1 flex-none"
+            style={{ background: accent }}
+          />
         )}
         <form
           className="flex min-h-0 flex-col text-xs"
