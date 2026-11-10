@@ -335,9 +335,8 @@ test("a refused answer shows its words in the dialog, which stays, and the next 
   expect(answers).toHaveLength(2);
 });
 
-test("while an answer is on its way nothing else answers, and a withdrawal then says nothing", async () => {
-  const { raise, control, withdraw, answers } = await broker();
-  const info = vi.spyOn(notify, "info");
+test("while an answer is on its way nothing else answers", async () => {
+  const { raise, control, answers } = await broker();
   let release: () => void = () => undefined;
   control.hold = new Promise((resolve) => {
     release = resolve;
@@ -353,13 +352,47 @@ test("while an answer is on its way nothing else answers, and a withdrawal then 
   });
   expect(answers).toHaveLength(1);
 
-  withdraw(1);
-  expect(info).not.toHaveBeenCalled();
   release();
   await waitFor(() => {
     expect(dialog(/^Allow Terminal 2 /)).toBeTruthy();
   });
   expect(button("Allow once").hasAttribute("disabled")).toBe(false);
+});
+
+test("an ask withdrawn while its answer is on its way closes the dialog, and the refusal of that answer says it did not reach the process", async () => {
+  const { raise, control, withdraw, answers } = await broker();
+  const info = vi.spyOn(notify, "info");
+  const warning = vi.spyOn(notify, "warning");
+  let release: () => void = () => undefined;
+  control.hold = new Promise((resolve) => {
+    release = resolve;
+  });
+  raise(ask(1), ask(2));
+  choose("Allow once");
+  await waitFor(() => {
+    expect(answers).toHaveLength(1);
+  });
+
+  withdraw(1);
+  expect(dialog(/^Allow Terminal 2 /)).toBeTruthy();
+  expect(warning).not.toHaveBeenCalled();
+
+  control.refuse = new IpcError(
+    "notFound",
+    "the process no longer waits for this answer",
+  );
+  release();
+  await waitFor(() => {
+    expect(warning).toHaveBeenCalledExactlyOnceWith(
+      "Terminal 1 no longer asks to patch deployments/web in default on staging, so your answer did not reach it",
+    );
+  });
+  expect(info).not.toHaveBeenCalled();
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(dialog(/^Allow Terminal 2 /)).toBeTruthy();
+  await waitFor(() => {
+    expect(button("Allow once").hasAttribute("disabled")).toBe(false);
+  });
 });
 
 test("the dialog says whose context it is, what the client claims and the detail the feature draws", async () => {

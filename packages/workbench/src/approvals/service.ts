@@ -101,8 +101,9 @@ export class Approvals {
    * Answers the ask the dialog showed, by its id: an ask withdrawn since is
    * gone, and nothing is sent, rather than whichever ask is current when
    * the call lands. A refusal stays on screen with its words, so the person
-   * can type the name again or deny; an ask that is gone leaves through the
-   * broker's withdrawal.
+   * can type the name again or deny. An ask withdrawn while its answer is on
+   * its way closes the dialog, and the broker refuses that answer as gone:
+   * the person is told it did not reach the process.
    */
   async answer(
     id: ApprovalId,
@@ -124,6 +125,10 @@ export class Approvals {
     } catch (error) {
       if (this.#asks.some(({ id }) => id === ask.id)) {
         this.#failure = toIpcError(error).message;
+      } else {
+        notify.warning(
+          `${ask.process} no longer asks to ${describeAsk(ask)}, so your answer did not reach it`,
+        );
       }
     }
     this.#answering = undefined;
