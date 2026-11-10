@@ -1518,6 +1518,97 @@ async fn withdrawn(events: &mut mpsc::UnboundedReceiver<ApprovalEvent>, ask: &Ap
 }
 
 #[tokio::test]
+async fn a_write_whose_body_ends_after_its_process_did_is_not_sent() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    let process = Process::start(&core, None).await;
+    let at = process.at();
+    let stream = TcpStream::connect(at.address).await.unwrap();
+    let stream = at
+        .tls
+        .connect(ServerName::IpAddress(at.address.ip().into()), stream)
+        .await
+        .unwrap();
+    let (frames, mut sent) = mpsc::channel::<Result<Frame<Bytes>, Infallible>>(4);
+    let body = StreamBody::new(futures::stream::poll_fn(move |cx| sent.poll_recv(cx)));
+    let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
+        .await
+        .unwrap();
+    tokio::spawn(connection);
+    let manifest = configmap("late").to_string();
+    let request = process
+        .request("POST", "kind-a", CONFIGMAPS)
+        .header("content-type", "application/json")
+        .header("content-length", manifest.len().to_string())
+        .body(body)
+        .unwrap();
+    let sending = tokio::spawn(async move { sender.send_request(request).await });
+    let (first, rest) = manifest.split_at(5);
+    let frame = |part: &str| Ok(Frame::data(Bytes::from(part.to_owned())));
+    frames.send(frame(first)).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    drop(process.handle);
+    frames.send(frame(rest)).await.unwrap();
+    let response = tokio::time::timeout(WAIT, sending).await.unwrap().unwrap();
+    let seen = fake.seen();
+    assert!(seen.is_empty(), "{seen:?}");
+    assert_eq!(response.unwrap().status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn a_process_that_ends_while_its_request_is_sent_gets_no_answer_of_the_server_s() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    let clients = core.clients("kind-a").await.unwrap();
+    let process = Process::start(&core, None).await;
+    let writing = tokio::spawn(send(process.at(), slow(create(&process, "c"))));
+    let execing = tokio::spawn(send(process.at(), slow(exec(&process, "p", "sh", true))));
+    seen_by(&fake, 2, |seen| seen.uri.contains("slow=1")).await;
+    let ended = std::time::Instant::now();
+    drop(process.handle);
+    let (wrote, execed) = (writing.await, execing.await);
+    assert!(ended.elapsed() < SLOW, "{:?}", ended.elapsed());
+    assert_eq!(
+        wrote.unwrap().0.status(),
+        StatusCode::FORBIDDEN,
+        "the write's"
+    );
+    assert_eq!(
+        execed.unwrap().0.status(),
+        StatusCode::FORBIDDEN,
+        "the exec's"
+    );
+    let usage = *clients.usage().borrow();
+    assert_eq!((usage.proxied.held, usage.sessions.held), (0, 0));
+}
+
+#[tokio::test]
+async fn an_answer_given_as_the_process_ends_sends_nothing() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut events = follow(&core, "main");
+    for _ in 0..8 {
+        let process = Process::start(&core, Some("main")).await;
+        let execing = tokio::spawn(send(process.at(), exec(&process, "p", "sh", true)));
+        let writing = tokio::spawn(send(process.at(), create(&process, "c")));
+        let asks = [asked(&mut events).await, asked(&mut events).await];
+        for ask in &asks {
+            answer_with(&core, ask, ApprovalAnswer::Once, None);
+        }
+        drop(process.handle);
+        let (execed, wrote) = (execing.await, writing.await);
+        assert_eq!(execs(&fake), 0);
+        assert_eq!(fake.writes(Method::POST), 0);
+        assert_eq!(execed.unwrap().0.status(), StatusCode::FORBIDDEN);
+        assert_eq!(wrote.unwrap().0.status(), StatusCode::FORBIDDEN);
+    }
+}
+
+#[tokio::test]
 async fn an_ask_its_window_cannot_answer_any_more_is_withdrawn_from_it() {
     let fake = Fake::start().await;
     let dir = tempfile::tempdir().unwrap();

@@ -271,7 +271,7 @@ async fn decide<'a>(
         Outcome::Decided(Ok(())) => Ok(Decided::default()),
         Outcome::Decided(Err(blocked)) => Err(Refusal::blocked(&blocked)),
         Outcome::Moved => Err(Refusal::moved(&holder.context)),
-        Outcome::Ended => Err(Refusal::forbidden("the process's token was revoked")),
+        Outcome::Ended => Err(Refusal::revoked()),
     }
 }
 

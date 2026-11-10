@@ -23,7 +23,7 @@ use twigo_ipc::BlockReason;
 use twigo_kube::client::{Actor, ActorClients, Class, Clients, Permit};
 use twigo_policy::{Approval, Attributes, Policy};
 
-use super::forward::{Sent, failed, passed};
+use super::forward::{Sent, failed, passed, revoked};
 use super::refusal::Refusal;
 use super::tokens::Holder;
 use super::{Changes, headers};
@@ -100,7 +100,12 @@ pub(super) async fn upgrade(upgrade: Upgrade<'_>, parts: Parts, client: OnUpgrad
     if let Some(approval) = approval {
         request.extensions_mut().insert(approval);
     }
-    let mut response = match actor.sessions.send(request).await {
+    let sent = tokio::select! {
+        biased;
+        () = holder.ended.cancelled() => return revoked(),
+        sent = actor.sessions.send(request) => sent,
+    };
+    let mut response = match sent {
         Ok(response) => response,
         Err(error) => return failed(&holder.context, &error),
     };

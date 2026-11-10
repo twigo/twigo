@@ -49,7 +49,12 @@ pub(super) async fn send(
     if let Some(approval) = approval {
         request.extensions_mut().insert(approval);
     }
-    match actor.api.send(request).await {
+    let sent = tokio::select! {
+        biased;
+        () = holder.ended.cancelled() => return revoked(),
+        sent = actor.api.send(request) => sent,
+    };
+    match sent {
         Ok(response) => Sent {
             response: passed(holder, response, None),
             reached: true,
@@ -87,6 +92,16 @@ pub(super) fn failed(context: &str, error: &kube::Error) -> Sent {
     Sent {
         response: refusal.into_response(),
         reached,
+    }
+}
+
+/// What a request comes to whose process ended before it was sent or while
+/// it was: a request accepted before the handle dropped goes out after
+/// nothing, and gets no answer of the server's.
+pub(super) fn revoked() -> Sent {
+    Sent {
+        response: Refusal::revoked().into_response(),
+        reached: true,
     }
 }
 

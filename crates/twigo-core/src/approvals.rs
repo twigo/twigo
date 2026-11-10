@@ -255,11 +255,13 @@ impl Approvals {
         let holder = asking.holder;
         loop {
             tokio::select! {
+                // An answer that comes as the process ends lets nothing go.
+                biased;
+                () = holder.ended.cancelled() => return Outcome::Ended,
                 resolution = &mut resolved => return match resolution {
                     Ok(Resolution::Answered(answer)) => self.answered(asking, answer),
                     Ok(Resolution::Nobody) | Err(_) => self.nobody(asking),
                 },
-                () = holder.ended.cancelled() => return Outcome::Ended,
                 () = changes.next() => {
                     if self.policy.connection(&holder.context) != Some(holder.connection) {
                         return Outcome::Moved;
@@ -558,5 +560,66 @@ impl Drop for Withdraw<'_> {
         }
         drop(state);
         self.approvals.audit(self.asking, "withdrawn");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio_util::sync::CancellationToken;
+    use twigo_ipc::RequestClass;
+    use twigo_policy::Actor;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn an_answer_that_comes_as_the_process_ends_lets_nothing_go() {
+        let policy = Policy::open();
+        let (_catalog, catalog) = watch::channel(None);
+        let approvals = Approvals::new(Arc::clone(&policy), catalog.clone());
+        let ended = CancellationToken::new();
+        let holder = Holder {
+            process: 0,
+            label: "Terminal 1".into(),
+            window: None,
+            actor: Actor::Terminal,
+            context: "kind-a".to_owned(),
+            connection: 0,
+            prefix: String::new(),
+            digest: [0; 32],
+            ended: ended.clone(),
+        };
+        let request = http::Request::post("/api/v1/namespaces/a/configmaps")
+            .body(())
+            .unwrap();
+        let attributes = Attributes::of(&request);
+        let asking = Asking {
+            holder: &holder,
+            method: &Method::POST,
+            attributes: &attributes,
+            blocked: Box::new(Blocked {
+                context: "kind-a".to_owned(),
+                mode: Mode::Guarded,
+                source: ModeSource::User,
+                class: RequestClass::Write,
+                reason: BlockReason::NoApproval,
+                verb: attributes.verb.clone(),
+                target: attributes.target(),
+            }),
+            repeat: [0; 32],
+            command: None,
+            impersonate: None,
+        };
+        ended.cancel();
+        for _ in 0..64 {
+            let (resolve, resolved) = oneshot::channel();
+            assert!(
+                resolve
+                    .send(Resolution::Answered(ApprovalAnswer::Once))
+                    .is_ok()
+            );
+            let changes = Changes::new(&policy, &catalog);
+            let outcome = approvals.wait(&asking, resolved, changes).await;
+            assert!(matches!(outcome, Outcome::Ended), "the answer won");
+        }
     }
 }

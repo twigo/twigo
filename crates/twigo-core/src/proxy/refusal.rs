@@ -51,6 +51,10 @@ impl Refusal {
         Self::forbidden(blocked)
     }
 
+    pub(super) fn revoked() -> Self {
+        Self::forbidden("the process's token was revoked")
+    }
+
     pub(super) fn moved(context: &str) -> Self {
         Self::forbidden(format_args!(
             "{context} names another cluster now than when this process got its token, so Twigo sent nothing"
