@@ -274,6 +274,19 @@ impl Policy {
             .map(|_| ())
     }
 
+    /// Whether a person's approval of exactly this request would let it
+    /// through now: what the gate refuses for want of an approval that no
+    /// answer can give, such as an agent's write to a Secret, is never asked
+    /// about.
+    pub fn approvable(&self, context: &str, attributes: &Attributes, actor: Actor) -> bool {
+        let (access, exact) = (
+            self.access(context),
+            Approval::once(context, actor, attributes),
+        );
+        self.decide(context, access, attributes, actor, Some(&exact))
+            .is_ok()
+    }
+
     /// [`Policy::authorize`], for clients built for `connection`, of a
     /// request that carries `approval`: once the context's name means
     /// something else, they still reach the old cluster until their owner

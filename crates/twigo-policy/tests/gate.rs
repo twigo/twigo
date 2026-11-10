@@ -919,6 +919,30 @@ fn a_write_to_a_secret_answers_with_it_so_it_needs_what_reading_one_does() {
 }
 
 #[test]
+fn only_what_an_exact_approval_lets_through_is_approvable() {
+    let write = Attributes::action("patch", "deployments", None, Some("a"), Some("d"));
+    let exec = Attributes::action("create", "pods", Some("exec"), Some("a"), Some("p"));
+    let secret = Request::post("/api/v1/namespaces/a/secrets")
+        .body(())
+        .unwrap();
+    let secret = Attributes::of(&secret);
+    let read = Attributes::action("get", "secrets", None, Some("a"), Some("s"));
+    let guarded = policy_in(Mode::Guarded);
+    for actor in [Actor::Terminal, Actor::Helm, Actor::Agent] {
+        assert!(guarded.approvable("c", &write, actor), "{actor:?}");
+        assert!(guarded.approvable("c", &exec, actor), "{actor:?}");
+    }
+    assert!(guarded.approvable("c", &secret, Actor::Terminal));
+    for mode in MODES {
+        let policy = policy_in(mode);
+        assert!(!policy.approvable("c", &secret, Actor::Agent), "{mode:?}");
+        assert!(!policy.approvable("c", &read, Actor::Agent), "{mode:?}");
+    }
+    let read_only = policy_in(Mode::ReadOnly);
+    assert!(!read_only.approvable("c", &write, Actor::Terminal));
+}
+
+#[test]
 fn in_guarded_only_the_ui_writes_since_its_commands_confirm_and_others_need_an_approval() {
     let write = Attributes::action("patch", "deployments", None, Some("a"), Some("d"));
     let exec = Attributes::action("create", "pods", Some("exec"), Some("a"), Some("p"));

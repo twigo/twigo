@@ -1608,6 +1608,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   - **Pre-approved tokens** for a process started by a confirmed command (a Helm release action, an action with `confirm`), for exactly the verbs and objects the command listed, come with their first callers (7.2); a request outside that set would go to the approval broker.
   - **Other processes in `guarded` contexts** (terminals, unconfirmed actions, agents): writes and exec-class requests go to the approval broker (`crates/twigo-core/src/approvals.rs`).
     - The proxy asks the gate first with no approval, only to know whether to ask; the request then meets the gate with the approval the broker attached, a `twigo_policy::Approval` request extension, which the gate reads with the attributes at the top and keeps for the recheck above the socket, so a relock still stops an approved request that waited.
+      It asks only when an approval of exactly that request would let it through: anything else the gate refuses for want of an approval, such as an agent's read of a Secret or its write to one in any mode, is a `403` at once, with no ask.
     - An approval names its context and actor and covers either exactly the verb, decoded path and class the person saw ("once", a pod's exec, attach or port-forward by its `get` or its `create` alike), or every write and exec of that process on that context until a wall-clock time, deletes excepted ("for 15 minutes").
       `read-only` refuses whatever approval a request carries, and `read-write` needs none.
     - The ask goes to the window the token names, which follows asks with `approvals_watch`; with no such window the answer is deny.
@@ -1623,7 +1624,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     - The audit log notes how each ask ended: `once`, `lasting`, `denied`, `nobody` when no window could ask, or `withdrawn`.
       An answer counts only when its waiting request takes it: one that comes after the request went is refused, and the window gets the withdrawal.
     - Agents may use the scope "this process" for the rest of one run, except for deletes, which comes with them (M3).
-      Terminals get only "once" and "for 15 minutes", because a terminal's token lives as long as the shell.
+      Terminals get only "once" and "for 15 minutes", because a terminal's token lives as long as the shell, and only terminals are offered "for 15 minutes": until their own scopes come, an agent's and `helm`'s asks are answered once.
   - For agents, the Rule of Two (6.6) also applies in `read-write` contexts: after untrusted content, their writes, exec-class requests and Secret reads go to the broker one call at a time.
   - The proxy has its own cap on concurrent streams per context (default 16, 3.2).
     Over the cap it answers `429` with `Retry-After: 1`, because client-go retries a 429 only when that header holds whole seconds, ten times at most.

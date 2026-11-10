@@ -149,9 +149,9 @@ impersonate: string | null, detail: ApprovalDetail,
  */
 typed: boolean, 
 /**
- * How long an answer of `lasting` holds, offered for every ask but a
- * delete's: every write and exec of this process on this context for
- * that long, deletes excepted.
+ * How long an answer of `lasting` holds, offered for a terminal's asks
+ * but a delete's: every write and exec of this process on this context
+ * for that long, deletes excepted. Any other process is allowed once.
  */
 lastingMinutes: number | null, };
 

@@ -1008,9 +1008,58 @@ async fn a_request_no_answer_can_allow_is_refused_without_an_ask() {
     let (status, message) = refused(agent.at(), read).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert!(message.contains("nothing can ask"), "{message}");
+    let secret = json!({ "apiVersion": "v1", "kind": "Secret", "metadata": { "name": "s" }, "stringData": { "k": "v" } });
+    for mode in [Mode::ReadWrite, Mode::Guarded] {
+        core.policy.set_mode("kind-a", Some(mode)).unwrap();
+        let write = agent
+            .request("POST", "kind-a", "/api/v1/namespaces/a/secrets")
+            .header("content-type", "application/json")
+            .body(json_body(&secret))
+            .unwrap();
+        let (status, message) = refused(agent.at(), write).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{mode:?}");
+        assert!(message.contains("nothing can ask"), "{mode:?}: {message}");
+    }
     assert!(events.try_recv().is_err(), "nothing asked");
     let seen = fake.seen();
-    assert!(seen.is_empty(), "{seen:?}");
+    assert!(seen.is_empty(), "not even a dry run: {seen:?}");
+}
+
+#[tokio::test]
+async fn only_a_terminal_is_offered_an_answer_for_15_minutes() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut events = follow(&core, "main");
+    for actor in [Actor::Agent, Actor::Helm] {
+        let process = Process::start_as(&core, actor, Some("main")).await;
+        let sending = tokio::spawn(send(process.at(), create(&process, "c")));
+        let ask = asked(&mut events).await;
+        assert_eq!(ask.lasting_minutes, None, "{actor:?}");
+        let lasting = core.answer_approval(
+            "main",
+            AnswerApproval {
+                id: ask.id,
+                answer: ApprovalAnswer::Lasting,
+                typed: None,
+            },
+        );
+        assert_eq!(
+            lasting.unwrap_err().kind,
+            ErrorKind::InvalidInput,
+            "{actor:?}"
+        );
+        assert_eq!(fake.writes(Method::POST), 0, "{actor:?}");
+        answer_with(&core, &ask, ApprovalAnswer::Deny, None);
+        assert_eq!(sending.await.unwrap().0.status(), StatusCode::FORBIDDEN);
+    }
+    let terminal = Process::start(&core, Some("main")).await;
+    let sending = tokio::spawn(send(terminal.at(), create(&terminal, "c")));
+    let ask = asked(&mut events).await;
+    assert_eq!(ask.lasting_minutes, Some(15));
+    answer_with(&core, &ask, ApprovalAnswer::Lasting, None);
+    assert_eq!(sending.await.unwrap().0.status(), StatusCode::CREATED);
 }
 
 /// `request`, with `slow=1` added to its query.

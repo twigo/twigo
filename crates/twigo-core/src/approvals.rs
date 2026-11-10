@@ -2,8 +2,9 @@
 //! the policy proxy in a `guarded` context waits while the window its token
 //! names asks the person, and goes on with the approval they gave, which the
 //! gate in the actor's clients reads. Terminals get "once" and "for 15
-//! minutes"; every delete asks, with the context's name typed. A window that
-//! follows no asks, or a process with none, is denied at once.
+//! minutes", `helm` and agents "once"; every delete asks, with the context's
+//! name typed. A window that follows no asks, or a process with none, is
+//! denied at once.
 
 pub(crate) mod detail;
 
@@ -18,7 +19,7 @@ use twigo_ipc::{
     AnswerApproval, ApprovalAnswer, ApprovalAsk, ApprovalDetail, ApprovalEvent, ApprovalId,
     BlockReason, Blocked, ErrorKind, IpcError, Mode, ModeSource,
 };
-use twigo_policy::{Approval, Attributes, Entry, Policy};
+use twigo_policy::{Actor, Approval, Attributes, Entry, Policy};
 
 use crate::catalog::Contexts;
 use crate::proxy::{Changes, Digest, Holder};
@@ -245,7 +246,8 @@ impl Approvals {
                 impersonate: asking.impersonate.clone(),
                 detail,
                 typed: delete,
-                lasting_minutes: (!delete).then_some(LASTING.as_mins() as u32),
+                lasting_minutes: (!delete && holder.actor == Actor::Terminal)
+                    .then_some(LASTING.as_mins() as u32),
             };
             let told = state.followers.get_mut(&window).is_some_and(|follower| {
                 follower(ApprovalEvent::Asked {
@@ -426,7 +428,7 @@ impl Approvals {
         if answer.answer == ApprovalAnswer::Lasting && ask.lasting_minutes.is_none() {
             return Err(IpcError::new(
                 ErrorKind::InvalidInput,
-                "a delete is allowed only once",
+                "this can be allowed only once: only a terminal's writes and exec can be allowed for a while, and never a delete",
             ));
         }
         let pending = state.asks.remove(&answer.id.0).expect("found above");
@@ -698,7 +700,6 @@ impl Drop for Withdraw<'_> {
 mod tests {
     use tokio_util::sync::CancellationToken;
     use twigo_ipc::RequestClass;
-    use twigo_policy::Actor;
 
     use super::*;
 
