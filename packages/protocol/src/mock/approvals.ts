@@ -196,7 +196,12 @@ function drafts(): Record<string, Draft> {
       detail: {
         kind: "unknown",
         reason: { reason: "aggregated" },
-        body: null,
+        body: JSON.stringify({
+          apiVersion: "wardle.example.com/v1alpha1",
+          kind: "Flunder",
+          metadata: { name: "blue", namespace: "default" },
+          spec: { reference: "red" },
+        }),
       },
     },
     refused: {
@@ -213,7 +218,9 @@ function drafts(): Record<string, Draft> {
           message:
             'admission webhook "policy.example.com" does not support dry run',
         },
-        body: null,
+        body: JSON.stringify({
+          spec: { rules: [{ host: "shop.example.com" }] },
+        }),
       },
     },
     impersonated: {

@@ -110,7 +110,7 @@ export class MockEdits {
 }
 
 /** A Secret's values replaced by their sizes, those that are masks already left alone. */
-export function masked(object: Fields): Fields {
+function masked(object: Fields): Fields {
   if (object.kind !== "Secret") return object;
   const mask = (values: unknown) =>
     typeof values === "object" && values !== null

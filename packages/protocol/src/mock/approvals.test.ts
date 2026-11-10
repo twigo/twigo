@@ -162,6 +162,19 @@ test("a scale is a merge patch of the replicas to the scale subresource, and a d
   });
 });
 
+test("an ask with no diff carries its body unless it writes a Secret, as Rust sends it", async () => {
+  const unknown = (await raised()).flatMap((ask) =>
+    ask.detail.kind === "unknown" ? [ask] : [],
+  );
+  expect(unknown.length).toBeGreaterThan(0);
+  for (const ask of unknown) {
+    expect(ask.detail).toHaveProperty(
+      "body",
+      ask.target.startsWith("secrets/") ? null : expect.any(String),
+    );
+  }
+});
+
 test("a diff's sides are recorded objects with a change made in code, as Rust's side sends them", async () => {
   const { backend, events } = await followed("approval");
   await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
