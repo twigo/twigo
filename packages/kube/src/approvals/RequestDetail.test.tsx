@@ -82,7 +82,7 @@ test("a create has no live object, and no warning means no callout", async () =>
   expect(screen.queryByText("The server warns")).toBeNull();
 });
 
-test("a Secret's diff says its values are masked, whichever side is a Secret", async () => {
+test("a Secret's diff says its values are masked, for a create and an update alike", async () => {
   const secret = { apiVersion: "v1", kind: "Secret", data: { a: "<3 bytes>" } };
   draw({ kind: "diff", live: null, result: secret, warnings: [] });
   await waitFor(() => {

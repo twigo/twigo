@@ -37,7 +37,7 @@ export function noDiffWords(reason: NoDiff): readonly string[] {
       ];
     case "notAResource":
       return [
-        "It is not a resource Twigo can read: its path lies outside the API's resources.",
+        "No dry run can say what it does: its path names no resource Twigo can read, or it is a review, which answers whatever it is asked.",
       ];
   }
 }

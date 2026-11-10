@@ -88,9 +88,7 @@ function Changes({
     [live],
   );
   const after = useMemo(() => yamlOfObject(result), [result]);
-  const secret = [live, result].some(
-    (object) => kindOf(object)?.kind === "Secret",
-  );
+  const secret = kindOf(result)?.kind === "Secret";
   return (
     <div className="grid gap-2">
       {warnings.length > 0 && (
