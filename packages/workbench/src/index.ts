@@ -32,6 +32,7 @@ export type {
 export { filtered } from "./quickaccess/providers";
 export { createWorkbench, Workbench } from "./services";
 export type { Look, Outcome } from "./operations/service";
+export type { ApprovalDetails } from "./approvals/service";
 export { StateStore } from "./state/store";
 export type { SpaceConnection, SpaceStatusProvider } from "./spaces/status";
 export type {
