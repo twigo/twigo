@@ -351,7 +351,7 @@ export class MockApprovals {
 
   #allowed(draft: Draft): boolean {
     const until = this.#lasting.get(grantOf(draft));
-    return until !== undefined && Date.now() < until && draft.verb !== "delete";
+    return until !== undefined && Date.now() < until && !draft.typed;
   }
 
   #later(ms: number): void {
