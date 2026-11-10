@@ -225,6 +225,92 @@ test("a delete refuses a context name typed wrong, an ask that is gone, and allo
   expect((gone as IpcError).kind).toBe("notFound");
 });
 
+async function throughSequence(
+  backend: Backend,
+  events: ApprovalEvent[],
+  first: "once" | "lasting",
+) {
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  await answer(backend, nth(events, 0), first);
+  for (let step = 1; ; step++) {
+    await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+    if (asks(events).length <= step) return;
+    await answer(backend, nth(events, step), "once", "prod-eu");
+  }
+}
+
+test("a lasting answer spares its process and context the asks that come after, and no other process", async () => {
+  const lasting = await followed("approval");
+  await throughSequence(lasting.backend, lasting.events, "lasting");
+  expect(asks(lasting.events).map(({ command }) => command)).toEqual([
+    "kubectl set image",
+    "kubectl create",
+    "kubectl delete",
+    "kubectl scale",
+    "kubectl apply",
+    "kubectl annotate",
+    "kubectl edit",
+  ]);
+  expect(
+    asks(lasting.events)
+      .slice(1)
+      .map(({ process }) => process),
+  ).not.toContain("Terminal 2");
+
+  const once = await followed("approval");
+  await throughSequence(once.backend, once.events, "once");
+  expect(asks(once.events)).toHaveLength(9);
+});
+
+test("a lasting answer ends after the minutes the ask offered", async () => {
+  const { backend, events } = await followed("approval");
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  const patch = nth(events, 0);
+  await answer(backend, patch, "lasting");
+  await vi.advanceTimersByTimeAsync((patch.lastingMinutes ?? 0) * 60_000);
+  await answer(backend, nth(events, 1));
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  await answer(backend, nth(events, 2), "deny");
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  expect(nth(events, 3).command).toBe("kubectl exec");
+});
+
+test("a lasting answer allows the asks of its process and context that already wait, and withdraws them", async () => {
+  const { backend, events } = await followed("approvalQueue");
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  const [patch, create, exec] = [
+    nth(events, 0),
+    nth(events, 1),
+    nth(events, 2),
+  ];
+  expect([patch.process, create.process, exec.process]).toEqual([
+    "Terminal 2",
+    "Terminal 1",
+    "Terminal 2",
+  ]);
+
+  expect(await answer(backend, patch, "lasting")).toBeUndefined();
+  expect(events.slice(3)).toEqual([{ event: "withdrawn", id: exec.id }]);
+  const gone = await answer(backend, exec);
+  expect((gone as IpcError).kind).toBe("notFound");
+  expect(await answer(backend, create)).toBeUndefined();
+});
+
+test("a lasting answer is refused for an ask that offers none, and the ask stays", async () => {
+  const { backend, events } = await followed("approval");
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  await answer(backend, nth(events, 0));
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  await answer(backend, nth(events, 1));
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  const remove = nth(events, 2);
+  expect(remove.lastingMinutes).toBeNull();
+
+  const refused = await answer(backend, remove, "lasting", "prod-eu");
+  expect((refused as IpcError).kind).toBe("invalidInput");
+  expect(await answer(backend, remove, "once", "prod-eu")).toBeUndefined();
+});
+
 test("a deny needs no name typed", async () => {
   const { backend, events } = await followed("approval");
   await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);

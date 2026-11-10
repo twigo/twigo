@@ -270,10 +270,15 @@ function sequence(scenario: ApprovalScenario): Draft[] {
   }
 }
 
+const grantOf = ({ process, context }: Draft) => `${process}\0${context}`;
+
 /**
  * The approval broker as a window sees it: it sends the asks waiting and
  * every new one to the window that follows, takes the answers and refuses
- * one for an ask that is gone or a name typed wrong.
+ * one for an ask that is gone, a name typed wrong or a lasting answer that
+ * was not offered. A lasting answer allows what its process asks on its
+ * context for the minutes the ask offered, deletes excepted: an ask that
+ * waits then is withdrawn, and one that comes is not raised.
  */
 export class MockApprovals {
   readonly #waiting = new Map<ApprovalId, ApprovalAsk>();
@@ -281,6 +286,8 @@ export class MockApprovals {
   #coming: Draft[] = [];
   #started = false;
   #next = 1;
+  /** When each process's lasting answer on a context ends, in milliseconds. */
+  readonly #lasting = new Map<string, number>();
 
   constructor(private readonly scenario: ApprovalScenario | undefined) {}
 
@@ -305,18 +312,40 @@ export class MockApprovals {
     if (answer !== "deny" && ask.typed && typed !== ask.context) {
       throw new IpcError("invalidInput", `type ${ask.context} to confirm`);
     }
+    if (answer === "lasting") {
+      if (ask.lastingMinutes === null) {
+        throw new IpcError("invalidInput", "this ask offers no lasting answer");
+      }
+      this.#lasting.set(grantOf(ask), Date.now() + ask.lastingMinutes * 60_000);
+    }
     this.#waiting.delete(id);
+    for (const other of [...this.#waiting.values()]) {
+      if (this.#allowed(other)) {
+        this.#waiting.delete(other.id);
+        this.#follower?.({ event: "withdrawn", id: other.id });
+      }
+    }
     if (this.scenario === "approval") this.#later(NEXT_ASK_MS);
     return null;
   }
 
+  #allowed(draft: Draft): boolean {
+    const until = this.#lasting.get(grantOf(draft));
+    return until !== undefined && Date.now() < until && draft.verb !== "delete";
+  }
+
   #later(ms: number): void {
     setTimeout(() => {
-      const batch =
-        this.scenario === "approvalQueue"
-          ? this.#coming.splice(0)
-          : this.#coming.splice(0, 1);
-      for (const draft of batch) this.#raise(draft);
+      const several = this.scenario === "approvalQueue";
+      for (
+        let draft = this.#coming.shift();
+        draft !== undefined;
+        draft = this.#coming.shift()
+      ) {
+        if (this.#allowed(draft)) continue;
+        this.#raise(draft);
+        if (!several) return;
+      }
     }, ms);
   }
 
