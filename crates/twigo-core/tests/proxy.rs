@@ -1906,6 +1906,64 @@ async fn dropping_a_process_ends_a_watch_whose_client_reads_nothing() {
 }
 
 #[tokio::test]
+async fn a_process_s_end_cuts_no_connection_that_wrote_its_answer_and_serves_another() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    let clients = core.clients("kind-a").await.unwrap();
+    let other = Process::start(&core, None).await;
+    let big = json!({ "apiVersion": "v1", "kind": "ConfigMap", "metadata": { "name": "big" }, "data": { "k": "x".repeat(1 << 20) } });
+    let runs = 40;
+    let mut cut = Vec::new();
+    for run in 0..runs {
+        let process = Process::start(&core, None).await;
+        let mut connection = connect(process.at()).await;
+        let post = process
+            .request("POST", "kind-a", CONFIGMAPS)
+            .header("content-type", "application/json")
+            .body(json_body(&big))
+            .unwrap();
+        let mut usage = clients.usage();
+        usage.borrow_and_update();
+        let handle = process.handle;
+        let ending = tokio::spawn(async move {
+            let mut held = false;
+            while usage.changed().await.is_ok() {
+                if usage.borrow().proxied.held > 0 {
+                    held = true;
+                } else if held {
+                    break;
+                }
+            }
+            drop(handle);
+        });
+        let response = connection.sender.send_request(post).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let whole = response.into_body().collect().await;
+        tokio::time::timeout(WAIT, ending)
+            .await
+            .expect("the answer's stream let go")
+            .unwrap();
+        let next = other
+            .request("GET", "kind-a", CONFIGMAPS)
+            .body(empty())
+            .unwrap();
+        let sent = match connection.sender.ready().await {
+            Ok(()) => connection
+                .sender
+                .send_request(next)
+                .await
+                .map(|response| response.status()),
+            Err(error) => Err(error),
+        };
+        if whole.is_err() || !sent.is_ok_and(|status| status == StatusCode::OK) {
+            cut.push(run);
+        }
+    }
+    assert!(cut.is_empty(), "cut in runs {cut:?} of {runs}");
+}
+
+#[tokio::test]
 async fn a_splice_ends_when_its_context_moves_to_another_cluster() {
     let fake = Fake::start().await;
     let dir = tempfile::tempdir().unwrap();

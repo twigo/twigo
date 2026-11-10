@@ -125,13 +125,16 @@ async fn ended(mut written: watch::Receiver<Option<CancellationToken>>) {
             }
         };
         tokio::select! {
-            () = ended => return,
+            // An answer that ended before its process did leaves the
+            // connection to the next.
+            biased;
             changed = written.changed() => {
                 // The connection's service holds a sender while it serves.
                 if changed.is_err() {
                     std::future::pending::<()>().await;
                 }
             }
+            () = ended => return,
         }
     }
 }
