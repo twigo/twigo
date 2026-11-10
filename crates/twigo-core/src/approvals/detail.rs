@@ -9,12 +9,12 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use http::header::{ACCEPT, HeaderValue};
 use http::request::Parts;
 use http::{Method, Request};
+use jiff::{SignedDuration, Timestamp};
 use kube::Client;
 use serde_json::Value;
 use twigo_ipc::{ApprovalDetail, NoDiff, RequestClass};
@@ -27,7 +27,7 @@ use crate::proxy::Holder;
 /// The largest body an ask shows as sent.
 const SHOWN_BODY: usize = 4 << 10;
 /// How long whether kube-apiserver serves a group/version itself is kept.
-const SERVED_FOR: Duration = Duration::from_secs(5 * 60);
+const SERVED_FOR: SignedDuration = SignedDuration::from_mins(5);
 
 /// Whether kube-apiserver serves each group/version itself, by context,
 /// connection and APIService.
@@ -36,7 +36,8 @@ pub(crate) struct Served(Mutex<HashMap<(String, u64, String), Read>>);
 
 #[derive(Clone, Copy)]
 struct Read {
-    at: Instant,
+    /// By the wall clock, which runs on while the machine sleeps.
+    until: Timestamp,
     itself: bool,
 }
 
@@ -217,16 +218,16 @@ impl Served {
         );
         let kept = self.0.lock().expect("served lock").get(&key).copied();
         let itself = match kept {
-            Some(read) if read.at.elapsed() < SERVED_FOR => read.itself,
+            Some(read) if Timestamp::now() < read.until => read.itself,
             _ => {
                 let path = format!("/apis/apiregistration.k8s.io/v1/apiservices/{}", key.2);
                 let request = Request::get(path).body(Vec::new()).expect("a path");
                 let (service, _) = send(api, request).await.map_err(|_| NoDiff::Unverified)?;
                 let itself = service["spec"]["service"].is_null();
-                let read = Read {
-                    at: Instant::now(),
-                    itself,
-                };
+                let until = Timestamp::now()
+                    .saturating_add(SERVED_FOR)
+                    .unwrap_or(Timestamp::MAX);
+                let read = Read { until, itself };
                 self.0.lock().expect("served lock").insert(key, read);
                 itself
             }

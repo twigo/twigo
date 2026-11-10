@@ -10,7 +10,6 @@ pub(crate) mod detail;
 use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
 
 use http::Method;
 use jiff::{SignedDuration, Timestamp};
@@ -29,7 +28,7 @@ const LASTING: SignedDuration = SignedDuration::from_mins(15);
 /// How long one answer covers a request's repeats: kubectl repeats a refused
 /// upgrade over SPDY after WebSocket, and a write after each `429`, for up
 /// to about 10 s ([`checkWait`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/client-go/rest/with_retry.go#L309-L318)).
-const REPEATS: Duration = Duration::from_secs(15);
+const REPEATS: SignedDuration = SignedDuration::from_secs(15);
 
 pub(crate) struct Approvals {
     policy: Arc<Policy>,
@@ -50,6 +49,22 @@ struct State {
     /// Numbers each "once", so that a request gives back or uses up only
     /// its own.
     onces: u64,
+}
+
+impl State {
+    /// What covers `repeat` at `now`. The wall clock, as the gate's for an
+    /// unlock, runs on while the machine sleeps, which `Instant` on macOS
+    /// does not.
+    fn cover(&mut self, repeat: &Digest, now: Timestamp) -> Option<&mut Cover> {
+        self.repeats.retain(|_, held| held.until > now);
+        self.repeats.get_mut(repeat).map(|held| &mut held.cover)
+    }
+
+    /// `cover` for the repeats of `repeat` from `now` on.
+    fn cover_repeats(&mut self, repeat: Digest, cover: Cover, now: Timestamp) {
+        let until = now.saturating_add(REPEATS).unwrap_or(Timestamp::MAX);
+        self.repeats.insert(repeat, Repeat { until, cover });
+    }
 }
 
 type Follower = Box<dyn FnMut(ApprovalEvent) -> bool + Send>;
@@ -81,7 +96,7 @@ struct Grant {
 }
 
 struct Repeat {
-    until: Instant,
+    until: Timestamp,
     cover: Cover,
 }
 
@@ -160,13 +175,7 @@ impl Approvals {
         let changes = Changes::new(&self.policy, &self.catalog);
         {
             let mut state = self.state();
-            let now = Instant::now();
-            state.repeats.retain(|_, repeat| repeat.until > now);
-            match state
-                .repeats
-                .get_mut(&asking.repeat)
-                .map(|repeat| &mut repeat.cover)
-            {
+            match state.cover(&asking.repeat, Timestamp::now()) {
                 Some(Cover::Denied(message)) => return Outcome::Denied(message.clone()),
                 Some(Cover::Once {
                     approval,
@@ -291,13 +300,8 @@ impl Approvals {
                     attributes.verb,
                     attributes.target()
                 );
-                state.repeats.insert(
-                    asking.repeat,
-                    Repeat {
-                        until: Instant::now() + REPEATS,
-                        cover: Cover::Denied(message.clone()),
-                    },
-                );
+                let cover = Cover::Denied(message.clone());
+                state.cover_repeats(asking.repeat, cover, Timestamp::now());
                 Outcome::Denied(message)
             }
             ApprovalAnswer::Once => {
@@ -305,17 +309,12 @@ impl Approvals {
                 let approval = Approval::once(context, holder.actor, attributes);
                 let id = state.onces;
                 state.onces += 1;
-                state.repeats.insert(
-                    asking.repeat,
-                    Repeat {
-                        until: Instant::now() + REPEATS,
-                        cover: Cover::Once {
-                            approval: approval.clone(),
-                            id,
-                            taken: true,
-                        },
-                    },
-                );
+                let cover = Cover::Once {
+                    approval: approval.clone(),
+                    id,
+                    taken: true,
+                };
+                state.cover_repeats(asking.repeat, cover, Timestamp::now());
                 Outcome::Approved {
                     approval,
                     once: Some(Once::taken(self, asking.repeat, id)),
@@ -350,13 +349,9 @@ impl Approvals {
     fn nobody(&self, asking: &Asking<'_>) -> Outcome<'_> {
         self.audit(asking, "nobody");
         let message = asking.blocked.to_string();
-        self.state().repeats.insert(
-            asking.repeat,
-            Repeat {
-                until: Instant::now() + REPEATS,
-                cover: Cover::Denied(message.clone()),
-            },
-        );
+        let cover = Cover::Denied(message.clone());
+        self.state()
+            .cover_repeats(asking.repeat, cover, Timestamp::now());
         Outcome::Denied(message)
     }
 
@@ -574,6 +569,17 @@ mod tests {
     use twigo_policy::Actor;
 
     use super::*;
+
+    #[test]
+    fn a_cover_lasts_15_seconds_of_the_wall_clock() {
+        let mut state = State::default();
+        let at = Timestamp::from_second(1_800_000_000).unwrap();
+        let later = |millis| at.checked_add(SignedDuration::from_millis(millis)).unwrap();
+        state.cover_repeats([1; 32], Cover::Denied("denied".to_owned()), at);
+        assert!(state.cover(&[1; 32], later(14_999)).is_some());
+        assert!(state.cover(&[1; 32], later(15_000)).is_none());
+        assert!(state.repeats.is_empty(), "gone for good");
+    }
 
     #[tokio::test]
     async fn an_answer_that_comes_as_the_process_ends_lets_nothing_go() {
