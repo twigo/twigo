@@ -8,7 +8,10 @@ interface FakeDiff {
   restored: unknown;
 }
 
-const fake = vi.hoisted(() => ({ views: [] as FakeDiff[] }));
+const fake = vi.hoisted(() => ({
+  views: [] as FakeDiff[],
+  options: [] as { hideUnchangedRegions?: { enabled?: boolean } }[],
+}));
 
 vi.mock("./monaco", () => ({
   editor: {
@@ -17,7 +20,11 @@ vi.mock("./monaco", () => ({
       setValue: () => undefined,
       dispose: () => undefined,
     }),
-    createDiffEditor: () => {
+    createDiffEditor: (
+      _host: unknown,
+      options: { hideUnchangedRegions?: { enabled?: boolean } },
+    ) => {
+      fake.options.push(options);
       const view = {
         disposed: false,
         restored: undefined as unknown,
@@ -41,6 +48,7 @@ vi.mock("./monaco", () => ({
 afterEach(() => {
   cleanup();
   fake.views.length = 0;
+  fake.options.length = 0;
 });
 
 const shown = (on: boolean) => (
@@ -57,4 +65,13 @@ test("a diff not on screen has no view, and shown again it is where it was", () 
   view.rerender(shown(true));
   expect(fake.views).toHaveLength(2);
   expect(fake.views[1]?.restored).toBe("where it was");
+});
+
+test("a diff folds the lines that did not change only when asked to", () => {
+  render(<DiffView original="a: 1" modified="a: 2" />);
+  render(<DiffView collapseUnchanged original="a: 1" modified="a: 2" />);
+  expect(fake.options.map((options) => options.hideUnchangedRegions)).toEqual([
+    { enabled: false },
+    { enabled: true },
+  ]);
 });

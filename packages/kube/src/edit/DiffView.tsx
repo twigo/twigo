@@ -5,9 +5,11 @@ import { editor } from "./monaco";
 export default function DiffView({
   original,
   modified,
+  collapseUnchanged = false,
 }: {
   readonly original: string;
   readonly modified: string;
+  readonly collapseUnchanged?: boolean;
 }) {
   const shown = useEditorShown();
   const host = useRef<HTMLDivElement>(null);
@@ -39,6 +41,7 @@ export default function DiffView({
       fontSize: 12,
       lineNumbersMinChars: 3,
       renderOverviewRuler: false,
+      hideUnchangedRegions: { enabled: collapseUnchanged },
     });
     view.setModel(pair);
     if (place.current) view.restoreViewState(place.current);
@@ -54,7 +57,7 @@ export default function DiffView({
       diff.current = undefined;
       models.current = undefined;
     };
-  }, [shown]);
+  }, [shown, collapseUnchanged]);
   useEffect(() => {
     const pair = models.current;
     const view = diff.current;

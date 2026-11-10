@@ -1,5 +1,6 @@
 import { FileCode, FolderTree, GitCompare } from "lucide-react";
 import { Changes, type Workbench } from "@twigo/workbench";
+import { RequestDetail } from "./approvals/RequestDetail";
 import { Explorer, EXPLORER_VIEW } from "./explorer/Explorer";
 import { registerEdits } from "./edit/commands";
 import { DiffEditor } from "./edit/DiffEditors";
@@ -55,6 +56,11 @@ export function registerKube(workbench: Workbench): void {
       },
     });
     menus.append("menubar/go", { command: id, group: "3_kubernetes", order });
+  });
+
+  workbench.approvals.registerDetails({
+    component: RequestDetail,
+    wide: (detail) => detail.kind === "diff",
   });
 
   views.registerContainer({
