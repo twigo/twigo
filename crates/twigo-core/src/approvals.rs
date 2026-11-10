@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use jiff::{SignedDuration, Timestamp};
 use tokio::sync::{oneshot, watch};
+use tokio_util::sync::CancellationToken;
 use twigo_ipc::{
     AnswerApproval, ApprovalAnswer, ApprovalAsk, ApprovalDetail, ApprovalEvent, ApprovalId,
     BlockReason, Blocked, ErrorKind, IpcError, Mode, ModeSource,
@@ -76,6 +77,8 @@ struct Pending {
     process: u64,
     /// Its token's connection.
     connection: u64,
+    /// Its process's end, which refuses an answer that comes after it.
+    ended: CancellationToken,
     delete: bool,
     ask: ApprovalAsk,
     audited: Audited,
@@ -270,6 +273,7 @@ impl Approvals {
                     window,
                     process: holder.process,
                     connection: holder.connection,
+                    ended: holder.ended.clone(),
                     delete,
                     ask,
                     audited: asking.audited(),
@@ -420,6 +424,10 @@ impl Approvals {
                 "another window asks this",
             ));
         }
+        if pending.ended.is_cancelled() {
+            let pending = state.asks.remove(&answer.id.0).expect("found above");
+            return Err(self.gone(state, answer.id, &pending.window, &pending.audited));
+        }
         let ask = &pending.ask;
         if answer.answer != ApprovalAnswer::Deny
             && ask.typed
@@ -453,17 +461,7 @@ impl Approvals {
         };
         if pending.resolve.send(resolution).is_err() {
             // Its request went and has not withdrawn the ask yet.
-            if let Some(follower) = state.followers.get_mut(&pending.window)
-                && !follower(ApprovalEvent::Withdrawn { id: answer.id })
-            {
-                state.followers.remove(&pending.window);
-            }
-            drop(state);
-            self.audit(&pending.audited, "withdrawn");
-            return Err(IpcError::new(
-                ErrorKind::NotFound,
-                "the process no longer waits for this answer",
-            ));
+            return Err(self.gone(state, answer.id, &pending.window, &pending.audited));
         }
         let mut ended = Vec::new();
         if let Some(until) = granted {
@@ -480,6 +478,28 @@ impl Approvals {
             self.audit(&audited, answer);
         }
         Ok(())
+    }
+
+    /// Refuses an answer that no request waits for: the window that asked
+    /// gets the withdrawal, and the audit log `withdrawn`.
+    fn gone(
+        &self,
+        mut state: MutexGuard<'_, State>,
+        id: ApprovalId,
+        window: &Arc<str>,
+        audited: &Audited,
+    ) -> IpcError {
+        if let Some(follower) = state.followers.get_mut(window)
+            && !follower(ApprovalEvent::Withdrawn { id })
+        {
+            state.followers.remove(window);
+        }
+        drop(state);
+        self.audit(audited, "withdrawn");
+        IpcError::new(
+            ErrorKind::NotFound,
+            "the process no longer waits for this answer",
+        )
     }
 
     /// "For 15 minutes" until `until` on `context`, held to what decides it
@@ -723,7 +743,6 @@ impl Drop for Withdraw<'_> {
 
 #[cfg(test)]
 mod tests {
-    use tokio_util::sync::CancellationToken;
     use twigo_ipc::RequestClass;
 
     use super::*;
@@ -792,6 +811,7 @@ mod tests {
             window: "main".into(),
             process: 0,
             connection: 0,
+            ended: CancellationToken::new(),
             delete: false,
             ask: ask(7),
             audited: audited(),
@@ -811,6 +831,7 @@ mod tests {
             window: "main".into(),
             process: 0,
             connection: 0,
+            ended: CancellationToken::new(),
             delete: false,
             ask: ask(8),
             audited: audited(),
@@ -861,30 +882,31 @@ mod tests {
         assert!(state.repeats.is_empty(), "gone for good");
     }
 
-    #[tokio::test]
-    async fn an_answer_that_comes_as_the_process_ends_lets_nothing_go() {
-        let policy = Policy::open();
-        let (_catalog, catalog) = watch::channel(None);
-        let approvals = Approvals::new(Arc::clone(&policy), catalog.clone());
-        let ended = CancellationToken::new();
-        let holder = Holder {
+    fn holder(window: Option<&str>, ended: &CancellationToken) -> Holder {
+        Holder {
             process: 0,
             label: "Terminal 1".into(),
-            window: None,
+            window: window.map(Into::into),
             actor: Actor::Terminal,
             context: "kind-a".to_owned(),
             connection: 0,
             prefix: String::new(),
             digest: [0; 32],
             ended: ended.clone(),
-        };
+        }
+    }
+
+    fn create() -> Attributes {
         let request = http::Request::post("/api/v1/namespaces/a/configmaps")
             .body(())
             .unwrap();
-        let attributes = Attributes::of(&request);
-        let asking = Asking {
-            holder: &holder,
-            attributes: &attributes,
+        Attributes::of(&request)
+    }
+
+    fn asking<'a>(holder: &'a Holder, attributes: &'a Attributes, repeat: Digest) -> Asking<'a> {
+        Asking {
+            holder,
+            attributes,
             blocked: Box::new(Blocked {
                 context: "kind-a".to_owned(),
                 mode: Mode::Guarded,
@@ -894,10 +916,21 @@ mod tests {
                 verb: attributes.verb.clone(),
                 target: attributes.target(),
             }),
-            repeat: [0; 32],
+            repeat,
             command: None,
             impersonate: None,
-        };
+        }
+    }
+
+    #[tokio::test]
+    async fn an_answer_that_comes_as_the_process_ends_lets_nothing_go() {
+        let policy = Policy::open();
+        let (_catalog, catalog) = watch::channel(None);
+        let approvals = Approvals::new(Arc::clone(&policy), catalog.clone());
+        let ended = CancellationToken::new();
+        let holder = holder(None, &ended);
+        let attributes = create();
+        let asking = asking(&holder, &attributes, [0; 32]);
         ended.cancel();
         for _ in 0..64 {
             let (resolve, resolved) = oneshot::channel();
@@ -906,5 +939,55 @@ mod tests {
             let outcome = approvals.wait(&asking, resolved, changes).await;
             assert!(matches!(outcome, Outcome::Ended), "the answer won");
         }
+    }
+
+    #[tokio::test]
+    async fn an_answer_after_the_process_ended_is_refused_as_gone_and_grants_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let audit = dir.path().join("audit.jsonl");
+        let policy = Policy::new(
+            twigo_policy::PolicyFile::default(),
+            |_| Some(twigo_policy::Metadata::default()),
+            twigo_policy::Choices::default(),
+            twigo_policy::Audit::open(&audit),
+        );
+        let (_catalog, catalog) = watch::channel(None);
+        let approvals = Approvals::new(policy, catalog);
+        let (events, mut told) = tokio::sync::mpsc::unbounded_channel();
+        approvals.follow_window("main", move |event| events.send(event).is_ok());
+        let ended = CancellationToken::new();
+        let holder = holder(Some("main"), &ended);
+        let attributes = create();
+        let detail = ApprovalDetail::Unknown {
+            reason: twigo_ipc::NoDiff::NotAResource,
+            body: None,
+        };
+        let deciding = approvals.decide(
+            asking(&holder, &attributes, [0; 32]),
+            std::future::ready(detail),
+        );
+        let answering = async {
+            let Some(ApprovalEvent::Asked { ask }) = told.recv().await else {
+                panic!("not asked");
+            };
+            ended.cancel();
+            let answered = approvals.answer(
+                "main",
+                AnswerApproval {
+                    id: ask.id,
+                    answer: ApprovalAnswer::Lasting,
+                    typed: None,
+                },
+            );
+            assert_eq!(answered.unwrap_err().kind, ErrorKind::NotFound);
+            assert_eq!(
+                told.try_recv().unwrap(),
+                ApprovalEvent::Withdrawn { id: ask.id }
+            );
+        };
+        let (outcome, ()) = tokio::join!(deciding, answering);
+        assert!(matches!(outcome, Outcome::Ended));
+        assert_eq!(answers(&audit), ["withdrawn"]);
+        assert!(approvals.state().grants.is_empty());
     }
 }
