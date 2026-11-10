@@ -11,7 +11,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use tokio::sync::watch;
 use twigo_ipc::{Blocked, ContextAccess, Environment, Mode, ModeSource};
 
-use crate::{Actor, Attributes, Audit, Gate, PolicyFile};
+use crate::{Actor, Approval, Attributes, Audit, Gate, PolicyFile};
 
 /// How long an unlock lasts.
 pub const UNLOCK: SignedDuration = SignedDuration::from_mins(15);
@@ -85,6 +85,23 @@ struct Held {
     choices: Choices,
     /// By context. Never stored: a restart relocks.
     unlocks: HashMap<String, Unlock>,
+    /// By context: how many times a choice, an unlock or its end changed
+    /// what it lets through.
+    changed: HashMap<String, u64>,
+}
+
+impl Held {
+    fn changed(&mut self, context: &str) {
+        *self.changed.entry(context.to_owned()).or_default() += 1;
+    }
+
+    fn end_unlock(&mut self, context: &str) -> bool {
+        let ended = self.unlocks.remove(context).is_some();
+        if ended {
+            self.changed(context);
+        }
+        ended
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -107,6 +124,7 @@ impl Policy {
             held: Mutex::new(Held {
                 choices,
                 unlocks: HashMap::new(),
+                changed: HashMap::new(),
             }),
             changes: watch::Sender::new(0),
             audit,
@@ -162,7 +180,7 @@ impl Policy {
             .get(context)
             .is_some_and(|unlock| Some(unlock.connection) != connection)
         {
-            held.unlocks.remove(context);
+            held.end_unlock(context);
         }
         self.resolved(&held, context, metadata, now)
     }
@@ -241,27 +259,29 @@ impl Policy {
         }
     }
 
-    /// Whether `attributes` may leave the process.
+    /// Whether `attributes` may leave the process, with no approval.
     pub fn authorize(
         &self,
         context: &str,
         attributes: &Attributes,
         actor: Actor,
     ) -> Result<(), Box<Blocked>> {
-        self.decide(context, self.access(context), attributes, actor)
+        self.decide(context, self.access(context), attributes, actor, None)
             .map(|_| ())
     }
 
-    /// [`Policy::authorize`], for clients built for `connection`: once the
-    /// context's name means something else, they still reach the old cluster
-    /// until their owner re-opens, and no mode of the new one holds for it.
-    /// Says the mode it let the request through in.
+    /// [`Policy::authorize`], for clients built for `connection`, of a
+    /// request that carries `approval`: once the context's name means
+    /// something else, they still reach the old cluster until their owner
+    /// re-opens, and no mode of the new one holds for it. Says the mode it
+    /// let the request through in.
     pub(crate) fn authorize_built(
         &self,
         context: &str,
         connection: Option<u64>,
         attributes: &Attributes,
         actor: Actor,
+        approval: Option<&Approval>,
     ) -> Result<Mode, Box<Blocked>> {
         let mut access = self.access(context);
         let moved = self.file.mode(context).is_none()
@@ -270,7 +290,7 @@ impl Policy {
             access.mode = Mode::ReadOnly;
             access.source = ModeSource::Moved;
         }
-        self.decide(context, access, attributes, actor)
+        self.decide(context, access, attributes, actor, approval)
     }
 
     /// What the context connects to now, as [`Metadata::connection`] says;
@@ -285,12 +305,19 @@ impl Policy {
         access: ContextAccess,
         attributes: &Attributes,
         actor: Actor,
+        approval: Option<&Approval>,
     ) -> Result<Mode, Box<Blocked>> {
+        let approved = || {
+            approval.is_some_and(|approval| {
+                approval.covers(context, actor, attributes, Timestamp::now())
+            })
+        };
         actor
             .decide(
                 attributes.class,
                 access.mode,
                 self.file.allow_port_forward(),
+                approved,
             )
             .and_then(|()| {
                 if attributes.writes_a_secret() {
@@ -319,6 +346,7 @@ impl Policy {
         self.refuse_policy_file(context)?;
         let mut held = self.held();
         held.unlocks.remove(context);
+        held.changed(context);
         match mode {
             Some(mode) => held.choices.modes.insert(context.to_owned(), mode),
             None => held.choices.modes.remove(context),
@@ -334,6 +362,7 @@ impl Policy {
     pub fn set_environment(&self, context: &str, environment: Option<Environment>) -> Choices {
         let mut held = self.held();
         held.unlocks.remove(context);
+        held.changed(context);
         held.choices
             .environments
             .insert(context.to_owned(), environment);
@@ -373,6 +402,7 @@ impl Policy {
                 connection: metadata.connection,
             },
         );
+        held.changed(context);
         drop(held);
         self.changed();
         Ok(())
@@ -380,9 +410,20 @@ impl Policy {
 
     /// Ends an unlock now.
     pub fn relock(&self, context: &str) {
-        if self.held().unlocks.remove(context).is_some() {
+        if self.held().end_unlock(context) {
             self.changed();
         }
+    }
+
+    /// How many times a choice, an unlock or its end changed what `context`
+    /// lets through: what someone holds to it lasts only while this stays.
+    /// What the catalog says of a context changes its connection instead.
+    pub fn changes_of(&self, context: &str) -> u64 {
+        self.held()
+            .changed
+            .get(context)
+            .copied()
+            .unwrap_or_default()
     }
 
     /// Tells [`Policy::changes`] as each unlock ends, while the policy lives.
@@ -410,9 +451,16 @@ impl Policy {
     /// looking again, while any runs.
     fn expire(&self, now: Timestamp) -> Option<Duration> {
         let mut held = self.held();
-        let before = held.unlocks.len();
-        held.unlocks.retain(|_, unlock| unlock.until > now);
-        let ended = held.unlocks.len() != before;
+        let ended: Vec<String> = held
+            .unlocks
+            .iter()
+            .filter(|(_, unlock)| unlock.until <= now)
+            .map(|(context, _)| context.clone())
+            .collect();
+        for context in &ended {
+            held.end_unlock(context);
+        }
+        let ended = !ended.is_empty();
         let next = held.unlocks.values().map(|unlock| unlock.until).min();
         drop(held);
         if ended {

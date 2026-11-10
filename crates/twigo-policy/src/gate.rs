@@ -11,7 +11,7 @@ use std::task::{Context, Poll};
 use http::Request;
 use tower::{BoxError, Layer, Service};
 
-use crate::{Actor, Attributes, Policy};
+use crate::{Actor, Approval, Attributes, Policy};
 
 /// An actor's way through the policy on one context.
 #[derive(Clone)]
@@ -70,12 +70,18 @@ impl Gate {
         RecheckLayer(self.clone())
     }
 
-    /// Whether the request may go on; `sending` where it goes out next,
-    /// which the audit log notes of a write it lets through.
-    fn check(&self, attributes: &Attributes, sending: bool) -> Result<(), BoxError> {
-        let decided =
-            self.policy
-                .authorize_built(&self.context, self.connection, attributes, self.actor);
+    /// Whether the request may go on with the approval it carries;
+    /// `sending` where it goes out next, which the audit log notes of a write
+    /// it lets through.
+    fn check(&self, read: &Read, sending: bool) -> Result<(), BoxError> {
+        let attributes = &read.attributes;
+        let decided = self.policy.authorize_built(
+            &self.context,
+            self.connection,
+            attributes,
+            self.actor,
+            read.approval.as_ref(),
+        );
         let audit = self.policy.audit();
         match decided {
             Ok(mode) => {
@@ -99,9 +105,13 @@ impl Gate {
 }
 
 /// What the top of the stack read of the request, for the check below, where
-/// its path has the server's prefix and it may have waited.
+/// its path has the server's prefix and it may have waited: its attributes
+/// and the approval it carries, which a relock meanwhile overrules.
 #[derive(Clone)]
-struct Read(Arc<Attributes>);
+struct Read {
+    attributes: Arc<Attributes>,
+    approval: Option<Approval>,
+}
 
 type Answer<R> = Pin<Box<dyn Future<Output = Result<R, BoxError>> + Send>>;
 
@@ -143,11 +153,14 @@ where
     }
 
     fn call(&mut self, mut request: Request<B>) -> Self::Future {
-        let attributes = Attributes::of(&request);
-        if let Err(blocked) = self.gate.check(&attributes, false) {
+        let read = Read {
+            attributes: Arc::new(Attributes::of(&request)),
+            approval: request.extensions().get::<Approval>().cloned(),
+        };
+        if let Err(blocked) = self.gate.check(&read, false) {
             return Box::pin(ready(Err(blocked)));
         }
-        request.extensions_mut().insert(Read(Arc::new(attributes)));
+        request.extensions_mut().insert(read);
         let answer = self.inner.call(request);
         Box::pin(async move { answer.await.map_err(Into::into) })
     }
@@ -194,7 +207,7 @@ where
             .extensions()
             .get::<Read>()
             .expect("the gate at the top of the stack read the request");
-        if let Err(blocked) = self.gate.check(&read.0, true) {
+        if let Err(blocked) = self.gate.check(read, true) {
             return Box::pin(ready(Err(blocked)));
         }
         let answer = self.inner.call(request);
