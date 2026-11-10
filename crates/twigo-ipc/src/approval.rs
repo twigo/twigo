@@ -33,7 +33,9 @@ pub struct ApprovalAsk {
     pub class: RequestClass,
     /// As people and `kubectl` name it: `deployments/web in default`.
     pub target: String,
-    /// Whom the request acts as, from `kubectl --as`.
+    /// Whom the request acts as, from `kubectl --as`, `--as-group` and
+    /// `--as-uid`: the user and, when the request names them, the groups,
+    /// the uid and the extras, in one line: `x, groups system:masters`.
     pub impersonate: Option<String>,
     pub detail: ApprovalDetail,
     /// Whether the context's name must be typed before it is allowed: a

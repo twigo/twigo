@@ -135,7 +135,9 @@ class: RequestClass,
  */
 target: string, 
 /**
- * Whom the request acts as, from `kubectl --as`.
+ * Whom the request acts as, from `kubectl --as`, `--as-group` and
+ * `--as-uid`: the user and, when the request names them, the groups,
+ * the uid and the extras, in one line: `x, groups system:masters`.
  */
 impersonate: string | null, detail: ApprovalDetail, 
 /**

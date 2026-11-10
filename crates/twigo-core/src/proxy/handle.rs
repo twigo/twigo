@@ -10,7 +10,7 @@ use std::sync::{Arc, Weak};
 use bytes::Bytes;
 use http::header::{AUTHORIZATION, HOST, ORIGIN, UPGRADE};
 use http::request::Parts;
-use http::{HeaderMap, Request, Response, Uri};
+use http::{HeaderMap, HeaderValue, Request, Response, Uri};
 use http_body_util::{BodyExt, LengthLimitError, Limited};
 use hyper::body::Incoming;
 use percent_encoding::percent_decode_str;
@@ -243,17 +243,18 @@ async fn decide(
         }
         Err(blocked) => return Err(Refusal::blocked(&blocked)),
     };
-    let header = |name: &str| {
-        let value = parts.headers.get(name)?.to_str().ok()?;
-        Some(value.to_owned())
-    };
+    let command = parts
+        .headers
+        .get("kubectl-command")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
     let asking = Asking {
         holder,
         attributes,
         blocked,
         repeat: repeat(holder, parts, upgrade, body),
-        command: header("kubectl-command"),
-        impersonate: header("impersonate-user"),
+        command,
+        impersonate: impersonate(&parts.headers),
     };
     let detail = detail::of(&core.approvals, &actor.api, holder, attributes, parts, body);
     match core.approvals.decide(asking, detail).await {
@@ -267,6 +268,43 @@ async fn decide(
         Outcome::Moved => Err(Refusal::moved(&holder.context)),
         Outcome::Ended => Err(Refusal::forbidden("the process's token was revoked")),
     }
+}
+
+/// Whom the request acts as, in one line: the user, then the groups, the uid
+/// and the extras it names, each extra's key percent-decoded, as client-go
+/// escapes it into the header's name
+/// ([`headerKeyEscape`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/client-go/transport/round_trippers.go#L697-L710)).
+fn impersonate(headers: &HeaderMap) -> Option<String> {
+    let text = |value: &HeaderValue| String::from_utf8_lossy(value.as_bytes()).into_owned();
+    let all = |name: &str| headers.get_all(name).iter().map(text).collect::<Vec<_>>();
+    let mut extras: Vec<(String, String)> = headers
+        .iter()
+        .filter_map(|(name, value)| {
+            let key = name.as_str().strip_prefix("impersonate-extra-")?;
+            Some((
+                percent_decode_str(key).decode_utf8_lossy().into(),
+                text(value),
+            ))
+        })
+        .collect();
+    // Names lose their order in a header map, whose removal moves the last
+    // into the gap; a key's values keep theirs.
+    extras.sort_by(|(a, _), (b, _)| a.cmp(b));
+    let extras = extras
+        .into_iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect();
+    let mut said = all("impersonate-user");
+    for (word, items) in [
+        ("groups", all("impersonate-group")),
+        ("uid", all("impersonate-uid")),
+        ("extra", extras),
+    ] {
+        if !items.is_empty() {
+            said.push(format!("{word} {}", items.join(", ")));
+        }
+    }
+    (!said.is_empty()).then(|| said.join(", "))
 }
 
 /// What one answer covers for a while: the same token, path, query and body,

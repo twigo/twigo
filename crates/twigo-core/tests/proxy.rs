@@ -915,6 +915,44 @@ async fn a_denial_covers_the_request_s_repeat() {
 }
 
 #[tokio::test]
+async fn an_ask_says_every_identity_the_request_acts_as() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+    let mut acting = create(&process, "c");
+    for (name, value) in [
+        ("impersonate-user", "x"),
+        ("impersonate-group", "system:masters"),
+        ("impersonate-group", "dev"),
+        ("impersonate-uid", "42"),
+        ("impersonate-extra-scopes", "view"),
+        ("impersonate-extra-scopes", "edit"),
+        ("impersonate-extra-acme.com%2fteam", "blue"),
+    ] {
+        acting.headers_mut().append(name, value.parse().unwrap());
+    }
+    let sent = tokio::spawn(send(process.at(), acting));
+    let ask = asked(&mut events).await;
+    assert_eq!(
+        ask.impersonate.as_deref(),
+        Some(
+            "x, groups system:masters, dev, uid 42, extra acme.com/team=blue, scopes=view, scopes=edit"
+        )
+    );
+    answer_with(&core, &ask, ApprovalAnswer::Deny, None);
+    sent.await.unwrap();
+
+    let sent = tokio::spawn(send(process.at(), create(&process, "d")));
+    let ask = asked(&mut events).await;
+    assert_eq!(ask.impersonate, None, "acting as nobody else");
+    answer_with(&core, &ask, ApprovalAnswer::Deny, None);
+    sent.await.unwrap();
+}
+
+#[tokio::test]
 async fn an_ask_is_withdrawn_when_its_client_goes() {
     let fake = Fake::start().await;
     let dir = tempfile::tempdir().unwrap();
