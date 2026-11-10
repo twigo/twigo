@@ -71,6 +71,10 @@ type Follower = Box<dyn FnMut(ApprovalEvent) -> bool + Send>;
 
 struct Pending {
     window: Arc<str>,
+    process: u64,
+    /// Its token's connection.
+    connection: u64,
+    delete: bool,
     ask: ApprovalAsk,
     audited: Audited,
     resolve: oneshot::Sender<Resolution>,
@@ -86,7 +90,11 @@ struct Audited {
 }
 
 enum Resolution {
-    Answered(ApprovalAnswer),
+    Denied,
+    Once,
+    /// A grant "for 15 minutes" until then covers it: the person's answer to
+    /// it, or to another ask of its process on its context.
+    Granted(Timestamp),
     /// The window that would answer went.
     Nobody,
 }
@@ -253,6 +261,9 @@ impl Approvals {
                 id,
                 Pending {
                     window,
+                    process: holder.process,
+                    connection: holder.connection,
+                    delete,
                     ask,
                     audited: asking.audited(),
                     resolve,
@@ -281,9 +292,7 @@ impl Approvals {
                 biased;
                 () = holder.ended.cancelled() => return Outcome::Ended,
                 resolution = &mut resolved => return match resolution {
-                    Ok(Resolution::Answered(answer)) => self.answered(asking, answer),
-                    // Audited as the window went.
-                    Ok(Resolution::Nobody) => self.unasked(asking),
+                    Ok(resolution) => self.answered(asking, resolution),
                     Err(_) => self.nobody(asking),
                 },
                 () = changes.next() => {
@@ -299,14 +308,15 @@ impl Approvals {
         }
     }
 
-    fn answered(&self, asking: &Asking<'_>, answer: ApprovalAnswer) -> Outcome<'_> {
+    /// What ended an ask, audited where it ended.
+    fn answered(&self, asking: &Asking<'_>, resolution: Resolution) -> Outcome<'_> {
         let Asking {
             holder, attributes, ..
         } = asking;
         let context = holder.context.as_str();
         let mut state = self.state();
-        match answer {
-            ApprovalAnswer::Deny => {
+        match resolution {
+            Resolution::Denied => {
                 let message = format!(
                     "{} {} on {context} was denied in Twigo, so Twigo did not send it",
                     attributes.verb,
@@ -316,7 +326,7 @@ impl Approvals {
                 state.cover_repeats(asking.repeat, cover, Timestamp::now());
                 Outcome::Denied(message)
             }
-            ApprovalAnswer::Once => {
+            Resolution::Once => {
                 let approval = Approval::once(context, holder.actor, attributes);
                 let id = state.onces;
                 state.onces += 1;
@@ -331,26 +341,13 @@ impl Approvals {
                     once: Some(Once::taken(self, asking.repeat, id)),
                 }
             }
-            ApprovalAnswer::Lasting => {
-                let access = self.policy.access(context);
-                let until = Timestamp::now()
-                    .saturating_add(LASTING)
-                    .unwrap_or(Timestamp::MAX);
-                state.grants.insert(
-                    (holder.process, context.to_owned()),
-                    Grant {
-                        until,
-                        mode: access.mode,
-                        source: access.source,
-                        connection: holder.connection,
-                        changes: self.policy.changes_of(context),
-                        revision: self.policy.revision(context),
-                    },
-                );
-                Outcome::Approved {
-                    approval: Approval::until(context, holder.actor, until),
-                    once: None,
-                }
+            Resolution::Granted(until) => Outcome::Approved {
+                approval: Approval::until(context, holder.actor, until),
+                once: None,
+            },
+            Resolution::Nobody => {
+                drop(state);
+                self.unasked(asking)
             }
         }
     }
@@ -433,11 +430,21 @@ impl Approvals {
             ));
         }
         let pending = state.asks.remove(&answer.id.0).expect("found above");
-        if pending
-            .resolve
-            .send(Resolution::Answered(answer.answer))
-            .is_err()
-        {
+        let (resolution, audited) = match answer.answer {
+            ApprovalAnswer::Deny => (Resolution::Denied, "denied"),
+            ApprovalAnswer::Once => (Resolution::Once, "once"),
+            ApprovalAnswer::Lasting => {
+                let until = Timestamp::now()
+                    .saturating_add(LASTING)
+                    .unwrap_or(Timestamp::MAX);
+                (Resolution::Granted(until), "lasting")
+            }
+        };
+        let granted = match resolution {
+            Resolution::Granted(until) => Some(until),
+            _ => None,
+        };
+        if pending.resolve.send(resolution).is_err() {
             // Its request went and has not withdrawn the ask yet.
             if let Some(follower) = state.followers.get_mut(&pending.window)
                 && !follower(ApprovalEvent::Withdrawn { id: answer.id })
@@ -451,14 +458,66 @@ impl Approvals {
                 "the process no longer waits for this answer",
             ));
         }
+        let mut ended = Vec::new();
+        if let Some(until) = granted {
+            let context = pending.ask.context.as_str();
+            let grant = self.grant(context, pending.connection, until);
+            state
+                .grants
+                .insert((pending.process, context.to_owned()), grant);
+            ended = Self::granted(&mut state, pending.process, context, until);
+        }
         drop(state);
-        let audited = match answer.answer {
-            ApprovalAnswer::Deny => "denied",
-            ApprovalAnswer::Once => "once",
-            ApprovalAnswer::Lasting => "lasting",
-        };
         self.audit(&pending.audited, audited);
+        for (audited, answer) in ended {
+            self.audit(&audited, answer);
+        }
         Ok(())
+    }
+
+    /// "For 15 minutes" until `until` on `context`, held to what decides it
+    /// now.
+    fn grant(&self, context: &str, connection: u64, until: Timestamp) -> Grant {
+        let access = self.policy.access(context);
+        Grant {
+            until,
+            mode: access.mode,
+            source: access.source,
+            connection,
+            changes: self.policy.changes_of(context),
+            revision: self.policy.revision(context),
+        }
+    }
+
+    /// The other asks of `process` on `context` that its new grant covers go
+    /// on under it, withdrawn from their window: every one but a delete's.
+    /// Says how each ended, for the audit log.
+    fn granted(
+        state: &mut State,
+        process: u64,
+        context: &str,
+        until: Timestamp,
+    ) -> Vec<(Audited, &'static str)> {
+        let covered: Vec<u32> = state
+            .asks
+            .iter()
+            .filter(|(_, other)| {
+                other.process == process && other.ask.context == context && !other.delete
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        let mut ended = Vec::new();
+        for id in covered {
+            let other = state.asks.remove(&id).expect("listed above");
+            if let Some(follower) = state.followers.get_mut(&other.window)
+                && !follower(ApprovalEvent::Withdrawn { id: ApprovalId(id) })
+            {
+                state.followers.remove(&other.window);
+            }
+            let taken = other.resolve.send(Resolution::Granted(until)).is_ok();
+            ended.push((other.audited, if taken { "lasting" } else { "withdrawn" }));
+        }
+        ended
     }
 
     /// The window went: its asks are withdrawn from what followed them, and
@@ -706,6 +765,9 @@ mod tests {
         drop(resolved);
         let pending = Pending {
             window: "main".into(),
+            process: 0,
+            connection: 0,
+            delete: false,
             ask: ask(7),
             audited: audited(),
             resolve,
@@ -723,6 +785,9 @@ mod tests {
         let (resolve, _resolved) = oneshot::channel();
         let pending = Pending {
             window: "main".into(),
+            process: 0,
+            connection: 0,
+            delete: false,
             ask: ask(8),
             audited: audited(),
             resolve,
@@ -785,11 +850,7 @@ mod tests {
         ended.cancel();
         for _ in 0..64 {
             let (resolve, resolved) = oneshot::channel();
-            assert!(
-                resolve
-                    .send(Resolution::Answered(ApprovalAnswer::Once))
-                    .is_ok()
-            );
+            assert!(resolve.send(Resolution::Once).is_ok());
             let changes = Changes::new(&policy, &catalog);
             let outcome = approvals.wait(&asking, resolved, changes).await;
             assert!(matches!(outcome, Outcome::Ended), "the answer won");

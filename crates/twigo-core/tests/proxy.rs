@@ -910,6 +910,56 @@ async fn lasting_lets_later_writes_through_but_deletes_until_the_mode_changes() 
 }
 
 #[tokio::test]
+async fn lasting_lets_through_the_writes_of_its_process_already_waiting_but_a_delete() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+    let other = Process::start(&core, Some("main")).await;
+
+    let first = tokio::spawn(send(process.at(), create(&process, "one")));
+    let answered = asked(&mut events).await;
+    let second = tokio::spawn(send(process.at(), create(&process, "two")));
+    let waiting = asked(&mut events).await;
+    let deleting = tokio::spawn(send(process.at(), delete(&process, "three")));
+    let delete = asked(&mut events).await;
+    let elsewhere = tokio::spawn(send(other.at(), create(&other, "four")));
+    let others = asked(&mut events).await;
+    answer_with(&core, &answered, ApprovalAnswer::Lasting, None);
+    // Shorter than the client's own wait, whose end would withdraw it too.
+    let withdrawn = tokio::time::timeout(WAIT / 2, events.recv()).await;
+    assert_eq!(
+        withdrawn.ok().flatten(),
+        Some(ApprovalEvent::Withdrawn { id: waiting.id }),
+        "the waiting write goes on under the grant"
+    );
+    assert_eq!(first.await.unwrap().0.status(), StatusCode::CREATED);
+    assert_eq!(second.await.unwrap().0.status(), StatusCode::CREATED);
+    assert!(
+        events.try_recv().is_err(),
+        "the delete and another process's write wait"
+    );
+    assert_eq!(fake.writes(Method::POST), 2);
+    assert_eq!(fake.writes(Method::DELETE), 0);
+
+    answer_with(&core, &delete, ApprovalAnswer::Once, Some("kind-a"));
+    assert_eq!(deleting.await.unwrap().0.status(), StatusCode::OK);
+    answer_with(&core, &others, ApprovalAnswer::Deny, None);
+    assert_eq!(elsewhere.await.unwrap().0.status(), StatusCode::FORBIDDEN);
+    assert_eq!(fake.writes(Method::POST), 2);
+    let audit = std::fs::read_to_string(dir.path().join("audit.jsonl")).unwrap();
+    let answers: Vec<String> = audit
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .filter(|line| line["event"] == "approval")
+        .map(|line| line["answer"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(answers, ["lasting", "lasting", "once", "denied"]);
+}
+
+#[tokio::test]
 async fn a_request_no_answer_can_allow_is_refused_without_an_ask() {
     let fake = Fake::start().await;
     let dir = tempfile::tempdir().unwrap();
