@@ -133,8 +133,9 @@ test("an ask's command is the command path alone, as kubectl's Kubectl-Command h
   ]);
 });
 
-test("a create is named by its body's name and an exec by its pod alone, as Rust names them", async () => {
-  const [, create, , exec] = await raised();
+test("a create is named as its dry run stores it, or by its path alone with none, and an exec by its pod alone, as Rust names them", async () => {
+  const all = await raised();
+  const [, create, , exec] = all;
   expect(create?.verb).toBe("create");
   const body =
     create?.detail.kind === "diff" ? (create.detail.result as Side) : undefined;
@@ -143,6 +144,13 @@ test("a create is named by its body's name and an exec by its pod alone, as Rust
   );
   expect(exec?.detail.kind).toBe("session");
   expect(exec?.target).toMatch(/^pods\/[^/]+ in default$/);
+  const undiffed = all.filter(
+    (ask) => ask.verb === "create" && ask.detail.kind === "unknown",
+  );
+  expect(undiffed.length).toBeGreaterThan(0);
+  for (const ask of undiffed) {
+    expect(ask.target).toMatch(/^[a-z]+ in [a-z-]+$/);
+  }
 });
 
 test("a scale is a merge patch of the replicas to the scale subresource, and a delete asks for the background propagation, as kubectl sends them", async () => {

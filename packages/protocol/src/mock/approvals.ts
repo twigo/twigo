@@ -192,7 +192,7 @@ function drafts(): Record<string, Draft> {
       process: "Terminal 3",
       command: "kubectl apply",
       verb: "create",
-      target: "flunders/blue in default",
+      target: "flunders in default",
       detail: {
         kind: "unknown",
         reason: { reason: "aggregated" },
