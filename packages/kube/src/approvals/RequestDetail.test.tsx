@@ -1,6 +1,13 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import type { ApprovalDetail } from "@twigo/protocol";
+import { ConfirmDialog } from "@twigo/ui";
 import { RequestDetail } from "./RequestDetail";
 
 const shown = vi.hoisted(() => ({
@@ -20,7 +27,11 @@ vi.mock("../edit/DiffView", () => ({
     maxHeight?: number;
   }) => {
     shown.views.push(props);
-    return <div data-testid="diff" />;
+    return (
+      <div data-testid="diff">
+        <textarea aria-label="Editor input" />
+      </div>
+    );
   },
 }));
 
@@ -163,4 +174,35 @@ test("an unknown detail says why, and shows the body as code only when it comes"
   draw({ kind: "unknown", reason: { reason: "aggregated" }, body: null });
   expect(screen.getByText(/aggregated API server serves it/)).toBeTruthy();
   expect(screen.queryByRole("region", { name: "Request body" })).toBeNull();
+});
+
+test("Escape pressed in the diff editor is the editor's, and denies nothing", async () => {
+  const onCancel = vi.fn();
+  render(
+    <ConfirmDialog
+      question="Allow Terminal 2 to patch deployments/web?"
+      consequences={[]}
+      cancel="Deny"
+      choices={[{ label: "Allow once", onSelect: vi.fn() }]}
+      onCancel={onCancel}
+    >
+      <RequestDetail
+        detail={{
+          kind: "diff",
+          live: { kind: "ConfigMap" },
+          result: { kind: "ConfigMap" },
+          warnings: [],
+        }}
+      />
+    </ConfirmDialog>,
+  );
+  fireEvent.keyDown(await screen.findByLabelText("Editor input"), {
+    key: "Escape",
+  });
+  expect(onCancel).not.toHaveBeenCalled();
+
+  fireEvent.keyDown(screen.getByRole("button", { name: /Deny/ }), {
+    key: "Escape",
+  });
+  expect(onCancel).toHaveBeenCalledOnce();
 });

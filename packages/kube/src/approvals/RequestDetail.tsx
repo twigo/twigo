@@ -113,6 +113,7 @@ function Changes({
       <div
         role="group"
         aria-label="Changes"
+        data-owns-escape
         className="overflow-hidden rounded-md shadow-[inset_0_0_0_1px_var(--border)]"
       >
         <Suspense fallback={<Skeleton className="m-3 h-4 w-1/2" />}>

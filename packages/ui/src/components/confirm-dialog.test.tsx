@@ -200,3 +200,20 @@ test("a click outside cancels, unless the dialog is told it must not", async () 
   expect(staying.onCancel).not.toHaveBeenCalled();
   expect(screen.getByRole("dialog")).toBeTruthy();
 });
+
+test("Escape pressed inside something marked as owning it is not the dialog's", () => {
+  const { onCancel } = several({
+    children: (
+      <div data-owns-escape>
+        <input aria-label="Find" />
+      </div>
+    ),
+  });
+  fireEvent.keyDown(screen.getByLabelText("Find"), { key: "Escape" });
+  expect(onCancel).not.toHaveBeenCalled();
+
+  fireEvent.keyDown(screen.getByRole("button", { name: /Deny/ }), {
+    key: "Escape",
+  });
+  expect(onCancel).toHaveBeenCalledOnce();
+});

@@ -46,6 +46,7 @@ export interface ConfirmDialogProps {
   readonly lists?: readonly ConfirmList[];
   /** The command line that does the same, shown as code to copy. */
   readonly command?: string;
+  /** An element in it marked `data-owns-escape`, such as an editor, keeps the Escape pressed inside it, which would cancel the dialog. */
   readonly children?: ReactNode;
   /** What the person types before a button works. */
   readonly typed?: string;
@@ -108,6 +109,14 @@ export function ConfirmDialog({
           "flex max-h-[calc(82%-24px)] flex-col overflow-hidden",
           wide ? "max-w-[880px]" : "max-w-[480px]",
         )}
+        onEscapeKeyDown={(event) => {
+          if (
+            event.target instanceof Element &&
+            event.target.closest("[data-owns-escape]")
+          ) {
+            event.preventDefault();
+          }
+        }}
         onPointerDownOutside={(event) => {
           if (!outsideCancels) event.preventDefault();
         }}
