@@ -16,12 +16,15 @@ const MONO = "font-mono text-[11px] wrap-anywhere select-text";
  * The dialog of the ask a process makes (ARCHITECTURE 6.4), one at a time
  * in the order they came and saying how many wait, in its context's colour
  * as a plan's dialog has it. Deny is what Escape does, and focus starts on
- * it, or on the typed name, so a stray Enter allows nothing.
+ * it, or on the typed name, so a stray Enter allows nothing. An ask waits
+ * while a plan's confirmation is open, so it takes neither that dialog's
+ * focus nor its Escape, and it shows once that dialog is gone.
  */
 export function ApprovalHost() {
-  const { approvals } = useWorkbench();
+  const { approvals, operations } = useWorkbench();
   useChanges(approvals.changes);
-  const ask = approvals.current;
+  useChanges(operations.changes);
+  const ask = operations.asking === undefined ? approvals.current : undefined;
   const returnFocus = useReturnFocus(ask !== undefined);
   if (!ask) return null;
   return (

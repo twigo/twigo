@@ -6,15 +6,19 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { Trash2 } from "lucide-react";
 import { afterEach, expect, test, vi } from "vitest";
 import {
   IpcError,
   type ApprovalAsk,
   type ApprovalEvent,
   type Backend,
+  type Plan,
+  type PlanRequest,
 } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { notify } from "@twigo/ui";
+import { ConfirmHost } from "../operations/ConfirmHost";
 import { inWorkbench, testWorkbench } from "../testing";
 import { ApprovalHost } from "./ApprovalHost";
 
@@ -40,6 +44,34 @@ function ask(id: number, over: Partial<ApprovalAsk> = {}): ApprovalAsk {
   };
 }
 
+const REQUEST: PlanRequest = {
+  action: "delete",
+  space: "dev",
+  targets: [
+    {
+      gvr: { group: "", version: "v1", resource: "pods" },
+      namespaced: true,
+      namespace: "default",
+      name: "web-1",
+    },
+  ],
+};
+
+const PLAN: Plan = {
+  id: 7,
+  context: "dev",
+  environment: "development",
+  mode: "read-write",
+  friction: { kind: "confirm" },
+  question: "Delete pod web-1 in default from dev?",
+  confirm: "Delete pod",
+  destructive: true,
+  consequences: [],
+  affected: [],
+  kubectl: "kubectl --context dev delete pods web-1 -n default",
+  doing: "Deleting pod web-1",
+};
+
 const DELETE = ask(9, {
   context: "prod-eu",
   verb: "delete",
@@ -59,6 +91,8 @@ async function broker() {
   } = { emit: () => undefined, refuse: undefined, hold: undefined };
   const backend: Backend = {
     async invoke(command, request) {
+      if (command === "command_plan") return PLAN;
+      if (command === "command_cancel") return null;
       if (command !== "approval_answer") return mock.invoke(command, request);
       answers.push(request);
       await control.hold;
@@ -79,7 +113,13 @@ async function broker() {
     wide: ({ kind }) => kind === "diff",
   });
   await act(() => workbench.approvals.watch());
-  render(<ApprovalHost />, { wrapper: inWorkbench(workbench) });
+  render(
+    <>
+      <ConfirmHost />
+      <ApprovalHost />
+    </>,
+    { wrapper: inWorkbench(workbench) },
+  );
   const raise = (...asks: ApprovalAsk[]) => {
     act(() => {
       for (const next of asks) control.emit({ event: "asked", ask: next });
@@ -330,4 +370,65 @@ test("the dialog says whose context it is, what the client claims and the detail
   expect(screen.getByText("Detail of a delete")).toBeTruthy();
   expect(screen.queryByText("The client says it runs")).toBeNull();
   expect(screen.getByRole("dialog").className).toContain("max-w-[480px]");
+});
+
+const planned = (workbench: Awaited<ReturnType<typeof broker>>["workbench"]) =>
+  workbench.operations.run(REQUEST, { icon: Trash2 });
+
+const titles = () =>
+  [...document.querySelectorAll('[data-slot="dialog-content"] h2')].map(
+    (title) => title.textContent,
+  );
+
+test("an ask that arrives while a plan's confirmation is open waits, and takes neither its focus nor its Escape", async () => {
+  const { workbench, raise, answers } = await broker();
+  const outcome = planned(workbench);
+  await waitFor(() => {
+    expect(titles()).toEqual(["Delete pod web-1 in default from dev?"]);
+  });
+  expect(document.activeElement).toBe(button(/^Cancel/));
+
+  raise(ask(1));
+  expect(titles()).toEqual(["Delete pod web-1 in default from dev?"]);
+  expect(document.activeElement).toBe(button(/^Cancel/));
+
+  fireEvent.keyDown(document.activeElement ?? document.body, {
+    key: "Escape",
+  });
+  await expect(outcome).resolves.toEqual({ state: "cancelled" });
+  expect(answers).toEqual([]);
+  await waitFor(() => {
+    expect(titles()).toEqual([
+      "Allow Terminal 1 to patch deployments/web in default on staging?",
+    ]);
+  });
+  expect(document.activeElement).toBe(button(/^Deny/));
+  expect(answers).toEqual([]);
+});
+
+test("a plan's confirmation that opens over an ask takes the screen, and the ask comes back after it, unanswered", async () => {
+  const { workbench, raise, answers } = await broker();
+  raise(ask(1));
+  expect(titles()).toHaveLength(1);
+
+  const outcome = planned(workbench);
+  await waitFor(() => {
+    expect(titles()).toEqual(["Delete pod web-1 in default from dev?"]);
+  });
+  await waitFor(() => {
+    expect(document.activeElement).toBe(button(/^Cancel/));
+  });
+
+  fireEvent.keyDown(document.activeElement ?? document.body, {
+    key: "Escape",
+  });
+  await expect(outcome).resolves.toEqual({ state: "cancelled" });
+  await waitFor(() => {
+    expect(titles()).toEqual([
+      "Allow Terminal 1 to patch deployments/web in default on staging?",
+    ]);
+  });
+  expect(document.activeElement).toBe(button(/^Deny/));
+  expect(screen.getByText("Allow once")).toBeTruthy();
+  expect(answers).toEqual([]);
 });
