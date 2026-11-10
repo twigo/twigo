@@ -37,6 +37,10 @@ const OF_ENVIRONMENT: Readonly<Record<Environment, ContextColor>> = {
   local: "blue",
 };
 
+export function contextAccent(color: ContextColor): string {
+  return `var(--context-${color})`;
+}
+
 /** Where a context's colour comes from, strongest first. */
 export type ColorSource = "kubeconfig" | "chosen" | "environment" | "automatic";
 

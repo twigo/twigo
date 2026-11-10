@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { Trash2 } from "lucide-react";
 import { afterEach, expect, test, vi } from "vitest";
@@ -16,10 +17,14 @@ function dialog(typed?: string) {
       consequences={["Every object in it goes with it."]}
       command="kubectl --context prod-eu delete namespaces payments"
       {...(typed !== undefined && { typed })}
-      confirm="Delete namespace"
-      icon={Trash2}
-      destructive
-      onConfirm={onConfirm}
+      choices={[
+        {
+          label: "Delete namespace",
+          icon: Trash2,
+          destructive: true,
+          onSelect: onConfirm,
+        },
+      ]}
       onCancel={onCancel}
     />,
   );
@@ -79,9 +84,9 @@ test("each list says what happens to its objects, how many, and names them", () 
           ],
         },
       ]}
-      confirm="Delete deployment"
-      destructive
-      onConfirm={vi.fn()}
+      choices={[
+        { label: "Delete deployment", destructive: true, onSelect: vi.fn() },
+      ]}
       onCancel={vi.fn()}
     />,
   );
@@ -89,4 +94,77 @@ test("each list says what happens to its objects, how many, and names them", () 
   expect(list.textContent).toBe(
     "With it go2ReplicaSetweb-5d4fPodweb-5d4f-x2kq9shop",
   );
+});
+
+function several(props: Partial<ComponentProps<typeof ConfirmDialog>> = {}) {
+  const once = vi.fn();
+  const lasting = vi.fn();
+  const onCancel = vi.fn();
+  render(
+    <ConfirmDialog
+      question="Allow Terminal 2 to patch deployments/web in default on staging?"
+      consequences={[]}
+      cancel="Deny"
+      choices={[
+        { label: "Allow once", onSelect: once },
+        { label: "Allow for 15 minutes", onSelect: lasting },
+      ]}
+      onCancel={onCancel}
+      {...props}
+    />,
+  );
+  return { once, lasting, onCancel };
+}
+
+test("each choice is a button of its own, the first one is what Enter takes, and the decline names itself", () => {
+  const { once, lasting, onCancel } = several();
+  const deny = screen.getByRole("button", { name: /Deny/ });
+  expect(document.activeElement).toBe(deny);
+  expect(screen.queryByRole("button", { name: /Cancel/ })).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Allow for 15 minutes" }));
+  expect(lasting).toHaveBeenCalledWith(undefined);
+  expect(once).not.toHaveBeenCalled();
+
+  fireEvent.submit(screen.getByRole("button", { name: "Allow once" }));
+  expect(once).toHaveBeenCalledWith(undefined);
+  expect(onCancel).not.toHaveBeenCalled();
+});
+
+test("a typed name holds every choice back, and the choice that is picked gets it", () => {
+  const { once, lasting } = several({ typed: "staging" });
+  const field = screen.getByLabelText("Type staging to confirm");
+  const buttons = ["Allow once", "Allow for 15 minutes"].map((name) =>
+    screen.getByRole("button", { name }),
+  );
+  expect(buttons.map((button) => button.hasAttribute("disabled"))).toEqual([
+    true,
+    true,
+  ]);
+  fireEvent.change(field, { target: { value: "staging" } });
+  fireEvent.click(buttons[1] ?? document.body);
+  expect(lasting).toHaveBeenCalledWith("staging");
+  expect(once).not.toHaveBeenCalled();
+});
+
+test("while an answer is on its way no button works, and a refusal is read aloud above them", () => {
+  const { once, lasting, onCancel } = several({
+    busy: true,
+    error: "The ask is gone.",
+  });
+  for (const name of [/Deny/, "Allow once", "Allow for 15 minutes"]) {
+    const button = screen.getByRole("button", { name });
+    expect(button.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(button);
+  }
+  expect(screen.getByRole("alert").textContent).toContain("The ask is gone.");
+  expect(once).not.toHaveBeenCalled();
+  expect(lasting).not.toHaveBeenCalled();
+  expect(onCancel).not.toHaveBeenCalled();
+});
+
+test("what it is given to show comes after the question, and it widens when asked to", () => {
+  several({ wide: true, children: <p>Changes go here.</p> });
+  expect(screen.getByText("Changes go here.")).toBeTruthy();
+  expect(screen.getByRole("dialog").className).toContain("max-w-[880px]");
 });
