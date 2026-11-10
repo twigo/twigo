@@ -1618,7 +1618,8 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
       A denial covers every repeat; "once" covers only a repeat of the verb, decoded path and class it was answered for, the `GET` and `POST` of a pod's stream as one, and one request at a time.
       A request takes it as it is sent and gives it back only when it reached no server: after the proxy's own `429`, or a pod's stream answered other than `101`, as nothing of it runs before the kubelet's `101` ([`ServeExec`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/cri-streaming/pkg/streaming/remotecommand/exec.go#L40-L48)); a proxy's answer came from its backend, and a request whose client went may have reached the server, so neither gives it back.
     - An ask is withdrawn when its request goes, as when kubectl is killed, when the process's handle drops, when the window goes, and when the context's access changes so that the request needs no approval any more, which then goes on as the gate says.
-    - The audit log notes each answer: `once`, `lasting`, `denied`, `nobody` when no window could ask, or `withdrawn`.
+    - The audit log notes how each ask ended: `once`, `lasting`, `denied`, `nobody` when no window could ask, or `withdrawn`.
+      An answer counts only when its waiting request takes it: one that comes after the request went is refused, and the window gets the withdrawal.
     - Agents may use the scope "this process" for the rest of one run, except for deletes, which comes with them (M3).
       Terminals get only "once" and "for 15 minutes", because a terminal's token lives as long as the shell.
   - For agents, the Rule of Two (6.6) also applies in `read-write` contexts: after untrusted content, their writes, exec-class requests and Secret reads go to the broker one call at a time.

@@ -72,7 +72,17 @@ type Follower = Box<dyn FnMut(ApprovalEvent) -> bool + Send>;
 struct Pending {
     window: Arc<str>,
     ask: ApprovalAsk,
+    audited: Audited,
     resolve: oneshot::Sender<Resolution>,
+}
+
+/// What the audit log names of an ask's request: never a value or a token.
+struct Audited {
+    context: String,
+    actor: &'static str,
+    process: Arc<str>,
+    verb: String,
+    target: String,
 }
 
 enum Resolution {
@@ -243,6 +253,7 @@ impl Approvals {
                 Pending {
                     window,
                     ask,
+                    audited: asking.audited(),
                     resolve,
                 },
             );
@@ -250,7 +261,6 @@ impl Approvals {
         };
         let _withdraw = Withdraw {
             approvals: self,
-            asking: &asking,
             id,
         };
         self.wait(&asking, resolved, changes).await
@@ -271,7 +281,9 @@ impl Approvals {
                 () = holder.ended.cancelled() => return Outcome::Ended,
                 resolution = &mut resolved => return match resolution {
                     Ok(Resolution::Answered(answer)) => self.answered(asking, answer),
-                    Ok(Resolution::Nobody) | Err(_) => self.nobody(asking),
+                    // Audited as the window went.
+                    Ok(Resolution::Nobody) => self.unasked(asking),
+                    Err(_) => self.nobody(asking),
                 },
                 () = changes.next() => {
                     if self.policy.connection(&holder.context) != Some(holder.connection) {
@@ -294,7 +306,6 @@ impl Approvals {
         let mut state = self.state();
         match answer {
             ApprovalAnswer::Deny => {
-                self.audit(asking, "denied");
                 let message = format!(
                     "{} {} on {context} was denied in Twigo, so Twigo did not send it",
                     attributes.verb,
@@ -305,7 +316,6 @@ impl Approvals {
                 Outcome::Denied(message)
             }
             ApprovalAnswer::Once => {
-                self.audit(asking, "once");
                 let approval = Approval::once(context, holder.actor, attributes);
                 let id = state.onces;
                 state.onces += 1;
@@ -321,7 +331,6 @@ impl Approvals {
                 }
             }
             ApprovalAnswer::Lasting => {
-                self.audit(asking, "lasting");
                 let access = self.policy.access(context);
                 let until = Timestamp::now()
                     .saturating_add(LASTING)
@@ -347,7 +356,12 @@ impl Approvals {
 
     /// Denied, as no window could ask; its repeats too.
     fn nobody(&self, asking: &Asking<'_>) -> Outcome<'_> {
-        self.audit(asking, "nobody");
+        self.audit(&asking.audited(), "nobody");
+        self.unasked(asking)
+    }
+
+    /// [`Approvals::nobody`], but not audited.
+    fn unasked(&self, asking: &Asking<'_>) -> Outcome<'_> {
         let message = asking.blocked.to_string();
         let cover = Cover::Denied(message.clone());
         self.state()
@@ -418,8 +432,31 @@ impl Approvals {
             ));
         }
         let pending = state.asks.remove(&answer.id.0).expect("found above");
-        // Its request may have gone meanwhile, and nothing waits then.
-        let _ = pending.resolve.send(Resolution::Answered(answer.answer));
+        if pending
+            .resolve
+            .send(Resolution::Answered(answer.answer))
+            .is_err()
+        {
+            // Its request went and has not withdrawn the ask yet.
+            if let Some(follower) = state.followers.get_mut(&pending.window)
+                && !follower(ApprovalEvent::Withdrawn { id: answer.id })
+            {
+                state.followers.remove(&pending.window);
+            }
+            drop(state);
+            self.audit(&pending.audited, "withdrawn");
+            return Err(IpcError::new(
+                ErrorKind::NotFound,
+                "the process no longer waits for this answer",
+            ));
+        }
+        drop(state);
+        let audited = match answer.answer {
+            ApprovalAnswer::Deny => "denied",
+            ApprovalAnswer::Once => "once",
+            ApprovalAnswer::Lasting => "lasting",
+        };
+        self.audit(&pending.audited, audited);
         Ok(())
     }
 
@@ -434,6 +471,7 @@ impl Approvals {
             .filter(|(_, pending)| *pending.window == *window)
             .map(|(id, _)| *id)
             .collect();
+        let mut ended = Vec::new();
         for id in gone {
             let pending = state.asks.remove(&id).expect("listed above");
             if let Some(send) = &mut follower
@@ -441,8 +479,13 @@ impl Approvals {
             {
                 follower = None;
             }
-            // Its request may have gone meanwhile, and nothing waits then.
-            let _ = pending.resolve.send(Resolution::Nobody);
+            // Its request may have gone and not withdrawn the ask yet.
+            let taken = pending.resolve.send(Resolution::Nobody).is_ok();
+            ended.push((pending.audited, if taken { "nobody" } else { "withdrawn" }));
+        }
+        drop(state);
+        for (audited, answer) in ended {
+            self.audit(&audited, answer);
         }
     }
 
@@ -453,23 +496,32 @@ impl Approvals {
             .retain(|(granted, _), _| *granted != process);
     }
 
-    fn audit(&self, asking: &Asking<'_>, answer: &str) {
-        let Asking {
-            holder, attributes, ..
-        } = asking;
+    fn audit(&self, audited: &Audited, answer: &str) {
         self.policy.audit().record(&Entry::Approval {
-            context: &holder.context,
-            actor: holder.actor.name(),
-            process: &holder.label,
-            verb: &attributes.verb,
-            target: &attributes.target(),
-            mode: self.policy.access(&holder.context).mode,
+            context: &audited.context,
+            actor: audited.actor,
+            process: &audited.process,
+            verb: &audited.verb,
+            target: &audited.target,
+            mode: self.policy.access(&audited.context).mode,
             answer,
         });
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
         self.state.lock().expect("approvals lock")
+    }
+}
+
+impl Asking<'_> {
+    fn audited(&self) -> Audited {
+        Audited {
+            context: self.holder.context.clone(),
+            actor: self.holder.actor.name(),
+            process: Arc::clone(&self.holder.label),
+            verb: self.attributes.verb.clone(),
+            target: self.attributes.target(),
+        }
     }
 }
 
@@ -540,7 +592,6 @@ impl Drop for Once<'_> {
 /// dropped as kubectl went, its process ended, or its decision changed.
 struct Withdraw<'a> {
     approvals: &'a Approvals,
-    asking: &'a Asking<'a>,
     id: u32,
 }
 
@@ -558,7 +609,7 @@ impl Drop for Withdraw<'_> {
             state.followers.remove(&pending.window);
         }
         drop(state);
-        self.approvals.audit(self.asking, "withdrawn");
+        self.approvals.audit(&pending.audited, "withdrawn");
     }
 }
 
@@ -569,6 +620,95 @@ mod tests {
     use twigo_policy::Actor;
 
     use super::*;
+
+    fn ask(id: u32) -> ApprovalAsk {
+        ApprovalAsk {
+            id: ApprovalId(id),
+            context: "kind-a".to_owned(),
+            process: "Terminal 1".to_owned(),
+            command: None,
+            verb: "create".to_owned(),
+            class: RequestClass::Write,
+            target: "configmaps in a".to_owned(),
+            impersonate: None,
+            detail: ApprovalDetail::Unknown {
+                reason: twigo_ipc::NoDiff::NotAResource,
+                body: None,
+            },
+            typed: false,
+            lasting_minutes: Some(15),
+        }
+    }
+
+    fn audited() -> Audited {
+        Audited {
+            context: "kind-a".to_owned(),
+            actor: "terminal",
+            process: "Terminal 1".into(),
+            verb: "create".to_owned(),
+            target: "configmaps in a".to_owned(),
+        }
+    }
+
+    /// The answers the audit log holds, in order.
+    fn answers(audit: &std::path::Path) -> Vec<String> {
+        let text = std::fs::read_to_string(audit).unwrap_or_default();
+        text.lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .map(|line| line["answer"].as_str().unwrap().to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn an_answer_is_taken_only_by_its_waiting_request_and_audited_either_way() {
+        let dir = tempfile::tempdir().unwrap();
+        let audit = dir.path().join("audit.jsonl");
+        let policy = Policy::new(
+            twigo_policy::PolicyFile::default(),
+            |_| Some(twigo_policy::Metadata::default()),
+            twigo_policy::Choices::default(),
+            twigo_policy::Audit::open(&audit),
+        );
+        let (_catalog, catalog) = watch::channel(None);
+        let approvals = Approvals::new(policy, catalog);
+        let (events, mut told) = tokio::sync::mpsc::unbounded_channel();
+        approvals.follow_window("main", move |event| events.send(event).is_ok());
+        let answer = |id| AnswerApproval {
+            id: ApprovalId(id),
+            answer: ApprovalAnswer::Once,
+            typed: None,
+        };
+
+        // Its request went, and has not withdrawn it yet.
+        let (resolve, resolved) = oneshot::channel();
+        drop(resolved);
+        let pending = Pending {
+            window: "main".into(),
+            ask: ask(7),
+            audited: audited(),
+            resolve,
+        };
+        approvals.state().asks.insert(7, pending);
+        let refused = approvals.answer("main", answer(7));
+        assert_eq!(refused.unwrap_err().kind, ErrorKind::NotFound);
+        assert_eq!(
+            told.try_recv().unwrap(),
+            ApprovalEvent::Withdrawn { id: ApprovalId(7) }
+        );
+        assert_eq!(answers(&audit), ["withdrawn"]);
+
+        // Its request waits: the answer is audited as it is taken.
+        let (resolve, _resolved) = oneshot::channel();
+        let pending = Pending {
+            window: "main".into(),
+            ask: ask(8),
+            audited: audited(),
+            resolve,
+        };
+        approvals.state().asks.insert(8, pending);
+        approvals.answer("main", answer(8)).unwrap();
+        assert_eq!(answers(&audit), ["withdrawn", "once"]);
+    }
 
     #[test]
     fn a_cover_lasts_15_seconds_of_the_wall_clock() {
