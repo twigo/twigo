@@ -44,6 +44,9 @@ Findings that belong to no step yet.
   - A CronJob's resume asks even when it missed no run while suspended: telling which needs its schedule read in its time zone, as its next run does.
 - A countdown's toast behind three newer ones is hidden by sonner (`visibleToasts`), so only ⌘Z cancels it until they go: keep a waiting countdown in front.
 - The audit log (`twigo_policy::Audit`) grows without bound: a person's writes add a few lines each, so rotate it once actors other than the UI write (M3).
+- The policy proxy and its broker (`twigo_core::proxy`, `twigo_core::approvals`, ARCHITECTURE 6.4):
+  - No token is pre-approved yet: a process started by a confirmed command, as Helm's release actions will be (7.2), should get one for exactly what the person confirmed.
+  - Agents have neither the scope "this process" nor the Rule of Two (6.6) yet; both come with them in M3.
 - The bench:
   - Core RSS, against its budget of 150 MB: kube 5 did not move the typical value, but spikes over the budget came only on kube 5, and their cause is not known.
     `bench/harness.sh` five times each, in turn, on `b6043b6` and on it with only kube, k8s-openapi and serde-saphyr set back to 4.2, 0.28 and 0.0.29, on fresh clusters on 2026-11-07, read 145, 144, 144, 144 and 143 MB on kube 4.2, and 152, 144, 141, 143 and 142 MB on kube 5.

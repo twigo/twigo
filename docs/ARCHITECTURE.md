@@ -138,10 +138,11 @@ Everything NATS-specific goes.
 │ twigo-netmon    wake from sleep · network changes (IOKit, SystemConfiguration,        │
 │                 logind, rtnetlink)                                                    │
 │                                                                                       │
-│ twigo-core      spaces · settings · catalog · command bus · approval broker · state   │
+│ twigo-core      spaces · settings · catalog · command bus · policy proxy · approval   │
+│                 broker · state                                                        │
 │  ├─ twigo-kube      kubeconfig source · client factory · credential runner            │
 │  │                  discovery + OpenAPI cache · operations (apply, scale, drain…)     │
-│  │                  └─ policy layer (tower) ◄── twigo-policy: modes · proxy · audit   │
+│  │                  └─ policy layer (tower) ◄── twigo-policy: modes · approval · audit│
 │  ├─ twigo-cache     watch hub: upstream watches → row stores → query views → batcher  │
 │  ├─ twigo-sessions  logs · exec/attach · port-forward manager · local pty             │
 │  ├─ twigo-ext-host  wasmtime, one store per extension · capability gate · registry    │
@@ -180,12 +181,12 @@ Detached editor windows (VS Code's auxiliary windows) come after the MVP.
 twigo/
 ├─ apps/desktop/              Tauri app: thin glue; src-tauri only wires crates into commands/channels
 ├─ crates/
-│  ├─ twigo-core/             app services: spaces, settings layers, catalog, command bus and its actions, approvals
+│  ├─ twigo-core/             app services: spaces, settings layers, catalog, command bus and its actions, policy proxy and approval broker
 │  ├─ twigo-kube/             contexts, client factory, credential runner, discovery/OpenAPI cache
 │  ├─ twigo-cache/            watch hub (upstreams, row stores, query views, batching), the discovery it follows
 │  ├─ twigo-describe/         describers by GroupKind: an object and its related facts → the Overview document (4.3)
 │  ├─ twigo-sessions/         logs, exec/attach, port-forward manager, pty terminal
-│  ├─ twigo-policy/           read-only modes, authorize(), policy proxy, approvals, audit log, redaction
+│  ├─ twigo-policy/           read-only modes, authorize(), what an approval covers, audit log, redaction
 │  ├─ twigo-env/              login-shell environment resolution
 │  ├─ twigo-ipc/              protocol types (serde) + TS codegen (ts-rs); channel framing
 │  ├─ twigo-keyboard/         active keyboard layout and its changes, from TIS, xkbcommon and ToUnicodeEx
@@ -216,6 +217,7 @@ Why these crates:
   Its tests run on objects recorded from kind, and the UI and `twigo mcp` describe an object alike.
 - `twigo-policy` sits under everything that can reach a cluster.
   `twigo-kube` builds its gate into every client, so the crate holds no Kubernetes client of its own.
+  What an approval covers is its too, while the policy proxy's server and the approval broker live in `twigo-core`, since they need the context's clients and the windows.
 - `twigo-keyboard` keeps the OS's keyboard APIs out of `apps/desktop`.
   It needs no Tauri, and its tests read named layouts without a window.
 - `twigo-netmon` keeps the OS's power and network notifications out of the transport, which only learns that the machine woke or the network changed.
@@ -307,12 +309,14 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
       Actors other than the UI may hold at most 20 of them, so an agent's lists cannot starve the UI.
   - A watch, log or request over its budget waits in the counter and shows `queued`.
     The proxy's class refuses instead, with the `429` of 6.4.
+  - A request the policy proxy sends carries a marker, `Proxied`, that makes the counter take a stream of the proxy's class whatever its URI, a watch or a followed log included, so it never waits among the hub's, and fail at once with `OverBudget` when they are all taken.
+  - The credential layer drops a `401`'s response before its retry, so no request holds two streams: with a budget of one, a request's retry waited for its own first try, or the proxy's refused it (`a_retry_after_a_401_goes_through_a_full_budget_of_one` in `crates/twigo-kube/tests/credentials.rs`).
   - Timeouts start when the counter admits a stream.
     A per-request timeout, a tower layer rather than a socket read timeout, backs the counter up against a server with a lower limit.
     It gives the response's headers 70 s, more than the 60 s the API server allows a request that is not long-running, so it cuts nothing the server still works on.
   - Sessions, meaning exec, attach and port-forward connections, have their own budget (default 64), counted in the same place below every actor.
     A session's permit outlives the `101` response, which `hyper::upgrade::on` drops: the upgraded stream holds it, and so does the policy proxy's splice.
-    A proxied upgrade over the budget gets the proxy's `429` instead of waiting (6.4).
+    A proxied upgrade takes its session from this budget, not the proxy's 16, and over it gets the proxy's `429` instead of waiting (6.4).
   - A proxy or server that answers HTTP/1.1 turns every stream back into a connection; the budgets stay the same.
     Benchmarks tune each of them.
   - When the watch budget is full, the least recently used idle upstreams are evicted.
@@ -1571,7 +1575,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   A write to `secrets` also needs what reading one needs, since its answer is the stored Secret and an empty patch changes nothing.
 
   The mode allows or blocks every other class.
-  In `guarded` the UI's writes and exec pass, since its commands confirm above the layer and the command bus checks that they did (5.1); anyone else's need the broker, and until there is one the answer is deny.
+  In `guarded` the UI's writes and exec pass, since its commands confirm above the layer and the command bus checks that they did (5.1); anyone else's pass only with an approval the broker attached to the request (below).
   Confirmations, typed context names and diffs belong to the commands above the layer, because at the HTTP level a scale is one PATCH and a drain is many requests.
 
 - **Actors.**
@@ -1581,23 +1585,41 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
 - **Child processes go through a policy proxy.**
   `helm` for release actions, kubectl in actions, the `kubectl port-forward` fallback, agent sessions and terminals of every context that is not `read-write` get a generated kubeconfig.
   Provider contexts always use it in terminals (4.6).
-  - It points at a loopback endpoint in the core, with a bearer token per process and context.
-    Each token maps to a context, an actor and, optionally, a pre-approval.
-  - Ordinary requests and watches go through the same per-context clients, stream counter and policy layer.
-  - Upgrade requests are checked by the same classes, then forwarded with the actor's HTTP/1.1 client and spliced with `hyper::upgrade::on`, which is all kube's own `connect` does (`kube-client/src/client/mod.rs`).
+  - It points at a loopback endpoint in the core (`crates/twigo-core/src/proxy`): HTTP/1.1 over TLS on `127.0.0.1`, on a port the OS picks when the core gives its first process a token, kept for the app's life.
+    TLS guards nothing the token does not, but clientcmd reads a user's credentials only for an https server ([`ClientConfig`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/client-go/tools/clientcmd/client_config.go#L230-L249)), so kubectl sends no token to `http://`; a CA made in memory per run signs the endpoint's certificate for `127.0.0.1`, and each kubeconfig trusts that CA alone.
+  - Each process gets a kubeconfig of its own in `proxy/` under the app-data directory (0700, the file 0600), deleted with the process's handle and, should the app end first, at the next start.
+    It holds a context per context the catalog lists, named as the catalog names it, with its namespace, whose server is `https://127.0.0.1:<port>/<id>` and whose user holds only a token.
+    `<id>` is `[a-z0-9]+`, from the context's name and its connection, so kubectl's discovery cache, a directory per server URL, never answers for another context or for another cluster the name moves to ([`computeDiscoverCacheDir`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/cli-runtime/pkg/genericclioptions/config_flags.go#L514-L522)).
+  - A token is 32 random bytes, one per process and context, kept only by its SHA-256 digest.
+    It maps to the process, its context and the context's connection when it was given, an actor, the window that may ask, and the process's label; nothing writes it to stderr or the audit log.
+  - What a request meets, in order: a `Host` other than the endpoint's or any `Origin`, `403`, as kubectl proxy guards against DNS rebinding; no token, an unknown one or another context's path prefix, `401`; an empty, `.` or `..` segment, `400`; a context that names another cluster than when the token was given, `403`, so a token never reaches the new one; then the gate's decision.
+    Every refusal is a Kubernetes `Status` whose message starts with `Twigo: `, in the gate's words where the gate refused, which kubectl prints.
+  - `Impersonate-*` goes on unless the context's kubeconfig acts as someone already, which gets a `400`: kube appends its own impersonation headers to the request's, and a request of two identities is not what the person asked for.
+  - `Authorization`, `Host` and hop-by-hop headers stop at the proxy, `Upgrade` and `Connection: Upgrade` excepted on an upgrade; `User-Agent`, `Kubectl-Command` and the WebSocket and SPDY headers pass as they came, and nothing is added.
+  - Ordinary requests and watches go through the actor's clients over the context's shared connections, stream counter and policy layer, so auth, the 401 refresh, the proxy connector and the gate stay one path.
+    The body is read whole, as kube's request body cannot stream, and above the API server's own 3 MiB gets a `413`.
+    The answer passes back frame by frame, hop-by-hop headers aside, and ends when the process's handle drops; a relock leaves it, as it is a read.
+  - Upgrade requests take a session of the context's budget (3.2), go on the actor's HTTP/1.1 client with an empty body, and on a `101` are spliced with `hyper::upgrade::on`, which is all kube's own `connect` does ([`connect`](https://github.com/kube-rs/kube/blob/5.0.0/kube-client/src/client/mod.rs#L240-L275)).
     The raw upgraded stream passes through whatever the protocol: WebSocket, SPDY, or SPDY over WebSocket.
-    Auth, the 401 refresh, the proxy connector and the policy layer stay one path.
-  - **A process started by a confirmed command** (a Helm release action, an action with `confirm`) gets a token pre-approved for exactly what the user confirmed: the verbs and objects the command listed.
-    A request outside that set goes to the approval broker.
-  - **Other processes in `guarded` contexts** (terminals, unconfirmed actions, agents): writes and exec-class requests go to the approval broker.
-    - The broker shows the verb, the resource, the name, and a dry-run diff where one can be computed.
-    - Deletes ask for the typed context name.
-    - Agents may use the scope "this process" for the rest of one run, except for deletes.
-      Terminals get only "once" and "for N minutes", because a terminal's token lives as long as the shell.
-    - When the UI cannot ask, the answer is deny.
+    Either direction's end ends both, as kube-apiserver's own proxy does, and so do the process's handle dropping, its context naming another cluster, and a mode that now refuses its class whatever any approval says: a terminal's `kubectl exec` ends when its context turns `read-only` (within 3 ms of the relock in two runs of `crates/twigo-core/tests/proxy_live.rs` on kind 1.37, 2026-11-10), while `guarded` ends none.
+  - **Pre-approved tokens** for a process started by a confirmed command (a Helm release action, an action with `confirm`), for exactly the verbs and objects the command listed, come with their first callers (7.2); a request outside that set would go to the approval broker.
+  - **Other processes in `guarded` contexts** (terminals, unconfirmed actions, agents): writes and exec-class requests go to the approval broker (`crates/twigo-core/src/approvals.rs`).
+    - The proxy asks the gate first with no approval, only to know whether to ask; the request then meets the gate with the approval the broker attached, a `twigo_policy::Approval` request extension, which the gate reads with the attributes at the top and keeps for the recheck above the socket, so a relock still stops an approved request that waited.
+    - An approval names its context and actor and covers either exactly the verb, decoded path and class the person saw ("once"), or every write and exec of that process on that context until a wall-clock time, deletes excepted ("for 15 minutes").
+      `read-only` refuses whatever approval a request carries, and `read-write` needs none.
+    - The ask goes to the window the token names, which follows asks with `approvals_watch`; with no such window the answer is deny.
+      It shows the verb, the target, the client's `Kubectl-Command`, whom `--as` acts as, and what the request would do: a dry run of the same request through the same actor's clients against the live object for a write of a resource itself, Secret values masked, but only in groups kube-apiserver serves itself, as an aggregated server that ignored `dryRun` would perform the write before the person answers; whether an APIService names a `spec.service` is read as the actor and kept 5 minutes.
+    - Deletes ask for the typed context name, and "for 15 minutes" never covers one.
+      "For 15 minutes" holds only while the context's mode, where it comes from and its connection stay, a change that went back included, and ends with the process's handle.
+    - One answer covers a request's repeats for 15 s, by token, path, query and body, the method aside for an upgrade: kubectl repeats a refused upgrade over SPDY after WebSocket, and a write after each `429`.
+      A denial covers every repeat; "once" covers repeats only while none of them has reached the server.
+    - An ask is withdrawn when its request goes, as when kubectl is killed, when the process's handle drops, when the window goes, and when the context's access changes so that the request needs no approval any more, which then goes on as the gate says.
+    - The audit log notes each answer: `once`, `lasting`, `denied`, `nobody` when no window could ask, or `withdrawn`.
+    - Agents may use the scope "this process" for the rest of one run, except for deletes, which comes with them (M3).
+      Terminals get only "once" and "for 15 minutes", because a terminal's token lives as long as the shell.
   - For agents, the Rule of Two (6.6) also applies in `read-write` contexts: after untrusted content, their writes, exec-class requests and Secret reads go to the broker one call at a time.
   - The proxy has its own cap on concurrent streams per context (default 16, 3.2).
-    Over the cap it answers `429` with `Retry-After`, because client-go retries a 429 only when that header is present.
+    Over the cap it answers `429` with `Retry-After: 1`, because client-go retries a 429 only when that header holds whole seconds, ten times at most.
     An upgrade while the session budget is full gets a `429` too, but client-go never waits for an upgrade: `kubectl exec`, `attach` and `port-forward` fail with it, and `kubectl run -it` and `debug -it` fall back to printing logs.
     The proxy never queues requests and never evicts the UI's upstreams (3.2).
 - **What the proxy does not cover.**
