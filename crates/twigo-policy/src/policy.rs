@@ -22,7 +22,7 @@ pub const UNLOCK: SignedDuration = SignedDuration::from_mins(15);
 const RELOCK_CHECK: Duration = Duration::from_secs(30);
 
 /// What the catalog says of a context it lists.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Metadata {
     /// `twigo.readOnly` in its kubeconfig.
     pub read_only: Option<bool>,
@@ -32,6 +32,10 @@ pub struct Metadata {
     /// Changes when what it connects to does, or what its kubeconfig says of
     /// it: an unlock holds only for what it was given on.
     pub connection: u64,
+    /// Changes with each change of the rest, and when the context is listed
+    /// again, and never comes back to a value it had, so that what holds to
+    /// it ends with a change that went back.
+    pub revision: u64,
 }
 
 /// What the person chose, by context.
@@ -299,6 +303,12 @@ impl Policy {
         (self.metadata)(context).map(|metadata| metadata.connection)
     }
 
+    /// [`Metadata::revision`] of what the catalog says of the context now;
+    /// none while no source lists it.
+    pub fn revision(&self, context: &str) -> Option<u64> {
+        (self.metadata)(context).map(|metadata| metadata.revision)
+    }
+
     fn decide(
         &self,
         context: &str,
@@ -416,8 +426,8 @@ impl Policy {
     }
 
     /// How many times a choice, an unlock or its end changed what `context`
-    /// lets through: what someone holds to it lasts only while this stays.
-    /// What the catalog says of a context changes its connection instead.
+    /// lets through: what someone holds to it lasts only while this stays,
+    /// and [`Policy::revision`] too.
     pub fn changes_of(&self, context: &str) -> u64 {
         self.held()
             .changed

@@ -76,6 +76,8 @@ struct Grant {
     connection: u64,
     /// [`Policy::changes_of`] the context when it was given.
     changes: u64,
+    /// [`Policy::revision`] of the context when it was given.
+    revision: Option<u64>,
 }
 
 struct Repeat {
@@ -333,6 +335,7 @@ impl Approvals {
                         source: access.source,
                         connection: holder.connection,
                         changes: self.policy.changes_of(context),
+                        revision: self.policy.revision(context),
                     },
                 );
                 Outcome::Approved {
@@ -361,6 +364,7 @@ impl Approvals {
         let access = self.policy.access(context);
         Timestamp::now() < grant.until
             && self.policy.changes_of(context) == grant.changes
+            && self.policy.revision(context) == grant.revision
             && access.mode == grant.mode
             && access.source == grant.source
             && self.policy.connection(context) == Some(grant.connection)

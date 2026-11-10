@@ -10,6 +10,7 @@ const NOTHING: Metadata = Metadata {
     provider: None,
     environment: None,
     connection: 0,
+    revision: 0,
 };
 
 fn file(text: &str) -> (tempfile::TempDir, PolicyFile) {
@@ -107,7 +108,7 @@ fn the_sources_rank_as_the_architecture_lists_them() {
         read_only: Some(false),
         provider: Some(Mode::Guarded),
         environment: Some(Environment::Production),
-        connection: 0,
+        ..NOTHING
     };
     let policy = Policy::new(
         entries.clone(),

@@ -32,8 +32,8 @@ use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use twigo_core::{Core, ProxyProcess};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    AnswerApproval, ApprovalAnswer, ApprovalAsk, ApprovalDetail, ApprovalEvent, ErrorKind, Mode,
-    RequestClass,
+    AnswerApproval, ApprovalAnswer, ApprovalAsk, ApprovalDetail, ApprovalEvent, Environment,
+    ErrorKind, Mode, RequestClass,
 };
 use twigo_policy::Actor;
 
@@ -179,30 +179,35 @@ async fn answer(
     Ok(response)
 }
 
-/// A core over a kubeconfig of two contexts on the fake server, whose user
-/// has no credential, so no `Authorization` of its own reaches the server.
-async fn core(dir: &Path, fake: &Fake) -> Arc<Core> {
-    let kubeconfig = dir.join("config");
-    std::fs::write(
-        &kubeconfig,
-        format!(
-            "
+/// `kind-a` as the test kubeconfig lists it at first.
+const KIND_A: &str = "
+- name: kind-a
+  context: { cluster: fake, user: nobody, namespace: a }";
+
+/// A kubeconfig of `kind_a`, none if empty, and `kind-b` on `server`, whose
+/// user has no credential, so no `Authorization` of its own reaches it.
+fn kubeconfig(server: &str, kind_a: &str) -> String {
+    format!(
+        "
 clusters:
 - name: fake
-  cluster: {{ server: 'http://{}' }}
+  cluster: {{ server: '{server}' }}
 users:
 - name: nobody
   user: {{}}
-contexts:
-- name: kind-a
-  context: {{ cluster: fake, user: nobody, namespace: a }}
+contexts:{kind_a}
 - name: kind-b
   context: {{ cluster: fake, user: nobody }}
-",
-            fake.address
-        ),
+"
     )
-    .unwrap();
+}
+
+/// A core over the kubeconfig `config` in `dir`, of two contexts on the
+/// fake server.
+async fn core(dir: &Path, fake: &Fake) -> Arc<Core> {
+    let kubeconfig = dir.join("config");
+    let server = format!("http://{}", fake.address);
+    std::fs::write(&kubeconfig, self::kubeconfig(&server, KIND_A)).unwrap();
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
     let (status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
         std::iter::empty::<(OsString, OsString)>(),
@@ -1022,6 +1027,119 @@ async fn once_covers_a_repeat_after_the_proxy_s_own_429() {
     assert_eq!(response.status(), StatusCode::CREATED);
     assert!(events.try_recv().is_err(), "the 429 reached no server");
     assert_eq!(fake.writes(Method::POST), 1);
+}
+
+/// What the catalog says of `kind-a` for its mode, none while it lists none.
+async fn said_of_kind_a(core: &Core) -> Option<(Option<bool>, Option<Environment>, u64)> {
+    let contexts = core.catalog.contexts().await;
+    let found = contexts.find("kind-a")?;
+    Some((
+        found.read_only,
+        found.environment,
+        found.fingerprint.value(),
+    ))
+}
+
+/// Writes `text` to the core's kubeconfig and waits until what the catalog
+/// says of `kind-a` is `wanted`, or other than it.
+async fn rewrite(
+    core: &Core,
+    dir: &Path,
+    text: &str,
+    said: Option<(Option<bool>, Option<Environment>, u64)>,
+    wanted: bool,
+) {
+    std::fs::write(dir.join("config"), text).unwrap();
+    let waited = tokio::time::timeout(WAIT, async {
+        while (said_of_kind_a(core).await == said) != wanted {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    });
+    waited
+        .await
+        .expect("the catalog reads the kubeconfig again");
+}
+
+#[tokio::test]
+async fn lasting_ends_with_a_change_of_what_the_catalog_says_that_went_back() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut events = follow(&core, "main");
+    let server = format!("http://{}", fake.address);
+    let first = kubeconfig(&server, KIND_A);
+    let marked = |extension: &str| {
+        let kind_a = format!(
+            "
+- name: kind-a
+  context:
+    cluster: fake
+    user: nobody
+    namespace: a
+    extensions:
+    - name: twigo
+      extension: {extension}"
+        );
+        kubeconfig(&server, &kind_a)
+    };
+    let said = said_of_kind_a(&core).await;
+    let mut outlived = Vec::new();
+    for (what, changed) in [
+        ("its connection", kubeconfig("http://127.0.0.1:1", KIND_A)),
+        ("twigo.readOnly", marked("{ readOnly: true }")),
+        ("its environment", marked("{ environment: Staging }")),
+        ("its listing", kubeconfig(&server, "")),
+    ] {
+        let process = Process::start(&core, Some("main")).await;
+        let granted = tokio::spawn(send(process.at(), create(&process, "one")));
+        let ask = asked(&mut events).await;
+        answer_with(&core, &ask, ApprovalAnswer::Lasting, None);
+        assert_eq!(granted.await.unwrap().0.status(), StatusCode::CREATED);
+        rewrite(&core, dir.path(), &changed, said, false).await;
+        rewrite(&core, dir.path(), &first, said, true).await;
+        assert_eq!(core.policy.access("kind-a").mode, Mode::Guarded, "{what}");
+
+        let after = tokio::spawn(send(process.at(), create(&process, "two")));
+        match tokio::time::timeout(WAIT, events.recv()).await {
+            Ok(Some(ApprovalEvent::Asked { ask })) => {
+                answer_with(&core, &ask, ApprovalAnswer::Deny, None);
+                assert_eq!(after.await.unwrap().0.status(), StatusCode::FORBIDDEN);
+            }
+            _ => outlived.push(what),
+        }
+    }
+    assert!(
+        outlived.is_empty(),
+        "the grant outlived a change of {outlived:?} that went back"
+    );
+    assert_eq!(fake.writes(Method::POST), 4, "the grants' first writes");
+
+    let process = Process::start(&core, Some("main")).await;
+    let granted = tokio::spawn(send(process.at(), create(&process, "one")));
+    let ask = asked(&mut events).await;
+    answer_with(&core, &ask, ApprovalAnswer::Lasting, None);
+    assert_eq!(granted.await.unwrap().0.status(), StatusCode::CREATED);
+    let kind_b = || async {
+        let contexts = core.catalog.contexts().await;
+        contexts.find("kind-b").unwrap().fingerprint.value()
+    };
+    let before = kind_b().await;
+    let other = first.replace("user: nobody }", "user: nobody, namespace: b }");
+    std::fs::write(dir.path().join("config"), other).unwrap();
+    let moved = tokio::time::timeout(WAIT, async {
+        while kind_b().await == before {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    });
+    moved.await.expect("the catalog reads the kubeconfig again");
+    let (response, _connection) = send(process.at(), create(&process, "two")).await;
+    assert_eq!(
+        response.status(),
+        StatusCode::CREATED,
+        "another context's change"
+    );
+    assert!(events.try_recv().is_err(), "the grant holds");
 }
 
 #[tokio::test]
