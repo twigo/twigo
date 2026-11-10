@@ -15,7 +15,7 @@ use http_body_util::{BodyExt, LengthLimitError, Limited};
 use hyper::body::Incoming;
 use percent_encoding::percent_decode_str;
 use ring::digest::SHA256;
-use twigo_ipc::BlockReason;
+use twigo_ipc::{BlockReason, RequestClass};
 use twigo_kube::client::ActorClients;
 use twigo_policy::{Approval, Attributes};
 
@@ -219,7 +219,8 @@ struct Decided {
 
 /// The gate's decision without an approval, asked only to know whether to
 /// ask the person: the request still meets the gate with whatever approval
-/// the broker gives it.
+/// the broker gives it. Only a write or an exec is asked about, as no answer
+/// covers anything else, such as an agent's read of a Secret.
 async fn decide(
     core: &Core,
     holder: &Holder,
@@ -234,7 +235,12 @@ async fn decide(
         .authorize(&holder.context, attributes, holder.actor)
     {
         Ok(()) => return Ok(Decided::default()),
-        Err(blocked) if blocked.reason == BlockReason::NoApproval => blocked,
+        Err(blocked)
+            if blocked.reason == BlockReason::NoApproval
+                && matches!(attributes.class, RequestClass::Write | RequestClass::Exec) =>
+        {
+            blocked
+        }
         Err(blocked) => return Err(Refusal::blocked(&blocked)),
     };
     let header = |name: &str| {

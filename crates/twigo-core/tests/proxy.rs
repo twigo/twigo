@@ -220,8 +220,12 @@ struct Process {
 
 impl Process {
     async fn start(core: &Core, window: Option<&str>) -> Self {
+        Self::start_as(core, Actor::Terminal, window).await
+    }
+
+    async fn start_as(core: &Core, actor: Actor, window: Option<&str>) -> Self {
         let handle = core
-            .proxy_process(Actor::Terminal, "Terminal 1", window, "kind-a")
+            .proxy_process(actor, "Terminal 1", window, "kind-a")
             .await
             .unwrap();
         let kubeconfig: Value =
@@ -869,6 +873,25 @@ async fn lasting_lets_later_writes_through_but_deletes_until_the_mode_changes() 
     answer_with(&core, &ask, ApprovalAnswer::Deny, None);
     assert_eq!(after.await.unwrap().0.status(), StatusCode::FORBIDDEN);
     assert_eq!(fake.writes(Method::POST), 1);
+}
+
+#[tokio::test]
+async fn a_request_no_answer_can_allow_is_refused_without_an_ask() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    let mut events = follow(&core, "main");
+    let agent = Process::start_as(&core, Actor::Agent, Some("main")).await;
+    let read = agent
+        .request("GET", "kind-a", "/api/v1/namespaces/a/secrets/s")
+        .body(empty())
+        .unwrap();
+    let (status, message) = refused(agent.at(), read).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(message.contains("nothing can ask"), "{message}");
+    assert!(events.try_recv().is_err(), "nothing asked");
+    let seen = fake.seen();
+    assert!(seen.is_empty(), "{seen:?}");
 }
 
 #[tokio::test]
