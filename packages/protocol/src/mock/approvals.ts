@@ -153,7 +153,7 @@ function drafts(): Record<string, Draft> {
       command: "kubectl delete",
       verb: "delete",
       target: `pods/${POD} in default`,
-      detail: { kind: "delete", propagation: null },
+      detail: { kind: "delete", propagation: "Background" },
       typed: true,
       lastingMinutes: null,
     },
@@ -178,17 +178,12 @@ function drafts(): Record<string, Draft> {
       context: STAGING,
       process: "Terminal 1",
       command: "kubectl scale",
-      verb: "update",
+      verb: "patch",
       target: "deployments/web/scale in default",
       detail: {
         kind: "unknown",
         reason: { reason: "subresource" },
-        body: JSON.stringify({
-          apiVersion: "autoscaling/v1",
-          kind: "Scale",
-          metadata: { name: "web", namespace: "default" },
-          spec: { replicas: 5 },
-        }),
+        body: JSON.stringify({ spec: { replicas: 5 } }),
       },
     },
     aggregated: {

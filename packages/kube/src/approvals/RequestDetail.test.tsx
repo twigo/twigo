@@ -122,10 +122,24 @@ test("a session shows the command line and container, and whether it takes input
   expect(screen.getByText("None: it only shows output.")).toBeTruthy();
 });
 
-test("a delete is a sentence with its propagation", () => {
+test("a delete is a sentence with its propagation, and one that sets none, as clients other than kubectl send it, has its own", () => {
+  draw({ kind: "delete", propagation: "Background" });
+  expect(
+    screen.getByText(
+      "The object goes at once, and the garbage collector deletes its dependents after.",
+    ),
+  ).toBeTruthy();
+  cleanup();
+
   draw({ kind: "delete", propagation: "Orphan" });
   expect(
     screen.getByText("The object goes and its dependents are left behind."),
+  ).toBeTruthy();
+  cleanup();
+
+  draw({ kind: "delete", propagation: null });
+  expect(
+    screen.getByText(/^The request sets no propagation, so /),
   ).toBeTruthy();
 });
 

@@ -131,6 +131,23 @@ test("an ask's command is the command path alone, as kubectl's Kubectl-Command h
   ]);
 });
 
+test("a scale is a merge patch of the replicas to the scale subresource, and a delete asks for the background propagation, as kubectl sends them", async () => {
+  const all = await raised();
+  expect(all[4]).toMatchObject({
+    verb: "patch",
+    target: "deployments/web/scale in default",
+    detail: {
+      kind: "unknown",
+      reason: { reason: "subresource" },
+      body: '{"spec":{"replicas":5}}',
+    },
+  });
+  expect(all[2]?.detail).toEqual({
+    kind: "delete",
+    propagation: "Background",
+  });
+});
+
 test("a diff's sides are recorded objects with a change made in code, as Rust's side sends them", async () => {
   const { backend, events } = await followed("approval");
   await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
