@@ -55,6 +55,7 @@ function targetOf(space: string, container = "api"): ShellTarget {
 interface Opened {
   readonly backend: Backend;
   readonly id: number;
+  readonly joined: { readonly tty: boolean; readonly stdin: boolean };
   readonly messages: ShellMessage[];
   readonly events: ShellEvent[];
   /** The output so far as text. */
@@ -79,12 +80,16 @@ async function openShell(
     }),
   );
   let id = 0;
+  let joined = { tty: false, stdin: false };
   await answered(
     backend.subscribe(
       "command_execute",
       { plan: plan.id, typed: plan.friction.kind === "typed" ? space : null },
       (event) => {
-        if (event.state === "session") id = event.id;
+        if (event.state === "session") {
+          id = event.id;
+          joined = { tty: event.tty, stdin: event.stdin };
+        }
       },
     ),
   );
@@ -102,6 +107,7 @@ async function openShell(
   return {
     backend,
     id,
+    joined,
     messages,
     events: [],
     frames,
@@ -211,6 +217,21 @@ test("an attach is planned apart from a shell, and a container that does not run
   expect(attach.confirm).toBe("Attach");
   const { namespace, pod } = targetOf("qa");
   expect(attach.kubectl).toBe(
+    `kubectl --context qa attach ${pod} -n ${namespace} -c api`,
+  );
+  expect(attach.consequences).toEqual([
+    "It keeps no stdin, so this attach only shows its output.",
+  ]);
+  const interactive = createMockBackend("shellAttachInteractive");
+  await answered(interactive.invoke("space_open", "qa"));
+  const joined = await answered(
+    interactive.invoke("command_plan", {
+      action: "shell",
+      target: targetOf("qa"),
+      kind: "attach",
+    }),
+  );
+  expect(joined.kubectl).toBe(
     `kubectl --context qa attach -it ${pod} -n ${namespace} -c api`,
   );
   const error = await refused(
@@ -376,11 +397,24 @@ test("Ctrl-C stops yes and shows the prompt again", async () => {
   expect(shell.text()).toMatch(/\^C\r\n.*# $/);
 });
 
-test("an attach joins a process that writes on its own, and Ctrl-C ends it", async () => {
+test("an attach joins a process that writes on its own with bare line feeds, and takes nothing typed", async () => {
   const shell = await openShell("live", "attach");
+  expect(shell.joined).toEqual({ tty: false, stdin: false });
   await vi.advanceTimersByTimeAsync(2500);
-  expect(shell.text()).toContain("If you don't see a command prompt");
-  expect(shell.text().match(/handled GET \/healthz 200/g)).toHaveLength(2);
+  expect(shell.text().match(/handled GET \/healthz 200\n/g)).toHaveLength(2);
+  expect(shell.text()).not.toContain("\r");
+  await shell.type("ls\r");
+  await vi.advanceTimersByTimeAsync(10);
+  expect(shell.text()).not.toContain("ls");
+});
+
+test("an attach to a process with a terminal and stdin echoes what is typed, and Ctrl-C ends it", async () => {
+  const shell = await openShell("shellAttachInteractive", "attach");
+  expect(shell.joined).toEqual({ tty: true, stdin: true });
+  await vi.advanceTimersByTimeAsync(2500);
+  expect(shell.text().match(/handled GET \/healthz 200\r\n/g)).toHaveLength(2);
+  await shell.type("ls");
+  expect(shell.text()).toContain("ls");
   await shell.type("\x03");
   expect(shell.messages[shell.messages.length - 1]).toEqual({
     state: "ended",

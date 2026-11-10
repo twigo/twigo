@@ -563,3 +563,28 @@ async fn attach_joins_a_container_with_a_tty_and_stdin() {
     drop(open);
     live.delete_namespace().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn attach_reads_a_container_with_neither_stdin_nor_tty() {
+    let live = live("attach-ro").await;
+    live.pod(
+        "p",
+        json!({
+            "name": "app",
+            "image": BUSYBOX,
+            "command": ["sh", "-c", "while true; do echo LOG-$((40+2)); sleep 0.2; done"],
+        }),
+    )
+    .await;
+    let open = open(
+        &live.clients,
+        live.spec("p", Join::Attach, false, false),
+        80,
+        24,
+    );
+    open.running().await;
+    open.sees("LOG-42").await;
+    drop(open);
+    live.delete_namespace().await;
+}

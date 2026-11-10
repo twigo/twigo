@@ -1129,19 +1129,23 @@ async fn plan_shell(core: &Core, kind: ShellKind) -> Result<twigo_ipc::Plan, Err
 }
 
 async fn parked(core: &Core, plan: PlanId) -> twigo_ipc::SubscriptionId {
+    answered(core, plan).await.0
+}
+
+async fn answered(core: &Core, plan: PlanId) -> (twigo_ipc::SubscriptionId, bool, bool) {
     let (told, send) = events();
     let request = Execute { plan, typed: None };
     core.command_execute("main", request, send).await.unwrap();
-    let mut id = None;
+    let mut session = None;
     until("the run answers a session", || {
-        id = told.lock().unwrap().iter().find_map(|event| match event {
-            OperationEvent::Session { id } => Some(*id),
+        session = told.lock().unwrap().iter().find_map(|event| match event {
+            OperationEvent::Session { id, tty, stdin } => Some((*id, *tty, *stdin)),
             _ => None,
         });
-        id.is_some()
+        session.is_some()
     })
     .await;
-    id.unwrap()
+    session.unwrap()
 }
 
 async fn opened(core: &Core, id: twigo_ipc::SubscriptionId) -> Arc<Mutex<Vec<ShellEvent>>> {
@@ -1255,9 +1259,10 @@ async fn read_write_runs_a_shell_at_once_and_attach_takes_the_containers_stdin_a
     assert!(sessions[0].contains("tty=true"), "{sessions:?}");
 }
 
+const QUIET: &str = r#"{"kind":"Pod","apiVersion":"v1","metadata":{"name":"web-1"},"spec":{"containers":[{"name":"app"}]}}"#;
+
 #[tokio::test]
 async fn an_attach_plan_says_whether_what_you_type_reaches_the_process() {
-    const QUIET: &str = r#"{"kind":"Pod","apiVersion":"v1","metadata":{"name":"web-1"},"spec":{"containers":[{"name":"app"}]}}"#;
     let consequences = |pod: &'static str| async move {
         let dir = tempfile::tempdir().unwrap();
         let (_server, port) = Server::start_with(pod);
@@ -1276,6 +1281,22 @@ async fn an_attach_plan_says_whether_what_you_type_reaches_the_process() {
         consequences(QUIET).await,
         ["It keeps no stdin, so this attach only shows its output."]
     );
+}
+
+#[tokio::test]
+async fn a_run_answers_whether_its_session_has_a_terminal_and_takes_stdin() {
+    let shape = |pod: &'static str, kind: ShellKind| async move {
+        let dir = tempfile::tempdir().unwrap();
+        let (_server, port) = Server::start_with(pod);
+        let core = over_server(dir.path(), port);
+        in_mode(&core, Mode::ReadWrite).await;
+        let plan = plan_shell(&core, kind).await.unwrap();
+        let (_, tty, stdin) = answered(&core, plan.id).await;
+        (tty, stdin)
+    };
+    assert_eq!(shape(POD, ShellKind::Attach).await, (true, true));
+    assert_eq!(shape(QUIET, ShellKind::Attach).await, (false, false));
+    assert_eq!(shape(QUIET, ShellKind::Shell).await, (true, true));
 }
 
 #[tokio::test]

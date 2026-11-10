@@ -90,7 +90,11 @@ export function registerExec(workbench: Workbench, tabs: ExecTabs): void {
     );
     if (outcome.state !== "session") return;
     const uri = execUri(input);
-    tabs.start(uri, input, outcome.id);
+    tabs.start(uri, input, {
+      id: outcome.id,
+      tty: outcome.tty,
+      stdin: outcome.stdin,
+    });
     editors.open(uri);
   };
 

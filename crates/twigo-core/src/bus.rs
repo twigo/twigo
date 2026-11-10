@@ -86,7 +86,11 @@ pub(crate) enum Finished {
         binary: bool,
     },
     /// A shell's session, parked until `shell_open` names it.
-    Session(SubscriptionId),
+    Session {
+        id: SubscriptionId,
+        tty: bool,
+        stdin: bool,
+    },
 }
 
 impl Finished {
@@ -120,7 +124,11 @@ impl Finished {
                 "done",
                 "revealed".to_owned(),
             ),
-            Finished::Session(id) => (OperationEvent::Session { id }, "done", "opened".to_owned()),
+            Finished::Session { id, tty, stdin } => (
+                OperationEvent::Session { id, tty, stdin },
+                "done",
+                "opened".to_owned(),
+            ),
         }
     }
 }

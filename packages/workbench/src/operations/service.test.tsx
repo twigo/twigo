@@ -708,10 +708,20 @@ test("a shell's session ends its run as the outcome, with no toast, and leaves t
   await scaled;
   expect(workbench.keys.lookup(null)(UNDOABLE)).toEqual(["dev"]);
 
-  events.splice(0, events.length, { state: "session", id: 41 });
+  events.splice(0, events.length, {
+    state: "session",
+    id: 41,
+    tty: false,
+    stdin: false,
+  });
   const opened = workbench.operations.run(SHELL, LOOK);
   await act(() => vi.advanceTimersByTimeAsync(20));
-  await expect(opened).resolves.toEqual({ state: "session", id: 41 });
+  await expect(opened).resolves.toEqual({
+    state: "session",
+    id: 41,
+    tty: false,
+    stdin: false,
+  });
   expect(commands(sent).slice(-2)).toEqual(["command_plan", "command_execute"]);
   expect(sent[sent.length - 2]?.request).toEqual(SHELL);
   expect(success).not.toHaveBeenCalled();
@@ -720,7 +730,7 @@ test("a shell's session ends its run as the outcome, with no toast, and leaves t
 
 test("a cancelled shell opens no session", async () => {
   const { backend, sent } = bus(plan({ kind: "confirm" }), [
-    { state: "session", id: 41 },
+    { state: "session", id: 41, tty: false, stdin: false },
   ]);
   const workbench = await testWorkbench("ready", backend);
   const cancelled = workbench.operations.run(SHELL, LOOK);
