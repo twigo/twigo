@@ -66,7 +66,8 @@ pub enum ApprovalDetail {
         live: Value,
         #[ts(type = "unknown")]
         result: Value,
-        /// The server's `Warning` headers on the dry run.
+        /// The server's `Warning` headers on the dry run; for a Secret, one
+        /// line of Twigo's in their place, as they may quote its values.
         warnings: Vec<String>,
     },
     /// What an exec runs or an attach joins; `command` is empty for an
@@ -101,7 +102,8 @@ pub enum NoDiff {
     Aggregated,
     /// Whether an aggregated API server serves it could not be read.
     Unverified,
-    /// The server refused the dry run, in its words, while the write itself
+    /// The server refused the dry run, in its words, or for a Secret in
+    /// Twigo's, as the server's may quote its values, while the write itself
     /// may pass: a webhook that does not support dry runs.
     Refused { message: String },
     /// Not a resource Twigo can read: a path outside the API's resources, or

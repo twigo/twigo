@@ -164,7 +164,8 @@ export type ApprovalDetail = { "kind": "diff",
  */
 live: unknown, result: unknown, 
 /**
- * The server's `Warning` headers on the dry run.
+ * The server's `Warning` headers on the dry run; for a Secret, one
+ * line of Twigo's in their place, as they may quote its values.
  */
 warnings: Array<string>, } | { "kind": "session", container: string | null, command: Array<string>, tty: boolean, stdin: boolean, } | { "kind": "delete", propagation: string | null, } | { "kind": "unknown", reason: NoDiff, body: string | null, };
 

@@ -230,7 +230,7 @@ fn invalid_body(message: &str) -> bool {
 /// again as a string ([`applyPatchToCurrentObject`]'s `field.Invalid`).
 ///
 /// [`applyPatchToCurrentObject`]: https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/patch.go#L356-L358
-pub(crate) fn scrub(text: &str, secrets: &[String]) -> String {
+fn scrub(text: &str, secrets: &[String]) -> String {
     let text = if secrets.is_empty() {
         text.to_owned()
     } else {
@@ -296,7 +296,7 @@ fn scrubbed(error: IpcError, secrets: &[String]) -> IpcError {
 /// and decoded, the longest first, so that what a refusal echoes is covered
 /// before any answer shows how the server stored it; empty for any other
 /// kind.
-pub(crate) fn secret_values(objects: &[&Value]) -> Vec<String> {
+fn secret_values(objects: &[&Value]) -> Vec<String> {
     let mut values = BTreeSet::new();
     for object in objects {
         for (field, encoded) in [("data", true), ("stringData", false)] {
@@ -324,7 +324,7 @@ pub(crate) fn secret_values(objects: &[&Value]) -> Vec<String> {
 
 /// Adds what a dry-run's answer holds, known only after it: a warning may
 /// echo a value the edit never named, as `stringData`'s in `data`.
-pub(crate) fn add_answered(secrets: &mut Vec<String>, answer: &Value) {
+fn add_answered(secrets: &mut Vec<String>, answer: &Value) {
     if secrets.is_empty() {
         return;
     }

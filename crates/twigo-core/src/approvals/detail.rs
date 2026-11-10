@@ -1,8 +1,8 @@
 //! What an ask shows of what its request would do (`ApprovalDetail`): a
 //! write of a resource itself is dry-run through the same actor's clients
 //! and compared with the live object, both sides as an apply's diff shows
-//! them, Secret values masked and scrubbed from every message; a delete
-//! shows its propagation, an exec what it runs. The dry run goes only to
+//! them, a Secret's values masked and none of the server's words about it
+//! shown; a delete shows its propagation, an exec what it runs. The dry run goes only to
 //! groups kube-apiserver serves itself: an aggregated server that ignored
 //! `dryRun` would perform the write before the person answers, as the gate
 //! lets `dryRun=All` through as a dry run.
@@ -21,13 +21,20 @@ use twigo_ipc::{ApprovalDetail, NoDiff, RequestClass};
 use twigo_policy::Attributes;
 
 use super::Approvals;
-use crate::actions::{add_answered, scrub, secret_values, send, side};
+use crate::actions::{send, side};
 use crate::proxy::Holder;
 
 /// The largest body an ask shows as sent.
 const SHOWN_BODY: usize = 4 << 10;
 /// How long whether kube-apiserver serves a group/version itself is kept.
 const SERVED_FOR: SignedDuration = SignedDuration::from_mins(5);
+/// What an ask says in place of the server's words about a Secret, its
+/// refusal's or its warnings': a refusal of a patch quotes the patched
+/// Secret whole
+/// ([`applyPatchToCurrentObject`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/patch.go#L334-L358)),
+/// values the request never named among them, so no list of values can say
+/// what to take out.
+const UNSAID: &str = "Twigo does not show its words, which may quote the Secret's values";
 
 /// Whether kube-apiserver serves each group/version itself, by context,
 /// connection and APIService.
@@ -67,7 +74,8 @@ pub(crate) async fn of(
     } else if attributes.subresource.is_some() {
         NoDiff::Subresource
     } else {
-        match diff(approvals, api, holder, parts, body).await {
+        let secret = attributes.resource.as_deref() == Some("secrets");
+        match diff(approvals, api, holder, parts, body, secret).await {
             Ok(diff) => return diff,
             Err(reason) => reason,
         }
@@ -117,6 +125,7 @@ async fn diff(
     holder: &Holder,
     parts: &Parts,
     body: &Bytes,
+    secret: bool,
 ) -> Result<ApprovalDetail, NoDiff> {
     let dry_run = dry_run(parts, body);
     let class = Attributes::of(&dry_run).class;
@@ -128,18 +137,17 @@ async fn diff(
     if let Some((group, version)) = group_version(parts.uri.path()) {
         approvals.served.itself(api, holder, group, version).await?;
     }
-    let sent: Option<Value> = serde_json::from_slice(body).ok();
-    let mut secrets = secret_values(&sent.iter().collect::<Vec<_>>());
-    let (result, warnings) = send(api, dry_run).await.map_err(|error| {
+    let (result, mut warnings) = send(api, dry_run).await.map_err(|error| {
         let message = match &error {
+            _ if secret => UNSAID.to_owned(),
             kube::Error::Api(status) if !status.message.is_empty() => status.message.clone(),
             _ => error.to_string(),
         };
-        NoDiff::Refused {
-            message: scrub(&message, &secrets),
-        }
+        NoDiff::Refused { message }
     })?;
-    add_answered(&mut secrets, &result);
+    if secret && !warnings.is_empty() {
+        warnings = vec![UNSAID.to_owned()];
+    }
     let live = if parts.method == Method::POST {
         Value::Null
     } else {
@@ -148,10 +156,7 @@ async fn diff(
     Ok(ApprovalDetail::Diff {
         live: side(live),
         result: side(result),
-        warnings: warnings
-            .iter()
-            .map(|warning| scrub(warning, &secrets))
-            .collect(),
+        warnings,
     })
 }
 

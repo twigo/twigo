@@ -33,7 +33,7 @@ use twigo_core::{Core, ProxyProcess};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
     AnswerApproval, ApprovalAnswer, ApprovalAsk, ApprovalDetail, ApprovalEvent, Environment,
-    ErrorKind, Mode, RequestClass,
+    ErrorKind, Mode, NoDiff, RequestClass,
 };
 use twigo_policy::Actor;
 
@@ -55,6 +55,9 @@ type FakeBody = UnsyncBoxBody<Bytes, Infallible>;
 /// and echoes what an upgraded connection sends; it refuses the upgrades of
 /// the pod `refuses`, holds open its refusal of anything of `holds`, and
 /// answers what has `slow=1` in its query, but a dry run, only after `SLOW`.
+/// A dry-run patch of a Secret it refuses quoting the patched Secret, as
+/// kube-apiserver refuses one that no longer decodes, and any other dry-run
+/// write of one it answers with a warning that quotes a value.
 #[derive(Clone)]
 struct Fake {
     address: SocketAddr,
@@ -158,6 +161,18 @@ async fn answer(
         let held = futures::stream::pending::<Result<Frame<Bytes>, Infallible>>();
         return Ok(Response::new(StreamBody::new(held).boxed_unsync()));
     }
+    let secret = request.uri().path().contains("/secrets/") && query.contains("dryRun");
+    if secret && request.method() == Method::PATCH {
+        let patched = json!({ "apiVersion": "v1", "kind": "Secret", "metadata": { "name": "s", "namespace": "a" }, "data": { "password": SECRET_VALUE } });
+        let message = format!(
+            " \"\" is invalid: patch: Invalid value: {:?}: illegal base64 data at input byte 0",
+            patched.to_string()
+        );
+        let status = json!({ "kind": "Status", "apiVersion": "v1", "status": "Failure", "code": 422, "reason": "Invalid", "message": message });
+        let mut response = Response::new(body(status.to_string()));
+        *response.status_mut() = StatusCode::UNPROCESSABLE_ENTITY;
+        return Ok(response);
+    }
     let method = request.method().clone();
     let sent = request.into_body().collect().await.unwrap().to_bytes();
     let object = match serde_json::from_slice::<Value>(&sent) {
@@ -173,11 +188,18 @@ async fn answer(
     if method == Method::POST {
         *response.status_mut() = StatusCode::CREATED;
     }
-    response
-        .headers_mut()
-        .insert("content-type", "application/json".parse().unwrap());
+    let headers = response.headers_mut();
+    headers.insert("content-type", "application/json".parse().unwrap());
+    if secret {
+        let warning = format!("299 - \"the live password {SECRET_VALUE} is weak\"");
+        headers.insert("warning", warning.parse().unwrap());
+    }
     Ok(response)
 }
+
+/// A value of the Secret `s` as the fake stores it: `secret-value` in
+/// base64.
+const SECRET_VALUE: &str = "c2VjcmV0LXZhbHVl";
 
 /// `kind-a` as the test kubeconfig lists it at first.
 const KIND_A: &str = "
@@ -1196,6 +1218,72 @@ async fn a_given_back_once_covers_no_repeat_that_acts_as_someone_else() {
         .map(|seen| format!("{} {}", seen.method, seen.uri))
         .collect();
     assert!(as_masters.is_empty(), "{as_masters:?}");
+}
+
+#[tokio::test]
+async fn no_word_of_the_server_s_about_a_secret_reaches_its_ask() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+    let unsaid = "Twigo does not show its words, which may quote the Secret's values";
+    let shown = |ask: &ApprovalAsk| {
+        let text = serde_json::to_string(ask).unwrap();
+        assert!(
+            !text.contains(SECRET_VALUE) && !text.contains("secret-value"),
+            "{text}"
+        );
+    };
+
+    for (kind, patch) in [
+        (
+            "application/json-patch+json",
+            json!([{ "op": "add", "path": "/data/bad", "value": "!!" }]),
+        ),
+        (
+            "application/merge-patch+json",
+            json!({ "metadata": { "labels": { "team": "a" } } }),
+        ),
+    ] {
+        let patching = process
+            .request("PATCH", "kind-a", "/api/v1/namespaces/a/secrets/s")
+            .header("content-type", kind)
+            .body(json_body(&patch))
+            .unwrap();
+        let sending = tokio::spawn(send(process.at(), patching));
+        let ask = asked(&mut events).await;
+        shown(&ask);
+        assert_eq!(
+            ask.detail,
+            ApprovalDetail::Unknown {
+                reason: NoDiff::Refused {
+                    message: unsaid.to_owned()
+                },
+                body: None,
+            },
+            "{kind}"
+        );
+        answer_with(&core, &ask, ApprovalAnswer::Deny, None);
+        sending.await.unwrap();
+    }
+
+    let replacing = process
+        .request("PUT", "kind-a", "/api/v1/namespaces/a/secrets/s")
+        .header("content-type", "application/json")
+        .body(json_body(&json!({ "apiVersion": "v1", "kind": "Secret", "metadata": { "name": "s" }, "stringData": { "user": "admin" } })))
+        .unwrap();
+    let sending = tokio::spawn(send(process.at(), replacing));
+    let ask = asked(&mut events).await;
+    shown(&ask);
+    let ApprovalDetail::Diff { warnings, .. } = &ask.detail else {
+        panic!("a dry run the server took: {:?}", ask.detail);
+    };
+    assert_eq!(*warnings, [unsaid]);
+    answer_with(&core, &ask, ApprovalAnswer::Deny, None);
+    sending.await.unwrap();
+    assert_eq!(fake.writes(Method::PATCH) + fake.writes(Method::PUT), 0);
 }
 
 #[tokio::test]
