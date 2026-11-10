@@ -256,6 +256,7 @@ async fn decide<'a>(
         holder,
         method: &parts.method,
         attributes,
+        body,
         blocked,
         repeat: repeat(holder, parts, reach, body),
         command,

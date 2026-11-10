@@ -129,6 +129,7 @@ pub(crate) struct Asking<'a> {
     pub holder: &'a Holder,
     pub method: &'a Method,
     pub attributes: &'a Attributes,
+    pub body: &'a [u8],
     /// The gate's words for it, should no window ask.
     pub blocked: Box<Blocked>,
     pub repeat: Digest,
@@ -232,7 +233,7 @@ impl Approvals {
                 command: asking.command.clone(),
                 verb: verb(attributes),
                 class: attributes.class,
-                target: attributes.target(),
+                target: target(attributes, asking.body),
                 impersonate: asking.impersonate.clone(),
                 detail,
                 typed: delete,
@@ -537,6 +538,27 @@ fn verb(attributes: &Attributes) -> String {
     }
 }
 
+/// What a person reads after the verb, unlike [`Attributes::target`], which
+/// the gate and the audit log name: a create by the name its body gives,
+/// or its `generateName` and `…`, and a pod's exec, attach or port-forward
+/// by the pod, as the verb says the rest.
+fn target(attributes: &Attributes, body: &[u8]) -> String {
+    let mut named = attributes.clone();
+    if attributes.verb == "create" && attributes.name.is_none() && attributes.subresource.is_none()
+    {
+        let object: Option<serde_json::Value> = serde_json::from_slice(body).ok();
+        let metadata = object.as_ref().map(|object| &object["metadata"]);
+        named.name = metadata.and_then(|metadata| match metadata["name"].as_str() {
+            Some(name) => Some(name.to_owned()),
+            None => Some(format!("{}…", metadata["generateName"].as_str()?)),
+        });
+    }
+    if attributes.opens_a_pod_stream() {
+        named.subresource = None;
+    }
+    named.target()
+}
+
 /// A "once" its request took as it was sent. Dropped, it is gone, as the
 /// request may have reached the server, its client gone or not; given back,
 /// the next repeat may take it.
@@ -755,6 +777,7 @@ mod tests {
                 verb: attributes.verb.clone(),
                 target: attributes.target(),
             }),
+            body: &[],
             repeat: [0; 32],
             command: None,
             impersonate: None,

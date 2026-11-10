@@ -777,7 +777,10 @@ async fn once_sends_the_write_once_and_its_repeat_asks_again_after_it_reached_th
         (ask.verb.as_str(), ask.class),
         ("create", RequestClass::Write)
     );
-    assert_eq!(ask.target, "configmaps in a");
+    assert_eq!(
+        ask.target, "configmaps/c in a",
+        "by the name its body gives"
+    );
     assert_eq!((ask.typed, ask.lasting_minutes), (false, Some(15)));
     let ApprovalDetail::Diff { live, result, .. } = &ask.detail else {
         panic!("a create in the core group dry-runs: {:?}", ask.detail);
@@ -801,6 +804,18 @@ async fn once_sends_the_write_once_and_its_repeat_asks_again_after_it_reached_th
         1,
         "the denied repeat was not sent"
     );
+
+    let generated = json!({ "apiVersion": "v1", "kind": "ConfigMap", "metadata": { "generateName": "feature-" } });
+    let generating = process
+        .request("POST", "kind-a", CONFIGMAPS)
+        .header("content-type", "application/json")
+        .body(json_body(&generated))
+        .unwrap();
+    let third = tokio::spawn(send(process.at(), generating));
+    let ask = asked(&mut events).await;
+    assert_eq!(ask.target, "configmaps/feature-… in a");
+    answer_with(&core, &ask, ApprovalAnswer::Deny, None);
+    third.await.unwrap();
 }
 
 #[tokio::test]
@@ -1396,7 +1411,7 @@ async fn an_exec_asks_with_what_it_runs_and_one_answer_covers_its_spdy_repeat() 
     let websocket = tokio::spawn(send(process.at(), exec(&process, "p", "sh", true)));
     let ask = asked(&mut events).await;
     assert_eq!((ask.verb.as_str(), ask.class), ("exec", RequestClass::Exec));
-    assert_eq!(ask.target, "pods/p/exec in a");
+    assert_eq!(ask.target, "pods/p in a", "the verb says exec");
     assert_eq!(
         ask.detail,
         ApprovalDetail::Session {
