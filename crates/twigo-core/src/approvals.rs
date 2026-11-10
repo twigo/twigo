@@ -760,7 +760,6 @@ mod tests {
             typed: None,
         };
 
-        // Its request went, and has not withdrawn it yet.
         let (resolve, resolved) = oneshot::channel();
         drop(resolved);
         let pending = Pending {
@@ -781,7 +780,6 @@ mod tests {
         );
         assert_eq!(answers(&audit), ["withdrawn"]);
 
-        // Its request waits: the answer is audited as it is taken.
         let (resolve, _resolved) = oneshot::channel();
         let pending = Pending {
             window: "main".into(),

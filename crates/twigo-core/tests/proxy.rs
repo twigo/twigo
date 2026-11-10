@@ -942,7 +942,6 @@ async fn lasting_lets_through_the_writes_of_its_process_already_waiting_but_a_de
     let elsewhere = tokio::spawn(send(other.at(), create(&other, "four")));
     let others = asked(&mut events).await;
     answer_with(&core, &answered, ApprovalAnswer::Lasting, None);
-    // Shorter than the client's own wait, whose end would withdraw it too.
     let withdrawn = tokio::time::timeout(WAIT / 2, events.recv()).await;
     assert_eq!(
         withdrawn.ok().flatten(),
@@ -1421,7 +1420,6 @@ async fn a_splice_ends_when_its_context_moves_to_another_cluster() {
     let mut echoed = [0; 4];
     upgraded.read_exact(&mut echoed).await.unwrap();
     held(&core, 0, 1).await;
-    // Built for the cluster the splice reaches, whose counter it holds.
     let clients = core.clients("kind-a").await.unwrap();
 
     let said = said_of_kind_a(&core).await;
@@ -1679,7 +1677,6 @@ async fn a_delete_asks_for_the_typed_name_whatever_its_class_and_no_grant_covers
     answer_with(&core, &ask, ApprovalAnswer::Lasting, None);
     assert_eq!(first.await.unwrap().0.status(), StatusCode::CREATED);
 
-    // RBAC calls whatever goes through the old proxy path `proxy`.
     let delete = process
         .request("DELETE", "kind-a", "/api/v1/proxy/namespaces/a/pods/p/x")
         .body(empty())

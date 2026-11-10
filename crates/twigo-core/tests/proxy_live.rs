@@ -710,7 +710,6 @@ async fn sixteen_watches_fill_the_proxy_and_a_get_waits_on_429s_until_one_ends()
             .unwrap()
             .contains("sleeper")
     );
-    // As client-go's debugging round tripper logs a response at -v=6.
     let refused = stderr
         .lines()
         .filter(|line| line.contains(r#"status="429 Too Many Requests""#))
