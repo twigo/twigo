@@ -52,6 +52,8 @@ export interface ConfirmDialogProps {
   readonly error?: string;
   readonly wide?: boolean;
   readonly busy?: boolean;
+  /** Whether a click on the overlay cancels; false for a dialog that comes unbidden, where that click was meant for what lies behind. */
+  readonly outsideCancels?: boolean;
   /** The ways to go ahead; the first is the primary one, which Enter in the typed field takes. */
   readonly choices: readonly ConfirmChoice[];
   readonly cancel?: string;
@@ -79,6 +81,7 @@ export function ConfirmDialog({
   error,
   wide = false,
   busy = false,
+  outsideCancels = true,
   choices,
   cancel: declines = "Cancel",
   onCancel,
@@ -105,6 +108,9 @@ export function ConfirmDialog({
           "flex max-h-[calc(82%-24px)] flex-col overflow-hidden",
           wide ? "max-w-[880px]" : "max-w-[480px]",
         )}
+        onPointerDownOutside={(event) => {
+          if (!outsideCancels) event.preventDefault();
+        }}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
           (input.current ?? cancel.current)?.focus();

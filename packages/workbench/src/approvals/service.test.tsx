@@ -472,3 +472,36 @@ test("an ask on screen that a plan's confirmation then covers is withdrawn witho
   });
   await expect(outcome).resolves.toEqual({ state: "cancelled" });
 });
+
+async function clickOutside() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  const overlay = document.querySelector('[data-slot="dialog-overlay"]');
+  expect(overlay).not.toBeNull();
+  const target = overlay ?? document.body;
+  fireEvent.pointerDown(target);
+  fireEvent.click(target);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+}
+
+test("a click outside an ask answers nothing, while one outside a plan's confirmation cancels it", async () => {
+  const { workbench, raise, answers } = await broker();
+  raise(ask(1));
+  await clickOutside();
+  expect(answers).toEqual([]);
+  expect(dialog(/^Allow Terminal 1 /)).toBeTruthy();
+
+  const outcome = planned(workbench);
+  await waitFor(() => {
+    expect(titles()).toEqual(["Delete pod web-1 in default from dev?"]);
+  });
+  await clickOutside();
+  await expect(outcome).resolves.toEqual({ state: "cancelled" });
+  expect(answers).toEqual([]);
+  await waitFor(() => {
+    expect(dialog(/^Allow Terminal 1 /)).toBeTruthy();
+  });
+});

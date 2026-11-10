@@ -18,7 +18,10 @@ const MONO = "font-mono text-[11px] wrap-anywhere select-text";
  * as a plan's dialog has it. Deny is what Escape does, and focus starts on
  * it, or on the typed name, so a stray Enter allows nothing. An ask waits
  * while a plan's confirmation is open, so it takes neither that dialog's
- * focus nor its Escape, and it shows once that dialog is gone.
+ * focus nor its Escape, and it shows once that dialog is gone. It comes
+ * unbidden, so a click outside it, meant for what lies behind, answers
+ * nothing; a plan's confirmation, which the person opened, still cancels on
+ * one.
  */
 export function ApprovalHost() {
   const { approvals, operations } = useWorkbench();
@@ -121,6 +124,7 @@ function AskDialog({
       {...(failure !== undefined && { error: failure })}
       wide={details?.wide(ask.detail) ?? false}
       busy={answering}
+      outsideCancels={false}
       cancel="Deny"
       choices={choices}
       onCancel={() => {

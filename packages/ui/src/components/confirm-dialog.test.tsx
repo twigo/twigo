@@ -1,5 +1,11 @@
 import type { ComponentProps } from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { Trash2 } from "lucide-react";
 import { afterEach, expect, test, vi } from "vitest";
 import { ConfirmDialog } from "./confirm-dialog";
@@ -167,4 +173,30 @@ test("what it is given to show comes after the question, and it widens when aske
   several({ wide: true, children: <p>Changes go here.</p> });
   expect(screen.getByText("Changes go here.")).toBeTruthy();
   expect(screen.getByRole("dialog").className).toContain("max-w-[880px]");
+});
+
+async function clickOutside() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  const overlay = document.querySelector('[data-slot="dialog-overlay"]');
+  expect(overlay).not.toBeNull();
+  const target = overlay ?? document.body;
+  fireEvent.pointerDown(target);
+  fireEvent.click(target);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+}
+
+test("a click outside cancels, unless the dialog is told it must not", async () => {
+  const closing = several();
+  await clickOutside();
+  expect(closing.onCancel).toHaveBeenCalledOnce();
+  cleanup();
+
+  const staying = several({ outsideCancels: false });
+  await clickOutside();
+  expect(staying.onCancel).not.toHaveBeenCalled();
+  expect(screen.getByRole("dialog")).toBeTruthy();
 });
