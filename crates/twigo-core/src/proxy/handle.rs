@@ -21,7 +21,7 @@ use twigo_policy::{Approval, Attributes};
 
 use super::forward::{BODY_LIMIT, ProxyBody};
 use super::refusal::Refusal;
-use super::splice::Upgrade;
+use super::splice::{Reach, Upgrade};
 use super::tokens::{self, Digest, Holder};
 use super::{Changes, forward, headers, splice};
 use crate::Core;
@@ -52,30 +52,33 @@ async fn serve(
         return Err(Refusal::moved(&holder.context));
     }
     one_identity(core, &holder, request.headers()).await?;
-    let upgrade = request.headers().contains_key(UPGRADE);
+    let upgrading = request.headers().contains_key(UPGRADE);
     // Before the request's parts move on.
-    let client = upgrade.then(|| hyper::upgrade::on(&mut request));
+    let client = upgrading.then(|| hyper::upgrade::on(&mut request));
     let (mut parts, body) = request.into_parts();
-    let body = if upgrade {
+    parts.uri = path
+        .parse()
+        .map_err(|_| Refusal::bad_request("the request's path is no URI"))?;
+    parts.headers = headers::request(&parts.headers, upgrading);
+    parts.extensions = http::Extensions::new();
+    let request = Request::from_parts(parts, ());
+    let attributes = Attributes::of(&request);
+    let (parts, ()) = request.into_parts();
+    let reach = upgrading
+        .then(|| Reach::of(&parts.method, &attributes).ok_or_else(Refusal::no_upgrade))
+        .transpose()?;
+    let body = if upgrading {
         Bytes::new()
     } else {
         read(body).await?
     };
-    parts.uri = path
-        .parse()
-        .map_err(|_| Refusal::bad_request("the request's path is no URI"))?;
-    parts.headers = headers::request(&parts.headers, upgrade);
-    parts.extensions = http::Extensions::new();
-    let read = Request::from_parts(parts, ());
-    let attributes = Attributes::of(&read);
-    let (parts, ()) = read.into_parts();
 
     let (clients, actor) = core.proxy.clients(core, &holder).await?;
     // Before anything is sent, so a relock meanwhile reaches a splice.
     let changes = Changes::new(&core.policy, &core.catalog.subscribe());
-    let decided = decide(core, &holder, &actor, &attributes, &parts, &body, upgrade).await?;
-    let sent = match client {
-        Some(client) => {
+    let decided = decide(core, &holder, &actor, &attributes, &parts, &body, reach).await?;
+    let sent = match client.zip(reach) {
+        Some((client, reach)) => {
             let upgrade = Upgrade {
                 holder: &holder,
                 clients: &clients,
@@ -83,6 +86,7 @@ async fn serve(
                 policy: Arc::clone(&core.policy),
                 changes,
                 attributes,
+                reach,
                 approval: decided.approval,
             };
             splice::upgrade(upgrade, parts, client).await
@@ -228,7 +232,7 @@ async fn decide(
     attributes: &Attributes,
     parts: &Parts,
     body: &Bytes,
-    upgrade: bool,
+    reach: Option<Reach>,
 ) -> Result<Decided, Refusal> {
     let blocked = match core
         .policy
@@ -250,9 +254,10 @@ async fn decide(
         .map(str::to_owned);
     let asking = Asking {
         holder,
+        method: &parts.method,
         attributes,
         blocked,
-        repeat: repeat(holder, parts, upgrade, body),
+        repeat: repeat(holder, parts, reach, body),
         command,
         impersonate: impersonate(&parts.headers),
     };
@@ -308,18 +313,19 @@ fn impersonate(headers: &HeaderMap) -> Option<String> {
 }
 
 /// What one answer covers for a while: the same token, path, query and body,
-/// and the same method but for an upgrade, which kubectl repeats over SPDY
-/// as a `POST` after a refused WebSocket `GET`
-/// ([`NewFallbackExecutor`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/client-go/tools/remotecommand/fallback.go#L53-L60)).
-fn repeat(holder: &Holder, parts: &Parts, upgrade: bool, body: &Bytes) -> Digest {
+/// whether it upgrades, and the same method, but that a pod's stream is one
+/// whether it comes as a `GET` or a `POST`
+/// ([`Attributes::opens_a_pod_stream`]).
+fn repeat(holder: &Holder, parts: &Parts, reach: Option<Reach>, body: &Bytes) -> Digest {
     let mut digest = ring::digest::Context::new(&SHA256);
     digest.update(&holder.digest);
-    let method = if upgrade {
-        "upgrade"
-    } else {
-        parts.method.as_str()
+    let (upgrade, method) = match reach {
+        Some(Reach::Stream) => ("upgrade", "GET or POST"),
+        Some(Reach::Proxy) => ("upgrade", parts.method.as_str()),
+        None => ("", parts.method.as_str()),
     };
     for part in [
+        upgrade,
         method,
         parts.uri.path(),
         parts.uri.query().unwrap_or_default(),

@@ -21,7 +21,8 @@ pub struct Approval {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Scope {
     /// "Once": the request the person saw, by its verb, decoded path and
-    /// class.
+    /// class; a pod's stream by its `get` or `create`, which kubectl sends
+    /// one after the other.
     Exact {
         verb: String,
         path: String,
@@ -58,7 +59,7 @@ impl Approval {
 
     /// Whether it lets `actor`'s write or exec of `attributes` through on
     /// `context` at `now`.
-    pub(crate) fn covers(
+    pub fn covers(
         &self,
         context: &str,
         actor: Actor,
@@ -71,7 +72,9 @@ impl Approval {
             && self.actor == actor
             && match &self.scope {
                 Scope::Exact { verb, path, class } => {
-                    *verb == attributes.verb
+                    let folded = attributes.opens_a_pod_stream()
+                        && matches!(verb.as_str(), "get" | "create");
+                    (*verb == attributes.verb || folded)
                         && *path == attributes.path
                         && *class == attributes.class
                 }
@@ -140,6 +143,60 @@ mod tests {
         let mut other_class = exec.clone();
         other_class.class = RequestClass::Write;
         assert!(!once.covers("c", Actor::Terminal, &other_class, now));
+    }
+
+    #[test]
+    fn once_for_a_pod_s_stream_covers_its_get_and_its_create_and_nothing_else() {
+        let now = Timestamp::now();
+        let upgrade = |method: &str, uri: &str, protocol: &'static str| {
+            let request = Request::builder()
+                .method(method)
+                .uri(uri)
+                .header(http::header::UPGRADE, protocol)
+                .body(())
+                .unwrap();
+            Attributes::of(&request)
+        };
+        for stream in ["exec", "attach", "portforward"] {
+            let path = format!("/api/v1/namespaces/a/pods/p/{stream}");
+            let websocket = upgrade("GET", &path, "websocket");
+            let spdy = upgrade("POST", &path, "SPDY/3.1");
+            assert!(websocket.opens_a_pod_stream(), "{stream}");
+            for (answered, repeat) in [(&websocket, &spdy), (&spdy, &websocket)] {
+                let once = Approval::once("c", Actor::Terminal, answered);
+                assert_eq!(
+                    once.covers("c", Actor::Terminal, repeat, now),
+                    repeat.class != RequestClass::Forward,
+                    "{stream}: {} after {}",
+                    repeat.verb,
+                    answered.verb
+                );
+            }
+            let other = upgrade("POST", "/api/v1/namespaces/a/pods/q/exec", "SPDY/3.1");
+            let once = Approval::once("c", Actor::Terminal, &websocket);
+            assert!(!once.covers("c", Actor::Terminal, &other, now), "{stream}");
+        }
+        let proxy = "/api/v1/namespaces/a/pods/p/proxy/";
+        let get = upgrade("GET", proxy, "websocket");
+        let post = upgrade("POST", proxy, "websocket");
+        assert!(!get.opens_a_pod_stream());
+        let once = Approval::once("c", Actor::Terminal, &get);
+        assert!(!once.covers("c", Actor::Terminal, &post, now), "a proxy's");
+        let elsewhere = upgrade(
+            "GET",
+            "/apis/example.com/v1/namespaces/a/pods/p/exec",
+            "websocket",
+        );
+        let created = upgrade(
+            "POST",
+            "/apis/example.com/v1/namespaces/a/pods/p/exec",
+            "SPDY/3.1",
+        );
+        let once = Approval::once("c", Actor::Terminal, &elsewhere);
+        assert!(
+            !once.covers("c", Actor::Terminal, &created, now),
+            "another group's"
+        );
     }
 
     #[test]

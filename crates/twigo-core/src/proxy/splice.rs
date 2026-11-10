@@ -1,7 +1,8 @@
-//! An upgrade: exec, attach and port-forward, over WebSocket or SPDY. It
-//! takes a session of the context's budget, or a `429` when they are all in
-//! use, goes on the actor's sessions client with an empty body, and on a
-//! `101` the two upgraded connections are spliced, holding the session, as
+//! An upgrade: a pod's exec, attach and port-forward, over WebSocket or SPDY,
+//! or the proxy of a pod, a service or a node. It takes a session of the
+//! context's budget, or a `429` when they are all in use, goes on the actor's
+//! sessions client with an empty body, and on a `101` the two upgraded
+//! connections are spliced, holding the session, as
 //! kube's own `connect` takes the server's
 //! ([`connect`](https://github.com/kube-rs/kube/blob/5.0.0/kube-client/src/client/mod.rs#L240-L275)).
 //! Either direction's end ends both, as kube-apiserver's proxy does
@@ -13,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use http::request::Parts;
-use http::{Request, Response, StatusCode};
+use http::{Method, Request, Response, StatusCode};
 use http_body_util::{BodyExt, Empty};
 use hyper::upgrade::OnUpgrade;
 use hyper_util::rt::TokioIo;
@@ -30,6 +31,39 @@ use super::{Changes, headers};
 /// How long a spliced side gets to take its end.
 const SHUTDOWN: Duration = Duration::from_secs(1);
 
+/// What an upgrade reaches: the requests whose `Upgrade` the proxy passes on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Reach {
+    /// A pod's exec, attach or port-forward, which kubectl sends as a `GET`
+    /// and again as a `POST`, and of which nothing runs before the kubelet's
+    /// `101`
+    /// ([`ServeExec`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/cri-streaming/pkg/streaming/remotecommand/exec.go#L40-L48)).
+    Stream,
+    /// The `proxy` subresource of a pod, a service or a node, whose answer,
+    /// whatever it is, comes from the backend the request reached.
+    Proxy,
+}
+
+impl Reach {
+    /// None for a request that carries `Upgrade` but may not upgrade.
+    pub(super) fn of(method: &Method, attributes: &Attributes) -> Option<Self> {
+        if !matches!(*method, Method::GET | Method::POST) {
+            return None;
+        }
+        if attributes.opens_a_pod_stream() {
+            return Some(Self::Stream);
+        }
+        let proxy = attributes.path.starts_with("/api/")
+            && matches!(attributes.verb.as_str(), "get" | "create")
+            && matches!(
+                attributes.resource.as_deref(),
+                Some("pods" | "services" | "nodes")
+            )
+            && attributes.subresource.as_deref() == Some("proxy");
+        proxy.then_some(Self::Proxy)
+    }
+}
+
 pub(super) struct Upgrade<'a> {
     pub holder: &'a Holder,
     pub clients: &'a Clients,
@@ -37,6 +71,7 @@ pub(super) struct Upgrade<'a> {
     pub policy: Arc<Policy>,
     pub changes: Changes,
     pub attributes: Attributes,
+    pub reach: Reach,
     pub approval: Option<Approval>,
 }
 
@@ -48,6 +83,7 @@ pub(super) async fn upgrade(upgrade: Upgrade<'_>, parts: Parts, client: OnUpgrad
         policy,
         changes,
         attributes,
+        reach,
         approval,
     } = upgrade;
     let Some(permit) = clients.try_admit(Class::Session, holder.actor) else {
@@ -70,8 +106,8 @@ pub(super) async fn upgrade(upgrade: Upgrade<'_>, parts: Parts, client: OnUpgrad
     };
     if response.status() != StatusCode::SWITCHING_PROTOCOLS {
         return Sent {
-            response: passed(holder, response),
-            reached: false,
+            response: passed(holder, response, Some(permit)),
+            reached: reach == Reach::Proxy,
         };
     }
     let server = hyper::upgrade::on(&mut response);

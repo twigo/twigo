@@ -40,6 +40,12 @@ impl Refusal {
         Self::new(StatusCode::BAD_REQUEST, "BadRequest", message)
     }
 
+    pub(super) fn no_upgrade() -> Self {
+        Self::bad_request(
+            "an Upgrade goes only with an exec, an attach or a port-forward of a pod, or the proxy of a pod, a service or a node, so Twigo sent nothing",
+        )
+    }
+
     /// What the gate said, in its words.
     pub(super) fn blocked(blocked: &Blocked) -> Self {
         Self::forbidden(blocked)

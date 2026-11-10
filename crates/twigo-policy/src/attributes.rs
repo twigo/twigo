@@ -95,6 +95,21 @@ impl Attributes {
         self.class == RequestClass::Write && self.resource.as_deref() == Some("secrets")
     }
 
+    /// Whether it opens an exec, an attach or a port-forward of a pod, which
+    /// kubectl sends over WebSocket as a `GET` and, refused, again over SPDY
+    /// as a `POST`: RBAC's `get` and `create` of one thing
+    /// ([`StreamWithContext`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/client-go/tools/remotecommand/fallback.go#L53-L60),
+    /// [`Dial`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/client-go/tools/portforward/fallback_dialer.go#L70-L78)).
+    pub fn opens_a_pod_stream(&self) -> bool {
+        self.path.starts_with("/api/")
+            && matches!(self.verb.as_str(), "get" | "create")
+            && self.resource.as_deref() == Some("pods")
+            && matches!(
+                self.subresource.as_deref(),
+                Some("exec" | "attach" | "portforward")
+            )
+    }
+
     /// As people and `kubectl` name it: `pods/web-1/exec in default`.
     pub fn target(&self) -> String {
         let Some(resource) = &self.resource else {

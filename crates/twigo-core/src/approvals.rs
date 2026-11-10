@@ -12,6 +12,7 @@ use std::future::Future;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+use http::Method;
 use jiff::{SignedDuration, Timestamp};
 use tokio::sync::{oneshot, watch};
 use twigo_ipc::{
@@ -82,14 +83,16 @@ struct Repeat {
 enum Cover {
     /// Every repeat, in these words.
     Denied(String),
-    /// Repeats while none of them has reached the server: one after a `429`,
-    /// or after an upgrade answered other than `101`.
-    Once,
+    /// Repeats while none of them has reached the server, as the approval
+    /// the person gave covers them: one after a `429`, or after a pod's
+    /// stream answered other than `101`.
+    Once(Approval),
 }
 
 /// A request the gate would stop for want of an approval.
 pub(crate) struct Asking<'a> {
     pub holder: &'a Holder,
+    pub method: &'a Method,
     pub attributes: &'a Attributes,
     /// The gate's words for it, should no window ask.
     pub blocked: Box<Blocked>,
@@ -141,7 +144,9 @@ impl Approvals {
             holder, attributes, ..
         } = &asking;
         let context = holder.context.as_str();
-        let delete = is_delete(attributes);
+        // Whatever RBAC calls it: the old proxy path names every method
+        // `proxy`.
+        let delete = *asking.method == Method::DELETE;
         // Before the detail's dry run, which a change may outlast.
         let changes = Changes::new(&self.policy, &self.catalog);
         {
@@ -154,13 +159,15 @@ impl Approvals {
                 .map(|repeat| &repeat.cover)
             {
                 Some(Cover::Denied(message)) => return Outcome::Denied(message.clone()),
-                Some(Cover::Once) => {
+                Some(Cover::Once(approval))
+                    if approval.covers(context, holder.actor, attributes, Timestamp::now()) =>
+                {
                     return Outcome::Approved {
-                        approval: Approval::once(context, holder.actor, attributes),
+                        approval: approval.clone(),
                         repeat: Some(asking.repeat),
                     };
                 }
-                None => {}
+                Some(Cover::Once(_)) | None => {}
             }
             let grant = state.grants.get(&(holder.process, context.to_owned()));
             if !delete
@@ -280,15 +287,16 @@ impl Approvals {
             }
             ApprovalAnswer::Once => {
                 self.audit(asking, "once");
+                let approval = Approval::once(context, holder.actor, attributes);
                 state.repeats.insert(
                     asking.repeat,
                     Repeat {
                         until: Instant::now() + REPEATS,
-                        cover: Cover::Once,
+                        cover: Cover::Once(approval.clone()),
                     },
                 );
                 Outcome::Approved {
-                    approval: Approval::once(context, holder.actor, attributes),
+                    approval,
                     repeat: Some(asking.repeat),
                 }
             }
@@ -336,7 +344,7 @@ impl Approvals {
         let mut state = self.state();
         if matches!(
             state.repeats.get(repeat).map(|repeat| &repeat.cover),
-            Some(Cover::Once)
+            Some(Cover::Once(_))
         ) {
             state.repeats.remove(repeat);
         }
@@ -469,10 +477,6 @@ fn verb(attributes: &Attributes) -> String {
         (Some("pods"), Some(session @ ("exec" | "attach"))) => session.to_owned(),
         _ => attributes.verb.clone(),
     }
-}
-
-fn is_delete(attributes: &Attributes) -> bool {
-    matches!(attributes.verb.as_str(), "delete" | "deletecollection")
 }
 
 /// Withdraws an ask that is still waiting when its request stops waiting:

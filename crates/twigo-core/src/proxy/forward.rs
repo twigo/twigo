@@ -13,7 +13,7 @@ use http_body::{Body, Frame, SizeHint};
 use http_body_util::BodyExt;
 use http_body_util::combinators::UnsyncBoxBody;
 use tokio_util::sync::WaitForCancellationFutureOwned;
-use twigo_kube::client::{ActorClients, Proxied};
+use twigo_kube::client::{ActorClients, Permit, Proxied};
 use twigo_policy::Approval;
 
 use super::headers;
@@ -51,7 +51,7 @@ pub(super) async fn send(
         Ok(response) => {
             let reached = response.status() != StatusCode::TOO_MANY_REQUESTS;
             Sent {
-                response: passed(holder, response),
+                response: passed(holder, response, None),
                 reached,
             }
         }
@@ -60,16 +60,18 @@ pub(super) async fn send(
 }
 
 /// The server's answer as it came, but its hop-by-hop headers, ending once
-/// the process does.
+/// the process does, and holding `session`, if any, until it ends.
 pub(super) fn passed(
     holder: &Holder,
     response: Response<kube::client::Body>,
+    session: Option<Permit>,
 ) -> Response<ProxyBody> {
     let (mut parts, body) = response.into_parts();
     parts.headers = headers::response(&parts.headers);
     let body = Until {
         body,
         ended: Box::pin(holder.ended.clone().cancelled_owned()),
+        _session: session,
     };
     Response::from_parts(parts, body.boxed_unsync())
 }
@@ -100,6 +102,7 @@ pub(super) fn full(context: &str) -> Refusal {
 struct Until<B> {
     body: B,
     ended: Pin<Box<WaitForCancellationFutureOwned>>,
+    _session: Option<Permit>,
 }
 
 impl<B> Body for Until<B>

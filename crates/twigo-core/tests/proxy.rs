@@ -50,7 +50,8 @@ struct Seen {
 type FakeBody = UnsyncBoxBody<Bytes, Infallible>;
 
 /// An API server that answers every request at once, holds watches open,
-/// and echoes what an upgraded connection sends.
+/// and echoes what an upgraded connection sends; it refuses the upgrades of
+/// the pod `refuses`, and holds open its refusal of anything of `holds`.
 #[derive(Clone)]
 struct Fake {
     address: SocketAddr,
@@ -108,6 +109,12 @@ async fn answer(
         headers: request.headers().clone(),
     });
     let refuses = request.uri().path().contains("/pods/refuses/");
+    if request.uri().path().contains("/pods/holds/") {
+        let held = futures::stream::pending::<Result<Frame<Bytes>, Infallible>>();
+        let mut response = Response::new(StreamBody::new(held).boxed_unsync());
+        *response.status_mut() = StatusCode::BAD_REQUEST;
+        return Ok(response);
+    }
     if let Some(protocol) = request.headers().get(UPGRADE).cloned()
         && !refuses
     {
@@ -1201,6 +1208,183 @@ async fn an_exec_asks_with_what_it_runs_and_one_answer_covers_its_spdy_repeat() 
     answer_with(&core, &ask, ApprovalAnswer::Once, None);
     let (response, _connection) = attaching.await.unwrap();
     assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+}
+
+/// A WebSocket upgrade of `path` with `method`.
+fn upgraded(process: &Process, method: &str, path: &str) -> Request<Full<Bytes>> {
+    process
+        .request(method, "kind-a", path)
+        .header("connection", "Upgrade")
+        .header(UPGRADE, "websocket")
+        .header("sec-websocket-key", "a2V5")
+        .header("sec-websocket-version", "13")
+        .body(empty())
+        .unwrap()
+}
+
+#[tokio::test]
+async fn an_upgrade_header_goes_only_with_a_pod_s_stream_or_a_proxy() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+    for (method, path) in [
+        ("GET", "/api/v1/namespaces/a/pods/x"),
+        ("DELETE", "/api/v1/namespaces/a/pods/x"),
+        ("DELETE", "/api/v1/namespaces/a/pods"),
+        ("DELETE", "/api/v1/namespaces/a/pods/x/exec"),
+        ("PUT", "/api/v1/namespaces/a/pods/x/proxy/"),
+        ("PATCH", "/api/v1/namespaces/a/configmaps/c"),
+        ("GET", "/api/v1/namespaces/a/configmaps/c/proxy"),
+        ("GET", "/apis/example.com/v1/namespaces/a/pods/x/exec"),
+        ("GET", "/api/v1/proxy/namespaces/a/pods/x"),
+        ("GET", "/api/v1/watch/namespaces/a/pods/x/exec"),
+    ] {
+        let (status, message) = refused(process.at(), upgraded(&process, method, path)).await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "{method} {path}: {message}"
+        );
+    }
+    let head = upgraded(&process, "HEAD", "/api/v1/namespaces/a/pods/x/exec");
+    let (response, _connection) = send(process.at(), head).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST, "HEAD");
+    assert!(events.try_recv().is_err(), "nothing asked");
+    let seen = fake.seen();
+    assert!(seen.is_empty(), "{seen:?}");
+}
+
+#[tokio::test]
+async fn a_delete_asks_for_the_typed_name_whatever_its_class_and_no_grant_covers_it() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+    let first = tokio::spawn(send(process.at(), create(&process, "one")));
+    let ask = asked(&mut events).await;
+    answer_with(&core, &ask, ApprovalAnswer::Lasting, None);
+    assert_eq!(first.await.unwrap().0.status(), StatusCode::CREATED);
+
+    // RBAC calls whatever goes through the old proxy path `proxy`.
+    let delete = process
+        .request("DELETE", "kind-a", "/api/v1/proxy/namespaces/a/pods/p/x")
+        .body(empty())
+        .unwrap();
+    let deleting = tokio::spawn(send(process.at(), delete));
+    let ask = asked(&mut events).await;
+    assert_eq!(ask.class, RequestClass::Exec);
+    assert_eq!((ask.typed, ask.lasting_minutes), (true, None));
+    answer_with(&core, &ask, ApprovalAnswer::Deny, None);
+    assert_eq!(deleting.await.unwrap().0.status(), StatusCode::FORBIDDEN);
+    assert_eq!(fake.writes(Method::DELETE), 0);
+}
+
+#[tokio::test]
+async fn a_proxy_s_answer_reached_its_backend_so_a_once_covers_no_repeat() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+    let path = "/api/v1/namespaces/a/pods/refuses/proxy/";
+    let first = tokio::spawn(send(process.at(), upgraded(&process, "GET", path)));
+    let ask = asked(&mut events).await;
+    assert_eq!(ask.class, RequestClass::Exec);
+    answer_with(&core, &ask, ApprovalAnswer::Once, None);
+    let (response, _connection) = first.await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST, "the backend's");
+
+    let repeat = tokio::spawn(send(process.at(), upgraded(&process, "GET", path)));
+    let again = asked(&mut events).await;
+    answer_with(&core, &again, ApprovalAnswer::Deny, None);
+    assert_eq!(repeat.await.unwrap().0.status(), StatusCode::FORBIDDEN);
+    let proxied = fake
+        .seen()
+        .iter()
+        .filter(|seen| seen.uri.contains("/proxy/"))
+        .count();
+    assert_eq!(proxied, 1);
+}
+
+#[tokio::test]
+async fn a_proxy_upgrade_keeps_its_method_where_a_pod_s_stream_folds_it() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+    let clients = core.clients("kind-a").await.unwrap();
+    let mut open = Vec::new();
+    while clients.usage().borrow().sessions.held < 64 {
+        let (response, connection) = send(process.at(), exec(&process, "p", "sh", true)).await;
+        assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+        open.push((response, connection));
+    }
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let full = |response: Response<Incoming>| {
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    };
+
+    let path = "/api/v1/namespaces/a/pods/p/proxy/";
+    let get = tokio::spawn(send(process.at(), upgraded(&process, "GET", path)));
+    let ask = asked(&mut events).await;
+    answer_with(&core, &ask, ApprovalAnswer::Once, None);
+    full(get.await.unwrap().0);
+    let post = tokio::spawn(send(process.at(), upgraded(&process, "POST", path)));
+    let ask = asked(&mut events).await;
+    assert_eq!(ask.verb, "create", "a POST asks for itself");
+    answer_with(&core, &ask, ApprovalAnswer::Deny, None);
+    assert_eq!(post.await.unwrap().0.status(), StatusCode::FORBIDDEN);
+    full(send(process.at(), upgraded(&process, "GET", path)).await.0);
+    assert!(
+        events.try_recv().is_err(),
+        "the GET's once covers its repeat"
+    );
+
+    let websocket = tokio::spawn(send(process.at(), exec(&process, "q", "sh", true)));
+    let ask = asked(&mut events).await;
+    answer_with(&core, &ask, ApprovalAnswer::Once, None);
+    full(websocket.await.unwrap().0);
+    full(send(process.at(), exec(&process, "q", "sh", false)).await.0);
+    assert!(
+        events.try_recv().is_err(),
+        "the WebSocket GET's once covers the SPDY POST"
+    );
+    let reached = fake
+        .seen()
+        .iter()
+        .filter(|seen| seen.uri.contains("/proxy/") || seen.uri.contains("/pods/q/"))
+        .count();
+    assert_eq!(reached, 0);
+}
+
+#[tokio::test]
+async fn a_stream_s_refusal_holds_its_session_until_its_body_ends() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    let process = Process::start(&core, None).await;
+    let clients = core.clients("kind-a").await.unwrap();
+    let (response, connection) = send(process.at(), exec(&process, "holds", "sh", true)).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        clients.usage().borrow().sessions.held,
+        1,
+        "while its body runs"
+    );
+    drop((response, connection));
+    let freed = tokio::time::timeout(WAIT, async {
+        while clients.usage().borrow().sessions.held != 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    });
+    freed.await.expect("its session freed with its body");
 }
 
 async fn withdrawn(events: &mut mpsc::UnboundedReceiver<ApprovalEvent>, ask: &ApprovalAsk) {
