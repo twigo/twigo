@@ -2354,6 +2354,10 @@ async fn an_eviction_asks_as_a_delete_does_and_no_grant_covers_it() {
 
     let evicting = tokio::spawn(send(process.at(), evict(&process, "p")));
     let eviction = asked(&mut events).await;
+    assert_eq!(
+        (eviction.verb.as_str(), eviction.target.as_str()),
+        ("evict", "pods/p in a")
+    );
     assert_eq!((eviction.typed, eviction.lasting_minutes), (true, None));
     assert_eq!(
         eviction.detail,

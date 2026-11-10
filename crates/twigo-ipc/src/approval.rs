@@ -26,16 +26,17 @@ pub struct ApprovalAsk {
     pub command: Option<String>,
     /// The word a person reads in "Allow Terminal 2 to <verb> <target>":
     /// `exec` for `pods/exec` and `attach` for `pods/attach`, which RBAC
-    /// calls `create` or `get`, and RBAC's verb otherwise: `create`, `patch`,
-    /// `delete`.
+    /// calls `create` or `get`, `evict` for `pods/eviction`, which RBAC calls
+    /// `create`, and RBAC's verb otherwise: `create`, `patch`, `delete`.
     pub verb: String,
     /// `write` or `exec`.
     pub class: RequestClass,
     /// As people and `kubectl` name it: `deployments/web in default`; a
     /// create by the name its dry run stores, or its `generateName` and `…`
     /// where the server generated that name, and by its path alone where no
-    /// dry run could say: `configmaps in default`; an exec or an attach by
-    /// its pod alone, as `verb` says the rest: `pods/web-1 in default`.
+    /// dry run could say: `configmaps in default`; an exec, an attach or an
+    /// eviction by its pod alone, as `verb` says the rest:
+    /// `pods/web-1 in default`.
     pub target: String,
     /// Whom the request acts as, from `kubectl --as`, `--as-group` and
     /// `--as-uid`: the user and, when the request names them, the groups,

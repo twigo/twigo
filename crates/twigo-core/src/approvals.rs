@@ -626,13 +626,14 @@ impl Asking<'_> {
 }
 
 /// The word a person reads in "Allow Terminal 2 to <verb> <target>": RBAC
-/// calls an exec and an attach `create` or `get`.
+/// calls an exec and an attach `create` or `get`, and an eviction `create`.
 fn verb(attributes: &Attributes) -> String {
     match (
         attributes.resource.as_deref(),
         attributes.subresource.as_deref(),
     ) {
         (Some("pods"), Some(session @ ("exec" | "attach"))) => session.to_owned(),
+        (Some("pods"), Some("eviction")) => "evict".to_owned(),
         _ => attributes.verb.clone(),
     }
 }
@@ -643,8 +644,8 @@ fn verb(attributes: &Attributes) -> String {
 /// otherwise to the server, whose decoder fills a field given twice into
 /// what the first gave
 /// ([`object`](https://github.com/kubernetes-sigs/json/blob/2d320260d730/internal/golang/encoding/json/decode.go#L778-L817))
-/// where serde_json keeps the last; a pod's exec, attach or port-forward by
-/// the pod, as the verb says the rest.
+/// where serde_json keeps the last; a pod's exec, attach, port-forward or
+/// eviction by the pod, as the verb says the rest.
 fn target(attributes: &Attributes, detail: &ApprovalDetail) -> String {
     let mut named = attributes.clone();
     if attributes.verb == "create"
@@ -654,7 +655,7 @@ fn target(attributes: &Attributes, detail: &ApprovalDetail) -> String {
     {
         named.name = stored(&result["metadata"]);
     }
-    if attributes.opens_a_pod_stream() {
+    if attributes.opens_a_pod_stream() || verb(attributes) == "evict" {
         named.subresource = None;
     }
     named.target()
