@@ -120,7 +120,10 @@ process: string,
  */
 command: string | null, 
 /**
- * As RBAC names it: `create`, `patch`, `delete`.
+ * The word a person reads in "Allow Terminal 2 to <verb> <target>":
+ * `exec` for `pods/exec` and `attach` for `pods/attach`, which RBAC
+ * calls `create` or `get`, and RBAC's verb otherwise: `create`, `patch`,
+ * `delete`.
  */
 verb: string, 
 /**
@@ -857,7 +860,7 @@ export type ModeSource = { "kind": "policyFile", file: string, pattern: string |
 /**
  * Why a write has no diff.
  */
-export type NoDiff = { "reason": "subresource" } | { "reason": "aggregated" } | { "reason": "unverified" } | { "reason": "tooLarge" } | { "reason": "refused", message: string, } | { "reason": "notAResource" };
+export type NoDiff = { "reason": "subresource" } | { "reason": "aggregated" } | { "reason": "unverified" } | { "reason": "refused", message: string, } | { "reason": "notAResource" };
 
 /**
  * One flush of an open object. Rust sends the next only after the webview

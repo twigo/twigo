@@ -24,7 +24,10 @@ pub struct ApprovalAsk {
     /// What the client says it runs, `kubectl apply`, from its own
     /// `Kubectl-Command` header: a label, never checked.
     pub command: Option<String>,
-    /// As RBAC names it: `create`, `patch`, `delete`.
+    /// The word a person reads in "Allow Terminal 2 to <verb> <target>":
+    /// `exec` for `pods/exec` and `attach` for `pods/attach`, which RBAC
+    /// calls `create` or `get`, and RBAC's verb otherwise: `create`, `patch`,
+    /// `delete`.
     pub verb: String,
     /// `write` or `exec`.
     pub class: RequestClass,
@@ -93,12 +96,12 @@ pub enum NoDiff {
     Aggregated,
     /// Whether an aggregated API server serves it could not be read.
     Unverified,
-    /// Larger than Twigo reads to compare.
-    TooLarge,
     /// The server refused the dry run, in its words, while the write itself
     /// may pass: a webhook that does not support dry runs.
     Refused { message: String },
-    /// Not a resource Twigo can read: a path outside the API's resources.
+    /// Not a resource Twigo can read: a path outside the API's resources, or
+    /// a write that no dry run covers, as a review of authorization.k8s.io
+    /// answers whatever `dryRun` says.
     NotAResource,
 }
 
@@ -111,7 +114,7 @@ pub enum NoDiff {
 )]
 pub enum ApprovalEvent {
     Asked {
-        ask: ApprovalAsk,
+        ask: Box<ApprovalAsk>,
     },
     /// The ask needs no answer any more: the process gave up, ended, or the
     /// context's mode changed.
