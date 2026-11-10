@@ -13,17 +13,10 @@ const DiffView = lazy(() => import("../edit/DiffView"));
 
 const CODE = "font-mono text-[11px] wrap-anywhere select-text";
 
-export function RequestDetail({
-  detail,
-  folded,
-}: {
-  detail: ApprovalDetail;
-  /** @todo: drop with the variants of the checkpoint, once the owner has chosen. */
-  folded: boolean;
-}) {
+export function RequestDetail({ detail }: { detail: ApprovalDetail }) {
   switch (detail.kind) {
     case "diff":
-      return <Changes {...detail} folded={folded} />;
+      return <Changes {...detail} />;
     case "session":
       return (
         <PropertyList
@@ -83,12 +76,10 @@ function Changes({
   live,
   result,
   warnings,
-  folded,
 }: {
   live: unknown;
   result: unknown;
   warnings: readonly string[];
-  folded: boolean;
 }) {
   const before = useMemo(
     () => (live === null ? "" : yamlOfObject(live)),
@@ -106,26 +97,22 @@ function Changes({
           </ul>
         </Callout>
       )}
-      {!folded && (
-        <>
-          <p>
-            <span className="font-medium">
-              {live === null ? "Not on the cluster yet" : "Live"}
-            </span>{" "}
-            <span className="text-muted-foreground">against</span>{" "}
-            <span className="font-medium">the result of a dry run</span>
-          </p>
-          <div
-            role="group"
-            aria-label="Changes"
-            className="h-[300px] overflow-hidden rounded-md shadow-[inset_0_0_0_1px_var(--border)]"
-          >
-            <Suspense fallback={<Skeleton className="m-3 h-4 w-1/2" />}>
-              <DiffView collapseUnchanged original={before} modified={after} />
-            </Suspense>
-          </div>
-        </>
-      )}
+      <p>
+        <span className="font-medium">
+          {live === null ? "Not on the cluster yet" : "Live"}
+        </span>{" "}
+        <span className="text-muted-foreground">against</span>{" "}
+        <span className="font-medium">the result of a dry run</span>
+      </p>
+      <div
+        role="group"
+        aria-label="Changes"
+        className="h-[300px] overflow-hidden rounded-md shadow-[inset_0_0_0_1px_var(--border)]"
+      >
+        <Suspense fallback={<Skeleton className="m-3 h-4 w-1/2" />}>
+          <DiffView collapseUnchanged original={before} modified={after} />
+        </Suspense>
+      </div>
     </div>
   );
 }

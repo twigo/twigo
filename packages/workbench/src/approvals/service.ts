@@ -17,12 +17,7 @@ import { Changes } from "../changes";
  * (ARCHITECTURE 2.3).
  */
 export interface ApprovalDetails {
-  /** @todo: drop `folded` with the variants of the checkpoint, once the owner has chosen. */
-  readonly component: ComponentType<{
-    readonly detail: ApprovalDetail;
-    /** Shows no more than what must stay in view, as a diff's warnings. */
-    readonly folded: boolean;
-  }>;
+  readonly component: ComponentType<{ readonly detail: ApprovalDetail }>;
   /** Whether the dialog widens for it, as for a diff. */
   readonly wide: (detail: ApprovalDetail) => boolean;
 }

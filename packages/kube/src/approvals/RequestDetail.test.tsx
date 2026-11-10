@@ -27,8 +27,8 @@ afterEach(() => {
   shown.views.length = 0;
 });
 
-const draw = (detail: ApprovalDetail, folded = false) =>
-  render(<RequestDetail detail={detail} folded={folded} />);
+const draw = (detail: ApprovalDetail) =>
+  render(<RequestDetail detail={detail} />);
 
 test("a diff sets the live object's YAML against the dry run's, with what the server warned", async () => {
   draw({

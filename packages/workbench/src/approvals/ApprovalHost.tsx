@@ -1,8 +1,5 @@
-import { useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
 import type { ApprovalAnswer, ApprovalAsk } from "@twigo/protocol";
 import {
-  Button,
   ConfirmDialog,
   PropertyList,
   type ConfirmChoice,
@@ -12,7 +9,6 @@ import { ContextBadge } from "../operations/ContextBadge";
 import { contextAccent } from "../spaces/colors";
 import { useChanges, useReturnFocus, useWorkbench } from "../react";
 import { describeAsk } from "./service";
-import { variant } from "./variant";
 
 const MONO = "font-mono text-[11px] wrap-anywhere select-text";
 
@@ -52,9 +48,6 @@ function AskDialog({
   useChanges(catalog.changes);
   useChanges(colors.changes);
   const { details, failure, answering } = approvals;
-  const [expanded, setExpanded] = useState(false);
-  const [lasting, setLasting] = useState(false);
-  const chosen = variant();
 
   const access = catalog.find(ask.context)?.access;
   const environment = access?.environment ?? null;
@@ -62,33 +55,22 @@ function AskDialog({
     void approvals.answer(given, typed);
   };
 
-  const wide = details?.wide(ask.detail) ?? false;
-  const collapsed = wide && chosen.diff === "collapsed";
   const minutes = ask.lastingMinutes;
-  const allow = ask.typed ? `Allow ${ask.verb}` : "Allow once";
-
-  const choices: ConfirmChoice[] =
-    chosen.scope === "checkbox"
-      ? [
-          {
-            label: ask.typed ? allow : "Allow",
-            destructive: ask.typed,
-            onSelect: (typed) => {
-              answer(lasting && minutes !== null ? "lasting" : "once")(typed);
-            },
-          },
-        ]
+  const choices: ConfirmChoice[] = [
+    {
+      label: ask.typed ? `Allow ${ask.verb}` : "Allow once",
+      destructive: ask.typed,
+      onSelect: answer("once"),
+    },
+    ...(minutes === null
+      ? []
       : [
-          { label: allow, destructive: ask.typed, onSelect: answer("once") },
-          ...(minutes === null
-            ? []
-            : [
-                {
-                  label: `Allow for ${lengthOf(minutes)}`,
-                  onSelect: answer("lasting"),
-                },
-              ]),
-        ];
+          {
+            label: `Allow for ${String(minutes)} ${minutes === 1 ? "minute" : "minutes"}`,
+            onSelect: answer("lasting"),
+          },
+        ]),
+  ];
 
   const claims: Property[] = [
     ...(ask.command === null
@@ -134,7 +116,7 @@ function AskDialog({
       consequences={[]}
       {...(ask.typed && { typed: ask.context })}
       {...(failure !== undefined && { error: failure })}
-      wide={wide && (!collapsed || expanded)}
+      wide={details?.wide(ask.detail) ?? false}
       busy={answering}
       cancel="Deny"
       choices={choices}
@@ -144,48 +126,7 @@ function AskDialog({
       onCloseAutoFocus={onCloseAutoFocus}
     >
       {claims.length > 0 && <PropertyList items={claims} />}
-      {details && (
-        <details.component
-          detail={ask.detail}
-          folded={collapsed && !expanded}
-        />
-      )}
-      {collapsed && (
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="justify-self-start"
-          aria-expanded={expanded}
-          onClick={() => {
-            setExpanded(!expanded);
-          }}
-        >
-          {expanded ? (
-            <ChevronDown aria-hidden />
-          ) : (
-            <ChevronRight aria-hidden />
-          )}
-          {expanded ? "Hide changes" : "Show changes"}
-        </Button>
-      )}
-      {chosen.scope === "checkbox" && minutes !== null && (
-        <label className="flex cursor-pointer items-center gap-2">
-          <input
-            type="checkbox"
-            className="accent-brand"
-            checked={lasting}
-            onChange={(event) => {
-              setLasting(event.target.checked);
-            }}
-          />
-          Don&apos;t ask again for {lengthOf(minutes)}
-        </label>
-      )}
+      {details && <details.component detail={ask.detail} />}
     </ConfirmDialog>
   );
-}
-
-function lengthOf(minutes: number): string {
-  return `${String(minutes)} ${minutes === 1 ? "minute" : "minutes"}`;
 }
