@@ -2016,6 +2016,71 @@ async fn a_relock_ends_an_exec_class_answer_without_an_upgrade_and_leaves_a_read
 }
 
 #[tokio::test]
+async fn a_relock_leaves_a_write_s_answer_and_a_forward_s_that_read_only_allows() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy
+        .set_mode("kind-a", Some(Mode::ReadWrite))
+        .unwrap();
+    let process = Process::start(&core, None).await;
+    let post = |path: &str| {
+        process
+            .request("POST", "kind-a", path)
+            .header("content-type", "application/json")
+            .body(json_body(&json!({})))
+            .unwrap()
+    };
+    let (binding, _b) = send(
+        process.at(),
+        post("/api/v1/namespaces/a/pods/holds/binding"),
+    )
+    .await;
+    let (eviction, _e) = send(
+        process.at(),
+        post("/api/v1/namespaces/a/pods/holds/eviction"),
+    )
+    .await;
+    let forward = process
+        .request("GET", "kind-a", "/api/v1/namespaces/a/pods/holds/proxy/x")
+        .body(empty())
+        .unwrap();
+    let (forward, _f) = send(process.at(), forward).await;
+    let exec = process
+        .request("POST", "kind-a", "/api/v1/namespaces/a/pods/holds/proxy/x")
+        .body(empty())
+        .unwrap();
+    let (exec, _x) = send(process.at(), exec).await;
+    let (mut binding, mut eviction, mut forward, exec) = (
+        binding.into_body(),
+        eviction.into_body(),
+        forward.into_body(),
+        exec.into_body(),
+    );
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    assert!(still_open(&mut binding).await);
+    core.policy
+        .set_mode("kind-a", Some(Mode::ReadOnly))
+        .unwrap();
+    assert!(
+        ends(exec).await,
+        "the exec-class POST to a pod's proxy ends"
+    );
+    assert!(
+        still_open(&mut binding).await,
+        "a write's held answer stays"
+    );
+    assert!(
+        still_open(&mut eviction).await,
+        "an eviction's held answer stays"
+    );
+    assert!(
+        still_open(&mut forward).await,
+        "a forward stays while read-only allows it"
+    );
+}
+
+#[tokio::test]
 async fn a_relock_ends_a_forward_class_answer_where_read_only_refuses_port_forwards() {
     let fake = Fake::start().await;
     let dir = tempfile::tempdir().unwrap();
