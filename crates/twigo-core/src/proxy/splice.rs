@@ -25,6 +25,7 @@ use twigo_policy::{Approval, Attributes, Policy};
 
 use super::forward::{Sent, failed, passed, revoked};
 use super::refusal::Refusal;
+use super::server::Writing;
 use super::tokens::Holder;
 use super::{Changes, headers};
 
@@ -66,6 +67,7 @@ impl Reach {
 
 pub(super) struct Upgrade<'a> {
     pub holder: &'a Holder,
+    pub writing: &'a Writing,
     pub clients: &'a Clients,
     pub actor: &'a ActorClients,
     pub policy: Arc<Policy>,
@@ -78,6 +80,7 @@ pub(super) struct Upgrade<'a> {
 pub(super) async fn upgrade(upgrade: Upgrade<'_>, parts: Parts, client: OnUpgrade) -> Sent {
     let Upgrade {
         holder,
+        writing,
         clients,
         actor,
         policy,
@@ -111,7 +114,7 @@ pub(super) async fn upgrade(upgrade: Upgrade<'_>, parts: Parts, client: OnUpgrad
     };
     if response.status() != StatusCode::SWITCHING_PROTOCOLS {
         return Sent {
-            response: passed(holder, response, Some(permit)),
+            response: passed(holder, writing, response, Some(permit)),
             reached: reach == Reach::Proxy,
         };
     }

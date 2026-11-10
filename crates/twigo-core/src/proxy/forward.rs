@@ -1,7 +1,8 @@
 //! An ordinary request: its body read whole, since kube's request `Body`
 //! cannot stream ([`Body`](https://github.com/kube-rs/kube/blob/5.0.0/kube-client/src/client/body.rs#L33-L84)),
 //! sent on the actor's api client as a proxied stream, and its answer passed
-//! back frame by frame until the body ends or the process does.
+//! back frame by frame until the body ends or the process does, which ends
+//! the connection that writes it.
 
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -12,12 +13,12 @@ use http::{Request, Response};
 use http_body::{Body, Frame, SizeHint};
 use http_body_util::BodyExt;
 use http_body_util::combinators::UnsyncBoxBody;
-use tokio_util::sync::WaitForCancellationFutureOwned;
 use twigo_kube::client::{ActorClients, Permit, Proxied};
 use twigo_policy::Approval;
 
 use super::headers;
 use super::refusal::Refusal;
+use super::server::{Answer, Writing};
 use super::tokens::Holder;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -39,6 +40,7 @@ pub(super) struct Sent {
 
 pub(super) async fn send(
     holder: &Holder,
+    writing: &Writing,
     actor: &ActorClients,
     parts: Parts,
     body: Bytes,
@@ -56,26 +58,28 @@ pub(super) async fn send(
     };
     match sent {
         Ok(response) => Sent {
-            response: passed(holder, response, None),
+            response: passed(holder, writing, response, None),
             reached: true,
         },
         Err(error) => failed(&holder.context, &error),
     }
 }
 
-/// The server's answer as it came, but its hop-by-hop headers, ending once
-/// the process does, and holding `session`, if any, until it ends.
+/// The server's answer as it came, but its hop-by-hop headers, holding
+/// `session`, if any, until it ends; its connection ends once the process
+/// does.
 pub(super) fn passed(
     holder: &Holder,
+    writing: &Writing,
     response: Response<kube::client::Body>,
     session: Option<Permit>,
 ) -> Response<ProxyBody> {
     let (mut parts, body) = response.into_parts();
     parts.headers = headers::response(&parts.headers);
-    let body = Until {
+    let body = Passed {
         body,
-        ended: Box::pin(holder.ended.clone().cancelled_owned()),
         _session: session,
+        _answer: writing.answer(&holder.ended),
     };
     Response::from_parts(parts, body.boxed_unsync())
 }
@@ -111,15 +115,14 @@ pub(super) fn full(context: &str) -> Refusal {
     ))
 }
 
-/// A response's body that ends with an error once its process's handle
-/// drops, which hyper turns into a cut connection.
-struct Until<B> {
+/// A passed answer's body, with what it holds while it runs.
+struct Passed<B> {
     body: B,
-    ended: Pin<Box<WaitForCancellationFutureOwned>>,
     _session: Option<Permit>,
+    _answer: Answer,
 }
 
-impl<B> Body for Until<B>
+impl<B> Body for Passed<B>
 where
     B: Body<Data = Bytes> + Unpin,
     B::Error: Into<BoxError>,
@@ -131,9 +134,6 @@ where
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Bytes>, BoxError>>> {
-        if self.ended.as_mut().poll(cx).is_ready() {
-            return Poll::Ready(Some(Err("the process's token was revoked".into())));
-        }
         Pin::new(&mut self.body).poll_frame(cx).map_err(Into::into)
     }
 

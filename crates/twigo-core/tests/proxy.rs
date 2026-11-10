@@ -8,6 +8,7 @@ use std::convert::Infallible;
 use std::ffi::OsString;
 use std::net::SocketAddr;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -57,11 +58,29 @@ type FakeBody = UnsyncBoxBody<Bytes, Infallible>;
 /// answers what has `slow=1` in its query, but a dry run, only after `SLOW`.
 /// A dry-run patch of a Secret it refuses quoting the patched Secret, as
 /// kube-apiserver refuses one that no longer decodes, and any other dry-run
-/// write of one it answers with a warning that quotes a value.
+/// write of one it answers with a warning that quotes a value. A watch with
+/// `flood=1` in its query it answers with data as fast as it is read.
 #[derive(Clone)]
 struct Fake {
     address: SocketAddr,
     seen: Arc<Mutex<Vec<Seen>>>,
+    floods: Arc<Floods>,
+}
+
+/// The fake's watches that flood: the bytes they gave, and how many run.
+#[derive(Default)]
+struct Floods {
+    given: AtomicUsize,
+    running: AtomicUsize,
+}
+
+/// One flood running, until it drops with its stream.
+struct Flooding(Arc<Floods>);
+
+impl Drop for Flooding {
+    fn drop(&mut self) {
+        self.0.running.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 impl Fake {
@@ -70,14 +89,15 @@ impl Fake {
         let fake = Self {
             address: listener.local_addr().unwrap(),
             seen: Arc::default(),
+            floods: Arc::default(),
         };
-        let seen = Arc::clone(&fake.seen);
+        let shared = fake.clone();
         tokio::spawn(async move {
             loop {
                 let (stream, _) = listener.accept().await.unwrap();
-                let seen = Arc::clone(&seen);
+                let fake = shared.clone();
                 tokio::spawn(async move {
-                    let service = service_fn(move |request| answer(Arc::clone(&seen), request));
+                    let service = service_fn(move |request| answer(fake.clone(), request));
                     let _ = hyper::server::conn::http1::Builder::new()
                         .serve_connection(TokioIo::new(stream), service)
                         .with_upgrades()
@@ -106,10 +126,10 @@ fn body(bytes: impl Into<Bytes>) -> FakeBody {
 }
 
 async fn answer(
-    seen: Arc<Mutex<Vec<Seen>>>,
+    fake: Fake,
     mut request: Request<Incoming>,
 ) -> Result<Response<FakeBody>, Infallible> {
-    seen.lock().unwrap().push(Seen {
+    fake.seen.lock().unwrap().push(Seen {
         method: request.method().clone(),
         uri: request.uri().to_string(),
         headers: request.headers().clone(),
@@ -157,6 +177,17 @@ async fn answer(
         .uri()
         .query()
         .is_some_and(|query| query.contains("watch=true"));
+    if watch && query.contains("flood=1") {
+        fake.floods.running.fetch_add(1, Ordering::SeqCst);
+        let flooding = Flooding(Arc::clone(&fake.floods));
+        let chunk = Bytes::from(vec![b' '; 64 << 10]);
+        let flood = futures::stream::repeat_with(move || {
+            let floods = &flooding.0;
+            floods.given.fetch_add(chunk.len(), Ordering::SeqCst);
+            Ok(Frame::data(chunk.clone()))
+        });
+        return Ok(Response::new(StreamBody::new(flood).boxed_unsync()));
+    }
     if watch {
         let held = futures::stream::pending::<Result<Frame<Bytes>, Infallible>>();
         return Ok(Response::new(StreamBody::new(held).boxed_unsync()));
@@ -1692,6 +1723,58 @@ async fn dropping_a_process_ends_its_watch_and_its_splice_and_frees_their_stream
     let spliced = tokio::time::timeout(WAIT, upgraded.read_to_end(&mut rest)).await;
     assert!(spliced.is_ok(), "the splice ends");
     held(&core, 0, 0).await;
+}
+
+#[tokio::test]
+async fn dropping_a_process_ends_a_watch_whose_client_reads_nothing() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    let process = Process::start(&core, None).await;
+    let at = process.at();
+    let stream = TcpStream::connect(at.address).await.unwrap();
+    let mut stream = at
+        .tls
+        .connect(ServerName::IpAddress(at.address.ip().into()), stream)
+        .await
+        .unwrap();
+    let watch = format!(
+        "GET {}/api/v1/namespaces/a/pods?watch=true&flood=1 HTTP/1.1\r\nhost: {}\r\nauthorization: Bearer {}\r\n\r\n",
+        process.prefix("kind-a"),
+        at.address,
+        process.token("kind-a"),
+    );
+    stream.write_all(watch.as_bytes()).await.unwrap();
+    stream.flush().await.unwrap();
+    held(&core, 1, 0).await;
+    let stalled = tokio::time::timeout(WAIT, async {
+        let mut last = 0;
+        loop {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            let given = fake.floods.given.load(Ordering::SeqCst);
+            if given > 0 && given == last {
+                return;
+            }
+            last = given;
+        }
+    });
+    stalled
+        .await
+        .expect("the flood stalls on a client that reads nothing");
+
+    drop(process.handle);
+    held(&core, 0, 0).await;
+    let ended = tokio::time::timeout(WAIT, async {
+        while fake.floods.running.load(Ordering::SeqCst) != 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    });
+    ended.await.expect("the upstream stream ends");
+    let mut buffer = vec![0; 1 << 20];
+    let cut = tokio::time::timeout(WAIT, async {
+        while stream.read(&mut buffer).await.is_ok_and(|read| read > 0) {}
+    });
+    cut.await.expect("the client's connection ends");
 }
 
 #[tokio::test]

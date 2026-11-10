@@ -21,6 +21,7 @@ use twigo_policy::{Approval, Attributes};
 
 use super::forward::{BODY_LIMIT, ProxyBody};
 use super::refusal::Refusal;
+use super::server::Writing;
 use super::splice::{Reach, Upgrade};
 use super::tokens::{self, Digest, Holder};
 use super::{Changes, forward, headers, splice};
@@ -30,12 +31,13 @@ use crate::approvals::{Asking, Once, Outcome, detail};
 pub(super) async fn handle(
     core: Weak<Core>,
     address: SocketAddr,
+    writing: Writing,
     request: Request<Incoming>,
 ) -> Result<Response<ProxyBody>, Infallible> {
     let Some(core) = core.upgrade() else {
         return Ok(Refusal::unavailable("Twigo is quitting").into_response());
     };
-    Ok(serve(&core, address, request)
+    Ok(serve(&core, address, &writing, request)
         .await
         .unwrap_or_else(Refusal::into_response))
 }
@@ -43,6 +45,7 @@ pub(super) async fn handle(
 async fn serve(
     core: &Core,
     address: SocketAddr,
+    writing: &Writing,
     mut request: Request<Incoming>,
 ) -> Result<Response<ProxyBody>, Refusal> {
     from_here(&request, address)?;
@@ -81,6 +84,7 @@ async fn serve(
         Some((client, reach)) => {
             let upgrade = Upgrade {
                 holder: &holder,
+                writing,
                 clients: &clients,
                 actor: &actor,
                 policy: Arc::clone(&core.policy),
@@ -91,7 +95,7 @@ async fn serve(
             };
             splice::upgrade(upgrade, parts, client).await
         }
-        None => forward::send(&holder, &actor, parts, body, decided.approval).await,
+        None => forward::send(&holder, writing, &actor, parts, body, decided.approval).await,
     };
     if !sent.reached
         && let Some(once) = decided.once

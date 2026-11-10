@@ -1599,7 +1599,8 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   - `Authorization`, `Host` and hop-by-hop headers stop at the proxy, `Upgrade` and `Connection: Upgrade` excepted on an upgrade; `User-Agent`, `Kubectl-Command` and the WebSocket and SPDY headers pass as they came, and nothing is added.
   - Ordinary requests and watches go through the actor's clients over the context's shared connections, stream counter and policy layer, so auth, the 401 refresh, the proxy connector and the gate stay one path.
     The body is read whole, as kube's request body cannot stream, and above the API server's own 3 MiB gets a `413`.
-    The answer passes back frame by frame, hop-by-hop headers aside, and ends when the process's handle drops; a relock leaves it, as it is a read.
+    The answer passes back frame by frame, hop-by-hop headers aside; a relock leaves it, as it is a read.
+    The connection that carries an answer ends when the answer's process's handle drops, whatever its client reads: hyper polls a body only while it can buffer what the body gives ([`poll_write`](https://github.com/hyperium/hyper/blob/v1.12.0/src/proto/h1/dispatch.rs#L384-L401)), so a watch whose client stopped reading would otherwise keep its stream and its upstream.
   - An upgrade is a `GET` or a `POST` that carries `Upgrade` to a pod's `exec`, `attach` or `portforward`, or to the `proxy` of a pod, a service or a node, in the core group.
     It takes a session of the context's budget (3.2), goes on the actor's HTTP/1.1 client with an empty body, and on a `101` is spliced with `hyper::upgrade::on`, which is all kube's own `connect` does ([`connect`](https://github.com/kube-rs/kube/blob/5.0.0/kube-client/src/client/mod.rs#L240-L275)).
     Any other answer passes through and holds the session until its body ends.
