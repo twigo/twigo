@@ -8,6 +8,7 @@ const shown = vi.hoisted(() => ({
     original: string;
     modified: string;
     collapseUnchanged?: boolean;
+    maxHeight?: number;
   }[],
 }));
 
@@ -16,6 +17,7 @@ vi.mock("../edit/DiffView", () => ({
     original: string;
     modified: string;
     collapseUnchanged?: boolean;
+    maxHeight?: number;
   }) => {
     shown.views.push(props);
     return <div data-testid="diff" />;
@@ -44,7 +46,9 @@ test("a diff sets the live object's YAML against the dry run's, with what the se
     original: "kind: ConfigMap\ndata:\n  mode: fast\n",
     modified: "kind: ConfigMap\ndata:\n  mode: slow\n",
     collapseUnchanged: true,
+    maxHeight: 300,
   });
+  expect(screen.queryByText(/values are hidden/)).toBeNull();
   expect(screen.getByText("Live")).toBeTruthy();
   expect(screen.getByText("the result of a dry run")).toBeTruthy();
   expect(screen.getByText("The server warns")).toBeTruthy();
@@ -65,6 +69,30 @@ test("a create has no live object, and no warning means no callout", async () =>
   expect(screen.getByText("Not on the cluster yet")).toBeTruthy();
   expect(screen.queryByText("Live")).toBeNull();
   expect(screen.queryByText("The server warns")).toBeNull();
+});
+
+test("a Secret's diff says its values are masked, whichever side is a Secret", async () => {
+  const secret = { apiVersion: "v1", kind: "Secret", data: { a: "<3 bytes>" } };
+  draw({ kind: "diff", live: null, result: secret, warnings: [] });
+  await waitFor(() => {
+    expect(screen.getByTestId("diff")).toBeTruthy();
+  });
+  expect(
+    screen.getByText(
+      "A Secret's values are hidden, as their sizes: values of the same size may still differ.",
+    ),
+  ).toBeTruthy();
+  cleanup();
+
+  draw({
+    kind: "diff",
+    live: secret,
+    result: { ...secret, data: { a: "<4 bytes>" } },
+    warnings: [],
+  });
+  expect(
+    screen.getByText(/values of the same size may still differ/),
+  ).toBeTruthy();
 });
 
 test("a session shows the command line and container, and whether it takes input", () => {

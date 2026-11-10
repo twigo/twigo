@@ -17,7 +17,7 @@ import { parseDiffUri, parseObjectUri } from "../uri";
 import { objectProblem } from "../viewProblem";
 import { EditActions } from "./actions";
 import { PreviewPage } from "./answers";
-import { kindOf, yamlOfJson } from "./object";
+import { kindOf, SECRET_NOTE, yamlOfJson } from "./object";
 import type { EditServices } from "./services";
 
 const DiffView = lazy(() => import("./DiffView"));
@@ -82,9 +82,6 @@ function ApplyDiff({
     </div>
   );
 }
-
-const SECRET_NOTE =
-  "A Secret's values are hidden, as their sizes: values of the same size may still differ.";
 
 function isSecret(manifest: string | undefined): boolean {
   return (

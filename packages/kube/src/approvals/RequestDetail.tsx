@@ -1,7 +1,7 @@
 import { lazy, Suspense, useMemo } from "react";
 import type { ApprovalDetail } from "@twigo/protocol";
 import { Callout, PropertyList, Skeleton } from "@twigo/ui";
-import { yamlOfObject } from "../edit/object";
+import { kindOf, SECRET_NOTE, yamlOfObject } from "../edit/object";
 import {
   commandLine,
   inputWords,
@@ -10,6 +10,8 @@ import {
 } from "./words";
 
 const DiffView = lazy(() => import("../edit/DiffView"));
+
+const DIFF_HEIGHT = 300;
 
 const CODE = "font-mono text-[11px] wrap-anywhere select-text";
 
@@ -86,6 +88,9 @@ function Changes({
     [live],
   );
   const after = useMemo(() => yamlOfObject(result), [result]);
+  const secret = [live, result].some(
+    (object) => kindOf(object)?.kind === "Secret",
+  );
   return (
     <div className="grid gap-2">
       {warnings.length > 0 && (
@@ -104,13 +109,19 @@ function Changes({
         <span className="text-muted-foreground">against</span>{" "}
         <span className="font-medium">the result of a dry run</span>
       </p>
+      {secret && <p className="text-muted-foreground">{SECRET_NOTE}</p>}
       <div
         role="group"
         aria-label="Changes"
-        className="h-[300px] overflow-hidden rounded-md shadow-[inset_0_0_0_1px_var(--border)]"
+        className="overflow-hidden rounded-md shadow-[inset_0_0_0_1px_var(--border)]"
       >
         <Suspense fallback={<Skeleton className="m-3 h-4 w-1/2" />}>
-          <DiffView collapseUnchanged original={before} modified={after} />
+          <DiffView
+            collapseUnchanged
+            maxHeight={DIFF_HEIGHT}
+            original={before}
+            modified={after}
+          />
         </Suspense>
       </div>
     </div>
