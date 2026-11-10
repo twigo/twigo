@@ -914,6 +914,10 @@ Extensions add commands, not prefixes.
     A second exec after a failure would log a runtime error on every shell into an Alpine image, and could read a person's `exit 1` as a shell that failed.
     `TERM` has to be set: a tty exec leaves it unset, so `sh -c 'echo $TERM'` prints nothing on busybox and bash reports `dumb`, which breaks full-screen programs (kind 1.37, containerd, 2026-11-09).
   - **Attach** takes `tty` and `stdin` from the container's spec and `stderr` when there is no tty, with no wrapper; a container whose spec keeps no stdin attaches read-only.
+    The run tells the tab both.
+    A process with no terminal writes bare line feeds, which the tab draws with carriage returns, as a terminal's line discipline would add them.
+    Once an attach runs, its tab says in the scrollback what it shows: what the process writes from then on, while what it wrote before is in its logs.
+    It also says whether what is typed reaches the process; one that keeps no stdin takes no input and hides its cursor.
   - **Flow control** is in bytes, counted by what the terminal has parsed (`shell_ack`, clamped to what was sent).
     A frame is at most 64 KiB, as `twigo-sessions` names its constants; output goes out at once when the last frame left 16 ms ago or more, so an echo after a quiet moment never waits, and otherwise gathers until 16 ms after the last frame, about a display frame, or 64 KiB, since the webview pays per frame, each one a Tauri `eval`; at 256 KiB unacknowledged it stops reading, until it falls below 64 KiB.
     Stopping the reader blocks kube's message loop, stdin and resizes included, until acks come; input and resizes therefore queue apart from the reader, and a Ctrl-C during `yes` reaches the process as the terminal catches up.

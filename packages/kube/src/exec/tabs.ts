@@ -11,7 +11,7 @@ import {
 import { Changes, type Platform } from "@twigo/workbench";
 import type { ExecInput } from "../uri";
 import { terminalFont, terminalTheme } from "./theme";
-import { ending } from "./words";
+import { attached, ending } from "./words";
 
 /** The lines a terminal keeps (ARCHITECTURE 4.6). */
 const SCROLLBACK = 5000;
@@ -25,8 +25,8 @@ const FIT_MS = 100;
  * session ends too, since a restart's reset is parsed after the task that
  * focuses the terminal, which would report the focus to the new shell.
  */
-const MODES_OFF =
-  "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1004l\x1b[?1006l\x1b[?2004l\x1b[?25l";
+const CURSOR_OFF = "\x1b[?25l";
+const MODES_OFF = `\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1004l\x1b[?1006l\x1b[?2004l${CURSOR_OFF}`;
 /** Leaves the alternate screen, which restores the cursor: a terminal that is not on it would jump home. */
 const LEAVE_ALTERNATE = "\x1b[?1049l";
 /**
@@ -47,6 +47,15 @@ const encoder = new TextEncoder();
 
 /** None for a tab restored from the saved layout. */
 export type ExecStatus = ShellEvent | { readonly state: "restored" };
+
+/** A session a plan's run answered with, and how it joins its process. */
+export interface ExecSession {
+  readonly id: SubscriptionId;
+  /** Whether the process has a terminal; without one, its line feeds come with no carriage return. */
+  readonly tty: boolean;
+  /** Whether what is typed reaches the process. */
+  readonly stdin: boolean;
+}
 
 export interface ExecOptions {
   readonly backend: Backend;
@@ -79,6 +88,7 @@ export class ExecTab {
   /** A session the plan's run answered with, not yet opened with the terminal's size. */
   #pending: SubscriptionId | undefined;
   #session: ShellSession | undefined;
+  #stdin = true;
   #unsubscribe: (() => void) | undefined;
   #opened = false;
   #shown = false;
@@ -93,11 +103,11 @@ export class ExecTab {
     readonly input: ExecInput,
     options: ExecOptions,
     changed: () => void,
-    session: SubscriptionId | undefined,
+    session: ExecSession | undefined,
   ) {
     this.#options = options;
     this.#changed = changed;
-    this.#pending = session;
+    this.#pending = session?.id;
     this.#status =
       session === undefined ? { state: "restored" } : { state: "connecting" };
     this.host.className = "size-full overflow-hidden";
@@ -131,6 +141,7 @@ export class ExecTab {
     this.term.attachCustomKeyEventHandler(
       (event) => !(event.type === "keydown" && options.binds(event)),
     );
+    if (session) this.#join(session);
   }
 
   getStatus(): ExecStatus {
@@ -185,14 +196,26 @@ export class ExecTab {
   }
 
   /** Starts, or starts again after an ending, with the session a plan's run answered with. */
-  start(session: SubscriptionId): void {
+  start(session: ExecSession): void {
     this.#release();
-    this.#pending = session;
+    this.#pending = session.id;
     this.#status = { state: "connecting" };
-    this.term.options.disableStdin = false;
     this.term.write(SESSION_STARTS);
+    this.#join(session);
     this.#changed();
     this.#begin();
+  }
+
+  /**
+   * A process with no terminal writes bare line feeds, which a terminal
+   * would draw as a staircase, so they come with carriage returns; one
+   * that keeps no stdin takes no input, and its cursor is hidden.
+   */
+  #join({ tty, stdin }: ExecSession): void {
+    this.#stdin = stdin;
+    this.term.options.convertEol = !tty;
+    this.term.options.disableStdin = !stdin;
+    if (!stdin) this.term.write(CURSOR_OFF);
   }
 
   dispose(): void {
@@ -264,6 +287,14 @@ export class ExecTab {
   #sync(next: ShellEvent): void {
     const was = this.#status.state;
     this.#status = next;
+    if (
+      next.state === "running" &&
+      was !== "running" &&
+      this.input.attach === true
+    ) {
+      const words = attached(this.input.container, this.#stdin);
+      this.term.write(`${QUIET}${words}${PLAIN}\r\n`);
+    }
     if (next.state === "ended" && was !== "ended") {
       const { title, detail } = ending(next.end);
       const lines = [title, ...(detail?.split(/\r?\n/) ?? [])];
@@ -361,7 +392,7 @@ export class ExecTabs {
     return made;
   }
 
-  start(uri: string, input: ExecInput, session: SubscriptionId): void {
+  start(uri: string, input: ExecInput, session: ExecSession): void {
     const found = this.#tabs.get(uri);
     if (found) found.start(session);
     else this.#make(uri, input, session);
@@ -379,7 +410,7 @@ export class ExecTabs {
   #make(
     uri: string,
     input: ExecInput,
-    session: SubscriptionId | undefined,
+    session: ExecSession | undefined,
   ): ExecTab {
     const tab = new ExecTab(
       input,

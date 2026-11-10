@@ -16,9 +16,11 @@ import type { Pod } from "./cluster";
  * cluster's sessions, `shellNoShell` finds no shell in the container,
  * `shellLost` loses its connection and `shellRelocked` its context's write
  * mode a while after it opens, `shellOneContainer` runs one container in
- * every pod, so no picker asks, and `shellDefaultSecond` has the pods'
+ * every pod, so no picker asks, `shellDefaultSecond` has the pods'
  * default-container annotation name the second container, so the default is
- * not the first. Any other scenario runs two or three.
+ * not the first, and `shellAttachInteractive` gives the containers a
+ * terminal and stdin, so an attach takes what is typed. Any other scenario
+ * runs two or three containers, which keep neither, as most servers' do.
  */
 export type ShellScenario =
   | "shellQueued"
@@ -26,7 +28,8 @@ export type ShellScenario =
   | "shellLost"
   | "shellRelocked"
   | "shellOneContainer"
-  | "shellDefaultSecond";
+  | "shellDefaultSecond"
+  | "shellAttachInteractive";
 
 export const SHELL_SCENARIOS: readonly ShellScenario[] = [
   "shellQueued",
@@ -35,7 +38,17 @@ export const SHELL_SCENARIOS: readonly ShellScenario[] = [
   "shellRelocked",
   "shellOneContainer",
   "shellDefaultSecond",
+  "shellAttachInteractive",
 ];
+
+/** How a session joins its process: a shell with a terminal and stdin, an attach as its container keeps them. */
+export function joins(
+  kind: ShellKind,
+  scenario: ShellScenario | undefined,
+): { readonly tty: boolean; readonly stdin: boolean } {
+  const both = kind === "shell" || scenario === "shellAttachInteractive";
+  return { tty: both, stdin: both };
+}
 
 export function isShellScenario(scenario: string): scenario is ShellScenario {
   return (SHELL_SCENARIOS as readonly string[]).includes(scenario);
@@ -112,6 +125,7 @@ function complete(sequence: string): boolean {
 export class MockShell {
   readonly #target: ShellTarget;
   readonly #kind: ShellKind;
+  readonly #joined: { readonly tty: boolean; readonly stdin: boolean };
   readonly #scenario: ShellScenario | undefined;
   readonly #onMessage: (message: ShellMessage) => void;
   readonly #relock: () => void;
@@ -138,6 +152,7 @@ export class MockShell {
   ) {
     this.#target = target;
     this.#kind = kind;
+    this.#joined = joins(kind, scenario);
     this.#scenario = scenario;
     this.#relock = relock;
     this.#onMessage = onMessage;
@@ -166,6 +181,7 @@ export class MockShell {
 
   /** Keeps what is typed before the process runs and gives it to the process then, as Rust's queue does. */
   input(data: readonly number[]): void {
+    if (!this.#joined.stdin) return;
     const text = this.#decoder.decode(Uint8Array.from(data), { stream: true });
     if (this.#state === "connecting" || this.#state === "queued") {
       this.#ahead += text;
@@ -205,9 +221,6 @@ export class MockShell {
       }
       this.#event({ state: "running" });
       if (this.#kind === "attach") {
-        this.#write(
-          "If you don't see a command prompt, try pressing enter.\r\n",
-        );
         this.#attached();
       } else {
         this.#write(BRACKETED_PASTE);
@@ -219,12 +232,13 @@ export class MockShell {
     });
   }
 
-  /** The joined process writes a line a second until it is stopped. */
+  /** The joined process writes a line a second until it is stopped, with a bare line feed when it has no terminal. */
   #attached(): void {
     this.#later(LINE_MS, () => {
       const at = new Date().toISOString();
+      const end = this.#joined.tty ? "\r\n" : "\n";
       this.#write(
-        `\x1b[90m${at}\x1b[0m [${this.#target.container}] handled GET /healthz 200\r\n`,
+        `\x1b[90m${at}\x1b[0m [${this.#target.container}] handled GET /healthz 200${end}`,
       );
       this.#attached();
     });

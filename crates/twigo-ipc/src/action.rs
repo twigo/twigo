@@ -179,6 +179,11 @@ pub enum OperationEvent {
     /// A shell's session, which starts once `shell_open` names it.
     Session {
         id: SubscriptionId,
+        /// Whether the process has a terminal: a shell's always does, an
+        /// attach's as its container's spec says.
+        tty: bool,
+        /// Whether what is typed reaches the process, as `tty` goes.
+        stdin: bool,
     },
     Failed {
         error: IpcError,

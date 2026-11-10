@@ -8,7 +8,8 @@ import {
   sized,
   withTerminalLayout,
 } from "../../test/terminal";
-import { ExecTabs, type WebglRenderer } from "./tabs";
+import { ExecTabs, type ExecSession, type WebglRenderer } from "./tabs";
+import { attached } from "./words";
 
 withTerminalLayout();
 
@@ -19,6 +20,11 @@ const INPUT: ExecInput = {
   container: "api",
 };
 const URI = execUri(INPUT);
+const ATTACH: ExecInput = { ...INPUT, attach: true };
+const ATTACH_URI = execUri(ATTACH);
+
+const shell = (id: number): ExecSession => ({ id, tty: true, stdin: true });
+const squeezed = (words: string) => words.replace(/\s/g, "");
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -77,9 +83,9 @@ function setup(
     document.body.append(element);
     return element;
   };
-  const mounted = async (id = 7) => {
-    tabs.start(URI, INPUT, id);
-    const tab = tabs.get(URI);
+  const mounted = async (session = shell(7), input = INPUT, uri = URI) => {
+    tabs.start(uri, input, session);
+    const tab = tabs.get(uri);
     if (!tab) throw new Error("no tab");
     sized(tab);
     tab.attach(container());
@@ -114,7 +120,7 @@ const bytes = (output: string) => new TextEncoder().encode(output).buffer;
 
 test("the session opens once the terminal is mounted and fitted, with its size", async () => {
   const { tabs, opens, container } = setup();
-  tabs.start(URI, INPUT, 7);
+  tabs.start(URI, INPUT, shell(7));
   const tab = tabs.get(URI);
   if (!tab) throw new Error("no tab");
   await vi.advanceTimersByTimeAsync(10);
@@ -133,7 +139,7 @@ test("the session opens once the terminal is mounted and fitted, with its size",
 test("Start on a tab that nothing started waits for the terminal's size too", async () => {
   const { tabs, opens, container } = setup();
   const tab = tabs.tab(URI, INPUT);
-  tabs.start(URI, INPUT, 7);
+  tabs.start(URI, INPUT, shell(7));
   await vi.advanceTimersByTimeAsync(10);
   expect(opens).toEqual([]);
   expect(tab.getStatus()).toEqual({ state: "connecting" });
@@ -150,7 +156,7 @@ test("the terminal survives a remount: its element moves and nothing restarts", 
   const { tabs, opens, calls, container } = setup();
   const tab = await (async () => {
     const first = container();
-    tabs.start(URI, INPUT, 7);
+    tabs.start(URI, INPUT, shell(7));
     const made = tabs.get(URI);
     if (!made) throw new Error("no tab");
     sized(made);
@@ -241,7 +247,7 @@ test("a WebGL that fails to load leaves the terminal on the DOM renderer, once",
 test("a tab that is not shown holds no WebGL, and opens no terminal", async () => {
   const webgl = fakeWebgl();
   const { tabs, container } = setup({ webgl: webgl.factory });
-  tabs.start(URI, INPUT, 7);
+  tabs.start(URI, INPUT, shell(7));
   const tab = tabs.get(URI);
   if (!tab) throw new Error("no tab");
   sized(tab);
@@ -286,6 +292,56 @@ test("a layout change fits the terminal once it settles, and only a new size is 
   tab.layout();
   await vi.advanceTimersByTimeAsync(150);
   expect(sent("shell_resize")).toHaveLength(1);
+});
+
+test("an attach to a process with no terminal and no stdin draws its lines from the left, says so, and takes no keys", async () => {
+  const { mounted, opens, sent } = setup();
+  const tab = await mounted(
+    { id: 7, tty: false, stdin: false },
+    ATTACH,
+    ATTACH_URI,
+  );
+  opens[0]?.send({ state: "running" });
+  opens[0]?.send(bytes("first\nsecond\n"));
+  await vi.advanceTimersByTimeAsync(10);
+  const lines = text(tab).split("\n");
+  expect(lines).toContain("first");
+  expect(lines).toContain("second");
+  expect(squeezed(text(tab))).toContain(squeezed(attached("api", false)));
+  expect(tab.term.modes.showCursor).toBe(false);
+  const textarea = tab.term.textarea;
+  if (!textarea) throw new Error("no textarea");
+  textarea.dispatchEvent(enter());
+  tab.term.paste("ls");
+  await vi.advanceTimersByTimeAsync(10);
+  expect(sent("shell_input")).toEqual([]);
+});
+
+test("an attach to a process with a terminal and stdin says that what is typed reaches it", async () => {
+  const { mounted, opens, sent } = setup();
+  const tab = await mounted(
+    { id: 7, tty: true, stdin: true },
+    ATTACH,
+    ATTACH_URI,
+  );
+  opens[0]?.send({ state: "running" });
+  opens[0]?.send(bytes("first\nsecond"));
+  await vi.advanceTimersByTimeAsync(10);
+  expect(squeezed(text(tab))).toContain(squeezed(attached("api", true)));
+  expect(text(tab).split("\n")).toContain("     second");
+  const textarea = tab.term.textarea;
+  if (!textarea) throw new Error("no textarea");
+  textarea.dispatchEvent(enter());
+  await vi.advanceTimersByTimeAsync(10);
+  expect(sent("shell_input")).toEqual([{ id: 7, data: [13] }]);
+});
+
+test("a shell says nothing of an attach", async () => {
+  const { mounted, opens } = setup();
+  const tab = await mounted();
+  opens[0]?.send({ state: "running" });
+  await vi.advanceTimersByTimeAsync(10);
+  expect(text(tab)).not.toContain("Attached");
 });
 
 test("typed keys and pastes go to the session in bytes, and the keys of a bound chord stay with the workbench", async () => {
@@ -430,7 +486,7 @@ test("a restart closes what ended, opens a new session at the terminal's size an
   opens[0]?.send({ state: "ended", end: { reason: "exited", code: 0 } });
   await vi.advanceTimersByTimeAsync(50);
 
-  tabs.start(URI, INPUT, 8);
+  tabs.start(URI, INPUT, shell(8));
   await vi.advanceTimersByTimeAsync(10);
   expect(sent("shell_close")).toEqual([7]);
   expect(opens.map(({ request }) => request)).toEqual([
@@ -457,7 +513,7 @@ test("a restart resets the modes the old program left, and focus sends no report
   await vi.advanceTimersByTimeAsync(50);
   expect(tab.term.modes).not.toEqual(fresh);
 
-  tabs.start(URI, INPUT, 8);
+  tabs.start(URI, INPUT, shell(8));
   await vi.advanceTimersByTimeAsync(50);
   expect(tab.term.modes).toEqual(fresh);
   tab.term.textarea?.dispatchEvent(new FocusEvent("focus"));
@@ -480,7 +536,7 @@ test("an ending turns focus reporting off, so a terminal focused in the task of 
     bracketedPasteMode: false,
   });
 
-  tabs.start(URI, INPUT, 8);
+  tabs.start(URI, INPUT, shell(8));
   tab.focus();
   await vi.advanceTimersByTimeAsync(50);
   expect(sent("shell_input")).toEqual([{ id: 7, data: [27, 91, 79] }]);
@@ -527,7 +583,7 @@ test("closing a tab closes its session and its terminal, and one never opened to
   expect(tabs.has(URI)).toBe(false);
   expect(tab.host.isConnected).toBe(false);
 
-  tabs.start(URI, INPUT, 9);
+  tabs.start(URI, INPUT, shell(9));
   container();
   tabs.closed(URI);
   expect(sent("shell_close")).toEqual([7, 9]);

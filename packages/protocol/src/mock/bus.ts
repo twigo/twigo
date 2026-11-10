@@ -380,6 +380,8 @@ export interface BusHost {
   containers(context: string, namespace: string, pod: string): ShellContainers;
   /** A shell's session, which starts once `shell_open` names it. */
   session(target: ShellTarget, kind: ShellKind): number;
+  /** Whether a session of `kind` has a terminal and takes stdin. */
+  joins(kind: ShellKind): { readonly tty: boolean; readonly stdin: boolean };
   /** Tells the lists that the cluster changed. */
   changed(): void;
   /** What `apply_preview` answers to every edit that changes something, unless the edit names an answer. */
@@ -1643,6 +1645,8 @@ export class MockBus {
       );
     }
     const where = `container ${container} of pod ${pod} on ${context}`;
+    const { tty, stdin } = this.host.joins(kind);
+    const flags = stdin ? (tty ? " -it" : " -i") : "";
     return {
       plan: {
         context,
@@ -1653,19 +1657,26 @@ export class MockBus {
         destructive: false,
         consequences: [
           attach
-            ? "What you type goes to the container's main process, and an interrupt may stop it."
+            ? stdin
+              ? "What you type goes to the container's main process, and an interrupt may stop it."
+              : "It keeps no stdin, so this attach only shows its output."
             : "It runs in the container with the rights of its service account.",
         ],
         affected: [],
         kubectl: attach
-          ? `kubectl --context ${context} attach -it ${pod} -n ${namespace} -c ${container}`
+          ? `kubectl --context ${context} attach${flags} ${pod} -n ${namespace} -c ${container}`
           : `kubectl --context ${context} exec -it ${pod} -n ${namespace} -c ${container} -- sh -c 'export TERM=xterm-256color; command -v bash >/dev/null && exec bash || exec sh'`,
         doing: `${attach ? "Attaching to" : "Opening a shell in"} ${pod}`,
       },
       risk: { kind: "reviewed" },
       write,
       run: (tell) => {
-        tell({ state: "session", id: this.host.session(target, kind) });
+        tell({
+          state: "session",
+          id: this.host.session(target, kind),
+          tty,
+          stdin,
+        });
       },
     };
   }

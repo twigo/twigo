@@ -152,6 +152,7 @@ pub(crate) async fn shell(
     let ticket = core.shells.ticket(window);
     let this = core.this.clone();
     let run_context = context.clone();
+    let (tty, stdin) = (spec.tty, spec.stdin);
     Ok(Planned {
         target: format!("{}, container {}", writes[0].target(), spec.container),
         writes,
@@ -179,7 +180,7 @@ pub(crate) async fn shell(
                 let id = core
                     .shells
                     .keep(ticket, Session::park(clients, spec, relocked))?;
-                Ok(Finished::Session(id))
+                Ok(Finished::Session { id, tty, stdin })
             })
         }),
     })

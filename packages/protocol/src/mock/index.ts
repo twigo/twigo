@@ -40,6 +40,7 @@ import { MockLogs } from "./logs";
 import { MockObject } from "./objects";
 import {
   isShellScenario,
+  joins,
   MockShell,
   shellContainers,
   SHELL_SCENARIOS,
@@ -316,6 +317,7 @@ export function createMockBackend(
       shells.set(id, { target, kind });
       return id;
     },
+    joins: (kind) => joins(kind, shellScenario),
     changed: () => {
       for (const sub of subscriptions.values()) sub.touch();
     },

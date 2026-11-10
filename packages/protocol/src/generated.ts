@@ -926,7 +926,16 @@ locked?: unknown, };
  * How a running plan goes, over its channel; every kind but `running` is
  * the last.
  */
-export type OperationEvent = { "state": "running", text: string, } | { "state": "done", text: string, undoUntil: number | null, } | { "state": "stopped", text: string, } | { "state": "revealed", value: string, binary: boolean, } | { "state": "session", id: SubscriptionId, } | { "state": "failed", error: IpcError, };
+export type OperationEvent = { "state": "running", text: string, } | { "state": "done", text: string, undoUntil: number | null, } | { "state": "stopped", text: string, } | { "state": "revealed", value: string, binary: boolean, } | { "state": "session", id: SubscriptionId, 
+/**
+ * Whether the process has a terminal: a shell's always does, an
+ * attach's as its container's spec says.
+ */
+tty: boolean, 
+/**
+ * Whether what is typed reaches the process, as `tty` goes.
+ */
+stdin: boolean, } | { "state": "failed", error: IpcError, };
 
 /**
  * An object described for people: sections in their order, each a list of

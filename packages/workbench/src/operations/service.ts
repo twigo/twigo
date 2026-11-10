@@ -70,7 +70,12 @@ export type Outcome =
       readonly value: string;
       readonly binary: boolean;
     }
-  | { readonly state: "session"; readonly id: SubscriptionId };
+  | {
+      readonly state: "session";
+      readonly id: SubscriptionId;
+      readonly tty: boolean;
+      readonly stdin: boolean;
+    };
 
 /**
  * The webview's side of the command bus (ARCHITECTURE 5.1, 6.4): asks Rust
@@ -367,7 +372,12 @@ export class Operations {
             });
             return;
           case "session":
-            end({ state: "session", id: event.id });
+            end({
+              state: "session",
+              id: event.id,
+              tty: event.tty,
+              stdin: event.stdin,
+            });
             return;
           case "failed":
             this.report(event.error);
