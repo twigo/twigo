@@ -2062,42 +2062,71 @@ async fn withdrawn(events: &mut mpsc::UnboundedReceiver<ApprovalEvent>, ask: &Ap
 }
 
 #[tokio::test]
-async fn a_write_whose_body_ends_after_its_process_did_is_not_sent() {
+async fn a_write_whose_body_ends_after_its_process_did_is_neither_sent_nor_asked_about() {
     let fake = Fake::start().await;
     let dir = tempfile::tempdir().unwrap();
     let core = core(dir.path(), &fake).await;
-    let process = Process::start(&core, None).await;
-    let at = process.at();
-    let stream = TcpStream::connect(at.address).await.unwrap();
-    let stream = at
-        .tls
-        .connect(ServerName::IpAddress(at.address.ip().into()), stream)
-        .await
-        .unwrap();
-    let (frames, mut sent) = mpsc::channel::<Result<Frame<Bytes>, Infallible>>(4);
-    let body = StreamBody::new(futures::stream::poll_fn(move |cx| sent.poll_recv(cx)));
-    let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
-        .await
-        .unwrap();
-    tokio::spawn(connection);
-    let manifest = configmap("late").to_string();
-    let request = process
-        .request("POST", "kind-a", CONFIGMAPS)
-        .header("content-type", "application/json")
-        .header("content-length", manifest.len().to_string())
-        .body(body)
-        .unwrap();
-    let sending = tokio::spawn(async move { sender.send_request(request).await });
-    let (first, rest) = manifest.split_at(5);
-    let frame = |part: &str| Ok(Frame::data(Bytes::from(part.to_owned())));
-    frames.send(frame(first)).await.unwrap();
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    drop(process.handle);
-    frames.send(frame(rest)).await.unwrap();
-    let response = tokio::time::timeout(WAIT, sending).await.unwrap().unwrap();
-    let seen = fake.seen();
-    assert!(seen.is_empty(), "{seen:?}");
-    assert_eq!(response.unwrap().status(), StatusCode::FORBIDDEN);
+    let mut events = follow(&core, "main");
+    let deployment = "/apis/apps/v1/namespaces/a/deployments/d";
+    for (mode, method, path, kind, manifest) in [
+        (
+            Mode::ReadWrite,
+            "POST",
+            CONFIGMAPS,
+            "application/json",
+            configmap("late"),
+        ),
+        (
+            Mode::Guarded,
+            "POST",
+            CONFIGMAPS,
+            "application/json",
+            configmap("late"),
+        ),
+        (
+            Mode::Guarded,
+            "PATCH",
+            deployment,
+            "application/merge-patch+json",
+            json!({ "spec": { "replicas": 2 } }),
+        ),
+    ] {
+        core.policy.set_mode("kind-a", Some(mode)).unwrap();
+        let process = Process::start(&core, Some("main")).await;
+        let at = process.at();
+        let stream = TcpStream::connect(at.address).await.unwrap();
+        let stream = at
+            .tls
+            .connect(ServerName::IpAddress(at.address.ip().into()), stream)
+            .await
+            .unwrap();
+        let (frames, mut sent) = mpsc::channel::<Result<Frame<Bytes>, Infallible>>(4);
+        let body = StreamBody::new(futures::stream::poll_fn(move |cx| sent.poll_recv(cx)));
+        let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
+            .await
+            .unwrap();
+        tokio::spawn(connection);
+        let manifest = manifest.to_string();
+        let request = process
+            .request(method, "kind-a", path)
+            .header("content-type", kind)
+            .header("content-length", manifest.len().to_string())
+            .body(body)
+            .unwrap();
+        let sending = tokio::spawn(async move { sender.send_request(request).await });
+        let (first, rest) = manifest.split_at(5);
+        let frame = |part: &str| Ok(Frame::data(Bytes::from(part.to_owned())));
+        frames.send(frame(first)).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        drop(process.handle);
+        frames.send(frame(rest)).await.unwrap();
+        let response = tokio::time::timeout(WAIT, sending).await.unwrap().unwrap();
+        let seen = fake.seen();
+        assert!(seen.is_empty(), "{mode:?} {method}: {seen:?}");
+        let told = events.try_recv();
+        assert!(told.is_err(), "{mode:?} {method}: {told:?}");
+        assert_eq!(response.unwrap().status(), StatusCode::FORBIDDEN);
+    }
 }
 
 #[tokio::test]

@@ -229,10 +229,18 @@ impl Approvals {
         if !self.state().followers.contains_key(&window) {
             return self.nobody(&asking);
         }
-        let detail = detail.await;
+        // Its reads race the process's end like every other send.
+        let detail = tokio::select! {
+            biased;
+            () = holder.ended.cancelled() => return Outcome::Ended,
+            detail = detail => detail,
+        };
         let (resolve, resolved) = oneshot::channel();
         let id = {
             let mut state = self.state();
+            if holder.ended.is_cancelled() {
+                return Outcome::Ended;
+            }
             let id = state.next;
             state.next = state.next.wrapping_add(1);
             let ask = ApprovalAsk {
