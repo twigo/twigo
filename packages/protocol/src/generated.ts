@@ -146,7 +146,7 @@ target: string,
 impersonate: string | null, detail: ApprovalDetail, 
 /**
  * Whether the context's name must be typed before it is allowed: a
- * delete's.
+ * delete's, a pod's eviction's among them.
  */
 typed: boolean, 
 /**

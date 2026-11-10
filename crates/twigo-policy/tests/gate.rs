@@ -1020,6 +1020,7 @@ fn what_a_command_says_it_does_has_the_class_of_the_request_it_sends() {
         let said = Attributes::action(verb, resource, subresource, None, None);
         assert_eq!(said.class, sent.class, "{verb} {uri}");
         assert_eq!(said.verb, sent.verb, "{verb} {uri}");
+        assert_eq!(said.deletes, sent.deletes, "{verb} {uri}");
     }
 }
 
@@ -1218,6 +1219,20 @@ fn approvals_table() -> Vec<Approved> {
             Method::DELETE,
             PODS,
             Write,
+            [EVERY, ONLY_EXACT, NONE],
+        ),
+        approved(
+            "evict, which deletes the pod",
+            Method::POST,
+            "/api/v1/namespaces/a/pods/p/eviction",
+            Write,
+            [EVERY, ONLY_EXACT, NONE],
+        ),
+        approved(
+            "a DELETE by the old proxy path, which RBAC calls proxy",
+            Method::DELETE,
+            "/api/v1/proxy/namespaces/a/pods/p/x",
+            Exec,
             [EVERY, ONLY_EXACT, NONE],
         ),
         upgrading(approved(

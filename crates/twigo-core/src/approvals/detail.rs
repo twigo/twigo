@@ -56,10 +56,13 @@ pub(crate) async fn of(
     parts: &Parts,
     body: &Bytes,
 ) -> ApprovalDetail {
-    if matches!(attributes.verb.as_str(), "delete" | "deletecollection") {
-        let options: Option<Value> = serde_json::from_slice(body).ok();
+    if attributes.deletes {
+        let body: Option<Value> = serde_json::from_slice(body).ok();
+        let options = match attributes.subresource.as_deref() {
+            Some("eviction") => body.as_ref().map(|body| &body["deleteOptions"]),
+            _ => body.as_ref(),
+        };
         let propagation = options
-            .as_ref()
             .and_then(|options| options["propagationPolicy"].as_str())
             .map(str::to_owned);
         return ApprovalDetail::Delete { propagation };

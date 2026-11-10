@@ -28,8 +28,8 @@ enum Scope {
         path: String,
         class: RequestClass,
     },
-    /// "For 15 minutes": every write and exec until then, but deletes, which
-    /// each ask.
+    /// "For 15 minutes": every write and exec until then, but what
+    /// [`Attributes::deletes`], which each ask.
     Until(Timestamp),
 }
 
@@ -48,7 +48,7 @@ impl Approval {
     }
 
     /// The person allowed the process's writes and exec on the context until
-    /// `until`, deletes excepted.
+    /// `until`, deletes and evictions excepted.
     pub fn until(context: &str, actor: Actor, until: Timestamp) -> Self {
         Self {
             context: context.to_owned(),
@@ -78,10 +78,7 @@ impl Approval {
                         && *path == attributes.path
                         && *class == attributes.class
                 }
-                Scope::Until(until) => {
-                    now < *until
-                        && !matches!(attributes.verb.as_str(), "delete" | "deletecollection")
-                }
+                Scope::Until(until) => now < *until && !attributes.deletes,
             }
     }
 }
@@ -226,6 +223,8 @@ mod tests {
         for delete in [
             read("DELETE", CONFIGMAP),
             read("DELETE", "/api/v1/namespaces/a/configmaps"),
+            read("POST", "/api/v1/namespaces/a/pods/p/eviction"),
+            read("DELETE", "/api/v1/proxy/namespaces/a/pods/p/x"),
         ] {
             assert!(
                 !lasting.covers("c", Actor::Terminal, &delete, now),

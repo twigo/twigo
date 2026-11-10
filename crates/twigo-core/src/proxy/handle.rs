@@ -261,7 +261,6 @@ async fn decide<'a>(
         .map(str::to_owned);
     let asking = Asking {
         holder,
-        method: &parts.method,
         attributes,
         blocked,
         repeat: repeat(holder, parts, reach, body),

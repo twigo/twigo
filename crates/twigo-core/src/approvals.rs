@@ -12,7 +12,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use http::Method;
 use jiff::{SignedDuration, Timestamp};
 use tokio::sync::{oneshot, watch};
 use twigo_ipc::{
@@ -138,7 +137,6 @@ enum Cover {
 /// A request the gate would stop for want of an approval.
 pub(crate) struct Asking<'a> {
     pub holder: &'a Holder,
-    pub method: &'a Method,
     pub attributes: &'a Attributes,
     /// The gate's words for it, should no window ask.
     pub blocked: Box<Blocked>,
@@ -189,9 +187,7 @@ impl Approvals {
             holder, attributes, ..
         } = &asking;
         let context = holder.context.as_str();
-        // Whatever RBAC calls it: the old proxy path names every method
-        // `proxy`.
-        let delete = *asking.method == Method::DELETE;
+        let delete = attributes.deletes;
         // Before the detail's dry run, which a change may outlast.
         let changes = Changes::new(&self.policy, &self.catalog);
         {
@@ -888,7 +884,6 @@ mod tests {
         let attributes = Attributes::of(&request);
         let asking = Asking {
             holder: &holder,
-            method: &Method::POST,
             attributes: &attributes,
             blocked: Box::new(Blocked {
                 context: "kind-a".to_owned(),

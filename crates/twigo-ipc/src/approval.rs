@@ -43,7 +43,7 @@ pub struct ApprovalAsk {
     pub impersonate: Option<String>,
     pub detail: ApprovalDetail,
     /// Whether the context's name must be typed before it is allowed: a
-    /// delete's.
+    /// delete's, a pod's eviction's among them.
     pub typed: bool,
     /// How long an answer of `lasting` holds, offered for a terminal's asks
     /// but a delete's: every write and exec of this process on this context
@@ -79,7 +79,8 @@ pub enum ApprovalDetail {
         tty: bool,
         stdin: bool,
     },
-    /// A delete, with the propagation its options ask for.
+    /// A delete or a pod's eviction, with the propagation its options ask
+    /// for.
     Delete { propagation: Option<String> },
     /// No dry run could say what it does, and why; the request's body as
     /// sent where it can be shown, never a Secret's.

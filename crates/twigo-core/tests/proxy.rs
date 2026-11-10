@@ -2188,6 +2188,87 @@ async fn a_delete_asks_for_the_typed_name_whatever_its_class_and_no_grant_covers
     assert_eq!(fake.writes(Method::DELETE), 0);
 }
 
+fn evict(process: &Process, pod: &str) -> Request<Full<Bytes>> {
+    let eviction = json!({
+        "apiVersion": "policy/v1",
+        "kind": "Eviction",
+        "metadata": { "name": pod, "namespace": "a" },
+        "deleteOptions": { "propagationPolicy": "Foreground" },
+    });
+    process
+        .request(
+            "POST",
+            "kind-a",
+            &format!("/api/v1/namespaces/a/pods/{pod}/eviction"),
+        )
+        .header("content-type", "application/json")
+        .body(json_body(&eviction))
+        .unwrap()
+}
+
+fn evictions(fake: &Fake) -> usize {
+    fake.seen()
+        .iter()
+        .filter(|seen| seen.uri.contains("/eviction"))
+        .count()
+}
+
+#[tokio::test]
+async fn an_eviction_asks_as_a_delete_does_and_no_grant_covers_it() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+
+    let evicting = tokio::spawn(send(process.at(), evict(&process, "p")));
+    let eviction = asked(&mut events).await;
+    assert_eq!((eviction.typed, eviction.lasting_minutes), (true, None));
+    assert_eq!(
+        eviction.detail,
+        ApprovalDetail::Delete {
+            propagation: Some("Foreground".to_owned())
+        }
+    );
+    let first = tokio::spawn(send(process.at(), create(&process, "one")));
+    let ask = asked(&mut events).await;
+    answer_with(&core, &ask, ApprovalAnswer::Lasting, None);
+    assert_eq!(first.await.unwrap().0.status(), StatusCode::CREATED);
+    assert!(events.try_recv().is_err(), "the eviction waits on");
+
+    for (answer, typed) in [
+        (ApprovalAnswer::Once, None),
+        (ApprovalAnswer::Once, Some("kind-b")),
+        (ApprovalAnswer::Lasting, Some("kind-a")),
+    ] {
+        let refused = core.answer_approval(
+            "main",
+            AnswerApproval {
+                id: eviction.id,
+                answer,
+                typed: typed.map(str::to_owned),
+            },
+        );
+        assert_eq!(
+            refused.unwrap_err().kind,
+            ErrorKind::InvalidInput,
+            "{answer:?} {typed:?}"
+        );
+    }
+    assert_eq!(evictions(&fake), 0, "not sent");
+    answer_with(&core, &eviction, ApprovalAnswer::Once, Some("kind-a"));
+    assert_eq!(evicting.await.unwrap().0.status(), StatusCode::CREATED);
+    assert_eq!(evictions(&fake), 1);
+
+    let again = tokio::spawn(send(process.at(), evict(&process, "q")));
+    let ask = asked(&mut events).await;
+    assert_eq!((ask.typed, ask.lasting_minutes), (true, None));
+    answer_with(&core, &ask, ApprovalAnswer::Deny, None);
+    assert_eq!(again.await.unwrap().0.status(), StatusCode::FORBIDDEN);
+    assert_eq!(evictions(&fake), 1);
+}
+
 #[tokio::test]
 async fn a_proxy_s_answer_reached_its_backend_so_a_once_covers_no_repeat() {
     let fake = Fake::start().await;

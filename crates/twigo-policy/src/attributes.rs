@@ -32,6 +32,11 @@ pub struct Attributes {
     /// The decoded path.
     pub path: String,
     pub class: RequestClass,
+    /// Whether it deletes, which asks each time with the context's name
+    /// typed and which no lasting approval covers (ARCHITECTURE 6.4): a
+    /// `DELETE`, whatever RBAC calls it, as the old proxy path calls every
+    /// method `proxy`, and a pod's eviction, which deletes the pod.
+    pub deletes: bool,
 }
 
 impl Attributes {
@@ -45,6 +50,7 @@ impl Attributes {
         let parts = Parts::of(&path);
         let verb = parts.verb(request.method(), &query);
         let class = parts.class(request.method(), request.headers(), &query);
+        let deletes = *request.method() == Method::DELETE || parts.evicts();
         Self {
             verb,
             resource: parts.resource.map(str::to_owned),
@@ -53,6 +59,7 @@ impl Attributes {
             name: parts.name.map(str::to_owned),
             path,
             class,
+            deletes,
         }
     }
 
@@ -85,6 +92,7 @@ impl Attributes {
             name: name.map(str::to_owned),
             path: String::new(),
             class,
+            deletes: matches!(verb, "delete" | "deletecollection") || parts.evicts(),
         }
     }
 
@@ -308,6 +316,10 @@ impl<'a> Parts<'a> {
             && self.subresource.is_none()
             && !self.group.is_some_and(|group| ANSWERS.contains(&group))
             && query.dry_run()
+    }
+
+    fn evicts(&self) -> bool {
+        self.resource == Some("pods") && self.subresource == Some("eviction")
     }
 
     fn is_review(&self) -> bool {
