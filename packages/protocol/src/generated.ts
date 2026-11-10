@@ -132,9 +132,10 @@ verb: string,
 class: RequestClass, 
 /**
  * As people and `kubectl` name it: `deployments/web in default`; a
- * create by the name its body gives, or its `generateName` and `…`, and
- * an exec or an attach by its pod alone, as `verb` says the rest:
- * `pods/web-1 in default`.
+ * create by the name its dry run stores, or its `generateName` and `…`
+ * where the server generated that name, and by its path alone where no
+ * dry run could say: `configmaps in default`; an exec or an attach by
+ * its pod alone, as `verb` says the rest: `pods/web-1 in default`.
  */
 target: string, 
 /**

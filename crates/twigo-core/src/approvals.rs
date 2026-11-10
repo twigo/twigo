@@ -30,6 +30,8 @@ const LASTING: SignedDuration = SignedDuration::from_mins(15);
 /// upgrade over SPDY after WebSocket, and a write after each `429`, for up
 /// to about 10 s ([`checkWait`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/client-go/rest/with_retry.go#L309-L318)).
 const REPEATS: SignedDuration = SignedDuration::from_secs(15);
+/// The longest `generateName` the server keeps whole in a name it generates.
+const GENERATED_BASE: usize = 58;
 
 pub(crate) struct Approvals {
     policy: Arc<Policy>,
@@ -138,7 +140,6 @@ pub(crate) struct Asking<'a> {
     pub holder: &'a Holder,
     pub method: &'a Method,
     pub attributes: &'a Attributes,
-    pub body: &'a [u8],
     /// The gate's words for it, should no window ask.
     pub blocked: Box<Blocked>,
     pub repeat: Digest,
@@ -250,7 +251,7 @@ impl Approvals {
                 command: asking.command.clone(),
                 verb: verb(attributes),
                 class: attributes.class,
-                target: target(attributes, asking.body),
+                target: target(attributes, &detail),
                 impersonate: asking.impersonate.clone(),
                 detail,
                 typed: delete,
@@ -608,24 +609,44 @@ fn verb(attributes: &Attributes) -> String {
 }
 
 /// What a person reads after the verb, unlike [`Attributes::target`], which
-/// the gate and the audit log name: a create by the name its body gives,
-/// or its `generateName` and `…`, and a pod's exec, attach or port-forward
-/// by the pod, as the verb says the rest.
-fn target(attributes: &Attributes, body: &[u8]) -> String {
+/// the gate and the audit log name: a create by the name its dry run
+/// stores, and by its path alone with no dry run, as its body may read
+/// otherwise to the server, whose decoder fills a field given twice into
+/// what the first gave
+/// ([`object`](https://github.com/kubernetes-sigs/json/blob/2d320260d730/internal/golang/encoding/json/decode.go#L778-L817))
+/// where serde_json keeps the last; a pod's exec, attach or port-forward by
+/// the pod, as the verb says the rest.
+fn target(attributes: &Attributes, detail: &ApprovalDetail) -> String {
     let mut named = attributes.clone();
-    if attributes.verb == "create" && attributes.name.is_none() && attributes.subresource.is_none()
+    if attributes.verb == "create"
+        && attributes.name.is_none()
+        && attributes.subresource.is_none()
+        && let ApprovalDetail::Diff { result, .. } = detail
     {
-        let object: Option<serde_json::Value> = serde_json::from_slice(body).ok();
-        let metadata = object.as_ref().map(|object| &object["metadata"]);
-        named.name = metadata.and_then(|metadata| match metadata["name"].as_str() {
-            Some(name) => Some(name.to_owned()),
-            None => Some(format!("{}…", metadata["generateName"].as_str()?)),
-        });
+        named.name = stored(&result["metadata"]);
     }
     if attributes.opens_a_pod_stream() {
         named.subresource = None;
     }
     named.target()
+}
+
+/// The name a create's dry run stored: its `generateName` and `…` where the
+/// server generated it, as the create would generate another, from the
+/// `generateName` cut to 58 bytes and five random characters
+/// ([`GenerateName`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/apiserver/pkg/storage/names/generate.go#L42-L54));
+/// a name given beside a `generateName` stays
+/// ([`create`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/apiserver/pkg/registry/generic/registry/store.go#L548-L556)).
+fn stored(metadata: &serde_json::Value) -> Option<String> {
+    let name = metadata["name"].as_str()?;
+    let base = metadata["generateName"].as_str().unwrap_or_default();
+    let base = base.get(..GENERATED_BASE).unwrap_or(base);
+    let generated = !base.is_empty() && name.strip_prefix(base).is_some_and(|rest| rest.len() == 5);
+    Some(if generated {
+        format!("{base}…")
+    } else {
+        name.to_owned()
+    })
 }
 
 /// A "once" its request took as it was sent. Dropped, it is gone, as the
@@ -805,6 +826,35 @@ mod tests {
     }
 
     #[test]
+    fn a_create_is_named_by_its_generate_name_only_where_the_server_generated_its_name() {
+        let long = "a".repeat(60);
+        let cut = &long[..GENERATED_BASE];
+        let cases = [
+            (serde_json::json!({ "name": "c" }), Some("c".to_owned())),
+            (
+                serde_json::json!({ "name": "feature-x7k2p", "generateName": "feature-" }),
+                Some("feature-…".to_owned()),
+            ),
+            (
+                serde_json::json!({ "name": "prod-db", "generateName": "x-" }),
+                Some("prod-db".to_owned()),
+            ),
+            (
+                serde_json::json!({ "name": "x-db", "generateName": "x-" }),
+                Some("x-db".to_owned()),
+            ),
+            (
+                serde_json::json!({ "name": format!("{cut}b2c4d"), "generateName": long }),
+                Some(format!("{cut}…")),
+            ),
+            (serde_json::json!({ "generateName": "x-" }), None),
+        ];
+        for (metadata, named) in cases {
+            assert_eq!(stored(&metadata), named, "{metadata}");
+        }
+    }
+
+    #[test]
     fn a_cover_lasts_15_seconds_of_the_wall_clock() {
         let mut state = State::default();
         let at = Timestamp::from_second(1_800_000_000).unwrap();
@@ -849,7 +899,6 @@ mod tests {
                 verb: attributes.verb.clone(),
                 target: attributes.target(),
             }),
-            body: &[],
             repeat: [0; 32],
             command: None,
             impersonate: None,

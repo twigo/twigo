@@ -32,9 +32,10 @@ pub struct ApprovalAsk {
     /// `write` or `exec`.
     pub class: RequestClass,
     /// As people and `kubectl` name it: `deployments/web in default`; a
-    /// create by the name its body gives, or its `generateName` and `…`, and
-    /// an exec or an attach by its pod alone, as `verb` says the rest:
-    /// `pods/web-1 in default`.
+    /// create by the name its dry run stores, or its `generateName` and `…`
+    /// where the server generated that name, and by its path alone where no
+    /// dry run could say: `configmaps in default`; an exec or an attach by
+    /// its pod alone, as `verb` says the rest: `pods/web-1 in default`.
     pub target: String,
     /// Whom the request acts as, from `kubectl --as`, `--as-group` and
     /// `--as-uid`: the user and, when the request names them, the groups,

@@ -59,7 +59,9 @@ type FakeBody = UnsyncBoxBody<Bytes, Infallible>;
 /// A dry-run patch of a Secret it refuses quoting the patched Secret, as
 /// kube-apiserver refuses one that no longer decodes, and any other dry-run
 /// write of one it answers with a warning that quotes a value. A watch with
-/// `flood=1` in its query it answers with data as fast as it is read.
+/// `flood=1` in its query it answers with data as fast as it is read. A
+/// write's body it reads as kube-apiserver does, and names a create by its
+/// `generateName` as kube-apiserver would.
 #[derive(Clone)]
 struct Fake {
     address: SocketAddr,
@@ -206,8 +208,17 @@ async fn answer(
     }
     let method = request.method().clone();
     let sent = request.into_body().collect().await.unwrap().to_bytes();
-    let object = match serde_json::from_slice::<Value>(&sent) {
-        Ok(object) if method != Method::DELETE => object,
+    let object = match serde_json::from_slice::<AsGoReads>(&sent) {
+        Ok(AsGoReads(mut object)) if method != Method::DELETE => {
+            let metadata = &mut object["metadata"];
+            if method == Method::POST
+                && metadata["name"].is_null()
+                && let Some(base) = metadata["generateName"].as_str()
+            {
+                metadata["name"] = json!(format!("{base}x7k2p"));
+            }
+            object
+        }
         _ => json!({
             "apiVersion": "v1",
             "kind": "ConfigMap",
@@ -231,6 +242,77 @@ async fn answer(
 /// A value of the Secret `s` as the fake stores it: `secret-value` in
 /// base64.
 const SECRET_VALUE: &str = "c2VjcmV0LXZhbHVl";
+
+/// JSON as Go's decoder reads it into Kubernetes' types, where an object's
+/// key given twice merges the two objects, while serde_json keeps the last.
+struct AsGoReads(Value);
+
+impl<'de> serde::Deserialize<'de> for AsGoReads {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(GoReads).map(AsGoReads)
+    }
+}
+
+struct GoReads;
+
+impl<'de> serde::de::Visitor<'de> for GoReads {
+    type Value = Value;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("JSON")
+    }
+
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
+        let mut object = Value::Object(serde_json::Map::new());
+        while let Some((key, AsGoReads(value))) = map.next_entry::<String, AsGoReads>()? {
+            merge(&mut object[key], value);
+        }
+        Ok(object)
+    }
+
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
+        let mut items = Vec::new();
+        while let Some(AsGoReads(item)) = seq.next_element()? {
+            items.push(item);
+        }
+        Ok(Value::Array(items))
+    }
+
+    fn visit_str<E>(self, text: &str) -> Result<Value, E> {
+        Ok(json!(text))
+    }
+
+    fn visit_bool<E>(self, value: bool) -> Result<Value, E> {
+        Ok(json!(value))
+    }
+
+    fn visit_i64<E>(self, value: i64) -> Result<Value, E> {
+        Ok(json!(value))
+    }
+
+    fn visit_u64<E>(self, value: u64) -> Result<Value, E> {
+        Ok(json!(value))
+    }
+
+    fn visit_f64<E>(self, value: f64) -> Result<Value, E> {
+        Ok(json!(value))
+    }
+
+    fn visit_unit<E>(self) -> Result<Value, E> {
+        Ok(Value::Null)
+    }
+}
+
+fn merge(into: &mut Value, value: Value) {
+    match (into, value) {
+        (Value::Object(into), Value::Object(value)) => {
+            for (key, value) in value {
+                merge(into.entry(key).or_insert(Value::Null), value);
+            }
+        }
+        (into, value) => *into = value,
+    }
+}
 
 /// `kind-a` as the test kubeconfig lists it at first.
 const KIND_A: &str = "
@@ -865,7 +947,7 @@ async fn once_sends_the_write_once_and_its_repeat_asks_again_after_it_reached_th
     );
     assert_eq!(
         ask.target, "configmaps/c in a",
-        "by the name its body gives"
+        "by the name its dry run stores"
     );
     assert_eq!((ask.typed, ask.lasting_minutes), (false, Some(15)));
     let ApprovalDetail::Diff { live, result, .. } = &ask.detail else {
@@ -890,18 +972,45 @@ async fn once_sends_the_write_once_and_its_repeat_asks_again_after_it_reached_th
         1,
         "the denied repeat was not sent"
     );
+}
 
-    let generated = json!({ "apiVersion": "v1", "kind": "ConfigMap", "metadata": { "generateName": "feature-" } });
-    let generating = process
-        .request("POST", "kind-a", CONFIGMAPS)
-        .header("content-type", "application/json")
-        .body(json_body(&generated))
-        .unwrap();
-    let third = tokio::spawn(send(process.at(), generating));
-    let ask = asked(&mut events).await;
-    assert_eq!(ask.target, "configmaps/feature-… in a");
-    answer_with(&core, &ask, ApprovalAnswer::Deny, None);
-    third.await.unwrap();
+#[tokio::test]
+async fn a_create_is_named_as_its_dry_run_stores_it_or_by_its_path_alone() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+    let reviews = "/apis/authorization.k8s.io/v1/subjectaccessreviews";
+    for (path, sent, named) in [
+        (
+            CONFIGMAPS,
+            r#"{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"prod-db"},"metadata":{"generateName":"x-"}}"#,
+            "configmaps/prod-db in a",
+        ),
+        (
+            CONFIGMAPS,
+            r#"{"apiVersion":"v1","kind":"ConfigMap","metadata":{"generateName":"feature-"}}"#,
+            "configmaps/feature-… in a",
+        ),
+        (
+            reviews,
+            r#"{"apiVersion":"authorization.k8s.io/v1","kind":"SubjectAccessReview","metadata":{"name":"sar"},"spec":{"user":"x"}}"#,
+            "subjectaccessreviews",
+        ),
+    ] {
+        let creating = process
+            .request("POST", "kind-a", path)
+            .header("content-type", "application/json")
+            .body(Full::new(Bytes::from(sent)))
+            .unwrap();
+        let sending = tokio::spawn(send(process.at(), creating));
+        let ask = asked(&mut events).await;
+        assert_eq!(ask.target, named, "{sent}: {:?}", ask.detail);
+        answer_with(&core, &ask, ApprovalAnswer::Deny, None);
+        sending.await.unwrap();
+    }
 }
 
 #[tokio::test]
