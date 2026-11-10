@@ -83,7 +83,7 @@ test("the sequence raises its asks one after another as each is answered", async
   expect(asks(events)).toHaveLength(2);
   expect(asks(events)[1]?.detail).toMatchObject({ kind: "diff", live: null });
 
-  for (let step = 1; step < 9; step++) {
+  for (let step = 1; step < 10; step++) {
     await answer(backend, nth(events, step), "deny", "prod-eu");
     await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
   }
@@ -101,6 +101,7 @@ test("the sequence raises its asks one after another as each is answered", async
     "refused",
     "diff",
     "diff",
+    "delete",
   ]);
   expect(asks(events)[7]?.impersonate).toBe(
     "system:serviceaccount:default:deployer",
@@ -110,7 +111,7 @@ test("the sequence raises its asks one after another as each is answered", async
 async function raised(): Promise<ApprovalAsk[]> {
   const { backend, events } = await followed("approval");
   await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
-  for (let step = 0; step < 9; step++) {
+  for (let step = 0; step < 10; step++) {
     await answer(backend, nth(events, step), "deny", "prod-eu");
     await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
   }
@@ -128,6 +129,7 @@ test("an ask's command is the command path alone, as kubectl's Kubectl-Command h
     "kubectl apply",
     "kubectl annotate",
     "kubectl edit",
+    "kubectl delete",
   ]);
 });
 
@@ -163,7 +165,7 @@ test("a scale is a merge patch of the replicas to the scale subresource, and a d
 test("a diff's sides are recorded objects with a change made in code, as Rust's side sends them", async () => {
   const { backend, events } = await followed("approval");
   await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
-  for (let step = 0; step < 9; step++) {
+  for (let step = 0; step < 10; step++) {
     await answer(backend, nth(events, step), "deny", "prod-eu");
     await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
   }
@@ -240,20 +242,24 @@ test("a delete refuses a context name typed wrong, an ask that is gone, and allo
 async function throughSequence(
   backend: Backend,
   events: ApprovalEvent[],
-  first: "once" | "lasting",
+  lastingAt?: number,
 ) {
   await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
-  await answer(backend, nth(events, 0), first);
-  for (let step = 1; ; step++) {
+  for (let step = 0; asks(events).length > step; step++) {
+    const ask = nth(events, step);
+    await answer(
+      backend,
+      ask,
+      step === lastingAt ? "lasting" : "once",
+      ask.context,
+    );
     await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
-    if (asks(events).length <= step) return;
-    await answer(backend, nth(events, step), "once", "prod-eu");
   }
 }
 
 test("a lasting answer spares its process and context the asks that come after, and no other process", async () => {
   const lasting = await followed("approval");
-  await throughSequence(lasting.backend, lasting.events, "lasting");
+  await throughSequence(lasting.backend, lasting.events, 0);
   expect(asks(lasting.events).map(({ command }) => command)).toEqual([
     "kubectl set image",
     "kubectl create",
@@ -262,6 +268,7 @@ test("a lasting answer spares its process and context the asks that come after, 
     "kubectl apply",
     "kubectl annotate",
     "kubectl edit",
+    "kubectl delete",
   ]);
   expect(
     asks(lasting.events)
@@ -270,8 +277,32 @@ test("a lasting answer spares its process and context the asks that come after, 
   ).not.toContain("Terminal 2");
 
   const once = await followed("approval");
-  await throughSequence(once.backend, once.events, "once");
-  expect(asks(once.events)).toHaveLength(9);
+  await throughSequence(once.backend, once.events);
+  expect(asks(once.events)).toHaveLength(10);
+});
+
+test("a lasting answer spares the writes of its process and context, and a delete of theirs still asks", async () => {
+  const { backend, events } = await followed("approval");
+  await throughSequence(backend, events, 1);
+  expect(
+    asks(events)
+      .filter(
+        ({ process, context }) =>
+          process === "Terminal 1" && context === "staging",
+      )
+      .map(({ verb, target, typed }) => ({ verb, target, typed })),
+  ).toEqual([
+    {
+      verb: "create",
+      target: "configmaps/feature-flags in default",
+      typed: false,
+    },
+    {
+      verb: "delete",
+      target: "configmaps/feature-flags in default",
+      typed: true,
+    },
+  ]);
 });
 
 test("a lasting answer ends after the minutes the ask offered", async () => {

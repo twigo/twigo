@@ -239,6 +239,17 @@ function drafts(): Record<string, Draft> {
         [],
       ),
     },
+    deleteFlags: {
+      ...common,
+      context: STAGING,
+      process: "Terminal 1",
+      command: "kubectl delete",
+      verb: "delete",
+      target: "configmaps/feature-flags in default",
+      detail: { kind: "delete", propagation: "Background" },
+      typed: true,
+      lastingMinutes: null,
+    },
   };
 }
 
@@ -262,6 +273,7 @@ function sequence(scenario: ApprovalScenario): Draft[] {
         "refused",
         "impersonated",
         "secret",
+        "deleteFlags",
       );
     case "approvalQueue":
       return pick("patch", "create", "exec");
