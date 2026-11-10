@@ -212,13 +212,9 @@ impl Approvals {
                 }
                 Some(Cover::Once { .. }) | None => {}
             }
-            let grant = state.grants.get(&(holder.process, context.to_owned()));
-            if !delete
-                && let Some(grant) = grant
-                && self.holds(context, grant)
-            {
+            if let Some(approval) = self.lasting(&state, holder, delete) {
                 return Outcome::Approved {
-                    approval: Approval::until(context, holder.actor, grant.until),
+                    approval,
                     once: None,
                 };
             }
@@ -240,6 +236,14 @@ impl Approvals {
             let mut state = self.state();
             if holder.ended.is_cancelled() {
                 return Outcome::Ended;
+            }
+            // A grant given while the detail was read found no ask of this
+            // request to spare.
+            if let Some(approval) = self.lasting(&state, holder, delete) {
+                return Outcome::Approved {
+                    approval,
+                    once: None,
+                };
             }
             let id = state.next;
             state.next = state.next.wrapping_add(1);
@@ -376,6 +380,15 @@ impl Approvals {
         self.state()
             .cover_repeats(asking.repeat, cover, Timestamp::now());
         Outcome::Denied(message)
+    }
+
+    /// What a grant "for 15 minutes" of the request's process on its context
+    /// lets through now, but a delete.
+    fn lasting(&self, state: &State, holder: &Holder, delete: bool) -> Option<Approval> {
+        let context = holder.context.as_str();
+        let grant = state.grants.get(&(holder.process, context.to_owned()))?;
+        (!delete && self.holds(context, grant))
+            .then(|| Approval::until(context, holder.actor, grant.until))
     }
 
     fn holds(&self, context: &str, grant: &Grant) -> bool {
@@ -989,5 +1002,55 @@ mod tests {
         assert!(matches!(outcome, Outcome::Ended));
         assert_eq!(answers(&audit), ["withdrawn"]);
         assert!(approvals.state().grants.is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_grant_given_while_an_ask_s_detail_is_read_spares_that_ask() {
+        let policy = Policy::new(
+            twigo_policy::PolicyFile::default(),
+            |_| Some(twigo_policy::Metadata::default()),
+            twigo_policy::Choices::default(),
+            twigo_policy::Audit::off(),
+        );
+        let (_catalog, catalog) = watch::channel(None);
+        let approvals = Approvals::new(policy, catalog);
+        let (events, mut told) = tokio::sync::mpsc::unbounded_channel();
+        approvals.follow_window("main", move |event| events.send(event).is_ok());
+        let ended = CancellationToken::new();
+        let holder = holder(Some("main"), &ended);
+        let attributes = create();
+        let detail = || ApprovalDetail::Unknown {
+            reason: twigo_ipc::NoDiff::NotAResource,
+            body: None,
+        };
+        let (release, released) = oneshot::channel::<()>();
+        let answered = approvals.decide(
+            asking(&holder, &attributes, [1; 32]),
+            std::future::ready(detail()),
+        );
+        let spared = approvals.decide(asking(&holder, &attributes, [2; 32]), async {
+            let _ = released.await;
+            detail()
+        });
+        let answering = async {
+            let Some(ApprovalEvent::Asked { ask }) = told.recv().await else {
+                panic!("not asked");
+            };
+            let lasting = AnswerApproval {
+                id: ask.id,
+                answer: ApprovalAnswer::Lasting,
+                typed: None,
+            };
+            approvals.answer("main", lasting).unwrap();
+            release.send(()).unwrap();
+        };
+        let all = async { tokio::join!(answered, spared, answering) };
+        let (answered, spared, ()) = tokio::time::timeout(std::time::Duration::from_secs(60), all)
+            .await
+            .expect("the second ask waits for an answer");
+        for outcome in [answered, spared] {
+            assert!(matches!(outcome, Outcome::Approved { once: None, .. }));
+        }
+        assert!(told.try_recv().is_err(), "the second was never asked");
     }
 }
