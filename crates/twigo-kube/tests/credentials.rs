@@ -22,7 +22,7 @@ use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tokio_rustls::TlsAcceptor;
 use twigo_env::ShellEnv;
-use twigo_kube::client::{Clients, Gate, Options};
+use twigo_kube::client::{Actor, Budgets, Clients, Gate, Options, Proxied};
 use twigo_kube::credentials::{Exec, Provider, Registry, Timeouts};
 
 /// What the server saw of one request.
@@ -290,6 +290,10 @@ fn clients(server: &Server, exec: Exec) -> Clients {
 }
 
 fn gated_clients(server: &Server, exec: Exec, gate: Gate) -> Clients {
+    budgeted_clients(server, exec, gate, Budgets::default())
+}
+
+fn budgeted_clients(server: &Server, exec: Exec, gate: Gate, budgets: Budgets) -> Clients {
     let env: ShellEnv = std::env::vars_os()
         .collect::<Vec<(OsString, OsString)>>()
         .into_iter()
@@ -309,6 +313,7 @@ fn gated_clients(server: &Server, exec: Exec, gate: Gate) -> Clients {
         &config,
         gate,
         Options {
+            budgets,
             provider: Some(Provider::Exec(registry.source(exec))),
             ..Options::default()
         },
@@ -384,6 +389,51 @@ async fn a_rejected_token_gets_one_new_run_and_one_retry() {
     };
     assert_eq!(status.code, 401);
     assert_eq!(plugin.runs(), 3, "one new run, not a loop");
+}
+
+#[tokio::test]
+async fn a_retry_after_a_401_goes_through_a_full_budget_of_one() {
+    let server = Server::start().await;
+    let plugin = Plugin::new();
+    plugin.prints(serde_json::json!({"token": "old"}));
+    server.accept_token("old");
+    let budgets = Budgets {
+        requests: 1,
+        proxied: 1,
+        ..Budgets::default()
+    };
+    let clients = budgeted_clients(&server, plugin.exec(), Gate::unrestricted(), budgets);
+    let terminal = clients.actor(Actor::Terminal).unwrap();
+    let proxied = || {
+        let mut request = Request::get("/version").body(Vec::new()).unwrap();
+        request.extensions_mut().insert(Proxied);
+        request
+    };
+    assert_eq!(terminal.api.request_text(proxied()).await.unwrap(), "ok");
+
+    server.revoke_token("old");
+    server.accept_token("new");
+    plugin.prints(serde_json::json!({"token": "new"}));
+    let retried = terminal.api.request_text(proxied()).await;
+    assert_eq!(
+        retried.unwrap(),
+        "ok",
+        "the 401 held no stream into its retry"
+    );
+
+    server.revoke_token("new");
+    server.accept_token("newer");
+    plugin.prints(serde_json::json!({"token": "newer"}));
+    let waits = tokio::time::timeout(std::time::Duration::from_secs(5), get(&clients));
+    assert_eq!(
+        waits
+            .await
+            .expect("the retry waits for no stream of its own")
+            .unwrap(),
+        "ok"
+    );
+    let statuses: Vec<_> = server.seen().iter().map(|seen| seen.status).collect();
+    assert_eq!(statuses, [200, 401, 200, 401, 200]);
 }
 
 #[tokio::test]
