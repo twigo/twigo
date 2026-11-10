@@ -156,7 +156,8 @@ impl Core {
     /// context per context the catalog lists now, `context` the current one,
     /// each with a token that maps to `actor`, the process's `label`, and the
     /// `window` its asks go to; with none, every ask is denied. Async, as the
-    /// endpoint it binds the first time serves on the runtime.
+    /// endpoint it binds the first time serves on the runtime. Refuses the
+    /// UI, whose writes the gate lets through in `guarded` unasked.
     pub async fn proxy_process(
         &self,
         actor: Actor,
@@ -164,6 +165,12 @@ impl Core {
         window: Option<&str>,
         context: &str,
     ) -> Result<ProxyProcess, IpcError> {
+        if actor == Actor::Ui {
+            return Err(IpcError::new(
+                ErrorKind::InvalidInput,
+                "a process never acts as the UI, whose writes pass guarded unasked",
+            ));
+        }
         let contexts = self.catalog.contexts().await;
         if contexts.find(context).is_none() {
             return Err(IpcError::from(&ClientsError::NoContext(context.to_owned())));

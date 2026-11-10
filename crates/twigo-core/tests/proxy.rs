@@ -492,6 +492,21 @@ async fn a_process_s_kubeconfig_names_every_context_and_goes_with_its_handle() {
 }
 
 #[tokio::test]
+async fn no_process_acts_as_the_ui() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    let refused = core
+        .proxy_process(Actor::Ui, "Terminal 1", Some("main"), "kind-a")
+        .await;
+    let Err(error) = refused else {
+        panic!("a process of the UI's, whose writes pass guarded unasked");
+    };
+    assert_eq!(error.kind, ErrorKind::InvalidInput, "{}", error.message);
+    assert!(!dir.path().join("proxy").exists(), "no kubeconfig written");
+}
+
+#[tokio::test]
 async fn a_request_without_its_own_token_or_from_a_page_reaches_no_server() {
     let fake = Fake::start().await;
     let dir = tempfile::tempdir().unwrap();
