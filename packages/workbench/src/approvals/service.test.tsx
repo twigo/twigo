@@ -505,3 +505,27 @@ test("a click outside an ask answers nothing, while one outside a plan's confirm
     expect(dialog(/^Allow Terminal 1 /)).toBeTruthy();
   });
 });
+
+test("an ask that mounts while an answer is on its way keeps the focus in its dialog, and Deny takes it once the answer is done", async () => {
+  const { raise, control, withdraw } = await broker();
+  let release: () => void = () => undefined;
+  control.hold = new Promise((resolve) => {
+    release = resolve;
+  });
+  raise(ask(1), ask(2));
+  fireEvent.click(button("Allow once"));
+  await waitFor(() => {
+    expect(button("Allow once").hasAttribute("disabled")).toBe(true);
+  });
+
+  withdraw(1);
+  expect(dialog(/^Allow Terminal 2 /).contains(document.activeElement)).toBe(
+    true,
+  );
+  expect(button("Allow once").hasAttribute("disabled")).toBe(true);
+
+  release();
+  await waitFor(() => {
+    expect(document.activeElement).toBe(button(/^Deny/));
+  });
+});

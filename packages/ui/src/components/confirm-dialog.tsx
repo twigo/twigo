@@ -1,4 +1,11 @@
-import { useId, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Check, Copy, type LucideIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 import { Button } from "./button";
@@ -89,10 +96,29 @@ export function ConfirmDialog({
   onCloseAutoFocus,
 }: ConfirmDialogProps) {
   const [text, setText] = useState("");
+  const content = useRef<HTMLDivElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const field = useId();
   const ready = typed === undefined || text === typed;
+  // A disabled button cannot take the focus, and loses it, so while one
+  // answer is on its way the focus rests on the dialog, where Tab cannot
+  // leave it.
+  const rest = useCallback(() => {
+    (input.current ?? (busy ? content.current : cancel.current))?.focus();
+  }, [busy]);
+  useEffect(() => {
+    const root = content.current;
+    const active = document.activeElement;
+    if (
+      root &&
+      (!root.contains(active) ||
+        active === root ||
+        (active instanceof HTMLButtonElement && active.disabled))
+    ) {
+      rest();
+    }
+  }, [rest]);
   const choose = (choice: ConfirmChoice | undefined) => {
     if (ready && !busy)
       choice?.onSelect(typed === undefined ? undefined : text);
@@ -105,6 +131,7 @@ export function ConfirmDialog({
       }}
     >
       <DialogContent
+        ref={content}
         className={cn(
           "flex max-h-[calc(82%-24px)] flex-col overflow-hidden",
           wide ? "max-w-[880px]" : "max-w-[480px]",
@@ -122,7 +149,7 @@ export function ConfirmDialog({
         }}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
-          (input.current ?? cancel.current)?.focus();
+          rest();
         }}
         onCloseAutoFocus={onCloseAutoFocus}
       >

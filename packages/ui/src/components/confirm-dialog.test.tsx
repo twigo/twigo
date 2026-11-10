@@ -217,3 +217,42 @@ test("Escape pressed inside something marked as owning it is not the dialog's", 
   });
   expect(onCancel).toHaveBeenCalledOnce();
 });
+
+function withBusy(busy: boolean, typed?: string) {
+  return (
+    <ConfirmDialog
+      question="Allow Terminal 2 to patch deployments/web in default on staging?"
+      consequences={[]}
+      cancel="Deny"
+      busy={busy}
+      {...(typed !== undefined && { typed })}
+      choices={[{ label: "Allow once", onSelect: vi.fn() }]}
+      onCancel={vi.fn()}
+    />
+  );
+}
+
+test("focus stays in the dialog while the buttons are disabled, and goes back to the decline when they are not", () => {
+  const { rerender } = render(withBusy(true));
+  const dialog = screen.getByRole("dialog");
+  expect(document.activeElement).toBe(dialog);
+
+  rerender(withBusy(false));
+  const deny = screen.getByRole("button", { name: /Deny/ });
+  expect(document.activeElement).toBe(deny);
+
+  const allow = screen.getByRole("button", { name: "Allow once" });
+  allow.focus();
+  rerender(withBusy(true));
+  expect(document.activeElement).toBe(dialog);
+  rerender(withBusy(false));
+  expect(document.activeElement).toBe(deny);
+});
+
+test("the typed field keeps the focus through an answer, as it is not disabled", () => {
+  const { rerender } = render(withBusy(true, "staging"));
+  const field = screen.getByLabelText("Type staging to confirm");
+  expect(document.activeElement).toBe(field);
+  rerender(withBusy(false, "staging"));
+  expect(document.activeElement).toBe(field);
+});
