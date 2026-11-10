@@ -2,9 +2,11 @@ import { IpcError } from "../error";
 import type {
   AnswerApproval,
   ApprovalAsk,
+  ApprovalDetail,
   ApprovalEvent,
   ApprovalId,
 } from "../generated";
+import { side } from "./edits";
 import { recordedManifest } from "./objects";
 
 /**
@@ -52,14 +54,12 @@ function named(manifest: Fields, name: string, namespace: string): Fields {
 }
 
 function withImage(deployment: Fields, image: string): Fields {
-  const metadata = deployment.metadata as Fields;
   const spec = deployment.spec as Fields;
   const template = spec.template as Fields;
   const pod = template.spec as Fields;
   const [first, ...more] = pod.containers as Fields[];
   return {
     ...deployment,
-    metadata: { ...metadata, generation: Number(metadata.generation) + 1 },
     spec: {
       ...spec,
       template: {
@@ -84,6 +84,18 @@ function annotated(object: Fields, key: string, value: string): Fields {
   };
 }
 
+function withData(object: Fields, data: Record<string, string>): Fields {
+  return { ...object, data: { ...(object.data as Fields), ...data } };
+}
+
+function diff(
+  live: Fields | null,
+  result: Fields,
+  warnings: string[],
+): ApprovalDetail {
+  return { kind: "diff", live: side(live), result: side(result), warnings };
+}
+
 function created(name: string, data: Record<string, string>): Fields {
   const settings = recordedManifest("configmap");
   return {
@@ -102,6 +114,11 @@ function created(name: string, data: Record<string, string>): Fields {
 function drafts(): Record<string, Draft> {
   const web = named(recordedManifest("deployment"), "web", "default");
   const settings = named(recordedManifest("configmap"), "settings", "default");
+  const credentials = named(
+    recordedManifest("secret"),
+    "credentials",
+    "default",
+  );
   const common = {
     class: "write",
     impersonate: null,
@@ -117,14 +134,9 @@ function drafts(): Record<string, Draft> {
         "kubectl set image deployment/web app=registry.k8s.io/pause:3.11",
       verb: "patch",
       target: "deployments/web in default",
-      detail: {
-        kind: "diff",
-        live: web,
-        result: withImage(web, "registry.k8s.io/pause:3.11"),
-        warnings: [
-          'would violate PodSecurity "restricted:latest": allowPrivilegeEscalation != false (container "app" must set securityContext.allowPrivilegeEscalation=false)',
-        ],
-      },
+      detail: diff(web, withImage(web, "registry.k8s.io/pause:3.11"), [
+        'would violate PodSecurity "restricted:latest": allowPrivilegeEscalation != false (container "app" must set securityContext.allowPrivilegeEscalation=false)',
+      ]),
     },
     create: {
       ...common,
@@ -134,12 +146,7 @@ function drafts(): Record<string, Draft> {
         "kubectl create configmap feature-flags --from-literal=checkout=on",
       verb: "create",
       target: "configmaps/feature-flags in default",
-      detail: {
-        kind: "diff",
-        live: null,
-        result: created("feature-flags", { checkout: "on" }),
-        warnings: [],
-      },
+      detail: diff(null, created("feature-flags", { checkout: "on" }), []),
     },
     delete: {
       ...common,
@@ -225,12 +232,20 @@ function drafts(): Record<string, Draft> {
       verb: "patch",
       target: "configmaps/settings in default",
       impersonate: "system:serviceaccount:default:deployer",
-      detail: {
-        kind: "diff",
-        live: settings,
-        result: annotated(settings, "team", "payments"),
-        warnings: [],
-      },
+      detail: diff(settings, annotated(settings, "team", "payments"), []),
+    },
+    secret: {
+      ...common,
+      context: STAGING,
+      process: "Terminal 3",
+      command: "kubectl edit secret credentials",
+      verb: "patch",
+      target: "secrets/credentials in default",
+      detail: diff(
+        credentials,
+        withData(credentials, { password: "<17 bytes>" }),
+        [],
+      ),
     },
   };
 }
@@ -254,6 +269,7 @@ function sequence(scenario: ApprovalScenario): Draft[] {
         "aggregated",
         "refused",
         "impersonated",
+        "secret",
       );
     case "approvalQueue":
       return pick("patch", "create", "exec");

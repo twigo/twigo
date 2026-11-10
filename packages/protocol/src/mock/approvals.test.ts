@@ -32,6 +32,13 @@ async function followed(scenario: MockScenario) {
 const asks = (events: ApprovalEvent[]): ApprovalAsk[] =>
   events.flatMap((event) => (event.event === "asked" ? [event.ask] : []));
 
+interface Side {
+  kind: string;
+  metadata: Record<string, unknown>;
+  spec: { template: { spec: { containers: { image: string }[] } } };
+  data: Record<string, string>;
+}
+
 function nth(events: ApprovalEvent[], index: number): ApprovalAsk {
   const ask = asks(events)[index];
   if (ask === undefined) throw new Error(`no ask ${String(index)} was raised`);
@@ -76,7 +83,7 @@ test("the sequence raises its asks one after another as each is answered", async
   expect(asks(events)).toHaveLength(2);
   expect(asks(events)[1]?.detail).toMatchObject({ kind: "diff", live: null });
 
-  for (let step = 1; step < 8; step++) {
+  for (let step = 1; step < 9; step++) {
     await answer(backend, nth(events, step), "deny", "prod-eu");
     await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
   }
@@ -93,32 +100,60 @@ test("the sequence raises its asks one after another as each is answered", async
     "aggregated",
     "refused",
     "diff",
+    "diff",
   ]);
   expect(asks(events)[7]?.impersonate).toBe(
     "system:serviceaccount:default:deployer",
   );
 });
 
-test("a diff's sides are recorded objects with a change made in code, none live for a create", async () => {
+test("a diff's sides are recorded objects with a change made in code, as Rust's side sends them", async () => {
   const { backend, events } = await followed("approval");
   await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
-  const patch = nth(events, 0);
-  const detail = patch.detail;
-  if (detail.kind !== "diff") throw new Error("not a diff");
-  const sides = [detail.live, detail.result] as {
-    metadata: { name: string; namespace: string; generation: number };
-    spec: { template: { spec: { containers: { image: string }[] } } };
-  }[];
-  expect(sides.map((side) => side.metadata.name)).toEqual(["web", "web"]);
-  expect(sides.map((side) => side.metadata.namespace)).toEqual([
-    "default",
-    "default",
-  ]);
-  expect(sides.map((side) => side.metadata.generation)).toEqual([2, 3]);
+  for (let step = 0; step < 9; step++) {
+    await answer(backend, nth(events, step), "deny", "prod-eu");
+    await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  }
+  const diffs = asks(events).flatMap(({ detail }) =>
+    detail.kind === "diff" ? [detail] : [],
+  );
+  expect(diffs).toHaveLength(4);
+  const [patch, create, annotate, secret] = diffs;
+  const sides = (detail: typeof patch) =>
+    detail === undefined ? [] : [detail.live, detail.result];
+  for (const side of diffs.flatMap((detail) => sides(detail))) {
+    if (side === null) continue;
+    const { metadata } = side as Side;
+    expect(metadata).not.toHaveProperty("resourceVersion");
+    expect(metadata).not.toHaveProperty("generation");
+    expect(metadata).toHaveProperty("uid");
+  }
+
+  const [before, after] = sides(patch) as Side[];
+  expect(before?.metadata).toMatchObject({ name: "web", namespace: "default" });
   expect(
-    sides.map((side) => side.spec.template.spec.containers[0]?.image),
+    [before, after].map(
+      (side) => side?.spec.template.spec.containers[0]?.image,
+    ),
   ).toEqual(["registry.k8s.io/pause:3.10", "registry.k8s.io/pause:3.11"]);
-  await answer(backend, patch);
+  expect({ ...before, spec: undefined }).toEqual({ ...after, spec: undefined });
+
+  expect(create?.live).toBeNull();
+  expect((create?.result as Side).kind).toBe("ConfigMap");
+  expect((annotate?.result as Side).metadata.annotations).toEqual({
+    team: "payments",
+  });
+
+  const [masked, changed] = sides(secret) as Side[];
+  expect(masked?.kind).toBe("Secret");
+  expect(masked?.data).toEqual({
+    "key.der": "<10 bytes>",
+    password: "<13 bytes>",
+  });
+  expect(changed?.data).toEqual({
+    "key.der": "<10 bytes>",
+    password: "<17 bytes>",
+  });
 });
 
 test("a delete refuses a context name typed wrong, an ask that is gone, and allows the right one", async () => {

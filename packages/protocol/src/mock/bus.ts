@@ -20,7 +20,7 @@ import type {
   ShellKind,
   ShellTarget,
 } from "../generated";
-import { masked } from "./edits";
+import { side } from "./edits";
 import {
   cordoned,
   deploymentOf,
@@ -344,22 +344,6 @@ function isEqual(a: unknown, b: unknown): boolean {
     left.length === Object.keys(b).length &&
     left.every(([key, value]) => isEqual(value, (b as Fields)[key]))
   );
-}
-
-/** An object as a side of the diff, as Rust's `side`: without what would only be noise. */
-function side(value: unknown): unknown {
-  if (typeof value !== "object" || value === null) return value;
-  const object = masked(value as Record<string, unknown>);
-  const { metadata } = object as { metadata?: object };
-  if (metadata === undefined) return object;
-  return {
-    ...object,
-    metadata: Object.fromEntries(
-      Object.entries(metadata).filter(
-        ([name]) => name !== "resourceVersion" && name !== "generation",
-      ),
-    ),
-  };
 }
 
 /** What the mock backend's bus reaches. */
