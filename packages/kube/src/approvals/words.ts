@@ -30,8 +30,6 @@ export function noDiffWords(reason: NoDiff): readonly string[] {
       return [
         "Twigo could not read whether an aggregated API server serves it, and such a server may not honour a dry run.",
       ];
-    case "tooLarge":
-      return ["The object is larger than Twigo reads to compare."];
     case "refused":
       return [
         `The server refused the dry run: ${reason.message}`,

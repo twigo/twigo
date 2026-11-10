@@ -223,7 +223,8 @@ function drafts(): Record<string, Draft> {
       command: "kubectl annotate",
       verb: "patch",
       target: "configmaps/settings in default",
-      impersonate: "system:serviceaccount:default:deployer",
+      impersonate:
+        "system:serviceaccount:default:deployer, groups system:serviceaccounts",
       detail: diff(settings, annotated(settings, "team", "payments"), []),
     },
     secret: {

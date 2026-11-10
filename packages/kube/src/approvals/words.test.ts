@@ -22,14 +22,13 @@ test("every reason a write has no diff is told in a sentence a person reads", ()
     { reason: "subresource" },
     { reason: "aggregated" },
     { reason: "unverified" },
-    { reason: "tooLarge" },
     { reason: "refused", message: 'admission webhook "x" refused it' },
     { reason: "notAResource" },
   ];
   const told = reasons.map((reason) => noDiffWords(reason));
-  expect(told.map((sentences) => sentences.length)).toEqual([1, 1, 1, 1, 2, 1]);
-  expect(new Set(told.flat()).size).toBe(7);
-  expect(told[4]?.[0]).toContain('admission webhook "x" refused it');
+  expect(told.map((sentences) => sentences.length)).toEqual([1, 1, 1, 2, 1]);
+  expect(new Set(told.flat()).size).toBe(6);
+  expect(told[3]?.[0]).toContain('admission webhook "x" refused it');
 });
 
 test("a delete says what happens to the dependents by the propagation it asks for", () => {

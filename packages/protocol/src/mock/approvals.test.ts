@@ -104,7 +104,7 @@ test("the sequence raises its asks one after another as each is answered", async
     "delete",
   ]);
   expect(asks(events)[7]?.impersonate).toBe(
-    "system:serviceaccount:default:deployer",
+    "system:serviceaccount:default:deployer, groups system:serviceaccounts",
   );
 });
 
