@@ -107,6 +107,30 @@ test("the sequence raises its asks one after another as each is answered", async
   );
 });
 
+async function raised(): Promise<ApprovalAsk[]> {
+  const { backend, events } = await followed("approval");
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  for (let step = 0; step < 9; step++) {
+    await answer(backend, nth(events, step), "deny", "prod-eu");
+    await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  }
+  return asks(events);
+}
+
+test("an ask's command is the command path alone, as kubectl's Kubectl-Command header holds it", async () => {
+  expect((await raised()).map(({ command }) => command)).toEqual([
+    "kubectl set image",
+    "kubectl create",
+    "kubectl delete",
+    "kubectl exec",
+    "kubectl scale",
+    "kubectl apply",
+    "kubectl apply",
+    "kubectl annotate",
+    "kubectl edit",
+  ]);
+});
+
 test("a diff's sides are recorded objects with a change made in code, as Rust's side sends them", async () => {
   const { backend, events } = await followed("approval");
   await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);

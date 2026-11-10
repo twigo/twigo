@@ -130,8 +130,7 @@ function drafts(): Record<string, Draft> {
       ...common,
       context: STAGING,
       process: "Terminal 2",
-      command:
-        "kubectl set image deployment/web app=registry.k8s.io/pause:3.11",
+      command: "kubectl set image",
       verb: "patch",
       target: "deployments/web in default",
       detail: diff(web, withImage(web, "registry.k8s.io/pause:3.11"), [
@@ -142,8 +141,7 @@ function drafts(): Record<string, Draft> {
       ...common,
       context: STAGING,
       process: "Terminal 1",
-      command:
-        "kubectl create configmap feature-flags --from-literal=checkout=on",
+      command: "kubectl create",
       verb: "create",
       target: "configmaps/feature-flags in default",
       detail: diff(null, created("feature-flags", { checkout: "on" }), []),
@@ -152,7 +150,7 @@ function drafts(): Record<string, Draft> {
       ...common,
       context: PRODUCTION,
       process: "Terminal 3",
-      command: `kubectl delete pod ${POD}`,
+      command: "kubectl delete",
       verb: "delete",
       target: `pods/${POD} in default`,
       detail: { kind: "delete", propagation: null },
@@ -164,7 +162,7 @@ function drafts(): Record<string, Draft> {
       class: "exec",
       context: STAGING,
       process: "Terminal 2",
-      command: `kubectl exec -it ${POD} -- sh -c 'tail -n 100 /var/log/app.log | grep ERROR'`,
+      command: "kubectl exec",
       verb: "exec",
       target: `pods/${POD} in default`,
       detail: {
@@ -179,7 +177,7 @@ function drafts(): Record<string, Draft> {
       ...common,
       context: STAGING,
       process: "Terminal 1",
-      command: "kubectl scale deployment/web --replicas=5",
+      command: "kubectl scale",
       verb: "update",
       target: "deployments/web/scale in default",
       detail: {
@@ -197,7 +195,7 @@ function drafts(): Record<string, Draft> {
       ...common,
       context: STAGING,
       process: "Terminal 3",
-      command: "kubectl apply -f flunder.yaml",
+      command: "kubectl apply",
       verb: "create",
       target: "flunders/blue in default",
       detail: {
@@ -210,7 +208,7 @@ function drafts(): Record<string, Draft> {
       ...common,
       context: STAGING,
       process: "Terminal 2",
-      command: "kubectl apply -f ingress.yaml",
+      command: "kubectl apply",
       verb: "patch",
       target: "ingresses/shop in default",
       detail: {
@@ -227,8 +225,7 @@ function drafts(): Record<string, Draft> {
       ...common,
       context: STAGING,
       process: "Terminal 1",
-      command:
-        "kubectl annotate configmap settings team=payments --as=system:serviceaccount:default:deployer",
+      command: "kubectl annotate",
       verb: "patch",
       target: "configmaps/settings in default",
       impersonate: "system:serviceaccount:default:deployer",
@@ -238,7 +235,7 @@ function drafts(): Record<string, Draft> {
       ...common,
       context: STAGING,
       process: "Terminal 3",
-      command: "kubectl edit secret credentials",
+      command: "kubectl edit",
       verb: "patch",
       target: "secrets/credentials in default",
       detail: diff(

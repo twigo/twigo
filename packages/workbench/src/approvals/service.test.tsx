@@ -345,7 +345,7 @@ test("the dialog says whose context it is, what the client claims and the detail
   const { raise } = await broker();
   raise(
     ask(1, {
-      command: "kubectl set image deployment/web app=web:2",
+      command: "kubectl set image",
       impersonate: "system:serviceaccount:default:deployer",
     }),
     DELETE,
@@ -353,9 +353,7 @@ test("the dialog says whose context it is, what the client claims and the detail
   expect(screen.getByText("Staging")).toBeTruthy();
   expect(screen.getByText("staging")).toBeTruthy();
   expect(screen.getByText("The client says it runs")).toBeTruthy();
-  expect(
-    screen.getByText("kubectl set image deployment/web app=web:2"),
-  ).toBeTruthy();
+  expect(screen.getByText("kubectl set image")).toBeTruthy();
   expect(screen.getByText("Acting as")).toBeTruthy();
   expect(
     screen.getByText("system:serviceaccount:default:deployer"),
