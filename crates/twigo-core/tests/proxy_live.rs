@@ -119,6 +119,16 @@ impl Cluster {
 
     /// A pod on kind's node running `script` in bash, once it runs.
     async fn running(&self, name: &str, script: &str, host_network: bool) {
+        self.started(name, script, host_network, false).await;
+    }
+
+    /// A pod on kind's node that writes the first line an attach gives its
+    /// stdin to `/tmp/written`, once it runs.
+    async fn reading(&self, name: &str) {
+        self.started(name, READS, false, true).await;
+    }
+
+    async fn started(&self, name: &str, script: &str, host_network: bool, stdin: bool) {
         let pod = json!({
             "metadata": { "name": name },
             "spec": {
@@ -131,6 +141,7 @@ impl Cluster {
                     "image": self.image,
                     "imagePullPolicy": "Never",
                     "command": ["bash", "-c", script],
+                    "stdin": stdin,
                 }],
             },
         });
@@ -405,6 +416,8 @@ fn manifest(name: &str, value: &str) -> String {
 const SLEEPS: &str = "coproc S { read; }; read -u \"${S[0]}\"";
 const TICKS: &str = "coproc S { read; }; while true; do echo tick; read -t 1 -u \"${S[0]}\"; done";
 const WRITES: &str = "echo hi > /tmp/written && echo done";
+const READS: &str =
+    "read line; echo \"$line\" > /tmp/written; coproc S { read; }; read -u \"${S[0]}\"";
 
 /// `kubectl run -i --rm` of a pod on kind's node that echoes a line. Not
 /// `-it`: without a terminal kubectl attaches with `stderr` to a container
@@ -474,6 +487,18 @@ async fn read_write_lets_every_command_through() {
     let mut attach = kubectl.command(&["attach", "ticker"]).spawn().unwrap();
     until_line(&mut attach, "tick").await;
     attach.kill().await.unwrap();
+    cluster.reading("reader").await;
+    let mut attach = kubectl
+        .command(&["attach", "-i", "reader"])
+        .spawn()
+        .unwrap();
+    let mut stdin = attach.stdin.take().unwrap();
+    stdin.write_all(b"hello\n").await.unwrap();
+    eventually("what the attach sent reaches the pod", || async {
+        cluster.written("reader").await == "present"
+    })
+    .await;
+    attach.kill().await.unwrap();
 
     let forwarded = kubectl.forwards().await;
     assert!(forwarded.ends_with("ok"), "{forwarded}");
@@ -499,7 +524,7 @@ async fn read_only_lets_reads_and_port_forwards_through_and_nothing_else() {
     let (core, process) = core(dir.path(), &cluster).await;
     let kubectl = Kubectl::new(&process, dir.path(), &cluster);
     cluster.running("sleeper", SLEEPS, false).await;
-    cluster.running("ticker", TICKS, false).await;
+    cluster.reading("reader").await;
     cluster.running("host", SLEEPS, true).await;
     cluster
         .config_maps()
@@ -542,7 +567,14 @@ async fn read_only_lets_reads_and_port_forwards_through_and_nothing_else() {
         .refused(&["exec", "sleeper", "--", "bash", "-c", WRITES], "")
         .await;
     assert_eq!(cluster.written("sleeper").await, "absent");
-    kubectl.refused(&["attach", "ticker"], "").await;
+    kubectl
+        .refused(&["attach", "-i", "reader"], "hello\n")
+        .await;
+    assert_eq!(
+        cluster.written("reader").await,
+        "absent",
+        "what the refused attach sent reached no file"
+    );
 
     kubectl.refused(&strs(&run(&cluster)), "hello\n").await;
     assert!(cluster.pods().get_opt("runner").await.unwrap().is_none());
@@ -678,7 +710,11 @@ async fn sixteen_watches_fill_the_proxy_and_a_get_waits_on_429s_until_one_ends()
             .unwrap()
             .contains("sleeper")
     );
-    let refused = stderr.lines().filter(|line| line.contains("429")).count();
+    // As client-go's debugging round tripper logs a response at -v=6.
+    let refused = stderr
+        .lines()
+        .filter(|line| line.contains(r#"status="429 Too Many Requests""#))
+        .count();
     assert!(refused >= 1, "it waited on 429s: {stderr}");
     eprintln!("the get was answered 429 {refused} times before a watch ended");
     assert_eq!(ui.state(), ViewState::Ready);

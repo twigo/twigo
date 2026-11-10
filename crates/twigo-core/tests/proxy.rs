@@ -559,14 +559,28 @@ async fn a_request_without_its_own_token_or_from_a_page_reaches_no_server() {
     let (status, message) = refused(address.clone(), other_context).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{message}");
 
-    let foreign = process
+    let mut foreign = process
         .request("GET", "kind-a", CONFIGMAPS)
-        .header(HOST, "attacker.example:80")
         .body(empty())
         .unwrap();
+    let attacker = http::HeaderValue::from_static("attacker.example:80");
+    foreign.headers_mut().insert(HOST, attacker.clone());
+    assert_eq!(foreign.headers().get_all(HOST).iter().count(), 1);
     assert_eq!(
         refused(address.clone(), foreign).await.0,
-        StatusCode::FORBIDDEN
+        StatusCode::FORBIDDEN,
+        "a foreign Host alone"
+    );
+    let mut both = process
+        .request("GET", "kind-a", CONFIGMAPS)
+        .body(empty())
+        .unwrap();
+    both.headers_mut().append(HOST, attacker);
+    assert_eq!(both.headers().get_all(HOST).iter().count(), 2);
+    assert_eq!(
+        refused(address.clone(), both).await.0,
+        StatusCode::FORBIDDEN,
+        "its own and a foreign one"
     );
     let from_a_page = process
         .request("GET", "kind-a", CONFIGMAPS)
@@ -1352,6 +1366,78 @@ async fn an_exec_is_spliced_and_ends_when_its_context_turns_read_only() {
     freed.await.expect("its session freed");
 }
 
+/// Until the context's clients hold `proxied` streams and `sessions`.
+async fn held(core: &Core, proxied: usize, sessions: usize) {
+    let clients = core.clients("kind-a").await.unwrap();
+    let waited = tokio::time::timeout(WAIT, async {
+        loop {
+            let usage = *clients.usage().borrow();
+            if (usage.proxied.held, usage.sessions.held) == (proxied, sessions) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    });
+    let usage = *clients.usage().borrow();
+    waited.await.unwrap_or_else(|_| panic!("{usage:?}"));
+}
+
+#[tokio::test]
+async fn dropping_a_process_ends_its_watch_and_its_splice_and_frees_their_streams() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    let process = Process::start(&core, None).await;
+    let watch = process
+        .request("GET", "kind-a", "/api/v1/namespaces/a/pods?watch=true")
+        .body(empty())
+        .unwrap();
+    let (watching, _watch) = send(process.at(), watch).await;
+    assert_eq!(watching.status(), StatusCode::OK);
+    let (switched, _exec) = send(process.at(), exec(&process, "p", "sh", true)).await;
+    assert_eq!(switched.status(), StatusCode::SWITCHING_PROTOCOLS);
+    let mut upgraded = TokioIo::new(hyper::upgrade::on(switched).await.unwrap());
+    held(&core, 1, 1).await;
+
+    drop(process.handle);
+    let watched = tokio::time::timeout(WAIT, watching.into_body().collect()).await;
+    assert!(watched.is_ok(), "the watch ends");
+    let mut rest = Vec::new();
+    let spliced = tokio::time::timeout(WAIT, upgraded.read_to_end(&mut rest)).await;
+    assert!(spliced.is_ok(), "the splice ends");
+    held(&core, 0, 0).await;
+}
+
+#[tokio::test]
+async fn a_splice_ends_when_its_context_moves_to_another_cluster() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    let process = Process::start(&core, None).await;
+    let (switched, _exec) = send(process.at(), exec(&process, "p", "sh", true)).await;
+    assert_eq!(switched.status(), StatusCode::SWITCHING_PROTOCOLS);
+    let mut upgraded = TokioIo::new(hyper::upgrade::on(switched).await.unwrap());
+    upgraded.write_all(b"ping").await.unwrap();
+    let mut echoed = [0; 4];
+    upgraded.read_exact(&mut echoed).await.unwrap();
+    held(&core, 0, 1).await;
+    // Built for the cluster the splice reaches, whose counter it holds.
+    let clients = core.clients("kind-a").await.unwrap();
+
+    let said = said_of_kind_a(&core).await;
+    let moved = kubeconfig("http://127.0.0.1:1", KIND_A);
+    rewrite(&core, dir.path(), &moved, said, false).await;
+    let mut rest = Vec::new();
+    let spliced = tokio::time::timeout(WAIT, upgraded.read_to_end(&mut rest)).await;
+    assert!(spliced.is_ok(), "the splice ends");
+    let freed = tokio::time::timeout(WAIT, async {
+        while clients.usage().borrow().sessions.held != 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    });
+    freed.await.expect("its session freed");
+}
+
 #[tokio::test]
 async fn no_audit_line_holds_a_token() {
     let fake = Fake::start().await;
@@ -1403,7 +1489,7 @@ fn delete(process: &Process, name: &str) -> Request<Full<Bytes>> {
 }
 
 #[tokio::test]
-async fn a_delete_is_denied_without_its_name_typed() {
+async fn a_delete_is_allowed_only_with_its_context_s_name_typed() {
     let fake = Fake::start().await;
     let dir = tempfile::tempdir().unwrap();
     let core = core(dir.path(), &fake).await;
@@ -1413,6 +1499,23 @@ async fn a_delete_is_denied_without_its_name_typed() {
     let deleting = tokio::spawn(send(process.at(), delete(&process, "c")));
     let ask = asked(&mut events).await;
     assert!(ask.typed);
+    for typed in [None, Some("kind-b"), Some("kind-a ")] {
+        let allowed = core.answer_approval(
+            "main",
+            AnswerApproval {
+                id: ask.id,
+                answer: ApprovalAnswer::Once,
+                typed: typed.map(str::to_owned),
+            },
+        );
+        assert_eq!(
+            allowed.unwrap_err().kind,
+            ErrorKind::InvalidInput,
+            "{typed:?}"
+        );
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(fake.writes(Method::DELETE), 0, "not sent");
     answer_with(&core, &ask, ApprovalAnswer::Deny, None);
     assert_eq!(deleting.await.unwrap().0.status(), StatusCode::FORBIDDEN);
     assert_eq!(fake.writes(Method::DELETE), 0);
