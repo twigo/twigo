@@ -1,5 +1,10 @@
 import { act } from "@testing-library/react";
-import type { Backend, KeyboardLayout } from "@twigo/protocol";
+import type {
+  ApprovalAsk,
+  ApprovalEvent,
+  Backend,
+  KeyboardLayout,
+} from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { expect, test } from "vitest";
 import { createWorkbench, type Workbench } from "./services";
@@ -39,4 +44,35 @@ test("a layout sent before the watch answers wins over its answer, and later one
   expect(sidebarKey(workbench)).toBe("KeyN");
   send(US);
   expect(sidebarKey(workbench)).toBe("KeyB");
+});
+
+test("the window follows the approval broker from startup", async () => {
+  const mock = createMockBackend("ready");
+  let send: (event: ApprovalEvent) => void = () => undefined;
+  const backend: Backend = {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe(command, request, onMessage) {
+      if (command !== "approvals_watch") {
+        return mock.subscribe(command, request, onMessage);
+      }
+      send = onMessage;
+      return Promise.resolve(null);
+    },
+  };
+  const ask: ApprovalAsk = {
+    id: 1,
+    context: "staging",
+    process: "Terminal 1",
+    command: null,
+    verb: "patch",
+    class: "write",
+    target: "deployments/web in default",
+    impersonate: null,
+    detail: { kind: "delete", propagation: null },
+    typed: false,
+    lastingMinutes: 15,
+  };
+  const workbench = await act(() => createWorkbench(backend, "mac"));
+  send({ event: "asked", ask });
+  expect(workbench.approvals.asks).toEqual([ask]);
 });
