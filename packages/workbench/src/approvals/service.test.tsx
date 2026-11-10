@@ -430,3 +430,45 @@ test("a plan's confirmation that opens over an ask takes the screen, and the ask
   expect(screen.getByText("Allow once")).toBeTruthy();
   expect(answers).toEqual([]);
 });
+
+test("an ask withdrawn behind a plan's confirmation leaves without a word, as it was not on screen", async () => {
+  const { workbench, raise, withdraw } = await broker();
+  const info = vi.spyOn(notify, "info");
+  const outcome = planned(workbench);
+  await waitFor(() => {
+    expect(titles()).toEqual(["Delete pod web-1 in default from dev?"]);
+  });
+
+  raise(ask(1), ask(2));
+  withdraw(1);
+  expect(info).not.toHaveBeenCalled();
+
+  fireEvent.keyDown(document.activeElement ?? document.body, {
+    key: "Escape",
+  });
+  await expect(outcome).resolves.toEqual({ state: "cancelled" });
+  await waitFor(() => {
+    expect(dialog(/^Allow Terminal 2 /)).toBeTruthy();
+  });
+  withdraw(2);
+  expect(info).toHaveBeenCalledExactlyOnceWith(
+    "Terminal 2 no longer asks to patch deployments/web in default on staging",
+  );
+});
+
+test("an ask on screen that a plan's confirmation then covers is withdrawn without a word too", async () => {
+  const { workbench, raise, withdraw } = await broker();
+  const info = vi.spyOn(notify, "info");
+  raise(ask(1));
+  const outcome = planned(workbench);
+  await waitFor(() => {
+    expect(titles()).toEqual(["Delete pod web-1 in default from dev?"]);
+  });
+
+  withdraw(1);
+  expect(info).not.toHaveBeenCalled();
+  fireEvent.keyDown(document.activeElement ?? document.body, {
+    key: "Escape",
+  });
+  await expect(outcome).resolves.toEqual({ state: "cancelled" });
+});

@@ -121,7 +121,10 @@ export class Workbench {
         this.report(error);
       },
     );
-    this.approvals = new Approvals(backend);
+    this.approvals = new Approvals(
+      backend,
+      () => this.operations.asking !== undefined,
+    );
   }
 
   /** A menu's commands as actions to draw, run against `lookup` with `args`, such as the space a tile's menu is about. */

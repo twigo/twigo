@@ -39,7 +39,11 @@ export class Approvals {
   #answering: ApprovalId | undefined;
   #failure: string | undefined;
 
-  constructor(private readonly backend: Backend) {}
+  /** `covered` says whether a plan's confirmation is open, which the asks wait behind. */
+  constructor(
+    private readonly backend: Backend,
+    private readonly covered: () => boolean,
+  ) {}
 
   /** The same array until the next change, for `useSyncExternalStore`. */
   get asks(): readonly ApprovalAsk[] {
@@ -119,8 +123,9 @@ export class Approvals {
       this.#asks = this.#asks.filter(({ id }) => id !== event.id);
       if (index === 0) {
         this.#failure = undefined;
-        // The answer in flight says how it went itself.
-        if (this.#answering !== ask.id) {
+        // The answer in flight says how it went itself, and an ask behind a
+        // plan's confirmation was not on screen.
+        if (this.#answering !== ask.id && !this.covered()) {
           notify.info(`${ask.process} no longer asks to ${describeAsk(ask)}`);
         }
       }
