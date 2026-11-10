@@ -218,7 +218,7 @@ test("Escape pressed inside something marked as owning it is not the dialog's", 
   expect(onCancel).toHaveBeenCalledOnce();
 });
 
-function withBusy(busy: boolean, typed?: string) {
+function withBusy(busy: boolean, typed?: string, onSelect = vi.fn()) {
   return (
     <ConfirmDialog
       question="Allow Terminal 2 to patch deployments/web in default on staging?"
@@ -226,7 +226,7 @@ function withBusy(busy: boolean, typed?: string) {
       cancel="Deny"
       busy={busy}
       {...(typed !== undefined && { typed })}
-      choices={[{ label: "Allow once", onSelect: vi.fn() }]}
+      choices={[{ label: "Allow once", onSelect }]}
       onCancel={vi.fn()}
     />
   );
@@ -255,6 +255,19 @@ test("the typed field keeps the focus through an answer, as it is not disabled",
   expect(document.activeElement).toBe(field);
   rerender(withBusy(false, "staging"));
   expect(document.activeElement).toBe(field);
+});
+
+test("Enter in the typed field sends nothing while an answer is on its way", () => {
+  const onSelect = vi.fn();
+  const { rerender } = render(withBusy(true, "staging", onSelect));
+  const field = screen.getByLabelText("Type staging to confirm");
+  fireEvent.change(field, { target: { value: "staging" } });
+  fireEvent.submit(field);
+  expect(onSelect).not.toHaveBeenCalled();
+
+  rerender(withBusy(false, "staging", onSelect));
+  fireEvent.submit(field);
+  expect(onSelect).toHaveBeenCalledExactlyOnceWith("staging");
 });
 
 test("the choices ignore activation for the guard time after it shows, and declining never waits", () => {

@@ -228,16 +228,17 @@ test("the typed field holds the delete's button back, takes the focus, and sends
   expect(allow.hasAttribute("disabled")).toBe(true);
   expect(screen.queryByRole("button", { name: /^Allow for / })).toBeNull();
 
+  armed();
   for (const wrong of ["prod", "Prod-eu", "prod-eu "]) {
     fireEvent.change(field, { target: { value: wrong } });
     expect(allow.hasAttribute("disabled")).toBe(true);
     fireEvent.click(allow);
+    fireEvent.submit(field);
   }
   expect(answers).toEqual([]);
 
   fireEvent.change(field, { target: { value: "prod-eu" } });
   expect(allow.hasAttribute("disabled")).toBe(false);
-  armed();
   fireEvent.click(allow);
   await waitFor(() => {
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -333,6 +334,51 @@ test("a refused answer shows its words in the dialog, which stays, and the next 
     expect(screen.queryByRole("dialog")).toBeNull();
   });
   expect(answers).toHaveLength(2);
+});
+
+function refusedDelete(control: Awaited<ReturnType<typeof broker>>["control"]) {
+  fireEvent.change(screen.getByLabelText("Type prod-eu to confirm"), {
+    target: { value: "prod-eu" },
+  });
+  control.refuse = new IpcError("invalidInput", "type prod-eu to confirm");
+  choose("Allow delete");
+  return waitFor(() => {
+    expect(screen.getByRole("alert").textContent).toContain(
+      "type prod-eu to confirm",
+    );
+  });
+}
+
+test("a refusal is cleared when its ask is withdrawn, so the next ask opens without it", async () => {
+  const { raise, control, withdraw } = await broker();
+  raise(DELETE, ask(2));
+  await refusedDelete(control);
+
+  withdraw(9);
+  expect(dialog(/^Allow Terminal 2 /)).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("a refusal is cleared when the next answer starts, not when it ends", async () => {
+  const { raise, control, answers } = await broker();
+  raise(DELETE);
+  await refusedDelete(control);
+
+  control.refuse = undefined;
+  let release: () => void = () => undefined;
+  control.hold = new Promise((resolve) => {
+    release = resolve;
+  });
+  choose("Allow delete");
+  await waitFor(() => {
+    expect(answers).toHaveLength(2);
+  });
+  expect(screen.queryByRole("alert")).toBeNull();
+
+  release();
+  await waitFor(() => {
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
 });
 
 test("while an answer is on its way nothing else answers", async () => {
