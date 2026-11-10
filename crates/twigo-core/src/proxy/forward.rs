@@ -8,7 +8,7 @@ use std::task::{Context, Poll};
 
 use bytes::Bytes;
 use http::request::Parts;
-use http::{Request, Response, StatusCode};
+use http::{Request, Response};
 use http_body::{Body, Frame, SizeHint};
 use http_body_util::BodyExt;
 use http_body_util::combinators::UnsyncBoxBody;
@@ -28,8 +28,10 @@ pub(crate) type ProxyBody = UnsyncBoxBody<Bytes, BoxError>;
 /// ([`MaxRequestBodyBytes`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/apiserver/pkg/server/config.go#L466-L474)).
 pub(super) const BODY_LIMIT: usize = 3 << 20;
 
-/// What a request came to, and whether it reached the server, as a `429`
-/// tells it did not.
+/// What a request came to, and whether it counts as having reached the
+/// server: all but the proxy's own `429` and a pod's stream answered other
+/// than `101` do, one the gate stopped above the socket included, since the
+/// relock that stopped it ends what an answer allowed.
 pub(super) struct Sent {
     pub response: Response<ProxyBody>,
     pub reached: bool,
@@ -48,13 +50,10 @@ pub(super) async fn send(
         request.extensions_mut().insert(approval);
     }
     match actor.api.send(request).await {
-        Ok(response) => {
-            let reached = response.status() != StatusCode::TOO_MANY_REQUESTS;
-            Sent {
-                response: passed(holder, response, None),
-                reached,
-            }
-        }
+        Ok(response) => Sent {
+            response: passed(holder, response, None),
+            reached: true,
+        },
         Err(error) => failed(&holder.context, &error),
     }
 }

@@ -25,7 +25,7 @@ use super::splice::{Reach, Upgrade};
 use super::tokens::{self, Digest, Holder};
 use super::{Changes, forward, headers, splice};
 use crate::Core;
-use crate::approvals::{Asking, Outcome, detail};
+use crate::approvals::{Asking, Once, Outcome, detail};
 
 pub(super) async fn handle(
     core: Weak<Core>,
@@ -93,10 +93,10 @@ async fn serve(
         }
         None => forward::send(&holder, &actor, parts, body, decided.approval).await,
     };
-    if sent.reached
-        && let Some(repeat) = decided.repeat
+    if !sent.reached
+        && let Some(once) = decided.once
     {
-        core.approvals.reached(&repeat);
+        once.give_back();
     }
     Ok(sent.response)
 }
@@ -215,25 +215,25 @@ async fn read(body: Incoming) -> Result<Bytes, Refusal> {
 }
 
 #[derive(Default)]
-struct Decided {
+struct Decided<'a> {
     approval: Option<Approval>,
-    /// The repeat a "once" covers until a request of it reaches the server.
-    repeat: Option<Digest>,
+    /// The "once" the request took, if any.
+    once: Option<Once<'a>>,
 }
 
 /// The gate's decision without an approval, asked only to know whether to
 /// ask the person: the request still meets the gate with whatever approval
 /// the broker gives it. Only a write or an exec is asked about, as no answer
 /// covers anything else, such as an agent's read of a Secret.
-async fn decide(
-    core: &Core,
+async fn decide<'a>(
+    core: &'a Core,
     holder: &Holder,
     actor: &ActorClients,
     attributes: &Attributes,
     parts: &Parts,
     body: &Bytes,
     reach: Option<Reach>,
-) -> Result<Decided, Refusal> {
+) -> Result<Decided<'a>, Refusal> {
     let blocked = match core
         .policy
         .authorize(&holder.context, attributes, holder.actor)
@@ -263,9 +263,9 @@ async fn decide(
     };
     let detail = detail::of(&core.approvals, &actor.api, holder, attributes, parts, body);
     match core.approvals.decide(asking, detail).await {
-        Outcome::Approved { approval, repeat } => Ok(Decided {
+        Outcome::Approved { approval, once } => Ok(Decided {
             approval: Some(approval),
-            repeat,
+            once,
         }),
         Outcome::Denied(message) => Err(Refusal::forbidden(message)),
         Outcome::Decided(Ok(())) => Ok(Decided::default()),

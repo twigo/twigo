@@ -47,6 +47,9 @@ struct State {
     grants: HashMap<(u64, String), Grant>,
     repeats: HashMap<Digest, Repeat>,
     next: u32,
+    /// Numbers each "once", so that a request gives back or uses up only
+    /// its own.
+    onces: u64,
 }
 
 type Follower = Box<dyn FnMut(ApprovalEvent) -> bool + Send>;
@@ -83,10 +86,15 @@ struct Repeat {
 enum Cover {
     /// Every repeat, in these words.
     Denied(String),
-    /// Repeats while none of them has reached the server, as the approval
-    /// the person gave covers them: one after a `429`, or after a pod's
+    /// The approval the person gave, for the repeats it covers, one at a
+    /// time: a request takes it as it is sent and gives it back only when it
+    /// did not reach the server, after the proxy's own `429` or a pod's
     /// stream answered other than `101`.
-    Once(Approval),
+    Once {
+        approval: Approval,
+        id: u64,
+        taken: bool,
+    },
 }
 
 /// A request the gate would stop for want of an approval.
@@ -102,12 +110,11 @@ pub(crate) struct Asking<'a> {
     pub impersonate: Option<String>,
 }
 
-pub(crate) enum Outcome {
-    /// Send it with `approval`, and tell [`Approvals::reached`] of `repeat`
-    /// once it reaches the server.
+pub(crate) enum Outcome<'a> {
+    /// Send it with `approval`, holding the "once" it took, if any.
     Approved {
         approval: Approval,
-        repeat: Option<Digest>,
+        once: Option<Once<'a>>,
     },
     /// Not sent, in these words.
     Denied(String),
@@ -139,7 +146,7 @@ impl Approvals {
         &self,
         asking: Asking<'_>,
         detail: impl Future<Output = ApprovalDetail>,
-    ) -> Outcome {
+    ) -> Outcome<'_> {
         let Asking {
             holder, attributes, ..
         } = &asking;
@@ -155,19 +162,24 @@ impl Approvals {
             state.repeats.retain(|_, repeat| repeat.until > now);
             match state
                 .repeats
-                .get(&asking.repeat)
-                .map(|repeat| &repeat.cover)
+                .get_mut(&asking.repeat)
+                .map(|repeat| &mut repeat.cover)
             {
                 Some(Cover::Denied(message)) => return Outcome::Denied(message.clone()),
-                Some(Cover::Once(approval))
-                    if approval.covers(context, holder.actor, attributes, Timestamp::now()) =>
+                Some(Cover::Once {
+                    approval,
+                    id,
+                    taken,
+                }) if !*taken
+                    && approval.covers(context, holder.actor, attributes, Timestamp::now()) =>
                 {
+                    *taken = true;
                     return Outcome::Approved {
                         approval: approval.clone(),
-                        repeat: Some(asking.repeat),
+                        once: Some(Once::taken(self, asking.repeat, *id)),
                     };
                 }
-                Some(Cover::Once(_)) | None => {}
+                Some(Cover::Once { .. }) | None => {}
             }
             let grant = state.grants.get(&(holder.process, context.to_owned()));
             if !delete
@@ -176,7 +188,7 @@ impl Approvals {
             {
                 return Outcome::Approved {
                     approval: Approval::until(context, holder.actor, grant.until),
-                    repeat: None,
+                    once: None,
                 };
             }
         }
@@ -230,11 +242,7 @@ impl Approvals {
             asking: &asking,
             id,
         };
-        match self.wait(&asking, resolved, changes).await {
-            Ok(Ok(Resolution::Answered(answer))) => self.answered(&asking, answer),
-            Ok(Ok(Resolution::Nobody) | Err(_)) => self.nobody(&asking),
-            Err(outcome) => outcome,
-        }
+        self.wait(&asking, resolved, changes).await
     }
 
     /// The person's answer, or what ended the wait first.
@@ -243,26 +251,29 @@ impl Approvals {
         asking: &Asking<'_>,
         mut resolved: oneshot::Receiver<Resolution>,
         mut changes: Changes,
-    ) -> Result<Result<Resolution, oneshot::error::RecvError>, Outcome> {
+    ) -> Outcome<'_> {
         let holder = asking.holder;
         loop {
             tokio::select! {
-                resolution = &mut resolved => return Ok(resolution),
-                () = holder.ended.cancelled() => return Err(Outcome::Ended),
+                resolution = &mut resolved => return match resolution {
+                    Ok(Resolution::Answered(answer)) => self.answered(asking, answer),
+                    Ok(Resolution::Nobody) | Err(_) => self.nobody(asking),
+                },
+                () = holder.ended.cancelled() => return Outcome::Ended,
                 () = changes.next() => {
                     if self.policy.connection(&holder.context) != Some(holder.connection) {
-                        return Err(Outcome::Moved);
+                        return Outcome::Moved;
                     }
                     match self.policy.authorize(&holder.context, asking.attributes, holder.actor) {
                         Err(blocked) if blocked.reason == BlockReason::NoApproval => {}
-                        decided => return Err(Outcome::Decided(decided)),
+                        decided => return Outcome::Decided(decided),
                     }
                 }
             }
         }
     }
 
-    fn answered(&self, asking: &Asking<'_>, answer: ApprovalAnswer) -> Outcome {
+    fn answered(&self, asking: &Asking<'_>, answer: ApprovalAnswer) -> Outcome<'_> {
         let Asking {
             holder, attributes, ..
         } = asking;
@@ -288,16 +299,22 @@ impl Approvals {
             ApprovalAnswer::Once => {
                 self.audit(asking, "once");
                 let approval = Approval::once(context, holder.actor, attributes);
+                let id = state.onces;
+                state.onces += 1;
                 state.repeats.insert(
                     asking.repeat,
                     Repeat {
                         until: Instant::now() + REPEATS,
-                        cover: Cover::Once(approval.clone()),
+                        cover: Cover::Once {
+                            approval: approval.clone(),
+                            id,
+                            taken: true,
+                        },
                     },
                 );
                 Outcome::Approved {
                     approval,
-                    repeat: Some(asking.repeat),
+                    once: Some(Once::taken(self, asking.repeat, id)),
                 }
             }
             ApprovalAnswer::Lasting => {
@@ -318,14 +335,14 @@ impl Approvals {
                 );
                 Outcome::Approved {
                     approval: Approval::until(context, holder.actor, until),
-                    repeat: None,
+                    once: None,
                 }
             }
         }
     }
 
     /// Denied, as no window could ask; its repeats too.
-    fn nobody(&self, asking: &Asking<'_>) -> Outcome {
+    fn nobody(&self, asking: &Asking<'_>) -> Outcome<'_> {
         self.audit(asking, "nobody");
         let message = asking.blocked.to_string();
         self.state().repeats.insert(
@@ -336,18 +353,6 @@ impl Approvals {
             },
         );
         Outcome::Denied(message)
-    }
-
-    /// A request covered by a "once" reached the server: its next repeat asks
-    /// again.
-    pub(crate) fn reached(&self, repeat: &Digest) {
-        let mut state = self.state();
-        if matches!(
-            state.repeats.get(repeat).map(|repeat| &repeat.cover),
-            Some(Cover::Once(_))
-        ) {
-            state.repeats.remove(repeat);
-        }
     }
 
     fn holds(&self, context: &str, grant: &Grant) -> bool {
@@ -476,6 +481,57 @@ fn verb(attributes: &Attributes) -> String {
     ) {
         (Some("pods"), Some(session @ ("exec" | "attach"))) => session.to_owned(),
         _ => attributes.verb.clone(),
+    }
+}
+
+/// A "once" its request took as it was sent. Dropped, it is gone, as the
+/// request may have reached the server, its client gone or not; given back,
+/// the next repeat may take it.
+pub(crate) struct Once<'a> {
+    approvals: &'a Approvals,
+    repeat: Digest,
+    id: u64,
+    given_back: bool,
+}
+
+impl<'a> Once<'a> {
+    fn taken(approvals: &'a Approvals, repeat: Digest, id: u64) -> Self {
+        Self {
+            approvals,
+            repeat,
+            id,
+            given_back: false,
+        }
+    }
+
+    /// Its request reached no server.
+    pub(crate) fn give_back(mut self) {
+        self.given_back = true;
+        let mut state = self.approvals.state();
+        if let Some(Cover::Once { id, taken, .. }) = state
+            .repeats
+            .get_mut(&self.repeat)
+            .map(|repeat| &mut repeat.cover)
+            && *id == self.id
+        {
+            *taken = false;
+        }
+    }
+}
+
+impl Drop for Once<'_> {
+    fn drop(&mut self) {
+        if self.given_back {
+            return;
+        }
+        let mut state = self.approvals.state();
+        let ours = matches!(
+            state.repeats.get(&self.repeat).map(|repeat| &repeat.cover),
+            Some(Cover::Once { id, .. }) if *id == self.id
+        );
+        if ours {
+            state.repeats.remove(&self.repeat);
+        }
     }
 }
 

@@ -38,6 +38,8 @@ use twigo_ipc::{
 use twigo_policy::Actor;
 
 const WAIT: Duration = Duration::from_secs(10);
+/// How long the fake holds a request with `slow=1` after it has seen it.
+const SLOW: Duration = Duration::from_secs(2);
 
 /// What the fake server saw of one request.
 #[derive(Debug, Clone)]
@@ -51,7 +53,8 @@ type FakeBody = UnsyncBoxBody<Bytes, Infallible>;
 
 /// An API server that answers every request at once, holds watches open,
 /// and echoes what an upgraded connection sends; it refuses the upgrades of
-/// the pod `refuses`, and holds open its refusal of anything of `holds`.
+/// the pod `refuses`, holds open its refusal of anything of `holds`, and
+/// answers what has `slow=1` in its query, but a dry run, only after `SLOW`.
 #[derive(Clone)]
 struct Fake {
     address: SocketAddr,
@@ -108,6 +111,10 @@ async fn answer(
         uri: request.uri().to_string(),
         headers: request.headers().clone(),
     });
+    let query = request.uri().query().unwrap_or_default();
+    if query.contains("slow=1") && !query.contains("dryRun") {
+        tokio::time::sleep(SLOW).await;
+    }
     let refuses = request.uri().path().contains("/pods/refuses/");
     if request.uri().path().contains("/pods/holds/") {
         let held = futures::stream::pending::<Result<Frame<Bytes>, Infallible>>();
@@ -899,6 +906,122 @@ async fn a_request_no_answer_can_allow_is_refused_without_an_ask() {
     assert!(events.try_recv().is_err(), "nothing asked");
     let seen = fake.seen();
     assert!(seen.is_empty(), "{seen:?}");
+}
+
+/// `request`, with `slow=1` added to its query.
+fn slow(mut request: Request<Full<Bytes>>) -> Request<Full<Bytes>> {
+    let uri = request.uri().to_string();
+    let joined = if uri.contains('?') { '&' } else { '?' };
+    *request.uri_mut() = format!("{uri}{joined}slow=1").parse().unwrap();
+    request
+}
+
+/// Until the fake has seen `count` requests that `what` picks.
+async fn seen_by(fake: &Fake, count: usize, what: impl Fn(&Seen) -> bool) {
+    let waited = tokio::time::timeout(WAIT, async {
+        while fake.seen().iter().filter(|seen| what(seen)).count() < count {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    });
+    waited.await.expect("the fake sees it");
+}
+
+fn post_of_c(seen: &Seen) -> bool {
+    seen.method == Method::POST && !seen.uri.contains("dryRun")
+}
+
+#[tokio::test]
+async fn once_covers_no_repeat_while_its_request_is_under_way() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+
+    let first = tokio::spawn(send(process.at(), slow(create(&process, "c"))));
+    let ask = asked(&mut events).await;
+    answer_with(&core, &ask, ApprovalAnswer::Once, None);
+    seen_by(&fake, 1, post_of_c).await;
+    let repeat = tokio::spawn(send(process.at(), slow(create(&process, "c"))));
+    let again = asked(&mut events).await;
+    answer_with(&core, &again, ApprovalAnswer::Deny, None);
+    assert_eq!(repeat.await.unwrap().0.status(), StatusCode::FORBIDDEN);
+    assert_eq!(first.await.unwrap().0.status(), StatusCode::CREATED);
+    assert_eq!(fake.writes(Method::POST), 1);
+
+    let is_exec = |seen: &Seen| seen.uri.contains("/exec");
+    let first = tokio::spawn(send(process.at(), slow(exec(&process, "p", "sh", true))));
+    let ask = asked(&mut events).await;
+    answer_with(&core, &ask, ApprovalAnswer::Once, None);
+    seen_by(&fake, 1, is_exec).await;
+    let repeat = tokio::spawn(send(process.at(), slow(exec(&process, "p", "sh", false))));
+    let again = asked(&mut events).await;
+    answer_with(&core, &again, ApprovalAnswer::Deny, None);
+    assert_eq!(repeat.await.unwrap().0.status(), StatusCode::FORBIDDEN);
+    let (response, _connection) = first.await.unwrap();
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+    assert_eq!(execs(&fake), 1);
+}
+
+#[tokio::test]
+async fn once_covers_no_rerun_once_its_request_reached_the_server_and_its_client_went() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+
+    let first = tokio::spawn(send(process.at(), slow(create(&process, "c"))));
+    let ask = asked(&mut events).await;
+    answer_with(&core, &ask, ApprovalAnswer::Once, None);
+    seen_by(&fake, 1, post_of_c).await;
+    first.abort();
+    tokio::time::sleep(SLOW + Duration::from_millis(500)).await;
+    let rerun = tokio::spawn(send(process.at(), slow(create(&process, "c"))));
+    let again = asked(&mut events).await;
+    answer_with(&core, &again, ApprovalAnswer::Deny, None);
+    assert_eq!(rerun.await.unwrap().0.status(), StatusCode::FORBIDDEN);
+    assert_eq!(fake.writes(Method::POST), 1);
+}
+
+#[tokio::test]
+async fn once_covers_a_repeat_after_the_proxy_s_own_429() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+    let clients = core.clients("kind-a").await.unwrap();
+    let mut open = Vec::new();
+    for _ in 0..16 {
+        let watch = process
+            .request("GET", "kind-a", "/api/v1/namespaces/a/pods?watch=true")
+            .body(empty())
+            .unwrap();
+        open.push(send(process.at(), watch).await);
+    }
+
+    let first = tokio::spawn(send(process.at(), create(&process, "c")));
+    let ask = asked(&mut events).await;
+    answer_with(&core, &ask, ApprovalAnswer::Once, None);
+    let (response, _connection) = first.await.unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    open.pop();
+    let freed = tokio::time::timeout(WAIT, async {
+        while clients.usage().borrow().proxied.held != 15 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    });
+    freed
+        .await
+        .expect("a watch ended by its client frees its stream");
+    let (response, _connection) = send(process.at(), create(&process, "c")).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    assert!(events.try_recv().is_err(), "the 429 reached no server");
+    assert_eq!(fake.writes(Method::POST), 1);
 }
 
 #[tokio::test]
