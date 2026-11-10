@@ -1193,3 +1193,30 @@ async fn an_ask_its_window_cannot_answer_any_more_is_withdrawn_from_it() {
     assert!(message.contains("nothing can ask"), "{message}");
     assert_eq!(fake.writes(Method::POST), 1);
 }
+
+#[tokio::test]
+async fn a_later_follower_of_the_window_replaces_the_earlier_and_gets_what_still_waits() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut earlier = follow(&core, "main");
+    let mut elsewhere = follow(&core, "another");
+    let process = Process::start(&core, Some("main")).await;
+
+    let sent = tokio::spawn(send(process.at(), create(&process, "c")));
+    let ask = asked(&mut earlier).await;
+    let mut later = follow(&core, "main");
+    assert_eq!(asked(&mut later).await, ask, "what still waits");
+    let second = tokio::spawn(send(process.at(), create(&process, "d")));
+    let next = asked(&mut later).await;
+    assert_ne!(next.id, ask.id);
+    assert!(earlier.try_recv().is_err(), "replaced");
+    assert!(elsewhere.try_recv().is_err(), "another window's");
+
+    answer_with(&core, &ask, ApprovalAnswer::Once, None);
+    answer_with(&core, &next, ApprovalAnswer::Once, None);
+    assert_eq!(sent.await.unwrap().0.status(), StatusCode::CREATED);
+    assert_eq!(second.await.unwrap().0.status(), StatusCode::CREATED);
+    assert_eq!(fake.writes(Method::POST), 2);
+}
