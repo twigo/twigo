@@ -60,7 +60,7 @@ export interface ConfirmDialogProps {
   readonly error?: string;
   readonly wide?: boolean;
   readonly busy?: boolean;
-  /** How long after it shows the choices ignore activation, so a click meant for what was there before cannot go ahead; declining never waits. */
+  /** How long after it shows, and after the window gains the focus, the choices ignore activation, and while the window has none, so a click meant for what was there before, or the one that brings the window forward, cannot go ahead; declining never waits. */
   readonly guardMs?: number;
   /** Whether a click on the overlay cancels; false for a dialog that comes unbidden, where that click was meant for what lies behind. */
   readonly outsideCancels?: boolean;
@@ -104,16 +104,29 @@ export function ConfirmDialog({
   const input = useRef<HTMLInputElement>(null);
   const field = useId();
   const ready = typed === undefined || text === typed;
-  const [held, setHeld] = useState(guardMs > 0);
+  const [hold, setHold] = useState<object | undefined>(
+    guardMs > 0 ? {} : undefined,
+  );
+  const held = hold !== undefined;
   useEffect(() => {
-    if (!held) return;
+    if (hold === undefined) return;
     const timer = setTimeout(() => {
-      setHeld(false);
+      setHold(undefined);
     }, guardMs);
     return () => {
       clearTimeout(timer);
     };
-  }, [held, guardMs]);
+  }, [hold, guardMs]);
+  useEffect(() => {
+    if (guardMs === 0) return;
+    const restart = () => {
+      setHold({});
+    };
+    window.addEventListener("focus", restart);
+    return () => {
+      window.removeEventListener("focus", restart);
+    };
+  }, [guardMs]);
   // A disabled button cannot take the focus, and loses it, so while one
   // answer is on its way the focus rests on the dialog, where Tab cannot
   // leave it.
@@ -133,7 +146,7 @@ export function ConfirmDialog({
     }
   }, [rest]);
   const choose = (choice: ConfirmChoice | undefined) => {
-    if (ready && !busy && !held)
+    if (ready && !busy && !held && (guardMs === 0 || document.hasFocus()))
       choice?.onSelect(typed === undefined ? undefined : text);
   };
   return (

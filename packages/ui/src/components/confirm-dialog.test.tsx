@@ -304,3 +304,70 @@ test("the choices ignore activation for the guard time after it shows, and decli
     vi.useRealTimers();
   }
 });
+
+test("the guard starts over when the window gains the focus, also while it still holds", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const { once } = several({ guardMs: 500 });
+    const allow = () => {
+      fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    };
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    act(() => {
+      vi.advanceTimersByTime(499);
+    });
+    allow();
+    expect(once).not.toHaveBeenCalled();
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    allow();
+    expect(once).toHaveBeenCalledOnce();
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    allow();
+    act(() => {
+      vi.advanceTimersByTime(499);
+    });
+    allow();
+    expect(once).toHaveBeenCalledOnce();
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    allow();
+    expect(once).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("the choices wait while the window has no focus, and declining never does", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    const { once, onCancel } = several({ guardMs: 500 });
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    fireEvent.submit(screen.getByRole("button", { name: "Allow once" }));
+    expect(once).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Deny/ }));
+    expect(onCancel).toHaveBeenCalledOnce();
+
+    hasFocus.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    expect(once).toHaveBeenCalledOnce();
+  } finally {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  }
+});

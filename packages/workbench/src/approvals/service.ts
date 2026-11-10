@@ -23,12 +23,19 @@ export interface ApprovalDetails {
 }
 
 /**
- * How long after an ask shows its allowing choices ignore activation, so a
- * double click, or a click meant for the ask just withdrawn, cannot allow the
- * next. Firefox's `security.notification_enable_delay` is 500 ms for a
- * prompt's buttons, its cancel excepted
+ * How long after an ask shows, and after the window gains the focus, its
+ * allowing choices ignore activation, so a double click, a click meant for
+ * the ask just withdrawn, or the click that brings the window forward cannot
+ * allow the next; while the window has no focus they ignore it too. Firefox's
+ * `security.notification_enable_delay` is 500 ms for a prompt's buttons, its
+ * cancel excepted
  * ([pref](https://github.com/mozilla-firefox/firefox/blob/FIREFOX_159_0_RELEASE/modules/libpref/init/StaticPrefList.yaml#L19153-L19155),
  * [use](https://github.com/mozilla-firefox/firefox/blob/FIREFOX_159_0_RELEASE/toolkit/modules/PopupNotifications.sys.mjs#L2040-L2064));
+ * it starts the delay over when the window is activated
+ * ([activate](https://github.com/mozilla-firefox/firefox/blob/FIREFOX_159_0_RELEASE/toolkit/modules/PopupNotifications.sys.mjs#L891-L903))
+ * and ignores the buttons while the window is inactive, bringing it forward
+ * instead
+ * ([inactive](https://github.com/mozilla-firefox/firefox/blob/FIREFOX_159_0_RELEASE/toolkit/modules/PopupNotifications.sys.mjs#L2026-L2038));
  * Chromium's dialogs ignore input for the double-click interval, 500 ms off
  * Windows
  * ([protector](https://github.com/chromium/chromium/blob/159.0.8154.0/ui/views/input_event_activation_protector.cc#L21-L22),
