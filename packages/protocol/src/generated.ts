@@ -34,6 +34,12 @@ title: string, objects: Array<ObjectRef>, };
 
 export type AnsiColor = "black" | "red" | "green" | "yellow" | "blue" | "magenta" | "cyan" | "white" | "brightBlack" | "brightRed" | "brightGreen" | "brightYellow" | "brightBlue" | "brightMagenta" | "brightCyan" | "brightWhite";
 
+export type AnswerApproval = { id: ApprovalId, answer: ApprovalAnswer, 
+/**
+ * What the person typed, for an ask with `typed`.
+ */
+typed: string | null, };
+
 /**
  * A field another manager owns that an apply would change.
  */
@@ -96,6 +102,70 @@ drop: Array<string>, };
  * How an edit that can go is sent.
  */
 export type ApplyStrategy = "serverSideApply" | "mergePatch";
+
+export type ApprovalAnswer = "deny" | "once" | "lasting";
+
+/**
+ * What a process asks to do, for the person to allow or deny.
+ */
+export type ApprovalAsk = { id: ApprovalId, context: string, 
+/**
+ * The process, as Twigo named it when it gave the process its token:
+ * `Terminal 2`.
+ */
+process: string, 
+/**
+ * What the client says it runs, `kubectl apply`, from its own
+ * `Kubectl-Command` header: a label, never checked.
+ */
+command: string | null, 
+/**
+ * As RBAC names it: `create`, `patch`, `delete`.
+ */
+verb: string, 
+/**
+ * `write` or `exec`.
+ */
+class: RequestClass, 
+/**
+ * As people and `kubectl` name it: `deployments/web in default`.
+ */
+target: string, 
+/**
+ * Whom the request acts as, from `kubectl --as`.
+ */
+impersonate: string | null, detail: ApprovalDetail, 
+/**
+ * Whether the context's name must be typed before it is allowed: a
+ * delete's.
+ */
+typed: boolean, 
+/**
+ * How long an answer of `lasting` holds, offered for every ask but a
+ * delete's: every write and exec of this process on this context for
+ * that long, deletes excepted.
+ */
+lastingMinutes: number | null, };
+
+/**
+ * What Twigo could show of what the request would do.
+ */
+export type ApprovalDetail = { "kind": "diff", 
+/**
+ * Null for a create.
+ */
+live: unknown, result: unknown, 
+/**
+ * The server's `Warning` headers on the dry run.
+ */
+warnings: Array<string>, } | { "kind": "session", container: string | null, command: Array<string>, tty: boolean, stdin: boolean, } | { "kind": "delete", propagation: string | null, } | { "kind": "unknown", reason: NoDiff, body: string | null, };
+
+/**
+ * What the broker tells a window.
+ */
+export type ApprovalEvent = { "event": "asked", ask: ApprovalAsk, } | { "event": "withdrawn", id: ApprovalId, };
+
+export type ApprovalId = number;
 
 export type Block = { "type": "fields", fields: Array<Field>, } | { "type": "conditions", conditions: Array<Condition>, } | { "type": "data", entries: Array<DataEntry>, 
 /**
@@ -785,6 +855,11 @@ export type Mode = "read-write" | "guarded" | "read-only";
 export type ModeSource = { "kind": "policyFile", file: string, pattern: string | null, } | { "kind": "unlisted" } | { "kind": "moved" } | { "kind": "user" } | { "kind": "kubeconfig" } | { "kind": "provider" } | { "kind": "environment", environment: Environment, } | { "kind": "default" };
 
 /**
+ * Why a write has no diff.
+ */
+export type NoDiff = { "reason": "subresource" } | { "reason": "aggregated" } | { "reason": "unverified" } | { "reason": "tooLarge" } | { "reason": "refused", message: string, } | { "reason": "notAResource" };
+
+/**
  * One flush of an open object. Rust sends the next only after the webview
  * acknowledged this one's `seq`, and coalesces changes meanwhile.
  */
@@ -1345,5 +1420,7 @@ export type Commands = {
   context_sign_in_cancel: { request: string; response: null; message: null };
   exec_review: { request: null; response: ExecReview; message: null };
   exec_trust: { request: Array<string>; response: null; message: null };
+  approvals_watch: { request: null; response: null; message: ApprovalEvent };
+  approval_answer: { request: AnswerApproval; response: null; message: null };
   url_open: { request: string; response: null; message: null };
 };

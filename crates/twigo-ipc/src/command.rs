@@ -5,12 +5,13 @@
 use ts_rs::TS;
 
 use crate::{
-    AccessQuery, Ack, ApplyPreviewed, ApplyRequest, ClusterVersion, Context, ContextAuth,
-    Discovered, DownloadLogs, ExecReview, Execute, GetValues, KeyboardLayout, ListBatch, ListQuery,
-    LogBatch, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan, PlanId,
-    PlanRequest, SchemaQuery, SetContextEnvironment, SetContextMode, SetLogSource, SetLogView,
-    SetLogWindow, SetParts, SetWindow, ShellAck, ShellContainers, ShellEnvironment, ShellInput,
-    ShellMessage, ShellPod, ShellResize, Space, StateEntry, StateSnapshot, SubscriptionId,
+    AccessQuery, Ack, AnswerApproval, ApplyPreviewed, ApplyRequest, ApprovalEvent, ClusterVersion,
+    Context, ContextAuth, Discovered, DownloadLogs, ExecReview, Execute, GetValues, KeyboardLayout,
+    ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent,
+    Plan, PlanId, PlanRequest, SchemaQuery, SetContextEnvironment, SetContextMode, SetLogSource,
+    SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck, ShellContainers, ShellEnvironment,
+    ShellInput, ShellMessage, ShellPod, ShellResize, Space, StateEntry, StateSnapshot,
+    SubscriptionId,
 };
 
 pub trait Command {
@@ -457,6 +458,30 @@ pub struct ExecTrust;
 impl Command for ExecTrust {
     const NAME: &'static str = "exec_trust";
     type Request = Vec<String>;
+    type Response = ();
+    type Message = ();
+}
+
+/// Follows the asks of the processes that belong to this window
+/// (ARCHITECTURE 6.4): sends each waiting ask, then every new one and every
+/// one withdrawn. A window that follows none denies them all, and a later
+/// follower of the same window replaces an earlier one.
+pub struct ApprovalsWatch;
+
+impl Command for ApprovalsWatch {
+    const NAME: &'static str = "approvals_watch";
+    type Request = ();
+    type Response = ();
+    type Message = ApprovalEvent;
+}
+
+/// The person's answer to an ask, refused when the ask is gone or belongs to
+/// another window, or when a typed name does not match.
+pub struct ApprovalAnswerSend;
+
+impl Command for ApprovalAnswerSend {
+    const NAME: &'static str = "approval_answer";
+    type Request = AnswerApproval;
     type Response = ();
     type Message = ();
 }
