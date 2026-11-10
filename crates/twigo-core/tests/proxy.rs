@@ -1219,6 +1219,32 @@ fn as_nobody(mut request: Request<Full<Bytes>>) -> Request<Full<Bytes>> {
 }
 
 #[tokio::test]
+async fn a_given_back_once_is_taken_by_one_repeat_at_a_time() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+
+    let mut open = all_streams(&process).await;
+    let first = tokio::spawn(send(process.at(), slow(create(&process, "c"))));
+    let ask = asked(&mut events).await;
+    answer_with(&core, &ask, ApprovalAnswer::Once, None);
+    let (response, _connection) = first.await.unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    free_one(&core, &mut open).await;
+    let taking = tokio::spawn(send(process.at(), slow(create(&process, "c"))));
+    seen_by(&fake, 1, post_of_c).await;
+    let second = tokio::spawn(send(process.at(), slow(create(&process, "c"))));
+    let again = asked(&mut events).await;
+    answer_with(&core, &again, ApprovalAnswer::Deny, None);
+    assert_eq!(second.await.unwrap().0.status(), StatusCode::FORBIDDEN);
+    assert_eq!(taking.await.unwrap().0.status(), StatusCode::CREATED);
+    assert_eq!(fake.writes(Method::POST), 1);
+}
+
+#[tokio::test]
 async fn a_given_back_once_covers_no_repeat_that_acts_as_someone_else() {
     let fake = Fake::start().await;
     let dir = tempfile::tempdir().unwrap();
