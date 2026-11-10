@@ -110,7 +110,7 @@ export class MockEdits {
 }
 
 /** A Secret's values replaced by their sizes, those that are masks already left alone. */
-export function masked(object: Fields): Fields {
+function masked(object: Fields): Fields {
   if (object.kind !== "Secret") return object;
   const mask = (values: unknown) =>
     typeof values === "object" && values !== null
@@ -128,5 +128,21 @@ export function masked(object: Fields): Fields {
     ...rest,
     ...(data !== undefined && { data: mask(data) }),
     ...(stringData !== undefined && { stringData: mask(stringData) }),
+  };
+}
+
+/** An object as a side of the diff, as Rust's `side`: without what would only be noise. */
+export function side(value: unknown): unknown {
+  if (typeof value !== "object" || value === null) return value;
+  const object = masked(value as Fields);
+  const { metadata } = object as { metadata?: object };
+  if (metadata === undefined) return object;
+  return {
+    ...object,
+    metadata: Object.fromEntries(
+      Object.entries(metadata).filter(
+        ([name]) => name !== "resourceVersion" && name !== "generation",
+      ),
+    ),
   };
 }

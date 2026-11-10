@@ -10,9 +10,7 @@ use crate::credentials::{CredentialError, OidcError, RunError};
 /// than kube's `ApiError: … (Status { … })`, else why the request got no
 /// answer.
 pub fn request(error: &kube::Error) -> IpcError {
-    if let kube::Error::Service(service) = error
-        && let Some(blocked) = blocked(&**service)
-    {
+    if let Some(blocked) = gate(error) {
         return blocked.clone().into();
     }
     let kind = match error {
@@ -54,6 +52,28 @@ pub fn refused(status: StatusCode, body: &[u8]) -> kube::Error {
 }
 
 /// What the gate said, when it stopped the request.
+pub fn gate(error: &kube::Error) -> Option<&Blocked> {
+    match error {
+        kube::Error::Service(service) => blocked(&**service),
+        _ => None,
+    }
+}
+
+/// Whether a proxied request found the proxy's budget full.
+pub fn over_budget(error: &kube::Error) -> bool {
+    let kube::Error::Service(service) = error else {
+        return false;
+    };
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&**service);
+    while let Some(error) = source {
+        if error.is::<crate::client::OverBudget>() {
+            return true;
+        }
+        source = error.source();
+    }
+    false
+}
+
 fn blocked<'a>(error: &'a (dyn std::error::Error + 'static)) -> Option<&'a Blocked> {
     let mut source = Some(error);
     while let Some(error) = source {

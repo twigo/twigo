@@ -18,12 +18,13 @@ use tauri_plugin_opener::OpenerExt;
 use twigo_core::{Core, PolicyFile, ShellFrame};
 use twigo_env::Environment;
 use twigo_ipc::{
-    AccessQuery, Ack, ApplyPreviewed, ApplyRequest, ClusterVersion, Context, ContextAuth,
-    Discovered, DownloadLogs, ErrorKind, ExecReview, Execute, GetValues, IpcError, KeyboardLayout,
-    ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent,
-    Plan, PlanId, PlanRequest, SchemaQuery, SetContextEnvironment, SetContextMode, SetLogSource,
-    SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck, ShellContainers, ShellEnvironment,
-    ShellInput, ShellPod, ShellResize, Space, StateEntry, StateSnapshot, SubscriptionId,
+    AccessQuery, Ack, AnswerApproval, ApplyPreviewed, ApplyRequest, ApprovalEvent, ClusterVersion,
+    Context, ContextAuth, Discovered, DownloadLogs, ErrorKind, ExecReview, Execute, GetValues,
+    IpcError, KeyboardLayout, ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject,
+    OpenShell, OperationEvent, Plan, PlanId, PlanRequest, SchemaQuery, SetContextEnvironment,
+    SetContextMode, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck,
+    ShellContainers, ShellEnvironment, ShellInput, ShellPod, ShellResize, Space, StateEntry,
+    StateSnapshot, SubscriptionId,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
 
@@ -614,6 +615,27 @@ fn exec_trust(app: State<'_, App>, request: Vec<String>) -> Result<(), IpcError>
 }
 
 #[tauri::command]
+fn approvals_watch(webview: Webview, app: State<'_, App>, channel: Channel<ApprovalEvent>) {
+    app.core
+        .follow_approvals(webview.label(), move |event| match channel.send(event) {
+            Ok(()) => true,
+            Err(error) => {
+                eprintln!("could not send an approval's ask: {error}");
+                false
+            }
+        });
+}
+
+#[tauri::command]
+fn approval_answer(
+    webview: Webview,
+    app: State<'_, App>,
+    request: AnswerApproval,
+) -> Result<(), IpcError> {
+    app.core.answer_approval(webview.label(), request)
+}
+
+#[tauri::command]
 fn url_open(handle: AppHandle, request: String) -> Result<(), IpcError> {
     let url = twigo_core::sign_in_url(&request)?;
     handle
@@ -763,6 +785,8 @@ fn main() {
             context_sign_in_cancel,
             exec_review,
             exec_trust,
+            approvals_watch,
+            approval_answer,
             url_open,
         ])
         // A page that starts to load, as on a reload, has none of the

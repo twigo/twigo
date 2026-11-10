@@ -1,6 +1,6 @@
 [package]
 name = "twigo-policy"
-description = "Read-only modes, authorization, policy proxy, approvals, audit log, redaction"
+description = "Read-only modes, authorization, what an approval covers, audit log, redaction"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -4,6 +4,7 @@
 mod access;
 mod action;
 mod apply;
+mod approval;
 pub mod command;
 mod credentials;
 mod discovery;
@@ -28,6 +29,9 @@ pub use action::{
 };
 pub use apply::{
     ApplyConflict, ApplyPreviewed, ApplyRequest, ApplyStrategy, OpenedEdit, PreviewId,
+};
+pub use approval::{
+    AnswerApproval, ApprovalAnswer, ApprovalAsk, ApprovalDetail, ApprovalEvent, ApprovalId, NoDiff,
 };
 pub use credentials::{ContextAuth, EnvVar, ExecPlugin, ExecReview, PluginStatus, ReviewedPlugin};
 pub use discovery::{ClusterVersion, Discovered, Resource};

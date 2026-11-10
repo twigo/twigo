@@ -1,6 +1,7 @@
 import type { Backend, KeyboardLayout } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
 import { notify, type ActionGroups } from "@twigo/ui";
+import { Approvals } from "./approvals/service";
 import { menuActions } from "./commands/actions";
 import { Menus, type MenuId } from "./commands/menus";
 import { Commands } from "./commands/registry";
@@ -73,6 +74,7 @@ export class Workbench {
   readonly shellEnvironment: ShellEnvironmentStatus;
   readonly credentials: Credentials;
   readonly operations: Operations;
+  readonly approvals: Approvals;
 
   constructor(
     readonly backend: Backend,
@@ -118,6 +120,10 @@ export class Workbench {
       (error) => {
         this.report(error);
       },
+    );
+    this.approvals = new Approvals(
+      backend,
+      () => this.operations.asking !== undefined,
     );
   }
 
@@ -182,6 +188,10 @@ export async function createWorkbench(
   });
   await workbench.spaces.load();
   workbench.credentials.start().catch((error: unknown) => {
+    workbench.report(error);
+  });
+  // Rust denies every ask while no window follows them.
+  workbench.approvals.watch().catch((error: unknown) => {
     workbench.report(error);
   });
   return workbench;

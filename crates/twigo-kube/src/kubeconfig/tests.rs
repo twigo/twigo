@@ -338,6 +338,48 @@ contexts:
 }
 
 #[test]
+fn a_context_says_whether_its_user_acts_as_someone() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = write(
+        dir.path(),
+        "config",
+        "
+users:
+- name: plain
+  user: { token: t }
+- name: as
+  user: { token: t, as: admin }
+- name: groups
+  user: { token: t, as-groups: [ops] }
+- name: uid
+  user: { token: t, as-uid: '1' }
+- name: extra
+  user: { token: t, as-user-extra: { team: [a] } }
+contexts:
+- name: kind-plain
+  context: { cluster: c, user: plain }
+- name: kind-as
+  context: { cluster: c, user: as }
+- name: kind-groups
+  context: { cluster: c, user: groups }
+- name: kind-uid
+  context: { cluster: c, user: uid }
+- name: kind-extra
+  context: { cluster: c, user: extra }
+- name: kind-nobody
+  context: { cluster: c }
+",
+    );
+    let catalog = Sources::explicit(file).load();
+    let impersonates = |name| context(&catalog, name).entries.impersonates();
+    assert!(!impersonates("kind-plain"));
+    assert!(!impersonates("kind-nobody"));
+    for name in ["kind-as", "kind-groups", "kind-uid", "kind-extra"] {
+        assert!(impersonates(name), "{name}");
+    }
+}
+
+#[test]
 fn kubectl_reads_kubeconfig_else_the_home_file() {
     let home = Path::new("/home/someone");
     let default = Sources::kubectl(None, Some(home));

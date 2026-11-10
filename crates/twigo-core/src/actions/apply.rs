@@ -491,7 +491,7 @@ fn combined_request(
 
 /// An answer's object and warnings, or the server's refusal, through
 /// `Client::send`, as kube-rs drops the `Warning` headers.
-async fn send(
+pub(crate) async fn send(
     client: &Client,
     request: http::Request<Vec<u8>>,
 ) -> Result<(Value, Vec<String>), kube::Error> {
@@ -595,7 +595,7 @@ fn resource_version(object: &Value) -> Option<&str> {
 
 /// An object as a side of the diff: as the view shows it, without what would
 /// only be noise.
-fn side(object: Value) -> Value {
+pub(crate) fn side(object: Value) -> Value {
     if object.is_null() {
         return object;
     }

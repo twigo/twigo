@@ -3,7 +3,7 @@
 
 use twigo_ipc::{BlockReason, Mode, RequestClass};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Actor {
     /// The webview's views and commands, the hub and discovery. Its commands
     /// confirm above the layer.
@@ -36,19 +36,24 @@ impl Actor {
     }
 
     /// What the mode does with the class: reads and dry runs always pass,
-    /// and the class of reading a Secret is the actor's, not the mode's.
+    /// and the class of reading a Secret is the actor's, not the mode's. In
+    /// `guarded` a write or an exec of anyone but the UI passes only when
+    /// `approved` says the person allowed it.
     pub(crate) fn decide(
         self,
         class: RequestClass,
         mode: Mode,
         allow_port_forward: bool,
+        approved: impl Fn() -> bool,
     ) -> Result<(), BlockReason> {
         match (class, mode) {
             (RequestClass::Read | RequestClass::DryRun, _) => Ok(()),
             (RequestClass::SecretRead, _) => self.read_secrets(),
             (_, Mode::ReadWrite) | (RequestClass::Forward, Mode::Guarded) => Ok(()),
             (RequestClass::Forward, Mode::ReadOnly) if allow_port_forward => Ok(()),
-            (RequestClass::Write | RequestClass::Exec, Mode::Guarded) if self == Actor::Ui => {
+            (RequestClass::Write | RequestClass::Exec, Mode::Guarded)
+                if self == Actor::Ui || approved() =>
+            {
                 Ok(())
             }
             (RequestClass::Write | RequestClass::Exec, Mode::Guarded) => {

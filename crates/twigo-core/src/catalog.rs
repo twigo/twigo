@@ -5,6 +5,7 @@
 mod tests;
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{self, AtomicU64};
@@ -17,28 +18,65 @@ use twigo_policy::{Metadata, Policy};
 /// The contexts, ordered by their `order`, those without one last, then by
 /// name.
 #[derive(Debug, PartialEq, Eq)]
-pub struct Contexts(Vec<kubeconfig::Context>);
+pub struct Contexts {
+    listed: Vec<kubeconfig::Context>,
+    /// By name: the read at which what the catalog says of the context for
+    /// its mode last changed, or it was listed again ([`Metadata::revision`]).
+    revisions: HashMap<String, u64>,
+    /// How many reads came before this one.
+    read: u64,
+}
+
+/// The contexts as the sources list them, ordered.
+fn sorted(catalog: kubeconfig::Catalog) -> Vec<kubeconfig::Context> {
+    for failure in &catalog.failures {
+        eprintln!("skipped {}: {}", failure.file.display(), failure.message);
+    }
+    let mut contexts = catalog.contexts;
+    contexts.sort_by(|a, b| by_order(a.order, b.order).then_with(|| a.name.cmp(&b.name)));
+    contexts
+}
 
 impl Contexts {
-    fn new(catalog: kubeconfig::Catalog) -> Self {
-        for failure in &catalog.failures {
-            eprintln!("skipped {}: {}", failure.file.display(), failure.message);
+    /// `listed`, read after `before`: a context keeps its revision while
+    /// what the catalog says of it stays, else takes this read's.
+    fn new(listed: Vec<kubeconfig::Context>, before: Option<&Self>) -> Self {
+        let read = before.map_or(0, |before| before.read + 1);
+        let mut revisions = HashMap::new();
+        for context in &listed {
+            // A name listed twice counts by its first, as `find` takes it.
+            if revisions.contains_key(&context.name) {
+                continue;
+            }
+            let kept = before.and_then(|before| {
+                let was = before.find(&context.name)?;
+                let revision = before.revisions[&context.name];
+                (metadata(was, revision) == metadata(context, revision)).then_some(revision)
+            });
+            revisions.insert(context.name.clone(), kept.unwrap_or(read));
         }
-        let mut contexts = catalog.contexts;
-        contexts.sort_by(|a, b| by_order(a.order, b.order).then_with(|| a.name.cmp(&b.name)));
-        Self(contexts)
+        Self {
+            listed,
+            revisions,
+            read,
+        }
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &kubeconfig::Context> {
-        self.0.iter()
+        self.listed.iter()
     }
 
     pub fn find(&self, name: &str) -> Option<&kubeconfig::Context> {
-        self.0.iter().find(|context| context.name == name)
+        self.listed.iter().find(|context| context.name == name)
+    }
+
+    fn metadata(&self, name: &str) -> Option<Metadata> {
+        let found = self.find(name)?;
+        Some(metadata(found, self.revisions[name]))
     }
 
     pub fn ipc(&self, policy: &Policy) -> Vec<twigo_ipc::Context> {
-        self.0
+        self.listed
             .iter()
             .map(|context| twigo_ipc::Context {
                 name: context.name.clone(),
@@ -48,6 +86,17 @@ impl Contexts {
                 access: policy.access(&context.name),
             })
             .collect()
+    }
+}
+
+/// What the catalog says of a context for its mode.
+fn metadata(context: &kubeconfig::Context, revision: u64) -> Metadata {
+    Metadata {
+        read_only: context.read_only,
+        provider: None,
+        environment: context.environment,
+        connection: context.fingerprint.value(),
+        revision,
     }
 }
 
@@ -104,16 +153,16 @@ impl Catalog {
             let contexts = self.contexts.clone();
             let current = Arc::clone(&self.generation);
             move |catalog: kubeconfig::Catalog| {
-                let next = Arc::new(Contexts::new(catalog));
+                let listed = sorted(catalog);
                 // Under the channel's write lock, which the successor's
                 // publish takes too, so the two cannot interleave.
                 contexts.send_if_modified(|now| {
                     if current.load(atomic::Ordering::Acquire) != generation
-                        || now.as_deref() == Some(&next)
+                        || now.as_ref().is_some_and(|now| now.listed == listed)
                     {
                         return false;
                     }
-                    *now = Some(Arc::clone(&next));
+                    *now = Some(Arc::new(Contexts::new(listed, now.as_deref())));
                     true
                 });
             }
@@ -178,13 +227,7 @@ impl Catalog {
             contexts
                 .borrow()
                 .as_ref()
-                .and_then(|contexts| contexts.find(context))
-                .map(|found| Metadata {
-                    read_only: found.read_only,
-                    provider: None,
-                    environment: found.environment,
-                    connection: found.fingerprint.value(),
-                })
+                .and_then(|contexts| contexts.metadata(context))
         }
     }
 

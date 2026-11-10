@@ -10,6 +10,7 @@ const NOTHING: Metadata = Metadata {
     provider: None,
     environment: None,
     connection: 0,
+    revision: 0,
 };
 
 fn file(text: &str) -> (tempfile::TempDir, PolicyFile) {
@@ -107,7 +108,7 @@ fn the_sources_rank_as_the_architecture_lists_them() {
         read_only: Some(false),
         provider: Some(Mode::Guarded),
         environment: Some(Environment::Production),
-        connection: 0,
+        ..NOTHING
     };
     let policy = Policy::new(
         entries.clone(),
@@ -451,6 +452,55 @@ fn every_change_ticks() {
     assert!(ticked());
     policy.relock("c");
     assert!(!ticked(), "nothing to end");
+}
+
+#[tokio::test]
+async fn each_change_of_a_context_counts_for_it_alone_and_never_goes_back() {
+    let policy = Policy::open();
+    let follower = {
+        let policy = Arc::clone(&policy);
+        tokio::spawn(async move { policy.follow_unlocks().await })
+    };
+    let mut counted = 0;
+    let mut changed = |policy: &Policy| {
+        let now = policy.changes_of("c");
+        let moved = now > counted;
+        counted = now;
+        moved
+    };
+    assert!(!changed(&policy));
+    policy.set_mode("c", Some(Mode::Guarded)).unwrap();
+    assert!(changed(&policy));
+    policy.set_mode("c", Some(Mode::ReadWrite)).unwrap();
+    policy.set_mode("c", Some(Mode::Guarded)).unwrap();
+    assert!(changed(&policy), "back to what it was is still a change");
+    policy.set_environment("c", Some(Environment::Staging));
+    assert!(changed(&policy));
+    policy.set_mode("c", Some(Mode::ReadOnly)).unwrap();
+    assert!(changed(&policy));
+    policy.unlock("c").unwrap();
+    assert!(changed(&policy));
+    policy.relock("c");
+    assert!(changed(&policy));
+    policy.relock("c");
+    assert!(!changed(&policy), "nothing to end");
+    policy.set_mode("other", Some(Mode::ReadOnly)).unwrap();
+    policy.unlock("other").unwrap();
+    assert!(!changed(&policy), "another context's");
+
+    policy
+        .unlock_for("c", SignedDuration::from_millis(20))
+        .unwrap();
+    assert!(changed(&policy));
+    let relocked = async {
+        while policy.changes_of("c") == counted {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(5), relocked)
+        .await
+        .expect("an unlock's end counts");
+    follower.abort();
 }
 
 #[test]

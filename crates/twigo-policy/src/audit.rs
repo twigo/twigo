@@ -1,7 +1,8 @@
 //! The audit log (ARCHITECTURE 6.4): a JSONL file in the app-data directory,
-//! mode 0600, of every write the gate sent or stopped, whoever asked, and of
-//! every command a person confirmed and how it ended. It names what was
-//! asked and where, never a value.
+//! mode 0600, of every write the gate sent or stopped, whoever asked, of
+//! every command a person confirmed and how it ended, and of every answer to
+//! a process's ask. It names what was asked and where, never a value or a
+//! token.
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -45,6 +46,18 @@ pub enum Entry<'a> {
         target: &'a str,
         mode: Mode,
         friction: &'a Friction,
+    },
+    /// What became of a process's ask through the policy proxy: `once`,
+    /// `lasting`, `denied`, `nobody` when no window could ask, or `withdrawn`.
+    Approval {
+        context: &'a str,
+        actor: &'a str,
+        /// As Twigo named the process: `Terminal 2`.
+        process: &'a str,
+        verb: &'a str,
+        target: &'a str,
+        mode: Mode,
+        answer: &'a str,
     },
     /// A confirmed command ended: `done`, `stopped` or `failed`, as it says.
     Ended {

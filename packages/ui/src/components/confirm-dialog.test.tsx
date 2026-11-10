@@ -1,4 +1,11 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { ComponentProps } from "react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { Trash2 } from "lucide-react";
 import { afterEach, expect, test, vi } from "vitest";
 import { ConfirmDialog } from "./confirm-dialog";
@@ -16,10 +23,14 @@ function dialog(typed?: string) {
       consequences={["Every object in it goes with it."]}
       command="kubectl --context prod-eu delete namespaces payments"
       {...(typed !== undefined && { typed })}
-      confirm="Delete namespace"
-      icon={Trash2}
-      destructive
-      onConfirm={onConfirm}
+      choices={[
+        {
+          label: "Delete namespace",
+          icon: Trash2,
+          destructive: true,
+          onSelect: onConfirm,
+        },
+      ]}
       onCancel={onCancel}
     />,
   );
@@ -79,9 +90,9 @@ test("each list says what happens to its objects, how many, and names them", () 
           ],
         },
       ]}
-      confirm="Delete deployment"
-      destructive
-      onConfirm={vi.fn()}
+      choices={[
+        { label: "Delete deployment", destructive: true, onSelect: vi.fn() },
+      ]}
       onCancel={vi.fn()}
     />,
   );
@@ -89,4 +100,274 @@ test("each list says what happens to its objects, how many, and names them", () 
   expect(list.textContent).toBe(
     "With it go2ReplicaSetweb-5d4fPodweb-5d4f-x2kq9shop",
   );
+});
+
+function several(props: Partial<ComponentProps<typeof ConfirmDialog>> = {}) {
+  const once = vi.fn();
+  const lasting = vi.fn();
+  const onCancel = vi.fn();
+  render(
+    <ConfirmDialog
+      question="Allow Terminal 2 to patch deployments/web in default on staging?"
+      consequences={[]}
+      cancel="Deny"
+      choices={[
+        { label: "Allow once", onSelect: once },
+        { label: "Allow for 15 minutes", onSelect: lasting },
+      ]}
+      onCancel={onCancel}
+      {...props}
+    />,
+  );
+  return { once, lasting, onCancel };
+}
+
+test("each choice is a button of its own, the first one is what Enter takes, and the decline names itself", () => {
+  const { once, lasting, onCancel } = several();
+  const deny = screen.getByRole("button", { name: /Deny/ });
+  expect(document.activeElement).toBe(deny);
+  expect(screen.queryByRole("button", { name: /Cancel/ })).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Allow for 15 minutes" }));
+  expect(lasting).toHaveBeenCalledWith(undefined);
+  expect(once).not.toHaveBeenCalled();
+
+  fireEvent.submit(screen.getByRole("button", { name: "Allow once" }));
+  expect(once).toHaveBeenCalledWith(undefined);
+  expect(onCancel).not.toHaveBeenCalled();
+});
+
+test("a typed name holds every choice back, and the choice that is picked gets it", () => {
+  const { once, lasting } = several({ typed: "staging" });
+  const field = screen.getByLabelText("Type staging to confirm");
+  const buttons = ["Allow once", "Allow for 15 minutes"].map((name) =>
+    screen.getByRole("button", { name }),
+  );
+  expect(buttons.map((button) => button.hasAttribute("disabled"))).toEqual([
+    true,
+    true,
+  ]);
+  fireEvent.change(field, { target: { value: "staging" } });
+  fireEvent.click(buttons[1] ?? document.body);
+  expect(lasting).toHaveBeenCalledWith("staging");
+  expect(once).not.toHaveBeenCalled();
+});
+
+test("while an answer is on its way no button works, and a refusal is read aloud above them", () => {
+  const { once, lasting, onCancel } = several({
+    busy: true,
+    error: "The ask is gone.",
+  });
+  for (const name of [/Deny/, "Allow once", "Allow for 15 minutes"]) {
+    const button = screen.getByRole("button", { name });
+    expect(button.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(button);
+  }
+  expect(screen.getByRole("alert").textContent).toContain("The ask is gone.");
+  expect(once).not.toHaveBeenCalled();
+  expect(lasting).not.toHaveBeenCalled();
+  expect(onCancel).not.toHaveBeenCalled();
+});
+
+test("what it is given to show comes after the question, and it widens when asked to", () => {
+  several({ wide: true, children: <p>Changes go here.</p> });
+  expect(screen.getByText("Changes go here.")).toBeTruthy();
+  expect(screen.getByRole("dialog").className).toContain("max-w-[880px]");
+});
+
+async function clickOutside() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  const overlay = document.querySelector('[data-slot="dialog-overlay"]');
+  expect(overlay).not.toBeNull();
+  const target = overlay ?? document.body;
+  fireEvent.pointerDown(target);
+  fireEvent.click(target);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+}
+
+test("a click outside cancels, unless the dialog is told it must not", async () => {
+  const closing = several();
+  await clickOutside();
+  expect(closing.onCancel).toHaveBeenCalledOnce();
+  cleanup();
+
+  const staying = several({ outsideCancels: false });
+  await clickOutside();
+  expect(staying.onCancel).not.toHaveBeenCalled();
+  expect(screen.getByRole("dialog")).toBeTruthy();
+});
+
+test("Escape pressed inside something marked as owning it is not the dialog's", () => {
+  const { onCancel } = several({
+    children: (
+      <div data-owns-escape>
+        <input aria-label="Find" />
+      </div>
+    ),
+  });
+  fireEvent.keyDown(screen.getByLabelText("Find"), { key: "Escape" });
+  expect(onCancel).not.toHaveBeenCalled();
+
+  fireEvent.keyDown(screen.getByRole("button", { name: /Deny/ }), {
+    key: "Escape",
+  });
+  expect(onCancel).toHaveBeenCalledOnce();
+});
+
+function withBusy(busy: boolean, typed?: string, onSelect = vi.fn()) {
+  return (
+    <ConfirmDialog
+      question="Allow Terminal 2 to patch deployments/web in default on staging?"
+      consequences={[]}
+      cancel="Deny"
+      busy={busy}
+      {...(typed !== undefined && { typed })}
+      choices={[{ label: "Allow once", onSelect }]}
+      onCancel={vi.fn()}
+    />
+  );
+}
+
+test("focus stays in the dialog while the buttons are disabled, and goes back to the decline when they are not", () => {
+  const { rerender } = render(withBusy(true));
+  const dialog = screen.getByRole("dialog");
+  expect(document.activeElement).toBe(dialog);
+
+  rerender(withBusy(false));
+  const deny = screen.getByRole("button", { name: /Deny/ });
+  expect(document.activeElement).toBe(deny);
+
+  const allow = screen.getByRole("button", { name: "Allow once" });
+  allow.focus();
+  rerender(withBusy(true));
+  expect(document.activeElement).toBe(dialog);
+  rerender(withBusy(false));
+  expect(document.activeElement).toBe(deny);
+});
+
+test("the typed field keeps the focus through an answer, as it is not disabled", () => {
+  const { rerender } = render(withBusy(true, "staging"));
+  const field = screen.getByLabelText("Type staging to confirm");
+  expect(document.activeElement).toBe(field);
+  rerender(withBusy(false, "staging"));
+  expect(document.activeElement).toBe(field);
+});
+
+test("Enter in the typed field sends nothing while an answer is on its way", () => {
+  const onSelect = vi.fn();
+  const { rerender } = render(withBusy(true, "staging", onSelect));
+  const field = screen.getByLabelText("Type staging to confirm");
+  fireEvent.change(field, { target: { value: "staging" } });
+  fireEvent.submit(field);
+  expect(onSelect).not.toHaveBeenCalled();
+
+  rerender(withBusy(false, "staging", onSelect));
+  fireEvent.submit(field);
+  expect(onSelect).toHaveBeenCalledExactlyOnceWith("staging");
+});
+
+test("the choices ignore activation for the guard time after it shows, and declining never waits", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const { once, lasting, onCancel } = several({ guardMs: 500 });
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    fireEvent.submit(screen.getByRole("button", { name: "Allow once" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Allow for 15 minutes" }),
+    );
+    expect(once).not.toHaveBeenCalled();
+    expect(lasting).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Deny/ }));
+    expect(onCancel).toHaveBeenCalledOnce();
+
+    act(() => {
+      vi.advanceTimersByTime(499);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    expect(once).not.toHaveBeenCalled();
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Allow for 15 minutes" }),
+    );
+    expect(once).toHaveBeenCalledOnce();
+    expect(lasting).toHaveBeenCalledOnce();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("the guard starts over when the window gains the focus, also while it still holds", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const { once } = several({ guardMs: 500 });
+    const allow = () => {
+      fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    };
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    act(() => {
+      vi.advanceTimersByTime(499);
+    });
+    allow();
+    expect(once).not.toHaveBeenCalled();
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    allow();
+    expect(once).toHaveBeenCalledOnce();
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    allow();
+    act(() => {
+      vi.advanceTimersByTime(499);
+    });
+    allow();
+    expect(once).toHaveBeenCalledOnce();
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    allow();
+    expect(once).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("the choices wait while the window has no focus, and declining never does", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    const { once, onCancel } = several({ guardMs: 500 });
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    fireEvent.submit(screen.getByRole("button", { name: "Allow once" }));
+    expect(once).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Deny/ }));
+    expect(onCancel).toHaveBeenCalledOnce();
+
+    hasFocus.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    expect(once).toHaveBeenCalledOnce();
+  } finally {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  }
 });

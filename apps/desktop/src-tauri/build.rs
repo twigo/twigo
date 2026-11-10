@@ -48,6 +48,8 @@ fn main() {
         "context_sign_in_cancel",
         "exec_review",
         "exec_trust",
+        "approvals_watch",
+        "approval_answer",
         "url_open",
     ]);
     let mut attributes = tauri_build::Attributes::new().app_manifest(commands);

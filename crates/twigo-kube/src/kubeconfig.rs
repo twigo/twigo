@@ -271,6 +271,20 @@ impl Entries {
         cluster.proxy_url.as_deref()
     }
 
+    /// Whether the user entry names whom to act as (`as`, `as-uid`,
+    /// `as-groups`, `as-user-extra`), which kube adds to every request as
+    /// `Impersonate-*` headers.
+    pub fn impersonates(&self) -> bool {
+        let user = self.config.auth_infos.first();
+        user.and_then(|user| user.auth_info.as_ref())
+            .is_some_and(|info| {
+                info.impersonate.is_some()
+                    || info.impersonate_uid.is_some()
+                    || info.impersonate_groups.is_some()
+                    || info.impersonate_user_extra.is_some()
+            })
+    }
+
     /// The user entry's `auth-provider: oidc`, with its file of origin.
     pub fn oidc(&self) -> Option<Result<OidcUser, OidcError>> {
         let user = self.config.auth_infos.first()?;

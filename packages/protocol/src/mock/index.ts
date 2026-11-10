@@ -18,6 +18,12 @@ import type {
   ViewState,
 } from "../generated";
 import { MockAccess } from "./access";
+import {
+  APPROVAL_SCENARIOS,
+  isApprovalScenario,
+  MockApprovals,
+  type ApprovalScenario,
+} from "./approvals";
 import { MockBus } from "./bus";
 import {
   AUTH_SCENARIOS,
@@ -69,6 +75,7 @@ import {
   type QueryResult,
 } from "./query";
 
+export { FIRST_ASK_MS, NEXT_ASK_MS, WITHDRAWN_AFTER_MS } from "./approvals";
 export { APPLIED_LAG_MS } from "./edits";
 export { UNMARKED } from "./fixtures";
 
@@ -89,7 +96,8 @@ type ListScenario = "live" | ViewState["state"];
  * RoleBindings reach only the namespace `default`, so a cluster-wide list
  * and one of any other namespace are forbidden, or live lists for a shell
  * that waits, finds no shell, loses its connection or its write mode, or
- * runs one container (`shellQueued` and the like).
+ * runs one container (`shellQueued` and the like), or live lists while
+ * processes ask the window to allow what they do (`approval` and the like).
  */
 export type MockScenario =
   | ListScenario
@@ -99,7 +107,8 @@ export type MockScenario =
   | "rbacNamespaces"
   | AuthScenario
   | EditScenario
-  | ShellScenario;
+  | ShellScenario
+  | ApprovalScenario;
 
 export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "live",
@@ -110,6 +119,7 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   ...AUTH_SCENARIOS,
   ...EDIT_SCENARIOS,
   ...SHELL_SCENARIOS,
+  ...APPROVAL_SCENARIOS,
   "queued",
   "connecting",
   "syncing",
@@ -177,11 +187,17 @@ export function createMockBackend(
     scenario === "rbacNamespaces" ||
     isAuthScenario(scenario) ||
     isEditScenario(scenario) ||
-    isShellScenario(scenario)
+    isShellScenario(scenario) ||
+    isApprovalScenario(scenario)
       ? "live"
       : scenario;
   const auth = new MockAuth(pinsAuth ? scenario : undefined);
   const access = new MockAccess(scenario === "policyFile");
+  const approvals = new MockApprovals(
+    isApprovalScenario(scenario) ? scenario : undefined,
+  );
+  // The delete of a Pod in prod-eu asks only because its lock was lifted.
+  if (isApprovalScenario(scenario)) access.unlock("prod-eu");
   const resolved: ShellEnvironment =
     scenario === "shellTimeout" ? SHELL_TIMEOUT : { state: "resolved" };
   let environment = resolved;
@@ -359,6 +375,7 @@ export function createMockBackend(
       access.relock(context);
       return null;
     },
+    approval_answer: (request) => approvals.answer(request),
     command_plan: (request) => bus.plan(request),
     apply_preview: (request) => bus.applyPreview(request),
     command_cancel: (id) => bus.cancel(id),
@@ -693,6 +710,7 @@ export function createMockBackend(
       );
       return null;
     },
+    approvals_watch: (_request, onMessage) => approvals.watch(onMessage),
     command_execute: (request, onMessage) => bus.execute(request, onMessage),
     contexts_watch: (_request, onMessage) => access.watch(onMessage),
     resources_watch: (id, onMessage) => {

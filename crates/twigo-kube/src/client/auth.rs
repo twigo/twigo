@@ -94,6 +94,9 @@ where
             if Arc::ptr_eq(&next, &used) {
                 return Ok(response);
             }
+            // Its body holds a stream's permit, which the retry may need: the
+            // proxy's budget refuses rather than waits.
+            drop(response);
             inner.oneshot(again).await.map_err(Into::into)
         })
     }

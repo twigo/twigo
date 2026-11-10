@@ -116,6 +116,17 @@ impl Usage {
 #[derive(Clone)]
 pub struct Waiting(pub Arc<dyn Fn(bool) + Send + Sync>);
 
+/// A request's extension: a stream of the policy proxy (ARCHITECTURE 3.2,
+/// 6.4), which takes a permit of [`Class::Proxied`] for its response's life,
+/// whatever its URI, or fails at once with [`OverBudget`].
+#[derive(Debug, Clone, Copy)]
+pub struct Proxied;
+
+/// A proxied request found every stream of the proxy's budget taken.
+#[derive(Debug, thiserror::Error)]
+#[error("the policy proxy's streams of this context are all in use")]
+pub struct OverBudget;
+
 #[derive(Clone)]
 pub struct Counter(Arc<Inner>);
 
@@ -299,10 +310,14 @@ where
         let party = self.party;
         let inner = self.inner.clone();
         Box::pin(async move {
-            let waiting = request.extensions().get::<Waiting>().cloned();
-            let permit = counter
-                .admit(Class::of(request.uri()), party, waiting.as_ref())
-                .await;
+            let permit = if request.extensions().get::<Proxied>().is_some() {
+                counter.try_admit(Class::Proxied, party).ok_or(OverBudget)?
+            } else {
+                let waiting = request.extensions().get::<Waiting>().cloned();
+                counter
+                    .admit(Class::of(request.uri()), party, waiting.as_ref())
+                    .await
+            };
             let response = inner.oneshot(request).await.map_err(Into::into)?;
             Ok(response.map(|body| Permitted {
                 body,
@@ -607,6 +622,78 @@ mod tests {
         assert_eq!(usage.borrow().sessions, Slots { held: 1, queued: 0 });
         drop((next, proxied));
         assert!(counter.try_admit(Class::Proxied, Party::Other).is_some());
+    }
+
+    fn proxied(uri: &str) -> Request<()> {
+        let mut request = request(uri);
+        request.extensions_mut().insert(Proxied);
+        request
+    }
+
+    #[tokio::test]
+    async fn a_proxied_request_over_its_budget_fails_at_once_and_takes_no_other_stream() {
+        let counter = Counter::new(Budgets {
+            proxied: 1,
+            ..Budgets::default()
+        });
+        let service = counted(&counter);
+        let held = service
+            .clone()
+            .oneshot(proxied("/api/v1/pods?watch=1"))
+            .await
+            .unwrap();
+        let usage = counter.usage();
+        for uri in [
+            "/api/v1/pods?watch=1",
+            "/api/v1/namespaces/a/pods/p/log?follow=true",
+            "/api/v1/pods",
+        ] {
+            let refused = tokio::time::timeout(
+                Duration::from_secs(1),
+                service.clone().oneshot(proxied(uri)),
+            )
+            .await
+            .expect("it fails at once")
+            .err()
+            .expect("over the budget");
+            assert!(refused.is::<OverBudget>(), "{uri}: {refused}");
+        }
+        assert_eq!(
+            *usage.borrow(),
+            Usage {
+                proxied: Slots { held: 1, queued: 0 },
+                ..Usage::default()
+            },
+            "no watch, log or request stream taken or waited for"
+        );
+        drop(held);
+        assert_eq!(*usage.borrow(), Usage::default());
+    }
+
+    #[tokio::test]
+    async fn a_proxied_watch_counts_among_the_proxy_s_streams_and_not_the_watches() {
+        let counter = Counter::new(Budgets {
+            watches: 1,
+            ..Budgets::default()
+        });
+        let service = counted(&counter);
+        let _hub = service
+            .clone()
+            .oneshot(request("/api/v1/pods?watch=1"))
+            .await
+            .unwrap();
+        let watch = tokio::time::timeout(
+            Duration::from_secs(1),
+            service.oneshot(proxied("/api/v1/pods?watch=1")),
+        )
+        .await
+        .expect("it waits for no watch")
+        .unwrap();
+        let usage = *counter.usage().borrow();
+        assert_eq!(usage.watches, Slots { held: 1, queued: 0 });
+        assert_eq!(usage.proxied, Slots { held: 1, queued: 0 });
+        drop(watch);
+        assert_eq!(counter.usage().borrow().proxied, Slots::default());
     }
 
     #[test]

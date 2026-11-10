@@ -32,6 +32,11 @@ pub struct Attributes {
     /// The decoded path.
     pub path: String,
     pub class: RequestClass,
+    /// Whether it deletes, which asks each time with the context's name
+    /// typed and which no lasting approval covers (ARCHITECTURE 6.4): a
+    /// `DELETE`, whatever RBAC calls it, as the old proxy path calls every
+    /// method `proxy`, and a pod's eviction, which deletes the pod.
+    pub deletes: bool,
 }
 
 impl Attributes {
@@ -45,6 +50,7 @@ impl Attributes {
         let parts = Parts::of(&path);
         let verb = parts.verb(request.method(), &query);
         let class = parts.class(request.method(), request.headers(), &query);
+        let deletes = *request.method() == Method::DELETE || parts.evicts();
         Self {
             verb,
             resource: parts.resource.map(str::to_owned),
@@ -53,6 +59,7 @@ impl Attributes {
             name: parts.name.map(str::to_owned),
             path,
             class,
+            deletes,
         }
     }
 
@@ -85,6 +92,7 @@ impl Attributes {
             name: name.map(str::to_owned),
             path: String::new(),
             class,
+            deletes: matches!(verb, "delete" | "deletecollection") || parts.evicts(),
         }
     }
 
@@ -93,6 +101,21 @@ impl Attributes {
     /// nothing new.
     pub(crate) fn writes_a_secret(&self) -> bool {
         self.class == RequestClass::Write && self.resource.as_deref() == Some("secrets")
+    }
+
+    /// Whether it opens an exec, an attach or a port-forward of a pod, which
+    /// kubectl sends over WebSocket as a `GET` and, refused, again over SPDY
+    /// as a `POST`: RBAC's `get` and `create` of one thing
+    /// ([`StreamWithContext`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/client-go/tools/remotecommand/fallback.go#L53-L60),
+    /// [`Dial`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/client-go/tools/portforward/fallback_dialer.go#L70-L78)).
+    pub fn opens_a_pod_stream(&self) -> bool {
+        self.path.starts_with("/api/")
+            && matches!(self.verb.as_str(), "get" | "create")
+            && self.resource.as_deref() == Some("pods")
+            && matches!(
+                self.subresource.as_deref(),
+                Some("exec" | "attach" | "portforward")
+            )
     }
 
     /// As people and `kubectl` name it: `pods/web-1/exec in default`.
@@ -293,6 +316,10 @@ impl<'a> Parts<'a> {
             && self.subresource.is_none()
             && !self.group.is_some_and(|group| ANSWERS.contains(&group))
             && query.dry_run()
+    }
+
+    fn evicts(&self) -> bool {
+        self.resource == Some("pods") && self.subresource == Some("eviction")
     }
 
     fn is_review(&self) -> bool {

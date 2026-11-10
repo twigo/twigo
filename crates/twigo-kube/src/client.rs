@@ -28,7 +28,7 @@ use tower::ServiceBuilder;
 use tower::timeout::TimeoutLayer;
 
 pub use connections::Connections;
-pub use counter::{Budgets, Class, Party, Permit, Slots, Usage, Waiting};
+pub use counter::{Budgets, Class, OverBudget, Party, Permit, Proxied, Slots, Usage, Waiting};
 pub use proxy::{Proxy, ProxyEnv, ProxyError, proxy_for};
 pub use twigo_policy::{Actor, Gate};
 

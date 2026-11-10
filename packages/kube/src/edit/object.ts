@@ -961,6 +961,9 @@ export function statusLines(
   }
 }
 
+export const SECRET_NOTE =
+  "A Secret's values are hidden, as their sizes: values of the same size may still differ.";
+
 export function kindOf(object: unknown):
   | {
       readonly group: string;

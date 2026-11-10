@@ -29,6 +29,14 @@ const VALUES: Readonly<
   Record<string, Readonly<Record<string, { value: string; binary: boolean }>>>
 > = REVEALED;
 
+export function recordedManifest(name: string): Record<string, unknown> {
+  const recorded = RECORDED[name];
+  if (recorded === undefined) {
+    throw new Error(`the mock backend has no recorded ${name}`);
+  }
+  return JSON.parse(recorded.manifest) as Record<string, unknown>;
+}
+
 /** The recorded object that stands for any object of a resource. */
 const BY_RESOURCE: Readonly<Record<string, string>> = {
   "/v1/pods": "pod",

@@ -58,6 +58,8 @@
     "allow-context-sign-in-cancel",
     "allow-exec-review",
     "allow-exec-trust",
+    "allow-approvals-watch",
+    "allow-approval-answer",
     "allow-url-open"
   ]
 }

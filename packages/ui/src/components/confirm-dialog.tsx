@@ -1,6 +1,15 @@
-import { useId, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Check, Copy, type LucideIcon } from "lucide-react";
+import { cn } from "../lib/cn";
 import { Button } from "./button";
+import { Callout } from "./callout";
 import {
   Dialog,
   DialogContent,
@@ -22,6 +31,15 @@ export interface ConfirmList {
   }[];
 }
 
+/** A way to go ahead, named by its action, never Yes or OK. */
+export interface ConfirmChoice {
+  readonly label: string;
+  readonly icon?: LucideIcon;
+  /** Whether it destroys, which the button's colour says: the first choice's only. */
+  readonly destructive?: boolean;
+  readonly onSelect: (typed: string | undefined) => void;
+}
+
 export interface ConfirmDialogProps {
   /** Says where it acts first: the context's type and name. */
   readonly badge?: ReactNode;
@@ -35,14 +53,20 @@ export interface ConfirmDialogProps {
   readonly lists?: readonly ConfirmList[];
   /** The command line that does the same, shown as code to copy. */
   readonly command?: string;
-  /** What the person types before the button works. */
+  /** An element in it marked `data-owns-escape`, such as an editor, keeps the Escape pressed inside it, which would cancel the dialog. */
+  readonly children?: ReactNode;
+  /** What the person types before a button works. */
   readonly typed?: string;
-  /** The button names its action, never Yes or OK. */
-  readonly confirm: string;
-  readonly icon?: LucideIcon;
-  /** Whether it destroys, which the button's colour says. */
-  readonly destructive: boolean;
-  readonly onConfirm: (typed: string | undefined) => void;
+  readonly error?: string;
+  readonly wide?: boolean;
+  readonly busy?: boolean;
+  /** How long after it shows, and after the window gains the focus, the choices ignore activation, and while the window has none, so a click meant for what was there before, or the one that brings the window forward, cannot go ahead; declining never waits. */
+  readonly guardMs?: number;
+  /** Whether a click on the overlay cancels; false for a dialog that comes unbidden, where that click was meant for what lies behind. */
+  readonly outsideCancels?: boolean;
+  /** The ways to go ahead; the first is the primary one, which Enter in the typed field takes. */
+  readonly choices: readonly ConfirmChoice[];
+  readonly cancel?: string;
   readonly onCancel: () => void;
   /** Where the focus goes when it closes; Radix returns it only to a trigger, which this has none. */
   readonly onCloseAutoFocus?: (event: Event) => void;
@@ -51,9 +75,9 @@ export interface ConfirmDialogProps {
 /**
  * Asks before a change that cannot be undone at once (ARCHITECTURE 6.4): the
  * question names the cluster, the dialog lists what follows and the
- * equivalent command, and a typed name holds the button back where the blast
- * radius or the mode asks for one. Focus starts on Cancel, or on the field,
- * so a stray Enter confirms nothing.
+ * equivalent command, and a typed name holds the buttons back where the blast
+ * radius or the mode asks for one. Focus starts on the button that declines,
+ * or on the field, so a stray Enter confirms nothing.
  */
 export function ConfirmDialog({
   badge,
@@ -62,21 +86,68 @@ export function ConfirmDialog({
   consequences,
   lists = [],
   command,
+  children,
   typed,
-  confirm,
-  icon: Icon,
-  destructive,
-  onConfirm,
+  error,
+  wide = false,
+  busy = false,
+  guardMs = 0,
+  outsideCancels = true,
+  choices,
+  cancel: declines = "Cancel",
   onCancel,
   onCloseAutoFocus,
 }: ConfirmDialogProps) {
   const [text, setText] = useState("");
+  const content = useRef<HTMLDivElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const field = useId();
   const ready = typed === undefined || text === typed;
-  const submit = () => {
-    if (ready) onConfirm(typed === undefined ? undefined : text);
+  const [hold, setHold] = useState<object | undefined>(
+    guardMs > 0 ? {} : undefined,
+  );
+  const held = hold !== undefined;
+  useEffect(() => {
+    if (hold === undefined) return;
+    const timer = setTimeout(() => {
+      setHold(undefined);
+    }, guardMs);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [hold, guardMs]);
+  useEffect(() => {
+    if (guardMs === 0) return;
+    const restart = () => {
+      setHold({});
+    };
+    window.addEventListener("focus", restart);
+    return () => {
+      window.removeEventListener("focus", restart);
+    };
+  }, [guardMs]);
+  // A disabled button cannot take the focus, and loses it, so while one
+  // answer is on its way the focus rests on the dialog, where Tab cannot
+  // leave it.
+  const rest = useCallback(() => {
+    (input.current ?? (busy ? content.current : cancel.current))?.focus();
+  }, [busy]);
+  useEffect(() => {
+    const root = content.current;
+    const active = document.activeElement;
+    if (
+      root &&
+      (!root.contains(active) ||
+        active === root ||
+        (active instanceof HTMLButtonElement && active.disabled))
+    ) {
+      rest();
+    }
+  }, [rest]);
+  const choose = (choice: ConfirmChoice | undefined) => {
+    if (ready && !busy && !held && (guardMs === 0 || document.hasFocus()))
+      choice?.onSelect(typed === undefined ? undefined : text);
   };
   return (
     <Dialog
@@ -86,10 +157,25 @@ export function ConfirmDialog({
       }}
     >
       <DialogContent
-        className="flex max-h-[calc(82%-24px)] max-w-[480px] flex-col overflow-hidden"
+        ref={content}
+        className={cn(
+          "flex max-h-[calc(82%-24px)] flex-col overflow-hidden",
+          wide ? "max-w-[880px]" : "max-w-[480px]",
+        )}
+        onEscapeKeyDown={(event) => {
+          if (
+            event.target instanceof Element &&
+            event.target.closest("[data-owns-escape]")
+          ) {
+            event.preventDefault();
+          }
+        }}
+        onPointerDownOutside={(event) => {
+          if (!outsideCancels) event.preventDefault();
+        }}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
-          (input.current ?? cancel.current)?.focus();
+          rest();
         }}
         onCloseAutoFocus={onCloseAutoFocus}
       >
@@ -104,7 +190,7 @@ export function ConfirmDialog({
           className="flex min-h-0 flex-col text-xs"
           onSubmit={(event) => {
             event.preventDefault();
-            submit();
+            choose(choices[0]);
           }}
         >
           <div className="grid min-h-0 grid-cols-[minmax(0,1fr)] gap-3 overflow-y-auto px-[18px] pt-4 pb-1">
@@ -129,6 +215,7 @@ export function ConfirmDialog({
               <Listed key={list.title} list={list} />
             ))}
             {command && <CommandLine command={command} />}
+            {children}
             {typed !== undefined && (
               <div className="grid gap-1.5">
                 <label htmlFor={field}>
@@ -150,27 +237,49 @@ export function ConfirmDialog({
                 />
               </div>
             )}
+            {error !== undefined && (
+              <div role="alert">
+                <Callout tone="error" title={error} />
+              </div>
+            )}
           </div>
-          <div className="flex flex-none items-center justify-end gap-2 px-[18px] pt-3 pb-4">
+          <div className="flex flex-none flex-wrap items-center justify-end gap-2 px-[18px] pt-3 pb-4">
             <Button
               ref={cancel}
               type="button"
               size="sm"
               variant="outline"
+              disabled={busy}
               onClick={onCancel}
             >
-              Cancel
+              {declines}
               <Kbd>esc</Kbd>
             </Button>
-            <Button
-              type="submit"
-              size="sm"
-              variant={destructive ? "destructive" : "default"}
-              disabled={!ready}
-            >
-              {Icon && <Icon aria-hidden />}
-              {confirm}
-            </Button>
+            {choices.map(({ label, icon: Icon, destructive }, index) => (
+              <Button
+                key={label}
+                type={index === 0 ? "submit" : "button"}
+                size="sm"
+                variant={
+                  index > 0
+                    ? "outline"
+                    : destructive === true
+                      ? "destructive"
+                      : "default"
+                }
+                disabled={!ready || busy}
+                onClick={
+                  index === 0
+                    ? undefined
+                    : () => {
+                        choose(choices[index]);
+                      }
+                }
+              >
+                {Icon && <Icon aria-hidden />}
+                {label}
+              </Button>
+            ))}
           </div>
         </form>
       </DialogContent>

@@ -2,10 +2,15 @@
 //! (ARCHITECTURE 6.4). A step that adds a way to change a cluster adds its
 //! row here: the request it sends, its class, and what each mode answers.
 
+use std::convert::Infallible;
+use std::sync::{Arc, Mutex};
+
 use http::header::{ACCEPT, UPGRADE};
 use http::{Method, Request};
+use jiff::{SignedDuration, Timestamp};
+use tower::{ServiceBuilder, ServiceExt};
 use twigo_ipc::{BlockReason, Mode, RequestClass};
-use twigo_policy::{Actor, Attributes, Audit, Choices, Policy, PolicyFile};
+use twigo_policy::{Actor, Approval, Attributes, Audit, Choices, Policy, PolicyFile};
 
 const PODS: &str = "/api/v1/namespaces/a/pods";
 const POD: &str = "/api/v1/namespaces/a/pods/p";
@@ -914,6 +919,30 @@ fn a_write_to_a_secret_answers_with_it_so_it_needs_what_reading_one_does() {
 }
 
 #[test]
+fn only_what_an_exact_approval_lets_through_is_approvable() {
+    let write = Attributes::action("patch", "deployments", None, Some("a"), Some("d"));
+    let exec = Attributes::action("create", "pods", Some("exec"), Some("a"), Some("p"));
+    let secret = Request::post("/api/v1/namespaces/a/secrets")
+        .body(())
+        .unwrap();
+    let secret = Attributes::of(&secret);
+    let read = Attributes::action("get", "secrets", None, Some("a"), Some("s"));
+    let guarded = policy_in(Mode::Guarded);
+    for actor in [Actor::Terminal, Actor::Helm, Actor::Agent] {
+        assert!(guarded.approvable("c", &write, actor), "{actor:?}");
+        assert!(guarded.approvable("c", &exec, actor), "{actor:?}");
+    }
+    assert!(guarded.approvable("c", &secret, Actor::Terminal));
+    for mode in MODES {
+        let policy = policy_in(mode);
+        assert!(!policy.approvable("c", &secret, Actor::Agent), "{mode:?}");
+        assert!(!policy.approvable("c", &read, Actor::Agent), "{mode:?}");
+    }
+    let read_only = policy_in(Mode::ReadOnly);
+    assert!(!read_only.approvable("c", &write, Actor::Terminal));
+}
+
+#[test]
 fn in_guarded_only_the_ui_writes_since_its_commands_confirm_and_others_need_an_approval() {
     let write = Attributes::action("patch", "deployments", None, Some("a"), Some("d"));
     let exec = Attributes::action("create", "pods", Some("exec"), Some("a"), Some("p"));
@@ -991,6 +1020,7 @@ fn what_a_command_says_it_does_has_the_class_of_the_request_it_sends() {
         let said = Attributes::action(verb, resource, subresource, None, None);
         assert_eq!(said.class, sent.class, "{verb} {uri}");
         assert_eq!(said.verb, sent.verb, "{verb} {uri}");
+        assert_eq!(said.deletes, sent.deletes, "{verb} {uri}");
     }
 }
 
@@ -1075,4 +1105,308 @@ fn a_request_is_read_as_the_api_server_reads_it() {
         read(Method::GET, "/apis/apps/v1"),
         ("get".to_owned(), None, None, None, None)
     );
+}
+
+/// The approvals a terminal's request may carry through the policy proxy,
+/// in the order of [`Approved::answers`].
+const APPROVALS: [&str; 8] = [
+    "no approval",
+    "an exact one",
+    "one for another path",
+    "one for another context",
+    "one for another actor",
+    "a lasting one",
+    "an expired one",
+    "a lasting one for another context",
+];
+
+/// What a mode answers a terminal's request with each of [`APPROVALS`].
+type Answers = [Answer; 8];
+
+const EVERY: Answers = [Pass; 8];
+const NONE: Answers = [Block; 8];
+const APPROVED: Answers = [Block, Pass, Block, Block, Block, Pass, Block, Block];
+const ONLY_EXACT: Answers = [Block, Pass, Block, Block, Block, Block, Block, Block];
+
+/// A terminal's request through the policy proxy, and what `read-write`,
+/// `guarded` and `read-only` answer it with each approval.
+struct Approved {
+    what: &'static str,
+    method: Method,
+    uri: &'static str,
+    upgrade: bool,
+    class: RequestClass,
+    answers: [Answers; 3],
+}
+
+fn approved(
+    what: &'static str,
+    method: Method,
+    uri: &'static str,
+    class: RequestClass,
+    answers: [Answers; 3],
+) -> Approved {
+    Approved {
+        what,
+        method,
+        uri,
+        upgrade: false,
+        class,
+        answers,
+    }
+}
+
+fn approvals_table() -> Vec<Approved> {
+    use RequestClass::{DryRun, Exec, Forward, Read, SecretRead, Write};
+    let upgrading = |row: Approved| Approved {
+        upgrade: true,
+        ..row
+    };
+    vec![
+        approved("get", Method::GET, POD, Read, [EVERY; 3]),
+        approved(
+            "a dry run",
+            Method::POST,
+            "/api/v1/namespaces/a/configmaps?dryRun=All",
+            DryRun,
+            [EVERY; 3],
+        ),
+        approved("read Secrets", Method::GET, SECRETS, SecretRead, [EVERY; 3]),
+        upgrading(approved(
+            "port-forward",
+            Method::GET,
+            "/api/v1/namespaces/a/pods/p/portforward",
+            Forward,
+            [EVERY; 3],
+        )),
+        approved(
+            "create",
+            Method::POST,
+            "/api/v1/namespaces/a/configmaps",
+            Write,
+            [EVERY, APPROVED, NONE],
+        ),
+        approved(
+            "patch",
+            Method::PATCH,
+            DEPLOYMENT,
+            Write,
+            [EVERY, APPROVED, NONE],
+        ),
+        approved(
+            "scale",
+            Method::PATCH,
+            "/apis/apps/v1/namespaces/a/deployments/d/scale",
+            Write,
+            [EVERY, APPROVED, NONE],
+        ),
+        approved(
+            "write a Secret, which the terminal may read",
+            Method::PUT,
+            "/api/v1/namespaces/a/secrets/s",
+            Write,
+            [EVERY, APPROVED, NONE],
+        ),
+        approved(
+            "delete",
+            Method::DELETE,
+            POD,
+            Write,
+            [EVERY, ONLY_EXACT, NONE],
+        ),
+        approved(
+            "delete a collection",
+            Method::DELETE,
+            PODS,
+            Write,
+            [EVERY, ONLY_EXACT, NONE],
+        ),
+        approved(
+            "evict, which deletes the pod",
+            Method::POST,
+            "/api/v1/namespaces/a/pods/p/eviction",
+            Write,
+            [EVERY, ONLY_EXACT, NONE],
+        ),
+        approved(
+            "a DELETE by the old proxy path, which RBAC calls proxy",
+            Method::DELETE,
+            "/api/v1/proxy/namespaces/a/pods/p/x",
+            Exec,
+            [EVERY, ONLY_EXACT, NONE],
+        ),
+        upgrading(approved(
+            "exec",
+            Method::GET,
+            "/api/v1/namespaces/a/pods/p/exec?command=sh",
+            Exec,
+            [EVERY, APPROVED, NONE],
+        )),
+        upgrading(approved(
+            "attach over SPDY",
+            Method::POST,
+            "/api/v1/namespaces/a/pods/p/attach?stdin=true",
+            Exec,
+            [EVERY, APPROVED, NONE],
+        )),
+    ]
+}
+
+/// Each of [`APPROVALS`] for a request read as `attributes` on the context
+/// `c`.
+fn approvals_for(attributes: &Attributes) -> [Option<Approval>; 8] {
+    let now = Timestamp::now();
+    let later = now.checked_add(SignedDuration::from_mins(15)).unwrap();
+    let earlier = now.checked_sub(SignedDuration::from_secs(1)).unwrap();
+    let mut elsewhere = attributes.clone();
+    elsewhere.path.push_str("-other");
+    [
+        None,
+        Some(Approval::once("c", Actor::Terminal, attributes)),
+        Some(Approval::once("c", Actor::Terminal, &elsewhere)),
+        Some(Approval::once("d", Actor::Terminal, attributes)),
+        Some(Approval::once("c", Actor::Agent, attributes)),
+        Some(Approval::until("c", Actor::Terminal, later)),
+        Some(Approval::until("c", Actor::Terminal, earlier)),
+        Some(Approval::until("d", Actor::Terminal, later)),
+    ]
+}
+
+#[tokio::test]
+async fn a_terminal_s_write_and_exec_pass_guarded_only_with_an_approval_that_covers_them() {
+    for row in approvals_table() {
+        let mut request = Request::builder().method(row.method.clone()).uri(row.uri);
+        if row.upgrade {
+            request = request.header(UPGRADE, "websocket");
+        }
+        let sent = request.body(()).unwrap();
+        let attributes = Attributes::of(&sent);
+        assert_eq!(attributes.class, row.class, "{}", row.what);
+        for (mode, answers) in MODES.into_iter().zip(row.answers) {
+            let policy = policy_in(mode);
+            let approvals = approvals_for(&attributes);
+            for ((approval, answer), named) in approvals.into_iter().zip(answers).zip(APPROVALS) {
+                let reached = Arc::new(Mutex::new(0));
+                let server = {
+                    let reached = Arc::clone(&reached);
+                    tower::service_fn(move |_: Request<()>| {
+                        *reached.lock().unwrap() += 1;
+                        async { Ok::<_, Infallible>(()) }
+                    })
+                };
+                let gate = policy.gate("c", Actor::Terminal);
+                let service = ServiceBuilder::new()
+                    .layer(gate.layer())
+                    .layer(gate.recheck())
+                    .service(server);
+                let mut request = Request::builder()
+                    .method(row.method.clone())
+                    .uri(row.uri)
+                    .body(())
+                    .unwrap();
+                *request.headers_mut() = sent.headers().clone();
+                if let Some(approval) = approval {
+                    request.extensions_mut().insert(approval);
+                }
+                let answered = service.oneshot(request).await;
+                let got = if answered.is_ok() { Pass } else { Block };
+                assert_eq!(got, answer, "{} with {named} in {mode:?}", row.what);
+                let expected = usize::from(answer == Pass);
+                assert_eq!(
+                    *reached.lock().unwrap(),
+                    expected,
+                    "{} with {named}",
+                    row.what
+                );
+                if let Err(blocked) = answered {
+                    let reason = blocked
+                        .downcast_ref::<twigo_ipc::Blocked>()
+                        .map(|blocked| blocked.reason);
+                    let wanted = match mode {
+                        Mode::ReadOnly => BlockReason::Mode,
+                        _ => BlockReason::NoApproval,
+                    };
+                    assert_eq!(
+                        reason,
+                        Some(wanted),
+                        "{} with {named} in {mode:?}",
+                        row.what
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Holds each request until `release`, as the stream counter holds one
+/// while its budget is full.
+#[derive(Clone)]
+struct Hold<S> {
+    inner: S,
+    release: Arc<tokio::sync::Notify>,
+}
+
+impl<S> tower::Service<Request<()>> for Hold<S>
+where
+    S: tower::Service<Request<()>> + Clone + Send + 'static,
+    S::Future: Send,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future =
+        std::pin::Pin<Box<dyn std::future::Future<Output = Result<S::Response, S::Error>> + Send>>;
+
+    fn poll_ready(
+        &mut self,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), S::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: Request<()>) -> Self::Future {
+        let (inner, release) = (self.inner.clone(), Arc::clone(&self.release));
+        Box::pin(async move {
+            release.notified().await;
+            inner.oneshot(request).await
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_relock_stops_an_approved_request_that_waited_below_the_gate() {
+    let policy = policy_in(Mode::Guarded);
+    let write = Request::post("/api/v1/namespaces/a/configmaps")
+        .body(())
+        .unwrap();
+    let approval = Approval::once("c", Actor::Terminal, &Attributes::of(&write));
+    let reached = Arc::new(Mutex::new(0));
+    let release = Arc::new(tokio::sync::Notify::new());
+    let gate = policy.gate("c", Actor::Terminal);
+    let server = {
+        let reached = Arc::clone(&reached);
+        tower::service_fn(move |_: Request<()>| {
+            *reached.lock().unwrap() += 1;
+            async { Ok::<_, Infallible>(()) }
+        })
+    };
+    let service = ServiceBuilder::new()
+        .layer(gate.layer())
+        .layer_fn(|inner| Hold {
+            inner,
+            release: Arc::clone(&release),
+        })
+        .layer(gate.recheck())
+        .service(server);
+    let mut request = Request::post("/api/v1/namespaces/a/configmaps")
+        .body(())
+        .unwrap();
+    request.extensions_mut().insert(approval);
+    let waiting = tokio::spawn(service.oneshot(request));
+    tokio::task::yield_now().await;
+    policy.set_mode("c", Some(Mode::ReadOnly)).unwrap();
+    release.notify_one();
+    let blocked = waiting.await.unwrap().unwrap_err();
+    let blocked = blocked.downcast_ref::<twigo_ipc::Blocked>().unwrap();
+    assert_eq!(blocked.reason, BlockReason::Mode);
+    assert_eq!(*reached.lock().unwrap(), 0);
 }

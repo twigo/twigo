@@ -5,9 +5,14 @@ import { editor } from "./monaco";
 export default function DiffView({
   original,
   modified,
+  collapseUnchanged = false,
+  maxHeight,
 }: {
   readonly original: string;
   readonly modified: string;
+  readonly collapseUnchanged?: boolean;
+  /** Takes the height of its content up to this many pixels, instead of filling its parent. */
+  readonly maxHeight?: number;
 }) {
   const shown = useEditorShown();
   const host = useRef<HTMLDivElement>(null);
@@ -39,12 +44,28 @@ export default function DiffView({
       fontSize: 12,
       lineNumbersMinChars: 3,
       renderOverviewRuler: false,
+      hideUnchangedRegions: { enabled: collapseUnchanged },
     });
     view.setModel(pair);
     if (place.current) view.restoreViewState(place.current);
+    // The modified side's content includes the zones that line it up with the original and hold the folded lines.
+    const fit = () => {
+      const { current: element } = host;
+      if (!element) return;
+      element.style.height =
+        maxHeight === undefined
+          ? ""
+          : `${String(Math.min(maxHeight, view.getModifiedEditor().getContentHeight()))}px`;
+    };
+    const resizing =
+      maxHeight === undefined
+        ? undefined
+        : view.getModifiedEditor().onDidContentSizeChange(fit);
+    fit();
     diff.current = view;
     models.current = pair;
     return () => {
+      resizing?.dispose();
       place.current = view.saveViewState();
       // A diff still being computed fails once its models are gone.
       view.setModel(null);
@@ -54,7 +75,7 @@ export default function DiffView({
       diff.current = undefined;
       models.current = undefined;
     };
-  }, [shown]);
+  }, [shown, collapseUnchanged, maxHeight]);
   useEffect(() => {
     const pair = models.current;
     const view = diff.current;
@@ -73,5 +94,10 @@ export default function DiffView({
     update(pair.original, view.getOriginalEditor(), original);
     update(pair.modified, view.getModifiedEditor(), modified);
   }, [original, modified]);
-  return <div ref={host} className="h-full w-full" />;
+  return (
+    <div
+      ref={host}
+      className={maxHeight === undefined ? "h-full w-full" : "w-full"}
+    />
+  );
 }
