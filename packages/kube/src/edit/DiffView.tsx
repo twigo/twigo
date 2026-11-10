@@ -51,8 +51,11 @@ export default function DiffView({
     // The modified side's content includes the zones that line it up with the original and hold the folded lines.
     const fit = () => {
       const { current: element } = host;
-      if (maxHeight === undefined || !element) return;
-      element.style.height = `${String(Math.min(maxHeight, view.getModifiedEditor().getContentHeight()))}px`;
+      if (!element) return;
+      element.style.height =
+        maxHeight === undefined
+          ? ""
+          : `${String(Math.min(maxHeight, view.getModifiedEditor().getContentHeight()))}px`;
     };
     const resizing =
       maxHeight === undefined

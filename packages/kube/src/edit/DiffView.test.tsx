@@ -108,6 +108,7 @@ test("a diff given a height takes its content's, up to that, and follows the con
   rerender(<DiffView original="a: 1" modified="a: 2" />);
   expect(fake.listeners.size).toBe(0);
   expect(host.className).toContain("h-full");
+  expect(host.style.height).toBe("");
 });
 
 test("a diff given no height fills its parent and listens to nothing", () => {
