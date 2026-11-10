@@ -156,8 +156,11 @@ impl Core {
     /// context per context the catalog lists now, `context` the current one,
     /// each with a token that maps to `actor`, the process's `label`, and the
     /// `window` its asks go to; with none, every ask is denied. Async, as the
-    /// endpoint it binds the first time serves on the runtime. Refuses the
-    /// UI, whose writes the gate lets through in `guarded` unasked.
+    /// endpoint it binds the first time serves on the runtime. Only a
+    /// terminal, `helm` or an agent gets one: the gate lets the UI's writes
+    /// through `guarded` unasked, Twigo's MCP tools read Secrets on the
+    /// premise that they return only keys and sizes, and an extension
+    /// reaches clusters through `host-kube`.
     pub async fn proxy_process(
         &self,
         actor: Actor,
@@ -165,10 +168,13 @@ impl Core {
         window: Option<&str>,
         context: &str,
     ) -> Result<ProxyProcess, IpcError> {
-        if actor == Actor::Ui {
+        if !matches!(actor, Actor::Terminal | Actor::Helm | Actor::Agent) {
             return Err(IpcError::new(
                 ErrorKind::InvalidInput,
-                "a process never acts as the UI, whose writes pass guarded unasked",
+                format!(
+                    "only a terminal, helm or an agent reaches a cluster through the policy proxy, never the actor {}",
+                    actor.name()
+                ),
             ));
         }
         let contexts = self.catalog.contexts().await;

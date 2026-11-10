@@ -568,18 +568,37 @@ async fn a_process_s_kubeconfig_names_every_context_and_goes_with_its_handle() {
 }
 
 #[tokio::test]
-async fn no_process_acts_as_the_ui() {
+async fn only_a_terminal_helm_or_an_agent_reaches_a_cluster_through_the_proxy() {
     let fake = Fake::start().await;
     let dir = tempfile::tempdir().unwrap();
     let core = core(dir.path(), &fake).await;
-    let refused = core
-        .proxy_process(Actor::Ui, "Terminal 1", Some("main"), "kind-a")
-        .await;
-    let Err(error) = refused else {
-        panic!("a process of the UI's, whose writes pass guarded unasked");
-    };
-    assert_eq!(error.kind, ErrorKind::InvalidInput, "{}", error.message);
-    assert!(!dir.path().join("proxy").exists(), "no kubeconfig written");
+    for actor in [
+        Actor::Ui,
+        Actor::Mcp,
+        Actor::Extension { secrets: true },
+        Actor::Extension { secrets: false },
+    ] {
+        let refused = core
+            .proxy_process(actor, "Terminal 1", Some("main"), "kind-a")
+            .await;
+        let Err(error) = refused else {
+            panic!("{actor:?} got a kubeconfig");
+        };
+        assert_eq!(
+            error.kind,
+            ErrorKind::InvalidInput,
+            "{actor:?}: {}",
+            error.message
+        );
+        assert!(!dir.path().join("proxy").exists(), "{actor:?}");
+    }
+    for actor in [Actor::Terminal, Actor::Helm, Actor::Agent] {
+        let process = core
+            .proxy_process(actor, "Terminal 1", Some("main"), "kind-a")
+            .await
+            .unwrap();
+        assert!(process.kubeconfig().exists(), "{actor:?}");
+    }
 }
 
 #[tokio::test]
