@@ -24,7 +24,7 @@ use super::refusal::Refusal;
 use super::server::Writing;
 use super::splice::{Reach, Upgrade};
 use super::tokens::{self, Digest, Holder};
-use super::{Changes, forward, headers, splice};
+use super::{Changes, Ends, forward, headers, splice};
 use crate::Core;
 use crate::approvals::{Asking, Once, Outcome, detail};
 
@@ -77,9 +77,10 @@ async fn serve(
     };
 
     let (clients, actor) = core.proxy.clients(core, &holder).await?;
-    // Before anything is sent, so a relock meanwhile reaches a splice.
+    // Before anything is sent, so a relock meanwhile reaches what it opens.
     let changes = Changes::new(&core.policy, &core.catalog.subscribe());
     let decided = decide(core, &holder, &actor, &attributes, &parts, &body, reach).await?;
+    let ends = Ends::new(Arc::clone(&core.policy), changes, &holder, attributes);
     let sent = match client.zip(reach) {
         Some((client, reach)) => {
             let upgrade = Upgrade {
@@ -87,15 +88,24 @@ async fn serve(
                 writing,
                 clients: &clients,
                 actor: &actor,
-                policy: Arc::clone(&core.policy),
-                changes,
-                attributes,
+                ends,
                 reach,
                 approval: decided.approval,
             };
             splice::upgrade(upgrade, parts, client).await
         }
-        None => forward::send(&holder, writing, &actor, parts, body, decided.approval).await,
+        None => {
+            forward::send(
+                &holder,
+                writing,
+                &actor,
+                parts,
+                body,
+                decided.approval,
+                ends,
+            )
+            .await
+        }
     };
     if !sent.reached
         && let Some(once) = decided.once

@@ -21,9 +21,9 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::{OnceCell, watch};
 use tokio_util::sync::CancellationToken;
-use twigo_ipc::{ErrorKind, IpcError};
+use twigo_ipc::{BlockReason, ErrorKind, IpcError, RequestClass};
 use twigo_kube::client::{Actor, ActorClients, Clients};
-use twigo_policy::Policy;
+use twigo_policy::{Attributes, Policy};
 
 use crate::approvals::Approvals;
 use crate::catalog::Contexts;
@@ -274,6 +274,60 @@ impl Changes {
             Ok(()) = self.catalog.changed() => {}
             // Both senders live as long as the core.
             else => std::future::pending().await,
+        }
+    }
+}
+
+/// What ends an open answer or splice from outside: its context naming
+/// another cluster, or a mode that now refuses its class whatever any
+/// approval says, so a relock to `read-only` ends a terminal's exec, while
+/// `guarded` ends none.
+struct Ends {
+    policy: Arc<Policy>,
+    changes: Changes,
+    context: String,
+    connection: u64,
+    actor: Actor,
+    attributes: Attributes,
+}
+
+impl Ends {
+    fn new(policy: Arc<Policy>, changes: Changes, holder: &Holder, attributes: Attributes) -> Self {
+        Self {
+            policy,
+            changes,
+            context: holder.context.clone(),
+            connection: holder.connection,
+            actor: holder.actor,
+            attributes,
+        }
+    }
+
+    /// Whether it reaches into a pod or a node, as an exec or a
+    /// port-forward does: no mode refuses a read, and a write's answer
+    /// comes once the write is done.
+    fn reaches_in(&self) -> bool {
+        matches!(
+            self.attributes.class,
+            RequestClass::Exec | RequestClass::Forward
+        )
+    }
+
+    /// Returns once the context names another cluster, or its mode refuses
+    /// the class whatever any approval says.
+    async fn refused(mut self) {
+        loop {
+            self.changes.next().await;
+            if self.policy.connection(&self.context) != Some(self.connection) {
+                return;
+            }
+            if let Err(blocked) = self
+                .policy
+                .authorize(&self.context, &self.attributes, self.actor)
+                && blocked.reason != BlockReason::NoApproval
+            {
+                return;
+            }
         }
     }
 }

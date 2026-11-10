@@ -1963,6 +1963,78 @@ async fn a_process_s_end_cuts_no_connection_that_wrote_its_answer_and_serves_ano
     assert!(cut.is_empty(), "cut in runs {cut:?} of {runs}");
 }
 
+/// The answer to a `GET` of `path` on `kind-a`, which the fake holds open.
+async fn held_open(process: &Process, path: &str) -> (Incoming, Connection) {
+    let request = process
+        .request("GET", "kind-a", &format!("{path}?watch=true"))
+        .body(empty())
+        .unwrap();
+    let (response, connection) = send(process.at(), request).await;
+    assert_eq!(response.status(), StatusCode::OK, "{path}");
+    (response.into_body(), connection)
+}
+
+async fn still_open(body: &mut Incoming) -> bool {
+    tokio::time::timeout(Duration::from_millis(300), body.frame())
+        .await
+        .is_err()
+}
+
+async fn ends(body: Incoming) -> bool {
+    tokio::time::timeout(WAIT, body.collect()).await.is_ok()
+}
+
+#[tokio::test]
+async fn a_relock_ends_an_exec_class_answer_without_an_upgrade_and_leaves_a_read() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    let process = Process::start(&core, None).await;
+    let (mut node, _node) = held_open(&process, "/api/v1/nodes/n/proxy/logs").await;
+    let (mut service, _service) =
+        held_open(&process, "/api/v1/namespaces/a/services/s/proxy/x").await;
+    let (mut watch, _watch) = held_open(&process, "/api/v1/namespaces/a/pods").await;
+    let (refusal, _refusal) = send(process.at(), exec(&process, "holds", "sh", true)).await;
+    assert_eq!(refusal.status(), StatusCode::BAD_REQUEST);
+    let mut refusal = refusal.into_body();
+    held(&core, 3, 1).await;
+
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    assert!(still_open(&mut node).await, "guarded ends none");
+    assert!(still_open(&mut refusal).await, "guarded ends none");
+    core.policy
+        .set_mode("kind-a", Some(Mode::ReadOnly))
+        .unwrap();
+    assert!(ends(node).await, "read-only ends the node's proxy");
+    assert!(ends(refusal).await, "read-only ends an exec's refusal");
+    held(&core, 2, 0).await;
+    assert!(
+        still_open(&mut service).await,
+        "read-only lets a service's proxy through"
+    );
+    assert!(still_open(&mut watch).await, "a relock leaves a read");
+}
+
+#[tokio::test]
+async fn a_relock_ends_a_forward_class_answer_where_read_only_refuses_port_forwards() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("policy.json"),
+        r#"{"readOnly": {"allowPortForward": false}}"#,
+    )
+    .unwrap();
+    let core = core(dir.path(), &fake).await;
+    let process = Process::start(&core, None).await;
+    let (service, _service) = held_open(&process, "/api/v1/namespaces/a/services/s/proxy/x").await;
+    held(&core, 1, 0).await;
+    core.policy
+        .set_mode("kind-a", Some(Mode::ReadOnly))
+        .unwrap();
+    assert!(ends(service).await);
+    held(&core, 0, 0).await;
+}
+
 #[tokio::test]
 async fn a_splice_ends_when_its_context_moves_to_another_cluster() {
     let fake = Fake::start().await;

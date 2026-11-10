@@ -1,8 +1,9 @@
 //! An ordinary request: its body read whole, since kube's request `Body`
 //! cannot stream ([`Body`](https://github.com/kube-rs/kube/blob/5.0.0/kube-client/src/client/body.rs#L33-L84)),
 //! sent on the actor's api client as a proxied stream, and its answer passed
-//! back frame by frame until the body ends or the process does, which ends
-//! the connection that writes it.
+//! back frame by frame until the body ends, the process does, or, for what
+//! reaches into a pod or a node, a relock that refuses it, either of which
+//! ends the connection that writes it.
 
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -13,13 +14,14 @@ use http::{Request, Response};
 use http_body::{Body, Frame, SizeHint};
 use http_body_util::BodyExt;
 use http_body_util::combinators::UnsyncBoxBody;
+use tokio_util::sync::{CancellationToken, DropGuard};
 use twigo_kube::client::{ActorClients, Permit, Proxied};
 use twigo_policy::Approval;
 
-use super::headers;
 use super::refusal::Refusal;
 use super::server::{Answer, Writing};
 use super::tokens::Holder;
+use super::{Ends, headers};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -45,6 +47,7 @@ pub(super) async fn send(
     parts: Parts,
     body: Bytes,
     approval: Option<Approval>,
+    ends: Ends,
 ) -> Sent {
     let mut request = Request::from_parts(parts, kube::client::Body::from(body));
     request.extensions_mut().insert(Proxied);
@@ -58,7 +61,7 @@ pub(super) async fn send(
     };
     match sent {
         Ok(response) => Sent {
-            response: passed(holder, writing, response, None),
+            response: passed(holder, writing, response, None, ends),
             reached: true,
         },
         Err(error) => failed(&holder.context, &error),
@@ -67,19 +70,33 @@ pub(super) async fn send(
 
 /// The server's answer as it came, but its hop-by-hop headers, holding
 /// `session`, if any, until it ends; its connection ends once the process
-/// does.
+/// does, and, if it reaches into a pod or a node, once `ends` says.
 pub(super) fn passed(
     holder: &Holder,
     writing: &Writing,
     response: Response<kube::client::Body>,
     session: Option<Permit>,
+    ends: Ends,
 ) -> Response<ProxyBody> {
     let (mut parts, body) = response.into_parts();
     parts.headers = headers::response(&parts.headers);
+    let ended = holder.ended.child_token();
+    let relock = ends.reaches_in().then(|| {
+        let (done, ending) = (CancellationToken::new(), ended.clone());
+        let watching = done.clone();
+        tokio::spawn(async move {
+            tokio::select! {
+                () = watching.cancelled() => {}
+                () = ends.refused() => ending.cancel(),
+            }
+        });
+        done.drop_guard()
+    });
     let body = Passed {
         body,
         _session: session,
-        _answer: writing.answer(&holder.ended),
+        _answer: writing.answer(&ended),
+        _relock: relock,
     };
     Response::from_parts(parts, body.boxed_unsync())
 }
@@ -120,6 +137,8 @@ struct Passed<B> {
     body: B,
     _session: Option<Permit>,
     _answer: Answer,
+    /// Ends the wait for a relock that would end it.
+    _relock: Option<DropGuard>,
 }
 
 impl<B> Body for Passed<B>

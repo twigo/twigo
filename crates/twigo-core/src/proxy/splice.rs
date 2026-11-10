@@ -10,7 +10,6 @@
 //! and so do the process's handle dropping, its context naming another
 //! cluster, and a mode that now refuses its class whatever any approval says.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use http::request::Parts;
@@ -19,15 +18,14 @@ use http_body_util::{BodyExt, Empty};
 use hyper::upgrade::OnUpgrade;
 use hyper_util::rt::TokioIo;
 use tokio::io::AsyncWriteExt;
-use twigo_ipc::BlockReason;
-use twigo_kube::client::{Actor, ActorClients, Class, Clients, Permit};
-use twigo_policy::{Approval, Attributes, Policy};
+use twigo_kube::client::{ActorClients, Class, Clients, Permit};
+use twigo_policy::{Approval, Attributes};
 
 use super::forward::{Sent, failed, passed, revoked};
 use super::refusal::Refusal;
 use super::server::Writing;
 use super::tokens::Holder;
-use super::{Changes, headers};
+use super::{Ends, headers};
 
 /// How long a spliced side gets to take its end.
 const SHUTDOWN: Duration = Duration::from_secs(1);
@@ -70,9 +68,7 @@ pub(super) struct Upgrade<'a> {
     pub writing: &'a Writing,
     pub clients: &'a Clients,
     pub actor: &'a ActorClients,
-    pub policy: Arc<Policy>,
-    pub changes: Changes,
-    pub attributes: Attributes,
+    pub ends: Ends,
     pub reach: Reach,
     pub approval: Option<Approval>,
 }
@@ -83,9 +79,7 @@ pub(super) async fn upgrade(upgrade: Upgrade<'_>, parts: Parts, client: OnUpgrad
         writing,
         clients,
         actor,
-        policy,
-        changes,
-        attributes,
+        ends,
         reach,
         approval,
     } = upgrade;
@@ -114,7 +108,7 @@ pub(super) async fn upgrade(upgrade: Upgrade<'_>, parts: Parts, client: OnUpgrad
     };
     if response.status() != StatusCode::SWITCHING_PROTOCOLS {
         return Sent {
-            response: passed(holder, writing, response, Some(permit)),
+            response: passed(holder, writing, response, Some(permit), ends),
             reached: reach == Reach::Proxy,
         };
     }
@@ -122,14 +116,6 @@ pub(super) async fn upgrade(upgrade: Upgrade<'_>, parts: Parts, client: OnUpgrad
     let mut switched = Response::new(Empty::new().map_err(|never| match never {}).boxed_unsync());
     *switched.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
     *switched.headers_mut() = headers::switched(response.headers());
-    let ends = Ends {
-        policy,
-        changes,
-        context: holder.context.clone(),
-        connection: holder.connection,
-        actor: holder.actor,
-        attributes,
-    };
     let ended = holder.ended.clone();
     let stop = async move {
         tokio::select! {
@@ -173,35 +159,4 @@ async fn splice(
         tokio::join!(to_client.shutdown(), to_server.shutdown())
     })
     .await;
-}
-
-/// What ends a splice from outside.
-struct Ends {
-    policy: Arc<Policy>,
-    changes: Changes,
-    context: String,
-    connection: u64,
-    actor: Actor,
-    attributes: Attributes,
-}
-
-impl Ends {
-    /// Returns once the context names another cluster, or its mode refuses
-    /// the splice's class whatever any approval says: a relock to
-    /// `read-only` ends a terminal's exec, while `guarded` ends none.
-    async fn refused(mut self) {
-        loop {
-            self.changes.next().await;
-            if self.policy.connection(&self.context) != Some(self.connection) {
-                return;
-            }
-            if let Err(blocked) = self
-                .policy
-                .authorize(&self.context, &self.attributes, self.actor)
-                && blocked.reason != BlockReason::NoApproval
-            {
-                return;
-            }
-        }
-    }
 }
