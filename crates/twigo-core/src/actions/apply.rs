@@ -230,7 +230,7 @@ fn invalid_body(message: &str) -> bool {
 /// again as a string ([`applyPatchToCurrentObject`]'s `field.Invalid`).
 ///
 /// [`applyPatchToCurrentObject`]: https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/patch.go#L356-L358
-fn scrub(text: &str, secrets: &[String]) -> String {
+pub(crate) fn scrub(text: &str, secrets: &[String]) -> String {
     let text = if secrets.is_empty() {
         text.to_owned()
     } else {
@@ -296,7 +296,7 @@ fn scrubbed(error: IpcError, secrets: &[String]) -> IpcError {
 /// and decoded, the longest first, so that what a refusal echoes is covered
 /// before any answer shows how the server stored it; empty for any other
 /// kind.
-fn secret_values(objects: &[&Value]) -> Vec<String> {
+pub(crate) fn secret_values(objects: &[&Value]) -> Vec<String> {
     let mut values = BTreeSet::new();
     for object in objects {
         for (field, encoded) in [("data", true), ("stringData", false)] {
@@ -324,7 +324,7 @@ fn secret_values(objects: &[&Value]) -> Vec<String> {
 
 /// Adds what a dry-run's answer holds, known only after it: a warning may
 /// echo a value the edit never named, as `stringData`'s in `data`.
-fn add_answered(secrets: &mut Vec<String>, answer: &Value) {
+pub(crate) fn add_answered(secrets: &mut Vec<String>, answer: &Value) {
     if secrets.is_empty() {
         return;
     }
@@ -491,7 +491,7 @@ fn combined_request(
 
 /// An answer's object and warnings, or the server's refusal, through
 /// `Client::send`, as kube-rs drops the `Warning` headers.
-async fn send(
+pub(crate) async fn send(
     client: &Client,
     request: http::Request<Vec<u8>>,
 ) -> Result<(Value, Vec<String>), kube::Error> {
@@ -595,7 +595,7 @@ fn resource_version(object: &Value) -> Option<&str> {
 
 /// An object as a side of the diff: as the view shows it, without what would
 /// only be noise.
-fn side(object: Value) -> Value {
+pub(crate) fn side(object: Value) -> Value {
     if object.is_null() {
         return object;
     }

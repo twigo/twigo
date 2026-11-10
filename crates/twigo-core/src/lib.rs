@@ -1,13 +1,16 @@
-//! App services: the catalog, spaces, the state store and each context's
-//! clients, which the Tauri app turns into commands.
+//! App services: the catalog, spaces, the state store, each context's
+//! clients, and the policy proxy with its approval broker, which the Tauri
+//! app turns into commands.
 
 mod actions;
+mod approvals;
 mod auth;
 mod bus;
 pub mod catalog;
 pub mod connections;
 mod errors;
 pub mod objects;
+mod proxy;
 pub mod state;
 pub mod subscriptions;
 pub mod trust;
@@ -26,12 +29,12 @@ use twigo_cache::hub::{Connect, Hub, Query, Resource, RowFormat};
 use twigo_cache::view::Spec;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    AccessQuery, Ack, ApplyPreviewed, ApplyRequest, ClusterVersion, Context, DownloadLogs,
-    ErrorKind, Execute, Friction, GetValues, IpcError, ListBatch, ListQuery, LogBatch, ObjectBatch,
-    OpenLogs, OpenObject, OpenShell, OperationEvent, Plan, PlanId, PlanRequest, SchemaQuery,
-    SetContextEnvironment, SetContextMode, SetLogSource, SetLogView, SetLogWindow, SetParts,
-    SetWindow, ShellAck, ShellContainers, ShellInput, ShellPod, ShellResize, SubscriptionId,
-    ViewState,
+    AccessQuery, Ack, AnswerApproval, ApplyPreviewed, ApplyRequest, ApprovalEvent, ClusterVersion,
+    Context, DownloadLogs, ErrorKind, Execute, Friction, GetValues, IpcError, ListBatch, ListQuery,
+    LogBatch, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan, PlanId,
+    PlanRequest, SchemaQuery, SetContextEnvironment, SetContextMode, SetLogSource, SetLogView,
+    SetLogWindow, SetParts, SetWindow, ShellAck, ShellContainers, ShellInput, ShellPod,
+    ShellResize, SubscriptionId, ViewState,
 };
 use twigo_kube::client::{Actor, Clients, ProxyEnv};
 use twigo_kube::credentials::{ExecError, OidcError, Provider, Registry, Source, Timeouts};
@@ -45,11 +48,14 @@ use twigo_sessions::logs::Session;
 pub use twigo_sessions::shell::Frame as ShellFrame;
 
 use actions::undo::Undos;
+use approvals::Approvals;
 pub use auth::AuthFollower;
 use bus::{Bus, Finished, Progress, Waiting};
 use catalog::Catalog;
 use connections::Connections;
 use objects::{Opened, Target};
+use proxy::Proxy;
+pub use proxy::ProxyProcess;
 use state::State;
 use subscriptions::Subscriptions;
 use trust::Trust;
@@ -64,6 +70,8 @@ pub struct Core {
     pub trust: Trust,
     pub hub: Hub,
     pub policy: Arc<Policy>,
+    proxy: Arc<Proxy>,
+    approvals: Arc<Approvals>,
     /// Held while a change of the person's choices is stored, so an earlier
     /// copy of them never lands after a later one.
     choosing: Mutex<()>,
@@ -101,10 +109,10 @@ pub enum ClientsError {
 }
 
 impl Core {
-    /// The core whose state, trusted plugins and audit log live in `data`,
-    /// the app's data directory, its clusters' discovery in `cache`, its
-    /// cache directory, and whose admin's policy is the file at
-    /// `policy_file`.
+    /// The core whose state, trusted plugins, audit log and processes'
+    /// kubeconfigs live in `data`, the app's data directory, its clusters'
+    /// discovery in `cache`, its cache directory, and whose admin's policy is
+    /// the file at `policy_file`.
     pub fn new(data: &Path, cache: &Path, policy_file: &Path) -> Arc<Self> {
         let shell_env = watch::Sender::new(None);
         let focused = watch::Sender::new(false);
@@ -116,10 +124,13 @@ impl Core {
             state.choices(),
             Audit::open(&data.join("audit.jsonl")),
         );
+        let approvals = Arc::new(Approvals::new(Arc::clone(&policy), catalog.subscribe()));
         Arc::new_cyclic(|core| Self {
             this: core.clone(),
             hub: Hub::new(connect(core.clone())),
             policy,
+            proxy: Arc::new(Proxy::new(data.join("proxy"))),
+            approvals,
             choosing: Mutex::default(),
             lists: Subscriptions::new("list"),
             objects: Subscriptions::new("object"),
@@ -816,14 +827,34 @@ impl Core {
         self.shells.remove(window, id)
     }
 
-    /// Ends the lists, open objects, logs sessions, shells and plans of a
-    /// window that reloads or closes.
+    /// The asks of the processes whose window is `window` (ARCHITECTURE
+    /// 6.4): `send` gets each one waiting, then each new one and each one
+    /// withdrawn, until it says the window is gone, and in place of what the
+    /// window followed before. It must not call back into the core.
+    pub fn follow_approvals(
+        &self,
+        window: &str,
+        send: impl FnMut(ApprovalEvent) -> bool + Send + 'static,
+    ) {
+        self.approvals.follow_window(window, send);
+    }
+
+    /// The person's answer to an ask of `window`'s, refused for one that is
+    /// gone or another window's, and for a delete's without the context's
+    /// name typed.
+    pub fn answer_approval(&self, window: &str, answer: AnswerApproval) -> Result<(), IpcError> {
+        self.approvals.answer(window, answer)
+    }
+
+    /// Ends the lists, open objects, logs sessions, shells, plans and asks of
+    /// a window that reloads or closes: its asks are denied.
     pub fn drop_window(&self, window: &str) {
         self.lists.drop_window(window);
         self.objects.drop_window(window);
         self.logs.drop_window(window);
         self.shells.drop_window(window);
         self.bus.drop_window(window);
+        self.approvals.drop_window(window);
     }
 
     /// Retires every connection on wake, and those whose route moved on a

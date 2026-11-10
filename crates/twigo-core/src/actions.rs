@@ -17,7 +17,7 @@ pub(crate) mod undo;
 
 use std::sync::{Arc, Weak};
 
-pub(crate) use apply::{Prepared, apply, preview};
+pub(crate) use apply::{Prepared, add_answered, apply, preview, scrub, secret_values, send, side};
 pub(crate) use cordon::cordon;
 pub(crate) use delete::delete;
 pub(crate) use drain::drain;
