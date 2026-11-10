@@ -256,3 +256,38 @@ test("the typed field keeps the focus through an answer, as it is not disabled",
   rerender(withBusy(false, "staging"));
   expect(document.activeElement).toBe(field);
 });
+
+test("the choices ignore activation for the guard time after it shows, and declining never waits", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const { once, lasting, onCancel } = several({ guardMs: 500 });
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    fireEvent.submit(screen.getByRole("button", { name: "Allow once" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Allow for 15 minutes" }),
+    );
+    expect(once).not.toHaveBeenCalled();
+    expect(lasting).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Deny/ }));
+    expect(onCancel).toHaveBeenCalledOnce();
+
+    act(() => {
+      vi.advanceTimersByTime(499);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    expect(once).not.toHaveBeenCalled();
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Allow for 15 minutes" }),
+    );
+    expect(once).toHaveBeenCalledOnce();
+    expect(lasting).toHaveBeenCalledOnce();
+  } finally {
+    vi.useRealTimers();
+  }
+});

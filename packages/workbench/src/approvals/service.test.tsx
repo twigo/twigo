@@ -7,7 +7,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { Trash2 } from "lucide-react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   IpcError,
   type ApprovalAsk,
@@ -21,11 +21,26 @@ import { notify } from "@twigo/ui";
 import { ConfirmHost } from "../operations/ConfirmHost";
 import { inWorkbench, testWorkbench } from "../testing";
 import { ApprovalHost } from "./ApprovalHost";
+import { ASK_GUARD_MS } from "./service";
+
+beforeEach(() => {
+  vi.useFakeTimers({
+    toFake: ["setTimeout", "clearTimeout"],
+    shouldAdvanceTime: true,
+  });
+});
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
+
+const armed = () => {
+  act(() => {
+    vi.advanceTimersByTime(ASK_GUARD_MS);
+  });
+};
 
 function ask(id: number, over: Partial<ApprovalAsk> = {}): ApprovalAsk {
   return {
@@ -136,6 +151,11 @@ async function broker() {
 const dialog = (name: string | RegExp) => screen.getByRole("dialog", { name });
 const button = (name: string | RegExp) => screen.getByRole("button", { name });
 
+const choose = (name: string) => {
+  armed();
+  fireEvent.click(button(name));
+};
+
 test("asks come one at a time in the order they came, saying how many wait", async () => {
   const { raise, answers } = await broker();
   expect(screen.queryByRole("dialog")).toBeNull();
@@ -146,7 +166,7 @@ test("asks come one at a time in the order they came, saying how many wait", asy
   ).toBeTruthy();
   expect(screen.getByText("1 of 3")).toBeTruthy();
 
-  fireEvent.click(button("Allow once"));
+  choose("Allow once");
   await waitFor(() => {
     expect(screen.getByText("1 of 2")).toBeTruthy();
   });
@@ -158,7 +178,7 @@ test("asks come one at a time in the order they came, saying how many wait", asy
   });
   expect(screen.queryByText(/^\d+ of \d+$/)).toBeNull();
 
-  fireEvent.click(button("Allow once"));
+  choose("Allow once");
   await waitFor(() => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
@@ -217,6 +237,7 @@ test("the typed field holds the delete's button back, takes the focus, and sends
 
   fireEvent.change(field, { target: { value: "prod-eu" } });
   expect(allow.hasAttribute("disabled")).toBe(false);
+  armed();
   fireEvent.click(allow);
   await waitFor(() => {
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -241,7 +262,7 @@ test("each button sends its answer, and a typed name goes with the allowing ones
   const { raise, answers } = await broker();
   raise(ask(1), ask(2), ask(3, { typed: true }));
 
-  fireEvent.click(button("Allow for 15 minutes"));
+  choose("Allow for 15 minutes");
   await waitFor(() => {
     expect(dialog(/^Allow Terminal 2 /)).toBeTruthy();
   });
@@ -253,7 +274,7 @@ test("each button sends its answer, and a typed name goes with the allowing ones
   fireEvent.change(screen.getByLabelText("Type staging to confirm"), {
     target: { value: "staging" },
   });
-  fireEvent.click(button("Allow for 15 minutes"));
+  choose("Allow for 15 minutes");
   await waitFor(() => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
@@ -268,7 +289,7 @@ test("the lasting button names the minutes the ask offers, and none is offered w
   const { raise } = await broker();
   raise(ask(1, { lastingMinutes: 1 }), ask(2, { lastingMinutes: null }));
   expect(button("Allow for 1 minute")).toBeTruthy();
-  fireEvent.click(button("Allow once"));
+  choose("Allow once");
   await waitFor(() => {
     expect(dialog(/^Allow Terminal 2 /)).toBeTruthy();
   });
@@ -297,7 +318,7 @@ test("a refused answer shows its words in the dialog, which stays, and the next 
     target: { value: "prod-eu" },
   });
   control.refuse = new IpcError("invalidInput", "type prod-eu to confirm");
-  fireEvent.click(button("Allow delete"));
+  choose("Allow delete");
   await waitFor(() => {
     expect(screen.getByRole("alert").textContent).toContain(
       "type prod-eu to confirm",
@@ -307,7 +328,7 @@ test("a refused answer shows its words in the dialog, which stays, and the next 
   expect(button("Allow delete").hasAttribute("disabled")).toBe(false);
 
   control.refuse = undefined;
-  fireEvent.click(button("Allow delete"));
+  choose("Allow delete");
   await waitFor(() => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
@@ -322,11 +343,11 @@ test("while an answer is on its way nothing else answers, and a withdrawal then 
     release = resolve;
   });
   raise(ask(1), ask(2));
-  fireEvent.click(button("Allow once"));
+  choose("Allow once");
   await waitFor(() => {
     expect(button("Allow once").hasAttribute("disabled")).toBe(true);
   });
-  fireEvent.click(button("Allow for 15 minutes"));
+  choose("Allow for 15 minutes");
   fireEvent.keyDown(document.activeElement ?? document.body, {
     key: "Escape",
   });
@@ -361,7 +382,7 @@ test("the dialog says whose context it is, what the client claims and the detail
   expect(screen.getByText("Detail of a diff")).toBeTruthy();
   expect(screen.getByRole("dialog").className).toContain("max-w-[880px]");
 
-  fireEvent.click(button("Allow once"));
+  choose("Allow once");
   await waitFor(() => {
     expect(screen.getByText("Production")).toBeTruthy();
   });
@@ -513,7 +534,7 @@ test("an ask that mounts while an answer is on its way keeps the focus in its di
     release = resolve;
   });
   raise(ask(1), ask(2));
-  fireEvent.click(button("Allow once"));
+  choose("Allow once");
   await waitFor(() => {
     expect(button("Allow once").hasAttribute("disabled")).toBe(true);
   });
@@ -528,4 +549,49 @@ test("an ask that mounts while an answer is on its way keeps the focus in its di
   await waitFor(() => {
     expect(document.activeElement).toBe(button(/^Deny/));
   });
+});
+
+test("the second click of a double click lands on the next ask and allows nothing, while Deny is never held back", async () => {
+  const { raise, answers } = await broker();
+  raise(ask(1), ask(2), ask(3));
+  choose("Allow once");
+  await waitFor(() => {
+    expect(dialog(/^Allow Terminal 2 /)).toBeTruthy();
+  });
+
+  fireEvent.click(button("Allow once"));
+  fireEvent.click(button("Allow for 15 minutes"));
+  expect(answers).toEqual([{ id: 1, answer: "once", typed: null }]);
+  act(() => {
+    vi.advanceTimersByTime(ASK_GUARD_MS - 100);
+  });
+  fireEvent.click(button("Allow once"));
+  expect(answers).toHaveLength(1);
+
+  fireEvent.click(button(/^Deny/));
+  await waitFor(() => {
+    expect(dialog(/^Allow Terminal 3 /)).toBeTruthy();
+  });
+  expect(answers[1]).toEqual({ id: 2, answer: "deny", typed: null });
+
+  fireEvent.click(button("Allow once"));
+  expect(answers).toHaveLength(2);
+  choose("Allow once");
+  await waitFor(() => {
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+  expect(answers[2]).toEqual({ id: 3, answer: "once", typed: null });
+});
+
+test("an answer goes to the ask the dialog showed, and to none when that ask has gone", async () => {
+  const { workbench, raise, withdraw, answers } = await broker();
+  raise(ask(1), ask(2));
+  withdraw(1);
+
+  await act(() => workbench.approvals.answer(1, "once"));
+  expect(answers).toEqual([]);
+  expect(dialog(/^Allow Terminal 2 /)).toBeTruthy();
+
+  await act(() => workbench.approvals.answer(2, "lasting"));
+  expect(answers).toEqual([{ id: 2, answer: "lasting", typed: null }]);
 });

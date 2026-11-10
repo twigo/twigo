@@ -60,6 +60,8 @@ export interface ConfirmDialogProps {
   readonly error?: string;
   readonly wide?: boolean;
   readonly busy?: boolean;
+  /** How long after it shows the choices ignore activation, so a click meant for what was there before cannot go ahead; declining never waits. */
+  readonly guardMs?: number;
   /** Whether a click on the overlay cancels; false for a dialog that comes unbidden, where that click was meant for what lies behind. */
   readonly outsideCancels?: boolean;
   /** The ways to go ahead; the first is the primary one, which Enter in the typed field takes. */
@@ -89,6 +91,7 @@ export function ConfirmDialog({
   error,
   wide = false,
   busy = false,
+  guardMs = 0,
   outsideCancels = true,
   choices,
   cancel: declines = "Cancel",
@@ -101,6 +104,16 @@ export function ConfirmDialog({
   const input = useRef<HTMLInputElement>(null);
   const field = useId();
   const ready = typed === undefined || text === typed;
+  const [held, setHeld] = useState(guardMs > 0);
+  useEffect(() => {
+    if (!held) return;
+    const timer = setTimeout(() => {
+      setHeld(false);
+    }, guardMs);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [held, guardMs]);
   // A disabled button cannot take the focus, and loses it, so while one
   // answer is on its way the focus rests on the dialog, where Tab cannot
   // leave it.
@@ -120,7 +133,7 @@ export function ConfirmDialog({
     }
   }, [rest]);
   const choose = (choice: ConfirmChoice | undefined) => {
-    if (ready && !busy)
+    if (ready && !busy && !held)
       choice?.onSelect(typed === undefined ? undefined : text);
   };
   return (

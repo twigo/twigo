@@ -8,7 +8,7 @@ import {
 import { ContextBadge } from "../operations/ContextBadge";
 import { contextAccent } from "../spaces/colors";
 import { useChanges, useReturnFocus, useWorkbench } from "../react";
-import { describeAsk } from "./service";
+import { ASK_GUARD_MS, describeAsk } from "./service";
 
 const MONO = "font-mono text-[11px] wrap-anywhere select-text";
 
@@ -58,7 +58,7 @@ function AskDialog({
   const access = catalog.find(ask.context)?.access;
   const environment = access?.environment ?? null;
   const answer = (given: ApprovalAnswer) => (typed: string | undefined) => {
-    void approvals.answer(given, typed);
+    void approvals.answer(ask.id, given, typed);
   };
 
   const minutes = ask.lastingMinutes;
@@ -124,6 +124,7 @@ function AskDialog({
       {...(failure !== undefined && { error: failure })}
       wide={details?.wide(ask.detail) ?? false}
       busy={answering}
+      guardMs={ASK_GUARD_MS}
       outsideCancels={false}
       cancel="Deny"
       choices={choices}

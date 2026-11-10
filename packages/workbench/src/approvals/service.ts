@@ -22,6 +22,20 @@ export interface ApprovalDetails {
   readonly wide: (detail: ApprovalDetail) => boolean;
 }
 
+/**
+ * How long after an ask shows its allowing choices ignore activation, so a
+ * double click, or a click meant for the ask just withdrawn, cannot allow the
+ * next. Firefox's `security.notification_enable_delay` is 500 ms for a
+ * prompt's buttons, its cancel excepted
+ * ([pref](https://github.com/mozilla-firefox/firefox/blob/FIREFOX_159_0_RELEASE/modules/libpref/init/StaticPrefList.yaml#L19153-L19155),
+ * [use](https://github.com/mozilla-firefox/firefox/blob/FIREFOX_159_0_RELEASE/toolkit/modules/PopupNotifications.sys.mjs#L2040-L2064));
+ * Chromium's dialogs ignore input for the double-click interval, 500 ms off
+ * Windows
+ * ([protector](https://github.com/chromium/chromium/blob/159.0.8154.0/ui/views/input_event_activation_protector.cc#L21-L22),
+ * [interval](https://github.com/chromium/chromium/blob/159.0.8154.0/ui/views/metrics_aura.cc#L15-L22)).
+ */
+export const ASK_GUARD_MS = 500;
+
 export function describeAsk({ verb, target, context }: ApprovalAsk): string {
   return `${verb} ${target} on ${context}`;
 }
@@ -84,12 +98,18 @@ export class Approvals {
   }
 
   /**
-   * Answers the ask on screen. A refusal stays on screen with its words, so
-   * the person can type the name again or deny; an ask that is gone leaves
-   * through the broker's withdrawal.
+   * Answers the ask the dialog showed, by its id: an ask withdrawn since is
+   * gone, and nothing is sent, rather than whichever ask is current when
+   * the call lands. A refusal stays on screen with its words, so the person
+   * can type the name again or deny; an ask that is gone leaves through the
+   * broker's withdrawal.
    */
-  async answer(answer: ApprovalAnswer, typed?: string): Promise<void> {
-    const ask = this.current;
+  async answer(
+    id: ApprovalId,
+    answer: ApprovalAnswer,
+    typed?: string,
+  ): Promise<void> {
+    const ask = this.#asks.find((waiting) => waiting.id === id);
     if (ask === undefined || this.#answering !== undefined) return;
     this.#answering = ask.id;
     this.#failure = undefined;
