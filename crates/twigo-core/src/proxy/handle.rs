@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Weak};
 
 use bytes::Bytes;
-use http::header::{AUTHORIZATION, HOST, ORIGIN, UPGRADE};
+use http::header::{AUTHORIZATION, CONTENT_TYPE, HOST, ORIGIN, UPGRADE};
 use http::request::Parts;
 use http::{HeaderMap, HeaderValue, Request, Response, Uri};
 use http_body_util::{BodyExt, LengthLimitError, Limited};
@@ -316,7 +316,10 @@ fn impersonate(headers: &HeaderMap) -> Option<String> {
 /// What one answer covers for a while: the same token, path, query and body,
 /// whether it upgrades, and the same method, but that a pod's stream is one
 /// whether it comes as a `GET` or a `POST`
-/// ([`Attributes::opens_a_pod_stream`]).
+/// ([`Attributes::opens_a_pod_stream`]); and the request as the person saw
+/// it, so every `Impersonate-*` header, sorted, and the `Content-Type`: the
+/// same bytes acting as someone else, or read as another kind of patch, are
+/// another request.
 fn repeat(holder: &Holder, parts: &Parts, reach: Option<Reach>, body: &Bytes) -> Digest {
     let mut digest = ring::digest::Context::new(&SHA256);
     digest.update(&holder.digest);
@@ -325,14 +328,31 @@ fn repeat(holder: &Holder, parts: &Parts, reach: Option<Reach>, body: &Bytes) ->
         Some(Reach::Proxy) => ("upgrade", parts.method.as_str()),
         None => ("", parts.method.as_str()),
     };
-    for part in [
+    let mut identity: Vec<(&str, &[u8])> = parts
+        .headers
+        .iter()
+        .filter(|(name, _)| name.as_str().starts_with("impersonate-"))
+        .map(|(name, value)| (name.as_str(), value.as_bytes()))
+        .collect();
+    identity.sort_unstable();
+    let content_type = parts
+        .headers
+        .get_all(CONTENT_TYPE)
+        .iter()
+        .map(|value| (CONTENT_TYPE.as_str(), value.as_bytes()));
+    let said = identity
+        .into_iter()
+        .chain(content_type)
+        .flat_map(|(name, value)| [name.as_bytes(), value]);
+    let request = [
         upgrade,
         method,
         parts.uri.path(),
         parts.uri.query().unwrap_or_default(),
-    ] {
+    ];
+    for part in request.map(str::as_bytes).into_iter().chain(said) {
         digest.update(&(part.len() as u64).to_be_bytes());
-        digest.update(part.as_bytes());
+        digest.update(part);
     }
     digest.update(ring::digest::digest(&SHA256, body).as_ref());
     digest

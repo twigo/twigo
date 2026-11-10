@@ -1107,6 +1107,130 @@ async fn once_covers_a_repeat_after_the_proxy_s_own_429() {
     assert_eq!(fake.writes(Method::POST), 1);
 }
 
+/// The 16 proxied streams of `kind-a`, held open by watches of `process`.
+async fn all_streams(process: &Process) -> Vec<(Response<Incoming>, Connection)> {
+    let mut open = Vec::new();
+    for _ in 0..16 {
+        let watch = process
+            .request("GET", "kind-a", "/api/v1/namespaces/a/pods?watch=true")
+            .body(empty())
+            .unwrap();
+        open.push(send(process.at(), watch).await);
+    }
+    open
+}
+
+/// Ends one of `open` and waits until its stream is free.
+async fn free_one(core: &Core, open: &mut Vec<(Response<Incoming>, Connection)>) {
+    open.pop();
+    let clients = core.clients("kind-a").await.unwrap();
+    let freed = tokio::time::timeout(WAIT, async {
+        while clients.usage().borrow().proxied.held != open.len() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    });
+    freed
+        .await
+        .expect("a watch ended by its client frees its stream");
+}
+
+fn as_admin(mut request: Request<Full<Bytes>>) -> Request<Full<Bytes>> {
+    let headers = request.headers_mut();
+    headers.insert("impersonate-user", "system:admin".parse().unwrap());
+    headers.insert("impersonate-group", "system:masters".parse().unwrap());
+    request
+}
+
+fn as_nobody(mut request: Request<Full<Bytes>>) -> Request<Full<Bytes>> {
+    let headers = request.headers_mut();
+    headers.insert("impersonate-user", "nobody".parse().unwrap());
+    request
+}
+
+#[tokio::test]
+async fn a_given_back_once_covers_no_repeat_that_acts_as_someone_else() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+
+    let first = as_nobody(exec(&process, "refuses", "sh", true));
+    let websocket = tokio::spawn(send(process.at(), first));
+    let ask = asked(&mut events).await;
+    assert_eq!(ask.impersonate.as_deref(), Some("nobody"));
+    answer_with(&core, &ask, ApprovalAnswer::Once, None);
+    assert_eq!(websocket.await.unwrap().0.status(), StatusCode::BAD_REQUEST);
+    let repeat = as_admin(exec(&process, "refuses", "sh", false));
+    let spdy = tokio::spawn(send(process.at(), repeat));
+    let again = asked(&mut events).await;
+    assert_eq!(
+        again.impersonate.as_deref(),
+        Some("system:admin, groups system:masters")
+    );
+    answer_with(&core, &again, ApprovalAnswer::Deny, None);
+    assert_eq!(spdy.await.unwrap().0.status(), StatusCode::FORBIDDEN);
+
+    let mut open = all_streams(&process).await;
+    let first = tokio::spawn(send(process.at(), as_nobody(create(&process, "c"))));
+    let ask = asked(&mut events).await;
+    answer_with(&core, &ask, ApprovalAnswer::Once, None);
+    let (response, _connection) = first.await.unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    free_one(&core, &mut open).await;
+    let repeat = tokio::spawn(send(process.at(), as_admin(create(&process, "c"))));
+    let again = asked(&mut events).await;
+    assert_eq!(
+        again.impersonate.as_deref(),
+        Some("system:admin, groups system:masters")
+    );
+    answer_with(&core, &again, ApprovalAnswer::Deny, None);
+    assert_eq!(repeat.await.unwrap().0.status(), StatusCode::FORBIDDEN);
+
+    let as_masters: Vec<String> = fake
+        .seen()
+        .iter()
+        .filter(|seen| seen.headers.get("impersonate-group").is_some())
+        .filter(|seen| !seen.uri.contains("dryRun"))
+        .map(|seen| format!("{} {}", seen.method, seen.uri))
+        .collect();
+    assert!(as_masters.is_empty(), "{as_masters:?}");
+}
+
+#[tokio::test]
+async fn a_given_back_once_covers_no_repeat_of_another_content_type() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+    let patch = |kind: &str| {
+        process
+            .request("PATCH", "kind-a", &format!("{CONFIGMAPS}/c"))
+            .header("content-type", kind)
+            .body(json_body(&json!({ "data": { "k": "w" } })))
+            .unwrap()
+    };
+
+    let mut open = all_streams(&process).await;
+    let first = tokio::spawn(send(process.at(), patch("application/merge-patch+json")));
+    let ask = asked(&mut events).await;
+    answer_with(&core, &ask, ApprovalAnswer::Once, None);
+    let (response, _connection) = first.await.unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    free_one(&core, &mut open).await;
+    let repeat = tokio::spawn(send(
+        process.at(),
+        patch("application/strategic-merge-patch+json"),
+    ));
+    let again = asked(&mut events).await;
+    answer_with(&core, &again, ApprovalAnswer::Deny, None);
+    assert_eq!(repeat.await.unwrap().0.status(), StatusCode::FORBIDDEN);
+    assert_eq!(fake.writes(Method::PATCH), 0);
+}
+
 /// What the catalog says of `kind-a` for its mode, none while it lists none.
 async fn said_of_kind_a(core: &Core) -> Option<(Option<bool>, Option<Environment>, u64)> {
     let contexts = core.catalog.contexts().await;
