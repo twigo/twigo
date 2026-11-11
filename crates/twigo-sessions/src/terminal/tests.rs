@@ -586,10 +586,17 @@ fn a_shell_started_from_a_thread_that_blocks_sigint_still_takes_ctrl_c() {
     .unwrap();
 }
 
+/// A descriptor open on exec, numbered above the one `ls` opens to list
+/// the descriptors, which takes the lowest free number.
+fn leak() -> i32 {
+    let leaked = unsafe { libc::fcntl(2, libc::F_DUPFD, 100) };
+    assert!(leaked >= 100);
+    leaked
+}
+
 #[tokio::test]
 async fn a_descriptor_twigo_holds_open_on_exec_does_not_reach_the_shell() {
-    let leaked = unsafe { libc::dup(2) };
-    assert!(leaked > 2);
+    let leaked = leak();
     let listing = if cfg!(target_os = "macos") {
         "ls /dev/fd"
     } else {
@@ -611,8 +618,7 @@ async fn a_descriptor_twigo_holds_open_on_exec_does_not_reach_the_shell() {
 #[cfg(target_os = "linux")]
 #[test]
 fn a_terminal_starts_where_close_range_is_refused_and_holds_no_descriptor_of_twigo_s() {
-    let leaked = unsafe { libc::dup(2) };
-    assert!(leaked > 2);
+    let leaked = leak();
     let dir = TempDir::new().unwrap();
     let spec = script(dir.path(), "ls /proc/self/fd");
     let held = std::thread::spawn(move || {
