@@ -78,7 +78,7 @@ interface Declared extends Omit<ForwardPort, "local" | "forward"> {
   readonly podPort: number;
 }
 
-/** The Service of the mock that serves three ports; the recorded one serves one. */
+/** The Services of the mock that end in `gateway` serve three ports; the recorded one serves one. */
 const GATEWAY: readonly Declared[] = [
   {
     port: 9090,
@@ -105,6 +105,18 @@ const GATEWAY: readonly Declared[] = [
     podPort: 50051,
   },
 ];
+
+/** The containers of the Deployments that end in `gateway` declare three ports, those of the Services' targets. */
+const GATEWAY_CONTAINER: readonly Declared[] = GATEWAY.map(
+  ({ name, appProtocol, podPort }) => ({
+    port: podPort,
+    name,
+    targetPort: null,
+    container: "app",
+    appProtocol,
+    podPort,
+  }),
+);
 
 interface Live {
   forward: Forward;
@@ -329,16 +341,19 @@ export class MockForwards {
       }
     }
     const manifest = fixture(recorded);
+    const gateway = name.endsWith("gateway");
     const ports =
       target.gvr.resource === "services"
-        ? name.endsWith("gateway")
+        ? gateway
           ? [...GATEWAY]
           : servicePorts(manifest)
-        : containerPorts(
-            manifest.spec.template?.spec.containers ??
-              manifest.spec.containers ??
-              [],
-          );
+        : gateway && target.gvr.resource === "deployments"
+          ? [...GATEWAY_CONTAINER]
+          : containerPorts(
+              manifest.spec.template?.spec.containers ??
+                manifest.spec.containers ??
+                [],
+            );
     if (ports.length === 0) {
       throw new IpcError(
         "invalidInput",

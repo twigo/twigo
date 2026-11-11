@@ -189,6 +189,23 @@ test("a workload's ports are its template's, and one that declares none is refus
     deployment.ports.map(({ port, container }) => [port, container]),
   ).toEqual([[8080, "app"]]);
 
+  const gateway = await answered(
+    backend.invoke("forward_ports", {
+      ...GATEWAY,
+      gvr: DEPLOYMENTS,
+      name: "payments-gateway",
+      namespace: "payments",
+    }),
+  );
+  expect(
+    gateway.ports.map(({ port, name, container }) => [port, name, container]),
+  ).toEqual([
+    [9090, "metrics", "app"],
+    [8080, "http", "app"],
+    [50051, "grpc", "app"],
+  ]);
+  expect(gateway.default).toBe(8080);
+
   const error = await refused(
     backend.invoke("forward_ports", {
       ...SERVICE,
