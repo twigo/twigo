@@ -438,7 +438,7 @@ async fn what_a_tool_writes_in_place_is_offered_once_and_more_comes_in_the_same_
         assert_eq!(first.users, [ARN]);
         assert_eq!(first.contexts, [ARN]);
         assert_eq!(first.target, "~/.kube/config");
-        assert_eq!(first.taken, ["kind-a"]);
+        assert_eq!(first.taken, ["cluster kind-a"]);
         let second = offered(&mut events).await;
         assert_eq!(second.id, first.id);
         assert_eq!(second.users, [ARN, "second"]);
@@ -553,6 +553,84 @@ async fn a_move_takes_each_entry_as_last_seen_though_the_file_dropped_it_since()
             .map(|c| c.name.clone())
             .collect::<Vec<_>>(),
         names(vec!["kind-a", "kind-b", ARN])
+    );
+}
+
+/// The person's files hold the cluster, the user and the context `kind-a`, and
+/// the context `kind-b`.
+#[tokio::test]
+async fn names_are_taken_by_section_and_a_context_moves_only_with_what_it_names() {
+    let setup = Setup::new().await;
+    let (_, mut events) = setup.follow();
+    let written = setup.dir.path().join("written.yaml");
+    std::fs::write(
+        &written,
+        "apiVersion: v1
+kind: Config
+clusters:
+- name: own
+  cluster:
+    server: https://own.example
+- name: kind-a
+  cluster:
+    server: https://other.example
+users:
+- name: own
+  user:
+    token: t
+contexts:
+- name: kind-b-new
+  context:
+    cluster: kind-a
+    user: own
+- name: ns
+  context:
+    cluster: kind-a
+    user: kind-a
+    namespace: ns
+- name: dangling
+  context:
+    cluster: nowhere
+    user: kind-a
+- name: proper
+  context:
+    cluster: own
+    user: own
+",
+    )
+    .unwrap();
+    let session = setup
+        .create(
+            "kind-a",
+            &format!(r#"cat {} > "${{KUBECONFIG%%:*}}""#, quoted(&written)),
+        )
+        .await;
+    setup.run(session.id).await;
+    let offer = offered(&mut events).await;
+    assert_eq!(
+        offer.taken,
+        [
+            "context dangling",
+            "context kind-b-new",
+            "context ns",
+            "cluster kind-a"
+        ]
+    );
+    setup.answer(&offer, KubeconfigOfferAnswer::Move).await;
+    let mine = kube::config::Kubeconfig::from_yaml(&std::fs::read_to_string(setup.mine()).unwrap())
+        .unwrap();
+    let names = |names: Vec<String>| names.join(" ");
+    assert_eq!(
+        names(mine.clusters.iter().map(|c| c.name.clone()).collect()),
+        "kind-a own"
+    );
+    assert_eq!(
+        names(mine.auth_infos.iter().map(|u| u.name.clone()).collect()),
+        "kind-a own"
+    );
+    assert_eq!(
+        names(mine.contexts.iter().map(|c| c.name.clone()).collect()),
+        "kind-a kind-b proper"
     );
 }
 

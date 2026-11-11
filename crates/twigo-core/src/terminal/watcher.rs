@@ -151,6 +151,7 @@ mod tests {
             file: file.clone(),
             sources: Sources::explicit(mine.clone()),
             target: mine,
+            chained: true,
             stopped: AtomicBool::new(false),
         });
         let offers = Offers::new();

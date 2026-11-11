@@ -3,7 +3,7 @@
 //! the user's (ARCHITECTURE 4.6). An offer belongs to its window: it outlives
 //! the terminal's tab, until it is answered or the window goes. A move
 //! appends the entries to the file kubectl writes new ones to, leaving out
-//! the names the user's files hold already.
+//! those that would mean something else among the user's files.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -31,6 +31,9 @@ pub(crate) struct Source {
     pub sources: Sources,
     /// The one of them kubectl writes new entries to.
     pub target: PathBuf,
+    /// Whether the user's files follow `file` in its `KUBECONFIG`, as in a
+    /// kubeconfig terminal.
+    pub chained: bool,
     /// Set once the terminal is gone: an offer that comes after it is not
     /// made, so none outlives a window that went with its terminals.
     pub stopped: AtomicBool,
@@ -90,7 +93,6 @@ impl Offers {
         holds: &Names,
         fresh: &Names,
     ) -> Option<KubeconfigOfferId> {
-        let taken = Names::of_files(source.sources.files());
         let mut state = self.state();
         if source.stopped.load(Ordering::Acquire) {
             return None;
@@ -105,18 +107,19 @@ impl Offers {
         };
         let mut written = state.offers.remove(&id.0).map_or_else(
             || {
-                Written::new(
-                    source
-                        .file
-                        .parent()
-                        .expect("a file in a directory")
-                        .to_owned(),
-                )
+                let base = source.file.parent().expect("a file in a directory");
+                Written::new(base.to_owned(), source.chained)
             },
             |held| held.written,
         );
         written.read(text, holds, fresh);
         let names = written.names();
+        let taken = written
+            .left_out(source.sources.files())
+            .unwrap_or_else(|error| {
+                eprintln!("could not tell what a move of an offer leaves out: {error}");
+                Vec::new()
+            });
         let offer = KubeconfigOffer {
             id,
             terminal: source.label.to_string(),
@@ -129,11 +132,7 @@ impl Offers {
             clusters: names.clusters.iter().cloned().collect(),
             users: names.users.iter().cloned().collect(),
             target: source.sources.named(&source.target),
-            taken: names
-                .all()
-                .intersection(&taken.all())
-                .map(|name| (*name).to_owned())
-                .collect(),
+            taken,
         };
         state.tell(
             &source.window,
@@ -237,16 +236,11 @@ impl State {
 }
 
 impl Held {
-    /// Appends the offered entries the user's files do not name yet to the
-    /// target, each as it was last seen while offered.
+    /// Appends to the target what the offer holds and a move takes, each
+    /// entry as it was last seen while offered.
     pub(crate) fn move_entries(&self) -> Result<(), IpcError> {
         let source = &self.source;
-        let taken = Names::of_files(source.sources.files());
-        let moving = self.written.names().without_any(&taken.all());
-        if moving.is_empty() {
-            return Ok(());
-        }
-        append(&source.target, &self.written, &moving).map_err(|error| {
+        append(&source.target, source.sources.files(), &self.written).map_err(|error| {
             let kind = match error {
                 WriteError::Locked(_) => ErrorKind::Conflict,
                 WriteError::Io(_) | WriteError::Parse(_) => ErrorKind::Internal,

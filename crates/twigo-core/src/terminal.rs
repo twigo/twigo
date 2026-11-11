@@ -227,8 +227,9 @@ impl Core {
                 (Reach::Directory { _held: directory }, file, kubeconfig)
             }
         };
+        let chained = kind == TerminalKind::Kubeconfig;
         let (watcher, source) = self
-            .watch_offers(window, &label, &context, &file, sources)
+            .watch_offers(window, &label, &context, &file, sources, chained)
             .unzip();
         let env = environment::environment(&login, &kubeconfig, twigo_env::utf8_locale);
         let cwd = login
@@ -258,7 +259,8 @@ impl Core {
 
     /// Follows `file` for offers of `window`'s terminal, while the user's
     /// files give kubectl somewhere to write new entries: the watch, and
-    /// the source it offers from, whose session the caller sets.
+    /// the source it offers from, whose session the caller sets. The user's
+    /// files follow `file` in its `KUBECONFIG` where it is `chained`.
     fn watch_offers(
         &self,
         window: &str,
@@ -266,6 +268,7 @@ impl Core {
         context: &str,
         file: &Path,
         sources: Sources,
+        chained: bool,
     ) -> Option<(Watcher, Arc<Source>)> {
         let target = sources.target()?.to_owned();
         let written = match std::fs::read_to_string(file) {
@@ -283,6 +286,7 @@ impl Core {
             file: file.to_owned(),
             sources,
             target,
+            chained,
             stopped: AtomicBool::new(false),
         });
         let offers = Arc::clone(&self.terminals.offers);

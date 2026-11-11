@@ -3,7 +3,7 @@
 //! rename, the file's comments and layout kept, their relative paths made
 //! absolute.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, btree_map};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -11,7 +11,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use kube::config::{Kubeconfig, KubeconfigError};
-use yaml_edit::{Mapping, Sequence, YamlFile};
+use yaml_edit::{Mapping, Sequence, YamlFile, yaml_eq};
 
 use super::write::{Lock, WriteError, replace};
 
@@ -49,32 +49,8 @@ impl Names {
         })
     }
 
-    /// Those of each of `files` that exists and parses.
-    pub fn of_files(files: &[PathBuf]) -> Self {
-        let mut names = Self::default();
-        for file in files {
-            let Ok(text) = fs::read_to_string(file) else {
-                continue;
-            };
-            if let Ok(read) = Self::of(&text) {
-                names.clusters.extend(read.clusters);
-                names.users.extend(read.users);
-                names.contexts.extend(read.contexts);
-            }
-        }
-        names
-    }
-
     pub fn is_empty(&self) -> bool {
         self.clusters.is_empty() && self.users.is_empty() && self.contexts.is_empty()
-    }
-
-    /// Every name, whatever its section.
-    pub fn all(&self) -> BTreeSet<&str> {
-        self.sections()
-            .into_iter()
-            .flat_map(|(_, names)| names.iter().map(String::as_str))
-            .collect()
     }
 
     /// Those that `other` does not hold, section by section.
@@ -86,21 +62,6 @@ impl Names {
             clusters: less(&self.clusters, &other.clusters),
             users: less(&self.users, &other.users),
             contexts: less(&self.contexts, &other.contexts),
-        }
-    }
-
-    /// Those not among `names`, whatever their section.
-    pub fn without_any(&self, names: &BTreeSet<&str>) -> Self {
-        let keep = |mine: &BTreeSet<String>| {
-            mine.iter()
-                .filter(|name| !names.contains(name.as_str()))
-                .cloned()
-                .collect()
-        };
-        Self {
-            clusters: keep(&self.clusters),
-            users: keep(&self.users),
-            contexts: keep(&self.contexts),
         }
     }
 
@@ -127,15 +88,24 @@ impl Names {
 pub struct Written {
     /// The file's directory, which its relative paths are against.
     base: PathBuf,
+    /// Whether the person's files follow the file in the terminal's
+    /// `KUBECONFIG`, as in a kubeconfig terminal, so a name it lacks is
+    /// theirs there.
+    chained: bool,
+    /// The file as last read, for what its contexts name that is not
+    /// offered.
+    last: Arc<str>,
     clusters: BTreeMap<String, Arc<str>>,
     users: BTreeMap<String, Arc<str>>,
     contexts: BTreeMap<String, Arc<str>>,
 }
 
 impl Written {
-    pub fn new(base: PathBuf) -> Self {
+    pub fn new(base: PathBuf, chained: bool) -> Self {
         Self {
             base,
+            chained,
+            last: "".into(),
             clusters: BTreeMap::new(),
             users: BTreeMap::new(),
             contexts: BTreeMap::new(),
@@ -158,6 +128,7 @@ impl Written {
                 }
             }
         }
+        self.last = text;
     }
 
     pub fn names(&self) -> Names {
@@ -167,6 +138,128 @@ impl Written {
             users: names(&self.users),
             contexts: names(&self.contexts),
         }
+    }
+
+    /// What a move would leave out against the person's `files` as they are
+    /// now, in words a person reads as they are: `context prod`.
+    pub fn left_out(&self, files: &[PathBuf]) -> Result<Vec<String>, WriteError> {
+        let read: Vec<(&Path, String)> = files
+            .iter()
+            .filter_map(|file| Some((file.as_path(), fs::read_to_string(file).ok()?)))
+            .collect();
+        let theirs = Entries::of_files(read.iter().map(|(file, text)| (*file, text.as_str())));
+        Ok(self.plan(&theirs)?.left)
+    }
+
+    /// Names match by section, as kubectl's do. A context moves only where
+    /// what it names, the cluster and the user, either moves with it or is,
+    /// in the person's files, the entry the terminal saw, so it means there
+    /// what it meant in the terminal; a cluster or a user moves where its
+    /// name is free, unless only contexts that stay out name it.
+    fn plan(&self, theirs: &Entries) -> Result<Plan, WriteError> {
+        let offered = self.offered()?;
+        let mut last = Entries::default();
+        if let Some(config) = mapping(&parse(&self.last)?) {
+            last.add(&config, &self.base);
+        }
+        let free = |section: &str| -> BTreeSet<&String> {
+            let theirs = theirs.section(section);
+            offered
+                .section(section)
+                .keys()
+                .filter(|name| !theirs.contains_key(*name))
+                .collect()
+        };
+        let free_clusters = free("clusters");
+        let free_users = free("users");
+        let seen = |section: &str, name: &str| {
+            offered
+                .section(section)
+                .get(name)
+                .or_else(|| last.section(section).get(name))
+                .or_else(|| {
+                    self.chained
+                        .then(|| theirs.section(section).get(name))
+                        .flatten()
+                })
+        };
+        let holds = |section: &str, free: &BTreeSet<&String>, name: &Option<String>| {
+            let Some(name) = name.as_deref().filter(|name| !name.is_empty()) else {
+                return true;
+            };
+            free.iter().any(|free| *free == name)
+                || matches!(
+                    (theirs.section(section).get(name), seen(section, name)),
+                    (Some(theirs), Some(seen)) if yaml_eq(theirs, seen)
+                )
+        };
+        let contexts: Vec<Naming> = offered
+            .contexts
+            .iter()
+            .map(|(name, entry)| {
+                let (cluster, user) = (named(entry, "cluster"), named(entry, "user"));
+                let moves = !theirs.contexts.contains_key(name)
+                    && holds("clusters", &free_clusters, &cluster)
+                    && holds("users", &free_users, &user);
+                Naming {
+                    name,
+                    moves,
+                    cluster,
+                    user,
+                }
+            })
+            .collect();
+        let mut plan = Plan::default();
+        for context in &contexts {
+            if context.moves {
+                let entry = offered.contexts[context.name].clone();
+                plan.moving.push(("contexts", entry));
+            } else {
+                plan.left.push(format!("context {}", context.name));
+            }
+        }
+        for (section, word, free) in [
+            ("clusters", "cluster", &free_clusters),
+            ("users", "user", &free_users),
+        ] {
+            for (name, entry) in offered.section(section) {
+                let naming: Vec<bool> = contexts
+                    .iter()
+                    .filter(|context| context.names(section) == Some(name))
+                    .map(|context| context.moves)
+                    .collect();
+                if free.contains(name) && (naming.is_empty() || naming.contains(&true)) {
+                    plan.moving.push((section, entry.clone()));
+                } else {
+                    plan.left.push(format!("{word} {name}"));
+                }
+            }
+        }
+        Ok(plan)
+    }
+
+    /// The offered entries, as last seen, against the file's directory.
+    fn offered(&self) -> Result<Entries, WriteError> {
+        let mut read: Vec<(Arc<str>, Mapping)> = Vec::new();
+        let mut offered = Entries::default();
+        for (section, entries) in self.sections() {
+            for (name, text) in entries {
+                let from = match read.iter().find(|(seen, _)| Arc::ptr_eq(seen, text)) {
+                    Some((_, from)) => from.clone(),
+                    None => {
+                        let from = mapping(&parse(text)?)
+                            .ok_or_else(|| WriteError::Parse("it holds no mapping".to_owned()))?;
+                        read.push((Arc::clone(text), from.clone()));
+                        from
+                    }
+                };
+                if let Some(entry) = entry(&from, section, name) {
+                    absolute(&entry, section, &self.base);
+                    offered.section_mut(section).insert(name.clone(), entry);
+                }
+            }
+        }
+        Ok(offered)
     }
 
     fn sections(&self) -> [(&'static str, &BTreeMap<String, Arc<str>>); 3] {
@@ -186,36 +279,110 @@ impl Written {
     }
 }
 
-/// Appends to `target` the entries of `written` that `names` names, each as
-/// it was last seen. A `target` that does not exist is created at 0600, as
-/// kubectl creates one, in a directory created as kubectl's lock creates
-/// it.
-pub fn append(target: &Path, written: &Written, names: &Names) -> Result<(), WriteError> {
-    let mut read: Vec<(Arc<str>, Mapping)> = Vec::new();
-    let mut moving = Vec::new();
-    for ((section, entries), (_, wanted)) in written.sections().into_iter().zip(names.sections()) {
-        for (name, text) in entries.iter().filter(|(name, _)| wanted.contains(*name)) {
-            let from = match read.iter().find(|(seen, _)| Arc::ptr_eq(seen, text)) {
-                Some((_, from)) => from.clone(),
-                None => {
-                    let from = mapping(&parse(text)?)
-                        .ok_or_else(|| WriteError::Parse("it holds no mapping".to_owned()))?;
-                    read.push((Arc::clone(text), from.clone()));
-                    from
-                }
+/// An offered context, and whether it moves.
+struct Naming<'a> {
+    name: &'a String,
+    moves: bool,
+    cluster: Option<String>,
+    user: Option<String>,
+}
+
+impl Naming<'_> {
+    /// The cluster or the user it names.
+    fn names(&self, section: &str) -> Option<&String> {
+        if section == "clusters" {
+            self.cluster.as_ref()
+        } else {
+            self.user.as_ref()
+        }
+    }
+}
+
+/// What a move appends, and what it leaves out in words.
+#[derive(Default)]
+struct Plan {
+    moving: Vec<(&'static str, Mapping)>,
+    left: Vec<String>,
+}
+
+/// Entries by section and name, each against its file's directory.
+#[derive(Default)]
+struct Entries {
+    clusters: BTreeMap<String, Mapping>,
+    users: BTreeMap<String, Mapping>,
+    contexts: BTreeMap<String, Mapping>,
+}
+
+impl Entries {
+    /// Those of the files, in their order, as kubectl merges them: the first
+    /// file to name an entry wins. One that does not parse is skipped.
+    fn of_files<'a>(files: impl IntoIterator<Item = (&'a Path, &'a str)>) -> Self {
+        let mut entries = Self::default();
+        for (file, text) in files {
+            if let Some(config) = parse(text).ok().as_ref().and_then(mapping) {
+                entries.add(&config, file.parent().unwrap_or(Path::new("")));
+            }
+        }
+        entries
+    }
+
+    /// The entries of `config` whose names it lacks.
+    fn add(&mut self, config: &Mapping, base: &Path) {
+        for section in ["clusters", "users", "contexts"] {
+            let Some(list) = config.get_sequence(section) else {
+                continue;
             };
-            if let Some(entry) = entry(&from, section, name) {
-                moving.push((section, entry));
+            for entry in list.values().filter_map(|node| node.as_mapping().cloned()) {
+                let Some(name) = name(&entry) else { continue };
+                if let btree_map::Entry::Vacant(vacant) = self.section_mut(section).entry(name) {
+                    absolute(&entry, section, base);
+                    vacant.insert(entry);
+                }
             }
         }
     }
+
+    fn section(&self, section: &str) -> &BTreeMap<String, Mapping> {
+        match section {
+            "clusters" => &self.clusters,
+            "users" => &self.users,
+            _ => &self.contexts,
+        }
+    }
+
+    fn section_mut(&mut self, section: &str) -> &mut BTreeMap<String, Mapping> {
+        match section {
+            "clusters" => &mut self.clusters,
+            "users" => &mut self.users,
+            _ => &mut self.contexts,
+        }
+    }
+}
+
+/// What a context names under `key`: its cluster or its user.
+fn named(context: &Mapping, key: &str) -> Option<String> {
+    Some(
+        context
+            .get_mapping("context")?
+            .get(key)?
+            .as_scalar()?
+            .as_string(),
+    )
+}
+
+/// Appends to `target` what `written` offers and a move takes against the
+/// person's `files`, `target` among them, as they are under its lock, so a
+/// name written into it meanwhile is not written twice, which client-go
+/// refuses. A `target` that does not exist is created at 0600, as kubectl
+/// creates one, in a directory created as kubectl's lock creates it.
+pub fn append(target: &Path, files: &[PathBuf], written: &Written) -> Result<(), WriteError> {
     if let Some(dir) = target.parent() {
         fs::create_dir_all(dir)?;
     }
     let _lock = Lock::take(target)?;
     // Written in place of the file a symlink names, as kubectl's write
     // through the link reaches it.
-    let (target, text) = match fs::canonicalize(target) {
+    let (resolved, text) = match fs::canonicalize(target) {
         Ok(resolved) => {
             let text = fs::read_to_string(&resolved)?;
             (resolved, text)
@@ -225,6 +392,20 @@ pub fn append(target: &Path, written: &Written, names: &Names) -> Result<(), Wri
         }
         Err(error) => return Err(error.into()),
     };
+    let read: Vec<(&Path, String)> = files
+        .iter()
+        .filter_map(|file| {
+            if file == target {
+                return Some((file.as_path(), text.clone()));
+            }
+            Some((file.as_path(), fs::read_to_string(file).ok()?))
+        })
+        .collect();
+    let theirs = Entries::of_files(read.iter().map(|(file, text)| (*file, text.as_str())));
+    let plan = written.plan(&theirs)?;
+    if plan.moving.is_empty() {
+        return Ok(());
+    }
     let mut file = parse(&text)?;
     if mapping(&file).is_none() && Names::of(&text).is_ok_and(|names| names.is_empty()) {
         // Whitespace and comments alone, which kubectl reads as an empty
@@ -237,11 +418,10 @@ pub fn append(target: &Path, written: &Written, names: &Names) -> Result<(), Wri
         file = parse(&format!("{text}{separator}{EMPTY}"))?;
     }
     let into = mapping(&file).ok_or_else(|| WriteError::Parse("it holds no mapping".to_owned()))?;
-    for (section, entry) in moving {
-        absolute(&entry, section, &written.base);
+    for (section, entry) in plan.moving {
         sequence(&into, section).push(entry);
     }
-    replace(&target, &file.to_string())
+    replace(&resolved, &file.to_string())
 }
 
 fn parse(text: &str) -> Result<YamlFile, WriteError> {
@@ -362,8 +542,16 @@ current-context: arn:aws:eks:eu-west-1:1:cluster/a
 
     /// `WRITTEN`, with `names` offered, its paths against `base`.
     fn written(base: &Path, names: &Names) -> Written {
-        let mut written = Written::new(base.to_owned());
+        let mut written = Written::new(base.to_owned(), true);
         written.read(WRITTEN, &Names::of(WRITTEN).unwrap(), names);
+        written
+    }
+
+    /// A terminal's file of `text`, its every name offered.
+    fn offered(text: &str, base: &Path, chained: bool) -> Written {
+        let names = Names::of(text).unwrap();
+        let mut written = Written::new(base.to_owned(), chained);
+        written.read(text, &names, &names);
         written
     }
 
@@ -394,7 +582,12 @@ current-context: arn:aws:eks:eu-west-1:1:cluster/a
         fs::write(&target, mine).unwrap();
         let base = Path::new("/twigo/terminals/1");
         let moving = names(&[ARN], &[ARN, "plugin"], &[ARN]);
-        append(&target, &written(base, &moving), &moving).unwrap();
+        append(
+            &target,
+            std::slice::from_ref(&target),
+            &written(base, &moving),
+        )
+        .unwrap();
         let written = fs::read_to_string(&target).unwrap();
         assert!(written.starts_with("# mine\napiVersion: v1\nclusters:\n# kind\n- cluster:\n    server: https://127.0.0.1:6443\n  name: kind-a\n- cluster:\n"), "{written}");
         assert!(written.contains("current-context: kind-a\n"), "{written}");
@@ -433,7 +626,12 @@ current-context: arn:aws:eks:eu-west-1:1:cluster/a
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join(".kube").join("config");
         let moving = names(&["other"], &[], &[]);
-        append(&target, &written(dir.path(), &moving), &moving).unwrap();
+        append(
+            &target,
+            std::slice::from_ref(&target),
+            &written(dir.path(), &moving),
+        )
+        .unwrap();
         let written = fs::read_to_string(&target).unwrap();
         assert_eq!(
             written,
@@ -450,7 +648,12 @@ current-context: arn:aws:eks:eu-west-1:1:cluster/a
             let target = dir.path().join("config");
             fs::write(&target, empty).unwrap();
             let moving = names(&["other"], &[], &[]);
-            append(&target, &written(dir.path(), &moving), &moving).unwrap();
+            append(
+                &target,
+                std::slice::from_ref(&target),
+                &written(dir.path(), &moving),
+            )
+            .unwrap();
             let written = fs::read_to_string(&target).unwrap();
             assert!(written.starts_with(empty.trim_end()), "{written:?}");
             assert_eq!(
@@ -462,13 +665,159 @@ current-context: arn:aws:eks:eu-west-1:1:cluster/a
     }
 
     #[test]
+    fn names_match_by_section() {
+        let dir = tempfile::tempdir().unwrap();
+        let mine = dir.path().join("config");
+        fs::write(
+            &mine,
+            "clusters:\n- name: prod\n  cluster:\n    server: https://a\n",
+        )
+        .unwrap();
+        let written = offered(
+            "clusters:\n- name: eks\n  cluster:\n    server: https://eks\nusers:\n- name: eks\n  user:\n    token: t\ncontexts:\n- name: prod\n  context:\n    cluster: eks\n    user: eks\n",
+            Path::new("/terminal"),
+            true,
+        );
+        assert!(
+            written
+                .left_out(std::slice::from_ref(&mine))
+                .unwrap()
+                .is_empty()
+        );
+        append(&mine, std::slice::from_ref(&mine), &written).unwrap();
+        assert_eq!(
+            Names::of(&fs::read_to_string(&mine).unwrap()).unwrap(),
+            names(&["eks", "prod"], &["eks"], &["prod"])
+        );
+    }
+
+    #[test]
+    fn a_context_moves_only_where_the_person_s_entries_it_names_are_those_the_terminal_saw() {
+        let dir = tempfile::tempdir().unwrap();
+        let (home, terminal) = (dir.path().join("home"), dir.path().join("terminal"));
+        fs::create_dir_all(&home).unwrap();
+        let mine = home.join("config");
+        fs::write(
+            &mine,
+            "clusters:
+- name: same
+  cluster:
+    server: https://same
+    insecure-skip-tls-verify: true
+- name: elsewhere
+  cluster:
+    server: https://elsewhere
+    certificate-authority: ca.pem
+- name: home-ca
+  cluster:
+    server: https://home
+    certificate-authority: ca.pem
+users:
+- name: me
+  user:
+    token: t
+",
+        )
+        .unwrap();
+        let text = &format!(
+            "clusters:
+- cluster:
+    insecure-skip-tls-verify: true
+    server: 'https://same'
+  name: same
+- name: elsewhere
+  cluster:
+    server: https://elsewhere
+    certificate-authority: ca.pem
+- name: home-ca
+  cluster:
+    server: https://home
+    certificate-authority: {}
+users:
+- name: only-b
+  user:
+    token: b
+contexts:
+- name: a
+  context:
+    cluster: same
+    user: me
+- name: b
+  context:
+    cluster: elsewhere
+    user: only-b
+- name: c
+  context:
+    cluster: home-ca
+    user: me
+",
+            home.join("ca.pem").display()
+        );
+        let written = offered(text, &terminal, true);
+        assert_eq!(
+            written.left_out(std::slice::from_ref(&mine)).unwrap(),
+            [
+                "context b",
+                "cluster elsewhere",
+                "cluster home-ca",
+                "cluster same",
+                "user only-b"
+            ]
+        );
+        let proxied = offered(text, &terminal, false);
+        assert_eq!(
+            proxied.left_out(std::slice::from_ref(&mine)).unwrap(),
+            [
+                "context a",
+                "context b",
+                "context c",
+                "cluster elsewhere",
+                "cluster home-ca",
+                "cluster same",
+                "user only-b"
+            ]
+        );
+        append(&mine, std::slice::from_ref(&mine), &written).unwrap();
+        assert_eq!(
+            Names::of(&fs::read_to_string(&mine).unwrap()).unwrap(),
+            names(&["elsewhere", "home-ca", "same"], &["me"], &["a", "c"])
+        );
+    }
+
+    #[test]
+    fn a_name_written_into_the_target_after_the_offer_is_not_appended_twice() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("config");
+        let moving = names(&["other"], &[], &[]);
+        let written = written(dir.path(), &moving);
+        assert!(
+            written
+                .left_out(std::slice::from_ref(&target))
+                .unwrap()
+                .is_empty()
+        );
+        fs::write(
+            &target,
+            "clusters:\n- name: other\n  cluster:\n    server: https://meanwhile\n",
+        )
+        .unwrap();
+        append(&target, std::slice::from_ref(&target), &written).unwrap();
+        let text = fs::read_to_string(&target).unwrap();
+        assert_eq!(text.matches("name: other").count(), 1, "{text}");
+    }
+
+    #[test]
     fn a_lock_another_writer_holds_refuses_the_write_and_stays() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("config");
         fs::write(&target, "apiVersion: v1\n").unwrap();
         fs::write(dir.path().join("config.lock"), "").unwrap();
         let moving = names(&["other"], &[], &[]);
-        let refused = append(&target, &written(dir.path(), &moving), &moving);
+        let refused = append(
+            &target,
+            std::slice::from_ref(&target),
+            &written(dir.path(), &moving),
+        );
         assert!(matches!(refused, Err(WriteError::Locked(_))), "{refused:?}");
         assert!(dir.path().join("config.lock").exists());
         assert_eq!(fs::read_to_string(&target).unwrap(), "apiVersion: v1\n");
