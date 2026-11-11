@@ -526,8 +526,12 @@ async fn a_taken_local_port_answers_busy_with_a_free_one_and_a_start_on_it_works
     .await;
     answered(free).await;
     let ports = core.forward_ports(cluster.pod()).await.unwrap();
-    assert_eq!(ports.ports[0].local, 8080, "a detour is not remembered");
+    assert_eq!(ports.ports[0].local, free, "the forward's own port");
     assert_eq!(ports.ports[0].forward, Some(started.id));
+    core.forward_remove(started.id).unwrap();
+    let ports = core.forward_ports(cluster.pod()).await.unwrap();
+    assert_eq!(ports.ports[0].local, 8080, "a detour is not remembered");
+    assert_eq!(ports.ports[0].forward, None);
     cluster.delete().await;
 }
 

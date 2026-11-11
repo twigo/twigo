@@ -103,9 +103,9 @@ fn containers(spec: &Value) -> Vec<ForwardPort> {
         .collect()
 }
 
-/// How early a name has its port chosen when none is: one that says HTTP
-/// first, an unnamed one next, then the others, and last those that say
-/// metrics, health or debug, which people look at less.
+/// How early a name has its port chosen when none is: one that says HTTP or
+/// web first, then the others in the spec's order, named or not, and last
+/// those that say metrics, health or debug, which people look at less.
 fn rank(name: Option<&str>) -> u8 {
     let Some(name) = name else {
         return 1;
@@ -115,11 +115,11 @@ fn rank(name: Option<&str>) -> u8 {
         .iter()
         .any(|word| name.contains(word))
     {
-        3
+        2
     } else if name.contains("http") || name.contains("web") {
         0
     } else {
-        2
+        1
     }
 }
 
@@ -251,6 +251,20 @@ mod tests {
             default(&[port(8080, Some("one")), port(8081, Some("two"))]),
             8080,
             "the first of equals"
+        );
+        assert_eq!(
+            default(&[port(9090, Some("grpc")), port(8080, None)]),
+            9090,
+            "an unnamed port has no rank of its own"
+        );
+        assert_eq!(
+            default(&[port(8080, None), port(9090, Some("grpc"))]),
+            8080,
+            "the spec's order, named or not"
+        );
+        assert_eq!(
+            default(&[port(8080, None), port(9090, Some("web-admin"))]),
+            9090
         );
     }
 

@@ -461,6 +461,40 @@ async fn a_port_that_has_a_forward_answers_with_it_started_again_and_moved_when_
 }
 
 #[tokio::test]
+async fn a_resume_leaves_a_forward_that_waits_for_its_first_connection_as_it_is() {
+    let dir = tempfile::tempdir().unwrap();
+    let local = free();
+    keep(
+        dir.path(),
+        &Saved {
+            forwards: vec![forward_of(1, 8080, local, true)],
+            ports: Vec::new(),
+        },
+    );
+    let core = running(dir.path());
+    core.catalog.contexts().await;
+    assert_eq!(forward_state(&core, 1).await, ForwardState::Restored);
+
+    let ForwardStarted::Started { forward } = core
+        .forward_resume(ResumeForward {
+            id: ForwardId(1),
+            local: None,
+        })
+        .await
+        .unwrap()
+    else {
+        panic!("a resume answers with the forward");
+    };
+    assert_eq!(forward.state, ForwardState::Restored);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        forward_state(&core, 1).await,
+        ForwardState::Restored,
+        "nothing asked its cluster"
+    );
+}
+
+#[tokio::test]
 async fn a_later_follower_of_a_window_replaces_the_earlier() {
     let dir = tempfile::tempdir().unwrap();
     keep(
@@ -506,6 +540,49 @@ fn a_detour_is_not_remembered_and_any_other_start_is() {
     table.detours.insert(key.clone(), 8081);
     table.remember(&key, &target, 9001);
     assert_eq!(table.remembered[&key].local, 9001, "not the offered port");
+}
+
+#[test]
+fn a_port_with_a_forward_shows_the_forwards_local_port_and_any_other_the_one_a_start_takes() {
+    let mut table = Table::default();
+    let target = target("kind-plain", "api");
+    let mut forward = shown();
+    forward.local = 18081;
+    table.entries.insert(
+        1,
+        Entry {
+            base: forward,
+            context: "kind-plain".to_owned(),
+            run: None,
+            unbound: None,
+            refused: false,
+        },
+    );
+    for port in [8080, 9090] {
+        table.remembered.insert(
+            Key::of(&target, port),
+            Remembered {
+                target: target.clone(),
+                port,
+                local: 18080,
+            },
+        );
+    }
+    let port = |number| ForwardPort {
+        port: number,
+        name: None,
+        target_port: None,
+        container: None,
+        app_protocol: None,
+        local: 0,
+        forward: None,
+    };
+    let mut declared = [port(8080), port(9090), port(7070)];
+    table.describe(&target, &mut declared);
+    assert_eq!(
+        declared.map(|port| (port.local, port.forward)),
+        [(18081, Some(ForwardId(1))), (18080, None), (7070, None)]
+    );
 }
 
 fn status(sent: u64, state: ForwardState) -> data::Status {

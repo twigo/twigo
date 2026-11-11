@@ -16,8 +16,8 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep_until};
 use twigo_cache::hub::Resource;
 use twigo_ipc::{
-    BusyWhy, ErrorKind, Forward, ForwardEvent, ForwardId, ForwardPorts, ForwardStarted,
-    ForwardState, ForwardTarget, IpcError, ResumeForward, StartForward,
+    BusyWhy, ErrorKind, Forward, ForwardEvent, ForwardId, ForwardPort, ForwardPorts,
+    ForwardStarted, ForwardState, ForwardTarget, IpcError, ResumeForward, StartForward,
 };
 use twigo_kube::client::Actor;
 use twigo_policy::{Attributes, Policy};
@@ -147,6 +147,25 @@ impl Table {
                 Key::of(target, entry.base.port) == *key
             })
             .map(|(id, _)| ForwardId(*id))
+    }
+
+    /// Fills the `local` and the `forward` of the ports `target` declares:
+    /// a forward's own local port where the port has a forward, else the one
+    /// a start takes.
+    fn describe(&self, target: &ForwardTarget, declared: &mut [ForwardPort]) {
+        for port in declared {
+            let key = Key::of(target, port.port);
+            match self.find(&key) {
+                Some(id) => {
+                    port.forward = Some(id);
+                    port.local = self.entries[&id.0].base.local;
+                }
+                None => {
+                    port.local =
+                        ports::local(self.remembered.get(&key).map(|r| r.local), port.port);
+                }
+            }
+        }
     }
 
     fn saved(&self, space: &str) -> Saved {
@@ -375,14 +394,7 @@ impl Core {
             data::Target::new(&target.gvr, target.namespace.clone(), target.name.clone())?.label();
         let object = self.read_target(&context, &target).await?;
         let mut declared = ports::declared(kind, &target.name, &object)?;
-        {
-            let table = self.forwards.table();
-            for port in &mut declared {
-                let key = Key::of(&target, port.port);
-                port.local = ports::local(table.remembered.get(&key).map(|r| r.local), port.port);
-                port.forward = table.find(&key);
-            }
-        }
+        self.forwards.table().describe(&target, &mut declared);
         let default = ports::default(&declared);
         Ok(ForwardPorts {
             kind: kind.to_owned(),
@@ -567,7 +579,9 @@ impl Core {
             if let Some(run) = &entry.run
                 && wanted == base.local
             {
-                run.data.restart();
+                if matches!(run.status.borrow().state, ForwardState::Failed { .. }) {
+                    run.data.restart();
+                }
                 entry.refused = false;
                 let forward = Box::new(entry.forward());
                 return Ok(ForwardStarted::Started { forward });
