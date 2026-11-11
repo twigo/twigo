@@ -455,6 +455,47 @@ test("Restart asks again and starts a new session in the same tab", async () => 
   expect(panelTabs()).toEqual([uri]);
 });
 
+test("a tab closed while Restart waits for its plan stays closed, and the session the plan ends with is closed", async () => {
+  const { workbench, tabs, backend, open } = await mounted("shellNoShell");
+  await open("qa", ONE);
+  const uri = execUri(RUNNING);
+  const original = workbench.operations.run.bind(workbench.operations);
+  let answer: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => {
+    answer = resolve;
+  });
+  const sessions: number[] = [];
+  vi.spyOn(workbench.operations, "run").mockImplementation(
+    async (plan, options) => {
+      await gate;
+      const outcome = await original(plan, options);
+      if (outcome.state === "session") sessions.push(outcome.id);
+      return outcome;
+    },
+  );
+  const closed: unknown[] = [];
+  const invoke = backend.invoke.bind(backend);
+  vi.spyOn(backend, "invoke").mockImplementation(
+    (command: string, request: unknown) => {
+      if (command === "shell_close") closed.push(request);
+      return invoke(command as never, request as never);
+    },
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Restart Shell" }));
+  await settle(4);
+  act(() => {
+    workbench.editors.close(uri);
+  });
+  await settle(4);
+  answer();
+  await settle(10);
+
+  expect(panelTabs()).toEqual([]);
+  expect(tabs.has(uri)).toBe(false);
+  expect(sessions).toHaveLength(1);
+  expect(closed).toContain(sessions[0]);
+});
+
 test("a shell that waits says so in the tab, with the cluster's sessions", async () => {
   const { open } = await mounted("shellQueued");
   await open("qa", ONE);

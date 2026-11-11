@@ -6,6 +6,7 @@ import { useChanges } from "@twigo/workbench";
 import { EXEC_SCHEME, execUri, parseExecUri, type ExecInput } from "../uri";
 import { ExecActions } from "./ExecActions";
 import { ExecEditor } from "./ExecEditor";
+import { watchClose } from "../xterm/closed";
 import { terminalOptions } from "../xterm/options";
 import { registerPicks } from "../xterm/picks";
 import { canShell } from "./kinds";
@@ -70,16 +71,28 @@ export function registerExec(workbench: Workbench, tabs: ExecTabs): void {
 
   /** Plans a shell, and opens its tab at `input`'s URI once the run answers with a session. */
   const start = async (input: ExecInput): Promise<void> => {
-    const outcome = await operations.run(
-      {
-        action: "shell",
-        target: targetOf(input, input.container),
-        kind: input.attach === true ? "attach" : "shell",
-      },
-      { icon: SquareTerminal },
-    );
-    if (outcome.state !== "session") return;
     const uri = execUri(input);
+    const watch = watchClose(editors, uri);
+    let outcome;
+    try {
+      outcome = await operations.run(
+        {
+          action: "shell",
+          target: targetOf(input, input.container),
+          kind: input.attach === true ? "attach" : "shell",
+        },
+        { icon: SquareTerminal },
+      );
+    } finally {
+      watch.stop();
+    }
+    if (outcome.state !== "session") return;
+    if (watch.closed) {
+      backend.invoke("shell_close", outcome.id).catch((error: unknown) => {
+        workbench.report(error);
+      });
+      return;
+    }
     tabs.start(uri, input, {
       id: outcome.id,
       tty: outcome.tty,
