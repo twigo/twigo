@@ -53,6 +53,12 @@ fn main() {
         "exec_trust",
         "approvals_watch",
         "approval_answer",
+        "forward_ports",
+        "forward_start",
+        "forward_stop",
+        "forward_resume",
+        "forward_remove",
+        "forwards_watch",
         "url_open",
     ]);
     let mut attributes = tauri_build::Attributes::new().app_manifest(commands);

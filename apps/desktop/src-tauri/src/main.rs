@@ -20,12 +20,13 @@ use twigo_env::Environment;
 use twigo_ipc::{
     AccessQuery, Ack, AnswerApproval, AnswerKubeconfigOffer, ApplyPreviewed, ApplyRequest,
     ApprovalEvent, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ErrorKind,
-    ExecReview, Execute, GetValues, IpcError, KeyboardLayout, KubeconfigOffer,
-    KubeconfigOfferEvent, ListBatch, ListQuery, LogBatch, NewTerminal, ObjectBatch, OpenLogs,
-    OpenObject, OpenShell, OperationEvent, Plan, PlanId, PlanRequest, SchemaQuery,
-    SetContextEnvironment, SetContextMode, SetLogSource, SetLogView, SetLogWindow, SetParts,
-    SetWindow, ShellAck, ShellContainers, ShellEnvironment, ShellInput, ShellPod, ShellResize,
-    Space, StateEntry, StateSnapshot, SubscriptionId, TerminalSession,
+    ExecReview, Execute, Forward, ForwardEvent, ForwardId, ForwardPorts, ForwardStarted,
+    ForwardTarget, GetValues, IpcError, KeyboardLayout, KubeconfigOffer, KubeconfigOfferEvent,
+    ListBatch, ListQuery, LogBatch, NewTerminal, ObjectBatch, OpenLogs, OpenObject, OpenShell,
+    OperationEvent, Plan, PlanId, PlanRequest, ResumeForward, SchemaQuery, SetContextEnvironment,
+    SetContextMode, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck,
+    ShellContainers, ShellEnvironment, ShellInput, ShellPod, ShellResize, Space, StartForward,
+    StateEntry, StateSnapshot, SubscriptionId, TerminalSession,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
 
@@ -673,6 +674,56 @@ fn approval_answer(
 }
 
 #[tauri::command]
+async fn forward_ports(
+    app: State<'_, App>,
+    request: ForwardTarget,
+) -> Result<ForwardPorts, IpcError> {
+    app.core.forward_ports(request).await
+}
+
+#[tauri::command]
+async fn forward_start(
+    app: State<'_, App>,
+    request: StartForward,
+) -> Result<ForwardStarted, IpcError> {
+    app.core.forward_start(request).await
+}
+
+#[tauri::command]
+fn forward_stop(app: State<'_, App>, request: ForwardId) -> Result<(), IpcError> {
+    app.core.forward_stop(request)
+}
+
+#[tauri::command]
+async fn forward_resume(
+    app: State<'_, App>,
+    request: ResumeForward,
+) -> Result<ForwardStarted, IpcError> {
+    app.core.forward_resume(request).await
+}
+
+#[tauri::command]
+fn forward_remove(app: State<'_, App>, request: ForwardId) -> Result<(), IpcError> {
+    app.core.forward_remove(request)
+}
+
+#[tauri::command]
+fn forwards_watch(
+    webview: Webview,
+    app: State<'_, App>,
+    channel: Channel<ForwardEvent>,
+) -> Vec<Forward> {
+    app.core
+        .follow_forwards(webview.label(), move |event| match channel.send(event) {
+            Ok(()) => true,
+            Err(error) => {
+                eprintln!("could not send a forward's change: {error}");
+                false
+            }
+        })
+}
+
+#[tauri::command]
 fn url_open(handle: AppHandle, request: String) -> Result<(), IpcError> {
     let url = twigo_core::sign_in_url(&request)?;
     handle
@@ -827,6 +878,12 @@ fn main() {
             exec_trust,
             approvals_watch,
             approval_answer,
+            forward_ports,
+            forward_start,
+            forward_stop,
+            forward_resume,
+            forward_remove,
+            forwards_watch,
             url_open,
         ])
         // A page that starts to load, as on a reload, has none of the

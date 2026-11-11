@@ -9,6 +9,7 @@ mod bus;
 pub mod catalog;
 pub mod connections;
 mod errors;
+mod forward;
 pub mod objects;
 mod proxy;
 pub mod state;
@@ -54,6 +55,7 @@ pub use auth::AuthFollower;
 use bus::{Bus, Finished, Progress, Waiting};
 use catalog::Catalog;
 use connections::Connections;
+use forward::Forwards;
 use objects::{Opened, Target};
 use proxy::Proxy;
 pub use proxy::ProxyProcess;
@@ -80,6 +82,7 @@ pub struct Core {
     objects: Subscriptions<Opened>,
     logs: Subscriptions<Session>,
     shells: Subscriptions<terminal::Shell>,
+    forwards: Forwards,
     terminals: terminal::Terminals,
     bus: Arc<Bus>,
     undos: Arc<Undos>,
@@ -138,6 +141,7 @@ impl Core {
             objects: Subscriptions::new("object"),
             logs: Subscriptions::new("logs"),
             shells: Subscriptions::new("shell"),
+            forwards: Forwards::default(),
             terminals: terminal::Terminals::new(data.join("terminals")),
             bus: Arc::default(),
             undos: Arc::default(),
@@ -162,11 +166,13 @@ impl Core {
         self.focused.send_replace(focused);
     }
 
-    /// Kills the plugins under way and hangs up every terminal at once, as
-    /// the app quits: nothing drops them then.
+    /// Kills the plugins under way, hangs up every terminal and closes every
+    /// forward's port and connections at once, as the app quits: nothing
+    /// drops them then. What the state says ran stays.
     pub fn shutdown(&self) {
         self.credentials.shutdown();
         self.shells.each(terminal::Shell::quit);
+        self.forwards.shutdown();
     }
 
     /// The context's clients, once the catalog and the login shell's
@@ -185,7 +191,8 @@ impl Core {
             .expect("the core outlives its subscribers")
             .clone()
             .expect("waited for");
-        self.connections
+        let clients = self
+            .connections
             .clients(
                 found,
                 &env,
@@ -196,7 +203,9 @@ impl Core {
                     .gate_for(context, Actor::Ui, found.fingerprint.value()),
             )
             .await
-            .map_err(|error| ClientsError::Connect(context.to_owned(), Box::new(error)))
+            .map_err(|error| ClientsError::Connect(context.to_owned(), Box::new(error)))?;
+        self.forwards.connected(context);
+        Ok(clients)
     }
 
     /// Where the context's credential comes from when Twigo gets it: its
@@ -853,7 +862,7 @@ impl Core {
 
     /// Ends the lists, open objects, logs sessions, shells and terminals,
     /// plans, asks and offers of a window that reloads or closes: its asks
-    /// are denied.
+    /// are denied. The forwards stay, and the window stops following them.
     pub fn drop_window(&self, window: &str) {
         self.lists.drop_window(window);
         self.objects.drop_window(window);
@@ -862,6 +871,7 @@ impl Core {
         self.bus.drop_window(window);
         self.approvals.drop_window(window);
         self.terminals.drop_window(window);
+        self.forwards.unfollow(window);
     }
 
     /// Retires every connection on wake, and those whose route moved on a
@@ -937,7 +947,13 @@ impl Core {
                 self.terminals.refresh_offers().await;
             }
         };
-        tokio::join!(sources, seen, offered, self.policy.follow_unlocks());
+        tokio::join!(
+            sources,
+            seen,
+            offered,
+            self.policy.follow_unlocks(),
+            self.follow_forward_modes()
+        );
     }
 }
 

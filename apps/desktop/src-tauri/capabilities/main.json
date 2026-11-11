@@ -63,6 +63,12 @@
     "allow-exec-trust",
     "allow-approvals-watch",
     "allow-approval-answer",
+    "allow-forward-ports",
+    "allow-forward-start",
+    "allow-forward-stop",
+    "allow-forward-resume",
+    "allow-forward-remove",
+    "allow-forwards-watch",
     "allow-url-open"
   ]
 }
