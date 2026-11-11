@@ -294,6 +294,27 @@ async fn a_foreground_job_that_ignores_the_hangup_is_killed_3_s_later() {
 }
 
 #[tokio::test]
+async fn a_hangup_as_the_app_quits_reaches_both_groups_at_once_and_kills_nothing_later() {
+    let dir = TempDir::new().unwrap();
+    let opened = Opened::new(interactive(dir.path()));
+    opened
+        .typed(concat!(
+            "echo $$ > shell.pid; trap '' HUP; ",
+            r#"perl -e '$SIG{HUP} = "DEFAULT"; open my $f, ">", "job.pid"; print $f $$; close $f; exec "sleep", "1000"'"#,
+            "\n",
+        ))
+        .await;
+    let shell = wait_for_pid(&dir.path().join("shell.pid")).await;
+    let job = wait_for_pid(&dir.path().join("job.pid")).await;
+    opened.terminal.hang_up();
+    let job_ended = gone(job, Duration::from_secs(2)).await;
+    let shell_spared = !gone(shell, Duration::from_secs(4)).await;
+    let _ = kill(shell, Signal::SIGKILL);
+    assert!(job_ended, "the foreground job outlived the hangup");
+    assert!(shell_spared, "killed after the hangup");
+}
+
+#[tokio::test]
 async fn the_group_of_a_shell_that_ignores_the_hangup_is_killed_3_s_later() {
     let dir = TempDir::new().unwrap();
     let opened = Opened::new(script(

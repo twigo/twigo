@@ -28,7 +28,7 @@ use twigo_ipc::{ErrorKind, IpcError, ShellEnd, ShellEvent};
 
 use crate::flow::{FRAME_MAX, Flow};
 use crate::shell::{Frame, INPUT_QUEUE};
-use hangup::Hangup;
+use hangup::{Hangup, Then};
 
 /// How long output may still come once the program exited, from a job that
 /// holds the pty; VS Code waits 200 ms for it.
@@ -153,13 +153,21 @@ impl Terminal {
         self.acks
             .send_modify(|total| *total = total.saturating_add(u64::from(bytes)));
     }
+
+    /// Hangs up at once and kills nothing later, as the app quits: the
+    /// process ends before a kill would come.
+    pub fn hang_up(&self) {
+        if let Some(running) = &*self.running.lock().expect("terminal lock") {
+            running.hangup.hang_up(Then::Quit);
+        }
+    }
 }
 
 impl Drop for Terminal {
     fn drop(&mut self) {
         let running = self.running.get_mut().expect("terminal lock").take();
         if let Some(Running { task, hangup }) = running {
-            hangup.hang_up();
+            hangup.hang_up(Then::Kill);
             task.abort();
         }
     }

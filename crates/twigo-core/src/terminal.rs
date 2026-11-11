@@ -105,6 +105,13 @@ impl Shell {
             Self::Local(local) => local.session.ack(bytes),
         }
     }
+
+    /// Hangs up a terminal here at once, as the app quits.
+    pub(crate) fn quit(&self) {
+        if let Self::Local(local) = self {
+            local.session.hang_up();
+        }
+    }
 }
 
 /// The core's terminals: their directories and their offers.

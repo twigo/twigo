@@ -443,6 +443,65 @@ async fn a_terminal_waits_for_the_login_environment_and_takes_its_kind_after() {
 }
 
 #[tokio::test]
+async fn shutdown_hangs_up_every_terminal() {
+    let setup = Setup::new().await;
+    let mut pids = Vec::new();
+    for n in 0..2 {
+        let file = setup.dir.path().join(format!("{n}.pid"));
+        let session = setup
+            .create(
+                "kind-a",
+                &format!("echo $$ > {}; exec sleep 1000", quoted(&file)),
+            )
+            .await;
+        let open = OpenShell {
+            id: session.id,
+            cols: 80,
+            rows: 24,
+        };
+        setup.core.shell_open("main", open, |_| true).await.unwrap();
+        pids.push(file);
+    }
+    let mut running = Vec::new();
+    for file in pids {
+        let pid = tokio::time::timeout(WAIT, async {
+            loop {
+                if let Ok(pid) = std::fs::read_to_string(&file)
+                    && !pid.trim().is_empty()
+                {
+                    return pid.trim().to_owned();
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        running.push(pid);
+    }
+    setup.core.shutdown();
+    let alive = |pid: &str| {
+        std::process::Command::new("kill")
+            .args(["-0", pid])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap()
+            .success()
+    };
+    let ended = tokio::time::timeout(Duration::from_secs(2), async {
+        while running.iter().any(|pid| alive(pid)) {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await;
+    for pid in &running {
+        let _ = std::process::Command::new("kill")
+            .args(["-KILL", pid])
+            .status();
+    }
+    assert!(ended.is_ok(), "a shell outlived the shutdown");
+}
+
+#[tokio::test]
 async fn a_context_no_source_lists_has_no_terminal() {
     let setup = Setup::new().await;
     let refused = setup

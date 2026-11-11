@@ -162,9 +162,11 @@ impl Core {
         self.focused.send_replace(focused);
     }
 
-    /// Kills the plugins under way, as the app quits.
+    /// Kills the plugins under way and hangs up every terminal at once, as
+    /// the app quits: nothing drops them then.
     pub fn shutdown(&self) {
         self.credentials.shutdown();
+        self.shells.each(terminal::Shell::quit);
     }
 
     /// The context's clients, once the catalog and the login shell's

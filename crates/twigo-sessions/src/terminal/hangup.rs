@@ -25,6 +25,14 @@ use tokio::runtime::Handle;
 
 const GRACE: Duration = Duration::from_secs(3);
 
+/// What follows a hangup.
+pub(super) enum Then {
+    /// `SIGKILL` after the grace to whichever group still has a process.
+    Kill,
+    /// Nothing, as the app quits before a kill would come.
+    Quit,
+}
+
 pub(super) struct Hangup {
     /// None once the shell has been reaped, as another process may have its
     /// pid by then, or hung up.
@@ -74,8 +82,8 @@ impl Hangup {
     }
 
     /// Never blocks: the kill is a task on the terminal's runtime, which a
-    /// runtime shut down, as at quit, drops unrun.
-    pub(super) fn hang_up(&self) {
+    /// runtime shut down drops unrun.
+    pub(super) fn hang_up(&self, then: Then) {
         let Some(Shell { child, pid, master }) = self.shell.lock().expect("hangup lock").take()
         else {
             return;
@@ -91,6 +99,9 @@ impl Hangup {
             send(*group, Signal::SIGHUP);
         }
         drop(master);
+        if let Then::Quit = then {
+            return;
+        }
         self.runtime.spawn(async move {
             tokio::time::sleep(GRACE).await;
             for group in groups {
