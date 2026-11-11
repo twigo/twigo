@@ -27,6 +27,7 @@ use twigo_sessions::forward::{BindError, Listeners, free_port, listen};
 use saved::Remembered;
 pub(crate) use saved::{Saved, SavedForward};
 
+use crate::catalog::Contexts;
 use crate::proxy::{Changes, blocked};
 use crate::{ClientsError, Core, actions};
 
@@ -72,20 +73,62 @@ impl Drop for Run {
 }
 
 struct Entry {
-    /// Everything of the forward that its data path does not tell.
+    /// Everything of the forward that its data path does not tell, and the
+    /// bytes of the runs it had before.
     base: Forward,
     context: String,
     /// None while it is stopped, or its port could not be bound.
     run: Option<Run>,
     /// It should run, and could not listen: why.
     unbound: Option<IpcError>,
-    /// Its context's mode refuses it.
+    /// Its context's mode refuses it, or the catalog lacks the context.
     refused: bool,
+    /// Its local port is the free one that was offered in place of a busy
+    /// one, which is never remembered.
+    detour: bool,
 }
 
 impl Entry {
     fn runs(&self) -> bool {
         self.run.is_some() || self.unbound.is_some()
+    }
+
+    /// Closes its port and connections, and keeps the bytes they carried.
+    fn stop(&mut self) {
+        if let Some(run) = self.run.take() {
+            let (sent, received) = run.data.bytes();
+            self.base.sent += sent;
+            self.base.received += received;
+        }
+    }
+
+    fn check(&mut self, policy: &Policy, contexts: Option<&Contexts>) {
+        let Some(run) = &self.run else {
+            return;
+        };
+        let refusal = match contexts {
+            Some(contexts) if contexts.find(&self.context).is_none() => Some(IpcError::from(
+                &ClientsError::NoContext(self.context.clone()),
+            )),
+            _ => blocked(
+                policy,
+                &self.context,
+                &attributes(&self.base.target),
+                Actor::Ui,
+            )
+            .map(|blocked| IpcError::from(*blocked)),
+        };
+        match refusal {
+            Some(error) if !self.refused => {
+                self.refused = true;
+                run.data.refuse(error);
+            }
+            None if self.refused => {
+                self.refused = false;
+                run.data.allow();
+            }
+            _ => {}
+        }
     }
 
     fn forward(&self) -> Forward {
@@ -110,8 +153,8 @@ fn apply(forward: &mut Forward, status: &data::Status) {
     forward.pod_port = status.pod_port;
     forward.connections = status.connections;
     forward.queued = status.queued;
-    forward.sent = status.sent;
-    forward.received = status.received;
+    forward.sent += status.sent;
+    forward.received += status.received;
     forward.failure = status.failure.clone();
 }
 
@@ -182,6 +225,7 @@ impl Table {
                     port_name: entry.base.port_name.clone(),
                     app_protocol: entry.base.app_protocol.clone(),
                     local: entry.base.local,
+                    detour: entry.detour,
                     runs: entry.runs(),
                 })
                 .collect(),
@@ -194,10 +238,18 @@ impl Table {
         }
     }
 
+    fn holder(&self, local: u16) -> Option<(String, String)> {
+        self.entries
+            .values()
+            .find(|entry| entry.run.is_some() && entry.base.local == local)
+            .map(|entry| (entry.base.kind.clone(), entry.base.target.name.clone()))
+    }
+
+    fn detour(&mut self, key: &Key, local: u16) -> bool {
+        self.detours.remove(key) == Some(local)
+    }
+
     fn remember(&mut self, key: &Key, target: &ForwardTarget, local: u16) {
-        if self.detours.remove(key) == Some(local) {
-            return;
-        }
         self.remembered.insert(
             key.clone(),
             Remembered {
@@ -235,12 +287,11 @@ impl Forwards {
         let forward = data::Forward::spawn(hub, config, listeners, restored);
         let status = forward.status();
         let table = Arc::downgrade(&self.0);
-        let pump = tokio::spawn(pump(status.clone(), base.clone(), move |forward| {
+        let id = base.id;
+        let pump = tokio::spawn(pump(status.clone(), base.clone(), move |_| {
             if let Some(table) = table.upgrade() {
-                let mut table = table.lock().expect("forwards lock");
-                table.emit(&ForwardEvent::Changed {
-                    forward: Box::new(forward),
-                });
+                // What goes out is the forward as it is now, if it still is.
+                table.lock().expect("forwards lock").changed(id);
             }
         }));
         Ok(Run {
@@ -272,7 +323,7 @@ impl Forwards {
     pub(crate) fn shutdown(&self) {
         let mut table = self.table();
         for entry in table.entries.values_mut() {
-            entry.run = None;
+            entry.stop();
         }
     }
 
@@ -289,32 +340,14 @@ impl Forwards {
         }
     }
 
-    /// Asks the policy again for each running forward's context: a forward
-    /// whose mode now refuses it ends its connections and fails, and starts
-    /// over once the mode allows it again.
-    pub(crate) fn recheck(&self, policy: &Policy) {
+    /// Asks the policy and the catalog again for each running forward's
+    /// context: a forward whose mode now refuses it, or whose context the
+    /// catalog lacks, ends its connections and fails, and goes back to what
+    /// it was once that passes.
+    pub(crate) fn recheck(&self, policy: &Policy, contexts: &Contexts) {
         let mut table = self.table();
         for entry in table.entries.values_mut() {
-            let Some(run) = &entry.run else {
-                continue;
-            };
-            let refusal = blocked(
-                policy,
-                &entry.context,
-                &attributes(&entry.base.target),
-                Actor::Ui,
-            );
-            match refusal {
-                Some(blocked) if !entry.refused => {
-                    entry.refused = true;
-                    run.data.refuse(IpcError::from(*blocked));
-                }
-                None if entry.refused => {
-                    entry.refused = false;
-                    run.data.restart();
-                }
-                _ => {}
-            }
+            entry.check(policy, Some(contexts));
         }
     }
 }
@@ -374,12 +407,28 @@ async fn pump(
     }
 }
 
-fn unbound(local: u16, why: BusyWhy) -> IpcError {
-    let words = match why {
-        BusyWhy::InUse => format!("port {local} is held by another process"),
-        BusyWhy::NotPermitted => format!("this system does not let Twigo listen on port {local}"),
+fn unbound(local: u16, why: BusyWhy, own: Option<(String, String)>) -> IpcError {
+    let words = match (why, own) {
+        (BusyWhy::InUse, Some((kind, name))) => {
+            format!("port {local} is held by another forward of Twigo, to {kind} {name}")
+        }
+        (BusyWhy::InUse, None) => format!("port {local} is held by another process"),
+        (BusyWhy::NotPermitted, _) => {
+            format!("this system does not let Twigo listen on port {local}")
+        }
     };
     IpcError::new(ErrorKind::Conflict, words)
+}
+
+/// A local port a person names: 0 would ask the system for any port.
+fn named(local: Option<u16>) -> Result<(), IpcError> {
+    if local == Some(0) {
+        return Err(IpcError::new(
+            ErrorKind::InvalidInput,
+            "port 0 is not a local port to listen on",
+        ));
+    }
+    Ok(())
 }
 
 enum Bound {
@@ -447,6 +496,7 @@ impl Core {
             port,
             local,
         } = request;
+        named(local)?;
         let context = self.context(&target.space)?;
         let kind = data::Target::new(&target.gvr, target.namespace.clone(), target.name.clone())?
             .label()
@@ -515,17 +565,20 @@ impl Core {
                 // Another start of this port came in meanwhile and won.
                 Some(existing) => Err(existing),
                 None => {
-                    table.remember(&key, &target, local);
-                    table.entries.insert(
-                        id.0,
-                        Entry {
-                            base,
-                            context,
-                            run: run.take(),
-                            unbound: None,
-                            refused: false,
-                        },
-                    );
+                    let detour = table.detour(&key, local);
+                    if !detour {
+                        table.remember(&key, &target, local);
+                    }
+                    let mut entry = Entry {
+                        base,
+                        context,
+                        run: run.take(),
+                        unbound: None,
+                        refused: false,
+                        detour,
+                    };
+                    entry.check(&self.policy, None);
+                    table.entries.insert(id.0, entry);
                     table.changed(id);
                     Ok(table.entries[&id.0].forward())
                 }
@@ -549,11 +602,11 @@ impl Core {
         })
     }
 
-    /// Starts a stopped forward again, on another local port when `local`
-    /// names one; a forward that failed starts over, and one that runs moves
-    /// if another port is asked.
+    /// Starts a stopped or failed forward again, on another local port when
+    /// `local` names one, and moves a running one if another port is asked.
     pub async fn forward_resume(&self, request: ResumeForward) -> Result<ForwardStarted, IpcError> {
         let ResumeForward { id, local } = request;
+        named(local)?;
         let (context, target, base) = {
             let table = self.forwards.table();
             let entry = table.entries.get(&id.0).ok_or_else(|| {
@@ -576,13 +629,14 @@ impl Core {
                     format!("forward {} was removed", id.0),
                 ));
             };
-            if let Some(run) = &entry.run
-                && wanted == base.local
+            if wanted == base.local
+                && let Some(run) = &entry.run
             {
                 if matches!(run.status.borrow().state, ForwardState::Failed { .. }) {
                     run.data.restart();
                 }
                 entry.refused = false;
+                entry.check(&self.policy, None);
                 let forward = Box::new(entry.forward());
                 return Ok(ForwardStarted::Started { forward });
             }
@@ -599,18 +653,34 @@ impl Core {
             .run(&context, &moved, listeners, false, self.hub.clone())?;
         let started = {
             let mut table = self.forwards.table();
-            let Some(entry) = table.entries.get_mut(&id.0) else {
+            let Some(was) = table
+                .entries
+                .get(&id.0)
+                .map(|entry| (entry.base.local, entry.detour))
+            else {
                 return Err(IpcError::new(
                     ErrorKind::NotFound,
                     format!("forward {} was removed", id.0),
                 ));
             };
-            entry.base = moved;
+            let detour = if was.0 == wanted {
+                was.1
+            } else {
+                table.detour(&key, wanted)
+            };
+            if !detour {
+                table.remember(&key, &target, wanted);
+            }
+            let entry = table.entries.get_mut(&id.0).expect("checked");
+            entry.stop();
+            entry.base.local = wanted;
+            entry.base.addresses = moved.addresses;
             entry.run = Some(run);
             entry.unbound = None;
             entry.refused = false;
+            entry.detour = detour;
+            entry.check(&self.policy, None);
             let started = entry.forward();
-            table.remember(&key, &target, wanted);
             table.changed(id);
             started
         };
@@ -627,7 +697,7 @@ impl Core {
             let entry = table.entries.get_mut(&id.0).ok_or_else(|| {
                 IpcError::new(ErrorKind::NotFound, format!("no forward {}", id.0))
             })?;
-            entry.run = None;
+            entry.stop();
             entry.unbound = None;
             entry.refused = false;
             let space = entry.base.target.space.clone();
@@ -670,9 +740,9 @@ impl Core {
 
     /// Binds the port of each forward that ran when Twigo quit, and lets it
     /// wait for its first connection or its space's connecting: nothing asks
-    /// a cluster. A forward whose port another process holds, or whose
-    /// context the catalog lacks, fails with that; one the mode refuses is
-    /// failed with the mode's words.
+    /// a cluster. A forward whose port another process holds fails with
+    /// that; the policy and the catalog are asked about the rest once they
+    /// are loaded.
     pub(crate) async fn restore_forwards(&self) {
         for space in self.state.spaces() {
             let saved = self.state.forwards(&space.id);
@@ -690,7 +760,6 @@ impl Core {
                 self.restore_forward(context, saved).await;
             }
         }
-        self.lack_contexts().await;
     }
 
     async fn restore_forward(&self, context: &str, saved: SavedForward) {
@@ -702,6 +771,7 @@ impl Core {
             port_name,
             app_protocol,
             local,
+            detour,
             runs,
         } = saved;
         let mut entry = Entry {
@@ -727,6 +797,7 @@ impl Core {
             run: None,
             unbound: None,
             refused: false,
+            detour,
         };
         if runs {
             match listen(local).await {
@@ -740,7 +811,10 @@ impl Core {
                         Err(error) => entry.unbound = Some(error),
                     }
                 }
-                Err(BindError::Busy(why)) => entry.unbound = Some(unbound(local, why)),
+                Err(BindError::Busy(why)) => {
+                    let own = self.forwards.table().holder(local);
+                    entry.unbound = Some(unbound(local, why, own));
+                }
                 Err(BindError::Failed(error)) => {
                     entry.unbound = Some(IpcError::new(
                         ErrorKind::Internal,
@@ -749,34 +823,20 @@ impl Core {
                 }
             }
         }
-        self.forwards.table().entries.insert(id.0, entry);
+        let mut table = self.forwards.table();
+        table.entries.insert(id.0, entry);
+        table.changed(id);
     }
 
-    /// Fails the forwards whose context the catalog does not list, once it
-    /// lists any.
-    async fn lack_contexts(&self) {
-        let contexts = self.catalog.contexts().await;
-        let table = self.forwards.table();
-        for entry in table.entries.values() {
-            if let Some(run) = &entry.run
-                && contexts.find(&entry.context).is_none()
-            {
-                run.data.refuse(IpcError::from(&ClientsError::NoContext(
-                    entry.context.clone(),
-                )));
-            }
-        }
-    }
-
-    /// Restores the forwards, then asks the policy for each again whenever
-    /// it or the catalog changes; never returns.
+    /// Restores the forwards, then asks the policy and the catalog for each
+    /// again whenever either changes; never returns.
     pub(crate) async fn follow_forward_modes(&self) {
         let mut changes = Changes::new(&self.policy, &self.catalog.subscribe());
         self.restore_forwards().await;
-        self.forwards.recheck(&self.policy);
         loop {
+            let contexts = self.catalog.contexts().await;
+            self.forwards.recheck(&self.policy, &contexts);
             changes.next().await;
-            self.forwards.recheck(&self.policy);
         }
     }
 }

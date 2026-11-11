@@ -1111,6 +1111,54 @@ async fn a_target_that_is_gone_fails_the_forward_with_its_name() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_lifted_refusal_returns_a_restored_forward_to_waiting_and_a_started_one_to_starting() {
+    let fake = Fake::default();
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    let mut restored = start(&fake, pod_target("web-1"), true, Budgets::default());
+    let refusal = IpcError::new(ErrorKind::Permissions, "the context is read-only");
+    for round in 0..20 {
+        restored.forward.refuse(refusal.clone());
+        restored.state("the forward fails", is_failed).await;
+        let _arrived = restored.client();
+        restored.forward.allow();
+        restored
+            .state("the forward waits", |state| {
+                *state == ForwardState::Restored
+            })
+            .await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            restored.status.borrow().state,
+            ForwardState::Restored,
+            "round {round}: a connection that came while it failed does not start it"
+        );
+    }
+    assert_eq!(fake.watching(), 0, "it asked nothing");
+
+    let mut started = start(&fake, pod_target("web-1"), false, Budgets::default());
+    started.ready().await;
+    started.forward.refuse(refusal);
+    started.state("the forward fails", is_failed).await;
+    started.forward.allow();
+    started.ready().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_bytes_a_forward_carried_are_known_before_its_status_publishes_them() {
+    let fake = Fake::default();
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    let mut forward = start(&fake, pod_target("web-1"), false, Budgets::default());
+    forward.ready().await;
+    let mut client = forward.client();
+    client.write_all(b"hello").await.unwrap();
+    let mut pod = forward.next().await;
+    assert_eq!(read_exactly(&mut pod.io, 5).await, b"hello");
+    pod.io.write_all(b"world!").await.unwrap();
+    assert_eq!(read_exactly(&mut client, 6).await, b"world!");
+    assert_eq!(forward.forward.bytes(), (5, 6));
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_refusal_ends_the_connections_and_a_restart_starts_over() {
     let fake = Fake::default();
     fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));

@@ -182,6 +182,7 @@ fn forward(id: u32) -> crate::forward::SavedForward {
         port_name: None,
         app_protocol: None,
         local: 8080,
+        detour: false,
         runs: true,
     }
 }

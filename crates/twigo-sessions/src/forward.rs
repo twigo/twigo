@@ -192,10 +192,12 @@ impl Status {
 enum Control {
     Restart,
     Refuse(IpcError),
+    Allow,
 }
 
 /// A forward, which closes its port and its connections when dropped.
 pub struct Forward {
+    shared: Arc<Shared>,
     status: watch::Receiver<Status>,
     control: mpsc::UnboundedSender<Control>,
     addresses: Vec<String>,
@@ -251,7 +253,7 @@ impl Forward {
             received: AtomicU64::new(0),
         });
         let supervisor = Supervisor {
-            shared,
+            shared: Arc::clone(&shared),
             sockets,
             control: control_rx,
             reports: reports_rx,
@@ -263,6 +265,7 @@ impl Forward {
             },
             worked: false,
             gone: false,
+            refused_from_restored: false,
             watching: None,
             opening: None,
             probe: None,
@@ -272,6 +275,7 @@ impl Forward {
             no_pod_by: None,
         };
         Self {
+            shared,
             status: status_rx,
             control,
             addresses,
@@ -288,6 +292,15 @@ impl Forward {
         &self.addresses
     }
 
+    /// The bytes to the pod and from it so far, which the status shows with
+    /// a delay.
+    pub fn bytes(&self) -> (u64, u64) {
+        (
+            self.shared.sent.load(Ordering::Relaxed),
+            self.shared.received.load(Ordering::Relaxed),
+        )
+    }
+
     /// Starts over a forward that waits for its first connection, or that
     /// failed; any other is working already.
     pub fn restart(&self) {
@@ -296,9 +309,16 @@ impl Forward {
     }
 
     /// Ends every connection and fails the forward with `error`, which
-    /// keeps listening and closes what it accepts, until [`Forward::restart`].
+    /// keeps listening and closes what it accepts, until [`Forward::allow`]
+    /// or [`Forward::restart`].
     pub fn refuse(&self, error: IpcError) {
         let _ = self.control.send(Control::Refuse(error));
+    }
+
+    /// Lifts a refusal: the forward goes back to what it was, waiting for
+    /// its first connection if it was restored, else starting over.
+    pub fn allow(&self) {
+        let _ = self.control.send(Control::Allow);
     }
 }
 
@@ -428,6 +448,9 @@ struct Supervisor {
     /// It failed because its target is gone, which a connection looks at
     /// again.
     gone: bool,
+    /// The refusal that failed it came while it waited for its first
+    /// connection.
+    refused_from_restored: bool,
     watching: Option<Watching>,
     opening: Option<BoxFuture<'static, Result<Watching, IpcError>>>,
     probe: Option<BoxFuture<'static, Result<(), connection::Over>>>,
@@ -492,13 +515,39 @@ impl Supervisor {
     }
 
     fn control(&mut self, control: Control) {
+        if matches!(control, Control::Restart | Control::Allow) {
+            // What came while the forward was failed is closed, not served.
+            while let Ok(socket) = self.sockets.try_recv() {
+                self.accepted(socket);
+            }
+        }
         match control {
             Control::Restart => {
                 if matches!(self.phase, Phase::Restored | Phase::Failed) {
                     self.begin();
                 }
             }
-            Control::Refuse(error) => self.fail(error),
+            Control::Refuse(error) => {
+                if self.phase != Phase::Failed {
+                    self.refused_from_restored = self.phase == Phase::Restored;
+                }
+                self.fail(error);
+            }
+            Control::Allow => {
+                if self.phase != Phase::Failed {
+                    return;
+                }
+                if self.refused_from_restored {
+                    self.refused_from_restored = false;
+                    self.phase = Phase::Restored;
+                    self.shared.update(|status| {
+                        status.state = ForwardState::Restored;
+                        true
+                    });
+                } else {
+                    self.begin();
+                }
+            }
         }
     }
 
@@ -525,6 +574,7 @@ impl Supervisor {
         self.phase = Phase::Proving;
         self.worked = false;
         self.gone = false;
+        self.refused_from_restored = false;
         self.retry = None;
         self.no_pod_by = None;
         self.retries = retries();
