@@ -509,7 +509,7 @@ test("kind:line says the kind and why in words above the terminal", async () => 
   withVariant("kind:line");
   const { create } = await mounted("ready", "staging");
   await create();
-  screen.getByText("Proxy · guarded");
+  screen.getByText("Proxy · guarded.");
   screen.getByText(/staging was not read-write when this terminal started/);
   expect(tabIcon(uriOf(1, "staging"))).toContain("lucide-terminal");
 });
@@ -518,13 +518,13 @@ test("kind:line puts the warning in the line's place, with Restart", async () =>
   withVariant("kind:line");
   const { backend, create } = await mounted("ready", "dev");
   await create();
-  screen.getByText("Your credentials");
+  screen.getByText("Your credentials.");
   await setMode(backend, "dev", "read-only");
   screen.getByText("Holds your real credentials, and dev is read-only now.");
-  expect(screen.queryByText("Your credentials")).toBeNull();
+  expect(screen.queryByText("Your credentials.")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Restart" }));
   await settle(10);
-  screen.getByText("Proxy · read-only");
+  screen.getByText("Proxy · read-only.");
 });
 
 test("a tab nothing started says no kind", async () => {

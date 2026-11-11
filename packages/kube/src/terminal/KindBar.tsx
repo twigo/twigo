@@ -38,7 +38,7 @@ export function KindBar({
     <div className="flex min-h-6 flex-none items-start gap-2 border-b border-border-subtle bg-panel px-3 py-1 text-xs text-muted-foreground">
       <KindIcon words={words} className="mt-0.5 size-3.5 shrink-0" />
       <span>
-        <span className="font-medium text-foreground">{words.short}</span>{" "}
+        <span className="font-medium text-foreground">{words.short}.</span>{" "}
         {words.why}
       </span>
     </div>
