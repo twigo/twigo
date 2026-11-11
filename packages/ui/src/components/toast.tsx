@@ -211,14 +211,28 @@ function secondsLeft(until: number): number {
 
 const WIDTH = { "--width": "288px" } as CSSProperties;
 
-/** `clearance` is the height of what the window shows above its status bar that the toasts must not cover. */
-export function Toaster({ clearance = 0 }: { clearance?: number }) {
+/**
+ * `clearance` is the height of what the window shows above its status bar
+ * that the toasts must not cover, and `ceiling` the height of what it shows
+ * under its top that they must not reach. The front toast sits above the
+ * clearance while it fits there whole, else as low as it takes to stay under
+ * the ceiling.
+ */
+export function Toaster({
+  clearance = 0,
+  ceiling = 0,
+}: {
+  clearance?: number;
+  ceiling?: number;
+}) {
+  // `--front-toast-height` is sonner's, set on its list from the front toast.
+  const bottom = `min(${String(32 + clearance)}px, calc(100dvh - ${String(ceiling + 8)}px - var(--front-toast-height)))`;
   return (
     <SonnerToaster
       position="bottom-right"
       visibleToasts={3}
       gap={6}
-      offset={{ bottom: 32 + clearance, right: 12 }}
+      offset={{ bottom, right: 12 }}
       style={WIDTH}
       containerAriaLabel="Notifications"
     />

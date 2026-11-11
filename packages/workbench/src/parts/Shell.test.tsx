@@ -81,7 +81,7 @@ test("dragged part sizes are the app's: they stay as spaces switch, and come bac
   expect(sizes()).toEqual([300, 200, 300]);
 });
 
-test("toasts stay above the panel's tab strip: as far up as the panel measures while it shows, and at the status bar's edge once it is hidden or maximized", async () => {
+test("toasts stay above the panel's tab strip as far up as the panel measures while it shows, at the status bar's edge once it is hidden or maximized, and under the title bar", async () => {
   const workbench = await testWorkbench();
   render(<WorkbenchView workbench={workbench} />);
   const space = workbench.spaces.active?.id ?? "";
@@ -89,26 +89,31 @@ test("toasts stay above the panel's tab strip: as far up as the panel measures w
     notify.warning("Held");
   });
   await screen.findByText("Held");
-  const bottom = () =>
-    document
-      .querySelector<HTMLElement>("[data-sonner-toaster]")
-      ?.style.getPropertyValue("--offset-bottom");
+  const placed = () => {
+    const bottom =
+      document
+        .querySelector<HTMLElement>("[data-sonner-toaster]")
+        ?.style.getPropertyValue("--offset-bottom") ?? "";
+    const match = /^min\((\d+)px, calc\(100dvh - (\d+)px - /.exec(bottom);
+    if (!match) throw new Error(`not a clamped offset: ${bottom}`);
+    return { above: Number(match[1]), under: Number(match[2]) };
+  };
   lay("rows", [700, 0]);
-  expect(bottom()).toBe("32px");
+  expect(placed()).toEqual({ above: 32, under: 44 });
 
   act(() => {
     workbench.spaces.setPart(space, "panel", { visible: true });
   });
   lay("rows", [400, 300]);
-  expect(bottom()).toBe("332px");
+  expect(placed()).toEqual({ above: 332, under: 44 });
   lay("rows", [300, 399.6]);
-  expect(bottom()).toBe("432px");
+  expect(placed()).toEqual({ above: 432, under: 44 });
 
   act(() => {
     workbench.spaces.setPart(space, "panel", { maximized: true });
   });
   lay("rows", [0, 700]);
-  expect(bottom()).toBe("32px");
+  expect(placed()).toEqual({ above: 32, under: 44 });
 
   act(() => {
     workbench.spaces.setPart(space, "panel", {
@@ -117,5 +122,8 @@ test("toasts stay above the panel's tab strip: as far up as the panel measures w
     });
   });
   lay("rows", [700, 0]);
-  expect(bottom()).toBe("32px");
+  expect(placed()).toEqual({ above: 32, under: 44 });
+  expect([
+    ...(document.querySelector(".twigo-titlebar")?.classList ?? []),
+  ]).toContain("h-9");
 });

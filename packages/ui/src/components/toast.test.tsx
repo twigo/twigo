@@ -185,22 +185,38 @@ test("a choice's toast stays until its owner dismisses it, takes one answer, and
   vi.useRealTimers();
 });
 
-test("the toaster keeps its toasts above the clearance it is given, and at the status bar's edge with none", async () => {
+test("the toaster keeps its front toast whole: above the clearance while it fits there, else as low as it takes to stay under the ceiling", async () => {
   vi.useFakeTimers();
-  const { rerender } = render(<Toaster />);
+  const { rerender } = render(<Toaster ceiling={36} />);
   act(() => {
     notify.warning("Held");
   });
   await act(() => vi.advanceTimersByTimeAsync(100));
-  const bottom = () =>
+  const offset = () =>
     document
       .querySelector<HTMLElement>("[data-sonner-toaster]")
-      ?.style.getPropertyValue("--offset-bottom");
-  expect(bottom()).toBe("32px");
-  rerender(<Toaster clearance={284} />);
-  expect(bottom()).toBe("316px");
-  rerender(<Toaster clearance={0} />);
-  expect(bottom()).toBe("32px");
+      ?.style.getPropertyValue("--offset-bottom") ?? "";
+  const bottomEdge = (viewport: number, front: number) => {
+    const match =
+      /^min\((\d+)px, calc\(100dvh - (\d+)px - var\(--front-toast-height\)\)\)$/.exec(
+        offset(),
+      );
+    if (!match) throw new Error(`not a clamped offset: ${offset()}`);
+    return Math.min(Number(match[1]), viewport - Number(match[2]) - front);
+  };
+  const topEdge = (viewport: number, front: number) =>
+    viewport - bottomEdge(viewport, front) - front;
+
+  expect(bottomEdge(760, 234)).toBe(32);
+  rerender(<Toaster clearance={284} ceiling={36} />);
+  expect(bottomEdge(760, 234)).toBe(316);
+  expect(topEdge(760, 234)).toBe(210);
+  rerender(<Toaster clearance={580} ceiling={36} />);
+  expect(topEdge(760, 234)).toBe(44);
+  expect(bottomEdge(760, 234)).toBe(482);
+  expect(bottomEdge(760, 40)).toBe(612);
+  rerender(<Toaster clearance={0} ceiling={36} />);
+  expect(bottomEdge(760, 234)).toBe(32);
   act(() => {
     toast.dismiss();
   });
