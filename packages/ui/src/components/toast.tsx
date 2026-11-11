@@ -241,12 +241,17 @@ const FLOOR = 32;
  * open and close the stack. The box is clipped and the content of the card
  * is hidden, `visibility` too, which takes its buttons out of the tab order
  * and the accessibility tree; the card's own edge stays above the front
- * toast, as a styled toast's does.
+ * toast, as a styled toast's does. A toast past the ones that show, which
+ * sonner draws at no opacity even while the stack is open, is hidden whole,
+ * so neither it nor its buttons take the focus. A toast that takes the
+ * focus shows the app's focus ring, as sonner's own barely shows in dark.
  */
 const BEHIND = [
   "data-[front=false]:data-[expanded=false]:overflow-hidden",
   "data-[front=false]:data-[expanded=false]:[&_[data-title]>*>*]:opacity-0",
   "data-[front=false]:data-[expanded=false]:[&_[data-title]>*>*]:invisible",
+  "data-[visible=false]:invisible",
+  "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
 ].join(" ");
 
 /**

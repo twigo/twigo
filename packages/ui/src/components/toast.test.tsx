@@ -409,6 +409,50 @@ test("while the stack is closed only the front toast's buttons can take focus, a
   await finish();
 });
 
+test("a toast past the three that show takes no focus, with the stack closed or open", async () => {
+  vi.useFakeTimers();
+  render(<Toaster />);
+  act(() => {
+    notify.choice(
+      {
+        icon: CircleCheck,
+        message: "Oldest",
+        choices: [{ label: "Move", run: () => undefined }],
+      },
+      "offer-1",
+    );
+  });
+  await settled();
+  for (const message of ["Second", "Third", "Front"]) {
+    act(() => {
+      notify.error(message);
+    });
+    await settled();
+  }
+  await withUtilities();
+  const hidden = document.querySelector<HTMLElement>(
+    '[data-sonner-toast][data-visible="false"]',
+  );
+  if (!hidden) throw new Error("no toast past the three");
+  const move = Array.from(hidden.querySelectorAll("button")).find(
+    (button) => button.textContent === "Move",
+  );
+  if (!move) throw new Error("no Move");
+  const list = document.querySelector("[data-sonner-toaster]");
+  if (!list) throw new Error("no toaster");
+  expect(getComputedStyle(hidden).visibility).toBe("hidden");
+  expect(getComputedStyle(move).visibility).toBe("hidden");
+  fireEvent.mouseEnter(list);
+  expect(getComputedStyle(hidden).visibility).toBe("hidden");
+  expect(getComputedStyle(move).visibility).toBe("hidden");
+  fireEvent.mouseLeave(list);
+  act(() => {
+    toast.dismiss();
+  });
+  await act(() => vi.advanceTimersByTimeAsync(1000));
+  vi.useRealTimers();
+});
+
 test("a window of 600 px or less places the toasts as the wider ones", async () => {
   vi.useFakeTimers();
   measureToasts({ Held: 98 });
