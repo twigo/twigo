@@ -1067,7 +1067,8 @@ Extensions add commands, not prefixes.
     A name that a move leaves out says `left out` after the kinds it leaves out, and one sentence below gives the reason for every case the core has: the person's files have that name, what the context names is another entry there or missing, or only contexts that stay out name it.
     A long name breaks after its own `:` and `/`, and inside a part only where that part alone is longer than the line; the toast holds four names, then `and n more`, a button whose tooltip lists them all.
     The toaster keeps its toasts above the panel while it shows, as far up as the panel measures, so a toast covers neither the panel's tab strip nor the terminal's chip; with the panel hidden or maximized they sit at the status bar's edge.
-    The toasts stay in the window whole, spread by a hover as well as closed: the toaster measures the heights of the toasts that show and the gaps between them, which is what sonner spreads, and where that stack does not fit above the panel it sits as low as it takes to stay under the title bar, over the panel's strip.
+    The toasts stay in the window whole, spread by a hover as well as closed, while they fit under the title bar: the toaster measures the heights of the toasts that show and the gaps between them, which is what sonner spreads, and where that stack does not fit above the panel it sits as low as it takes to stay under the title bar, over the panel's strip.
+    A stack taller than the window under the title bar sits at the status bar's edge, so the front toast, the newest, stays in the window, and the top of the spread stack goes past the title bar.
     It sits so closed too, since moving it as the pointer arrives would move the toasts from under it.
     A window of 600 px or less, where sonner reads other offsets, gets the same ones.
     An offer sent again with its id changes the words of its toast, and a withdrawn one takes its toast down.

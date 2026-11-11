@@ -219,6 +219,8 @@ function secondsLeft(until: number): number {
 
 const WIDTH = { "--width": "288px" } as CSSProperties;
 const GAP = 6;
+/** The status bar's 24 px and 8 px of air: the lowest the front toast sits. */
+const FLOOR = 32;
 
 /**
  * The height of the toasts that show, spread as sonner spreads them while
@@ -270,7 +272,9 @@ function useSpreadHeight() {
  * that the toasts must not cover, and `ceiling` the height of what it shows
  * under its top that they must not reach. The toasts sit above the
  * clearance while they fit there, spread by a hover, else as low as it takes
- * to keep them whole under the ceiling. A window of 600 px or less, where
+ * to keep them whole under the ceiling, but never below the status bar's
+ * edge: a stack taller than the window lets its top go past the title bar,
+ * and the front toast stays in the window. A window of 600 px or less, where
  * sonner takes other offsets, gets the same ones.
  */
 export function Toaster({
@@ -281,7 +285,7 @@ export function Toaster({
   ceiling?: number;
 }) {
   const { section, height } = useSpreadHeight();
-  const bottom = `min(${String(32 + clearance)}px, calc(100dvh - ${String(ceiling + 8 + height)}px))`;
+  const bottom = `max(${String(FLOOR)}px, min(${String(FLOOR + clearance)}px, calc(100dvh - ${String(ceiling + 8 + height)}px)))`;
   const offset = { bottom, right: 12 };
   return (
     <SonnerToaster

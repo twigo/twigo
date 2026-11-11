@@ -201,19 +201,11 @@ function measureToasts(heights: Readonly<Record<string, number>>) {
 function bottomEdge(): number {
   const list = document.querySelector<HTMLElement>("[data-sonner-toaster]");
   const offset = list?.style.getPropertyValue("--offset-bottom") ?? "";
-  const resolved = offset.replace(
-    /var\((--[\w-]+)\)/g,
-    (_, name: string) => list?.style.getPropertyValue(name) ?? "",
-  );
-  const [limit, window, ...taken] = [
-    ...resolved
-      .replace("100dvh", `${String(VIEWPORT)}px`)
-      .matchAll(/\d+(?:\.\d+)?/g),
-  ].map(([number]) => Number(number));
-  if (limit === undefined || window === undefined) {
-    throw new Error(`not a clamped offset: ${offset}`);
-  }
-  return Math.min(limit, window - taken.reduce((sum, each) => sum + each, 0));
+  const parts =
+    /^max\((\d+)px, min\((\d+)px, calc\(100dvh - (\d+)px\)\)\)$/.exec(offset);
+  if (!parts) throw new Error(`not a clamped offset: ${offset}`);
+  const [floor = 0, limit = 0, taken = 0] = parts.slice(1).map(Number);
+  return Math.max(floor, Math.min(limit, VIEWPORT - taken));
 }
 
 const spreadTop = (stack: number) => VIEWPORT - bottomEdge() - stack;
@@ -278,6 +270,26 @@ test("only the toasts that show are spread, three of them", async () => {
     await settled();
   }
   expect(spreadTop(3 * 98 + 2 * 6)).toBe(44);
+  act(() => {
+    toast.dismiss();
+  });
+  await act(() => vi.advanceTimersByTimeAsync(1000));
+  vi.useRealTimers();
+});
+
+test("a stack taller than the window under the title bar keeps the front toast above the status bar and lets its top go past the title bar", async () => {
+  vi.useFakeTimers();
+  measureToasts({ Held: 250 });
+  render(<Toaster clearance={580} ceiling={36} />);
+  for (const n of [1, 2, 3]) {
+    act(() => {
+      notify.error(`Held ${String(n)}`, { key: `held-${String(n)}` });
+    });
+    await settled();
+  }
+  const stack = 3 * 250 + 2 * 6;
+  expect(bottomEdge()).toBe(32);
+  expect(spreadTop(stack)).toBeLessThan(0);
   act(() => {
     toast.dismiss();
   });
