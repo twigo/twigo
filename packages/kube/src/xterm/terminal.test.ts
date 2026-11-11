@@ -78,8 +78,8 @@ function lines(tab: ShellTerminal): string[] {
 }
 
 describe.each(SHELLS)("$name", ({ starter }) => {
-  function setup() {
-    const fake = fakeShells();
+  function setup(onOpen?: Parameters<typeof fakeShells>[0]) {
+    const fake = fakeShells(onOpen);
     const start = starter({
       backend: fake.backend,
       platform: "mac",
@@ -201,6 +201,19 @@ describe.each(SHELLS)("$name", ({ starter }) => {
     expect(fake.opens.map(({ request }) => request.id)).toEqual([7, 9]);
     await output(1, "you@mac ~ % ");
     expect(lines(tab)).toEqual(["you@mac ~ %", "you@mac ~ %"]);
+  });
+
+  test("output that comes with the open goes on a line of its own", async () => {
+    const { start, output } = setup(({ request, send }) => {
+      if (request.id === 8) {
+        send({ state: "running" });
+        send(bytes("EAGER% "));
+      }
+    });
+    const tab = await start(7);
+    await output(0, "you@mac ~ % ");
+    await start(8);
+    expect(lines(tab)).toEqual(["you@mac ~ %", "EAGER%"]);
   });
 
   test("a first session starts at the top of an empty terminal", async () => {

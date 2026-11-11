@@ -29,10 +29,14 @@ export function sized(
   tab.host.style.height = `${String(height)}px`;
 }
 
-export function fakeShells() {
+interface Open {
+  request: OpenShell;
+  send: (message: ShellMessage) => void;
+}
+
+export function fakeShells(onOpen?: (open: Open) => void) {
   const calls: { command: string; request: unknown }[] = [];
-  const opens: { request: OpenShell; send: (message: ShellMessage) => void }[] =
-    [];
+  const opens: Open[] = [];
   const backend: Backend = {
     invoke(command, request) {
       calls.push({ command, request });
@@ -41,10 +45,9 @@ export function fakeShells() {
     subscribe(command, request, onMessage) {
       calls.push({ command, request });
       if (command === "shell_open") {
-        opens.push({
-          request: request as OpenShell,
-          send: onMessage,
-        });
+        const open = { request: request as OpenShell, send: onMessage };
+        opens.push(open);
+        onOpen?.(open);
       }
       return Promise.resolve(null as never);
     },
