@@ -26,9 +26,10 @@ use twigo_ipc::{
 };
 
 use crate::logs::buffer::{Buffer, Kind, LIMITS};
-use crate::logs::target::{Subscriptions, Target};
+use crate::logs::target::target;
 use crate::logs::view::{self, Spec};
 use crate::logs::{now, plan};
+use crate::pods::Subscriptions;
 
 use marks::Marks;
 use streams::{Streams, Taken};
@@ -270,7 +271,7 @@ async fn run(mut session: Run, control: Arc<Control>, mut send: impl FnMut(LogBa
 
 impl Run {
     async fn new(hub: Hub, context: String, request: OpenLogs) -> Result<Self, IpcError> {
-        let target = Target::new(&request.target)?;
+        let target = target(&request.target)?;
         let spec = Spec::new(&request.view)?;
         let streams = Streams::new(hub.clone(), context.clone(), target.namespace.clone());
         let subscriptions = Subscriptions::new(&hub, &context, target).await?;

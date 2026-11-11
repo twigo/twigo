@@ -3,5 +3,6 @@
 
 mod flow;
 pub mod logs;
+mod pods;
 pub mod shell;
 pub mod terminal;
