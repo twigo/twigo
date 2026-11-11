@@ -393,6 +393,22 @@ test("while the stack is closed a toast behind the front one is clipped to its b
   await finish();
 });
 
+test("while the stack is closed only the front toast's buttons can take focus, and a hover gives the others theirs", async () => {
+  const { toastAt, open, close, finish } = await stackOfTwo();
+  const focusable = (li: HTMLElement) =>
+    Array.from(li.querySelectorAll("button")).filter(
+      (button) => getComputedStyle(button).visibility !== "hidden",
+    );
+  expect(focusable(toastAt(false))).toEqual([]);
+  expect(focusable(toastAt(true)).map((b) => b.ariaLabel)).toEqual(["Dismiss"]);
+
+  open();
+  expect(focusable(toastAt(false)).map((b) => b.textContent)).toEqual(["Move"]);
+  close();
+  expect(focusable(toastAt(false))).toEqual([]);
+  await finish();
+});
+
 test("a window of 600 px or less places the toasts as the wider ones", async () => {
   vi.useFakeTimers();
   measureToasts({ Held: 98 });
