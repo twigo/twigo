@@ -100,6 +100,7 @@
 - The local terminal's tests in `crates/twigo-sessions/src/terminal/tests.rs` run `/bin/sh`, `/bin/zsh`, `vi` and `perl`, so CI installs zsh and vim-tiny on Linux.
 - On macOS a pty's unread output goes when its last slave closes: the close waits 0.6 s for a reader, then drops it, and while another slave stays open, as the terminal holds one, the exit of the session's leader waits until it is read; bash at its exit waits either way, so the test of unread output runs zsh (a probe with Python's `pty.openpty`, macOS 27.2, 2026-11-11).
   Linux keeps it and ends the exit at once.
+- A closed terminal keeps its shell a zombie through the kill's 3 s, so the terminal's tests count a zombie as ended; on macOS 27.2 `proc_pidinfo` with `PROC_PIDTBSDINFO` answers `ESRCH` for a zombie that `kill` still finds, which is how they tell one (a probe with Python's ctypes, 2026-11-11).
 - TIS must run on the main thread, so `crates/twigo-keyboard/tests/layouts.rs` runs without the test harness.
 - Tailwind scans `packages/` through `@source "../../../packages"` in `apps/desktop/src/index.css`.
   A glob such as `packages/*/src` there generated no utilities from the packages (Tailwind 4.3.3, 2026-10-31).

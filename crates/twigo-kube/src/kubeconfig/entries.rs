@@ -547,14 +547,12 @@ current-context: arn:aws:eks:eu-west-1:1:cluster/a
 
     const ARN: &str = "arn:aws:eks:eu-west-1:1:cluster/a";
 
-    /// `WRITTEN`, with `names` offered, its paths against `base`.
     fn written(base: &Path, names: &Names) -> Written {
         let mut written = Written::new(base.to_owned(), true);
         written.read(WRITTEN, &Names::of(WRITTEN).unwrap(), names);
         written
     }
 
-    /// A terminal's file of `text`, its every name offered.
     fn offered(text: &str, base: &Path, chained: bool) -> Written {
         let names = Names::of(text).unwrap();
         let mut written = Written::new(base.to_owned(), chained);

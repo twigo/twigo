@@ -124,8 +124,6 @@ async fn wait_for_pid(file: &Path) -> Pid {
     panic!("no pid in {}", file.display());
 }
 
-/// Whether `pid` ends within `within`: it is gone, or a zombie, as the
-/// terminal keeps its shell unreaped through the kill's grace.
 async fn gone(pid: Pid, within: Duration) -> bool {
     let start = Instant::now();
     while start.elapsed() < within {
@@ -145,8 +143,6 @@ fn zombie(pid: Pid) -> bool {
     })
 }
 
-/// macOS 27.2 gives no `PROC_PIDTBSDINFO` of a zombie, which `kill` still
-/// finds: `ESRCH`, as for a pid nobody has.
 #[cfg(target_os = "macos")]
 fn zombie(pid: Pid) -> bool {
     let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
@@ -365,8 +361,6 @@ async fn a_job_left_writing_meets_a_closed_terminal_once_its_shell_ended() {
     assert!(ended, "the job still writes to the terminal");
 }
 
-/// Gives the ended shell's pid to an unrelated process group through
-/// `ns_last_pid`, as heavy forking would by chance.
 #[cfg(target_os = "linux")]
 #[tokio::test]
 #[ignore = "writes /proc/sys/kernel/ns_last_pid, which needs CAP_SYS_ADMIN: crates/twigo-sessions/linux.sh runs it privileged"]
@@ -580,8 +574,6 @@ fn a_terminal_starts_where_close_range_is_refused_and_holds_no_descriptor_of_twi
     assert!(!held.contains(&leaked), "{leaked} in {held:?}");
 }
 
-/// A seccomp filter on this thread and what it starts: `syscall` fails with
-/// `errno`.
 #[cfg(target_os = "linux")]
 fn refuse(syscall: libc::c_long, errno: i32) {
     let statement = |code: u32, jt: u8, jf: u8, k: u32| libc::sock_filter {

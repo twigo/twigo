@@ -671,8 +671,6 @@ async fn a_move_takes_each_entry_as_last_seen_though_the_file_dropped_it_since()
     );
 }
 
-/// The person's files hold the cluster, the user and the context `kind-a`, and
-/// the context `kind-b`.
 #[tokio::test]
 async fn names_are_taken_by_section_and_a_context_moves_only_with_what_it_names() {
     let setup = Setup::new().await;
