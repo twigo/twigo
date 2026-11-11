@@ -24,7 +24,7 @@ use twigo_ipc::{
     KubeconfigOfferEvent, Mode, NewTerminal, ProxyWhy, ShellEvent, TerminalKind, TerminalSession,
 };
 use twigo_kube::client::Actor;
-use twigo_kube::kubeconfig::{Names, Sources};
+use twigo_kube::kubeconfig::{Names, Reach, Sources};
 use twigo_policy::Policy;
 use twigo_sessions::shell::Frame;
 use twigo_sessions::terminal::{Spec, Terminal};
@@ -310,13 +310,16 @@ impl Core {
         chained: bool,
     ) -> Option<(Watcher, Arc<Source>)> {
         let target = sources.target()?.to_owned();
-        let written = match std::fs::read_to_string(file) {
-            Ok(text) => Names::of(&text).expect("Twigo writes a kubeconfig that parses"),
+        let text = match std::fs::read_to_string(file) {
+            Ok(text) => text,
             Err(error) => {
                 eprintln!("could not read {}: {error}", file.display());
                 return None;
             }
         };
+        let parses = "Twigo writes a kubeconfig that parses";
+        let written = Names::of(&text).expect(parses);
+        let proxied = (!chained).then(|| Reach::of(&text).expect(parses));
         let source = Arc::new(Source {
             window: window.into(),
             label: label.into(),
@@ -329,7 +332,7 @@ impl Core {
             stopped: AtomicBool::new(false),
         });
         let offers = Arc::clone(&self.terminals.offers);
-        match watcher::watch(offers, Arc::clone(&source), written) {
+        match watcher::watch(offers, Arc::clone(&source), written, proxied) {
             Ok(watcher) => Some((watcher, source)),
             Err(error) => {
                 eprintln!(
@@ -341,9 +344,11 @@ impl Core {
         }
     }
 
-    /// The offers of `window`'s terminals waiting now; `send` gets each new,
-    /// changed and withdrawn one from then on, in place of what the window
-    /// followed before. It must not call back into the core.
+    /// The offers of `window`'s terminals waiting now; `send` gets the
+    /// contexts each of its proxy terminals reaches past the proxy, where
+    /// there are any, then each new, changed and withdrawn offer and each
+    /// change of those contexts, in place of what the window followed
+    /// before. It must not call back into the core.
     pub fn follow_kubeconfig_offers(
         &self,
         window: &str,

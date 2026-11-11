@@ -560,7 +560,9 @@ impl Command for TerminalCreate {
 
 /// Follows the offers of this window's terminals to move what a tool wrote
 /// into a terminal's own kubeconfig into the user's: answers with those
-/// waiting, then sends each new, changed and withdrawn one. A later follower
+/// waiting, then sends each new, changed and withdrawn one. It also sends
+/// the contexts each proxy terminal of the window reaches past the proxy:
+/// at once those of each that has any, then each change. A later follower
 /// of the same window replaces an earlier one.
 pub struct KubeconfigOffersWatch;
 

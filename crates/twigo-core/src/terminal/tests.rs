@@ -1151,3 +1151,166 @@ users:
         }
     );
 }
+
+impl Setup {
+    async fn guard(&self, context: &str) {
+        self.core
+            .set_context_mode(SetContextMode {
+                context: context.to_owned(),
+                mode: Some(Mode::Guarded),
+            })
+            .await
+            .unwrap();
+    }
+
+    fn proxied(&self) -> serde_json::Value {
+        let dir = self.dir.path().join("data").join("proxy");
+        let files: Vec<PathBuf> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "kubeconfig"))
+            .collect();
+        assert_eq!(files.len(), 1, "{files:?}");
+        serde_json::from_str(&std::fs::read_to_string(&files[0]).unwrap()).unwrap()
+    }
+
+    fn step(&self, n: usize) -> PathBuf {
+        self.dir.path().join(format!("step-{n}"))
+    }
+
+    fn writing(&self, steps: usize) -> String {
+        (0..steps)
+            .map(|n| {
+                format!(
+                    r#"cat {} > "${{KUBECONFIG%%:*}}"; sleep 1; "#,
+                    quoted(&self.step(n))
+                )
+            })
+            .collect::<String>()
+            + "true"
+    }
+
+    fn steps(&self, steps: &[String]) {
+        for (n, step) in steps.iter().enumerate() {
+            std::fs::write(self.step(n), step).unwrap();
+        }
+    }
+}
+
+fn with_eks(config: &serde_json::Value) -> serde_json::Value {
+    let mut config = config.clone();
+    config["clusters"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "name": ARN, "cluster": { "server": "https://eks.example" }
+        }));
+    config["users"].as_array_mut().unwrap().push(serde_json::json!({
+        "name": ARN,
+        "user": { "exec": { "apiVersion": "client.authentication.k8s.io/v1beta1", "command": "aws" } }
+    }));
+    config
+}
+
+fn context_mut<'a>(config: &'a mut serde_json::Value, name: &str) -> &'a mut serde_json::Value {
+    config["contexts"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|context| context["name"] == name)
+        .unwrap()
+}
+
+async fn directs(
+    events: &mut mpsc::UnboundedReceiver<KubeconfigOfferEvent>,
+    session: SubscriptionId,
+) -> Vec<Vec<String>> {
+    let mut told = Vec::new();
+    while let Ok(Some(event)) = tokio::time::timeout(Duration::from_secs(1), events.recv()).await {
+        if let KubeconfigOfferEvent::Direct {
+            session: of,
+            contexts,
+        } = event
+        {
+            assert_eq!(of, session);
+            told.push(contexts);
+        }
+    }
+    told
+}
+
+#[tokio::test]
+async fn a_tool_s_context_in_a_proxy_terminal_s_file_goes_direct_until_it_is_deleted() {
+    let setup = Setup::new().await;
+    setup.guard("kind-b").await;
+    let (_, mut events) = setup.follow();
+    let session = setup.create("kind-b", &setup.writing(3)).await;
+    let written = setup.proxied();
+    let mut aws = with_eks(&written);
+    aws["contexts"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "name": ARN, "context": { "cluster": ARN, "user": ARN }
+        }));
+    aws["current-context"] = ARN.into();
+    let mut namespaced = aws.clone();
+    context_mut(&mut namespaced, "kind-b")["context"]["namespace"] = "edited".into();
+    let mut deleted = namespaced.clone();
+    deleted["contexts"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|context| context["name"] != ARN);
+    setup.steps(&[
+        serde_json::to_string_pretty(&aws).unwrap(),
+        serde_json::to_string(&namespaced).unwrap(),
+        serde_json::to_string(&deleted).unwrap(),
+    ]);
+    let (output, end) = setup.run(session.id).await;
+    assert_eq!(end, ShellEnd::Exited { code: 0 }, "{output}");
+    assert_eq!(
+        directs(&mut events, session.id).await,
+        [vec![ARN.to_owned()], vec![]]
+    );
+}
+
+#[tokio::test]
+async fn an_entry_a_tool_rewrote_goes_direct_by_its_name_and_a_later_follower_gets_it_until_the_tab_closes()
+ {
+    let setup = Setup::new().await;
+    setup.guard("kind-b").await;
+    let (_, mut events) = setup.follow();
+    let session = setup.create("kind-b", &setup.writing(1)).await;
+    let mut aliased = with_eks(&setup.proxied());
+    context_mut(&mut aliased, "kind-a")["context"] =
+        serde_json::json!({ "cluster": ARN, "user": ARN });
+    setup.steps(&[serde_json::to_string_pretty(&aliased).unwrap()]);
+    let (output, end) = setup.run(session.id).await;
+    assert_eq!(end, ShellEnd::Exited { code: 0 }, "{output}");
+    assert_eq!(
+        directs(&mut events, session.id).await,
+        [vec!["kind-a".to_owned()]]
+    );
+    let (_, mut later) = setup.follow();
+    assert_eq!(
+        directs(&mut later, session.id).await,
+        [vec!["kind-a".to_owned()]]
+    );
+    setup.core.shell_close("main", session.id).unwrap();
+    nothing_more(&mut later).await;
+    let (_, mut after) = setup.follow();
+    nothing_more(&mut after).await;
+}
+
+#[tokio::test]
+async fn a_kubeconfig_terminal_never_says_its_contexts_go_direct() {
+    let setup = Setup::new().await;
+    let (_, mut events) = setup.follow();
+    let session = setup.create("kind-a", &setup.writing(1)).await;
+    setup.steps(&[EKS.to_owned()]);
+    let (output, end) = setup.run(session.id).await;
+    assert_eq!(end, ShellEnd::Exited { code: 0 }, "{output}");
+    let offer = offered(&mut events).await;
+    assert_eq!(offer.contexts, [ARN]);
+    assert!(directs(&mut events, session.id).await.is_empty());
+}

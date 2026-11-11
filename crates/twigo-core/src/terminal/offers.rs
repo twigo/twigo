@@ -5,9 +5,10 @@
 //! appends the entries to the file kubectl writes new ones to, leaving out
 //! those that would mean something else among the user's files. An offer
 //! is made anew whenever what it holds or the user's files change, and is
-//! not shown while a move would move nothing.
+//! not shown while a move would move nothing. The window is also told which
+//! contexts of a proxy terminal's file reach their clusters past the proxy.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
@@ -38,7 +39,8 @@ pub(crate) struct Source {
     /// kubeconfig terminal.
     pub chained: bool,
     /// Set once the terminal is gone: an offer that comes after it is not
-    /// made, so none outlives a window that went with its terminals.
+    /// made, so none outlives a window that went with its terminals, and
+    /// nothing more is said of its contexts.
     pub stopped: AtomicBool,
 }
 
@@ -52,6 +54,14 @@ struct State {
     followers: HashMap<Arc<str>, Follower>,
     offers: BTreeMap<u32, Held>,
     next: u32,
+    /// The contexts of each proxy terminal's file that reach their clusters
+    /// past the proxy, by its session, while there are any.
+    direct: HashMap<SubscriptionId, Direct>,
+}
+
+struct Direct {
+    window: Arc<str>,
+    contexts: Vec<String>,
 }
 
 struct Held {
@@ -85,8 +95,10 @@ impl Offers {
         }
     }
 
-    /// The window's offers waiting now; `send` gets each new, changed and
-    /// withdrawn one from then on, in place of an earlier follower.
+    /// The window's offers waiting now; `send` gets the contexts its proxy
+    /// terminals reach past the proxy, those of each that has any, then
+    /// each new, changed and withdrawn offer and each change of those
+    /// contexts, in place of an earlier follower.
     pub(crate) fn follow(
         &self,
         window: &str,
@@ -100,7 +112,61 @@ impl Offers {
             .map(|held| held.offer.clone())
             .collect();
         state.followers.insert(window.into(), Box::new(send));
+        let now: Vec<KubeconfigOfferEvent> = state
+            .direct
+            .iter()
+            .filter(|(_, direct)| *direct.window == *window)
+            .map(|(session, direct)| KubeconfigOfferEvent::Direct {
+                session: *session,
+                contexts: direct.contexts.clone(),
+            })
+            .collect();
+        for event in now {
+            state.tell(window, event);
+        }
         waiting
+    }
+
+    /// Tells `source`'s window of `contexts`, those of its proxy terminal's
+    /// file that reach their clusters past the proxy, where they changed;
+    /// nothing once the terminal has gone.
+    pub(crate) fn direct(&self, source: &Source, contexts: BTreeSet<String>) {
+        let mut state = self.state();
+        if source.stopped.load(Ordering::Acquire) {
+            return;
+        }
+        let session = *source
+            .session
+            .get()
+            .expect("set before the terminal's shell starts");
+        let contexts: Vec<String> = contexts.into_iter().collect();
+        let held = state.direct.get(&session).map(|direct| &direct.contexts);
+        if held.map_or(contexts.is_empty(), |held| *held == contexts) {
+            return;
+        }
+        if contexts.is_empty() {
+            state.direct.remove(&session);
+        } else {
+            let direct = Direct {
+                window: Arc::clone(&source.window),
+                contexts: contexts.clone(),
+            };
+            state.direct.insert(session, direct);
+        }
+        state.tell(
+            &source.window,
+            KubeconfigOfferEvent::Direct { session, contexts },
+        );
+    }
+
+    /// `source`'s terminal has gone: no offer of it is made from now on, and
+    /// nothing more is said of its contexts.
+    pub(crate) fn stop(&self, source: &Source) {
+        let mut state = self.state();
+        source.stopped.store(true, Ordering::Release);
+        if let Some(session) = source.session.get() {
+            state.direct.remove(session);
+        }
     }
 
     /// Offers `fresh` names of `text`, a read of the terminal's file whose

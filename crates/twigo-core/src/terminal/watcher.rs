@@ -3,17 +3,17 @@
 //! replaces the file by a rename, gcloud may rename it to a backup and write
 //! a new one, and kubectl creates and removes `<file>.lock` beside it. A
 //! read that does not parse, as one in the middle of a write in place,
-//! waits for the next event or 200 ms.
+//! waits for the next event or 200 ms. A proxy terminal's file is also
+//! read for contexts that reach their clusters past the proxy's entries.
 
 use std::ffi::OsString;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 
 use notify_debouncer_full::notify::{self, EventKind, RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{DebounceEventResult, Debouncer, NoCache, new_debouncer_opt};
-use twigo_kube::kubeconfig::Names;
+use twigo_kube::kubeconfig::{Names, Reach};
 
 use super::offers::{Offers, Source};
 
@@ -23,22 +23,26 @@ const DEBOUNCE: Duration = Duration::from_millis(250);
 const RETRY: Duration = Duration::from_millis(200);
 
 pub(super) struct Watcher {
+    offers: Arc<Offers>,
     source: Arc<Source>,
     _debouncer: Debouncer<RecommendedWatcher, NoCache>,
 }
 
 impl Drop for Watcher {
     fn drop(&mut self) {
-        self.source.stopped.store(true, Ordering::Release);
+        self.offers.stop(&self.source);
     }
 }
 
 /// Offers the names the file gets that were not in it as Twigo wrote it,
-/// `written`, and were never offered for this terminal.
+/// `written`, and were never offered for this terminal; for a proxy
+/// terminal, whose file Twigo wrote with the proxy's entries `proxied`,
+/// tells which contexts reach their clusters past them.
 pub(super) fn watch(
     offers: Arc<Offers>,
     source: Arc<Source>,
     written: Names,
+    proxied: Option<Reach>,
 ) -> notify::Result<Watcher> {
     let (events, received) = mpsc::channel();
     let mut debouncer = new_debouncer_opt(
@@ -50,11 +54,12 @@ pub(super) fn watch(
     )?;
     let dir = source.file.parent().expect("a file in a directory");
     debouncer.watch(dir, RecursiveMode::NonRecursive)?;
-    let followed = Arc::clone(&source);
+    let (followed, told) = (Arc::clone(&source), Arc::clone(&offers));
     std::thread::Builder::new()
         .name("terminal-kubeconfig".into())
-        .spawn(move || follow(&received, &offers, &followed, &written))?;
+        .spawn(move || follow(&received, &told, &followed, &written, proxied.as_ref()))?;
     Ok(Watcher {
+        offers,
         source,
         _debouncer: debouncer,
     })
@@ -66,6 +71,7 @@ fn follow(
     offers: &Offers,
     source: &Arc<Source>,
     written: &Names,
+    proxied: Option<&Reach>,
 ) {
     let name = source.file.file_name().expect("a file name").to_owned();
     let mut offered = Names::default();
@@ -85,6 +91,9 @@ fn follow(
             }
         };
         let Some(text) = text else { continue };
+        if let Some(proxied) = proxied {
+            offers.direct(source, proxied.past(&text).expect("parsed above"));
+        }
         let names = Names::of(&text).expect("parsed above");
         let fresh = names.without(written).without(&offered);
         if fresh.is_empty() {
@@ -162,7 +171,7 @@ mod tests {
         let (events, received) = mpsc::channel();
         let followed = Arc::clone(&source);
         let follower = std::thread::spawn(move || {
-            follow(&received, &offers, &followed, &Names::default());
+            follow(&received, &offers, &followed, &Names::default(), None);
         });
         let modified = Event::new(EventKind::Modify(ModifyKind::Any)).add_path(file.clone());
         events

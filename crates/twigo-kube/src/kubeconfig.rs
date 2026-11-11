@@ -4,6 +4,7 @@
 
 mod entries;
 mod fingerprint;
+mod reach;
 #[cfg(test)]
 mod tests;
 mod watch;
@@ -23,6 +24,7 @@ use crate::credentials::{Exec, ExecError, OidcEntry, OidcError, token_or_basic};
 
 pub use entries::{Appended, Names, Outcome, Written, append};
 pub use fingerprint::Fingerprint;
+pub use reach::Reach;
 pub use watch::Watch;
 pub use write::WriteError;
 

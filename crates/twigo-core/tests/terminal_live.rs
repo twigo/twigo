@@ -359,6 +359,46 @@ async fn a_zshrc_that_exports_kubeconfig_leaves_each_kind_its_space_s_context() 
 
 #[tokio::test]
 #[ignore = "needs a kind cluster: TWIGO_TEST_KUBECONFIG"]
+async fn a_context_kubectl_writes_into_a_proxy_terminal_s_file_goes_direct_until_it_is_deleted() {
+    let live = Live::new(&json!({"terminal": {"usePolicyProxy": ["kind-*"]}}).to_string()).await;
+    let (events, mut followed) = mpsc::unbounded_channel();
+    live.core
+        .follow_kubeconfig_offers("main", move |event| events.send(event).is_ok());
+    let script = format!(
+        "kubectl config set-cluster {ARN} --server=https://ABCDEF.gr7.eu-west-1.eks.amazonaws.com \
+         && kubectl config set-credentials {ARN} --token=theirs \
+         && kubectl config set-context {ARN} --cluster={ARN} --user={ARN} \
+         && kubectl config use-context {ARN} && sleep 1.5 \
+         && kubectl config set-context {context} --namespace=edited && sleep 1.5 \
+         && kubectl config use-context {context} && kubectl config delete-context {ARN} && sleep 1.5",
+        context = live.context
+    );
+    let (session, output, end) = live
+        .run(
+            &live.context,
+            "/bin/sh",
+            vec!["-c".into(), script.into()],
+            "",
+        )
+        .await;
+    assert_eq!(end, ShellEnd::Exited { code: 0 }, "{output}");
+    let mut told = Vec::new();
+    while let Ok(Some(event)) = tokio::time::timeout(Duration::from_secs(1), followed.recv()).await
+    {
+        if let KubeconfigOfferEvent::Direct {
+            session: of,
+            contexts,
+        } = event
+        {
+            assert_eq!(of, session.id);
+            told.push(contexts);
+        }
+    }
+    assert_eq!(told, [vec![ARN.to_owned()], vec![]], "{output}");
+}
+
+#[tokio::test]
+#[ignore = "needs a kind cluster: TWIGO_TEST_KUBECONFIG"]
 async fn a_proxy_terminal_reaches_another_context_only_through_the_proxy() {
     let live = Live::new(&json!({"terminal": {"usePolicyProxy": ["kind-*"]}}).to_string()).await;
     let script = format!(
