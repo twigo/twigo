@@ -327,6 +327,41 @@ test("Toggle Terminal shows the panel with the terminal that was last in use, an
   expect(document.activeElement).toBe(tabOf(tabs, 1).term.textarea);
 });
 
+function withNote(workbench: Workbench) {
+  workbench.editors.register({
+    id: "test.note",
+    scheme: "note",
+    area: "panel",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <p>note {uri}</p>,
+  });
+}
+
+test("Toggle Terminal shows a terminal the layout restored behind another tab, and starts none", async () => {
+  const { workbench, tabs, backend } = await mounted();
+  withNote(workbench);
+  const invoke = vi.spyOn(backend, "invoke");
+  act(() => {
+    workbench.editors.open(uriOf(1));
+    workbench.editors.open("note://a");
+  });
+  await settle(6);
+  act(() => {
+    workbench.spaces.setPart("qa", "panel", { visible: false });
+  });
+  await settle(4);
+  expect(workbench.editors.activeIn("panel")).toBe("note://a");
+
+  await press(document.body, TOGGLE);
+  expect(invoke.mock.calls.map(([command]) => command)).not.toContain(
+    "terminal_create",
+  );
+  expect(panelTabs().sort()).toEqual(["note://a", uriOf(1)]);
+  expect(panelShown(workbench)).toBe(true);
+  expect(workbench.editors.activeIn("panel")).toBe(uriOf(1));
+  expect(tabs.has(uriOf(2))).toBe(false);
+});
+
 test("Toggle Terminal hides the panel where a terminal has the focus, and focuses the terminal where something else has it", async () => {
   const { workbench, tabs, create } = await mounted();
   await create();

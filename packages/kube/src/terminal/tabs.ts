@@ -59,11 +59,16 @@ export class TerminalTabs extends ShellTabs<
     this.#recent = [...this.#recent.filter((each) => each !== uri), uri];
   }
 
-  /** The URI of the space's tab that was last in use, if it has one. */
+  /**
+   * The URI of the space's tab that was last in use, else its first tab, as
+   * after a restart, when none was in use yet; undefined when it has none.
+   */
   last(space: string): string | undefined {
-    return [...this.#recent]
-      .reverse()
-      .find((uri) => this.get(uri)?.input.space === space);
+    const inSpace = (uri: string) => this.get(uri)?.input.space === space;
+    return (
+      [...this.#recent].reverse().find(inSpace) ??
+      this.list().find(([, tab]) => tab.input.space === space)?.[0]
+    );
   }
 
   override closed(uri: string): void {
