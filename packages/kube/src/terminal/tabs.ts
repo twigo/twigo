@@ -44,10 +44,30 @@ export class TerminalTabs extends ShellTabs<
   TerminalStart,
   TerminalTab
 > {
+  /** The URIs of the tabs in the order they were last active, the latest last. */
+  #recent: string[] = [];
+
   constructor(options: TerminalOptions) {
     super(
       (input, changed, session) =>
         new TerminalTab(input, options, changed, session),
     );
+  }
+
+  touch(uri: string): void {
+    if (this.#recent[this.#recent.length - 1] === uri) return;
+    this.#recent = [...this.#recent.filter((each) => each !== uri), uri];
+  }
+
+  /** The URI of the space's tab that was last in use, if it has one. */
+  last(space: string): string | undefined {
+    return [...this.#recent]
+      .reverse()
+      .find((uri) => this.get(uri)?.input.space === space);
+  }
+
+  override closed(uri: string): void {
+    this.#recent = this.#recent.filter((each) => each !== uri);
+    super.closed(uri);
   }
 }

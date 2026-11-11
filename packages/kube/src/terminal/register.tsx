@@ -8,6 +8,7 @@ import {
   type TerminalInput,
 } from "../uri";
 import { terminalOptions } from "../xterm/options";
+import { registerPicks } from "../xterm/picks";
 import { RESTART_TERMINAL, TerminalEditor } from "./TerminalEditor";
 import { TerminalActions } from "./TerminalActions";
 import { started, TerminalTabs } from "./tabs";
@@ -16,6 +17,9 @@ import { terminalTitle } from "./words";
 export function createTerminalTabs(workbench: Workbench): TerminalTabs {
   return new TerminalTabs(terminalOptions(workbench));
 }
+
+const NEW_TERMINAL = "k8s.terminal.new";
+const TOGGLE_TERMINAL = "k8s.terminal.toggle";
 
 const URI_ARGUMENT = v.object({ uri: v.string() });
 
@@ -28,7 +32,7 @@ export function registerTerminals(
   workbench: Workbench,
   tabs: TerminalTabs,
 ): void {
-  const { backend, commands, editors, menus, spaces } = workbench;
+  const { backend, commands, editors, keybindings, menus, spaces } = workbench;
   editors.onClose((uri) => {
     tabs.closed(uri);
   });
@@ -66,8 +70,13 @@ export function registerTerminals(
     }
     const uri = terminalUri(input);
     tabs.start(uri, input, started(created));
+    tabs.touch(uri);
     editors.open(uri);
   };
+  editors.changes.subscribe(() => {
+    const uri = editors.activeIn("panel");
+    if (uri !== undefined && tabs.has(uri)) tabs.touch(uri);
+  });
 
   /** The URIs whose terminal has not been created yet, which another press must not pick too. */
   const planning = new Set<string>();
@@ -87,25 +96,53 @@ export function registerTerminals(
     }
   };
 
+  const open = async (): Promise<void> => {
+    const space = spaces.active;
+    if (!space) return;
+    const input = free(space.id);
+    const uri = terminalUri(input);
+    planning.add(uri);
+    try {
+      await start(input);
+    } finally {
+      planning.delete(uri);
+    }
+  };
+
   commands.register({
-    id: "k8s.terminal.new",
+    id: NEW_TERMINAL,
     title: "New Terminal",
     category: "Terminal",
     icon: Terminal,
     enablement: "space.count > 0",
-    run: async () => {
+    run: open,
+  });
+
+  commands.register({
+    id: TOGGLE_TERMINAL,
+    title: "Toggle Terminal",
+    category: "Terminal",
+    icon: Terminal,
+    enablement: "space.count > 0",
+    run: async (_args, lookup) => {
       const space = spaces.active;
       if (!space) return;
-      const input = free(space.id);
-      const uri = terminalUri(input);
-      planning.add(uri);
-      try {
-        await start(input);
-      } finally {
-        planning.delete(uri);
+      if (
+        spaces.state(space.id).parts.panel.visible &&
+        lookup("terminalFocus")
+      ) {
+        spaces.setPart(space.id, "panel", { visible: false });
+        return;
       }
+      const last = tabs.last(space.id);
+      if (last === undefined) await open();
+      else editors.open(last);
     },
   });
+  keybindings.register("core", [
+    { key: "ctrl+shift+`", command: NEW_TERMINAL },
+    { key: "ctrl+`", command: TOGGLE_TERMINAL },
+  ]);
 
   commands.register({
     id: RESTART_TERMINAL,
@@ -127,5 +164,13 @@ export function registerTerminals(
     group: "navigation",
     order: 2,
     when: "terminalRestartable",
+  });
+
+  registerPicks(workbench, tabs, {
+    noun: "Terminal",
+    prefix: "k8s.terminal",
+    key: "terminalOpen",
+    icon: Terminal,
+    row: (tab) => ({ label: terminalTitle(tab.input) }),
   });
 }

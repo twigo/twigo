@@ -40,6 +40,7 @@ export function TerminalEditor({
   useEffect(() => {
     if (!root) return;
     const scope = keys.scope(root);
+    scope.set("terminalFocus", true);
     scope.set("terminalRestartable", ended);
     return () => {
       scope.dispose();

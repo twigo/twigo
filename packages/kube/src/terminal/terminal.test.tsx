@@ -8,11 +8,12 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Backend } from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
-import { WorkbenchView, type Workbench } from "@twigo/workbench";
+import { WorkbenchView, type Platform, type Workbench } from "@twigo/workbench";
 import { tabsIn, testWorkbench } from "@twigo/workbench/testing";
 import { settle, withScreenSize } from "../../test/workbench";
 import { withTerminalLayout } from "../../test/terminal";
 import { terminalUri } from "../uri";
+import { workbenchKey } from "../xterm/keys";
 import { createTerminalTabs, registerTerminals } from "./register";
 import type { TerminalTab, TerminalTabs } from "./tabs";
 
@@ -41,9 +42,10 @@ interface Mounted {
 async function mounted(
   scenario: MockScenario = "ready",
   space = "qa",
+  platform: Platform = "mac",
 ): Promise<Mounted> {
   const backend = createMockBackend(scenario);
-  const workbench = await testWorkbench(scenario, backend, "mac");
+  const workbench = await testWorkbench(scenario, backend, platform);
   const tabs = createTerminalTabs(workbench);
   registerTerminals(workbench, tabs);
   await act(() => workbench.spaces.open(space));
@@ -256,4 +258,180 @@ test("the terminal of a space is the space's own: a staging terminal asks the co
     kind: "proxy",
     why: "mode",
   });
+});
+
+const BACKQUOTE = { key: "`", code: "Backquote" };
+
+function keydown(target: Element, init: KeyboardEventInit): KeyboardEvent {
+  const event = new KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    ...BACKQUOTE,
+    ...init,
+  });
+  target.dispatchEvent(event);
+  return event;
+}
+
+async function press(
+  target: Element,
+  init: KeyboardEventInit,
+): Promise<boolean> {
+  const event = keydown(target, init);
+  await settle(10);
+  return event.defaultPrevented;
+}
+
+const TOGGLE = { ctrlKey: true };
+const NEW = { ctrlKey: true, shiftKey: true };
+const panelShown = (workbench: Workbench) =>
+  workbench.spaces.state("qa").parts.panel.visible;
+
+test("Toggle Terminal with no terminal in the space starts one and shows the panel with it focused", async () => {
+  const { workbench, tabs } = await mounted();
+  expect(panelShown(workbench)).toBe(false);
+  expect(await press(document.body, TOGGLE)).toBe(true);
+  expect(panelTabs()).toEqual([uriOf(1)]);
+  expect(panelShown(workbench)).toBe(true);
+  expect(document.activeElement).toBe(tabOf(tabs).term.textarea);
+});
+
+test("Toggle Terminal shows the panel with the terminal that was last in use, and starts none when there is one", async () => {
+  const { workbench, tabs, create } = await mounted();
+  await create();
+  await create();
+  act(() => {
+    workbench.editors.open(uriOf(1));
+  });
+  await settle(4);
+  act(() => {
+    workbench.spaces.setPart("qa", "panel", { visible: false });
+  });
+  await settle(4);
+  expect(panelShown(workbench)).toBe(false);
+
+  await press(document.body, TOGGLE);
+  expect(panelShown(workbench)).toBe(true);
+  expect(panelTabs().sort()).toEqual([uriOf(1), uriOf(2)]);
+  expect(workbench.editors.activeIn("panel")).toBe(uriOf(1));
+  expect(document.activeElement).toBe(tabOf(tabs, 1).term.textarea);
+});
+
+test("Toggle Terminal hides the panel where a terminal has the focus, and focuses the terminal where something else has it", async () => {
+  const { workbench, tabs, create } = await mounted();
+  await create();
+  const { textarea } = tabOf(tabs).term;
+  if (!textarea) throw new Error("no terminal");
+  expect(document.activeElement).toBe(textarea);
+
+  await press(textarea, TOGGLE);
+  expect(panelShown(workbench)).toBe(false);
+
+  act(() => {
+    workbench.spaces.setPart("qa", "panel", { visible: true });
+  });
+  await settle(4);
+  act(() => {
+    (document.activeElement as HTMLElement).blur();
+  });
+  expect(document.activeElement).toBe(document.body);
+  await press(document.body, TOGGLE);
+  expect(panelShown(workbench)).toBe(true);
+  expect(document.activeElement).toBe(textarea);
+  expect(panelTabs()).toEqual([uriOf(1)]);
+});
+
+test("New Terminal is on Ctrl+Shift+` and starts another terminal, from a terminal too", async () => {
+  const { tabs, create } = await mounted();
+  await create();
+  const { textarea } = tabOf(tabs).term;
+  if (!textarea) throw new Error("no terminal");
+  expect(await press(textarea, NEW)).toBe(true);
+  expect(panelTabs().sort()).toEqual([uriOf(1), uriOf(2)]);
+});
+
+test.each<Platform>(["mac", "linux"])(
+  "on %s the terminal's own keys win over the shell, and the other Ctrl chords stay with it",
+  async (platform) => {
+    const { workbench, tabs, create } = await mounted("ready", "qa", platform);
+    await create();
+    const { textarea } = tabOf(tabs).term;
+    if (!textarea) throw new Error("no terminal");
+    const binds = (init: KeyboardEventInit) =>
+      workbenchKey(
+        workbench.keybindings,
+        platform,
+        keydown(textarea, { ...init }),
+      );
+    expect(binds(TOGGLE)).toBe(true);
+    expect(binds(NEW)).toBe(true);
+    expect(binds({ key: "c", code: "KeyC", ctrlKey: true })).toBe(false);
+    expect(binds({})).toBe(false);
+  },
+);
+
+async function pick(workbench: Workbench, id?: string) {
+  const asking = workbench.quickAccess.session?.pick;
+  if (!asking) throw new Error("nothing asks");
+  act(() => {
+    asking.resolve(asking.items.find((item) => item.id === id));
+  });
+  await settle(6);
+}
+
+test("Go to Terminal… and Close Terminal… list the space's terminals with the state of those that ended", async () => {
+  const { workbench, tabs, create } = await mounted();
+  await create();
+  await create();
+  await type(tabOf(tabs, 2), "exit 1\r");
+  const lookup = workbench.keys.lookup(null);
+
+  const go = workbench.commands.execute("k8s.terminal.show", lookup);
+  await settle(4);
+  const asking = workbench.quickAccess.session?.pick;
+  expect(
+    asking?.items.map(({ id, label, state }) => [id, label, state?.label]),
+  ).toEqual([
+    [uriOf(1), "Terminal 1", undefined],
+    [uriOf(2), "Terminal 2", "Exit 1"],
+  ]);
+  await pick(workbench, uriOf(1));
+  await go;
+  expect(workbench.editors.activeIn("panel")).toBe(uriOf(1));
+
+  const close = workbench.commands.execute("k8s.terminal.close", lookup);
+  await settle(4);
+  await pick(workbench, uriOf(2));
+  await close;
+  expect(panelTabs()).toEqual([uriOf(1)]);
+  expect(tabs.has(uriOf(2))).toBe(false);
+
+  act(() => {
+    workbench.editors.close(uriOf(1));
+  });
+  await settle(4);
+  expect(workbench.commands.enabled("k8s.terminal.show", lookup)).toBe(false);
+});
+
+test("the picks list only the terminals of the space that shows, and wait for a terminal to exist", async () => {
+  const { workbench, tabs, create } = await mounted();
+  const lookup = () => workbench.keys.lookup(null);
+  expect(workbench.commands.enabled("k8s.terminal.show", lookup())).toBe(false);
+  await create();
+  await act(() => workbench.spaces.open("staging"));
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  await settle(6);
+  const run = workbench.commands.execute("k8s.terminal.new", lookup());
+  await settle(10);
+  await run;
+  expect(tabs.has(uriOf(1, "staging"))).toBe(true);
+  const go = workbench.commands.execute("k8s.terminal.show", lookup());
+  await settle(4);
+  expect(
+    workbench.quickAccess.session?.pick?.items.map(({ id }) => id),
+  ).toEqual([uriOf(1, "staging")]);
+  await pick(workbench);
+  await go;
 });

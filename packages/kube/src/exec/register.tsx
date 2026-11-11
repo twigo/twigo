@@ -7,7 +7,7 @@ import { EXEC_SCHEME, execUri, parseExecUri, type ExecInput } from "../uri";
 import { ExecActions } from "./ExecActions";
 import { ExecEditor } from "./ExecEditor";
 import { terminalOptions } from "../xterm/options";
-import { ending, stateOf } from "../xterm/words";
+import { registerPicks } from "../xterm/picks";
 import { canShell } from "./kinds";
 import { ExecTabs } from "./tabs";
 import { execTitle } from "./words";
@@ -203,70 +203,16 @@ export function registerExec(workbench: Workbench, tabs: ExecTabs): void {
     when: "execEnded",
   });
 
-  /** The active space's shell tabs, as rows to pick. */
-  const rows = (): QuickPickItem[] => {
-    const space = workbench.spaces.active?.id;
-    return tabs
-      .list()
-      .filter(([, tab]) => tab.input.space === space)
-      .map(([uri, tab]) => {
-        const status = tab.getStatus();
-        const { label, tone, pulse } = stateOf(status);
-        return {
-          id: uri,
-          label: execTitle(tab.input),
-          description: tab.input.namespace,
-          icon: ({ className }) => <SquareTerminal className={className} />,
-          ...(status.state !== "running" && {
-            state: {
-              tone,
-              label:
-                status.state === "ended" ? ending(status.end).label : label,
-              ...(pulse && { pulse }),
-            },
-          }),
-        };
-      });
-  };
-  const picks: readonly {
-    id: string;
-    title: string;
-    placeholder: string;
-    accept: (uri: string) => void;
-  }[] = [
-    {
-      id: "k8s.shell.show",
-      title: "Go to Shell…",
-      placeholder: "Go to a shell",
-      accept: (uri) => {
-        editors.open(uri);
-      },
-    },
-    {
-      id: "k8s.shell.close",
-      title: "Close Shell…",
-      placeholder: "Close a shell",
-      accept: (uri) => {
-        editors.close(uri);
-      },
-    },
-  ];
-  for (const { id, title, placeholder, accept } of picks) {
-    commands.register({
-      id,
-      title,
-      category: "Shell",
-      enablement: "execOpen",
-      run: async () => {
-        const picked = await quickAccess.pick(placeholder, rows());
-        if (picked) accept(picked.id);
-      },
-    });
-  }
-  const listed = () => {
-    keys.set("execOpen", tabs.list().length > 0);
-  };
-  tabs.changes.subscribe(listed);
+  registerPicks(workbench, tabs, {
+    noun: "Shell",
+    prefix: "k8s.shell",
+    key: "execOpen",
+    icon: SquareTerminal,
+    row: (tab) => ({
+      label: execTitle(tab.input),
+      description: tab.input.namespace,
+    }),
+  });
 
   workbench.views.registerStatusBarItem({
     id: "kube.shells",
