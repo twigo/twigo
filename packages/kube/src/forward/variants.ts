@@ -4,7 +4,9 @@
  * the owner has chosen, and the code that reads it keeps the choice.
  */
 const VARIANTS = {
+  start: ["pick", "once"],
   busy: ["offer", "input"],
+  open: ["tab", "list"],
 } as const;
 
 type Group = keyof typeof VARIANTS;

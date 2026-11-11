@@ -1,4 +1,5 @@
 import { ArrowLeftRight } from "lucide-react";
+import * as v from "valibot";
 import type { Workbench } from "@twigo/workbench";
 import { PF_SCHEME, parsePfUri } from "../uri";
 import {
@@ -9,8 +10,23 @@ import {
 import { ForwardActions } from "./ForwardActions";
 import { ForwardEditor } from "./ForwardEditor";
 import { ForwardsView } from "./ForwardsView";
+import { canForward } from "./kinds";
 import type { Forwards } from "./service";
+import { startForward } from "./start";
 import { forwardTitle } from "./words";
+
+/** A `k8s.forward.open` request: a target, and whether to pick its port whatever the number. */
+const REQUEST = v.object({
+  space: v.string(),
+  gvr: v.object({
+    group: v.string(),
+    version: v.string(),
+    resource: v.string(),
+  }),
+  namespace: v.string(),
+  name: v.string(),
+  pick: v.optional(v.boolean()),
+});
 
 /**
  * Port-forwards (ARCHITECTURE 4.6): this window follows the core's, which
@@ -22,7 +38,8 @@ export function registerForwards(
   workbench: Workbench,
   forwards: Forwards,
 ): void {
-  const { editors, keybindings, keys, spaces, views } = workbench;
+  const { commands, editors, keybindings, keys, menus, spaces, views } =
+    workbench;
   forwards.watch().catch((error: unknown) => {
     workbench.report(error);
   });
@@ -41,6 +58,31 @@ export function registerForwards(
     actions: ({ uri }) => <ForwardActions uri={uri} forwards={forwards} />,
   });
   registerForwardActions(workbench, forwards);
+
+  const start = startForward(workbench, forwards);
+  commands.register({
+    id: "k8s.forward.open",
+    title: "Forward",
+    category: "Port Forward",
+    icon: ArrowLeftRight,
+    run: async (args) => {
+      const parsed = v.safeParse(REQUEST, args);
+      if (!parsed.success || !canForward(parsed.output.gvr)) return;
+      const { pick, ...target } = parsed.output;
+      await start(target, { pick: pick === true });
+    },
+  });
+  // It acts on the object its caller names, so the palette has nothing to give it.
+  menus.append("commandPalette", {
+    command: "k8s.forward.open",
+    when: "false",
+  });
+  menus.append("editor/title", {
+    command: "k8s.forward.open",
+    group: "navigation",
+    order: 3,
+    when: "resource.forward",
+  });
 
   views.registerContainer({
     id: FORWARDS_CONTAINER,

@@ -37,6 +37,7 @@ async function withEveryEnablement() {
   workbench.keys.set("operationUndo", ["dev"]);
   workbench.keys.set("resource.scalable", true);
   for (const key of [
+    "resource.forward",
     "forward",
     "forward.running",
     "forward.startable",

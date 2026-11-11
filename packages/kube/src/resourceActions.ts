@@ -1,5 +1,6 @@
 import {
   ArrowDownToLine,
+  ArrowLeftRight,
   Cable,
   CircleCheck,
   CirclePause,
@@ -58,7 +59,8 @@ export function replicasOf({ columns, row }: Selected): number | undefined {
  * menu, its hover buttons and the marked rows' bar, and an object editor's
  * title. Delete goes through the command bus, whose plan says how much to
  * ask (6.4); it is ⌘⌫, never a bare key (4.4). A pod's shell and attach
- * open their tab in the panel through `k8s.shell.open`.
+ * open their tab in the panel through `k8s.shell.open`, and a port-forward
+ * starts through `k8s.forward.open`.
  */
 export function registerResourceActions(
   workbench: Workbench,
@@ -91,6 +93,21 @@ export function registerResourceActions(
     await workbench.operations.run(request(space, found), look);
   };
   const node = (found: { selected: Selected }) => objectOf(found.selected).name;
+  /** Forwards a port of the selected pod, Service or workload; `pick` asks which whatever their number. */
+  const forward = async (pick: boolean) => {
+    const found = target();
+    const space = found && parseListUri(found.uri)?.space;
+    if (!found || space === undefined) return;
+    const { namespace, name } = objectOf(found.selected);
+    if (namespace === undefined) return;
+    await commands.execute("k8s.forward.open", workbench.keys.lookup(null), {
+      space,
+      gvr: found.selected.gvr,
+      namespace,
+      name,
+      ...(pick && { pick }),
+    });
+  };
   /** Opens a shell, or an attach, in a container of the selected pod. */
   const shell = async (kind: ShellKind) => {
     const found = target();
@@ -180,6 +197,31 @@ export function registerResourceActions(
         ["resource/details", "navigation"],
       ],
       run: () => shell("attach"),
+    },
+    {
+      id: "k8s.resource.forward",
+      title: "Forward",
+      icon: ArrowLeftRight,
+      key: "f",
+      when: "resource.forward",
+      menus: [
+        ["resource/context", "navigation"],
+        ["resource/inline", "navigation"],
+        ["resource/details", "navigation"],
+      ],
+      run: () => forward(false),
+    },
+    {
+      id: "k8s.resource.forwardPick",
+      title: "Forward Port…",
+      icon: ArrowLeftRight,
+      key: "shift+f",
+      when: "resource.forward",
+      menus: [
+        ["resource/context", "navigation"],
+        ["resource/details", "navigation"],
+      ],
+      run: () => forward(true),
     },
     {
       id: "k8s.resource.yaml",
