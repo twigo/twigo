@@ -70,6 +70,9 @@ pub struct KubeconfigOfferId(pub u32);
 #[serde(rename_all = "camelCase")]
 pub struct KubeconfigOffer {
     pub id: KubeconfigOfferId,
+    /// How many times the offer of this id was sent again with a change;
+    /// an answer names the revision it answers.
+    pub revision: u32,
     /// The terminal's label.
     pub terminal: String,
     /// The id `terminal_create` answered for the terminal, which finds its
@@ -128,5 +131,8 @@ pub enum KubeconfigOfferAnswer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct AnswerKubeconfigOffer {
     pub id: KubeconfigOfferId,
+    /// The revision of the offer the person answered: an answer to another
+    /// than the offer's now changes nothing and is refused as a conflict.
+    pub revision: u32,
     pub answer: KubeconfigOfferAnswer,
 }

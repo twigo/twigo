@@ -215,9 +215,16 @@ impl Setup {
     }
 
     async fn answer(&self, offer: &KubeconfigOffer, answer: KubeconfigOfferAnswer) {
-        let id = offer.id;
+        let (id, revision) = (offer.id, offer.revision);
         self.core
-            .answer_kubeconfig_offer("main", AnswerKubeconfigOffer { id, answer })
+            .answer_kubeconfig_offer(
+                "main",
+                AnswerKubeconfigOffer {
+                    id,
+                    revision,
+                    answer,
+                },
+            )
             .await
             .unwrap();
     }
@@ -918,6 +925,7 @@ async fn offers_outlive_their_terminal_and_end_with_their_window() {
             "other",
             AnswerKubeconfigOffer {
                 id: offer.id,
+                revision: offer.revision,
                 answer: KubeconfigOfferAnswer::Dismiss,
             },
         )
@@ -939,6 +947,7 @@ async fn offers_outlive_their_terminal_and_end_with_their_window() {
             "main",
             AnswerKubeconfigOffer {
                 id: offer.id,
+                revision: offer.revision,
                 answer: KubeconfigOfferAnswer::Move,
             },
         )

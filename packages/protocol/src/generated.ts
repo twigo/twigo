@@ -40,7 +40,12 @@ export type AnswerApproval = { id: ApprovalId, answer: ApprovalAnswer,
  */
 typed: string | null, };
 
-export type AnswerKubeconfigOffer = { id: KubeconfigOfferId, answer: KubeconfigOfferAnswer, };
+export type AnswerKubeconfigOffer = { id: KubeconfigOfferId, 
+/**
+ * The revision of the offer the person answered: an answer to another
+ * than the offer's now changes nothing and is refused as a conflict.
+ */
+revision: number, answer: KubeconfigOfferAnswer, };
 
 /**
  * A field another manager owns that an apply would change.
@@ -571,6 +576,11 @@ export type KubeconfigNames = { contexts: Array<string>, clusters: Array<string>
  * update-kubeconfig` does, offered for moving into the user's kubeconfig.
  */
 export type KubeconfigOffer = { id: KubeconfigOfferId, 
+/**
+ * How many times the offer of this id was sent again with a change;
+ * an answer names the revision it answers.
+ */
+revision: number, 
 /**
  * The terminal's label.
  */

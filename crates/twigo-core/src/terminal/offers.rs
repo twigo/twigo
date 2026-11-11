@@ -427,6 +427,7 @@ fn offer_of(
 ) -> KubeconfigOffer {
     KubeconfigOffer {
         id,
+        revision: 0,
         terminal: source.label.to_string(),
         session: *source
             .session

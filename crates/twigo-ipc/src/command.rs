@@ -574,7 +574,8 @@ impl Command for KubeconfigOffersWatch {
 }
 
 /// Moves an offer's entries into the user's kubeconfig, or dismisses it;
-/// refused for one that is gone or another window's.
+/// refused for one that is gone, another window's, or of another revision
+/// than the one answered.
 pub struct KubeconfigOfferAnswerSend;
 
 impl Command for KubeconfigOfferAnswerSend {

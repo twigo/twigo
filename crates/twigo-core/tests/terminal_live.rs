@@ -471,6 +471,7 @@ async fn what_a_cloud_cli_writes_is_offered_and_a_move_keeps_the_user_s_comments
             "main",
             AnswerKubeconfigOffer {
                 id,
+                revision: offer.revision,
                 answer: KubeconfigOfferAnswer::Move,
             },
         )
@@ -512,6 +513,7 @@ async fn what_a_cloud_cli_writes_is_offered_and_a_move_keeps_the_user_s_comments
                 "main",
                 AnswerKubeconfigOffer {
                     id: later.id,
+                    revision: later.revision,
                     answer: KubeconfigOfferAnswer::Dismiss,
                 },
             )
