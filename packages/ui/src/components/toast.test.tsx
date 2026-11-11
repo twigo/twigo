@@ -127,3 +127,60 @@ test("an undo's toast runs it and stays for its owner to end, as long as the und
   expect(dismiss).not.toHaveBeenCalled();
   vi.useRealTimers();
 });
+
+test("a choice's toast stays until its owner dismisses it, takes one answer, and shows new words under the same key", async () => {
+  vi.useFakeTimers();
+  render(<Toaster />);
+  const first = vi.fn();
+  const second = vi.fn();
+  const choices = (move: () => void) => [
+    { label: "Move", run: move },
+    { label: "Dismiss", run: second },
+  ];
+  let shown: { dismiss: () => void } | undefined;
+  act(() => {
+    shown = notify.choice(
+      {
+        icon: CircleCheck,
+        message: "Terminal 1 added a context",
+        choices: choices(first),
+      },
+      "offer-1",
+    );
+  });
+  await act(() => vi.advanceTimersByTimeAsync(60_000));
+  expect(
+    document
+      .querySelector("[data-sonner-toast]")
+      ?.getAttribute("data-dismissible"),
+  ).toBe("false");
+  fireEvent.click(screen.getByRole("button", { name: "Move" }));
+  expect(first).toHaveBeenCalledOnce();
+
+  act(() => {
+    notify.choice(
+      {
+        icon: CircleCheck,
+        message: "Terminal 1 added two contexts",
+        choices: choices(first),
+        busy: true,
+      },
+      "offer-1",
+    );
+  });
+  await act(() => vi.advanceTimersByTimeAsync(100));
+  expect(screen.getAllByRole("status")).toHaveLength(1);
+  screen.getByText("Terminal 1 added two contexts");
+  expect(
+    screen.getByRole("button", { name: "Move" }).hasAttribute("disabled"),
+  ).toBe(true);
+
+  act(() => {
+    shown?.dismiss();
+  });
+  await act(() => vi.advanceTimersByTimeAsync(1000));
+  expect(
+    document.querySelector("[data-sonner-toast]")?.getAttribute("data-removed"),
+  ).toBe("true");
+  vi.useRealTimers();
+});

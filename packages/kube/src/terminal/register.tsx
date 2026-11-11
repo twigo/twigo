@@ -10,6 +10,8 @@ import {
 import { terminalOptions } from "../xterm/options";
 import { registerPicks } from "../xterm/picks";
 import { KindTabIcon } from "./KindTabIcon";
+import { hostOf, KubeconfigOffers, offersInBars } from "./offers";
+import { presentOffers } from "./presentOffers";
 import { RESTART_TERMINAL, TerminalEditor } from "./TerminalEditor";
 import { TerminalActions } from "./TerminalActions";
 import { started, TerminalTabs } from "./tabs";
@@ -37,6 +39,17 @@ export function registerTerminals(
   editors.onClose((uri) => {
     tabs.closed(uri);
   });
+  const offers = new KubeconfigOffers(backend, (error) => {
+    workbench.report(error);
+  });
+  presentOffers(
+    offers,
+    tabs,
+    (offer) => offersInBars() && hostOf(offer, tabs) !== undefined,
+  );
+  offers.watch().catch((error: unknown) => {
+    workbench.report(error);
+  });
   editors.register({
     id: "kube.terminal",
     scheme: TERMINAL_SCHEME,
@@ -49,7 +62,9 @@ export function registerTerminals(
     icon: ({ uri, className }) => (
       <KindTabIcon uri={uri} tabs={tabs} className={className} />
     ),
-    component: ({ uri }) => <TerminalEditor uri={uri} tabs={tabs} />,
+    component: ({ uri }) => (
+      <TerminalEditor uri={uri} tabs={tabs} offers={offers} />
+    ),
     actions: ({ uri }) => <TerminalActions uri={uri} tabs={tabs} />,
     focus: (uri) => {
       tabs.get(uri)?.focus();

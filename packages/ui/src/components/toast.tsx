@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { Toaster as SonnerToaster, toast } from "sonner";
 import { cn } from "../lib/cn";
+import { Button } from "./button";
 import { Kbd } from "./kbd";
 
 export type Tone = "success" | "error" | "warning" | "info";
@@ -149,6 +150,57 @@ export function CountdownToast({
         className="absolute inset-x-0 bottom-0 h-0.5 origin-left animate-countdown bg-brand"
         style={bar}
       />
+    </div>
+  );
+}
+
+export interface ChoiceToastProps {
+  icon: LucideIcon;
+  message: ReactNode;
+  detail?: ReactNode;
+  /** The choices as buttons, the first of them the one to take. */
+  choices: readonly { label: string; run: () => void }[];
+  /** While an answer is on its way, which the buttons wait for. */
+  busy?: boolean;
+}
+
+/**
+ * Something that waits for an answer: what came and the buttons to answer
+ * it with. It has no close of its own, since closing it would answer
+ * nothing.
+ */
+export function ChoiceToast({
+  icon: Icon,
+  message,
+  detail,
+  choices,
+  busy = false,
+}: ChoiceToastProps) {
+  return (
+    <div
+      role="status"
+      className="relative flex w-[var(--width)] items-start gap-2 overflow-hidden rounded-md border border-border bg-popover/90 py-2 pr-2 pl-3 font-sans text-xs shadow-lg backdrop-blur-xl"
+    >
+      <span className="flex h-5 shrink-0 items-center">
+        <Icon aria-hidden className="size-3.5 text-muted-foreground" />
+      </span>
+      <span className="grid min-w-0 flex-1 gap-1.5 leading-5">
+        <span className="break-words text-foreground">{message}</span>
+        {detail}
+        <span className="flex flex-wrap gap-1.5">
+          {choices.map(({ label, run }, index) => (
+            <Button
+              key={label}
+              size="sm"
+              variant={index === 0 ? "brand" : "outline"}
+              disabled={busy}
+              onClick={run}
+            >
+              {label}
+            </Button>
+          ))}
+        </span>
+      </span>
     </div>
   );
 }

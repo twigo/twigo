@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import {
+  ChoiceToast,
   CountdownToast,
   Toast,
+  type ChoiceToastProps,
   type CountdownToastProps,
   type ToastAction,
   type Tone,
@@ -50,6 +52,24 @@ function countdown(props: CountdownToastProps): { dismiss: () => void } {
 }
 
 /**
+ * Something that waits for an answer, until its owner dismisses it: it
+ * cannot be swiped away, and a call with the same key shows the new words in
+ * its place.
+ */
+function choice(props: ChoiceToastProps, key: string): { dismiss: () => void } {
+  const id = toast.custom(() => <ChoiceToast {...props} />, {
+    id: key,
+    duration: Infinity,
+    dismissible: false,
+  });
+  return {
+    dismiss: () => {
+      toast.dismiss(id);
+    },
+  };
+}
+
+/**
  * What ran, with its undo for as long as it lasts: the toast goes when the
  * undo ends, or when its owner says it was taken, as a refused or cancelled
  * undo still lasts; dismissing it leaves the undo to ⌘Z.
@@ -77,4 +97,5 @@ export const notify = {
   info: show("info"),
   countdown,
   undoable,
+  choice,
 };
