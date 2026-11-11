@@ -19,6 +19,7 @@ import {
 } from "./quickaccess";
 import { createExecTabs, registerExec } from "./exec/register";
 import { registerLogs } from "./logs/register";
+import { createTerminalTabs, registerTerminals } from "./terminal/register";
 import { LogsTabs } from "./logs/state";
 import { registerResourceActions } from "./resourceActions";
 import { editorSpace } from "./edit/services";
@@ -202,6 +203,7 @@ export function registerKube(workbench: Workbench): void {
   ]);
   registerLogs(workbench, new LogsTabs(workbench.backend));
   registerExec(workbench, createExecTabs(workbench));
+  registerTerminals(workbench, createTerminalTabs(workbench));
   registerResourceActions(workbench, services);
   registerEdits(workbench, {
     discovery: services.discovery,

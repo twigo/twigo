@@ -6,25 +6,14 @@ import { useChanges } from "@twigo/workbench";
 import { EXEC_SCHEME, execUri, parseExecUri, type ExecInput } from "../uri";
 import { ExecActions } from "./ExecActions";
 import { ExecEditor } from "./ExecEditor";
-import { workbenchKey } from "../xterm/keys";
+import { terminalOptions } from "../xterm/options";
 import { ending, stateOf } from "../xterm/words";
 import { canShell } from "./kinds";
 import { ExecTabs } from "./tabs";
 import { execTitle } from "./words";
 
 export function createExecTabs(workbench: Workbench): ExecTabs {
-  return new ExecTabs({
-    backend: workbench.backend,
-    platform: workbench.platform,
-    report: (error) => {
-      workbench.report(error);
-    },
-    openUrl: (url) => {
-      workbench.openUrl(url);
-    },
-    binds: (event) =>
-      workbenchKey(workbench.keybindings, workbench.platform, event),
-  });
+  return new ExecTabs(terminalOptions(workbench));
 }
 
 /** A `k8s.shell.open` request: a pod, and maybe a container and what to start in it. */
