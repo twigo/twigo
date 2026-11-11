@@ -18,6 +18,7 @@ mod schema;
 mod shell;
 mod space;
 mod state;
+mod terminal;
 mod typescript;
 
 pub use access::{
@@ -61,4 +62,8 @@ pub use shell::{
 };
 pub use space::{Context, ContextColor, Space};
 pub use state::{StateEntry, StateSnapshot};
+pub use terminal::{
+    AnswerKubeconfigOffer, KubeconfigOffer, KubeconfigOfferAnswer, KubeconfigOfferEvent,
+    KubeconfigOfferId, NewTerminal, ProxyWhy, TerminalKind, TerminalSession,
+};
 pub use typescript::typescript;

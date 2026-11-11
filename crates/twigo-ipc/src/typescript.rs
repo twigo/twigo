@@ -9,12 +9,13 @@ use crate::command::{
     AccessReview, ApplyPreview, ApprovalAnswerSend, ApprovalsWatch, ClusterVersionGet, Command,
     CommandCancel, CommandExecute, CommandPlan, ContextAuthWatch, ContextEnvironmentSet,
     ContextModeSet, ContextRelock, ContextSignIn, ContextSignInCancel, ContextUnlock,
-    ContextsWatch, ExecReviewGet, ExecTrust, KeyboardLayoutWatch, ListAck, ListSetWindow,
-    ListSubscribe, ListUnsubscribe, LogsAck, LogsClose, LogsDownload, LogsOpen, LogsSetSource,
-    LogsSetView, LogsSetWindow, NamespacesList, ObjectAck, ObjectClose, ObjectOpen, ObjectSetParts,
-    ObjectValues, ResourcesWatch, SchemaGet, ShellAcknowledge, ShellClose, ShellContainersGet,
-    ShellEnvironmentRetry, ShellEnvironmentWatch, ShellOpen, ShellSendInput, ShellSetSize,
-    SpaceOpen, SpacesList, StateLoad, StateSet, UrlOpen,
+    ContextsWatch, ExecReviewGet, ExecTrust, KeyboardLayoutWatch, KubeconfigOfferAnswerSend,
+    KubeconfigOffersWatch, ListAck, ListSetWindow, ListSubscribe, ListUnsubscribe, LogsAck,
+    LogsClose, LogsDownload, LogsOpen, LogsSetSource, LogsSetView, LogsSetWindow, NamespacesList,
+    ObjectAck, ObjectClose, ObjectOpen, ObjectSetParts, ObjectValues, ResourcesWatch, SchemaGet,
+    ShellAcknowledge, ShellClose, ShellContainersGet, ShellEnvironmentRetry, ShellEnvironmentWatch,
+    ShellOpen, ShellSendInput, ShellSetSize, SpaceOpen, SpacesList, StateLoad, StateSet,
+    TerminalCreate, UrlOpen,
 };
 
 /// The TypeScript module of `packages/protocol`: every type the commands
@@ -58,6 +59,9 @@ pub fn typescript() -> String {
     module.command::<ShellSetSize>();
     module.command::<ShellAcknowledge>();
     module.command::<ShellClose>();
+    module.command::<TerminalCreate>();
+    module.command::<KubeconfigOffersWatch>();
+    module.command::<KubeconfigOfferAnswerSend>();
     module.command::<LogsOpen>();
     module.command::<LogsSetSource>();
     module.command::<LogsSetView>();
