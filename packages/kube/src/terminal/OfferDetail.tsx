@@ -24,7 +24,6 @@ function Line({ entry }: { entry: OfferName }) {
   );
 }
 
-/** The tooltip is above sonner's toaster (z-index 999999999), which would hide the half of it that falls over the toast. */
 export function OfferDetail({ words }: { words: OfferWords }) {
   return (
     <div className="grid gap-1 text-[11px] leading-4">
@@ -42,10 +41,7 @@ export function OfferDetail({ words }: { words: OfferWords }) {
                 {words.more}
               </button>
             </TooltipTrigger>
-            <TooltipContent
-              side="left"
-              className="z-[1000000000] grid gap-0.5 text-[11px]"
-            >
+            <TooltipContent side="left" className="grid gap-0.5 text-[11px]">
               {words.all.map((entry) => (
                 <Line key={entry.name} entry={entry} />
               ))}

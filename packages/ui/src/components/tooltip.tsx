@@ -44,7 +44,8 @@ function TooltipContent({
         data-slot="tooltip-content"
         sideOffset={sideOffset}
         className={cn(
-          "z-50 max-w-xs rounded-md border border-border bg-popover/95 px-2 py-1 text-xs text-popover-foreground shadow-md backdrop-blur-lg",
+          // Above sonner's toaster, z-index 999999999, which would hide the part of a tooltip that falls over a toast.
+          "z-[1000000000] max-w-xs rounded-md border border-border bg-popover/95 px-2 py-1 text-xs text-popover-foreground shadow-md backdrop-blur-lg",
           "data-[state=delayed-open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95",
           className,
         )}
