@@ -272,7 +272,12 @@ impl Core {
         if let Some(source) = source {
             source.session.set(id).expect("set once");
         }
-        Ok(TerminalSession { id, kind, shell })
+        Ok(TerminalSession {
+            id,
+            kind,
+            shell,
+            kubeconfig_kept: false,
+        })
     }
 
     /// Follows `file` for offers of `window`'s terminal, while the user's

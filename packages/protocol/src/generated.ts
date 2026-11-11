@@ -598,7 +598,7 @@ leftOut: KubeconfigNames, };
 
 export type KubeconfigOfferAnswer = "move" | "dismiss";
 
-export type KubeconfigOfferEvent = { "event": "offered", offer: KubeconfigOffer, } | { "event": "withdrawn", id: KubeconfigOfferId, };
+export type KubeconfigOfferEvent = { "event": "offered", offer: KubeconfigOffer, } | { "event": "withdrawn", id: KubeconfigOfferId, } | { "event": "direct", session: SubscriptionId, contexts: Array<string>, };
 
 export type KubeconfigOfferId = number;
 
@@ -1405,7 +1405,13 @@ export type TerminalSession = { id: SubscriptionId, kind: TerminalKind,
 /**
  * The shell's file name: `zsh`.
  */
-shell: string, };
+shell: string, 
+/**
+ * Whether Twigo sets `KUBECONFIG` again after the shell's startup
+ * files, as it does for zsh, bash, fish and pwsh; for another shell a
+ * startup file that sets it replaces the terminal's.
+ */
+kubeconfigKept: boolean, };
 
 /**
  * Indexes a line's text in UTF-16 units; `end` is exclusive.

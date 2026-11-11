@@ -20,11 +20,16 @@ pub struct NewTerminal {
 
 /// A parked terminal, which starts once `shell_open` names it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct TerminalSession {
     pub id: SubscriptionId,
     pub kind: TerminalKind,
     /// The shell's file name: `zsh`.
     pub shell: String,
+    /// Whether Twigo sets `KUBECONFIG` again after the shell's startup
+    /// files, as it does for zsh, bash, fish and pwsh; for another shell a
+    /// startup file that sets it replaces the terminal's.
+    pub kubeconfig_kept: bool,
 }
 
 /// How a terminal reaches clusters, which its tab shows.
@@ -103,6 +108,14 @@ pub enum KubeconfigOfferEvent {
     Offered { offer: Box<KubeconfigOffer> },
     /// Answered, or gone with the app's window.
     Withdrawn { id: KubeconfigOfferId },
+    /// The contexts of a proxy terminal's file that are not the proxy's own,
+    /// as a tool such as `aws eks update-kubeconfig` writes them, which reach
+    /// their clusters with the person's own credentials: sent when they
+    /// change, empty once none is left.
+    Direct {
+        session: SubscriptionId,
+        contexts: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
