@@ -61,7 +61,7 @@ The sources are in the appendix.
 | Hangs with "All namespaces" on 30k pods; freezes on big ConfigMaps; eager metrics on huge lists                                                         | Aptakube #499, #575                                | Rust owns sort, filter and window; metrics only for visible rows; large values rendered lazily (3.4, 3.6)                                                     |
 | Exec plugins not found from a Dock launch; kubelogin re-run every 30 s, opening browser tabs; device codes lost; plugins run for every context at start | Lens #7956, Headlamp #7879, Freelens < 2.0         | Login-shell environment, a credential runner of our own: timeout, single-flight, no retry loops, visible prompts; connect only on space activation (6.1, 6.2) |
 | Empty views after a fixed cache-sync timeout                                                                                                            | k9s PR #4023                                       | Typed view states: `syncing / ready / relisting / forbidden / unauthorized / error` (3.7)                                                                     |
-| Port-forwards tied to one pod; no failover behind a Service; random pod names restored                                                                  | k9s, Aptakube #384, #519                           | Forward targets are Services or workloads, resolved through EndpointSlices on every new connection (4.6)                                                      |
+| Port-forwards tied to one pod; no failover behind a Service; random pod names restored                                                                  | k9s, Aptakube #384, #519                           | Forward targets are Services or workloads, their pods read through EndpointSlices, and a new pod is taken when the current one leaves (4.6)                   |
 | Extension API removed, rewritten or put behind a paywall; extensions break with each host React/MobX bump                                               | Lens 2024.9 and 2026.10, Freelens 2.0              | Versioned WIT kept side by side (Zed), no host libraries shared as implicit API, a fixture extension in CI (5.3)                                              |
 | In-process plugins with no boundary; malware in plugin stores                                                                                           | Headlamp, Backstage, Obsidian, VS Code (GlassWorm) | WASM sandbox, capabilities declared and granted, signed packages, nothing executes in the workbench DOM (5.3, 5.6)                                            |
 | A local proxy that breaks SOCKS, bastion and corporate proxies                                                                                          | Freelens #766, Lens #6063                          | No proxy in the UI path. The core talks to the API server directly through the kubeconfig proxy settings (6.3)                                                |
@@ -315,7 +315,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
     A per-request timeout, a tower layer rather than a socket read timeout, backs the counter up against a server with a lower limit.
     It gives the response's headers 70 s, more than the 60 s the API server allows a request that is not long-running, so it cuts nothing the server still works on.
   - Sessions, meaning exec, attach and port-forward connections, have their own budget (default 64), counted in the same place below every actor.
-    A session's permit outlives the `101` response, which `hyper::upgrade::on` drops: the upgraded stream holds it, and so does the policy proxy's splice.
+    A session's permit outlives the `101` response, which `hyper::upgrade::on` drops: the task of the session holds it, a shell's or a forward's connection's, not the upgraded stream, and so does the policy proxy's splice.
     A proxied upgrade takes its session from this budget, not the proxy's 16, and over it gets the proxy's `429` instead of waiting (6.4).
   - A proxy or server that answers HTTP/1.1 turns every stream back into a connection; the budgets stay the same.
     Benchmarks tune each of them.
@@ -630,15 +630,15 @@ The bench also replays the cases that broke other clients, and one that loopback
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-| Part               | Holds                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Title bar          | Breadcrumb of the space and its namespace scope; in the middle a search field with its key that opens quick access, as VS Code's Command Center; drag region; native traffic lights on macOS. Parts show and hide by keys (⌘B, ⌘J, ⌥⌘B), the View menu and the palette, not buttons                                                                                                                                                      |
-| Space rail         | Tiles of the open spaces (D6, Lens's hotbar), each with a dot of its connection, ⌘1..9 by position, a button that opens any context                                                                                                                                                                                                                                                                                                      |
-| Primary side bar   | View containers as tabs in its header (Explorer, Port forwards, Helm, Extensions and contributed ones); the active one's views: resource tree, saved filters                                                                                                                                                                                                                                                                             |
-| Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups; with no editor open, the space's home                                                                                                                                                                                                                                                                                                                   |
-| Panel              | A dockview of its own for sessions opened by URI, its layout kept per space beside the editor area's: logs, shell and terminal tabs now (4.6); the cluster's Events, Output (Twigo logs per channel) and Agent activity (audit, 6.6) later. Its tabs split and move; it maximizes over the editor area and hides with ⌘J                                                                                                                 |
-| Secondary side bar | The ACP agent panel later; hidden while nothing lives there                                                                                                                                                                                                                                                                                                                                                                              |
-| Status bar         | In the shell's colour, entries as data: on the left the active space in its context's colour, with a lock while its mode holds writes back (6.4), a warning while the login shell's environment is missing (6.1), credentials that need the person, the cluster's version, or its connection in words when it is not connected (later port-forwards, sync); on the right the active list's rows and how many fail or wait, each a filter |
+| Part               | Holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Title bar          | Breadcrumb of the space and its namespace scope; in the middle a search field with its key that opens quick access, as VS Code's Command Center; drag region; native traffic lights on macOS. Parts show and hide by keys (⌘B, ⌘J, ⌥⌘B), the View menu and the palette, not buttons                                                                                                                                                                                                                                                                 |
+| Space rail         | Tiles of the open spaces (D6, Lens's hotbar), each with a dot of its connection, ⌘1..9 by position, a button that opens any context                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Primary side bar   | View containers as tabs in its header (Explorer, Port forwards, Helm, Extensions and contributed ones); the active one's views: resource tree, saved filters                                                                                                                                                                                                                                                                                                                                                                                        |
+| Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups; with no editor open, the space's home                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Panel              | A dockview of its own for sessions opened by URI, its layout kept per space beside the editor area's: logs, shell and terminal tabs now (4.6); the cluster's Events, Output (Twigo logs per channel) and Agent activity (audit, 6.6) later. Its tabs split and move; it maximizes over the editor area and hides with ⌘J                                                                                                                                                                                                                            |
+| Secondary side bar | The ACP agent panel later; hidden while nothing lives there                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Status bar         | In the shell's colour, entries as data: on the left the active space in its context's colour, with a lock while its mode holds writes back (6.4), a warning while the login shell's environment is missing (6.1), credentials that need the person, the cluster's version, or its connection in words when it is not connected (sync later), one entry with the count of port-forwards, `⇄ 3 forwards`, while there are any, in warning while one fails or reconnects; on the right the active list's rows and how many fail or wait, each a filter |
 
 The parts sit flush, split by hairlines, with no cards or gaps: the owner tried islands, as JetBrains Islands and VS Code's 2026 layout ([research](research/workbench-chrome.md)), and preferred flat parts.
 Views are descriptors (ID, title, container, `when`, provider), so the user can move a view to another container, VS Code style.
@@ -677,17 +677,17 @@ The layout per space is persisted (dockview `toJSON` and which parts show); part
 Inputs are typed URIs.
 A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor resolver does:
 
-| URI                                                                 | Editor                                                                                                                                                       |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `k8s://<space>/<group>/<version>/<resource>[/<ns>]/<name>`          | Resource editor with sub-tabs: Overview, YAML, Events, Related; Logs in its title opens the object's logs tab in the panel, and Shell for pods its shell tab |
-| `k8s-list://<space>/<gvr>?ns=…&q=…`                                 | Resource table as an editor, so one can pin "pods in payments where status≠Running" next to another list                                                     |
-| `logs://<space>/<group>/<version>/<resource>/<ns>/<name>`           | Logs tab in the panel (4.6): a pod's, or a workload's pods' merged; the core group an empty segment, as in `k8s://`                                          |
-| `exec://<space>/<ns>/<pod>/<container>[?n=2][?attach=1]`            | Shell tab in the panel (4.6): xterm over an exec of the container, `n` for a second shell on it, `attach` for its main process                               |
-| `terminal://<space>/<n>`                                            | Terminal tab in the panel (4.6): xterm over a pty on this machine, pinned to the space's context, numbered within its space                                  |
-| `pf://<space>/<forward-id>`                                         | Port-forward tab: state, target and resolved pod, local address, open connections, bytes, errors, a quick HTTP request tester                                |
-| `diff://edit/apply?editor=<uri>`, `diff://<space>/objects?…`        | Monaco diff: the apply dry-run of an editor's edit, its opened object against the server's now (`edit/server`), Compare with…, any two objects               |
-| `untitled://<space>/manifest-n`                                     | New manifest of a space, numbered within it; its first Apply asks for the target context and, once applied, opens the object it made                         |
-| `twigo://settings`, `twigo://keybindings`, `twigo://extension/<id>` | Settings UI, keybindings UI, extension details                                                                                                               |
+| URI                                                                 | Editor                                                                                                                                                                 |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `k8s://<space>/<group>/<version>/<resource>[/<ns>]/<name>`          | Resource editor with sub-tabs: Overview, YAML, Events, Related; Logs in its title opens the object's logs tab in the panel, and Shell for pods its shell tab           |
+| `k8s-list://<space>/<gvr>?ns=…&q=…`                                 | Resource table as an editor, so one can pin "pods in payments where status≠Running" next to another list                                                               |
+| `logs://<space>/<group>/<version>/<resource>/<ns>/<name>`           | Logs tab in the panel (4.6): a pod's, or a workload's pods' merged; the core group an empty segment, as in `k8s://`                                                    |
+| `exec://<space>/<ns>/<pod>/<container>[?n=2][?attach=1]`            | Shell tab in the panel (4.6): xterm over an exec of the container, `n` for a second shell on it, `attach` for its main process                                         |
+| `terminal://<space>/<n>`                                            | Terminal tab in the panel (4.6): xterm over a pty on this machine, pinned to the space's context, numbered within its space                                            |
+| `pf://<space>/<forward-id>`                                         | Port-forward tab: state, target and resolved pod, local address, open connections, bytes, errors; Open in browser and Copy address (a quick HTTP request tester later) |
+| `diff://edit/apply?editor=<uri>`, `diff://<space>/objects?…`        | Monaco diff: the apply dry-run of an editor's edit, its opened object against the server's now (`edit/server`), Compare with…, any two objects                         |
+| `untitled://<space>/manifest-n`                                     | New manifest of a space, numbered within it; its first Apply asks for the target context and, once applied, opens the object it made                                   |
+| `twigo://settings`, `twigo://keybindings`, `twigo://extension/<id>` | Settings UI, keybindings UI, extension details                                                                                                                         |
 
 - **Details and preview tabs.**
   A click or Enter on a row opens its details, and Space shows or hides them, as Linear's peek; arrows move them along and Esc closes them.
@@ -990,18 +990,54 @@ Extensions add commands, not prefixes.
     A session that waits for a place among the cluster's 64 says so in its tab, and the status bar lists open shells while there are any, to go to one or close it.
   - The theme is the editor's surface and the logs' sixteen colours from the tokens, and follows the document's theme live.
 - **Port-forward manager.**
-  A target is a Pod, a Service or a workload.
-  - The manager binds the local `TcpListener` and keeps it for the life of the forward, so no other process can take the port between check and bind.
-  - Each accepted TCP connection resolves a Ready, non-terminating pod through EndpointSlices (named `targetPort`s are translated), opens its own kube-rs port-forward stream and copies in both directions.
-  - A failed pod is avoided on the next resolution, with backoff.
-    Open TCP connections die with their pod; the listener does not.
-  - States: `starting → ready → reconnecting(reason) → error`, plus `queued` when the session budget is full (3.2).
-  - The local port is remembered per target.
-    When it is busy, the next free port is offered.
-  - Forwards persist per space.
-    Each one has its own tab (`pf://`) and a status-bar item.
-  - Each TCP connection is its own WebSocket and counts against the session budget.
-    If browsers or connection pools exhaust it, Twigo implements the SPDY-over-WebSocket tunnel that kubectl has used since 1.31 to multiplex connections.
+  A target is a Pod, a Service or a Deployment, ReplicaSet, StatefulSet or DaemonSet, and a forward is one port of one target, named by the target the person chose; the pod it reaches is a detail of it.
+  The data path is `twigo_sessions::forward`; the table, the policy and what is kept are `twigo_core::forward`.
+  - **The listener.**
+    The manager binds `127.0.0.1`, which must bind, and `::1` on the same port where this machine has it, as kubectl's `localhost` does, and keeps both for the life of the forward, whatever happens to pods, so no other process can take the port between check and bind.
+    A port that either loopback cannot give is answered as data, in use or not permitted, with the next free port above it, from 1024 up, found by binding on those two addresses.
+    The local port of a start is the one that port of that target had last, else the same number, else for a port below 1024 that number plus 8000.
+    A free port offered in place of a busy one is never taken silently, and starting on it is not remembered.
+  - **The pod.**
+    - A Pod target is that pod by name while it exists and has not finished; a pod made again under the name is the same target.
+    - A Service's pods come from the EndpointSlices that carry its name: endpoints whose `serving` is not false and `terminating` not true, with a `targetRef` of kind Pod, one per pod uid whatever address families it has.
+      The pod's port is the entry of the same slice that carries the Service port's name, so a named `targetPort` that pods resolve differently needs no pod spec.
+      A Service with no such endpoint says why: it is an ExternalName, its endpoints are not pods, or no pod is ready.
+    - A workload's pods are those it controls by controller reference, as the logs find them, a Deployment's through its ReplicaSets; they count when they are Ready by their conditions and not being deleted, and a workload's port that has a name is each pod's container port of that name.
+    - The pod is sticky.
+      Connections go to the forward's current pod while it is a candidate, so a client's connections do not spread over the replicas; another is picked when it leaves or a connection to it fails, and a pod that failed is avoided for a backoff unless it is the only one.
+      Connections already open keep their pod.
+  - **A connection.**
+    Each accepted TCP connection holds a place among the context's sessions (3.2) for its life, waiting in `queued` when the budget is full, then goes to the current pod, waiting 20 s at most for one to be a candidate.
+    It is its own kube-rs WebSocket on the sessions client, opened under a timeout of its own, since that stack has none.
+    The text the pod's side gives on the error channel is the connection's failure, and a refused port closes that connection alone.
+    - On the client's FIN the connection does not shut the stream down: kube-rs answers that by dropping what the pod still sends and closing the socket.
+      It keeps copying from the pod and ends once the pod has sent nothing for 1 s, the second containerd gives kubectl's clients ([`sandbox_portforward_linux.go`](https://github.com/containerd/containerd/blob/v2.3.4/internal/cri/server/sandbox_portforward_linux.go#L83-L126)); never ending would leak a session for each keep-alive connection a browser closes.
+      A server that answers only after end of input gets no answer through a forward, as through kubectl on containerd, where a half-close reaches the runtime through kubectl 1.34.1's tunnel and stops there, the answer lost after 1 s (kind 1.37, containerd 2.3.4, 2026-11-11).
+    - It ends when the forward stops, when the context's mode refuses forwards, when its clients are abandoned, and on a wake or a moved route, as a shell does.
+    - A session's permit is held by the connection's task, not by the upgraded stream.
+  - **States.**
+    `Starting` while the first pod is found and one stream to it is opened and dropped, which proves the credentials, the rights, the upgrade and, by the pod's silence for 250 ms, that something listens: a port that nothing listens on answered on the error channel within 36 ms of the request (20 tries, kind 1.37, containerd 2.3.4, 2026-11-11).
+    No access review comes first, since from 1.35 the upgrade needs `get` and `create` on `pods/portforward` and before that `get` (6.3).
+    `Ready` once it worked; a forward that worked goes to `Reconnecting` with its reason when a pod or the cluster does not answer, and tries again with a backoff.
+    A forward that never worked fails at once with the cluster's words, and any forward whose credentials, rights or policy are refused (a `401`, a `403`, the gate's) goes to `Failed` too.
+    A failed forward keeps listening and closes what it accepts at once, until it is started again.
+    `Restored` is a forward that listens since the app started and has not asked its cluster yet; `Stopped` is one that does not listen and is kept.
+    A connection that fails after the forward was ready sets the forward's `failure` and changes nothing else.
+  - **Watching.**
+    A forward reads its target through the hub only while it has connections or proves that it can be reached: its subscriptions start with a connection and go when the last one closes, so a listening forward that nobody uses costs none of the context's 24 watches.
+  - **Keeping them.**
+    A space keeps its forwards and the local port each target's port had last under a key that only Rust writes, as it does the modes, so the webview follows them and cannot overwrite them (4.8).
+    Ids are unique in the app and never reused across restarts.
+    A forward that ran listens on its port again at a start and waits, `Restored`, for its first connection or for its space to connect, which is when the core makes the clients of its context; no credential plugin runs at a start.
+    A port that another process holds, or a context the catalog no longer lists, makes it `Failed` with that; a target that is gone is found once the forward is asked, and fails with `NotFound` and its name.
+    A stopped forward stays stopped.
+  - **The mode.**
+    A forward changes nothing in the cluster, so it does not go through the command bus: the gate decides each connection's upgrade, and the manager asks the policy again for each running forward's context whenever the policy or the catalog changes.
+    When the mode comes to refuse forwards (`read-only` with `readOnly.allowPortForward: false`), its connections end and it is `Failed` with the gate's words, still listening, until the mode allows it again.
+  - **No SPDY tunnel.**
+    Each TCP connection is its own WebSocket, and counts against the session budget.
+    A browser takes about six of the 64 sessions per forwarded port: Chrome 157.0.8103.39, headless, loaded a page of 100 images, each answered after 2 s, in 37 s over 12 connections through a kube-rs forwarder on kind 1.37 (2026-11-11), five to six at a time.
+    The SPDY-over-WebSocket tunnel that kubectl has used since 1.31 would multiplex them, but a half-close does not survive containerd through it either, so the tunnel is not built.
   - Later: defaults from annotations (k9s `k9scli.io/port-forwards`), and a `kubectl port-forward` fallback, run through the policy proxy, for proxies that refuse WebSocket upgrades.
 - **Integrated terminal.**
   A local pty with the login-shell environment, in a tab of the panel run over the shell commands: `terminal_create` parks it for the space's context, and `shell_open` starts it with the terminal's size.
@@ -1164,6 +1200,7 @@ An action with an undo ends in a toast that offers it for as long as it lasts, a
     Before users exist there are no migrations.
   - Secrets never go into the state: they stay in Rust and the keychain (6.2).
   - Until the settings files come in M3, the mode a person chooses for a context and the type they mark it as live here too, under a key `state_set` refuses, since only a command changes a mode.
+  - A space's port-forwards (4.6) live here under a key `state_set` refuses as well, with the id the last forward got in the app's scope, since only the manager changes them.
 - **What is skipped from VS Code, and why:**
   - Workspace and folder layers: spaces take their place.
   - Profiles and settings sync: later, if users ask.
