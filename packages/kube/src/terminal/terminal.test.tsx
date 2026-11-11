@@ -760,6 +760,14 @@ test("the kind is a chip beside the state, and the warning turns it to warn with
   expect(workbench.editors.activeIn("panel")).toBe(uriOf(1, "dev"));
 });
 
+test("the state beside the chip keeps its words whole, so only the chip gives way to the tabs", async () => {
+  const { create } = await mounted("ready", "dev");
+  await create();
+  expect(screen.getByText("Running").parentElement?.className).toContain(
+    "shrink-0",
+  );
+});
+
 test("the chip says the proxy and the mode of a guarded context, and follows the mode", async () => {
   const { backend, create } = await mounted("ready", "staging");
   await create();

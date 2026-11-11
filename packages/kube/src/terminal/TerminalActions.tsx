@@ -40,7 +40,11 @@ export function TerminalActions({
   return (
     <div className="flex items-center gap-2">
       {words && <KindChip words={words} />}
-      <StatusLabel tone={tone} {...(pulse && { pulse })} className="text-xs">
+      <StatusLabel
+        tone={tone}
+        {...(pulse && { pulse })}
+        className="shrink-0 text-xs"
+      >
         {label}
       </StatusLabel>
       <InlineActions

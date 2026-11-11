@@ -28,13 +28,16 @@ const LONG = {
 };
 
 test.each(Object.entries(LONG))(
-  "the chip of %s has a maximum width, and its words are cut by an ellipsis, not by the tabs beside it",
+  "the chip of %s takes its words' own width with no minimum, so it gives way before the tabs and its words are cut by an ellipsis",
   (_, words) => {
     render(<KindChip words={words} />);
     const chip = screen.getByRole("button");
-    expect(chip.className).toMatch(/(^| )max-w-/);
+    expect(chip.className).not.toMatch(/(^| )max-w-/);
     const label = screen.getByText(words.short);
     expect(label.className).toContain("truncate");
+    expect(label.parentElement?.className).toContain(
+      "grid-cols-[minmax(0,max-content)]",
+    );
     expect(label.textContent).toBe(words.short);
   },
 );
