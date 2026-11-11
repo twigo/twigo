@@ -500,6 +500,63 @@ async fn a_move_appends_what_the_user_s_files_lack_and_the_catalog_lists_it() {
 }
 
 #[tokio::test]
+async fn a_move_takes_each_entry_as_last_seen_though_the_file_dropped_it_since() {
+    let setup = Setup::new().await;
+    let (_, mut events) = setup.follow();
+    let eks = setup.dir.path().join("eks.yaml");
+    std::fs::write(&eks, EKS).unwrap();
+    let later = setup.dir.path().join("later.yaml");
+    std::fs::write(
+        &later,
+        "apiVersion: v1\nkind: Config\nclusters: []\ncontexts: []\nusers:\n- name: later\n  user:\n    token: t\n",
+    )
+    .unwrap();
+    let session = setup
+        .create(
+            "kind-a",
+            &format!(
+                r#"f="${{KUBECONFIG%%:*}}"; cat {} > "$f"; sleep 1.5; mv "$f" "$f.backup"; cat {} > "$f"; sleep 1.5"#,
+                quoted(&eks),
+                quoted(&later)
+            ),
+        )
+        .await;
+    let running = setup.run(session.id);
+    let offers = async {
+        offered(&mut events).await;
+        offered(&mut events).await
+    };
+    let ((_, end), offer) = tokio::join!(running, offers);
+    assert_eq!(end, ShellEnd::Exited { code: 0 });
+    assert_eq!(offer.users, [ARN, "later"]);
+    setup.answer(&offer, KubeconfigOfferAnswer::Move).await;
+    let mine = kube::config::Kubeconfig::from_yaml(&std::fs::read_to_string(setup.mine()).unwrap())
+        .unwrap();
+    let names = |names: Vec<&str>| names.into_iter().map(str::to_owned).collect::<Vec<_>>();
+    assert_eq!(
+        mine.clusters
+            .iter()
+            .map(|c| c.name.clone())
+            .collect::<Vec<_>>(),
+        names(vec!["kind-a", ARN])
+    );
+    assert_eq!(
+        mine.auth_infos
+            .iter()
+            .map(|u| u.name.clone())
+            .collect::<Vec<_>>(),
+        names(vec!["kind-a", ARN, "later"])
+    );
+    assert_eq!(
+        mine.contexts
+            .iter()
+            .map(|c| c.name.clone())
+            .collect::<Vec<_>>(),
+        names(vec!["kind-a", "kind-b", ARN])
+    );
+}
+
+#[tokio::test]
 async fn a_dismissed_offer_is_not_made_again_and_only_new_names_come_after() {
     let setup = Setup::new().await;
     let (_, mut events) = setup.follow();

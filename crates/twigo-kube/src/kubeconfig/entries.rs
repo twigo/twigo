@@ -1,12 +1,14 @@
-//! A kubeconfig's entries by name, and moving some into another file as a
-//! person's own: appended under kubectl's lock and by a rename, the file's
-//! comments and layout kept, their relative paths made absolute.
+//! A kubeconfig's entries by name, and moving what tools wrote into a
+//! terminal's own into the person's: appended under kubectl's lock and by a
+//! rename, the file's comments and layout kept, their relative paths made
+//! absolute.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Arc;
 
 use kube::config::{Kubeconfig, KubeconfigError};
 use yaml_edit::{Mapping, Sequence, YamlFile};
@@ -117,16 +119,96 @@ impl Names {
     }
 }
 
-/// Appends to `target` the entries of `source`, a kubeconfig's text whose
-/// relative paths are against `base`, that `names` names, as they stand
-/// there. A `target` that does not exist is created at 0600, as kubectl
-/// creates one, in a directory created as kubectl's lock creates it.
-pub fn append(target: &Path, source: &str, base: &Path, names: &Names) -> Result<(), WriteError> {
-    let parse =
-        |text: &str| YamlFile::from_str(text).map_err(|error| WriteError::Parse(error.to_string()));
-    let source = parse(source)?;
-    let from =
-        mapping(&source).ok_or_else(|| WriteError::Parse("it holds no mapping".to_owned()))?;
+/// What tools wrote into a terminal's own kubeconfig, as a move takes it:
+/// each offered entry from the last read of the file that held it, so one
+/// that a later write dropped, as gcloud drops all when it moves the file
+/// to a backup, still moves as it was.
+#[derive(Debug, Clone)]
+pub struct Written {
+    /// The file's directory, which its relative paths are against.
+    base: PathBuf,
+    clusters: BTreeMap<String, Arc<str>>,
+    users: BTreeMap<String, Arc<str>>,
+    contexts: BTreeMap<String, Arc<str>>,
+}
+
+impl Written {
+    pub fn new(base: PathBuf) -> Self {
+        Self {
+            base,
+            clusters: BTreeMap::new(),
+            users: BTreeMap::new(),
+            contexts: BTreeMap::new(),
+        }
+    }
+
+    /// Takes `text`, a read of the file whose names are `holds`: the
+    /// `fresh` among them join, and those that joined before are taken
+    /// from it from now on.
+    pub fn read(&mut self, text: &str, holds: &Names, fresh: &Names) {
+        let text: Arc<str> = text.into();
+        for ((_, entries), ((_, held), (_, new))) in self
+            .sections_mut()
+            .into_iter()
+            .zip(holds.sections().into_iter().zip(fresh.sections()))
+        {
+            for name in held {
+                if new.contains(name) || entries.contains_key(name) {
+                    entries.insert(name.clone(), Arc::clone(&text));
+                }
+            }
+        }
+    }
+
+    pub fn names(&self) -> Names {
+        let names = |entries: &BTreeMap<String, Arc<str>>| entries.keys().cloned().collect();
+        Names {
+            clusters: names(&self.clusters),
+            users: names(&self.users),
+            contexts: names(&self.contexts),
+        }
+    }
+
+    fn sections(&self) -> [(&'static str, &BTreeMap<String, Arc<str>>); 3] {
+        [
+            ("clusters", &self.clusters),
+            ("users", &self.users),
+            ("contexts", &self.contexts),
+        ]
+    }
+
+    fn sections_mut(&mut self) -> [(&'static str, &mut BTreeMap<String, Arc<str>>); 3] {
+        [
+            ("clusters", &mut self.clusters),
+            ("users", &mut self.users),
+            ("contexts", &mut self.contexts),
+        ]
+    }
+}
+
+/// Appends to `target` the entries of `written` that `names` names, each as
+/// it was last seen. A `target` that does not exist is created at 0600, as
+/// kubectl creates one, in a directory created as kubectl's lock creates
+/// it.
+pub fn append(target: &Path, written: &Written, names: &Names) -> Result<(), WriteError> {
+    let mut read: Vec<(Arc<str>, Mapping)> = Vec::new();
+    let mut moving = Vec::new();
+    for ((section, entries), (_, wanted)) in written.sections().into_iter().zip(names.sections()) {
+        for (name, text) in entries.iter().filter(|(name, _)| wanted.contains(*name)) {
+            let from = match read.iter().find(|(seen, _)| Arc::ptr_eq(seen, text)) {
+                Some((_, from)) => from.clone(),
+                None => {
+                    let from = mapping(&parse(text)?)
+                        .ok_or_else(|| WriteError::Parse("it holds no mapping".to_owned()))?;
+                    read.push((Arc::clone(text), from.clone()));
+                    from
+                }
+            };
+            if let Some(entry) = entry(&from, section, name) {
+                moving.push((section, entry));
+            }
+        }
+    }
     if let Some(dir) = target.parent() {
         fs::create_dir_all(dir)?;
     }
@@ -155,28 +237,28 @@ pub fn append(target: &Path, source: &str, base: &Path, names: &Names) -> Result
         file = parse(&format!("{text}{separator}{EMPTY}"))?;
     }
     let into = mapping(&file).ok_or_else(|| WriteError::Parse("it holds no mapping".to_owned()))?;
-    for (section, wanted) in names.sections() {
-        let entries: Vec<Mapping> = from
-            .get_sequence(section)
-            .into_iter()
-            .flat_map(|entries| entries.values().collect::<Vec<_>>())
-            .filter_map(|node| node.as_mapping().cloned())
-            .filter(|entry| name(entry).is_some_and(|name| wanted.contains(&name)))
-            .collect();
-        if entries.is_empty() {
-            continue;
-        }
-        let list = sequence(&into, section);
-        for entry in entries {
-            absolute(&entry, section, base);
-            list.push(entry);
-        }
+    for (section, entry) in moving {
+        absolute(&entry, section, &written.base);
+        sequence(&into, section).push(entry);
     }
     replace(&target, &file.to_string())
 }
 
+fn parse(text: &str) -> Result<YamlFile, WriteError> {
+    YamlFile::from_str(text).map_err(|error| WriteError::Parse(error.to_string()))
+}
+
 fn mapping(file: &YamlFile) -> Option<Mapping> {
     file.document()?.as_mapping()
+}
+
+/// The entry of `config`'s `section` named `name`, the first by that name.
+fn entry(config: &Mapping, section: &str, name: &str) -> Option<Mapping> {
+    config
+        .get_sequence(section)?
+        .values()
+        .filter_map(|node| node.as_mapping().cloned())
+        .find(|entry| self::name(entry).as_deref() == Some(name))
 }
 
 /// The section's list: a block one in place of an empty `[]`, as a new file
@@ -278,6 +360,13 @@ current-context: arn:aws:eks:eu-west-1:1:cluster/a
 
     const ARN: &str = "arn:aws:eks:eu-west-1:1:cluster/a";
 
+    /// `WRITTEN`, with `names` offered, its paths against `base`.
+    fn written(base: &Path, names: &Names) -> Written {
+        let mut written = Written::new(base.to_owned());
+        written.read(WRITTEN, &Names::of(WRITTEN).unwrap(), names);
+        written
+    }
+
     fn names(clusters: &[&str], users: &[&str], contexts: &[&str]) -> Names {
         let set = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect();
         Names {
@@ -304,13 +393,8 @@ current-context: arn:aws:eks:eu-west-1:1:cluster/a
         let mine = "# mine\napiVersion: v1\nclusters:\n# kind\n- cluster:\n    server: https://127.0.0.1:6443\n  name: kind-a\ncontexts:\n- context:\n    cluster: kind-a\n    user: kind-a\n  name: kind-a\ncurrent-context: kind-a\nkind: Config\nusers: null\n";
         fs::write(&target, mine).unwrap();
         let base = Path::new("/twigo/terminals/1");
-        append(
-            &target,
-            WRITTEN,
-            base,
-            &names(&[ARN], &[ARN, "plugin"], &[ARN]),
-        )
-        .unwrap();
+        let moving = names(&[ARN], &[ARN, "plugin"], &[ARN]);
+        append(&target, &written(base, &moving), &moving).unwrap();
         let written = fs::read_to_string(&target).unwrap();
         assert!(written.starts_with("# mine\napiVersion: v1\nclusters:\n# kind\n- cluster:\n    server: https://127.0.0.1:6443\n  name: kind-a\n- cluster:\n"), "{written}");
         assert!(written.contains("current-context: kind-a\n"), "{written}");
@@ -348,7 +432,8 @@ current-context: arn:aws:eks:eu-west-1:1:cluster/a
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join(".kube").join("config");
-        append(&target, WRITTEN, dir.path(), &names(&["other"], &[], &[])).unwrap();
+        let moving = names(&["other"], &[], &[]);
+        append(&target, &written(dir.path(), &moving), &moving).unwrap();
         let written = fs::read_to_string(&target).unwrap();
         assert_eq!(
             written,
@@ -364,7 +449,8 @@ current-context: arn:aws:eks:eu-west-1:1:cluster/a
             let dir = tempfile::tempdir().unwrap();
             let target = dir.path().join("config");
             fs::write(&target, empty).unwrap();
-            append(&target, WRITTEN, dir.path(), &names(&["other"], &[], &[])).unwrap();
+            let moving = names(&["other"], &[], &[]);
+            append(&target, &written(dir.path(), &moving), &moving).unwrap();
             let written = fs::read_to_string(&target).unwrap();
             assert!(written.starts_with(empty.trim_end()), "{written:?}");
             assert_eq!(
@@ -381,7 +467,8 @@ current-context: arn:aws:eks:eu-west-1:1:cluster/a
         let target = dir.path().join("config");
         fs::write(&target, "apiVersion: v1\n").unwrap();
         fs::write(dir.path().join("config.lock"), "").unwrap();
-        let refused = append(&target, WRITTEN, dir.path(), &names(&["other"], &[], &[]));
+        let moving = names(&["other"], &[], &[]);
+        let refused = append(&target, &written(dir.path(), &moving), &moving);
         assert!(matches!(refused, Err(WriteError::Locked(_))), "{refused:?}");
         assert!(dir.path().join("config.lock").exists());
         assert_eq!(fs::read_to_string(&target).unwrap(), "apiVersion: v1\n");

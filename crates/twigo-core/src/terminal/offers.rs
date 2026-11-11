@@ -6,7 +6,6 @@
 //! the names the user's files hold already.
 
 use std::collections::{BTreeMap, HashMap};
-use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
@@ -14,7 +13,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use twigo_ipc::{
     ErrorKind, IpcError, KubeconfigOffer, KubeconfigOfferEvent, KubeconfigOfferId, SubscriptionId,
 };
-use twigo_kube::kubeconfig::{Names, Sources, WriteError, append};
+use twigo_kube::kubeconfig::{Names, Sources, WriteError, Written, append};
 
 type Follower = Box<dyn FnMut(KubeconfigOfferEvent) -> bool + Send>;
 
@@ -51,9 +50,7 @@ struct State {
 
 pub(crate) struct Held {
     source: Arc<Source>,
-    names: Names,
-    /// The terminal's file as last read whole, for a move once it is gone.
-    text: String,
+    written: Written,
     offer: KubeconfigOffer,
 }
 
@@ -82,27 +79,23 @@ impl Offers {
         waiting
     }
 
-    /// Offers `fresh` names, which `text`, the terminal's file, holds: in
-    /// `live`, the terminal's offer, while it waits, else in a new one. None
-    /// once the terminal has gone.
+    /// Offers `fresh` names of `text`, a read of the terminal's file whose
+    /// names are `holds`: in `live`, the terminal's offer, while it waits,
+    /// else in a new one. None once the terminal has gone.
     pub(crate) fn offer(
         &self,
         source: &Arc<Source>,
         live: Option<KubeconfigOfferId>,
-        fresh: Names,
-        text: String,
+        text: &str,
+        holds: &Names,
+        fresh: &Names,
     ) -> Option<KubeconfigOfferId> {
         let taken = Names::of_files(source.sources.files());
         let mut state = self.state();
         if source.stopped.load(Ordering::Acquire) {
             return None;
         }
-        let waiting = live.filter(|id| {
-            state
-                .offers
-                .get(&id.0)
-                .is_some_and(|held| Arc::ptr_eq(&held.source, source))
-        });
+        let waiting = live.filter(|id| state.live(source, *id).is_some());
         let id = match waiting {
             Some(id) => id,
             None => {
@@ -110,12 +103,20 @@ impl Offers {
                 KubeconfigOfferId(state.next)
             }
         };
-        let mut names = state
-            .offers
-            .remove(&id.0)
-            .map(|held| held.names)
-            .unwrap_or_default();
-        names.extend(fresh);
+        let mut written = state.offers.remove(&id.0).map_or_else(
+            || {
+                Written::new(
+                    source
+                        .file
+                        .parent()
+                        .expect("a file in a directory")
+                        .to_owned(),
+                )
+            },
+            |held| held.written,
+        );
+        written.read(text, holds, fresh);
+        let names = written.names();
         let offer = KubeconfigOffer {
             id,
             terminal: source.label.to_string(),
@@ -142,12 +143,27 @@ impl Offers {
         );
         let held = Held {
             source: Arc::clone(source),
-            names,
-            text,
+            written,
             offer,
         };
         state.offers.insert(id.0, held);
         Some(id)
+    }
+
+    /// Takes `text`, a read of the terminal's file whose names are `holds`,
+    /// into `live`, the terminal's offer, while it waits: a move takes the
+    /// offered entries from it from now on.
+    pub(crate) fn read(
+        &self,
+        source: &Arc<Source>,
+        live: Option<KubeconfigOfferId>,
+        text: &str,
+        holds: &Names,
+    ) {
+        let mut state = self.state();
+        if let Some(held) = live.and_then(|id| state.live(source, id)) {
+            held.written.read(text, holds, &Names::default());
+        }
     }
 
     /// Takes the window's offer out, to be answered.
@@ -204,6 +220,13 @@ impl Offers {
 }
 
 impl State {
+    /// The offer `id`, while it waits, if it is `source`'s.
+    fn live(&mut self, source: &Arc<Source>, id: KubeconfigOfferId) -> Option<&mut Held> {
+        self.offers
+            .get_mut(&id.0)
+            .filter(|held| Arc::ptr_eq(&held.source, source))
+    }
+
     fn tell(&mut self, window: &str, event: KubeconfigOfferEvent) {
         if let Some(send) = self.followers.get_mut(window)
             && !send(event)
@@ -215,21 +238,15 @@ impl State {
 
 impl Held {
     /// Appends the offered entries the user's files do not name yet to the
-    /// target, from the terminal's file as it is now, or as it was last read
-    /// whole once it is gone or half written.
+    /// target, each as it was last seen while offered.
     pub(crate) fn move_entries(&self) -> Result<(), IpcError> {
         let source = &self.source;
-        let now = fs::read_to_string(&source.file)
-            .ok()
-            .filter(|text| Names::of(text).is_ok());
-        let text = now.as_deref().unwrap_or(&self.text);
         let taken = Names::of_files(source.sources.files());
-        let moving = self.names.without_any(&taken.all());
+        let moving = self.written.names().without_any(&taken.all());
         if moving.is_empty() {
             return Ok(());
         }
-        let base = source.file.parent().expect("a file in a directory");
-        append(&source.target, text, base, &moving).map_err(|error| {
+        append(&source.target, &self.written, &moving).map_err(|error| {
             let kind = match error {
                 WriteError::Locked(_) => ErrorKind::Conflict,
                 WriteError::Io(_) | WriteError::Parse(_) => ErrorKind::Internal,

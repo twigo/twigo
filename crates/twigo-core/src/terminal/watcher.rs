@@ -88,10 +88,11 @@ fn follow(
         let names = Names::of(&text).expect("parsed above");
         let fresh = names.without(written).without(&offered);
         if fresh.is_empty() {
+            offers.read(source, live, &text, &names);
             continue;
         }
         offered.extend(fresh.clone());
-        live = offers.offer(source, live, fresh, text);
+        live = offers.offer(source, live, &text, &names, &fresh);
         if live.is_none() {
             return;
         }
