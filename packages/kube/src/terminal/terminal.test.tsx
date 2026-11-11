@@ -478,6 +478,40 @@ test.each<Platform>(["mac", "linux"])(
   },
 );
 
+test.each<[Platform, boolean]>([
+  ["mac", false],
+  ["linux", true],
+])(
+  "on %s a Ctrl binding of quick access, the palette or the panel's toggle is taken from the shell: %s",
+  async (platform, taken) => {
+    const { workbench, tabs, create } = await mounted("ready", "qa", platform);
+    await create();
+    const { textarea } = tabOf(tabs).term;
+    if (!textarea) throw new Error("no terminal");
+    const bound = [
+      ["KeyQ", "workbench.action.quickOpen"],
+      ["KeyW", "workbench.action.showCommands"],
+      ["KeyE", "workbench.action.togglePanel"],
+    ] as const;
+    workbench.keybindings.register(
+      "user",
+      bound.map(([code, command]) => ({
+        key: `ctrl+shift+${code.slice(3).toLowerCase()}`,
+        command,
+      })),
+    );
+    for (const [code] of bound) {
+      const event = keydown(textarea, {
+        key: code.slice(3).toLowerCase(),
+        code,
+        ctrlKey: true,
+        shiftKey: true,
+      });
+      expect(workbenchKey(workbench.keybindings, platform, event)).toBe(taken);
+    }
+  },
+);
+
 async function pick(workbench: Workbench, id?: string) {
   const asking = workbench.quickAccess.session?.pick;
   if (!asking) throw new Error("nothing asks");
