@@ -527,3 +527,77 @@ async fn a_descriptor_twigo_holds_open_on_exec_does_not_reach_the_shell() {
     assert!(held.starts_with(&[0, 1, 2]), "{held:?}");
     assert!(!held.contains(&leaked), "{leaked} in {held:?}");
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_terminal_starts_where_close_range_is_refused_and_holds_no_descriptor_of_twigo_s() {
+    let leaked = unsafe { libc::dup(2) };
+    assert!(leaked > 2);
+    let dir = TempDir::new().unwrap();
+    let spec = script(dir.path(), "ls /proc/self/fd");
+    let held = std::thread::spawn(move || {
+        refuse(libc::SYS_close_range, libc::ENOSYS);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let mut opened = Opened::new(spec);
+            let end = opened.end().await;
+            (end, String::from_utf8_lossy(&opened.output).into_owned())
+        })
+    })
+    .join()
+    .unwrap();
+    unsafe { libc::close(leaked) };
+    assert_eq!(held.0, ShellEnd::Exited { code: 0 }, "{}", held.1);
+    let held: Vec<i32> = held
+        .1
+        .split_whitespace()
+        .map(|fd| fd.parse().unwrap())
+        .collect();
+    assert!(!held.contains(&leaked), "{leaked} in {held:?}");
+}
+
+/// A seccomp filter on this thread and what it starts: `syscall` fails with
+/// `errno`.
+#[cfg(target_os = "linux")]
+fn refuse(syscall: libc::c_long, errno: i32) {
+    let statement = |code: u32, jt: u8, jf: u8, k: u32| libc::sock_filter {
+        code: code as u16,
+        jt,
+        jf,
+        k,
+    };
+    let mut filter = [
+        statement(libc::BPF_LD | libc::BPF_W | libc::BPF_ABS, 0, 0, 0),
+        statement(
+            libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K,
+            0,
+            1,
+            syscall as u32,
+        ),
+        statement(
+            libc::BPF_RET | libc::BPF_K,
+            0,
+            0,
+            libc::SECCOMP_RET_ERRNO | errno as u32,
+        ),
+        statement(libc::BPF_RET | libc::BPF_K, 0, 0, libc::SECCOMP_RET_ALLOW),
+    ];
+    let program = libc::sock_fprog {
+        len: filter.len() as u16,
+        filter: filter.as_mut_ptr(),
+    };
+    unsafe {
+        assert_eq!(libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0), 0);
+        assert_eq!(
+            libc::prctl(
+                libc::PR_SET_SECCOMP,
+                libc::SECCOMP_MODE_FILTER,
+                &raw const program
+            ),
+            0
+        );
+    }
+}

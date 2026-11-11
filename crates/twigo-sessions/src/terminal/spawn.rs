@@ -84,7 +84,9 @@ fn reset(signals: RangeInclusive<c_int>) -> io::Result<()> {
 }
 
 /// Marked, not closed: std reports a failed `exec` over a close-on-exec pipe
-/// of its own.
+/// of its own. Linux before 5.11 refuses the flag (`EINVAL`), before 5.9 has
+/// no `close_range` (`ENOSYS`), and a seccomp filter may refuse it as either
+/// or `EPERM`: then each is marked, as on macOS.
 #[cfg(target_os = "linux")]
 fn close_on_exec() -> io::Result<()> {
     // SAFETY: a system call that takes no pointer.
@@ -97,20 +99,29 @@ fn close_on_exec() -> io::Result<()> {
         )
     };
     if marked == -1 {
-        return Err(io::Error::last_os_error());
+        let error = io::Error::last_os_error();
+        match error.raw_os_error() {
+            Some(libc::EINVAL | libc::ENOSYS | libc::EPERM) => mark_each(),
+            _ => return Err(error),
+        }
     }
     Ok(())
 }
 
 /// Marked, not closed: std reports a failed `exec` over a close-on-exec pipe
-/// of its own. A number no descriptor holds fails with EBADF.
+/// of its own.
 #[cfg(target_os = "macos")]
 fn close_on_exec() -> io::Result<()> {
+    mark_each();
+    Ok(())
+}
+
+/// A number no descriptor holds fails with EBADF.
+fn mark_each() {
     // SAFETY: system calls that take no pointer.
     unsafe {
         for fd in 3..libc::getdtablesize() {
             libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
         }
     }
-    Ok(())
 }
