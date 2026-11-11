@@ -28,9 +28,21 @@ export class TerminalTab extends ShellTerminal {
     this.#kind = session?.kind;
   }
 
+  #restoredView: HTMLElement | null = null;
+
   /** How it reaches clusters; none for a tab restored from the saved layout. */
   get kind(): TerminalKind | undefined {
     return this.#kind;
+  }
+
+  /** The view of a tab nothing started, which takes the focus in place of a terminal, so that `terminalFocus` holds. */
+  setRestoredView(view: HTMLElement | null): void {
+    this.#restoredView = view;
+  }
+
+  override focus(): void {
+    if (this.getStatus().state === "restored") this.#restoredView?.focus();
+    else super.focus();
   }
 
   override start(session: TerminalStart): void {

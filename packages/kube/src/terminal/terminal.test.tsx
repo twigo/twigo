@@ -386,6 +386,28 @@ test("Toggle Terminal hides the panel where a terminal has the focus, and focuse
   expect(panelTabs()).toEqual([uriOf(1)]);
 });
 
+test("Toggle Terminal over a terminal the layout restored focuses its view, so a second press hides the panel", async () => {
+  const { workbench, tabs } = await mounted();
+  act(() => {
+    workbench.editors.open(uriOf(1));
+  });
+  await settle(10);
+  act(() => {
+    workbench.spaces.setPart("qa", "panel", { visible: false });
+  });
+  await settle(4);
+  expect(tabs.get(uriOf(1))?.getStatus().state).toBe("restored");
+
+  await press(document.body, TOGGLE);
+  expect(panelShown(workbench)).toBe(true);
+  expect(workbench.keys.lookup(document.activeElement)("terminalFocus")).toBe(
+    true,
+  );
+
+  await press(document.activeElement ?? document.body, TOGGLE);
+  expect(panelShown(workbench)).toBe(false);
+});
+
 test("New Terminal is on Ctrl+Shift+` and starts another terminal, from a terminal too", async () => {
   const { tabs, create } = await mounted();
   await create();

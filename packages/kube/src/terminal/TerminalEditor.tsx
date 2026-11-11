@@ -56,6 +56,15 @@ export function TerminalEditor({
     };
   }, [root, keys, restartable]);
 
+  const restored = status?.state === "restored";
+  useEffect(() => {
+    if (!tab || !root || !restored) return;
+    tab.setRestoredView(root);
+    return () => {
+      tab.setRestoredView(null);
+    };
+  }, [tab, root, restored]);
+
   if (!input || !tab || !status) {
     return (
       <EmptyState title="Not a terminal tab" className="h-full">
@@ -70,9 +79,13 @@ export function TerminalEditor({
     void commands.execute(RESTART_TERMINAL, lookup, { uri });
   };
 
-  if (status.state === "restored") {
+  if (restored) {
     return (
-      <div ref={setRoot} className="h-full bg-editor">
+      <div
+        ref={setRoot}
+        tabIndex={-1}
+        className="h-full bg-editor outline-none"
+      >
         <EmptyState
           icon={Terminal}
           title="This terminal ended when Twigo closed"
