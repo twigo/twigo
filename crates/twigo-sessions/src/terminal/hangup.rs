@@ -7,7 +7,10 @@
 //! Only a shell nobody has reaped is signalled, as another process may have
 //! the pid of one reaped: the poll that reaps it ends the hangup under the
 //! same lock, and the kill keeps it unreaped through the grace, so its pid
-//! and its group's id stay its own.
+//! and its group's id stay its own. The foreground job's leader is the
+//! shell's to reap, and is reaped at once, so its group's id may pass to
+//! another group within the grace: the kill signals a group only while it
+//! still belongs to the shell's session.
 
 use std::io;
 use std::os::fd::OwnedFd;
@@ -19,7 +22,7 @@ use std::time::Duration;
 
 use nix::errno::Errno;
 use nix::sys::signal::{Signal, killpg};
-use nix::unistd::{Pid, tcgetpgrp};
+use nix::unistd::{Pid, getsid, tcgetpgrp};
 use tokio::process::Child;
 use tokio::runtime::Handle;
 
@@ -105,12 +108,26 @@ impl Hangup {
         self.runtime.spawn(async move {
             tokio::time::sleep(GRACE).await;
             for group in groups {
-                if killpg(group, None).is_ok() {
+                if runs_in(group, pid) {
                     send(group, Signal::SIGKILL);
                 }
             }
             drop(child);
         });
+    }
+}
+
+/// Whether `group` still has a process and belongs to the session that
+/// `shell` leads: its leader is in it, or is gone while members remain, as
+/// an id in use as a group's is never given to another process
+/// ([POSIX 4.17]). A group that took the id of one that ended is another's.
+///
+/// [POSIX 4.17]: https://pubs.opengroup.org/onlinepubs/9799919799/basedefs/V1_chap04.html#tag_04_17
+fn runs_in(group: Pid, shell: Pid) -> bool {
+    match getsid(Some(group)) {
+        Ok(session) if session != shell => false,
+        Ok(_) | Err(Errno::ESRCH) => killpg(group, None).is_ok(),
+        Err(_) => false,
     }
 }
 

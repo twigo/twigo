@@ -365,17 +365,61 @@ async fn a_job_left_writing_meets_a_closed_terminal_once_its_shell_ended() {
 #[tokio::test]
 #[ignore = "writes /proc/sys/kernel/ns_last_pid, which needs CAP_SYS_ADMIN: crates/twigo-sessions/linux.sh runs it privileged"]
 async fn a_terminal_closed_after_its_shell_ended_spares_whoever_has_its_pid_now() {
-    use std::os::unix::process::CommandExt;
     let dir = TempDir::new().unwrap();
     let mut opened = Opened::new(script(dir.path(), "echo $$ > shell.pid; exit 0"));
     assert_eq!(opened.end().await, ShellEnd::Exited { code: 0 });
     let shell = wait_for_pid(&dir.path().join("shell.pid")).await;
     assert_eq!(kill(shell, None), Err(Errno::ESRCH), "reaped");
-    let mut other = None;
+    let mut other = leading_a_group_as(shell);
+    drop(opened);
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    let ended = other.try_wait().unwrap();
+    other.kill().unwrap();
+    other.wait().unwrap();
+    assert_eq!(ended, None, "the process that has the shell's pid now");
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore = "writes /proc/sys/kernel/ns_last_pid, which needs CAP_SYS_ADMIN: crates/twigo-sessions/linux.sh runs it privileged"]
+async fn a_group_that_takes_the_foreground_job_s_id_within_the_grace_is_spared() {
+    let dir = TempDir::new().unwrap();
+    let opened = Opened::new(interactive(dir.path()));
+    opened
+        .typed(concat!(
+            "trap '' HUP; ",
+            r#"perl -e '$SIG{HUP} = "DEFAULT"; open my $f, ">", "job.pid"; print $f $$; close $f; exec "sleep", "1000"'"#,
+            "\n",
+        ))
+        .await;
+    let job = wait_for_pid(&dir.path().join("job.pid")).await;
+    assert_eq!(getpgid(Some(job)), Ok(job), "the job leads its group");
+    drop(opened);
+    let start = Instant::now();
+    while kill(job, None) != Err(Errno::ESRCH) {
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "the job was reaped"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let mut other = leading_a_group_as(job);
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    let ended = other.try_wait().unwrap();
+    other.kill().unwrap();
+    other.wait().unwrap();
+    assert_eq!(ended, None, "the group that has the job's id now");
+}
+
+/// A `sleep` that leads a process group of its own, given `pid` through
+/// `ns_last_pid`.
+#[cfg(target_os = "linux")]
+fn leading_a_group_as(pid: Pid) -> std::process::Child {
+    use std::os::unix::process::CommandExt;
     for _ in 0..50 {
         std::fs::write(
             "/proc/sys/kernel/ns_last_pid",
-            (shell.as_raw() - 1).to_string(),
+            (pid.as_raw() - 1).to_string(),
         )
         .unwrap();
         let mut child = std::process::Command::new("sleep")
@@ -383,20 +427,13 @@ async fn a_terminal_closed_after_its_shell_ended_spares_whoever_has_its_pid_now(
             .process_group(0)
             .spawn()
             .unwrap();
-        if child.id() == shell.as_raw().unsigned_abs() {
-            other = Some(child);
-            break;
+        if child.id() == pid.as_raw().unsigned_abs() {
+            return child;
         }
         child.kill().unwrap();
         child.wait().unwrap();
     }
-    let mut other = other.expect("the shell's pid given to another process group");
-    drop(opened);
-    tokio::time::sleep(Duration::from_secs(4)).await;
-    let ended = other.try_wait().unwrap();
-    other.kill().unwrap();
-    other.wait().unwrap();
-    assert_eq!(ended, None, "the process that has the shell's pid now");
+    panic!("{pid} was not given to another process group");
 }
 
 #[test]

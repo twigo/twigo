@@ -72,5 +72,6 @@ jobs:
         run: |
           kubeconfig=$(bench/cluster.sh up ci ${{ matrix.kubernetes }} | tail -1)
           echo "TWIGO_TEST_KUBECONFIG=$kubeconfig" >> "$GITHUB_ENV"
-      # The test of a dead shell's pid writes ns_last_pid, which needs privileges; linux.sh runs it.
-      - run: cargo test -p twigo-cache -p twigo-kube -p twigo-core -p twigo-bench -p twigo-sessions -- --ignored --skip a_terminal_closed_after_its_shell_ended_spares_whoever_has_its_pid_now
+      # The tests that give a pid to another process group write ns_last_pid, which needs
+      # privileges; linux.sh runs them.
+      - run: cargo test -p twigo-cache -p twigo-kube -p twigo-core -p twigo-bench -p twigo-sessions -- --ignored --skip a_terminal_closed_after_its_shell_ended_spares_whoever_has_its_pid_now --skip a_group_that_takes_the_foreground_job_s_id_within_the_grace_is_spared
