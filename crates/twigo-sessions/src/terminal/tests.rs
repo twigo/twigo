@@ -290,6 +290,34 @@ async fn a_foreground_job_that_ignores_the_hangup_is_killed_3_s_later() {
 }
 
 #[tokio::test]
+async fn a_foreground_pipeline_whose_leader_has_gone_is_killed_3_s_later() {
+    let dir = TempDir::new().unwrap();
+    let opened = Opened::new(interactive(dir.path()));
+    opened
+        .typed(concat!(
+            "trap '' HUP; true | ",
+            r#"perl -e '$SIG{HUP} = "IGNORE"; open my $f, ">", "job.pid"; print $f $$; close $f; sleep 1000'"#,
+            "\n",
+        ))
+        .await;
+    let job = wait_for_pid(&dir.path().join("job.pid")).await;
+    let group = getpgid(Some(job)).unwrap();
+    assert_ne!(group, job, "perl does not lead its pipeline's group");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        kill(group, None),
+        Err(Errno::ESRCH),
+        "the leader was reaped"
+    );
+    drop(opened);
+    let gone_early = gone(job, Duration::from_millis(2500)).await;
+    let gone_later = gone(job, Duration::from_secs(2)).await;
+    let _ = kill(job, Signal::SIGKILL);
+    assert!(!gone_early, "killed before 3 s");
+    assert!(gone_later, "the pipeline outlived the kill");
+}
+
+#[tokio::test]
 async fn a_hangup_as_the_app_quits_reaches_both_groups_at_once_and_kills_nothing_later() {
     let dir = TempDir::new().unwrap();
     let opened = Opened::new(interactive(dir.path()));
