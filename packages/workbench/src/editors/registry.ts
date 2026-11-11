@@ -265,6 +265,18 @@ export class Editors {
     this.#focusOpened(area, panel, preserveFocus);
   }
 
+  /**
+   * A click on an editor's tab, as VS Code's tab control does on mouse down:
+   * the editor shows, its group becomes the active one, and the editor takes
+   * the focus through its provider's `focus`. A preview stays one.
+   */
+  activate(uri: string): void {
+    const open = this.#find(uri);
+    if (!open) return;
+    open.panel.api.setActive();
+    this.#focusIn(open.area);
+  }
+
   /** Turns a preview tab into an ordinary one. */
   pin(uri: string): void {
     const panel = this.#find(uri)?.panel;

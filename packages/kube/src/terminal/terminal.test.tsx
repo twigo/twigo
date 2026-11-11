@@ -13,9 +13,15 @@ import {
   type MockScenario,
 } from "@twigo/protocol/mock";
 import { WorkbenchView, type Platform, type Workbench } from "@twigo/workbench";
-import { tabsIn, testWorkbench } from "@twigo/workbench/testing";
+import {
+  click,
+  stripOf,
+  tabOf as tabElement,
+  tabsIn,
+  testWorkbench,
+} from "@twigo/workbench/testing";
 import { settle, withScreenSize } from "../../test/workbench";
-import { withTerminalLayout } from "../../test/terminal";
+import { ctrlC, withTerminalLayout } from "../../test/terminal";
 import { terminalUri } from "../uri";
 import { workbenchKey } from "../xterm/keys";
 import { createTerminalTabs, registerTerminals } from "./register";
@@ -451,6 +457,54 @@ test("Toggle Terminal over a terminal the layout restored focuses its view, so a
 
   await press(document.activeElement ?? document.body, TOGGLE);
   expect(panelShown(workbench)).toBe(false);
+});
+
+test("a click on a terminal's tab gives its terminal the focus, so the keys reach its session", async () => {
+  const { workbench, tabs, backend, create } = await mounted();
+  await create();
+  await create();
+  const invoke = vi.spyOn(backend, "invoke");
+  const inputs = () =>
+    invoke.mock.calls
+      .filter(([command]) => command === "shell_input")
+      .map(([, request]) => request as { id: number; data: number[] });
+  await type(tabOf(tabs, 1), "1");
+  await type(tabOf(tabs, 2), "2");
+  const [one, two] = inputs().map(({ id }) => id);
+  expect(one).not.toBe(two);
+  expect(workbench.editors.activeIn("panel")).toBe(uriOf(2));
+  invoke.mockClear();
+
+  click(tabElement(uriOf(1)));
+  await settle(4);
+  expect(workbench.editors.activeIn("panel")).toBe(uriOf(1));
+  expect(document.activeElement).toBe(tabOf(tabs, 1).term.textarea);
+  expect(workbench.keys.lookup(document.activeElement)("terminalFocus")).toBe(
+    true,
+  );
+  ctrlC(document.activeElement ?? document.body);
+  await settle(2);
+  expect(inputs()).toEqual([{ id: one, data: [3] }]);
+});
+
+test("a click on the empty part of the tab strip leaves the terminal that has the focus with it", async () => {
+  const { tabs, backend, create } = await mounted();
+  await create();
+  await create();
+  const textarea = tabOf(tabs, 2).term.textarea;
+  expect(document.activeElement).toBe(textarea);
+  const invoke = vi.spyOn(backend, "invoke");
+
+  click(stripOf("panel"));
+  await settle(4);
+  expect(document.activeElement).toBe(textarea);
+  ctrlC(document.activeElement ?? document.body);
+  await settle(2);
+  expect(
+    invoke.mock.calls
+      .filter(([command]) => command === "shell_input")
+      .map(([, request]) => (request as { data: number[] }).data),
+  ).toEqual([[3]]);
 });
 
 test("New Terminal is on Ctrl+Shift+` and starts another terminal, from a terminal too", async () => {

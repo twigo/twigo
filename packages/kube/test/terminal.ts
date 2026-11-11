@@ -72,3 +72,16 @@ export function enter(init: KeyboardEventInit = {}): KeyboardEvent {
   Object.defineProperty(event, "keyCode", { value: 13 });
   return event;
 }
+
+/** xterm reads `keyCode`, which jsdom does not take from a keyboard event's init. */
+export function ctrlC(target: Element): void {
+  const event = new KeyboardEvent("keydown", {
+    key: "c",
+    code: "KeyC",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  Object.defineProperty(event, "keyCode", { value: 67 });
+  target.dispatchEvent(event);
+}

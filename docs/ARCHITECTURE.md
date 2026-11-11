@@ -727,6 +727,14 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   A list that asked for the focus before its grid mounted, which is after its resources arrive, gets it when the grid mounts, unless the focus has moved on by then or the list closed (the mock in Chromium and WebKit, 2026-11-09).
   While a maximized panel covers the editor area, Close Editor and the other editor commands act on the panel's active editor whatever has the focus, so ⌘W never closes what nobody sees.
   A panel shown again gives the focus to its active shell tab, unless quick access is open, which stays on screen and keeps what is typed; a dialog needs no such rule: with the rule taken out, a confirm dialog kept the focus and the shell received nothing (the mock in Chromium and WebKit, 2026-11-09).
+- **Clicking a tab.**
+  A press of the left button on a tab, in the editor area and in the panel, shows its editor and gives it the keyboard focus through the editor's registered `focus`, whatever the editor is.
+  VS Code's tab does that on mouse down: it [opens the editor with `activation: ACTIVATE` and without `preserveFocus`](https://github.com/microsoft/vscode/blob/1.145.2/src/vs/workbench/browser/parts/editor/multiEditorTabsControl.ts#L1085-L1144), the group [activates itself](https://github.com/microsoft/vscode/blob/1.145.2/src/vs/workbench/browser/parts/editor/editorGroupView.ts#L1241-L1298), and the [pane takes the focus](https://github.com/microsoft/vscode/blob/1.145.2/src/vs/workbench/browser/parts/editor/editorPanes.ts#L262-L269).
+  A press on the empty part of the strip does not leave the focus where it was: the group's [title container](https://github.com/microsoft/vscode/blob/1.145.2/src/vs/workbench/browser/parts/editor/editorGroupView.ts#L511-L537) gives it to the group's active editor, a task after the press, since the browser moves the focus to what was pressed after the press's listeners ran.
+  Where the editor of that group already held the focus, the focus stays; where it was elsewhere, it comes to the editor of the group pressed.
+  A press on a button, such as a tab's X or an action, and one of another mouse button take none of this, and a preview tab stays a preview.
+  Dockview activates a tab a frame after the press, and the press left the focus on the tab, so the keys of a terminal or a shell went nowhere (the mock in Chromium and Playwright's WebKit, 2026-11-11).
+  An editor with no `focus` of its own leaves it on its group.
 - **An editor off screen has no Monaco view.**
   Behind another tab of its group or under a maximized panel, a YAML editor or a diff disposes its view.
   A YAML editor's model, cursor, scroll and undo stay in the working-copy service until it shows again; a diff's models go with its view, and `DiffView` keeps its view state (cursor and scroll) in a ref for the next one.

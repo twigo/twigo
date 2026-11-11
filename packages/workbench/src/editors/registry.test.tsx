@@ -7,7 +7,8 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
-import { testWorkbench } from "../testing";
+import { click, stripOf, tabOf, testWorkbench } from "../testing";
+import type { Workbench } from "../services";
 import { WorkbenchView } from "../WorkbenchView";
 
 afterEach(cleanup);
@@ -337,6 +338,165 @@ test("closing a tab by its X or a middle click gives the focus to the editor tha
   });
   expect(editors.active).toBe("field://a");
   expect(inGroup("field://a")).toBe(true);
+});
+
+async function elapse() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve));
+  });
+}
+
+function withFields(workbench: Workbench) {
+  workbench.editors.register({
+    id: "test.field",
+    scheme: "field",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <input aria-label={uri} />,
+    focus: (uri) => {
+      document.querySelector<HTMLElement>(`[aria-label="${uri}"]`)?.focus();
+    },
+  });
+}
+
+test("a click on a tab shows its editor and gives it the focus through the editor's own focus, from the page and from another editor", async () => {
+  const { workbench, editors } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+    editors.open("field://b");
+  });
+  act(() => {
+    screen.getByLabelText("field://b").focus();
+  });
+
+  click(tabOf("field://a"));
+  await elapse();
+  expect(editors.active).toBe("field://a");
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+
+  act(() => {
+    screen.getByLabelText("field://a").blur();
+  });
+  click(tabOf("field://b"));
+  await elapse();
+  expect(editors.active).toBe("field://b");
+  expect(document.activeElement).toBe(screen.getByLabelText("field://b"));
+});
+
+test("a click on the tab of the active editor gives it the focus it lost", async () => {
+  const { workbench, editors } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+  });
+  act(() => {
+    screen.getByLabelText("field://a").focus();
+  });
+  act(() => {
+    screen.getByLabelText("field://a").blur();
+  });
+  expect(document.activeElement).toBe(document.body);
+  click(tabOf("field://a"));
+  await elapse();
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+});
+
+test("a click on a tab whose editor holds no focus of its own leaves the focus on its group", async () => {
+  const { editors } = await mounted();
+  act(() => {
+    editors.open("note://a");
+    editors.open("note://b");
+  });
+  click(tabOf("note://a"));
+  await elapse();
+  expect(editors.active).toBe("note://a");
+  const group = document.querySelector(".dv-groupview");
+  expect(group?.contains(document.activeElement)).toBe(true);
+});
+
+test("pressing a tab's X does not activate its tab before the click closes it", async () => {
+  const { workbench, editors } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+    editors.open("field://b");
+    editors.open("field://c");
+  });
+  act(() => {
+    screen.getByLabelText("field://c").focus();
+  });
+  const x = screen.getByRole("button", { name: "Close a" });
+  fireEvent.mouseDown(x, { button: 0 });
+  await elapse();
+  expect(editors.active).toBe("field://c");
+  expect(document.activeElement).toBe(screen.getByLabelText("field://c"));
+  fireEvent.click(x);
+  expect(document.querySelector('[data-tab-panel-id="field://a"]')).toBeNull();
+});
+
+test("a click on a preview tab shows its editor and leaves it a preview", async () => {
+  const { editors, tabs } = await mounted();
+  act(() => {
+    editors.open("note://a", { preview: true });
+    editors.open("note://b");
+  });
+  click(tabOf("note://a"));
+  await elapse();
+  expect(editors.active).toBe("note://a");
+  expect(tabs()).toEqual([
+    { title: "a", preview: "true" },
+    { title: "b", preview: "false" },
+  ]);
+});
+
+test("a click with another button than the left does not activate the tab", async () => {
+  const { workbench, editors } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+    editors.open("field://b");
+  });
+  act(() => {
+    screen.getByLabelText("field://b").focus();
+  });
+  fireEvent.mouseDown(tabOf("field://a"), { button: 2 });
+  await elapse();
+  expect(editors.active).toBe("field://b");
+  expect(document.activeElement).toBe(screen.getByLabelText("field://b"));
+});
+
+test("a click on the empty part of the tab strip keeps the focus in the editor that holds it", async () => {
+  const { workbench, editors } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+    editors.open("field://b");
+  });
+  act(() => {
+    screen.getByLabelText("field://b").focus();
+  });
+  click(stripOf("editor"));
+  await elapse();
+  expect(document.activeElement).toBe(screen.getByLabelText("field://b"));
+  expect(editors.active).toBe("field://b");
+});
+
+test("a click on the empty part of a group's tab strip gives the focus to that group's active editor, as VS Code's title does", async () => {
+  const { workbench, editors } = await mounted();
+  withFields(workbench);
+  const outside = document.createElement("input");
+  document.body.append(outside);
+  act(() => {
+    editors.open("field://a");
+  });
+  act(() => {
+    outside.focus();
+  });
+  expect(document.activeElement).toBe(outside);
+  click(stripOf("editor"));
+  await elapse();
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+  outside.remove();
 });
 
 test("opening, moving or a space shown gives the active group the focus that fell to the page, and an editor that can hold it its own", async () => {
