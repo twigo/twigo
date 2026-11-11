@@ -184,7 +184,7 @@ impl Drop for Session {
     }
 }
 
-async fn abandoned(mut abandoned: watch::Receiver<bool>) {
+pub(crate) async fn abandoned(mut abandoned: watch::Receiver<bool>) {
     // Its sender lives as long as the clients this session holds.
     let _ = abandoned.wait_for(|abandoned| *abandoned).await;
 }

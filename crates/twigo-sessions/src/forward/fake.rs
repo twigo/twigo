@@ -1,0 +1,267 @@
+//! A fake API server for the forward's tests on paused time: the objects of
+//! one namespace by resource, listed and watched whole as raw objects, as a
+//! server without Table sends them, picked by a `metadata.name` field
+//! selector or all of them.
+
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex, MutexGuard};
+
+use bytes::Bytes;
+use futures::channel::mpsc;
+use http::{Request, Response, StatusCode};
+use http_body::Frame;
+use http_body_util::combinators::UnsyncBoxBody;
+use http_body_util::{BodyExt, Full, StreamBody};
+use serde_json::{Value, json};
+use tower::BoxError;
+use twigo_cache::hub::{Connect, Hub};
+use twigo_ipc::IpcError;
+use twigo_kube::client::{Budgets, Clients};
+
+pub const NAMESPACE: &str = "shop";
+
+type Body = UnsyncBoxBody<Bytes, BoxError>;
+type Sender = mpsc::UnboundedSender<Result<Frame<Bytes>, BoxError>>;
+
+#[derive(Clone, Default)]
+pub struct Fake(Arc<Mutex<State>>);
+
+#[derive(Default)]
+struct State {
+    version: u64,
+    /// By resource, then name.
+    objects: BTreeMap<(String, String), Value>,
+    changes: Vec<(u64, String, &'static str, Value)>,
+    watches: Vec<Watch>,
+}
+
+struct Watch {
+    resource: String,
+    /// The name its field selector picks.
+    name: Option<String>,
+    sender: Sender,
+}
+
+/// The clients a hub gets, which are replaced as the core replaces a
+/// context's when what they were built from changes.
+pub struct Renew {
+    fake: Fake,
+    budgets: Budgets,
+    current: Arc<Mutex<Arc<Clients>>>,
+}
+
+impl Renew {
+    pub fn clients(&self) -> Arc<Clients> {
+        Arc::clone(&self.current.lock().unwrap())
+    }
+
+    /// New clients for whoever asks next, and the old ones abandoned.
+    pub fn replace(&self) {
+        let new = self.fake.clients(self.budgets);
+        let old = std::mem::replace(&mut *self.current.lock().unwrap(), new);
+        old.connections().abandon();
+    }
+}
+
+impl Fake {
+    fn state(&self) -> MutexGuard<'_, State> {
+        self.0.lock().unwrap()
+    }
+
+    /// The hub over this server, with the clients every context gets.
+    pub fn hub(&self, budgets: Budgets) -> (Hub, Arc<Clients>) {
+        let (hub, renew) = self.renewing(budgets);
+        (hub, renew.clients())
+    }
+
+    /// [`Fake::hub`], whose clients can be replaced.
+    pub fn renewing(&self, budgets: Budgets) -> (Hub, Renew) {
+        let renew = Renew {
+            fake: self.clone(),
+            budgets,
+            current: Arc::new(Mutex::new(self.clients(budgets))),
+        };
+        let connect: Connect = {
+            let current = Arc::clone(&renew.current);
+            Arc::new(move |_context| {
+                let clients = Arc::clone(&current.lock().unwrap());
+                Box::pin(async move { Ok::<_, IpcError>(clients) })
+            })
+        };
+        (Hub::new(connect), renew)
+    }
+
+    fn clients(&self, budgets: Budgets) -> Arc<Clients> {
+        let fake = self.clone();
+        let service = tower::service_fn(move |request: Request<kube::client::Body>| {
+            let fake = fake.clone();
+            async move { Ok::<_, BoxError>(fake.respond(&request)) }
+        });
+        Arc::new(Clients::over(service, budgets))
+    }
+
+    /// Adds or replaces an object of `resource`, such as `pods`.
+    pub fn put(&self, resource: &str, mut object: Value) {
+        let mut state = self.state();
+        state.version += 1;
+        object["metadata"]["namespace"] = json!(NAMESPACE);
+        object["metadata"]["resourceVersion"] = json!(state.version.to_string());
+        let name = object["metadata"]["name"].as_str().unwrap().to_owned();
+        let kind = match state
+            .objects
+            .insert((resource.to_owned(), name), object.clone())
+        {
+            Some(_) => "MODIFIED",
+            None => "ADDED",
+        };
+        state.change(resource, kind, object);
+    }
+
+    pub fn remove(&self, resource: &str, name: &str) {
+        let mut state = self.state();
+        state.version += 1;
+        let mut object = state
+            .objects
+            .remove(&(resource.to_owned(), name.to_owned()))
+            .expect("an object to remove");
+        object["metadata"]["resourceVersion"] = json!(state.version.to_string());
+        state.change(resource, "DELETED", object);
+    }
+
+    /// How many watches are open.
+    pub fn watching(&self) -> usize {
+        let mut state = self.state();
+        state.watches.retain(|watch| !watch.sender.is_closed());
+        state.watches.len()
+    }
+
+    fn respond(&self, request: &Request<kube::client::Body>) -> Response<Body> {
+        let uri = request.uri();
+        let query: BTreeMap<String, String> =
+            form_urlencoded::parse(uri.query().unwrap_or_default().as_bytes())
+                .into_owned()
+                .collect();
+        let param = |name: &str| query.get(name).map(String::as_str);
+        if uri.path() == "/version" {
+            return full(StatusCode::OK, &json!({ "gitVersion": "v1.37.0" }));
+        }
+        let path: Vec<&str> = uri.path().trim_matches('/').split('/').collect();
+        let resource = match path[..] {
+            ["api", "v1", "namespaces", NAMESPACE, resource]
+            | ["apis", _, _, "namespaces", NAMESPACE, resource] => resource.to_owned(),
+            _ => panic!("the fake serves no {uri}"),
+        };
+        let name = param("fieldSelector")
+            .and_then(|selector| selector.strip_prefix("metadata.name="))
+            .map(str::to_owned);
+        let mut state = self.state();
+        if param("watch") == Some("true") {
+            return state.watch(
+                resource,
+                name,
+                param("resourceVersion"),
+                param("sendInitialEvents"),
+            );
+        }
+        let items: Vec<&Value> = state.items(&resource, name.as_deref()).collect();
+        full(
+            StatusCode::OK,
+            &json!({
+                "kind": "List",
+                "apiVersion": "v1",
+                "metadata": { "resourceVersion": state.version.to_string() },
+                "items": items,
+            }),
+        )
+    }
+}
+
+fn picks(name: Option<&str>, object: &Value) -> bool {
+    name.is_none_or(|name| object["metadata"]["name"] == name)
+}
+
+impl State {
+    fn items<'a>(
+        &'a self,
+        resource: &'a str,
+        name: Option<&'a str>,
+    ) -> impl Iterator<Item = &'a Value> {
+        self.objects
+            .iter()
+            .filter(move |((kept, _), object)| kept == resource && picks(name, object))
+            .map(|(_, object)| object)
+    }
+
+    fn change(&mut self, resource: &str, kind: &'static str, object: Value) {
+        self.changes
+            .push((self.version, resource.to_owned(), kind, object.clone()));
+        let event = line(&json!({ "type": kind, "object": object }));
+        self.watches.retain(|watch| {
+            watch.resource != resource
+                || !picks(watch.name.as_deref(), &object)
+                || watch
+                    .sender
+                    .unbounded_send(Ok(Frame::data(event.clone())))
+                    .is_ok()
+        });
+    }
+
+    /// A watch of the objects `name` picks: their initial events and the
+    /// bookmark that ends them, or the changes after `from`.
+    fn watch(
+        &mut self,
+        resource: String,
+        name: Option<String>,
+        from: Option<&str>,
+        initial: Option<&str>,
+    ) -> Response<Body> {
+        let (sender, receiver) = mpsc::unbounded();
+        let send = |value: &Value| {
+            sender
+                .unbounded_send(Ok(Frame::data(line(value))))
+                .expect("the receiver is ours");
+        };
+        if initial == Some("true") {
+            for object in self.items(&resource, name.as_deref()) {
+                send(&json!({ "type": "ADDED", "object": object }));
+            }
+            send(&json!({
+                "type": "BOOKMARK",
+                "object": {
+                    "kind": "List",
+                    "apiVersion": "v1",
+                    "metadata": {
+                        "resourceVersion": self.version.to_string(),
+                        "annotations": { "k8s.io/initial-events-end": "true" },
+                    },
+                },
+            }));
+        } else {
+            let from: u64 = from.and_then(|from| from.parse().ok()).expect("a version");
+            for (version, kept, kind, object) in &self.changes {
+                if *version > from && *kept == resource && picks(name.as_deref(), object) {
+                    send(&json!({ "type": kind, "object": object }));
+                }
+            }
+        }
+        self.watches.push(Watch {
+            resource,
+            name,
+            sender,
+        });
+        Response::new(StreamBody::new(receiver).boxed_unsync())
+    }
+}
+
+fn line(value: &Value) -> Bytes {
+    let mut line = serde_json::to_vec(value).unwrap();
+    line.push(b'\n');
+    line.into()
+}
+
+fn full(code: StatusCode, value: &Value) -> Response<Body> {
+    let body = Full::new(Bytes::from(serde_json::to_vec(value).unwrap()));
+    let mut response = Response::new(body.map_err(|never| match never {}).boxed_unsync());
+    *response.status_mut() = code;
+    response
+}

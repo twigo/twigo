@@ -7,6 +7,8 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use futures::FutureExt;
+use futures::future::{BoxFuture, select_all};
 use twigo_cache::hub::{self, Delta, Hub, Query, Resource, RowFormat, Subscription};
 use twigo_cache::meta::Meta;
 use twigo_cache::object::Object;
@@ -122,6 +124,18 @@ impl Subscriptions {
             changed |= drained(pods);
         }
         changed
+    }
+
+    /// Waits for a change of any subscription.
+    pub(crate) async fn changed(&mut self) {
+        let mut waits: Vec<BoxFuture<'_, ()>> = vec![self.object.changed().boxed()];
+        if let Some(controlled) = &mut self.controlled {
+            waits.push(controlled.changed().boxed());
+        }
+        if let Some(pods) = &mut self.pods {
+            waits.push(pods.changed().boxed());
+        }
+        select_all(waits).await;
     }
 
     /// The least ready of its subscriptions' states, or an error once the
