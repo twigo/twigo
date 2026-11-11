@@ -614,3 +614,23 @@ fn refuse(syscall: libc::c_long, errno: i32) {
         );
     }
 }
+
+#[test]
+fn ptys_opened_from_many_threads_at_once_all_open() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let failed: usize = std::thread::scope(|scope| {
+        let threads: Vec<_> = (0..32)
+            .map(|_| {
+                scope.spawn(|| {
+                    let _runtime = runtime.enter();
+                    (0..100).filter(|_| super::spawn::open().is_err()).count()
+                })
+            })
+            .collect();
+        threads
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .sum()
+    });
+    assert_eq!(failed, 0);
+}

@@ -13,7 +13,7 @@ use std::ops::RangeInclusive;
 use std::os::fd::{AsFd, OwnedFd};
 
 use libc::c_int;
-use pty_process::{Pty, Size};
+use pty_process::{Pts, Pty, Size};
 
 use super::Spec;
 use super::hangup::Hangup;
@@ -27,7 +27,7 @@ pub(super) struct Spawned {
 }
 
 pub(super) fn spawn(spec: &Spec, size: Size) -> pty_process::Result<Spawned> {
-    let (pty, pts) = pty_process::open()?;
+    let (pty, pts) = open()?;
     pty.resize(size)?;
     let master = pty.as_fd().try_clone_to_owned()?;
     let slave = pts.as_fd().try_clone_to_owned()?;
@@ -46,6 +46,34 @@ pub(super) fn spawn(spec: &Spec, size: Size) -> pty_process::Result<Spawned> {
         slave,
         hangup: Hangup::new(shell, master),
     })
+}
+
+/// XNU can give two opens of `/dev/ptmx` at once the same pty, and once its
+/// own retries of the one that lost run out, the open fails with its
+/// internal `EREDRIVEOPEN` ([`ptmx_clone`], [`vn_open_auth`]), as when
+/// several terminals start together: then it is tried again.
+///
+/// [`ptmx_clone`]: https://github.com/apple-oss-distributions/xnu/blob/xnu-12377.121.6/bsd/kern/tty_ptmx.c#L475-L510
+/// [`vn_open_auth`]: https://github.com/apple-oss-distributions/xnu/blob/xnu-12377.121.6/bsd/vfs/vfs_vnops.c#L785-L821
+pub(super) fn open() -> pty_process::Result<(Pty, Pts)> {
+    const TRIES: u32 = 10;
+    let mut tried = 1;
+    loop {
+        match pty_process::open() {
+            Err(error) if tried < TRIES && redrive(&error) => tried += 1,
+            opened => return opened,
+        }
+    }
+}
+
+fn redrive(error: &pty_process::Error) -> bool {
+    const EREDRIVEOPEN: i32 = -6;
+    let raw = match error {
+        pty_process::Error::Io(error) => error.raw_os_error(),
+        pty_process::Error::Rustix(error) => Some(error.raw_os_error()),
+        _ => None,
+    };
+    raw == Some(EREDRIVEOPEN)
 }
 
 /// Every signal number: Darwin's `NSIG` is 32, and Linux has real-time
