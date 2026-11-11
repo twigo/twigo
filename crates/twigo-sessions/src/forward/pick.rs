@@ -13,9 +13,11 @@ use twigo_ipc::IpcError;
 use super::watching::{Candidate, Seen};
 
 pub(super) enum Known {
-    /// Nothing is listed yet, or nothing is watched.
-    Unknown,
+    /// Nothing is listed yet, or nothing is watched; why, when the cluster
+    /// does not answer.
+    Unknown(Option<String>),
     Fault(IpcError),
+    Refused(IpcError),
     Listed {
         candidates: Vec<Candidate>,
         why: String,
@@ -25,8 +27,9 @@ pub(super) enum Known {
 impl From<Seen> for Known {
     fn from(seen: Seen) -> Self {
         match seen {
-            Seen::Unlisted => Known::Unknown,
+            Seen::Unlisted(why) => Known::Unknown(why),
             Seen::Fault(error) => Known::Fault(error),
+            Seen::Refused(error) => Known::Refused(error),
             Seen::Listed { candidates, why } => Known::Listed { candidates, why },
         }
     }
@@ -37,7 +40,8 @@ pub(super) enum Chosen {
     /// There is none, and why.
     None(String),
     Fault(IpcError),
-    Unknown,
+    Refused(IpcError),
+    Unknown(Option<String>),
 }
 
 struct Avoided {
@@ -65,7 +69,7 @@ fn backoff() -> ExponentialBackoff {
 impl Pick {
     pub(super) fn new() -> Self {
         Self {
-            known: Known::Unknown,
+            known: Known::Unknown(None),
             current: None,
             avoided: HashMap::new(),
         }
@@ -80,8 +84,9 @@ impl Pick {
     /// candidate avoided, the one whose backoff ends first.
     pub(super) fn choose(&mut self, now: Instant) -> Chosen {
         let candidates = match &self.known {
-            Known::Unknown => return Chosen::Unknown,
+            Known::Unknown(why) => return Chosen::Unknown(why.clone()),
             Known::Fault(error) => return Chosen::Fault(error.clone()),
+            Known::Refused(error) => return Chosen::Refused(error.clone()),
             Known::Listed { candidates, why } if candidates.is_empty() => {
                 return Chosen::None(why.clone());
             }

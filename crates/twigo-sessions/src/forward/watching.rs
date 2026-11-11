@@ -9,7 +9,7 @@ use std::sync::Arc;
 use futures::FutureExt;
 use futures::future::{BoxFuture, select_all};
 use serde::{Deserialize, Deserializer};
-use twigo_cache::hub::{self, Hub, Resource, Subscription};
+use twigo_cache::hub::{Hub, Resource, Subscription};
 use twigo_cache::object::Object;
 use twigo_ipc::{ErrorKind, IpcError, ViewState};
 
@@ -17,6 +17,8 @@ use super::{Config, Kind};
 use crate::pods::{Subscriptions, v1};
 
 const SERVICE_NAME: &str = "kubernetes.io/service-name";
+
+pub(super) const UNANSWERED: &str = "the cluster does not answer";
 
 /// A pod a connection can go to, and the port it reaches there.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,10 +32,14 @@ pub(super) struct Candidate {
 }
 
 pub(super) enum Seen {
-    /// Not everything is listed yet.
-    Unlisted,
-    /// The cluster refuses, or the target is gone.
+    /// Not everything is listed yet; the cluster does not answer, when that
+    /// is why.
+    Unlisted(Option<String>),
+    /// The credentials are rejected, which the hub gives up on, or the
+    /// target is gone.
     Fault(IpcError),
+    /// The cluster refuses or fails in a way the hub tries again.
+    Refused(IpcError),
     Listed {
         candidates: Vec<Candidate>,
         /// Why there are none, when there are none.
@@ -111,11 +117,12 @@ impl Watching {
         let name = &config.target.name;
         match self {
             Watching::Pod(pod) => {
-                if let Some(fault) = fault(pod.state()) {
-                    return Seen::Fault(fault);
+                let states = [pod.state()];
+                if let Some(seen) = refusal(&states) {
+                    return seen;
                 }
                 if !pod.listed() {
-                    return Seen::Unlisted;
+                    return Seen::Unlisted(unanswered(&states));
                 }
                 let Some(object) = pod.items().into_iter().next() else {
                     return Seen::Fault(gone(label, name));
@@ -142,12 +149,12 @@ impl Watching {
                 }
             }
             Watching::Service { service, slices } => {
-                let state = hub::combine([service.state(), slices.state()].into_iter());
-                if let Some(fault) = fault(state) {
-                    return Seen::Fault(fault);
+                let states = [service.state(), slices.state()];
+                if let Some(seen) = refusal(&states) {
+                    return seen;
                 }
                 if !(service.listed() && slices.listed()) {
-                    return Seen::Unlisted;
+                    return Seen::Unlisted(unanswered(&states));
                 }
                 let Some(object) = service.items().into_iter().next() else {
                     return Seen::Fault(gone(label, name));
@@ -157,11 +164,15 @@ impl Watching {
                 Seen::Listed { candidates, why }
             }
             Watching::Workload(workload) => {
-                if let Some(fault) = fault(workload.state()) {
-                    return Seen::Fault(fault);
+                let states = workload.states();
+                if let Some(seen) = refusal(&states) {
+                    return seen;
+                }
+                if let Some(error) = workload.gone() {
+                    return Seen::Fault(error);
                 }
                 let Some(pods) = workload.pods() else {
-                    return Seen::Unlisted;
+                    return Seen::Unlisted(unanswered(&states));
                 };
                 let candidates = ready(&pods, config.port, config.port_name.as_deref());
                 let why = if candidates.is_empty() {
@@ -179,19 +190,31 @@ fn gone(label: &str, name: &str) -> IpcError {
     IpcError::new(ErrorKind::NotFound, format!("{label} {name} is gone"))
 }
 
-fn fault(state: ViewState) -> Option<IpcError> {
-    match state {
-        ViewState::Forbidden { verb, resource } => Some(IpcError::new(
-            ErrorKind::Forbidden,
-            format!("you may not {verb} {resource}"),
-        )),
-        ViewState::Unauthorized => Some(IpcError::new(
+/// What the hub's states say of the cluster's refusals: only a rejected
+/// credential is final, since the hub tries every other error again.
+fn refusal(states: &[ViewState]) -> Option<Seen> {
+    if states.contains(&ViewState::Unauthorized) {
+        return Some(Seen::Fault(IpcError::new(
             ErrorKind::Unauthorized,
             "no credentials for this context that the cluster accepts",
-        )),
-        ViewState::Error { error } => Some(error),
-        _ => None,
+        )));
     }
+    states.iter().find_map(|state| match state {
+        ViewState::Forbidden { verb, resource } => Some(Seen::Refused(IpcError::new(
+            ErrorKind::Forbidden,
+            format!("you may not {verb} {resource}"),
+        ))),
+        ViewState::Error { error } => Some(Seen::Refused(error.clone())),
+        _ => None,
+    })
+}
+
+/// The cluster does not answer when a subscription that has listed nothing
+/// yet is reconnecting.
+fn unanswered(states: &[ViewState]) -> Option<String> {
+    states
+        .contains(&ViewState::Stale)
+        .then(|| UNANSWERED.to_owned())
 }
 
 /// A list the API server sends as `null` when it is empty.

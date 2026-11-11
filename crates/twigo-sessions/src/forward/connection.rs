@@ -2,7 +2,7 @@
 //! reached: each a WebSocket of its own to a pod's port, holding a place
 //! among the context's sessions for as long as it lives.
 
-use std::future::pending;
+use std::future::{pending, ready};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -11,7 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::watch;
 use tokio::time::{Instant, sleep, sleep_until, timeout};
 use twigo_ipc::{ErrorKind, IpcError};
-use twigo_kube::client::{Actor, Clients, Waiting};
+use twigo_kube::client::{Actor, Clients, Permit, Waiting};
 
 use super::connect::Connected;
 use super::listen::Socket;
@@ -21,6 +21,11 @@ use super::{CANDIDATE_WAIT, CONNECT_TIMEOUT, Open, PROBE_WINDOW, QUIET, Report, 
 use crate::shell::abandoned;
 
 const CHUNK: usize = 16 * 1024;
+/// How much a client may send while its connection waits, before the wait
+/// stops reading it.
+const EARLY: usize = 4 * CHUNK;
+
+const UNANSWERED_YET: &str = "the cluster has not answered yet";
 
 /// Why a connection or a try failed.
 pub(super) enum Fault {
@@ -116,7 +121,33 @@ pub(super) async fn serve(
     }
 }
 
-async fn run(shared: &Arc<Shared>, socket: Socket, end: watch::Receiver<u64>) -> Result<(), Over> {
+async fn run(
+    shared: &Arc<Shared>,
+    mut socket: Socket,
+    end: watch::Receiver<u64>,
+) -> Result<(), Over> {
+    let mut early = Vec::new();
+    let Prepared {
+        mut link,
+        candidate,
+        connected,
+        permit: _permit,
+    } = tokio::select! {
+        biased;
+        prepared = prepare(shared, end) => prepared?,
+        () = leaves(&mut socket, &mut early) => return Ok(()),
+    };
+    pump(shared, &mut link, socket, early, connected, &candidate).await
+}
+
+struct Prepared {
+    link: Link,
+    candidate: Candidate,
+    connected: Connected,
+    permit: Permit,
+}
+
+async fn prepare(shared: &Arc<Shared>, end: watch::Receiver<u64>) -> Result<Prepared, Over> {
     let mut link = Link::new(shared, end).await?;
     let clients = Arc::clone(&link.clients);
     let waiting = Waiting(Arc::new({
@@ -132,7 +163,7 @@ async fn run(shared: &Arc<Shared>, socket: Socket, end: watch::Receiver<u64>) ->
             });
         }
     }));
-    let _permit = tokio::select! {
+    let permit = tokio::select! {
         biased;
         over = link.interrupted() => return Err(over),
         permit = clients.admit_session(Actor::Ui, Some(&waiting)) => permit,
@@ -143,7 +174,29 @@ async fn run(shared: &Arc<Shared>, socket: Socket, end: watch::Receiver<u64>) ->
         over = link.interrupted() => return Err(over),
         connected = connect(shared, &clients, &candidate) => connected?,
     };
-    pump(shared, &mut link, socket, connected, &candidate).await
+    Ok(Prepared {
+        link,
+        candidate,
+        connected,
+        permit,
+    })
+}
+
+/// Returns once the client is gone without having sent anything, which a
+/// connection that waits would otherwise not notice. What the client sends
+/// meanwhile is kept in `early`, for the pod; a client that sent something
+/// and closed its side wants its answer.
+async fn leaves(socket: &mut Socket, early: &mut Vec<u8>) {
+    while early.len() < EARLY {
+        early.reserve(CHUNK);
+        match socket.read_buf(early).await {
+            Ok(0) if early.is_empty() => return,
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(_) => return,
+        }
+    }
+    pending().await
 }
 
 async fn pod(shared: &Shared, link: &mut Link) -> Result<Candidate, Over> {
@@ -154,8 +207,9 @@ async fn pod(shared: &Shared, link: &mut Link) -> Result<Candidate, Over> {
             Chosen::Pod(candidate) => return Ok(candidate),
             // The forward fails with it, which ends this connection.
             Chosen::Fault(_) => return Err(Over::Ended),
+            Chosen::Refused(error) => error.message,
             Chosen::None(why) => why,
-            Chosen::Unknown => "no pod to forward to was found".to_owned(),
+            Chosen::Unknown(why) => why.unwrap_or_else(|| UNANSWERED_YET.to_owned()),
         };
         tokio::select! {
             biased;
@@ -202,15 +256,28 @@ enum Side {
     Pod,
 }
 
-/// Copies both ways, with byte counts. On the client's FIN the stream is not
-/// shut down, which kube answers by dropping what the pod still sends and
+#[derive(Clone, Copy, Default)]
+struct Ending {
+    fin: Option<Instant>,
+    /// The pod's side said why the port is unusable, so what it has sent
+    /// already is the last.
+    told: bool,
+}
+
+/// Copies both ways, with byte counts, `early` being what the client sent
+/// before the stream was open. On the client's FIN the stream is not shut
+/// down, which kube answers by dropping what the pod still sends and
 /// closing the socket: the pod's answer still arrives, and the connection
-/// ends once the pod has said nothing for [`QUIET`]. It ends when the pod's
-/// side does, with the client's socket shut down.
+/// ends once the pod has said nothing for [`QUIET`], counted from what was
+/// last written to the client, and never while the pod has something to
+/// read. It ends when the pod's side does, with the client's socket shut
+/// down, and when the pod gives its error, once what it sent before is
+/// written.
 async fn pump(
     shared: &Shared,
     link: &mut Link,
     socket: Socket,
+    early: Vec<u8>,
     connected: Connected,
     candidate: &Candidate,
 ) -> Result<(), Over> {
@@ -222,15 +289,21 @@ async fn pump(
     let _held = held;
     let (mut from_client, mut to_client) = tokio::io::split(socket);
     let (mut from_pod, mut to_pod) = tokio::io::split(stream);
-    let (fin, mut fin_seen) = watch::channel(None::<Instant>);
+    let (ending, mut ending_seen) = watch::channel(Ending::default());
     let up = async {
+        if !early.is_empty() {
+            if to_pod.write_all(&early).await.is_err() {
+                return Side::Pod;
+            }
+            shared.sent.fetch_add(early.len() as u64, Ordering::Relaxed);
+        }
         let mut buffer = vec![0; CHUNK];
         loop {
             let Ok(read) = from_client.read(&mut buffer).await else {
                 return Side::Client;
             };
             if read == 0 {
-                fin.send_replace(Some(Instant::now()));
+                ending.send_modify(|ending| ending.fin = Some(Instant::now()));
                 return Side::Fin;
             }
             if to_pod.write_all(&buffer[..read]).await.is_err() {
@@ -244,20 +317,21 @@ async fn pump(
         let mut last = Instant::now();
         let mut served = false;
         loop {
-            let fin_at = *fin_seen.borrow_and_update();
+            let Ending { fin, told } = *ending_seen.borrow_and_update();
             let quiet = async {
-                match fin_at {
+                match fin {
                     Some(at) => sleep_until(at.max(last) + QUIET).await,
                     None => pending().await,
                 }
             };
             tokio::select! {
+                biased;
                 read = from_pod.read(&mut buffer) => {
                     let Ok(read @ 1..) = read else { break };
-                    last = Instant::now();
                     if to_client.write_all(&buffer[..read]).await.is_err() {
                         break;
                     }
+                    last = Instant::now();
                     shared.received.fetch_add(read as u64, Ordering::Relaxed);
                     if !served {
                         served = true;
@@ -265,23 +339,26 @@ async fn pump(
                         shared.report(Report::Served);
                     }
                 }
+                () = ready(()), if told => break,
                 () = quiet => break,
-                _ = fin_seen.changed() => {}
+                _ = ending_seen.changed() => {}
             }
         }
         let _ = to_client.shutdown().await;
     };
     tokio::pin!(up, down);
-    let (mut up_over, mut told) = (false, false);
+    let (mut up_over, mut heard) = (false, false);
+    let mut failure = None;
     loop {
         tokio::select! {
             biased;
             over = link.interrupted() => return Err(over),
-            text = &mut error, if !told => {
-                told = true;
+            text = &mut error, if !heard => {
+                heard = true;
                 if let Some(text) = text {
                     shared.failed(&candidate.key);
-                    return Err(Over::Fault(Fault::Port(text)));
+                    failure = Some(text);
+                    ending.send_modify(|ending| ending.told = true);
                 }
             }
             () = &mut down => break,
@@ -293,11 +370,11 @@ async fn pump(
             }
         }
     }
-    if !told && let Some(Some(text)) = (&mut error).now_or_never() {
+    if !heard && let Some(Some(text)) = (&mut error).now_or_never() {
         shared.failed(&candidate.key);
-        return Err(Over::Fault(Fault::Port(text)));
+        failure = Some(text);
     }
-    Ok(())
+    failure.map_or(Ok(()), |text| Err(Over::Fault(Fault::Port(text))))
 }
 
 /// Opens a stream to the candidate and drops it, which proves the
@@ -313,7 +390,14 @@ pub(super) async fn probe(
     let _permit = tokio::select! {
         biased;
         over = link.interrupted() => return Err(over),
-        permit = clients.admit_session(Actor::Ui, None) => permit,
+        permit = timeout(CONNECT_TIMEOUT, clients.admit_session(Actor::Ui, None)) => {
+            permit.map_err(|_| {
+                Over::Fault(Fault::Transient(IpcError::new(
+                    ErrorKind::Timeout,
+                    "every session of this context stayed in use",
+                )))
+            })?
+        }
     };
     let mut connected = tokio::select! {
         biased;

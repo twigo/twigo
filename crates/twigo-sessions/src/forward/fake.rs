@@ -1,9 +1,10 @@
 //! A fake API server for the forward's tests on paused time: the objects of
 //! one namespace by resource, listed and watched whole as raw objects, as a
 //! server without Table sends them, picked by a `metadata.name` field
-//! selector or all of them.
+//! selector or all of them. It can be unreachable, forbid a resource and
+//! end its watches.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use bytes::Bytes;
@@ -28,6 +29,8 @@ pub struct Fake(Arc<Mutex<State>>);
 
 #[derive(Default)]
 struct State {
+    offline: bool,
+    forbidden: BTreeSet<String>,
     version: u64,
     /// By resource, then name.
     objects: BTreeMap<(String, String), Value>,
@@ -95,7 +98,7 @@ impl Fake {
         let fake = self.clone();
         let service = tower::service_fn(move |request: Request<kube::client::Body>| {
             let fake = fake.clone();
-            async move { Ok::<_, BoxError>(fake.respond(&request)) }
+            async move { fake.respond(&request) }
         });
         Arc::new(Clients::over(service, budgets))
     }
@@ -128,6 +131,23 @@ impl Fake {
         state.change(resource, "DELETED", object);
     }
 
+    pub fn set_offline(&self, offline: bool) {
+        self.state().offline = offline;
+    }
+
+    pub fn forbid(&self, resource: &str, forbidden: bool) {
+        let mut state = self.state();
+        if forbidden {
+            state.forbidden.insert(resource.to_owned());
+        } else {
+            state.forbidden.remove(resource);
+        }
+    }
+
+    pub fn end_watches(&self) {
+        self.state().watches.clear();
+    }
+
     /// How many watches are open.
     pub fn watching(&self) -> usize {
         let mut state = self.state();
@@ -135,7 +155,10 @@ impl Fake {
         state.watches.len()
     }
 
-    fn respond(&self, request: &Request<kube::client::Body>) -> Response<Body> {
+    fn respond(&self, request: &Request<kube::client::Body>) -> Result<Response<Body>, BoxError> {
+        if self.state().offline {
+            return Err("connection refused".into());
+        }
         let uri = request.uri();
         let query: BTreeMap<String, String> =
             form_urlencoded::parse(uri.query().unwrap_or_default().as_bytes())
@@ -143,7 +166,7 @@ impl Fake {
                 .collect();
         let param = |name: &str| query.get(name).map(String::as_str);
         if uri.path() == "/version" {
-            return full(StatusCode::OK, &json!({ "gitVersion": "v1.37.0" }));
+            return Ok(full(StatusCode::OK, &json!({ "gitVersion": "v1.37.0" })));
         }
         let path: Vec<&str> = uri.path().trim_matches('/').split('/').collect();
         let resource = match path[..] {
@@ -155,16 +178,29 @@ impl Fake {
             .and_then(|selector| selector.strip_prefix("metadata.name="))
             .map(str::to_owned);
         let mut state = self.state();
+        if state.forbidden.contains(&resource) {
+            return Ok(full(
+                StatusCode::FORBIDDEN,
+                &json!({
+                    "kind": "Status",
+                    "apiVersion": "v1",
+                    "status": "Failure",
+                    "message": format!("{resource} is forbidden"),
+                    "reason": "Forbidden",
+                    "code": 403,
+                }),
+            ));
+        }
         if param("watch") == Some("true") {
-            return state.watch(
+            return Ok(state.watch(
                 resource,
                 name,
                 param("resourceVersion"),
                 param("sendInitialEvents"),
-            );
+            ));
         }
         let items: Vec<&Value> = state.items(&resource, name.as_deref()).collect();
-        full(
+        Ok(full(
             StatusCode::OK,
             &json!({
                 "kind": "List",
@@ -172,7 +208,7 @@ impl Fake {
                 "metadata": { "resourceVersion": state.version.to_string() },
                 "items": items,
             }),
-        )
+        ))
     }
 }
 

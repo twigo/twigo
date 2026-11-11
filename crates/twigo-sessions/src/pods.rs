@@ -138,26 +138,34 @@ impl Subscriptions {
         select_all(waits).await;
     }
 
-    /// The least ready of its subscriptions' states, or an error once the
-    /// target is gone.
-    pub(crate) fn state(&self) -> ViewState {
+    pub(crate) fn states(&self) -> Vec<ViewState> {
         let mut states = vec![self.object.state()];
         states.extend(self.controlled.as_ref().map(Subscription::state));
         states.extend(self.pods.as_ref().map(Subscription::state));
-        let state = hub::combine(states.into_iter());
-        if state == ViewState::Ready && self.object.listed() && self.object.items().is_empty() {
-            return ViewState::Error {
-                error: IpcError::new(
-                    ErrorKind::NotFound,
-                    format!(
-                        "{} {} is gone",
-                        resource_name(&self.target.resource.group, &self.target.resource.resource),
-                        self.target.name
-                    ),
-                ),
-            };
+        states
+    }
+
+    /// The least ready of its subscriptions' states, or an error once the
+    /// target is gone.
+    pub(crate) fn state(&self) -> ViewState {
+        match self.gone() {
+            Some(error) => ViewState::Error { error },
+            None => hub::combine(self.states().into_iter()),
         }
-        state
+    }
+
+    pub(crate) fn gone(&self) -> Option<IpcError> {
+        let ready = hub::combine(self.states().into_iter()) == ViewState::Ready;
+        (ready && self.object.listed() && self.object.items().is_empty()).then(|| {
+            IpcError::new(
+                ErrorKind::NotFound,
+                format!(
+                    "{} {} is gone",
+                    resource_name(&self.target.resource.group, &self.target.resource.resource),
+                    self.target.name
+                ),
+            )
+        })
     }
 
     /// The target's pods, once its subscriptions have listed them.
