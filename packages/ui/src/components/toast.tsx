@@ -221,6 +221,15 @@ const WIDTH = { "--width": "288px" } as CSSProperties;
 const GAP = 6;
 /** The status bar's 24 px and 8 px of air: the lowest the front toast sits. */
 const FLOOR = 32;
+/**
+ * While the stack is closed sonner caps a toast behind the front one to the
+ * front's height, and hides the children of its own styled toasts only
+ * (`data-styled`, which a custom toast is not), so a taller card would hang
+ * out of the cap over what is under the stack, and a pointer there would
+ * open and close the stack. Clipped and hidden, as the styled ones are.
+ */
+const BEHIND =
+  "data-[front=false]:data-[expanded=false]:overflow-hidden data-[front=false]:data-[expanded=false]:*:opacity-0";
 
 /**
  * The height of the toasts that show, spread as sonner spreads them while
@@ -296,6 +305,7 @@ export function Toaster({
       offset={offset}
       mobileOffset={offset}
       style={WIDTH}
+      toastOptions={{ className: BEHIND }}
       containerAriaLabel="Notifications"
     />
   );

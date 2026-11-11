@@ -297,6 +297,62 @@ test("a stack taller than the window under the title bar keeps the front toast a
   vi.useRealTimers();
 });
 
+function applied(element: Element): string[] {
+  return Array.from(element.classList).flatMap((name) => {
+    const [utility = "", ...variants] = name.split(":").reverse();
+    const holds = variants.every((variant) => {
+      const [, key, value] = /^data-\[(.+)=(.+)\]$/.exec(variant) ?? [];
+      return (
+        variant === "*" ||
+        (key !== undefined && element.getAttribute(`data-${key}`) === value)
+      );
+    });
+    return holds ? [`${variants.includes("*") ? "*:" : ""}${utility}`] : [];
+  });
+}
+
+test("while the stack is closed a toast behind the front one is clipped to its box with its children hidden, and a hover shows it whole", async () => {
+  vi.useFakeTimers();
+  render(<Toaster />);
+  act(() => {
+    notify.choice(
+      {
+        icon: CircleCheck,
+        message: "Waiting",
+        choices: [{ label: "Move", run: () => undefined }],
+      },
+      "offer-1",
+    );
+  });
+  await settled();
+  act(() => {
+    notify.error("Held");
+  });
+  await settled();
+  const toastAt = (front: boolean) => {
+    const found = document.querySelectorAll(
+      `[data-sonner-toast][data-front="${String(front)}"]`,
+    );
+    if (found.length !== 1 || !found[0]) throw new Error("not one toast");
+    return found[0];
+  };
+  const clipped = ["overflow-hidden", "*:opacity-0"];
+  expect(applied(toastAt(false))).toEqual(clipped);
+  expect(applied(toastAt(true))).toEqual([]);
+
+  const list = document.querySelector("[data-sonner-toaster]");
+  if (!list) throw new Error("no toaster");
+  fireEvent.mouseEnter(list);
+  expect(applied(toastAt(false))).toEqual([]);
+  fireEvent.mouseLeave(list);
+  expect(applied(toastAt(false))).toEqual(clipped);
+  act(() => {
+    toast.dismiss();
+  });
+  await act(() => vi.advanceTimersByTimeAsync(1000));
+  vi.useRealTimers();
+});
+
 test("a window of 600 px or less places the toasts as the wider ones", async () => {
   vi.useFakeTimers();
   measureToasts({ Held: 98 });

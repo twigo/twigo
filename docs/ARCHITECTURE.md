@@ -1070,6 +1070,7 @@ Extensions add commands, not prefixes.
     The toasts stay in the window whole, spread by a hover as well as closed, while they fit under the title bar: the toaster measures the heights of the toasts that show and the gaps between them, which is what sonner spreads, and where that stack does not fit above the panel it sits as low as it takes to stay under the title bar, over the panel's strip.
     A stack taller than the window under the title bar sits at the status bar's edge, so the front toast, the newest, stays in the window, and the top of the spread stack goes past the title bar.
     It sits so closed too, since moving it as the pointer arrives would move the toasts from under it.
+    While the stack is closed a toast behind the front one is clipped to its box and its card hidden, as sonner does its styled toasts: it caps a back toast's box to the front toast's height but hides the children only of toasts it styles (2.0.8), so a taller custom card would hang below the front toast, over the panel, and a pointer there would open and close the stack; a hover shows it.
     A window of 600 px or less, where sonner reads other offsets, gets the same ones.
     An offer sent again with its id changes the words of its toast, and a withdrawn one takes its toast down.
     The buttons answer with the revision their toast was drawn with, not the one the window holds, since sonner shows a replacement one timer tick after the window has it (2.0.8), and a click in that gap answers what the person read.
