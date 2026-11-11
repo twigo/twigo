@@ -364,8 +364,9 @@ impl Core {
     }
 
     /// Moves an offer's entries into the user's kubeconfig, or dismisses
-    /// it, which withdraws it; refused for one that is gone or another
-    /// window's. A move that fails leaves the offer waiting, and one that
+    /// it, which withdraws it; refused for one that is gone, another
+    /// window's, or of another revision than the one answered, which then
+    /// changes nothing. A move that fails leaves the offer waiting, and one that
     /// would leave out more than the offer said moves nothing and makes the
     /// offer anew, refused as a conflict. Async, as the move waits for
     /// kubectl's lock.
@@ -375,7 +376,7 @@ impl Core {
         answer: AnswerKubeconfigOffer,
     ) -> Result<(), IpcError> {
         let offers = &self.terminals.offers;
-        let answering = offers.take(window, answer.id)?;
+        let answering = offers.take(window, answer)?;
         if answer.answer == KubeconfigOfferAnswer::Dismiss {
             offers.withdraw(answering);
             return Ok(());

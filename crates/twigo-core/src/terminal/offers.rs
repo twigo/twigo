@@ -14,8 +14,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use twigo_ipc::{
-    ErrorKind, IpcError, KubeconfigNames, KubeconfigOffer, KubeconfigOfferEvent, KubeconfigOfferId,
-    SubscriptionId,
+    AnswerKubeconfigOffer, ErrorKind, IpcError, KubeconfigNames, KubeconfigOffer,
+    KubeconfigOfferAnswer, KubeconfigOfferEvent, KubeconfigOfferId, SubscriptionId,
 };
 use twigo_kube::kubeconfig::{Appended, Names, Outcome, Sources, WriteError, Written, append};
 
@@ -67,7 +67,10 @@ struct Direct {
 struct Held {
     source: Arc<Source>,
     written: Written,
+    /// As last sent, while shown.
     offer: KubeconfigOffer,
+    /// How many times it was sent, the next one's revision.
+    sent: u32,
     /// What `offer` says a move leaves out.
     left_out: Names,
     /// Whether its window has it: not while a move would move nothing.
@@ -219,8 +222,15 @@ impl Offers {
     }
 
     /// The window's offer, which waits on while it is answered; refused for
-    /// one that is gone, another window's, or answered already.
-    pub(crate) fn take(&self, window: &str, id: KubeconfigOfferId) -> Result<Answering, IpcError> {
+    /// one that is gone, another window's, answered already, or of another
+    /// revision than the one answered, as when a renewal crossed the answer,
+    /// which then changes nothing.
+    pub(crate) fn take(
+        &self,
+        window: &str,
+        answer: AnswerKubeconfigOffer,
+    ) -> Result<Answering, IpcError> {
+        let id = answer.id;
         let mut state = self.state();
         let Some(held) = state.offers.get_mut(&id.0).filter(|held| held.shown) else {
             return Err(IpcError::new(ErrorKind::NotFound, "this offer is gone"));
@@ -235,6 +245,22 @@ impl Offers {
             return Err(IpcError::new(
                 ErrorKind::Conflict,
                 "this offer is being answered",
+            ));
+        }
+        if held.offer.revision != answer.revision {
+            let (done, now) = match answer.answer {
+                KubeconfigOfferAnswer::Move => (
+                    format!("moved into {}", held.offer.target),
+                    "what a move does",
+                ),
+                KubeconfigOfferAnswer::Dismiss => ("dismissed".to_owned(), "what it holds"),
+            };
+            return Err(IpcError::new(
+                ErrorKind::Conflict,
+                format!(
+                    "Nothing was {done}: the offer changed after it was shown to you, and now \
+                     says {now}."
+                ),
             ));
         }
         held.answering = true;
@@ -359,7 +385,8 @@ impl State {
         let held = Held {
             source: Arc::clone(source),
             written,
-            offer: offer_of(source, id, &Names::default(), &Names::default()),
+            offer: offer_of(source, id, 0, &Names::default(), &Names::default()),
+            sent: 0,
             left_out: Names::default(),
             shown: false,
             answering: false,
@@ -386,9 +413,12 @@ impl State {
                     left_out: Names::default(),
                 }
             });
-        let offer = offer_of(&held.source, id, &names, &left_out);
+        let revision = held.offer.revision;
+        let mut offer = offer_of(&held.source, id, revision, &names, &left_out);
         let shows = !moves.is_empty();
         let event = if shows && (!held.shown || offer != held.offer) {
+            offer.revision = held.sent;
+            held.sent += 1;
             Some(KubeconfigOfferEvent::Offered {
                 offer: Box::new(offer.clone()),
             })
@@ -418,12 +448,13 @@ impl State {
 fn offer_of(
     source: &Source,
     id: KubeconfigOfferId,
+    revision: u32,
     names: &Names,
     left_out: &Names,
 ) -> KubeconfigOffer {
     KubeconfigOffer {
         id,
-        revision: 0,
+        revision,
         terminal: source.label.to_string(),
         session: *source
             .session
@@ -510,6 +541,23 @@ mod tests {
         })
     }
 
+    fn take(offers: &Offers, id: KubeconfigOfferId) -> Result<Answering, IpcError> {
+        let revision = offers
+            .state()
+            .offers
+            .get(&id.0)
+            .map_or(0, |held| held.offer.revision);
+        let answer = KubeconfigOfferAnswer::Move;
+        offers.take(
+            "main",
+            AnswerKubeconfigOffer {
+                id,
+                revision,
+                answer,
+            },
+        )
+    }
+
     fn offer(offers: &Offers, source: &Arc<Source>, text: &str) -> KubeconfigOfferId {
         let names = Names::of(text).unwrap();
         offers.offer(source, text, &names, &names).unwrap()
@@ -520,8 +568,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (offers, source) = (Offers::new(), source(dir.path()));
         let first = offer(&offers, &source, FIRST);
-        let moving = offers.take("main", first).unwrap();
-        let Err(again) = offers.take("main", first) else {
+        let moving = take(&offers, first).unwrap();
+        let Err(again) = take(&offers, first) else {
             panic!("taken twice");
         };
         assert_eq!(again.kind, ErrorKind::Conflict);
@@ -542,7 +590,7 @@ mod tests {
         let (told, events) = std::sync::mpsc::channel();
         offers.follow("main", move |event| told.send(event).is_ok());
         let first = offer(&offers, &source, FIRST);
-        let moving = offers.take("main", first).unwrap();
+        let moving = take(&offers, first).unwrap();
         assert_eq!(offer(&offers, &source, MORE), first);
         let moved = moving.move_entries();
         offers.moved(moving, moved).unwrap();
@@ -574,11 +622,70 @@ mod tests {
     }
 
     #[test]
+    fn an_answer_to_another_revision_than_the_offer_s_changes_nothing_and_is_a_conflict() {
+        let dir = tempfile::tempdir().unwrap();
+        let (offers, source) = (Offers::new(), source(dir.path()));
+        let (told, events) = std::sync::mpsc::channel();
+        offers.follow("main", move |event| told.send(event).is_ok());
+        let id = offer(&offers, &source, FIRST);
+        let seen = offered(&events);
+        assert_eq!((seen.id, seen.revision), (id, 0));
+        offer(&offers, &source, MORE);
+        let renewed = offered(&events);
+        assert_eq!((renewed.id, renewed.revision), (id, 1));
+        for (answer, words) in [
+            (
+                KubeconfigOfferAnswer::Move,
+                format!(
+                    "Nothing was moved into {}: the offer changed after it was shown to you, \
+                     and now says what a move does.",
+                    dir.path().join("config").display()
+                ),
+            ),
+            (
+                KubeconfigOfferAnswer::Dismiss,
+                "Nothing was dismissed: the offer changed after it was shown to you, and now \
+                 says what it holds."
+                    .to_owned(),
+            ),
+        ] {
+            let stale = AnswerKubeconfigOffer {
+                id,
+                revision: seen.revision,
+                answer,
+            };
+            let Err(refused) = offers.take("main", stale) else {
+                panic!("{answer:?} of revision 0 taken");
+            };
+            assert_eq!(
+                (refused.kind, refused.message),
+                (ErrorKind::Conflict, words)
+            );
+        }
+        assert!(events.try_recv().is_err(), "the offer stays as shown");
+        assert!(!dir.path().join("config").exists());
+        assert_eq!(
+            offers.follow("main", |_| true),
+            std::slice::from_ref(&renewed)
+        );
+        let answer = AnswerKubeconfigOffer {
+            id,
+            revision: renewed.revision,
+            answer: KubeconfigOfferAnswer::Move,
+        };
+        let answering = offers.take("main", answer).unwrap();
+        let moved = answering.move_entries();
+        offers.moved(answering, moved).unwrap();
+        let mine = std::fs::read_to_string(dir.path().join("config")).unwrap();
+        assert_eq!(Names::of(&mine).unwrap(), Names::of(MORE).unwrap());
+    }
+
+    #[test]
     fn nothing_is_put_back_once_the_window_s_offers_stopped() {
         let dir = tempfile::tempdir().unwrap();
         let (offers, source) = (Offers::new(), source(dir.path()));
         let first = offer(&offers, &source, FIRST);
-        let moving = offers.take("main", first).unwrap();
+        let moving = take(&offers, first).unwrap();
         offers.drop_window("main");
         offers.put_back(moving);
         assert!(offers.follow("main", |_| true).is_empty());
@@ -600,7 +707,7 @@ mod tests {
     }
 
     fn moved(offers: &Offers, id: KubeconfigOfferId) -> Result<(), IpcError> {
-        let answering = offers.take("main", id).unwrap();
+        let answering = take(offers, id).unwrap();
         let moved = answering.move_entries();
         offers.moved(answering, moved)
     }
@@ -678,7 +785,7 @@ mod tests {
             KubeconfigOfferEvent::Withdrawn { id }
         );
         assert!(offers.follow("main", |_| true).is_empty());
-        let Err(gone) = offers.take("main", id) else {
+        let Err(gone) = take(&offers, id) else {
             panic!("a withdrawn offer taken");
         };
         assert_eq!(gone.kind, ErrorKind::NotFound);
