@@ -82,6 +82,10 @@ struct Setup {
 
 impl Setup {
     async fn new() -> Self {
+        Self::with_login(|_| Vec::new()).await
+    }
+
+    async fn with_login(login: impl FnOnce(&Path) -> Vec<(&'static str, OsString)>) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join("home");
         std::fs::create_dir_all(home.join(".kube")).unwrap();
@@ -94,14 +98,16 @@ impl Setup {
             &dir.path().join("policy.json"),
         );
         let env: ShellEnv = [
-            ("HOME", home.as_os_str()),
-            ("PATH", "/usr/bin:/bin".as_ref()),
-            ("TWIGO_KUBECONFIG", "/elsewhere".as_ref()),
-            ("LANG", "C".as_ref()),
+            ("HOME", home.clone().into_os_string()),
+            ("PATH", "/usr/bin:/bin".into()),
+            ("TWIGO_KUBECONFIG", "/elsewhere".into()),
+            ("LANG", "C".into()),
         ]
         .into_iter()
-        .map(|(name, value)| (OsString::from(name), value.to_owned()))
+        .chain(login(&home))
+        .map(|(name, value)| (OsString::from(name), value))
         .collect();
+        core.set_terminal_zdotdir(None);
         let (status, followed) = watch::channel(Status::Resolved(Arc::new(env)));
         tokio::spawn({
             let core = Arc::clone(&core);
@@ -453,6 +459,55 @@ async fn a_zsh_terminal_keeps_its_kubeconfig_over_a_zshrc_that_exports_one() {
     assert_eq!(
         std::fs::read_to_string(&out).unwrap(),
         format!("{kubeconfig}|0\n"),
+        "{output}"
+    );
+}
+
+#[tokio::test]
+async fn zsh_reads_the_zshenv_in_home_that_moves_zdotdir_though_the_login_environment_holds_it() {
+    let setup = Setup::with_login(|home| {
+        vec![("ZDOTDIR", home.join(".config").join("zsh").into_os_string())]
+    })
+    .await;
+    let config = setup.home().join(".config").join("zsh");
+    std::fs::create_dir_all(&config).unwrap();
+    let ran = setup.dir.path().join("ran");
+    let record = |name: &str| format!("echo {name} >> {}\n", quoted(&ran));
+    std::fs::write(
+        setup.home().join(".zshenv"),
+        format!(
+            "{}export ZDOTDIR=$HOME/.config/zsh\n",
+            record("home/.zshenv")
+        ),
+    )
+    .unwrap();
+    std::fs::write(config.join(".zshenv"), record("zdotdir/.zshenv")).unwrap();
+    std::fs::write(
+        config.join(".zshrc"),
+        format!("{}export KUBECONFIG=/theirs\n", record("zdotdir/.zshrc")),
+    )
+    .unwrap();
+    let session = setup.create_running("kind-a", "/bin/zsh", &[]).await;
+    let out = setup.dir.path().join("out");
+    let typed = format!(
+        "print -r -- \"$KUBECONFIG|${{ZDOTDIR-}}\" > {}; exit\n",
+        quoted(&out)
+    );
+    let (output, end) = setup.run_typed(session.id, &typed).await;
+    assert_eq!(end, ShellEnd::Exited { code: 0 }, "{output}");
+    assert_eq!(
+        std::fs::read_to_string(&ran).unwrap(),
+        "home/.zshenv\nzdotdir/.zshrc\n",
+        "{output}"
+    );
+    let kubeconfig = format!(
+        "{}:{}",
+        setup.terminals().join("0").join("kubeconfig").display(),
+        setup.mine().display()
+    );
+    assert_eq!(
+        std::fs::read_to_string(&out).unwrap(),
+        format!("{kubeconfig}|{}\n", config.display()),
         "{output}"
     );
 }

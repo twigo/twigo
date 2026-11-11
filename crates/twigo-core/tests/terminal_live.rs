@@ -116,6 +116,7 @@ impl Live {
             &dir.path().join("cache"),
             &policy_file,
         );
+        core.set_terminal_zdotdir(None);
         let (status, followed) = watch::channel(Status::Resolved(Arc::new(env)));
         tokio::spawn({
             let core = Arc::clone(&core);

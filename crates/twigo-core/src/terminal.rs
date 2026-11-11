@@ -117,6 +117,10 @@ pub(crate) struct Terminals {
     offers: Arc<Offers>,
     /// What tests run in place of the login shell.
     program: Mutex<Option<(PathBuf, Vec<OsString>)>>,
+    /// Twigo's own `ZDOTDIR`, which a terminal app hands its shell, so zsh
+    /// reads the person's `.zshenv` where it would: the login shell's
+    /// environment is read after that file ran, which may have moved it.
+    zdotdir: Mutex<Option<OsString>>,
 }
 
 impl Terminals {
@@ -128,6 +132,7 @@ impl Terminals {
             made: AtomicU64::new(0),
             offers: Arc::new(Offers::new()),
             program: Mutex::default(),
+            zdotdir: Mutex::new(std::env::var_os("ZDOTDIR")),
         }
     }
 
@@ -239,12 +244,13 @@ impl Core {
                 (None, file, kubeconfig)
             }
         };
+        let zdotdir = self.terminals.zdotdir.lock().expect("zdotdir lock").clone();
         let startup = twigo_env::Startup::of(
             &program,
             &args,
             &kubeconfig,
             directory.path(),
-            login.get("ZDOTDIR"),
+            zdotdir.as_deref(),
         );
         let kubeconfig_kept = startup.is_some();
         let (args, startup_env) = match startup {
@@ -386,5 +392,12 @@ impl Core {
     #[cfg(feature = "test-util")]
     pub fn set_terminal_program(&self, program: PathBuf, args: Vec<OsString>) {
         *self.terminals.program.lock().expect("program lock") = Some((program, args));
+    }
+
+    /// Takes `zdotdir` for Twigo's own `ZDOTDIR` in every terminal made from
+    /// now on, so no test reads the startup files of whoever runs it.
+    #[cfg(feature = "test-util")]
+    pub fn set_terminal_zdotdir(&self, zdotdir: Option<OsString>) {
+        *self.terminals.zdotdir.lock().expect("zdotdir lock") = zdotdir;
     }
 }
