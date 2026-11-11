@@ -96,7 +96,6 @@ export type {
   Label,
   ListBatch,
   ListQuery,
-  NewTerminal,
   ObjectBatch,
   ObjectEvent,
   ObjectParts,
