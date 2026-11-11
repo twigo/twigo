@@ -569,7 +569,16 @@ export type KubeconfigOffer = { id: KubeconfigOfferId,
 /**
  * The terminal's label.
  */
-terminal: string, contexts: Array<string>, clusters: Array<string>, users: Array<string>, 
+terminal: string, 
+/**
+ * The id `terminal_create` answered for the terminal, which finds its
+ * tab where labels repeat: every space has its own `Terminal 1`.
+ */
+session: SubscriptionId, 
+/**
+ * The context the terminal was pinned to.
+ */
+context: string, contexts: Array<string>, clusters: Array<string>, users: Array<string>, 
 /**
  * The user's file a move writes to, the one kubectl writes new entries
  * to, as a person reads it: `~/.kube/config`.

@@ -66,6 +66,11 @@ pub struct KubeconfigOffer {
     pub id: KubeconfigOfferId,
     /// The terminal's label.
     pub terminal: String,
+    /// The id `terminal_create` answered for the terminal, which finds its
+    /// tab where labels repeat: every space has its own `Terminal 1`.
+    pub session: SubscriptionId,
+    /// The context the terminal was pinned to.
+    pub context: String,
     pub contexts: Vec<String>,
     pub clusters: Vec<String>,
     pub users: Vec<String>,
