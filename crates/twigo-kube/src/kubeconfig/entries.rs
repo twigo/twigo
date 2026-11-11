@@ -451,14 +451,22 @@ pub fn append(
     }
     let mut file = parse(&text)?;
     if mapping(&file).is_none() && Names::of(&text).is_ok_and(|names| names.is_empty()) {
-        // Whitespace and comments alone, which kubectl reads as an empty
-        // config.
-        let separator = if text.is_empty() || text.ends_with('\n') {
+        // Whitespace and comments, alone or around a `null` or `~`, which
+        // kubectl reads as an empty config.
+        let kept = match file.document().and_then(|document| document.as_scalar()) {
+            Some(null) if null.is_null() => {
+                let range = null.byte_range();
+                let (start, end) = (range.start as usize, range.end as usize);
+                format!("{}{}", &text[..start], &text[end..])
+            }
+            _ => text,
+        };
+        let separator = if kept.is_empty() || kept.ends_with('\n') {
             ""
         } else {
             "\n"
         };
-        file = parse(&format!("{text}{separator}{EMPTY}"))?;
+        file = parse(&format!("{kept}{separator}{EMPTY}"))?;
     }
     let into = mapping(&file).ok_or_else(|| WriteError::Parse("it holds no mapping".to_owned()))?;
     for (section, entry) in plan.moving {
@@ -701,6 +709,40 @@ current-context: arn:aws:eks:eu-west-1:1:cluster/a
             .unwrap();
             let written = fs::read_to_string(&target).unwrap();
             assert!(written.starts_with(empty.trim_end()), "{written:?}");
+            assert_eq!(
+                Names::of(&written).unwrap(),
+                names(&["other"], &[], &[]),
+                "{written:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_target_that_holds_only_null_starts_as_the_empty_config_with_its_comments() {
+        for (null, kept) in [
+            ("null\n", ""),
+            ("~\n", ""),
+            ("~", ""),
+            ("# nothing yet\nnull\n", "# nothing yet\n"),
+            ("---\n~ # empty\n", "---\n"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let target = dir.path().join("config");
+            fs::write(&target, null).unwrap();
+            let moving = names(&["other"], &[], &[]);
+            let appended = append(
+                &target,
+                std::slice::from_ref(&target),
+                &written(dir.path(), &moving),
+                &Names::default(),
+            );
+            assert_eq!(appended.unwrap(), Appended::Moved, "{null:?}");
+            let written = fs::read_to_string(&target).unwrap();
+            assert!(written.starts_with(kept), "{written:?}");
+            assert!(
+                !written.contains("null") && !written.contains('~'),
+                "{written:?}"
+            );
             assert_eq!(
                 Names::of(&written).unwrap(),
                 names(&["other"], &[], &[]),
