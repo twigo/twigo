@@ -64,6 +64,9 @@ Findings that belong to no step yet.
   - Closing a dirty editor keeps its copy and Discard Changes asks nothing.
   - Compare with… offers the objects of the kind in the space and those opened lately, not another space's.
   - In the dev server a diff editor logs "no diff result available" as it mounts, under StrictMode's second mount; the production build served by `vite preview` logged none (2026-11-08).
+- The integrated terminal (`twigo_core::terminal`, ARCHITECTURE 4.6):
+  - The person's `terminal.usePolicyProxy`, which turns the proxy on for `read-write` contexts too, waits for the settings files of M3; so far only the admin's policy file sets it.
+  - No source lists contexts from a provider yet, so no terminal goes through the proxy for that reason (`ProxyWhy::Provider`); it comes with the providers' source.
 - The terminal (`packages/kube/src/exec`, ARCHITECTURE 4.6):
   - `theme.ts` hands xterm the tokens in sRGB hex and carries an `@todo`: the WebGL addon's pattern glyphs, such as ░, throw on `oklch` (`drawPatternChar` in 0.20.0-beta.300); xterm.js had no issue for it on 2026-11-10.
   - xterm is on 6.1.0-beta.304, the betas VS Code 1.145.2 locks, until a 6.1.0 release.

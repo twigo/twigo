@@ -17,6 +17,7 @@ use twigo_sessions::shell::{Join, SHELL, Session, Spec};
 use super::{Target, clients_for, get, kubectl};
 use crate::Core;
 use crate::bus::{Finished, Planned};
+use crate::terminal::Shell;
 
 const DEFAULT_CONTAINER: &str = "kubectl.kubernetes.io/default-container";
 
@@ -179,7 +180,7 @@ pub(crate) async fn shell(
                 let relocked = relocked(Arc::clone(&core.policy), run_context.clone()).boxed();
                 let id = core
                     .shells
-                    .keep(ticket, Session::park(clients, spec, relocked))?;
+                    .keep(ticket, Shell::Pod(Session::park(clients, spec, relocked)))?;
                 Ok(Finished::Session { id, tty, stdin })
             })
         }),

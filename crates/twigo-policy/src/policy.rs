@@ -310,6 +310,12 @@ impl Policy {
         self.decide(context, access, attributes, actor, approval)
     }
 
+    /// Whether the admin's policy file has `context`'s terminals go through
+    /// the policy proxy, whatever its mode (ARCHITECTURE 4.6).
+    pub fn uses_policy_proxy(&self, context: &str) -> bool {
+        self.file.uses_policy_proxy(context)
+    }
+
     /// What the context connects to now, as [`Metadata::connection`] says;
     /// none while no source lists it.
     pub fn connection(&self, context: &str) -> Option<u64> {

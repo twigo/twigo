@@ -988,22 +988,42 @@ Extensions add commands, not prefixes.
     If browsers or connection pools exhaust it, Twigo implements the SPDY-over-WebSocket tunnel that kubectl has used since 1.31 to multiplex connections.
   - Later: defaults from annotations (k9s `k9scli.io/port-forwards`), and a `kubectl port-forward` fallback, run through the policy proxy, for proxies that refuse WebSocket upgrades.
 - **Integrated terminal.**
-  A local pty with the login-shell environment.
+  A local pty with the login-shell environment, in a tab of the panel run over the shell commands: `terminal_create` parks it for the space's context, and `shell_open` starts it with the terminal's size.
   - The terminal is pinned to the space's context without touching the user's kubeconfig.
+  - Its kind is decided when it is created, and the tab shows it; a later change of mode changes nothing in a running terminal, whose proxy follows the mode by itself.
   - **Terminals of `read-write` contexts from the user's kubeconfig** use the user's real credentials.
-    `KUBECONFIG` is a tiny Twigo file holding only `current-context: <ctx>`, followed by the user's own files, so kubectl takes the first file's current context.
-    Such a terminal reaches every context with real credentials, read-only ones included, as any terminal app would.
-  - **Terminals of every other context**, including one temporarily unlocked, get only a generated policy-proxy kubeconfig (6.4).
-    So do terminals of contexts that come from a provider, whatever their mode, because those have no kubeconfig entry to point at.
+    `KUBECONFIG` is Twigo's file of the context, then the catalog's kubeconfig files in their order.
+    Twigo's file is a whole kubeconfig, `apiVersion`, `kind`, `clusters: []`, `users: []`, a copy of the context's own entry and `current-context`, in `terminals/<n>/` under the app-data directory (0700, the file 0600), deleted with the terminal and, should the app end first, at the next start.
+    kubectl writes a changed entry back to the first file that names it ([`ModifyConfig`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/client-go/tools/clientcmd/config.go#L235-L258)), so `config set-context --current --namespace` writes Twigo's copy and `config use-context` the current context of Twigo's file, and the user's files stay as they were.
+    The empty lists keep `az`, which refuses a file without them, and `gcloud`, which moves one aside, working.
+    Such a terminal reaches every context with real credentials, read-only ones included, as any terminal app would, and it keeps running when its context stops being `read-write`: ending it would protect little and lose local work, so its tab warns that it holds real credentials and offers a restart through the proxy.
+  - **Terminals of every other context**, including one temporarily unlocked, get only a generated policy-proxy kubeconfig (6.4), a process of the terminal's actor, label and window that the terminal holds as long as it runs.
+    So do terminals of contexts that come from a provider, whatever their mode, because those have no kubeconfig entry to point at; no source lists such contexts yet.
     It holds one proxy entry per catalog context, each with its own token and that context's mode, and none of the user's files.
     `--context`, k9s `:ctx` or `config use-context` therefore cannot reach real credentials by accident.
     The proxy follows the current mode, so a relock applies to terminals that are already open.
     A write from a `guarded` terminal raises a Twigo approval.
-  - The tab shows which kind of terminal it is.
-    `terminal.usePolicyProxy` turns the proxy on for `read-write` contexts too.
-    The policy file can force it on for any context, and settings cannot turn that off.
-  - kubectl and most tools write new entries (for example from `aws eks update-kubeconfig`) to the first file in `KUBECONFIG`, which is Twigo's.
-    Twigo watches that file and offers to move new entries into the user's kubeconfig.
+  - `terminal.usePolicyProxy` in the person's settings will turn the proxy on for `read-write` contexts too, once the settings files come (M3).
+    The policy file's `terminal.usePolicyProxy` forces it on for the contexts its globs match (4.8), and settings cannot turn that off.
+  - **The shell** is the login shell from the password database: a login shell on macOS (`-l`, `-Login` for pwsh) and an interactive one on Linux, as VS Code's profiles start them, in `$HOME` of the login environment.
+    Its environment is the login shell's (6.1), or the fallback a failure carries, without Twigo's own `TWIGO_*`, with `TERM=xterm-256color`, `COLORTERM=truecolor`, `TERM_PROGRAM=Twigo`, `TERM_PROGRAM_VERSION` and `KUBECONFIG`.
+    Where none of `LC_ALL`, `LC_CTYPE` and `LANG` names UTF-8, `LANG` is the system locale in UTF-8 on macOS when `/usr/share/locale` has it, else `en_US.UTF-8`, and `C.UTF-8` on Linux.
+    pty-process 0.5.4 spawns it as the leader of a session of its own with the pty as its controlling terminal; then Twigo's `pre_exec` clears the signal mask, which std no longer resets ([`do_exec`](https://github.com/rust-lang/rust/blob/1.99.1/library/std/src/sys/process/unix/unix.rs#L357-L358)), sets every catchable signal to its default and marks every descriptor above 2 close-on-exec, with only async-signal-safe calls.
+  - **Output** goes out by the same flow as a pod's shell, in the same frames; the events are `Running` once it is spawned and `Failed`, in words, when it cannot start, with no `Queued` and no `Connecting`.
+  - **The end** is the shell's exit, from tokio's `Child::wait`, not the pty's EOF: `Exited { code }`, or `Signaled { signal }` named as `kill -l` names it, `KILL`.
+    Twigo holds a slave descriptor of its own: macOS 27.2 drops a pty's unread output 0.6 s after its last slave closes, and while another slave is open, the exit of the session's leader waits until the output is read (a probe with Python's `pty.openpty`, 2026-11-11).
+    After the exit it reads on as flow control allows until a read would block, 1 s at most, so a background job's output after that is dropped, as VS Code drops it after 200 ms; then comes the end.
+  - **Closing** a terminal hangs up its shell's process group and the terminal's foreground group (`tcgetpgrp` on the master), closes the master and Twigo's slave, and 3 s later kills both groups if anything in them still runs; VS Code sends one `SIGHUP` to the shell's pid and nothing more.
+    The pty's own hangup on close reaches only the shell, and the shell's end its foreground group, so a shell that ignores `SIGHUP` would leave its foreground job running without Twigo's.
+    A job moved out of both groups, as `nohup … &` under job control moves it, survives, as in any terminal.
+    At quit, with the runtime gone, the hangup comes at once and nothing is killed later.
+  - **Offers.** kubectl and most tools write new entries, as `aws eks update-kubeconfig` does, to the first file in `KUBECONFIG`: Twigo's, or a proxy terminal's own.
+    Twigo watches the directory that holds it, since kubectl, aws and gcloud write in place, az replaces the file by a rename, gcloud may rename it to a backup and write a new one, and kubectl creates and removes `<file>.lock` beside it; a read that does not parse waits for the next event or 200 ms.
+    Names in `clusters`, `users` and `contexts` that were not in the file as Twigo wrote it, and were never offered for this terminal, make an offer to move them into the user's kubeconfig: one live offer per terminal, sent again with its id as more come.
+    It names the file a move writes to, the one of the user's files kubectl writes new entries to (the only one, else the first that exists, else the last), and the names the user's files hold already, which a move leaves out of every list.
+    A move reads the terminal's file again, or takes it as last read once it is gone, makes the paths client-go reads relative to it absolute against its directory ([`GetAuthInfoFileReferences`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/client-go/tools/clientcmd/loader.go#L606-L617)), and appends the entries under kubectl's `<file>.lock` and by a rename, the file's comments and layout kept, as Twigo writes oidc tokens back (6.2); a target that does not exist is created at 0600.
+    A move or a dismiss withdraws the offer, a dismissed name is not offered again by that terminal, and a move that fails leaves the offer waiting.
+    Offers belong to the window: they outlive the terminal's tab and end with the window.
 - **YAML editor and diff.**
   Monaco with monaco-yaml (yaml-language-server).
   - The schema per model URI comes from the cluster's OpenAPI (3.6), so validation, completion and hover work for CRDs too.
@@ -1045,8 +1065,8 @@ An action with an undo ends in a toast that offers it for as long as it lasts, a
   4. policy.
 - **Policy** is an admin-managed file, `/Library/Application Support/Twigo/policy.json` or `/etc/twigo/policy.json`, and later MDM.
   It locks values: for example "contexts matching `prod-*` are read-only", "extensions only from these registries", "MCP off".
-  So far it sets modes by context glob and what `read-only` does with a port-forward, `{"contexts": {"prod-*": "read-only"}, "readOnly": {"allowPortForward": false}}`, and it is read once, as the app starts.
-  A key nothing reads would be a lock that does not hold, so an unknown key, like any file that cannot be read, locks every context `read-only` and says so (6.4).
+  So far it sets modes by context glob, what `read-only` does with a port-forward, and by context glob the terminals that go through the policy proxy whatever their mode (4.6), `{"contexts": {"prod-*": "read-only"}, "readOnly": {"allowPortForward": false}, "terminal": {"usePolicyProxy": ["prod-*"]}}`, and it is read once, as the app starts.
+  A key nothing reads would be a lock that does not hold, so an unknown key, like any file that cannot be read, locks every context `read-only` and says so (6.4), and has every terminal use the proxy.
 - Settings are files the user can edit in the app (with a schema) or through the generated settings UI.
   Changes are picked up live.
   `keybindings.json` works the same way.
@@ -1584,7 +1604,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   A hyper-util client clone shares its pool, so every actor uses the same HTTP/2 connection, and the layer knows who is asking without per-call plumbing.
 - **Child processes go through a policy proxy.**
   `helm` for release actions, kubectl in actions, the `kubectl port-forward` fallback, agent sessions and terminals of every context that is not `read-write` get a generated kubeconfig.
-  Provider contexts always use it in terminals (4.6).
+  Provider contexts always use it in terminals, and so do the contexts the policy file's `terminal.usePolicyProxy` matches (4.6, 4.8).
   - It points at a loopback endpoint in the core (`crates/twigo-core/src/proxy`): HTTP/1.1 over TLS on `127.0.0.1`, on a port the OS picks when the core gives its first process a token, kept for the app's life.
     TLS guards nothing the token does not, but clientcmd reads a user's credentials only for an https server ([`ClientConfig`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/client-go/tools/clientcmd/client_config.go#L230-L249)), so kubectl sends no token to `http://`; a CA made in memory per run signs the endpoint's certificate for `127.0.0.1`, and each kubeconfig trusts that CA alone.
   - Each process gets a kubeconfig of its own in `proxy/` under the app-data directory (0700, the file 0600), deleted with the process's handle and, should the app end first, at the next start.
@@ -1638,6 +1658,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   - Any process running as the user can still read `~/.kube/config` or pass `--kubeconfig`.
     That includes tier-3 processes, agents and terminals.
   - The terminal of a `read-write` context from the user's kubeconfig uses real credentials by design: it is the user's own shell, like any terminal app (4.6).
+  - A user's kuberc, `$KUBERC` or else `~/.kube/kuberc`, can default any flag of a kubectl command, `--kubeconfig`, `--context` and `--server` included, as kubectl checks only a flag's form there ([`applyOverrides`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/kubectl/pkg/kuberc/kuberc.go#L166-L223)), so kubectl in a proxy terminal can go to a cluster with the user's own credentials; `KUBERC=off` or `KUBECTL_KUBERC=false` turns kuberc off.
 
 | Operation                                                                     | `read-write`                            | `guarded`                             | `read-only`                                            |
 | ----------------------------------------------------------------------------- | --------------------------------------- | ------------------------------------- | ------------------------------------------------------ |

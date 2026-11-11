@@ -88,6 +88,24 @@ fn the_first_file_to_define_a_name_wins() {
 }
 
 #[test]
+fn new_entries_go_where_kubectl_puts_them_the_only_file_or_the_first_that_exists_or_the_last() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+    assert_eq!(kubectl(&[&a]).target(), Some(a.as_path()));
+    assert_eq!(kubectl(&[&a, &b]).target(), Some(b.as_path()));
+    write(dir.path(), "b", "");
+    write(dir.path(), "a", "");
+    assert_eq!(kubectl(&[&a, &b]).target(), Some(a.as_path()));
+    let home = dir.path().join("home");
+    let only = Sources::kubectl(None, Some(&home));
+    assert_eq!(
+        only.target(),
+        Some(home.join(".kube").join("config").as_path())
+    );
+    assert_eq!(Sources::kubectl(None, None).target(), None);
+}
+
+#[test]
 fn a_context_names_the_file_that_defines_it_from_home() {
     let dir = tempfile::tempdir().unwrap();
     let kube = dir.path().join(".kube");

@@ -1,0 +1,320 @@
+//! Terminals on this machine pinned to a context (ARCHITECTURE 4.6): the
+//! login shell on a pty, run over the shell commands beside the shells in
+//! pods. How one reaches clusters is decided as it is created: through the
+//! policy proxy alone, or with the user's own kubeconfig behind Twigo's file
+//! of the context. What tools write into its first file is offered for
+//! moving into the user's.
+
+mod directory;
+mod environment;
+mod offers;
+#[cfg(test)]
+mod tests;
+mod watcher;
+
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+
+use futures::future::Either;
+use twigo_ipc::{
+    AnswerKubeconfigOffer, ErrorKind, IpcError, KubeconfigOffer, KubeconfigOfferAnswer,
+    KubeconfigOfferEvent, Mode, NewTerminal, ProxyWhy, TerminalKind, TerminalSession,
+};
+use twigo_kube::client::Actor;
+use twigo_kube::kubeconfig::{Names, Sources};
+use twigo_policy::Policy;
+use twigo_sessions::shell::Frame;
+use twigo_sessions::terminal::{Spec, Terminal};
+
+use crate::{ClientsError, Core};
+use directory::Directory;
+pub(crate) use offers::Offers;
+use offers::Source;
+use watcher::Watcher;
+
+/// A session of the shells' table: a shell in a pod, or a terminal here.
+pub(crate) enum Shell {
+    Pod(twigo_sessions::shell::Session),
+    Local(Local),
+}
+
+pub(crate) struct Local {
+    // Dropped first: the shell hangs up before its tokens are revoked, and
+    // the watch ends before its directory goes.
+    session: Terminal,
+    _watcher: Option<Watcher>,
+    /// Its proxy process, or its directory.
+    _reach: Box<dyn Send>,
+}
+
+impl Shell {
+    pub(crate) fn open(
+        &self,
+        cols: u16,
+        rows: u16,
+        send: impl FnMut(Frame) -> bool + Send + 'static,
+    ) -> Result<(), IpcError> {
+        match self {
+            Self::Pod(session) => session.open(cols, rows, send),
+            Self::Local(local) => local.session.open(cols, rows, send),
+        }
+    }
+
+    pub(crate) fn input(&self, data: Vec<u8>) -> impl Future<Output = ()> + Send + use<> {
+        match self {
+            Self::Pod(session) => Either::Left(session.input(data)),
+            Self::Local(local) => Either::Right(local.session.input(data)),
+        }
+    }
+
+    pub(crate) fn resize(&self, cols: u16, rows: u16) {
+        match self {
+            Self::Pod(session) => session.resize(cols, rows),
+            Self::Local(local) => local.session.resize(cols, rows),
+        }
+    }
+
+    pub(crate) fn ack(&self, bytes: u32) {
+        match self {
+            Self::Pod(session) => session.ack(bytes),
+            Self::Local(local) => local.session.ack(bytes),
+        }
+    }
+}
+
+/// The core's terminals: their directories and their offers.
+pub(crate) struct Terminals {
+    /// `terminals/` in the app's data directory.
+    root: PathBuf,
+    made: AtomicU64,
+    offers: Arc<Offers>,
+    /// What tests run in place of the login shell.
+    program: Mutex<Option<(PathBuf, Vec<OsString>)>>,
+}
+
+impl Terminals {
+    /// Deletes what a previous run left in `root`.
+    pub(crate) fn new(root: PathBuf) -> Self {
+        directory::wipe(&root);
+        Self {
+            root,
+            made: AtomicU64::new(0),
+            offers: Arc::new(Offers::new()),
+            program: Mutex::default(),
+        }
+    }
+
+    pub(crate) fn drop_window(&self, window: &str) {
+        self.offers.drop_window(window);
+    }
+}
+
+/// How a terminal of `context` reaches clusters: through the policy proxy
+/// where the admin's policy file says so, or the context is not
+/// `read-write`, an unlocked one included; else with the user's own
+/// kubeconfig. A later change of mode changes nothing in a terminal, whose
+/// proxy follows the mode by itself.
+pub(crate) fn kind(policy: &Policy, context: &str) -> TerminalKind {
+    if policy.uses_policy_proxy(context) {
+        TerminalKind::Proxy {
+            why: ProxyWhy::PolicyFile,
+        }
+    } else if policy.access(context).mode != Mode::ReadWrite {
+        TerminalKind::Proxy {
+            why: ProxyWhy::Mode,
+        }
+    } else {
+        TerminalKind::Kubeconfig
+    }
+}
+
+fn written(path: &Path, error: std::io::Error) -> IpcError {
+    IpcError::new(
+        ErrorKind::Internal,
+        format!("could not write {}: {error}", path.display()),
+    )
+}
+
+impl Core {
+    /// Parks a terminal of `request.context` for `window`, which starts once
+    /// `shell_open` names it. Async, as a proxy terminal's endpoint serves
+    /// on the runtime, and its watch waits for the login shell's
+    /// environment.
+    pub async fn terminal_create(
+        &self,
+        window: &str,
+        request: NewTerminal,
+    ) -> Result<TerminalSession, IpcError> {
+        let ticket = self.shells.ticket(window);
+        let NewTerminal { context, label } = request;
+        let contexts = self.catalog.contexts().await;
+        let Some(found) = contexts.find(&context) else {
+            return Err(IpcError::from(&ClientsError::NoContext(context)));
+        };
+        let kind = kind(&self.policy, &context);
+        let login = self
+            .shell_env
+            .subscribe()
+            .wait_for(Option::is_some)
+            .await
+            .expect("the core outlives its subscribers")
+            .clone()
+            .expect("waited for");
+        let sources = self
+            .catalog
+            .sources()
+            .expect("the catalog follows its sources before it lists");
+        let seam = self.terminals.program.lock().expect("program lock").clone();
+        let (program, args) = seam.unwrap_or_else(|| {
+            let shell = twigo_env::login_shell();
+            let args = twigo_env::terminal_args(&shell)
+                .iter()
+                .map(OsString::from)
+                .collect();
+            (shell, args)
+        });
+        let (reach, file, kubeconfig): (Box<dyn Send>, _, _) = match kind {
+            TerminalKind::Proxy { .. } => {
+                let process = self
+                    .proxy_process(Actor::Terminal, &label, Some(window), &context)
+                    .await?;
+                let file = process.kubeconfig().to_owned();
+                let kubeconfig = file.clone().into_os_string();
+                (Box::new(process), file, kubeconfig)
+            }
+            TerminalKind::Kubeconfig => {
+                let made = self.terminals.made.fetch_add(1, Ordering::Relaxed);
+                let root = &self.terminals.root;
+                let directory = Directory::create(root, made).map_err(|e| written(root, e))?;
+                let entry = &found.entries.kubeconfig().contexts[0];
+                let file = directory.kubeconfig(entry).map_err(|e| written(root, e))?;
+                let kubeconfig = std::env::join_paths(
+                    std::iter::once(file.as_path())
+                        .chain(sources.files().iter().map(PathBuf::as_path)),
+                )
+                .map_err(|error| {
+                    IpcError::new(
+                        ErrorKind::InvalidInput,
+                        format!("a kubeconfig file's path cannot join KUBECONFIG: {error}"),
+                    )
+                })?;
+                (Box::new(directory), file, kubeconfig)
+            }
+        };
+        let (watcher, source) = self
+            .watch_offers(window, &label, &context, &file, sources)
+            .unzip();
+        let env = environment::environment(&login, &kubeconfig, twigo_env::utf8_locale);
+        let cwd = login
+            .get("HOME")
+            .map_or_else(|| PathBuf::from("/"), PathBuf::from);
+        let shell = program
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let session = Terminal::park(Spec {
+            program,
+            args,
+            env,
+            cwd,
+        });
+        let local = Local {
+            session,
+            _watcher: watcher,
+            _reach: reach,
+        };
+        let id = self.shells.keep(ticket, Shell::Local(local))?;
+        if let Some(source) = source {
+            source.session.set(id).expect("set once");
+        }
+        Ok(TerminalSession { id, kind, shell })
+    }
+
+    /// Follows `file` for offers of `window`'s terminal, while the user's
+    /// files give kubectl somewhere to write new entries: the watch, and
+    /// the source it offers from, whose session the caller sets.
+    fn watch_offers(
+        &self,
+        window: &str,
+        label: &str,
+        context: &str,
+        file: &Path,
+        sources: Sources,
+    ) -> Option<(Watcher, Arc<Source>)> {
+        let target = sources.target()?.to_owned();
+        let written = match std::fs::read_to_string(file) {
+            Ok(text) => Names::of(&text).expect("Twigo writes a kubeconfig that parses"),
+            Err(error) => {
+                eprintln!("could not read {}: {error}", file.display());
+                return None;
+            }
+        };
+        let source = Arc::new(Source {
+            window: window.into(),
+            label: label.into(),
+            context: context.to_owned(),
+            session: OnceLock::new(),
+            file: file.to_owned(),
+            sources,
+            target,
+            stopped: AtomicBool::new(false),
+        });
+        let offers = Arc::clone(&self.terminals.offers);
+        match watcher::watch(offers, Arc::clone(&source), written) {
+            Ok(watcher) => Some((watcher, source)),
+            Err(error) => {
+                eprintln!(
+                    "could not watch {}, so what tools write there is not offered: {error}",
+                    file.display()
+                );
+                None
+            }
+        }
+    }
+
+    /// The offers of `window`'s terminals waiting now; `send` gets each new,
+    /// changed and withdrawn one from then on, in place of what the window
+    /// followed before. It must not call back into the core.
+    pub fn follow_kubeconfig_offers(
+        &self,
+        window: &str,
+        send: impl FnMut(KubeconfigOfferEvent) -> bool + Send + 'static,
+    ) -> Vec<KubeconfigOffer> {
+        self.terminals.offers.follow(window, send)
+    }
+
+    /// Moves an offer's entries into the user's kubeconfig, or dismisses
+    /// it, which withdraws it; refused for one that is gone or another
+    /// window's. A move that fails leaves the offer waiting. Async, as the
+    /// move waits for kubectl's lock.
+    pub async fn answer_kubeconfig_offer(
+        &self,
+        window: &str,
+        answer: AnswerKubeconfigOffer,
+    ) -> Result<(), IpcError> {
+        let offers = &self.terminals.offers;
+        let held = offers.take(window, answer.id)?;
+        if answer.answer == KubeconfigOfferAnswer::Move {
+            let (moved, held) = tokio::task::spawn_blocking(move || (held.move_entries(), held))
+                .await
+                .expect("a move does not panic");
+            if let Err(error) = moved {
+                offers.put_back(held);
+                return Err(error);
+            }
+            offers.withdraw(&held);
+        } else {
+            offers.withdraw(&held);
+        }
+        Ok(())
+    }
+
+    /// Runs `program` with `args` in every terminal made from now on, in
+    /// place of the login shell.
+    #[cfg(feature = "test-util")]
+    pub fn set_terminal_program(&self, program: PathBuf, args: Vec<OsString>) {
+        *self.terminals.program.lock().expect("program lock") = Some((program, args));
+    }
+}

@@ -41,6 +41,8 @@
   They run the kubectl on `PATH`, refuse to start without it, refuse contexts other than `kind-*`, and give kubectl a `KUBECACHEDIR` of their own.
   The helper image below has nothing that listens, so their port-forward reaches the kubelet's healthz (`127.0.0.1:10248`) through a pod on the host's network.
   Their `kubectl run` is `-i`, not `-it`: without a terminal kubectl attaches with `stderr` to a container that has a TTY, which kind 1.37 answers with a `500`, through the proxy or straight (2026-11-10), and kubectl falls back to the pod's logs, where `read` waits forever.
+- The terminal's live tests: `TWIGO_TEST_KUBECONFIG=<kind kubeconfig> cargo test -p twigo-core --test terminal_live -- --ignored`.
+  They refuse contexts other than `kind-*`, run `/bin/sh` in place of the login shell (`Core::set_terminal_program`, the `test-util` feature) and the kubectl on `PATH`, give the shell a `HOME`, a `KUBECACHEDIR` and a kubeconfig of their own, which names the kind context twice, and put a fake `aws` first on its `PATH`.
 - The logs' live tests (`crates/twigo-sessions/tests/logs_live.rs`) and `objects_live`'s crash loop need a kubelet, so they refuse contexts other than `kind-*`.
   Their pods run on kind's node from its `docker.io/kindest/local-path-helper` image with `imagePullPolicy: Never`, so nothing is pulled; it has bash and no other command, so their scripts sleep by reading a coprocess that never writes, and a forced restart is `crictl stop` through `docker exec`.
 - The hub's heap at 5,000 pods: `bench/pods.sh <kubeconfig> 5000`, then `TWIGO_TEST_KUBECONFIG=<kubeconfig> cargo run --release -p twigo-cache --example hub_memory`, next to `--example table_memory`.

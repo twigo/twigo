@@ -87,6 +87,45 @@ pub fn login_shell() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/bin/sh"))
 }
 
+/// The arguments a terminal starts `shell` with, as VS Code's profiles start
+/// it: a login shell on macOS, whose terminal apps start login shells, and
+/// none on Linux, where the desktop session has read the login files.
+pub fn terminal_args(shell: &Path) -> &'static [&'static str] {
+    match Syntax::of(shell) {
+        _ if !cfg!(target_os = "macos") => &[],
+        Syntax::Pwsh => &["-Login"],
+        Syntax::Posix | Syntax::Fish | Syntax::Nu | Syntax::Xonsh => &["-l"],
+    }
+}
+
+/// The `LANG` a terminal gets where nothing names UTF-8: the system locale
+/// in UTF-8 on macOS, when the system has that locale, else `en_US.UTF-8`,
+/// and `C.UTF-8` on Linux, which glibc has built in.
+pub fn utf8_locale() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        let system = objc2_core_foundation::CFLocale::current()
+            .and_then(|locale| locale.identifier())
+            .map(|id| id.to_string());
+        in_utf8(system.as_deref(), |name| {
+            Path::new("/usr/share/locale").join(name).is_dir()
+        })
+    }
+    #[cfg(not(target_os = "macos"))]
+    "C.UTF-8".to_owned()
+}
+
+/// A locale identifier, which may carry keywords (`en_GB@rg=uszzzz`), as
+/// the name of its UTF-8 locale, if `exists`.
+#[cfg(any(target_os = "macos", test))]
+fn in_utf8(identifier: Option<&str>, exists: impl Fn(&str) -> bool) -> String {
+    identifier
+        .and_then(|id| id.split('@').next())
+        .map(|id| format!("{id}.UTF-8"))
+        .filter(|name| exists(name))
+        .unwrap_or_else(|| "en_US.UTF-8".to_owned())
+}
+
 #[derive(Debug, thiserror::Error)]
 #[error("{} {reason}", shell.display())]
 pub struct Failure {

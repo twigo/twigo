@@ -18,13 +18,14 @@ use tauri_plugin_opener::OpenerExt;
 use twigo_core::{Core, PolicyFile, ShellFrame};
 use twigo_env::Environment;
 use twigo_ipc::{
-    AccessQuery, Ack, AnswerApproval, ApplyPreviewed, ApplyRequest, ApprovalEvent, ClusterVersion,
-    Context, ContextAuth, Discovered, DownloadLogs, ErrorKind, ExecReview, Execute, GetValues,
-    IpcError, KeyboardLayout, ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject,
-    OpenShell, OperationEvent, Plan, PlanId, PlanRequest, SchemaQuery, SetContextEnvironment,
-    SetContextMode, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck,
-    ShellContainers, ShellEnvironment, ShellInput, ShellPod, ShellResize, Space, StateEntry,
-    StateSnapshot, SubscriptionId,
+    AccessQuery, Ack, AnswerApproval, AnswerKubeconfigOffer, ApplyPreviewed, ApplyRequest,
+    ApprovalEvent, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ErrorKind,
+    ExecReview, Execute, GetValues, IpcError, KeyboardLayout, KubeconfigOffer,
+    KubeconfigOfferEvent, ListBatch, ListQuery, LogBatch, NewTerminal, ObjectBatch, OpenLogs,
+    OpenObject, OpenShell, OperationEvent, Plan, PlanId, PlanRequest, SchemaQuery,
+    SetContextEnvironment, SetContextMode, SetLogSource, SetLogView, SetLogWindow, SetParts,
+    SetWindow, ShellAck, ShellContainers, ShellEnvironment, ShellInput, ShellPod, ShellResize,
+    Space, StateEntry, StateSnapshot, SubscriptionId, TerminalSession,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
 
@@ -586,6 +587,42 @@ fn shell_ack(webview: Webview, app: State<'_, App>, request: ShellAck) -> Result
 }
 
 #[tauri::command]
+async fn terminal_create(
+    webview: Webview,
+    app: State<'_, App>,
+    request: NewTerminal,
+) -> Result<TerminalSession, IpcError> {
+    app.core.terminal_create(webview.label(), request).await
+}
+
+#[tauri::command]
+fn kubeconfig_offers_watch(
+    webview: Webview,
+    app: State<'_, App>,
+    channel: Channel<KubeconfigOfferEvent>,
+) -> Vec<KubeconfigOffer> {
+    app.core
+        .follow_kubeconfig_offers(webview.label(), move |event| match channel.send(event) {
+            Ok(()) => true,
+            Err(error) => {
+                eprintln!("could not send a kubeconfig offer: {error}");
+                false
+            }
+        })
+}
+
+#[tauri::command]
+async fn kubeconfig_offer_answer(
+    webview: Webview,
+    app: State<'_, App>,
+    request: AnswerKubeconfigOffer,
+) -> Result<(), IpcError> {
+    app.core
+        .answer_kubeconfig_offer(webview.label(), request)
+        .await
+}
+
+#[tauri::command]
 fn shell_close(
     webview: Webview,
     app: State<'_, App>,
@@ -781,6 +818,9 @@ fn main() {
             shell_resize,
             shell_ack,
             shell_close,
+            terminal_create,
+            kubeconfig_offers_watch,
+            kubeconfig_offer_answer,
             context_sign_in,
             context_sign_in_cancel,
             exec_review,

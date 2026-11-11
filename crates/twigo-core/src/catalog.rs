@@ -126,6 +126,8 @@ pub fn sources(
 pub struct Catalog {
     /// None until the sources have been read once.
     contexts: watch::Sender<Option<Arc<Contexts>>>,
+    /// What it follows: set before the first read is published.
+    sources: Mutex<Option<Sources>>,
     followed: Mutex<Option<Watch>>,
     /// Counts [`Catalog::follow`] calls, so that a watch it replaced cannot
     /// publish after its successor.
@@ -136,6 +138,7 @@ impl Default for Catalog {
     fn default() -> Self {
         Self {
             contexts: watch::Sender::new(None),
+            sources: Mutex::new(None),
             followed: Mutex::new(None),
             generation: Arc::new(AtomicU64::new(0)),
         }
@@ -148,6 +151,7 @@ impl Catalog {
     pub fn follow(&self, sources: Sources) {
         let mut followed = self.followed.lock().expect("catalog lock");
         followed.take();
+        *self.sources.lock().expect("catalog lock") = Some(sources.clone());
         let generation = self.generation.fetch_add(1, atomic::Ordering::AcqRel) + 1;
         let publish = {
             let contexts = self.contexts.clone();
@@ -180,6 +184,11 @@ impl Catalog {
 
     pub fn subscribe(&self) -> watch::Receiver<Option<Arc<Contexts>>> {
         self.contexts.subscribe()
+    }
+
+    /// The files it reads, once it follows any.
+    pub fn sources(&self) -> Option<Sources> {
+        self.sources.lock().expect("catalog lock").clone()
     }
 
     /// A context's fingerprint, followed while the receiver lives: it

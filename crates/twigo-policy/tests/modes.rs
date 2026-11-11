@@ -201,6 +201,9 @@ fn a_policy_file_that_cannot_be_read_locks_every_context_and_says_so() {
         r#"{"contexts": {"prod-*": "readonly"}}"#,
         r#"{"contexts": {"[": "read-only"}}"#,
         r#"{"readOnly": {"allowPortforward": true}}"#,
+        r#"{"terminal": {"usePolicyproxy": ["prod-*"]}}"#,
+        r#"{"terminal": {"usePolicyProxy": ["["]}}"#,
+        r#"{"terminal": {"usePolicyProxy": "prod-*"}}"#,
     ] {
         let (_dir, unreadable) = file(text);
         let policy = Policy::new(
@@ -220,10 +223,21 @@ fn a_policy_file_that_cannot_be_read_locks_every_context_and_says_so() {
             Err(Refused::PolicyFileUnreadable(_))
         ));
         assert!(policy.unlock("anything").is_err(), "{text}");
+        assert!(policy.uses_policy_proxy("anything"), "{text}");
         let forward =
             Attributes::action("create", "pods", Some("portforward"), Some("a"), Some("p"));
         assert!(policy.authorize("anything", &forward, Actor::Ui).is_err());
     }
+}
+
+#[test]
+fn the_policy_file_has_terminals_of_the_contexts_it_names_use_the_proxy() {
+    let (_dir, proxied) = file(r#"{"terminal": {"usePolicyProxy": ["prod-*", "arn:aws:eks:*"]}}"#);
+    let policy = Policy::new(proxied, |_| Some(NOTHING), Choices::default(), Audit::off());
+    assert!(policy.uses_policy_proxy("prod-eu"));
+    assert!(policy.uses_policy_proxy("arn:aws:eks:eu-west-1:1:cluster/a"));
+    assert!(!policy.uses_policy_proxy("staging-eu"));
+    assert_eq!(policy.access("prod-eu").mode, Mode::ReadWrite);
 }
 
 #[test]
@@ -236,6 +250,7 @@ fn a_missing_policy_file_sets_nothing() {
         Audit::off(),
     );
     assert_eq!(policy.access("c").mode, Mode::ReadWrite);
+    assert!(!policy.uses_policy_proxy("c"));
 }
 
 #[test]
