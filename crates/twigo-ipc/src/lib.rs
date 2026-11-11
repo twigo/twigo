@@ -10,6 +10,7 @@ mod credentials;
 mod discovery;
 mod environment;
 mod error;
+mod forward;
 mod keyboard;
 mod list;
 mod logs;
@@ -38,6 +39,10 @@ pub use credentials::{ContextAuth, EnvVar, ExecPlugin, ExecReview, PluginStatus,
 pub use discovery::{ClusterVersion, Discovered, Resource};
 pub use environment::ShellEnvironment;
 pub use error::{ErrorKind, IpcError};
+pub use forward::{
+    BusyWhy, Forward, ForwardEvent, ForwardId, ForwardPort, ForwardPorts, ForwardStarted,
+    ForwardState, ForwardTarget, ResumeForward, StartForward,
+};
 pub use keyboard::{KeyMapping, KeyboardLayout};
 pub use list::{
     Ack, Cell, Column, ColumnKind, ColumnValues, Grouping, Gvr, ListBatch, ListQuery, Row,

@@ -7,12 +7,13 @@ use ts_rs::TS;
 use crate::{
     AccessQuery, Ack, AnswerApproval, AnswerKubeconfigOffer, ApplyPreviewed, ApplyRequest,
     ApprovalEvent, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ExecReview,
-    Execute, GetValues, KeyboardLayout, KubeconfigOffer, KubeconfigOfferEvent, ListBatch,
-    ListQuery, LogBatch, NewTerminal, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent,
-    Plan, PlanId, PlanRequest, SchemaQuery, SetContextEnvironment, SetContextMode, SetLogSource,
-    SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck, ShellContainers, ShellEnvironment,
-    ShellInput, ShellMessage, ShellPod, ShellResize, Space, StateEntry, StateSnapshot,
-    SubscriptionId, TerminalSession,
+    Execute, Forward, ForwardEvent, ForwardId, ForwardPorts, ForwardStarted, ForwardTarget,
+    GetValues, KeyboardLayout, KubeconfigOffer, KubeconfigOfferEvent, ListBatch, ListQuery,
+    LogBatch, NewTerminal, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan,
+    PlanId, PlanRequest, ResumeForward, SchemaQuery, SetContextEnvironment, SetContextMode,
+    SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck, ShellContainers,
+    ShellEnvironment, ShellInput, ShellMessage, ShellPod, ShellResize, Space, StartForward,
+    StateEntry, StateSnapshot, SubscriptionId, TerminalSession,
 };
 
 pub trait Command {
@@ -583,6 +584,71 @@ impl Command for KubeconfigOfferAnswerSend {
     type Request = AnswerKubeconfigOffer;
     type Response = ();
     type Message = ();
+}
+
+/// The TCP ports of a pod, a Service or a workload that a forward can reach
+/// (ARCHITECTURE 4.6), read from the cluster; refused, in words, for a
+/// target that declares none.
+pub struct ForwardPortsGet;
+
+impl Command for ForwardPortsGet {
+    const NAME: &'static str = "forward_ports";
+    type Request = ForwardTarget;
+    type Response = ForwardPorts;
+    type Message = ();
+}
+
+/// Binds a local port and forwards it to a port of the target, kept with
+/// its space until it is removed.
+pub struct ForwardStart;
+
+impl Command for ForwardStart {
+    const NAME: &'static str = "forward_start";
+    type Request = StartForward;
+    type Response = ForwardStarted;
+    type Message = ();
+}
+
+/// Closes a forward's connections and its local port, and keeps it listed.
+pub struct ForwardStop;
+
+impl Command for ForwardStop {
+    const NAME: &'static str = "forward_stop";
+    type Request = ForwardId;
+    type Response = ();
+    type Message = ();
+}
+
+pub struct ForwardResume;
+
+impl Command for ForwardResume {
+    const NAME: &'static str = "forward_resume";
+    type Request = ResumeForward;
+    type Response = ForwardStarted;
+    type Message = ();
+}
+
+/// Stops a forward and forgets it; the local port its target's port had
+/// stays remembered.
+pub struct ForwardRemove;
+
+impl Command for ForwardRemove {
+    const NAME: &'static str = "forward_remove";
+    type Request = ForwardId;
+    type Response = ();
+    type Message = ();
+}
+
+/// Follows the forwards of every space: the response has them all, then
+/// each change comes over the channel. A later follower of the same window
+/// replaces an earlier one.
+pub struct ForwardsWatch;
+
+impl Command for ForwardsWatch {
+    const NAME: &'static str = "forwards_watch";
+    type Request = ();
+    type Response = Vec<Forward>;
+    type Message = ForwardEvent;
 }
 
 pub struct ShellClose;
