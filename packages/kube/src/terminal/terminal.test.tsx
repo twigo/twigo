@@ -478,6 +478,35 @@ test.each<Platform>(["mac", "linux"])(
   },
 );
 
+test("where ` needs Shift, as on the recorded German layout, the two terminal keys are one chord that Toggle takes, and New Terminal stays in the palette", async () => {
+  const { workbench, tabs } = await mounted();
+  workbench.keybindings.setLayout(
+    await createMockBackend("ready", "german").subscribe(
+      "keyboard_layout_watch",
+      null,
+      () => undefined,
+    ),
+  );
+  const chord = { key: "`", code: "Equal", ctrlKey: true, shiftKey: true };
+  const shared = workbench.keybindings.primary("k8s.terminal.new")?.ids;
+  expect(shared).toHaveLength(1);
+  expect(workbench.keybindings.primary("k8s.terminal.toggle")?.ids).toEqual(
+    shared,
+  );
+
+  await press(document.body, chord);
+  expect(panelTabs()).toEqual([uriOf(1)]);
+  await press(document.activeElement ?? document.body, chord);
+  expect(panelTabs()).toEqual([uriOf(1)]);
+  expect(panelShown(workbench)).toBe(false);
+  expect(tabs.has(uriOf(2))).toBe(false);
+
+  const items = await workbench.quickAccess
+    .resolve(">")
+    ?.provider.items("", { lookup: workbench.keys.lookup(document.body) });
+  expect(items?.map(({ id }) => id)).toContain("k8s.terminal.new");
+});
+
 test.each<[Platform, boolean]>([
   ["mac", false],
   ["linux", true],

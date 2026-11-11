@@ -71,3 +71,5 @@ Findings that belong to no step yet.
   - `theme.ts` hands xterm the tokens in sRGB hex and carries an `@todo`: the WebGL addon's pattern glyphs, such as ░, throw on `oklch` (`drawPatternChar` in 0.20.0-beta.300); xterm.js had no issue for it on 2026-11-10.
   - xterm is on 6.1.0-beta.304, the betas VS Code 1.145.2 locks, until a 6.1.0 release.
   - WebGL draws an emoji with a skin tone, or a flag, a cell per code point; xterm's `unicode-graphemes` addon was not tried.
+  - New Terminal has no key on layouts where the backtick needs Shift, as the German one: ⌃\` and ⌃⇧\` are one chord there, and Toggle Terminal, registered last, takes it (`packages/kube/src/terminal/register.tsx`).
+    It stays in the palette until the keybindings editor lets a person rebind it.
