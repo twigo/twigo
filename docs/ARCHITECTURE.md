@@ -909,8 +909,8 @@ Extensions add commands, not prefixes.
     - a line shows its text as the container wrote it, ANSI colours as tokens at 4.5:1 or more on the editor, warnings and errors tinted with an edge as failing rows are; markers say that a container ended, with its code and next start, that a pod joined from its ReplicaSet or left, and what the buffer dropped;
     - F, W and T toggle follow, wrap and timestamps while the lines have the focus, ⌘F finds and `/` filters; below 1,100 px the toolbar drops the level counts, narrows its fields and shortens the range's label, and below 800 px, a split panel's group, the filter and the search go to a row of their own under it, which opens once their icons, `/` or ⌘F ask for a field, and while either is set, so a split panel keeps every control.
 - **Exec and attach.**
-  xterm.js 6.1.0-beta.304 with the WebGL addon 0.20.0-beta.300, the fit addon and Unicode 11, the betas VS Code 1.145.2 locks.
-  No release has followed 6.0.0 (2025-12-22), which rebuilds a hidden terminal's rows on every scroll: 12,642 DOM mutations in 5 s of `yes` behind another tab, against 0 on the beta (Chromium on the mock, 2026-11-09).
+  xterm.js 6.1.0-beta.337 with the WebGL addon 0.20.0-beta.330, the fit addon and Unicode 11: VS Code 1.145.2 locks 6.1.0-beta.304, whose `flushSync`, which every resize runs, parsed again the chunks its write queue had parsed and kept, repeating output and acks, until [#6201](https://github.com/xtermjs/xterm.js/pull/6201).
+  No release has followed 6.0.0 (2025-12-22), which rebuilds a hidden terminal's rows on every scroll: 12,642 DOM mutations in 5 s of `yes` behind another tab, against 0 on 6.1.0-beta.337 (Chromium on the mock, 2026-11-09).
   It falls back to the DOM renderer on context loss, which happens on WebKitGTK.
   WebGL is disposed on hidden tabs.
   A shell or an attach is a plan of the command bus (5.1, 6.4): its run parks a session in `twigo-core` and connects nothing, and `shell_open` starts it with the terminal's size, so the first prompt is laid out right; a session is only reached through a plan that ran.
@@ -955,7 +955,7 @@ Extensions add commands, not prefixes.
     An ending turns the mouse, bracketed paste and focus reporting off as well, since xterm parses the new session's reset after the task that restarts, and a terminal focused in that task would report the focus to the new shell.
   - **Output.**
     Rust sends the bytes of the process's output and its events over one channel, in order.
-    The bytes are written to xterm as `Uint8Array`, which is stream-aware across frames, and Rust is told how many the terminal has parsed from the callback of `write`, so flow control follows what xterm has parsed, but for the bytes a resize parses twice (`TODO.md`): a frame of 64 KiB at most, nothing more read at 256 KiB unacknowledged, reading again below 64 KiB.
+    The bytes are written to xterm as `Uint8Array`, which is stream-aware across frames, and Rust is told how many the terminal has parsed from the callback of `write`, so flow control follows what xterm has really parsed: a frame of 64 KiB at most, nothing more read at 256 KiB unacknowledged, reading again below 64 KiB.
     A terminal keeps 5000 lines.
     What is typed goes one `shell_input` at a time, and what is typed while a call is in flight goes in the next, so keystrokes keep their order whatever the transport does.
     What is typed while the shell connects goes to Rust's queue and reaches the process once it runs, as a terminal keeps type-ahead.

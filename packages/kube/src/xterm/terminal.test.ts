@@ -314,26 +314,23 @@ describe.each(SHELLS)("$name", ({ starter }) => {
     expect(lines(tab)).toEqual(["EAGER%"]);
   });
 
-  test.fails(
-    "a resize between two slices of output parses none of it twice",
-    async () => {
-      const { start, fake } = setup();
-      const tab = await start(7);
-      fake.opens[0]?.send({ state: "running" });
-      let now = 0;
-      vi.spyOn(performance, "now").mockImplementation(() => (now += 13));
-      for (const text of ["A\r\n", "B\r\n", "C\r\n", "D\r\n"]) {
-        fake.opens[0]?.send(bytes(text));
-      }
-      await vi.advanceTimersToNextTimerAsync();
-      tab.term.resize(tab.term.cols - 1, tab.term.rows);
-      await vi.advanceTimersByTimeAsync(10);
-      expect(lines(tab)).toEqual(["A", "B", "C", "D"]);
-      const acked = (fake.sent("shell_ack") as { bytes: number }[]).reduce(
-        (sum, ack) => sum + ack.bytes,
-        0,
-      );
-      expect(acked).toBe(12);
-    },
-  );
+  test("a resize between two slices of output parses none of it twice", async () => {
+    const { start, fake } = setup();
+    const tab = await start(7);
+    fake.opens[0]?.send({ state: "running" });
+    let now = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => (now += 13));
+    for (const text of ["A\r\n", "B\r\n", "C\r\n", "D\r\n"]) {
+      fake.opens[0]?.send(bytes(text));
+    }
+    await vi.advanceTimersToNextTimerAsync();
+    tab.term.resize(tab.term.cols - 1, tab.term.rows);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(lines(tab)).toEqual(["A", "B", "C", "D"]);
+    const acked = (fake.sent("shell_ack") as { bytes: number }[]).reduce(
+      (sum, ack) => sum + ack.bytes,
+      0,
+    );
+    expect(acked).toBe(12);
+  });
 });

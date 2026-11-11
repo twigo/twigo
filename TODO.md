@@ -70,13 +70,10 @@ Findings that belong to no step yet.
   - No source lists contexts from a provider yet, so no terminal goes through the proxy for that reason (`ProxyWhy::Provider`); it comes with the providers' source.
   - On Ubuntu the global zshrc runs `compinit` while `ZDOTDIR` is still Twigo's (`crates/twigo-env/src/terminal.rs`), so `.zcompdump` is written into the terminal's directory and goes with its tab: each terminal builds its completion dump anew; not measured how long that takes.
 - The terminal (`packages/kube/src/exec`, ARCHITECTURE 4.6):
-  - `theme.ts` hands xterm the tokens in sRGB hex and carries an `@todo`: the WebGL addon's pattern glyphs, such as ░, throw on `oklch` (`drawPatternChar` in 0.20.0-beta.300); xterm.js had no issue for it on 2026-11-10.
-  - xterm is on 6.1.0-beta.304, the betas VS Code 1.145.2 locks, until a 6.1.0 release.
+  - `theme.ts` hands xterm the tokens in sRGB hex and carries an `@todo`: the WebGL addon's pattern glyphs, such as ░, throw on `oklch` (`drawPatternChar` in 0.20.0-beta.330); xterm.js had no issue for it on 2026-11-10.
+  - xterm is on 6.1.0-beta.337, past the 6.1.0-beta.304 VS Code 1.145.2 locks, for [#6201](https://github.com/xtermjs/xterm.js/pull/6201) (a resize parsed again what the write queue had parsed), until a 6.1.0 release.
   - WebGL draws an emoji with a skin tone, or a flag, a cell per code point; xterm's `unicode-graphemes` addon was not tried.
   - New Terminal has no key on layouts where the backtick needs Shift, as the German one: ⌃\` and ⌃⇧\` are one chord there, and Toggle Terminal, registered last, takes it (`packages/kube/src/terminal/register.tsx`).
     Move Editor into New Group to the Right (`mod+\`) loses its key to Toggle Terminal the same way on Linux with the recorded French layout, a Mac's, where the backtick sits on the `Backslash` key; not verified with a French layout of Linux.
     Both stay in the palette until the keybindings editor lets a person rebind them.
   - The resolver drops a command's key hint only where one later rule takes the key wherever the binding's `when` holds (`packages/workbench/src/keybindings/resolver.ts`): later rules that take it only together, as one under `w` and one under `!w`, leave the hint; weigh them together when `keybindings.json` comes (M3).
-  - xterm's `flushSync`, which every resize runs, shifts the write queue from its first chunk and ignores `_bufferOffset`, so the chunks `_innerWrite` parsed and still keeps (up to 50) are parsed again, callbacks included ([`WriteBuffer.ts`](https://github.com/xtermjs/xterm.js/blob/c58ea3637f3968e0e6e79cd92cf9aace7ef89ee2/src/common/input/WriteBuffer.ts#L71-L101), 6.1.0-beta.304).
-    A resize between two slices of heavy output draws the output of the slices before it twice and acknowledges its bytes twice, which Rust caps at what it sent (`Flow::ack`) but which credits frames the terminal has not parsed yet.
-    `terminal.test.ts` holds the case as a `test.fails`, with the clock moved by hand since jsdom parses fast; remove both once xterm honours the offset (not reported upstream; not measured how often a resize meets a half-parsed queue in the app).

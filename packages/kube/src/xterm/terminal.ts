@@ -31,7 +31,7 @@ const LEAVE_ALTERNATE = "\x1b[?1049l";
 /**
  * A soft reset (DECSTR): the cursor and keypad keys, bracketed paste, focus
  * reporting, wrapping, insert and origin modes, and the cursor shown
- * ([`CoreService.reset`](https://github.com/xtermjs/xterm.js/blob/c58ea3637f3968e0e6e79cd92cf9aace7ef89ee2/src/common/services/CoreService.ts#L68-L72)).
+ * ([`CoreService.reset`](https://github.com/xtermjs/xterm.js/blob/f70764dd3da05ebda0390605c6f9adbbea3f0e90/src/common/services/CoreService.ts#L68-L72)).
  * The screen and the scrollback stay, and so does the mouse, which is
  * `MODES_OFF`'s.
  */
@@ -43,13 +43,6 @@ const QUIET = "\x1b[90m";
 const PLAIN = "\x1b[0m";
 
 const encoder = new TextEncoder();
-
-/**
- * What a write carries to learn that the output so far is parsed. An empty
- * string is falsy, which `flushSync`, run by every resize, takes for the end
- * of the queue: it drops the marker, its callback and what follows.
- */
-const MARKER = new Uint8Array();
 
 /** None for a tab restored from the saved layout. */
 export type SessionStatus = ShellEvent | { readonly state: "restored" };
@@ -248,7 +241,7 @@ export class ShellTerminal {
     this.#steps = this.#steps.then(step).catch(this.#options.report);
   }
 
-  #parsed(data: string | Uint8Array = MARKER): Promise<void> {
+  #parsed(data = ""): Promise<void> {
     return new Promise((resolve) => {
       this.term.write(data, resolve);
     });
