@@ -60,6 +60,10 @@ jobs:
           curl -fsSLo kind https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64
           echo "aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d  kind" | sha256sum -c
           sudo install kind /usr/local/bin/kind
+      - name: Install zsh, which the terminal's live tests run
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zsh
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
