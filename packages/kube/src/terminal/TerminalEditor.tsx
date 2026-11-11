@@ -10,6 +10,7 @@ import {
 } from "@twigo/workbench";
 import { parseTerminalUri } from "../uri";
 import { useTerminalHost } from "../xterm/useTerminalHost";
+import type { KubeconfigOffers } from "./offers";
 import type { TerminalTabs } from "./tabs";
 import { useKind } from "./useKind";
 import { terminalTitle } from "./words";
@@ -25,7 +26,8 @@ export const RESTART_TERMINAL = "k8s.terminal.restart";
 export function TerminalEditor({
   uri,
   tabs,
-}: EditorProps & { tabs: TerminalTabs }) {
+  offers,
+}: EditorProps & { tabs: TerminalTabs; offers: KubeconfigOffers }) {
   const { keys, commands } = useWorkbench();
   useChanges(tabs.changes);
   const input = useMemo(() => parseTerminalUri(uri), [uri]);
@@ -36,11 +38,11 @@ export function TerminalEditor({
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const setContainer = useTerminalHost(tab, uri, input?.space);
   const status = tab?.getStatus();
-  const words = useKind(tab);
+  const words = useKind(tab, offers);
   const restartable =
     status?.state === "ended" ||
     status?.state === "restored" ||
-    words?.warning !== undefined;
+    words?.restartable === true;
 
   useEffect(() => {
     if (!root) return;

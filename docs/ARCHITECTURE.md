@@ -1014,6 +1014,8 @@ Extensions add commands, not prefixes.
     A tab restored after a restart has no terminal: it says so and offers Restart, which creates a new one at the same URI, whose kind the core decides again.
     The kind is a chip at the right of the panel's tab strip, beside the state of the active terminal: `Proxy · <mode>`, with the mode the context has now, or `Your credentials`, and its tooltip says what the person gets and why.
     A terminal with real credentials whose context has stopped being `read-write` turns the chip to the warning's tone, `Your credentials · guarded context`, and its tooltip says so; the tab then offers Restart, which starts it through the proxy.
+    A proxy terminal whose file a tool wrote its own entries into says so in the same tone, `Proxy · guarded, prod-eu direct` or `Proxy · guarded, 2 contexts direct`: the window follows the core's `direct` event, keyed by the terminal's session, so a restarted terminal starts clean, and the tooltip says that those contexts reach their clusters with the person's credentials, not through the proxy, and that a `use-context` back to a proxy context goes through it again.
+    A move or a dismiss of an offer leaves them, since the entries stay in the terminal's file.
     Toggle Terminal (⌃\`) shows the panel with the space's last terminal focused, starts one when the space has none, and hides the panel when a terminal has the focus.
     Go to Terminal… and Close Terminal… are in the palette; a terminal holds no cluster's place, so the status bar lists none.
   - **The shell** is the login shell from the password database: a login shell on macOS (`-l`, `-Login` for pwsh) and an interactive one on Linux, as VS Code's profiles start them, in `$HOME` of the login environment.

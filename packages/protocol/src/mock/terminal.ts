@@ -16,7 +16,9 @@ import { complete } from "./shell";
  * Pins what the terminals' offers do (ARCHITECTURE 4.6): `terminalOffer`
  * raises an offer to move what a tool wrote into a terminal's own kubeconfig
  * a while after the first terminal opens, and a second one a while after the
- * first is answered. Any other scenario raises none.
+ * first is answered; for a proxy terminal the first comes with the context
+ * the tool wrote into its file as a direct one. Any other scenario raises
+ * none.
  */
 export type TerminalScenario = "terminalOffer";
 
@@ -71,6 +73,14 @@ const CLEAR = "\x1b[H\x1b[2J\x1b[3J";
 
 const encoder = new TextEncoder();
 
+export interface Spawned {
+  readonly id: number;
+  readonly context: string;
+  readonly kind: TerminalKind;
+  /** Removes a context from the terminal's file if a tool wrote it there, and says whether it was. */
+  readonly deleteContext: (name: string) => boolean;
+}
+
 /**
  * A terminal session of the mock backend: a small line-editing zsh on this
  * machine, over the channel Rust would send, bytes and events in order.
@@ -79,6 +89,7 @@ export class MockTerminal {
   readonly #id: number;
   readonly #context: string;
   readonly #kind: TerminalKind;
+  readonly #deleteContext: (name: string) => boolean;
   readonly #onMessage: (message: ShellMessage) => void;
   readonly #decoder = new TextDecoder();
   readonly #timers = new Set<ReturnType<typeof setTimeout>>();
@@ -88,14 +99,13 @@ export class MockTerminal {
   #escape = "";
 
   constructor(
-    id: number,
-    context: string,
-    kind: TerminalKind,
+    { id, context, kind, deleteContext }: Spawned,
     onMessage: (message: ShellMessage) => void,
   ) {
     this.#id = id;
     this.#context = context;
     this.#kind = kind;
+    this.#deleteContext = deleteContext;
     this.#onMessage = onMessage;
     this.#later(0, () => {
       this.#event({ state: "connecting" });
@@ -205,6 +215,13 @@ export class MockTerminal {
           this.#write(`${this.#context}\r\n`);
           return;
         }
+        if (
+          args.length === 3 &&
+          args.slice(0, 2).join(" ") === "config delete-context"
+        ) {
+          this.#deleteFromFile(args[2] ?? "");
+          return;
+        }
         break;
       case "kill":
         if (args.join(" ") === "-9 $$") {
@@ -223,6 +240,15 @@ export class MockTerminal {
       }
     }
     this.#write(`zsh: command not found: ${name}\r\n`);
+  }
+
+  #deleteFromFile(name: string): void {
+    const [file = ""] = kubeconfigPath(this.#id, this.#kind).split(":");
+    this.#write(
+      this.#deleteContext(name)
+        ? `deleted context ${name} from ${file}\r\n`
+        : `error: cannot delete context ${name}, not in ${file}\r\n`,
+    );
   }
 
   #write(text: string): void {
@@ -295,6 +321,8 @@ export class MockOffers {
   #coming: Draft[] = [...DRAFTS];
   #started = false;
   #source: Source | undefined;
+  #proxy = false;
+  #direct: readonly string[] = [];
   #next = 1;
 
   constructor(private readonly scenario: TerminalScenario | undefined) {}
@@ -305,11 +333,21 @@ export class MockOffers {
   }
 
   /** The first terminal to open is the one the offers come from. */
-  opened(source: Source): void {
+  opened(source: Source, kind: TerminalKind): void {
     if (this.scenario === undefined || this.#started) return;
     this.#started = true;
     this.#source = source;
+    this.#proxy = kind.kind === "proxy";
     this.#later();
+  }
+
+  /** Removes a context a tool wrote into the source's proxy file, as a delete-context of kubectl does. */
+  deleteDirect(session: number, name: string): boolean {
+    if (this.#source?.session !== session || !this.#direct.includes(name)) {
+      return false;
+    }
+    this.#tell(this.#direct.filter((each) => each !== name));
+    return true;
   }
 
   answer({ id }: AnswerKubeconfigOffer): null {
@@ -330,8 +368,19 @@ export class MockOffers {
         ...this.#source,
         id: this.#next++,
       };
+      if (this.#proxy && offer.id === 1) this.#tell([this.#source.context]);
       this.#waiting.set(offer.id, offer);
       this.#follower?.({ event: "offered", offer });
     }, OFFER_AFTER_MS);
+  }
+
+  #tell(contexts: readonly string[]): void {
+    if (this.#source === undefined) return;
+    this.#direct = contexts;
+    this.#follower?.({
+      event: "direct",
+      session: this.#source.session,
+      contexts: [...contexts],
+    });
   }
 }

@@ -750,16 +750,22 @@ export function createMockBackend(
           throw new IpcError("conflict", `session ${open.id} opened already`);
         }
         parked.terminal = new MockTerminal(
-          open.id,
-          parked.context,
-          parked.kind,
+          {
+            id: open.id,
+            context: parked.context,
+            kind: parked.kind,
+            deleteContext: (name) => offers.deleteDirect(open.id, name),
+          },
           onMessage,
         );
-        offers.opened({
-          terminal: parked.label,
-          session: open.id,
-          context: parked.context,
-        });
+        offers.opened(
+          {
+            terminal: parked.label,
+            session: open.id,
+            context: parked.context,
+          },
+          parked.kind,
+        );
         return null;
       }
       const found = shellOf(open.id);

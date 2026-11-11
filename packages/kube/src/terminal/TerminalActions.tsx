@@ -8,6 +8,7 @@ import {
 import { parseTerminalUri } from "../uri";
 import { stateOf } from "../xterm/words";
 import { KindChip } from "./KindChip";
+import type { KubeconfigOffers } from "./offers";
 import type { TerminalTabs } from "./tabs";
 import { useKind } from "./useKind";
 
@@ -19,18 +20,19 @@ import { useKind } from "./useKind";
 export function TerminalActions({
   uri,
   tabs,
-}: EditorProps & { tabs: TerminalTabs }) {
+  offers,
+}: EditorProps & { tabs: TerminalTabs; offers: KubeconfigOffers }) {
   const workbench = useWorkbench();
   useChanges(tabs.changes);
   useChanges(workbench.menus.changes);
   useChanges(workbench.keys.changes);
   const input = parseTerminalUri(uri);
   const tab = input && tabs.tab(uri, input);
-  const words = useKind(tab);
+  const words = useKind(tab, offers);
   const status = tab?.getStatus();
   if (!status) return null;
   const ended = status.state === "ended" || status.state === "restored";
-  const restartable = ended || words?.warning !== undefined;
+  const restartable = ended || words?.restartable === true;
   const base = workbench.keys.lookup(null);
   const lookup: Lookup = (key) =>
     key === "terminalRestartable" ? restartable : base(key);

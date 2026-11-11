@@ -131,9 +131,33 @@ test("the offers that wait are known at once, and each new one, replaced one and
   expect(ids(offers)).toEqual([2, 3]);
 });
 
-test("an event of direct contexts leaves the offers as they are", async () => {
+test("the direct contexts of a session are what its last event says, each session's own, and an empty event clears them", async () => {
   const { core, offers } = await followed([offer(1)]);
+  const changed = vi.fn();
+  offers.changes.subscribe(changed);
+  expect(offers.direct(1)).toEqual([]);
   core.send({ event: "direct", session: 1, contexts: ["prod-eu"] });
+  expect(offers.direct(1)).toEqual(["prod-eu"]);
+  expect(offers.direct(2)).toEqual([]);
+  expect(changed).toHaveBeenCalledTimes(1);
+  core.send({ event: "direct", session: 2, contexts: ["a", "b"] });
+  core.send({ event: "direct", session: 1, contexts: ["prod-eu", "c"] });
+  expect(offers.direct(1)).toEqual(["prod-eu", "c"]);
+  expect(offers.direct(2)).toEqual(["a", "b"]);
+  core.send({ event: "direct", session: 1, contexts: [] });
+  expect(offers.direct(1)).toEqual([]);
+  expect(offers.direct(2)).toEqual(["a", "b"]);
+  expect(ids(offers)).toEqual([1]);
+});
+
+test("direct contexts that the core tells before it answers the watch are kept", async () => {
+  const core = fakeCore();
+  const offers = new KubeconfigOffers(core.backend, vi.fn());
+  const watching = offers.watch();
+  core.send({ event: "direct", session: 1, contexts: ["prod-eu"] });
+  core.answerWatch([offer(1)]);
+  await watching;
+  expect(offers.direct(1)).toEqual(["prod-eu"]);
   expect(ids(offers)).toEqual([1]);
 });
 

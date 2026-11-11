@@ -12,7 +12,7 @@ export function KindChip({ words }: { words: KindWords }) {
           className="rounded-full outline-none focus-visible:shadow-[var(--focus-ring)]"
         >
           <Pill
-            tone={words.warning ? "warn" : "idle"}
+            tone={words.warnings.length > 0 ? "warn" : "idle"}
             icon={<KindIcon words={words} className="size-3 shrink-0" />}
           >
             {words.short}

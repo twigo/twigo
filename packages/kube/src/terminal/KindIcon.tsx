@@ -9,7 +9,9 @@ export function KindIcon({
   words: KindWords;
   className?: string;
 }) {
-  if (words.warning) return <TriangleAlert aria-hidden className={className} />;
+  if (words.warnings.length > 0) {
+    return <TriangleAlert aria-hidden className={className} />;
+  }
   return words.credentials === "own" ? (
     <KeyRound aria-hidden className={className} />
   ) : (
@@ -17,16 +19,20 @@ export function KindIcon({
   );
 }
 
-/** What a hover over the kind says: the warning first. */
+/** What a hover over the kind says: its warnings, else the kind and why. */
 export function KindTip({ words }: { words: KindWords }) {
+  const notes =
+    words.warnings.length > 0
+      ? words.warnings
+      : [{ title: words.short, detail: words.why }];
   return (
-    <>
-      <div className="font-medium">
-        {words.warning ? words.warning.title : words.short}
-      </div>
-      <div className="text-muted-foreground">
-        {words.warning ? words.warning.detail : words.why}
-      </div>
-    </>
+    <div className="grid gap-1.5">
+      {notes.map(({ title, detail }) => (
+        <div key={title}>
+          <div className="font-medium">{title}</div>
+          <div className="text-muted-foreground">{detail}</div>
+        </div>
+      ))}
+    </div>
   );
 }

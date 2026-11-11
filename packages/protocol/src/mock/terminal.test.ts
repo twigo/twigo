@@ -357,6 +357,84 @@ test("the second offer comes 3 s after the first is answered, which withdraws th
   expect(offers(events)).toHaveLength(2);
 });
 
+const directs = (events: readonly KubeconfigOfferEvent[]) =>
+  events.flatMap((event) => (event.event === "direct" ? [event] : []));
+
+test("a proxy terminal's first offer comes with the direct contexts of its own context, just before it, and a kubeconfig terminal's with none", async () => {
+  const proxied = await followed("terminalOffer");
+  const { session } = await opened(
+    "staging",
+    "terminalOffer",
+    "Terminal 1",
+    proxied.backend,
+  );
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS - SETTLE_MS);
+  expect(proxied.events.map((event) => event.event)).toEqual([
+    "direct",
+    "offered",
+  ]);
+  expect(directs(proxied.events)).toEqual([
+    { event: "direct", session: session.id, contexts: ["staging"] },
+  ]);
+
+  const own = await followed("terminalOffer");
+  await opened("dev", "terminalOffer", "Terminal 1", own.backend);
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS * 3);
+  expect(own.events.map((event) => event.event)).toEqual(["offered"]);
+});
+
+test("a move or a dismiss leaves the direct contexts, and the second offer brings none", async () => {
+  const { backend, events } = await followed("terminalOffer");
+  await opened("staging", "terminalOffer", "Terminal 1", backend);
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS - SETTLE_MS);
+  const [first] = offers(events);
+  if (!first) throw new Error("no first offer");
+  await answered(
+    backend.invoke("kubeconfig_offer_answer", { id: first.id, answer: "move" }),
+  );
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS);
+  const [, second] = offers(events);
+  if (!second) throw new Error("no second offer");
+  await answered(
+    backend.invoke("kubeconfig_offer_answer", {
+      id: second.id,
+      answer: "dismiss",
+    }),
+  );
+  expect(directs(events)).toHaveLength(1);
+});
+
+test("kubectl config delete-context of a direct context removes it and sends the contexts left, empty when none is", async () => {
+  const { backend, events } = await followed("terminalOffer");
+  const shell = await opened("staging", "terminalOffer", "Terminal 1", backend);
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS);
+  await shell.type("kubectl config delete-context staging\r");
+  expect(shell.text()).toContain(
+    `\r\ndeleted context staging from ${APP_DATA}/proxy/process-${String(shell.session.id)}.kubeconfig\r\n`,
+  );
+  expect(last(events)).toEqual({
+    event: "direct",
+    session: shell.session.id,
+    contexts: [],
+  });
+
+  await shell.type("kubectl config delete-context staging\r");
+  expect(shell.text()).toContain(
+    "error: cannot delete context staging, not in",
+  );
+  expect(directs(events)).toHaveLength(2);
+});
+
+test("kubectl config delete-context of a name the terminal's file lacks is refused as kubectl refuses it, and sends nothing", async () => {
+  const { backend, events } = await followed("terminalOffer");
+  const shell = await opened("dev", "terminalOffer", "Terminal 1", backend);
+  await shell.type("kubectl config delete-context staging\r");
+  expect(shell.text()).toContain(
+    `\r\nerror: cannot delete context staging, not in ${APP_DATA}/terminals/${String(shell.session.id)}/kubeconfig\r\n`,
+  );
+  expect(directs(events)).toEqual([]);
+});
+
 test("a window that follows later is told the offers that wait, and answering one that is gone is refused", async () => {
   const backend = createMockBackend("terminalOffer");
   await opened("dev", "terminalOffer", "Terminal 1", backend);

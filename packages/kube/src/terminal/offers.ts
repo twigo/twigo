@@ -5,12 +5,16 @@ import {
   type KubeconfigOfferAnswer,
   type KubeconfigOfferEvent,
   type KubeconfigOfferId,
+  type SubscriptionId,
 } from "@twigo/protocol";
 import { Changes } from "@twigo/workbench";
 
+const NONE: readonly string[] = [];
+
 /**
  * The offers this window's terminals make to move what a tool wrote into a
- * terminal's own kubeconfig into the person's (ARCHITECTURE 4.6). An offer
+ * terminal's own kubeconfig into the person's (ARCHITECTURE 4.6), and the
+ * contexts of proxy terminals that reach their clusters directly. An offer
  * belongs to the window, not to its terminal's tab: it stays until it is
  * answered or the core withdraws it.
  */
@@ -18,6 +22,7 @@ export class KubeconfigOffers {
   readonly changes = new Changes();
   #offers: readonly KubeconfigOffer[] = [];
   readonly #answering = new Set<KubeconfigOfferId>();
+  readonly #direct = new Map<SubscriptionId, readonly string[]>();
   /** The ids that events told of before the response to the watch, which is older than they are. */
   #early: Set<KubeconfigOfferId> | undefined = new Set();
 
@@ -33,6 +38,11 @@ export class KubeconfigOffers {
 
   answering(id: KubeconfigOfferId): boolean {
     return this.#answering.has(id);
+  }
+
+  /** The contexts of a proxy terminal's file that reach their clusters with the person's credentials. */
+  direct(session: SubscriptionId): readonly string[] {
+    return this.#direct.get(session) ?? NONE;
   }
 
   /** Follows the core; it answers with the offers that wait, and a later watch of the window replaces this one. */
@@ -75,7 +85,12 @@ export class KubeconfigOffers {
   }
 
   #told(event: KubeconfigOfferEvent): void {
-    if (event.event === "direct") return;
+    if (event.event === "direct") {
+      if (event.contexts.length === 0) this.#direct.delete(event.session);
+      else this.#direct.set(event.session, event.contexts);
+      this.changes.emit();
+      return;
+    }
     this.#early?.add(event.event === "offered" ? event.offer.id : event.id);
     if (event.event === "withdrawn") {
       this.#remove(event.id);

@@ -7,7 +7,11 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Backend, Mode } from "@twigo/protocol";
-import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
+import {
+  createMockBackend,
+  OFFER_AFTER_MS,
+  type MockScenario,
+} from "@twigo/protocol/mock";
 import { WorkbenchView, type Platform, type Workbench } from "@twigo/workbench";
 import { tabsIn, testWorkbench } from "@twigo/workbench/testing";
 import { settle, withScreenSize } from "../../test/workbench";
@@ -727,6 +731,63 @@ test("the kind is the chip and nothing else, whatever the address asks for", asy
     screen.queryByText("Holds your real credentials, and dev is guarded now."),
   ).toBeNull();
   expect(tabIcon(uri)).toContain("lucide-terminal");
+});
+
+async function later(ms: number) {
+  await act(() => vi.advanceTimersByTimeAsync(ms));
+  await settle(2);
+}
+
+test("a proxy terminal whose file a tool wrote its own context into says so on its chip, offers no Restart for it, and the chip follows a delete-context", async () => {
+  const { tabs, create } = await mounted("terminalOffer", "staging");
+  await create();
+  screen.getByText("Proxy · guarded");
+  await later(OFFER_AFTER_MS);
+  screen.getByText("Proxy · guarded, staging direct");
+  expect(screen.queryByRole("button", { name: "Restart Terminal" })).toBeNull();
+
+  await type(
+    tabOf(tabs, 1, "staging"),
+    "kubectl config delete-context staging\r",
+  );
+  screen.getByText("Proxy · guarded");
+  expect(screen.queryByText(/direct/)).toBeNull();
+});
+
+test("a restarted terminal is a new session and starts without direct contexts, and the old session's stay with it", async () => {
+  const { tabs, workbench, create } = await mounted("terminalOffer", "staging");
+  await create();
+  await later(OFFER_AFTER_MS);
+  screen.getByText("Proxy · guarded, staging direct");
+  const tab = tabOf(tabs, 1, "staging");
+  const before = tab.session;
+
+  await type(tab, "exit\r");
+  screen.getByText("Proxy · guarded, staging direct");
+  fireEvent.click(screen.getByRole("button", { name: "Restart Terminal" }));
+  await settle(10);
+  expect(tab.session).not.toBe(before);
+  screen.getByText("Proxy · guarded");
+  expect(screen.queryByText(/direct/)).toBeNull();
+  expect(workbench.editors.activeIn("panel")).toBe(uriOf(1, "staging"));
+});
+
+test("direct contexts are of one terminal: another terminal of the space has none on its chip", async () => {
+  const { workbench, tabs, create } = await mounted("terminalOffer", "staging");
+  await create();
+  await create();
+  await later(OFFER_AFTER_MS);
+  expect(tabOf(tabs, 1, "staging").session).not.toBe(
+    tabOf(tabs, 2, "staging").session,
+  );
+  screen.getByText("Proxy · guarded");
+  expect(screen.queryByText(/direct/)).toBeNull();
+
+  act(() => {
+    workbench.editors.open(uriOf(1, "staging"));
+  });
+  await settle(4);
+  screen.getByText("Proxy · guarded, staging direct");
 });
 
 test("a tab nothing started says no kind", async () => {

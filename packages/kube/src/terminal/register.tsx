@@ -56,8 +56,12 @@ export function registerTerminals(
       return input ? terminalTitle(input) : uri.href;
     },
     icon: ({ className }) => <Terminal className={className} />,
-    component: ({ uri }) => <TerminalEditor uri={uri} tabs={tabs} />,
-    actions: ({ uri }) => <TerminalActions uri={uri} tabs={tabs} />,
+    component: ({ uri }) => (
+      <TerminalEditor uri={uri} tabs={tabs} offers={offers} />
+    ),
+    actions: ({ uri }) => (
+      <TerminalActions uri={uri} tabs={tabs} offers={offers} />
+    ),
     focus: (uri) => {
       tabs.get(uri)?.focus();
     },
