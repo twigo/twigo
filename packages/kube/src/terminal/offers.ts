@@ -76,6 +76,7 @@ export class KubeconfigOffers {
   }
 
   #told(event: KubeconfigOfferEvent): void {
+    if (event.event === "direct") return;
     this.#early?.add(event.event === "offered" ? event.offer.id : event.id);
     if (event.event === "withdrawn") {
       this.#remove(event.id);

@@ -561,7 +561,7 @@ export function createMockBackend(
       );
       const id = nextId++;
       terminals.set(id, { context, label, kind });
-      return { id, kind, shell: "zsh" };
+      return { id, kind, shell: "zsh", kubeconfigKept: true };
     },
     kubeconfig_offer_answer: (request) => offers.answer(request),
     logs_set_source: ({ id, source }) => {

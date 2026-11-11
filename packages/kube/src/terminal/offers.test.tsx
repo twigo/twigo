@@ -132,6 +132,12 @@ test("the offers that wait are known at once, and each new one, replaced one and
   expect(ids(offers)).toEqual([2, 3]);
 });
 
+test("an event of direct contexts leaves the offers as they are", async () => {
+  const { core, offers } = await followed([offer(1)]);
+  core.send({ event: "direct", session: 1, contexts: ["prod-eu"] });
+  expect(ids(offers)).toEqual([1]);
+});
+
 test("what the core tells before it answers the watch is newer than the answer", async () => {
   const core = fakeCore();
   const offers = new KubeconfigOffers(core.backend, vi.fn());

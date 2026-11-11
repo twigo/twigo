@@ -110,6 +110,7 @@ test("a terminal of a read-write context goes by the person's credentials, any o
     id: expect.any(Number) as number,
     kind: { kind: "kubeconfig" },
     shell: "zsh",
+    kubeconfigKept: true,
   });
   expect((await created("live", "staging")).kind).toEqual({
     kind: "proxy",
