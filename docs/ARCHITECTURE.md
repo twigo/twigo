@@ -951,6 +951,7 @@ Extensions add commands, not prefixes.
     What a start and an ending decide from the screen, they decide in one queue, each step once the output so far and what the step before wrote are parsed: a start that comes straight after an ending reads the screen the ending left, and writes its leave of the alternate screen, its reset and its line feed after the ending's words, not among them.
     A step waits for a write of an empty array, not of an empty string: a resize flushes xterm's write queue at once, and the flush takes an empty string for the end of the queue and drops it with its callback and the writes behind it, so every later step would wait for ever.
     A start leaves the alternate screen first and only then resets, since a leave restores the colours that were set before the screen was entered and would undo a reset parsed on it; the session opens last, once the line feed is parsed, so none of its output comes before.
+    A terminal that is mounted and fitted for the first time while a start waits leaves the opening to that queue, not to its first fit, as a shell may answer within `shell_open`.
     An ending turns the mouse, bracketed paste and focus reporting off as well, since xterm parses the new session's reset after the task that restarts, and a terminal focused in that task would report the focus to the new shell.
   - **Output.**
     Rust sends the bytes of the process's output and its events over one channel, in order.

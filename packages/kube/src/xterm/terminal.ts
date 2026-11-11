@@ -106,6 +106,8 @@ export class ShellTerminal {
   #unload: ReturnType<typeof setTimeout> | undefined;
   #fitTimer: ReturnType<typeof setTimeout> | undefined;
   #steps: Promise<void> = Promise.resolve();
+  /** The starts whose steps have not finished: while one waits, only the queue opens the session. */
+  #starting = 0;
 
   constructor(
     options: TerminalOptions,
@@ -217,14 +219,21 @@ export class ShellTerminal {
     this.#pending = session.id;
     this.#status = { state: "connecting" };
     this.#join(session);
+    this.#starting++;
     this.#enqueue(async () => {
-      await this.#parsed();
-      if (this.term.buffer.active.type === "alternate") {
-        await this.#parsed(LEAVE_ALTERNATE);
+      try {
+        await this.#parsed();
+        if (this.term.buffer.active.type === "alternate") {
+          await this.#parsed(LEAVE_ALTERNATE);
+        }
+        await this.#parsed(
+          `${SESSION_STARTS}${session.stdin ? "" : CURSOR_OFF}`,
+        );
+        if (this.term.buffer.active.cursorX > 0) await this.#parsed("\r\n");
+        if (this.#pending === session.id) this.#begin();
+      } finally {
+        this.#starting--;
       }
-      await this.#parsed(`${SESSION_STARTS}${session.stdin ? "" : CURSOR_OFF}`);
-      if (this.term.buffer.active.cursorX > 0) await this.#parsed("\r\n");
-      if (this.#pending === session.id) this.#begin();
     });
     this.#changed();
   }
@@ -295,7 +304,7 @@ export class ShellTerminal {
       this.#opened = true;
       this.#fit.fit();
       this.#loadWebgl();
-      this.#begin();
+      if (this.#starting === 0) this.#begin();
     }
     if (this.#focusWanted) {
       this.#focusWanted = false;

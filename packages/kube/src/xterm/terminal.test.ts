@@ -287,6 +287,33 @@ describe.each(SHELLS)("$name", ({ starter }) => {
     expect(fake.opens.map(({ request }) => request.id)).toEqual([8, 9]);
   });
 
+  test("a restored tab restarted before it is shown opens its session after the reset when the backend answers inside the open", async () => {
+    const { restored, restart, show } = setup(({ send }) => {
+      send({ state: "running" });
+      send(bytes("\x1b[?2004hEAGER% "));
+    });
+    const tab = restored();
+    restart(8);
+    await Promise.resolve();
+    show(tab);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(tab.term.modes.bracketedPasteMode).toBe(true);
+    expect(lines(tab)).toEqual(["EAGER%"]);
+  });
+
+  test("a restored tab restarted and shown in one task opens its session after the reset", async () => {
+    const { restored, restart, show } = setup(({ send }) => {
+      send({ state: "running" });
+      send(bytes("\x1b[?2004hEAGER% "));
+    });
+    const tab = restored();
+    restart(8);
+    show(tab);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(tab.term.modes.bracketedPasteMode).toBe(true);
+    expect(lines(tab)).toEqual(["EAGER%"]);
+  });
+
   test.fails(
     "a resize between two slices of output parses none of it twice",
     async () => {
